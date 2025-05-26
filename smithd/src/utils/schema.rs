@@ -103,6 +103,8 @@ pub enum SafeCommandTx {
     },
     OpenTunnel {
         port: Option<u16>,
+        user: Option<String>,
+        pub_key: Option<String>,
     },
     CloseTunnel,
     UpdateNetwork {

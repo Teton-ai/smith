@@ -60,7 +60,7 @@ secret = "{random_secret}"
     configuration.load(Some(path)).await;
     let tunnel = super::TunnelHandle::new(shutdown.signals(), configuration);
 
-    let resp = tunnel.start_tunnel(Some(local_port)).await;
+    let resp = tunnel.start_tunnel(Some(local_port), None, None).await;
 
     assert_ne!(resp, 0);
 }
