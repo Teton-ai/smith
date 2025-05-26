@@ -44,6 +44,10 @@ sqlx = { version = "0.7", features = [
 tracing-test = "0.2.5"
 tempfile = "3"
 rand = "0.8"
+nix = { version = "0.30.1", features = [
+    "fs",
+] }
+fs2 = "0.4.3"
 
 [package.metadata.deb]
 maintainer-scripts = "debian/"
