@@ -1,6 +1,15 @@
+use anyhow::Context;
+use base64::Engine;
+use base64::engine::general_purpose;
 use colored::{Color, ColoredString, Style};
+use rand::rngs::OsRng;
+use russh::keys::*;
 use serde::{Deserialize, Serialize};
+use std::os::unix::fs::PermissionsExt;
+use std::process::exit;
 use std::{collections::HashMap, fmt::Display};
+use tokio::fs::File;
+use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
 
 const OP_DEFAULT_CONFIG: &str = "op://Engineering/smith.env/config.toml";
@@ -20,6 +29,7 @@ struct Profile {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
     pub current_profile: String,
+    pub_key_file: Option<String>,
     profile: HashMap<String, Profile>,
 }
 
@@ -45,6 +55,35 @@ impl Config {
         let config_file = dirs::home_dir().unwrap().join(".smith").join("config.toml");
         let config_str = tokio::fs::read_to_string(config_file).await?;
         let config: Config = toml::from_str(&config_str)?;
+
+        // check if there is an identity key in the folder
+        let identity_key_path = dirs::home_dir().unwrap().join(".smith").join("identity");
+
+        let identity_pub_key_path = dirs::home_dir()
+            .unwrap()
+            .join(".smith")
+            .join("identity.pub");
+
+        if !identity_key_path.exists() || !identity_pub_key_path.exists() {
+            println!("Warning: No identity.pub key found in ~/.smith/");
+            println!("Creating default");
+            let private_key = PrivateKey::random(&mut OsRng, Algorithm::Ed25519)?;
+            let private_key_pem = private_key.to_openssh(Default::default())?;
+            let public_key = private_key.public_key();
+            let public_key_ssh = public_key.to_string();
+
+            let mut private_file = File::create(identity_key_path).await?;
+            private_file.write_all(private_key_pem.as_bytes()).await?;
+            let mut perms = private_file.metadata().await?.permissions();
+            perms.set_mode(0o600);
+            private_file.set_permissions(perms).await?;
+
+            let mut public_file = File::create(identity_pub_key_path).await?;
+            public_file.write_all(public_key_ssh.as_bytes()).await?;
+
+            println!("Keys Saved, run your command again!");
+            exit(1);
+        }
 
         unsafe {
             std::env::set_var("SMITH_PROFILE", &config.current_profile);
@@ -104,6 +143,26 @@ impl Config {
 
     pub fn current_domain(&self) -> String {
         self.profile[&self.current_profile].server.clone()
+    }
+
+    pub async fn get_identity_pub_key(&self) -> anyhow::Result<String> {
+        let config_file = dirs::home_dir()
+            .unwrap()
+            .join(".smith")
+            .join("identity.pub");
+        tokio::fs::read_to_string(config_file)
+            .await
+            .with_context(|| "Failed to read identity.pub")
+    }
+
+    pub fn get_identity_file(&self) -> String {
+        dirs::home_dir()
+            .unwrap()
+            .join(".smith")
+            .join("identity")
+            .to_str()
+            .unwrap_or_default()
+            .to_owned()
     }
 }
 
