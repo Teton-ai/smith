@@ -43,7 +43,7 @@ impl PackagesInterface {
 
     async fn expose_port(&mut self, port: u16) -> String {
         info!("Exposing port {}", port);
-        let public_port = self.tunnel.start_tunnel(Some(port)).await;
+        let public_port = self.tunnel.start_tunnel(Some(port), None, None).await;
         public_port.to_string()
     }
     async fn download_file_rl(

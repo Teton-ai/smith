@@ -5,8 +5,10 @@ pub(super) async fn open_port(
     id: i32,
     tunnel_handle: &TunnelHandle,
     port: Option<u16>,
+    user: Option<String>,
+    pub_key: Option<String>,
 ) -> SafeCommandResponse {
-    let remote_port = tunnel_handle.start_tunnel(port).await;
+    let remote_port = tunnel_handle.start_tunnel(port, user, pub_key).await;
     let status = if remote_port > 0 { 0 } else { -1 };
 
     SafeCommandResponse {
