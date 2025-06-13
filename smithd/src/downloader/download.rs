@@ -16,13 +16,9 @@ use tracing::{error, info};
 
 pub struct DownloadStats {
     pub bytes_downloaded: u64,
-
     pub elapsed_seconds: f64,
-
     pub average_speed_mbps: f64,
-
     pub success: bool,
-
     pub error_message: Option<String>,
 }
 
@@ -30,13 +26,9 @@ impl Default for DownloadStats {
     fn default() -> Self {
         Self {
             bytes_downloaded: 0,
-
             elapsed_seconds: 0.0,
-
             average_speed_mbps: 0.0,
-
             success: false,
-
             error_message: None,
         }
     }
@@ -51,11 +43,9 @@ pub async fn download_package(
 ) -> anyhow::Result<String> {
     // Convert the MB rate to bytes/sec
     let bytes_per_second = (rate * 1_000_000.0) as u64;
-
     info!("Rate limit: {} bytes/sec", bytes_per_second);
 
     // Example: download at 1MB per second
-
     let result = download_file(
         magic,
         local_file.as_str(),
@@ -71,29 +61,18 @@ pub async fn download_package(
 
 async fn download_file(
     magic: MagicHandle,
-
     local_path: &str,
-
     remote_path: &str,
-
     bytes_per_second: u64,
-
     force_stop: Arc<AtomicBool>,
-
     recurse: Option<u32>,
 ) -> anyhow::Result<String> {
     let mut rec_track = 0;
-
     let mut stats = DownloadStats::default();
-
     let shutdown = ShutdownHandler::new();
-
     let configuration = MagicHandle::new(shutdown.signals());
-
     configuration.load(None).await;
-
     let client = Client::new();
-
     let server_api_url = configuration.get_server().await;
 
     if let Some(r) = recurse {
@@ -111,7 +90,6 @@ async fn download_file(
     }
 
     let token = magic.get_token().await;
-
     let token = token.unwrap_or_default();
 
     let url = if remote_path.is_empty() {
@@ -119,6 +97,28 @@ async fn download_file(
     } else {
         format!("{}/download/{}", &server_api_url, &remote_path)
     };
+
+    // Create local file path if it does not exist
+    if let Some(parent) = Path::new(local_path).parent() {
+        if !parent.exists() {
+            fs::create_dir_all(parent).await?;
+        }
+    }
+
+    // Check if file already exists and get its size for resuming
+    let mut downloaded: u64 = 0;
+    let mut resume_download = false;
+
+    if let Ok(metadata) = tokio::fs::metadata(local_path).await {
+        downloaded = metadata.len();
+        if downloaded > 0 {
+            resume_download = true;
+            info!(
+                "Found existing partial file with {} bytes, attempting to resume",
+                downloaded
+            );
+        }
+    }
 
     let initial_response = client
         .get(&url)
@@ -134,12 +134,10 @@ async fn download_file(
     }
 
     // Extract the pre-signed URL from the Location header
-
     let presigned_url = match initial_response.headers().get("Location") {
         Some(location) => location
             .to_str()
             .map_err(|e| anyhow::anyhow!("Invalid location header: {:?}", e))?,
-
         None => {
             return Err(anyhow::anyhow!(
                 "No pre-signed URL provided in response headers"
@@ -147,13 +145,38 @@ async fn download_file(
         }
     };
 
-    let response = client.get(presigned_url).send().await?;
+    // Build get based on if some of the file has already been downloaded
+    let mut request = client.get(presigned_url);
 
-    if !response.status().is_success() {
-        return Err(anyhow::anyhow!(
-            "Failed to download file from pre-signed URL: {:?}",
-            response.status()
-        ));
+    if resume_download && downloaded > 0 {
+        request = request.header("Range", format!("bytes={}-", downloaded));
+        info!("Requesting to resume from byte {}", downloaded);
+    }
+
+    let mut response = request.send().await?;
+
+    let expected_status = if resume_download && downloaded > 0 {
+        reqwest::StatusCode::PARTIAL_CONTENT
+    } else {
+        reqwest::StatusCode::OK
+    };
+
+    if response.status() != expected_status {
+        if resume_download && response.status() == reqwest::StatusCode::OK {
+            info!("Server does not support resume, starting from beginning");
+            response = client.get(presigned_url).send().await?;
+            if !response.status().is_success() {
+                return Err(anyhow::anyhow!(
+                    "Failed to download file from pre-signed URL: {:?}",
+                    response.status()
+                ));
+            }
+        } else {
+            return Err(anyhow::anyhow!(
+                "Failed to download file from pre-signed URL: {:?}",
+                response.status()
+            ));
+        }
     }
 
     // Get the total content length of the object
@@ -163,15 +186,23 @@ async fn download_file(
         .and_then(|value| value.to_str().ok())
         .and_then(|value| value.parse::<u64>().ok());
 
-    // Create root path if it does not exist
-    if let Some(parent) = Path::new(local_path).parent() {
-        if !parent.exists() {
-            fs::create_dir_all(parent).await?;
-        }
-    }
+    let content_length = if resume_download && downloaded > 0 {
+        downloaded + content_length.unwrap_or(0)
+    } else {
+        content_length.unwrap_or(0)
+    };
 
     // Open the file for writing
-    let mut file = tokio::fs::File::create(local_path).await?;
+    // let mut file = tokio::fs::File::create(local_path).await?;
+    let mut file = if resume_download && downloaded > 0 {
+        tokio::fs::OpenOptions::new()
+            .write(true)
+            .append(true)
+            .open(local_path)
+            .await?
+    } else {
+        tokio::fs::File::create(local_path).await?
+    };
 
     let quota = Quota::per_second(
         NonZeroU32::new(bytes_per_second as u32).unwrap_or(NonZeroU32::new(1).unwrap()),
@@ -193,12 +224,9 @@ async fn download_file(
 
     while let Some(chunk_result) = stream.next().await {
         // Check if download should be forcefully stopped
-
         if force_stop.load(std::sync::atomic::Ordering::SeqCst) {
             info!("Timeout interrupt - download stopping forcefully");
-
             file.flush().await?;
-
             break;
         }
 
@@ -213,13 +241,11 @@ async fn download_file(
 
                 // Write chunk to file
                 file.write_all(&chunk).await?;
-
                 downloaded += chunk.len() as u64;
             }
 
             Err(e) => {
                 error!("Error downloading chunk: {}", e);
-
                 return Err(anyhow::anyhow!("Download error: {}", e));
             }
         }
@@ -228,7 +254,6 @@ async fn download_file(
     file.flush().await?;
 
     // Calculate and log final statistics
-
     let elapsed = start.elapsed().as_secs_f64();
 
     let avg_speed = if elapsed > 0.0 {
@@ -238,16 +263,14 @@ async fn download_file(
     };
 
     stats.bytes_downloaded = downloaded;
-
     stats.elapsed_seconds = elapsed;
-
     stats.average_speed_mbps = avg_speed / 1_000_000.0;
 
     match tokio::fs::metadata(local_path).await {
         Ok(metadata) => {
             let file_size = metadata.len();
 
-            if file_size != downloaded || Some(file_size) != content_length {
+            if file_size != downloaded || file_size != content_length {
                 error!(
                     "Size mismatch: file on disk ({}), downloaded amount ({}), expected content length ({:?})",
                     file_size, downloaded, content_length
@@ -261,9 +284,7 @@ async fn download_file(
                 ));
             } else if file_size == 0 {
                 // We know the file is completely busted here, try again 2x
-
                 error!("File did not install properly. Re-installing");
-
                 tokio::fs::remove_file(local_path).await?;
 
                 Box::pin(download_file(
@@ -277,7 +298,6 @@ async fn download_file(
                 .await?;
             } else {
                 info!("Downloaded file verification passed");
-
                 stats.success = true;
             }
         }
