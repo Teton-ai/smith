@@ -15,7 +15,7 @@ use clap_complete::generate;
 use colored::Colorize;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use serde_json::Value;
-use std::{io, sync::mpsc, thread, time::Duration};
+use std::{io, thread, time::Duration};
 use termion::raw::IntoRawMode;
 use tokio::sync::oneshot;
 use tunnel::Session;

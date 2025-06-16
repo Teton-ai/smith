@@ -1,6 +1,4 @@
 use anyhow::Context;
-use base64::Engine;
-use base64::engine::general_purpose;
 use colored::{Color, ColoredString, Style};
 use rand::rngs::OsRng;
 use russh::keys::*;
@@ -135,10 +133,6 @@ impl Config {
             profile.auth0_client_id.clone(),
             profile.auth0_audience.clone(),
         )
-    }
-
-    pub fn tunnel_server(&self) -> String {
-        self.profile[&self.current_profile].tunnel_server.clone()
     }
 
     pub fn current_domain(&self) -> String {
