@@ -1,7 +1,7 @@
-use crate::schema;
 use anyhow::Result;
 use reqwest::Client;
 use serde_json::Value;
+use smith::utils::schema;
 
 pub struct SmithAPI {
     domain: String,
@@ -92,20 +92,25 @@ impl SmithAPI {
         Ok(distros)
     }
 
-    pub async fn open_tunnel(&self, device_id: u64) -> Result<()> {
+    pub async fn open_tunnel(&self, device_id: u64, pub_key: String, user: String) -> Result<()> {
         let client = Client::new();
 
         let open_tunnel_command = schema::SafeCommandRequest {
             id: 0,
-            command: schema::SafeCommandTx::OpenTunnel { port: None },
+            command: schema::SafeCommandTx::OpenTunnel {
+                port: None,
+                pub_key: Some(pub_key),
+                user: Some(user),
+            },
             continue_on_error: false,
         };
 
         let resp = client
             .post(format!("{}/devices/{device_id}/commands", self.domain))
-            .header("Authorization", &self.bearer_token)
-            .json(&serde_json::json!([open_tunnel_command]))
-            .send();
+            .header("Authorization", format!("Bearer {}", &self.bearer_token))
+            .json(&serde_json::json!([open_tunnel_command]));
+
+        let resp = resp.send();
 
         // check if return code was 201
         let response_code = resp.await?.status();
@@ -122,7 +127,7 @@ impl SmithAPI {
 
         let resp = client
             .get(format!("{}/devices/{device_id}/commands", self.domain))
-            .header("Authorization", &self.bearer_token)
+            .header("Authorization", format!("Bearer {}", &self.bearer_token))
             .send();
 
         let commands = resp.await?.text().await?;

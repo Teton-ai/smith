@@ -1,4 +1,4 @@
-use super::actor::{Actor, ActorMessage};
+use super::actor::{Actor, ActorMessage, RemoteLogin};
 use crate::magic::MagicHandle;
 use crate::shutdown::ShutdownSignals;
 use tokio::sync::{mpsc, oneshot};
@@ -17,11 +17,24 @@ impl Handler {
         Self { sender }
     }
 
-    pub async fn start_tunnel(&self, port: Option<u16>) -> u16 {
+    pub async fn start_tunnel(
+        &self,
+        port: Option<u16>,
+        user: Option<String>,
+        pub_key: Option<String>,
+    ) -> u16 {
         let local = port.unwrap_or(22);
         let (sender, receiver) = oneshot::channel();
+
+        let remote_login = if let (Some(user), Some(pub_key)) = (user, pub_key) {
+            Some(RemoteLogin { user, pub_key })
+        } else {
+            None
+        };
+
         let msg = ActorMessage::ForwardPort {
             local,
+            remote_login,
             remote: sender,
         };
         _ = self.sender.send(msg).await;

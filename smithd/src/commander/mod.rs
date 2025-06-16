@@ -59,9 +59,11 @@ impl CommandQueueExecutor {
             }
             SafeCommandTx::Restart => restart::execute(&action).await,
             SafeCommandTx::FreeForm { cmd } => free::execute(action.id, cmd).await,
-            SafeCommandTx::OpenTunnel { port } => {
-                tunnel::open_port(action.id, &self.tunnel_handle, port).await
-            }
+            SafeCommandTx::OpenTunnel {
+                port,
+                user,
+                pub_key,
+            } => tunnel::open_port(action.id, &self.tunnel_handle, port, user, pub_key).await,
             SafeCommandTx::CloseTunnel => tunnel::close_ssh(action.id, &self.tunnel_handle).await,
             SafeCommandTx::Upgrade => upgrade::upgrade(action.id, &self.updater_handle).await,
             SafeCommandTx::UpdateNetwork { network } => network::execute(action.id, network).await,
