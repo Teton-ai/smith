@@ -1,18 +1,12 @@
 use anyhow::Result;
-use async_trait::async_trait;
-use clap::Parser;
 use russh::keys::*;
 use russh::*;
 use std::convert::TryFrom;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::time::Duration;
 use std::{env, sync::Arc};
-use termion::raw::IntoRawMode;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::ToSocketAddrs;
-use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt},
-    process::Command,
-};
 
 struct Client {}
 
