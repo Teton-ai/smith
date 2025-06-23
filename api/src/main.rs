@@ -26,6 +26,7 @@ use tokio::net::TcpListener;
 use tokio::sync::broadcast::Sender;
 use tokio::sync::{Mutex, broadcast};
 use tower::ServiceBuilder;
+use tower_http::cors::CorsLayer;
 use tower_http::decompression::RequestDecompressionLayer;
 use tracing::info;
 use tracing_subscriber::{EnvFilter, prelude::*};
@@ -125,7 +126,7 @@ impl Modify for SecurityAddon {
 struct ApiDoc;
 
 async fn start_main_server(config: &'static Config, authorization: AuthorizationConfig) {
-    info!("Starting up SMITH API - {}", env!("CARGO_PKG_VERSION"));
+    info!("Starting Smith API v{}", env!("CARGO_PKG_VERSION"));
     // set up connection pool
     let pool = PgPoolOptions::new()
         .max_connections(100)
@@ -353,16 +354,19 @@ async fn start_main_server(config: &'static Config, authorization: Authorization
         .route_layer(middleware::from_fn(track_metrics))
         .layer(Extension(state))
         .route(
-            "/api-docs/openapi.json",
+            "/docs/openapi.json",
             get(move || ready(json_specification.clone())),
         )
-        .merge(Scalar::with_url("/api-docs", api));
+        .layer(CorsLayer::permissive())
+        .merge(Scalar::with_url("/docs", api));
 
     let listener = TcpListener::bind("0.0.0.0:8080")
         .await
         .expect("error: failed to bind to port");
-    info!("{:<12} - {:?}", "LISTENING", listener.local_addr());
-
+    info!(
+        "Smith API running on http://{} (Press Ctrl+C to quit)",
+        listener.local_addr().unwrap().to_string()
+    );
     axum::serve(listener, app.into_make_service())
         .await
         .expect("error: failed to initialize axum server");
