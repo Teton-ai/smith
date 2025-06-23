@@ -48,6 +48,7 @@ mod rollout;
 mod storage;
 mod telemetry;
 mod users;
+mod dashboard;
 
 #[derive(Clone, Debug)]
 pub struct State {
@@ -154,6 +155,7 @@ async fn start_main_server(config: &'static Config, authorization: Authorization
 
     // build our application with a route
     let (router, api) = OpenApiRouter::with_openapi(ApiDoc::openapi())
+      .routes(routes!(dashboard::api))
         .routes(routes!(handlers::auth::verify_token))
         .routes(routes!(
             handlers::network::get_networks,
@@ -357,6 +359,7 @@ async fn start_main_server(config: &'static Config, authorization: Authorization
             "/docs/openapi.json",
             get(move || ready(json_specification.clone())),
         )
+        .layer(CorsLayer::permissive())
         .layer(CorsLayer::permissive())
         .merge(Scalar::with_url("/docs", api));
 
