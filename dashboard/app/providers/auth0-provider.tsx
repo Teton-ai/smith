@@ -10,11 +10,11 @@ interface Auth0ProviderWrapperProps {
 export default function Auth0ProviderWrapper({ children }: Auth0ProviderWrapperProps) {
   return (
     <Auth0Provider
-      domain="https://tenant-ai-dev.eu.auth0.com"
-      clientId="JxiK5L2zMPSLD4arcUJvQRQ5pNCP6mc5"
+      domain="https://teton-ai.eu.auth0.com"
+      clientId="1XPAp9LsuOddURHVDNwiL2H8rhCPhTGE"
       authorizationParams={{
         redirect_uri: "http://localhost:3000",
-        audience: "https://teton.dev",
+        audience: "https://teton.ai",
         scope: "openid profile email"
       }}
     >
