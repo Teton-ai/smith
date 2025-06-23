@@ -48,7 +48,6 @@ mod rollout;
 mod storage;
 mod telemetry;
 mod users;
-mod dashboard;
 
 #[derive(Clone, Debug)]
 pub struct State {
@@ -155,7 +154,6 @@ async fn start_main_server(config: &'static Config, authorization: Authorization
 
     // build our application with a route
     let (router, api) = OpenApiRouter::with_openapi(ApiDoc::openapi())
-      .routes(routes!(dashboard::api))
         .routes(routes!(handlers::auth::verify_token))
         .routes(routes!(
             handlers::network::get_networks,
