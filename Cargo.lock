@@ -182,7 +182,7 @@ dependencies = [
 
 [[package]]
 name = "api"
-version = "0.2.25"
+version = "0.2.26"
 dependencies = [
  "anyhow",
  "axum",
@@ -898,7 +898,7 @@ checksum = "b94f61472cee1439c0b966b47e3aca9ae07e45d070759512cd390ea2bebc6675"
 
 [[package]]
 name = "cli"
-version = "0.2.25"
+version = "0.2.26"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2150,7 +2150,7 @@ dependencies = [
  "http 1.3.1",
  "hyper 1.6.0",
  "hyper-util",
- "rustls 0.23.27",
+ "rustls 0.23.28",
  "rustls-pki-types",
  "tokio",
  "tokio-rustls 0.26.2",
@@ -4148,9 +4148,9 @@ dependencies = [
 
 [[package]]
 name = "rustls"
-version = "0.23.27"
+version = "0.23.28"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "730944ca083c1c233a75c09f199e973ca499344a2b7ba9e755c457e86fb4a321"
+checksum = "7160e3e10bf4535308537f3c4e1641468cd0e485175d6163087c0393c7d46643"
 dependencies = [
  "once_cell",
  "rustls-pki-types",
@@ -4631,7 +4631,7 @@ dependencies = [
 
 [[package]]
 name = "smith"
-version = "0.2.25"
+version = "0.2.26"
 dependencies = [
  "anyhow",
  "bore-cli",
@@ -4660,7 +4660,7 @@ dependencies = [
 
 [[package]]
 name = "smith-updater"
-version = "0.2.25"
+version = "0.2.26"
 dependencies = [
  "clap",
  "smith",
@@ -5326,7 +5326,7 @@ version = "0.26.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8e727b36a1a0e8b74c376ac2211e40c2c8af09fb4013c60d910495810f008e9b"
 dependencies = [
- "rustls 0.23.27",
+ "rustls 0.23.28",
  "tokio",
 ]
 
