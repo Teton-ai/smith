@@ -357,7 +357,7 @@ async fn start_main_server(config: &'static Config, authorization: Authorization
             "/docs/openapi.json",
             get(move || ready(json_specification.clone())),
         )
-      .layer(CorsLayer::permissive())
+        .layer(CorsLayer::permissive())
         .merge(Scalar::with_url("/docs", api));
 
     let listener = TcpListener::bind("0.0.0.0:8080")
@@ -366,7 +366,7 @@ async fn start_main_server(config: &'static Config, authorization: Authorization
     info!(
         "Smith API running on http://{} (Press Ctrl+C to quit)",
         listener.local_addr().unwrap().to_string()
-      );
+    );
     axum::serve(listener, app.into_make_service())
         .await
         .expect("error: failed to initialize axum server");
