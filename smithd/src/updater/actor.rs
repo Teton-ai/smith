@@ -200,7 +200,6 @@ impl Actor {
 
             // check if the package exists in the packages directory
             let package_file = &target_package.file;
-            // check if package is available locally
             let path = std::env::current_dir()?;
             let packages_folder = path.join("packages");
             let package_file = packages_folder.join(package_file);
