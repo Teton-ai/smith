@@ -28,7 +28,11 @@ pub async fn get_commands() -> Result<Json<Vec<SafeCommandTx>>, StatusCode> {
         SafeCommandTx::FreeForm {
             cmd: "echo 'Hello, World!'".to_string(),
         },
-        SafeCommandTx::OpenTunnel { port: None },
+        SafeCommandTx::OpenTunnel {
+            port: None,
+            pub_key: None,
+            user: None,
+        },
         SafeCommandTx::CloseTunnel,
         SafeCommandTx::DownloadOTA {
             tools: "ota_tools.tbz2".to_string(),

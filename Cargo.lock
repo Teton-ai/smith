@@ -1624,6 +1624,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "fs2"
+version = "0.4.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9564fc758e15025b46aa6643b1b77d047d1a56a1aea6e01002ac0c7026876213"
+dependencies = [
+ "libc",
+ "winapi",
+]
+
+[[package]]
 name = "futures"
 version = "0.3.31"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4632,9 +4642,11 @@ dependencies = [
  "chrono",
  "clap",
  "flate2",
+ "fs2",
  "futures",
  "futures-util",
  "governor",
+ "nix",
  "pnet",
  "rand 0.8.5",
  "reqwest 0.12.21",
@@ -4648,6 +4660,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "tracing-test",
+ "uuid",
  "walkdir",
  "zbus",
 ]
