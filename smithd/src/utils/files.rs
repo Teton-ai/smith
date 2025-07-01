@@ -123,7 +123,11 @@ pub async fn remove_key(user: &str, tag: &str) -> Result<()> {
         let mut lines = Vec::<String>::new();
         for l in BufReader::new(file).lines() {
             let l = l?;
-            if !l.split_whitespace().last().map_or(false, |last_part| last_part == tag) {
+            if !l
+                .split_whitespace()
+                .last()
+                .map_or(false, |last_part| last_part == tag)
+            {
                 lines.push(l);
             }
         }
