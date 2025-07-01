@@ -25,7 +25,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 zbus = "5.6"
 flate2 = "1.0"
 futures-util = "0.3"
-reqwest = { version = "0.12", default-features = false, features = [
+reqwest = { version = "0.12", features = [
     "gzip",
     "json",
     "multipart",
