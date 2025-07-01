@@ -77,11 +77,13 @@ impl Actor {
                     let res = ensure_ssh_dir(&remote_login.user).await;
                     if let Err(err) = res {
                         error!("Failed to ensure ssh dir: {err}");
+                        _ = remote.send(0);
                         return;
                     }
                     let res = add_key(&remote_login.user, &remote_login.pub_key, tag.clone()).await;
                     if let Err(err) = res {
-                        error!("Failed add key: {err}");
+                        error!("Failed to add key: {err}");
+                        _ = remote.send(0);
                         return;
                     }
                 }
