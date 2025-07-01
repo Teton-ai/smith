@@ -6,6 +6,7 @@ use std::collections::HashMap;
 use tokio::sync::{mpsc, oneshot};
 use tokio::time::{self, Duration, Instant};
 use tracing::{error, info};
+use uuid::Uuid;
 
 pub struct RemoteLogin {
     pub user: String,
@@ -14,6 +15,7 @@ pub struct RemoteLogin {
 
 struct ForwardConnection {
     created_at: time::Instant,
+    tag: String,
     remote_login: Option<RemoteLogin>,
     remote: u16,
     task: tokio::task::JoinHandle<()>,
@@ -69,15 +71,15 @@ impl Actor {
                     return;
                 }
 
+                let tag = format!("{}-smith", Uuid::new_v4());
                 if let Some(ref remote_login) = remote_login {
                     info!("Received remote_login info");
-                    let tag = format!("{:?}-smith", created_at);
                     let res = ensure_ssh_dir(&remote_login.user).await;
                     if let Err(err) = res {
                         error!("Failed to ensure ssh dir: {err}");
                         return;
                     }
-                    let res = add_key(&remote_login.user, &remote_login.pub_key, tag).await;
+                    let res = add_key(&remote_login.user, &remote_login.pub_key, tag.clone()).await;
                     if let Err(err) = res {
                         error!("Failed add key: {err}");
                         return;
@@ -118,6 +120,7 @@ impl Actor {
                         remote_login,
                         task: handle,
                         created_at,
+                        tag,
                     },
                 );
             }
@@ -148,11 +151,9 @@ impl Actor {
                 if let Some(remote_login) = conn.remote_login {
                     info!("Removing remote login info");
                     let user = remote_login.user;
-                    let tag = format!("{:?}-smith", conn.created_at);
-                    let res = remove_key(&user, &tag).await;
+                    let res = remove_key(&user, &conn.tag).await;
                     if let Err(err) = res {
-                        error!("Failed add key: {err}");
-                        return;
+                        error!("Failed to remove key: {err}");
                     }
                 }
             }
