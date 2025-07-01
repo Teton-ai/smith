@@ -182,7 +182,7 @@ dependencies = [
 
 [[package]]
 name = "api"
-version = "0.2.27"
+version = "0.2.26"
 dependencies = [
  "anyhow",
  "axum",
@@ -898,7 +898,7 @@ checksum = "b94f61472cee1439c0b966b47e3aca9ae07e45d070759512cd390ea2bebc6675"
 
 [[package]]
 name = "cli"
-version = "0.2.27"
+version = "0.2.26"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4631,7 +4631,7 @@ dependencies = [
 
 [[package]]
 name = "smith"
-version = "0.2.27"
+version = "0.2.26"
 dependencies = [
  "anyhow",
  "bore-cli",
@@ -4660,7 +4660,7 @@ dependencies = [
 
 [[package]]
 name = "smith-updater"
-version = "0.2.27"
+version = "0.2.26"
 dependencies = [
  "clap",
  "smith",
