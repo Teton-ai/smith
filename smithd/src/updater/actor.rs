@@ -198,7 +198,13 @@ impl Actor {
                 .map(|output| !output.status.success())
                 .unwrap_or(true);
 
-            if package_not_on_magic_file || package_not_installed {
+            // check if the package exists in the packages directory
+            let package_file = &target_package.file;
+            let path = std::env::current_dir()?;
+            let package_file_path = path.join("packages").join(package_file);
+            let package_not_in_path = !package_file_path.exists();
+
+            if package_not_on_magic_file || package_not_installed || package_not_in_path {
                 info!("Package {} is not installed", target_package.name);
                 up_to_date = false;
                 // we need to install the package

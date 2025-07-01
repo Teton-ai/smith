@@ -85,7 +85,7 @@ impl Downloader {
                     let result =
                         download_package(magic, remote_file, local_file, rate, force_stop).await;
 
-                    if let Ok(_) = &result {
+                    if result.is_ok() {
                         last_download_status.store(true, Ordering::SeqCst);
                     } else {
                         last_download_status.store(false, Ordering::SeqCst);
@@ -100,10 +100,8 @@ impl Downloader {
                 let mut status = DownloadingStatus::Failed;
                 if self.is_downloading.load(Ordering::SeqCst) > 0 {
                     status = DownloadingStatus::Downloading;
-                } else {
-                    if self.last_download_status.load(Ordering::SeqCst) {
-                        status = DownloadingStatus::Success;
-                    }
+                } else if self.last_download_status.load(Ordering::SeqCst) {
+                    status = DownloadingStatus::Success;
                 }
 
                 let _ = rpc.send(Ok(status));
