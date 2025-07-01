@@ -43,6 +43,11 @@ pub async fn ensure_ssh_dir(login: &str) -> Result<(PathBuf, u32, u32)> {
 }
 
 pub async fn add_key(user: &str, pubkey: &str, tag: String) -> Result<()> {
+    // Validate SSH public key format
+    if !pubkey.starts_with("ssh-rsa ") && !pubkey.starts_with("ssh-ed25519 ") {
+        return Err(anyhow!("Invalid SSH public key format"));
+    }
+
     let pubkey = pubkey.to_owned();
     let (ssh_folder, uid, gid) = ensure_ssh_dir(user).await?;
     let mut auth_keys = ssh_folder.clone();
@@ -67,6 +72,10 @@ pub async fn add_key(user: &str, pubkey: &str, tag: String) -> Result<()> {
         if let Ok(file) = File::open(&auth_keys) {
             for l in BufReader::new(file).lines() {
                 let l = l?;
+                // Skip if this key already exists
+                if l.starts_with(&pubkey) {
+                    return Ok(());
+                }
                 lines.push(l);
             }
         }
