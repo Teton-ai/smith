@@ -25,11 +25,12 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 zbus = "5.6"
 flate2 = "1.0"
 futures-util = "0.3"
-reqwest = { version = "0.12", features = [
+reqwest = { version = "0.12", default-features = false, features = [
     "gzip",
     "json",
     "multipart",
     "stream",
+    "native-tls-vendored"
 ] }
 bore-cli = "0.5"
 pnet = "0.35"
