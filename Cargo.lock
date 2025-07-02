@@ -911,7 +911,6 @@ dependencies = [
  "indicatif",
  "keyring",
  "open",
- "openssl",
  "reqwest 0.12.21",
  "russh",
  "serde",
