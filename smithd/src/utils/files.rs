@@ -5,6 +5,7 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 use tempfile::NamedTempFile;
 use tokio::task;
+use tracing::info;
 
 pub async fn ensure_ssh_dir(login: &str) -> Result<(PathBuf, u32, u32)> {
     let login = login.to_owned();
@@ -97,6 +98,7 @@ pub async fn add_key(user: &str, pubkey: &str, tag: String) -> Result<()> {
 }
 
 pub async fn remove_key(user: &str, tag: &str) -> Result<()> {
+    info!("Removing key for user {user} with tag {tag}");
     let (ssh_folder, _uid, _gid) = ensure_ssh_dir(user).await?;
     let mut auth_keys = ssh_folder.clone();
     auth_keys.push("authorized_keys");
