@@ -43,9 +43,6 @@ pub enum ActorMessage {
     ClosePort {
         local: u16,
     },
-    CleanupSmithKeys {
-        user: String,
-    },
 }
 
 // Tunnel actor
