@@ -21,6 +21,19 @@ struct ForwardConnection {
     task: tokio::task::JoinHandle<()>,
 }
 
+impl ForwardConnection {
+    async fn remove(&self) {
+        self.task.abort();
+        if let Some(remote_login) = &self.remote_login {
+            info!("Removing remote login info");
+            let res = remove_key(&remote_login.user, &self.tag).await;
+            if let Err(err) = res {
+                error!("Failed to remove key: {err}");
+            }
+        }
+    }
+}
+
 pub enum ActorMessage {
     ForwardPort {
         local: u16,
@@ -128,7 +141,7 @@ impl Actor {
             }
             ActorMessage::ClosePort { local } => {
                 if let Some(conn) = self.ports.remove(&local) {
-                    conn.task.abort();
+                    conn.remove().await;
                 }
             }
         }
@@ -148,16 +161,7 @@ impl Actor {
         for port in to_remove {
             info!("Closing port {} due to timeout", port);
             if let Some(conn) = self.ports.remove(&port) {
-                conn.task.abort();
-
-                if let Some(remote_login) = conn.remote_login {
-                    info!("Removing remote login info");
-                    let user = remote_login.user;
-                    let res = remove_key(&user, &conn.tag).await;
-                    if let Err(err) = res {
-                        error!("Failed to remove key: {err}");
-                    }
-                }
+                conn.remove().await;
             }
         }
     }
