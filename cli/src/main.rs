@@ -15,9 +15,10 @@ use clap_complete::generate;
 use colored::Colorize;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use serde_json::Value;
-use std::{io, sync::mpsc, thread, time::Duration};
+use std::{io, thread, time::Duration};
 use termion::raw::IntoRawMode;
 use tokio::sync::oneshot;
+use tunnel::Session;
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> anyhow::Result<()> {
@@ -156,6 +157,8 @@ async fn main() -> anyhow::Result<()> {
                     .with_context(|| "Error getting token")?
                     .with_context(|| "No Token found, please Login")?;
 
+                let pub_key = config.get_identity_pub_key().await?;
+
                 let api = SmithAPI::new(secrets, &config);
 
                 let devices = api.get_devices(Some(serial_number.clone())).await?;
@@ -165,64 +168,13 @@ async fn main() -> anyhow::Result<()> {
                 let id = parsed[0]["id"].as_u64().unwrap();
 
                 println!(
-                    "Creating tunnel for device [{}] {}",
+                    "Creating tunnel for device [{}] {} {:?}",
                     id,
-                    &serial_number.bold()
+                    &serial_number.bold(),
+                    overview_debug
                 );
-
-                let item_uuid = if overview_debug {
-                    "2e6hkkg53lpmcw7qqeuqmnvy64"
-                } else {
-                    "q5dk6wsnchmfrlbl6balq5mg6u"
-                };
-
-                let child = std::process::Command::new("op")
-                    .args([
-                        "item",
-                        "get",
-                        item_uuid,
-                        "--fields",
-                        "username,password",
-                        "--reveal",
-                    ])
-                    .stdout(std::process::Stdio::piped())
-                    .spawn()?;
 
                 let m = MultiProgress::new();
-
-                let pb = m.add(ProgressBar::new_spinner());
-                pb.enable_steady_tick(Duration::from_millis(50));
-                pb.set_style(
-                    ProgressStyle::with_template("{spinner:.blue} {msg}")
-                        .unwrap()
-                        .tick_strings(&["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]),
-                );
-                pb.set_message("Fetchin password from 1password");
-
-                let (tx_pass, rx_pass) = mpsc::channel();
-                let one_password_handle = tokio::spawn(async move {
-                    let stdout = child.wait_with_output().unwrap();
-                    let fields = String::from_utf8(stdout.stdout).unwrap();
-                    let fields: Vec<&str> = fields.split(',').collect();
-                    let username = fields[0].trim();
-                    let password = fields[1].trim();
-                    let _visible_part = &password[0..3];
-                    let masked_length = password.len() - 3;
-
-                    tx_pass
-                        .send((username.to_string(), password.to_owned().clone()))
-                        .unwrap();
-
-                    pb.finish_with_message(format!(
-                        "{}{} {}{}{}",
-                        "Username: ".bold(),
-                        username,
-                        "Password: ".bold(),
-                        password,
-                        "*".repeat(masked_length)
-                    ));
-                });
-
                 let pb2 = m.add(ProgressBar::new_spinner());
                 pb2.enable_steady_tick(Duration::from_millis(50));
                 pb2.set_style(
@@ -233,8 +185,9 @@ async fn main() -> anyhow::Result<()> {
                 pb2.set_message("Sending request to smith");
 
                 let (tx, rx) = oneshot::channel();
+                let username = config.current_tunnel_username();
                 let tunnel_openning_handler = tokio::spawn(async move {
-                    api.open_tunnel(id).await.unwrap();
+                    api.open_tunnel(id, pub_key, username).await.unwrap();
                     pb2.set_message("Request sent to smith 💻");
 
                     let port;
@@ -262,38 +215,30 @@ async fn main() -> anyhow::Result<()> {
                     pb2.finish_with_message(format!("{} {}", "Port:".bold(), port));
                 });
 
-                let port = rx.await.unwrap();
-                let (username, password) = rx_pass.recv().unwrap();
+                let port = rx.await.unwrap() as u16;
 
                 println!("Opening tunnel to port {}", port);
-                println!("Username: {}", username);
-                println!("Password: {}", password);
 
-                one_password_handle.await.unwrap();
                 tunnel_openning_handler.await.unwrap();
 
-                if !overview_debug {
-                    let mut ssh =
-                        tunnel::Session::connect(username, password, port as u16, &config).await?;
-                    println!("Connected");
+                let mut ssh = Session::connect(
+                    config.get_identity_file(),
+                    "TODO",
+                    None,
+                    ("bore.teton.ai", port),
+                )
+                .await?;
+                println!("Connected");
+                let code = {
+                    // We're using `termion` to put the terminal into raw mode, so that we can
+                    // display the output of interactive applications correctly
+                    let _raw_term = std::io::stdout().into_raw_mode()?;
+                    ssh.call("bash").await.with_context(|| "skill issues")?;
+                };
 
-                    let code = {
-                        let _raw_term = std::io::stdout().into_raw_mode()?;
-
-                        ssh.call().await?
-                    };
-
-                    println!("Exited with code: {}", code);
-                    ssh.close().await?;
-                } else {
-                    tunnel::connect_local_port_to_remote_port(
-                        &config,
-                        username,
-                        password,
-                        port as u16,
-                    )
-                    .await?;
-                }
+                println!("Exitcode: {:?}", code);
+                ssh.close().await?;
+                return Ok(());
             }
             Commands::Release {
                 release_number,
