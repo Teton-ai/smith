@@ -185,10 +185,9 @@ async fn main() -> anyhow::Result<()> {
                 pb2.set_message("Sending request to smith");
 
                 let (tx, rx) = oneshot::channel();
+                let username = config.current_tunnel_username();
                 let tunnel_openning_handler = tokio::spawn(async move {
-                    api.open_tunnel(id, pub_key, String::from("TODO"))
-                        .await
-                        .unwrap();
+                    api.open_tunnel(id, pub_key, username).await.unwrap();
                     pb2.set_message("Request sent to smith 💻");
 
                     let port;

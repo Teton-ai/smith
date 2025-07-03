@@ -16,6 +16,7 @@ const OP_DEFAULT_CONFIG: &str = "op://Engineering/smith.env/config.toml";
 struct Profile {
     server: String,
     tunnel_server: String,
+    tunnel_username: String,
     color: String,
     #[serde(default)]
     ask: bool,
@@ -27,7 +28,6 @@ struct Profile {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
     pub current_profile: String,
-    pub_key_file: Option<String>,
     profile: HashMap<String, Profile>,
 }
 
@@ -65,7 +65,8 @@ impl Config {
         if !identity_key_path.exists() || !identity_pub_key_path.exists() {
             println!("Warning: No identity.pub key found in ~/.smith/");
             println!("Creating default");
-            let private_key = PrivateKey::random(&mut OsRng, Algorithm::Ed25519)?;
+            let private_key = PrivateKey::random(&mut OsRng, Algorithm::Ed25519)
+                .context("Failed to generate Ed25519 private key")?;
             let private_key_pem = private_key.to_openssh(Default::default())?;
             let public_key = private_key.public_key();
             let public_key_ssh = public_key.to_string();
@@ -137,6 +138,10 @@ impl Config {
 
     pub fn current_domain(&self) -> String {
         self.profile[&self.current_profile].server.clone()
+    }
+
+    pub fn current_tunnel_username(&self) -> String {
+        self.profile[&self.current_profile].tunnel_username.clone()
     }
 
     pub async fn get_identity_pub_key(&self) -> anyhow::Result<String> {

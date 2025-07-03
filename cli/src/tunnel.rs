@@ -42,8 +42,8 @@ impl Session {
 
         // load ssh certificate
         let mut openssh_cert = None;
-        if openssh_cert_path.is_some() {
-            openssh_cert = Some(load_openssh_certificate(openssh_cert_path.unwrap())?);
+        if let Some(cert_path) = openssh_cert_path {
+            openssh_cert = Some(load_openssh_certificate(cert_path)?);
         }
 
         let config = client::Config {
@@ -56,29 +56,27 @@ impl Session {
 
         let mut session = client::connect(config, addrs, sh).await?;
 
-        // use publickey authentication, with or without certificate
-        if openssh_cert.is_none() {
-            let auth_res = session
-                .authenticate_publickey(
-                    user,
-                    PrivateKeyWithHashAlg::new(
-                        Arc::new(key_pair),
-                        session.best_supported_rsa_hash().await?.flatten(),
-                    ),
-                )
-                .await?;
-
-            if !auth_res.success() {
-                anyhow::bail!("Authentication (with publickey) failed");
+        let auth_res = match openssh_cert {
+            Some(cert) => {
+                session
+                    .authenticate_openssh_cert(user, Arc::new(key_pair), cert)
+                    .await?
             }
-        } else {
-            let auth_res = session
-                .authenticate_openssh_cert(user, Arc::new(key_pair), openssh_cert.unwrap())
-                .await?;
-
-            if !auth_res.success() {
-                anyhow::bail!("Authentication (with publickey+cert) failed");
+            None => {
+                session
+                    .authenticate_publickey(
+                        user,
+                        PrivateKeyWithHashAlg::new(
+                            Arc::new(key_pair),
+                            session.best_supported_rsa_hash().await?.flatten(),
+                        ),
+                    )
+                    .await?
             }
+        };
+
+        if !auth_res.success() {
+            anyhow::bail!("SSH authentication failed");
         }
 
         Ok(Self { session })
