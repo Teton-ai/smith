@@ -28,7 +28,7 @@ chrono = "0.4.38"
 colored = "2"
 dirs = "5.0"
 indicatif = "0.17.8"
-russh = "0.52"
+russh = "0.53"
 termion = "4.0.2"
 tokio = { version = "1.40.0", features = ["full"] }
 tokio-fd = "0.3.0"
