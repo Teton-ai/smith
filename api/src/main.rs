@@ -8,7 +8,7 @@ use axum::{
     Extension,
     extract::Request,
     middleware,
-    routing::{any, delete, get, post, put},
+    routing::{any, get, post},
 };
 use config::Config;
 use handlers::events::PublicEvent;
@@ -243,34 +243,24 @@ async fn start_main_server(config: &'static Config, authorization: Authorization
             handlers::devices::update_device_target_release
         ))
         .routes(routes!(handlers::devices::get_ledger_for_device))
-        .route(
-            "/devices/:device_id/approval",
-            post(handlers::devices::approve_device).delete(handlers::devices::revoke_device),
-        )
-        .route(
-            "/devices/:device_id/token",
-            delete(handlers::devices::delete_token),
-        )
-        .route("/devices/tags", get(handlers::devices::get_tags))
-        .route(
-            "/devices/release",
-            put(handlers::devices::update_devices_target_release),
-        )
-        .route("/devices/variables", get(handlers::devices::get_variables))
-        .route(
-            "/tags",
-            get(handlers::tags::get_tags).post(handlers::tags::create_tag),
-        )
-        .route("/commands", get(handlers::commands::get_commands))
-        .route(
-            "/commands/bundles",
-            get(handlers::commands::get_bundle_commands)
-                .post(handlers::commands::issue_commands_to_devices),
-        )
-        .route(
-            "/lean/:filter_kind/:filter_value",
-            get(handlers::devices::get_devices_new),
-        )
+        .routes(routes!(
+            handlers::devices::approve_device,
+            handlers::devices::revoke_device
+        ))
+        .routes(routes!(handlers::devices::delete_token))
+        .routes(routes!(handlers::devices::get_tags))
+        .routes(routes!(handlers::devices::update_devices_target_release))
+        .routes(routes!(handlers::devices::get_variables))
+        .routes(routes!(
+            handlers::tags::get_tags,
+            handlers::tags::create_tag
+        ))
+        .routes(routes!(handlers::commands::get_commands))
+        .routes(routes!(
+            handlers::commands::get_bundle_commands,
+            handlers::commands::issue_commands_to_devices
+        ))
+        .routes(routes!(handlers::devices::get_devices_new))
         // Auth middleware. Every route prior to this is protected.
         .route_layer(middleware::from_fn(middlewares::authentication::check))
         .routes(routes!(handlers::events::sse_handler))

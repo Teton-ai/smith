@@ -33,6 +33,19 @@ pub struct LeanDeviceFilter {
     limit: Option<i64>,
 }
 
+#[utoipa::path(
+    get,
+    path = "/lean/{filter_kind}/{filter_value}",
+    responses(
+        (status = 200, description = "Filtered devices", body = types::LeanResponse),
+        (status = 403, description = "Forbidden"),
+        (status = 500, description = "Failed to retrieve devices", body = String),
+    ),
+    security(
+        ("Access Token" = [])
+    ),
+    tag = DEVICES_TAG
+)]
 // TODO: this is getting crazy huge, maybe it would be nice to have an handler
 // per filter type instead of only 1 to handle all, maybe that could also have
 // some performance beneficts to let axum handle the matching of the arms
@@ -351,6 +364,18 @@ pub async fn get_devices(
     Ok(Json(devices))
 }
 
+#[utoipa::path(
+    get,
+    path = "/devices/tags",
+    responses(
+        (status = 200, description = "List of all device tags", body = Vec<types::Tag>),
+        (status = 500, description = "Failed to retrieve tags", body = String),
+    ),
+    security(
+        ("Access Token" = [])
+    ),
+    tag = DEVICES_TAG
+)]
 pub async fn get_tags(
     Extension(state): Extension<State>,
 ) -> Result<Json<Vec<types::Tag>>, StatusCode> {
@@ -375,6 +400,18 @@ pub async fn get_tags(
     Ok(Json(tags))
 }
 
+#[utoipa::path(
+    get,
+    path = "/devices/variables",
+    responses(
+        (status = 200, description = "List of all device variables", body = Vec<types::Variable>),
+        (status = 500, description = "Failed to retrieve variables", body = String),
+    ),
+    security(
+        ("Access Token" = [])
+    ),
+    tag = DEVICES_TAG
+)]
 pub async fn get_variables(
     Extension(state): Extension<State>,
 ) -> Result<Json<Vec<types::Variable>>, StatusCode> {
@@ -1456,6 +1493,20 @@ pub async fn update_device_target_release(
     Ok(StatusCode::OK)
 }
 
+#[utoipa::path(
+    put,
+    path = "/devices/release",
+    request_body = types::UpdateDevicesRelease,
+    responses(
+        (status = 200, description = "Devices target release updated successfully"),
+        (status = 404, description = "Release not found"),
+        (status = 500, description = "Failed to update devices target release", body = String),
+    ),
+    security(
+        ("Access Token" = [])
+    ),
+    tag = DEVICES_TAG
+)]
 pub async fn update_devices_target_release(
     Extension(state): Extension<State>,
     Json(devices_release): Json<types::UpdateDevicesRelease>,
@@ -1670,6 +1721,18 @@ pub async fn delete_device(
     Ok(StatusCode::NO_CONTENT)
 }
 
+#[utoipa::path(
+    post,
+    path = "/devices/{device_id}/approval",
+    responses(
+        (status = 200, description = "Device approved successfully"),
+        (status = 500, description = "Failed to approve device", body = String),
+    ),
+    security(
+        ("Access Token" = [])
+    ),
+    tag = DEVICES_TAG
+)]
 pub async fn approve_device(
     Path(device_id): Path<i32>,
     Extension(state): Extension<State>,
@@ -1757,6 +1820,18 @@ pub async fn approve_device(
     Ok(Json(()))
 }
 
+#[utoipa::path(
+    delete,
+    path = "/devices/{device_id}/approval",
+    responses(
+        (status = 200, description = "Device approval revoked successfully"),
+        (status = 500, description = "Failed to revoke device approval", body = String),
+    ),
+    security(
+        ("Access Token" = [])
+    ),
+    tag = DEVICES_TAG
+)]
 pub async fn revoke_device(
     Path(device_id): Path<i32>,
     Extension(state): Extension<State>,
@@ -1798,6 +1873,18 @@ pub async fn revoke_device(
     Ok(Json(()))
 }
 
+#[utoipa::path(
+    delete,
+    path = "/devices/{device_id}/token",
+    responses(
+        (status = 200, description = "Device token deleted successfully"),
+        (status = 500, description = "Failed to delete device token", body = String),
+    ),
+    security(
+        ("Access Token" = [])
+    ),
+    tag = DEVICES_TAG
+)]
 pub async fn delete_token(
     Path(device_id): Path<i32>,
     Extension(state): Extension<State>,
