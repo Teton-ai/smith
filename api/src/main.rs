@@ -229,16 +229,14 @@ async fn start_main_server(config: &'static Config, authorization: Authorization
             handlers::devices::delete_tag_from_device,
             handlers::devices::add_tag_to_device
         ))
-        .route(
-            "/devices/:device_id/variables",
-            get(handlers::devices::get_variables_for_device)
-                .post(handlers::devices::add_variable_to_device),
-        )
-        .route(
-            "/devices/:device_id/variables/:variable_id",
-            delete(handlers::devices::delete_variable_from_device)
-                .put(handlers::devices::update_variable_for_device),
-        )
+        .routes(routes!(
+            handlers::devices::get_variables_for_device,
+            handlers::devices::add_variable_to_device
+        ))
+        .routes(routes!(
+            handlers::devices::delete_variable_from_device,
+            handlers::devices::update_variable_for_device
+        ))
         .route(
             "/devices/:device_id/note",
             put(handlers::devices::update_note_for_device),

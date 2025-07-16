@@ -604,6 +604,18 @@ pub async fn add_tag_to_device(
     Ok(StatusCode::CREATED)
 }
 
+#[utoipa::path(
+    delete,
+    path = "/devices/{device_id}/variables/{variable_id}",
+    responses(
+        (status = 204, description = "Variable deleted successfully"),
+        (status = 500, description = "Failed to delete variable", body = String),
+    ),
+    security(
+        ("Access Token" = [])
+    ),
+    tag = DEVICES_TAG
+)]
 pub async fn delete_variable_from_device(
     Path((device_id, variable_id)): Path<(i32, i32)>,
     Extension(state): Extension<State>,
@@ -648,6 +660,19 @@ pub async fn delete_variable_from_device(
     Ok(StatusCode::NO_CONTENT)
 }
 
+#[utoipa::path(
+    put,
+    path = "/devices/{device_id}/variables/{variable_id}",
+    request_body = types::NewVariable,
+    responses(
+        (status = 200, description = "Variable updated successfully"),
+        (status = 500, description = "Failed to update variable", body = String),
+    ),
+    security(
+        ("Access Token" = [])
+    ),
+    tag = DEVICES_TAG
+)]
 pub async fn update_variable_for_device(
     Path((device_id, variable_id)): Path<(i32, i32)>,
     Extension(state): Extension<State>,
@@ -702,6 +727,18 @@ pub async fn update_variable_for_device(
     Ok(StatusCode::NO_CONTENT)
 }
 
+#[utoipa::path(
+    get,
+    path = "/devices/{device_id}/variables",
+    responses(
+        (status = 200, description = "List of variables for device", body = Vec<types::Variable>),
+        (status = 500, description = "Failed to retrieve variables", body = String),
+    ),
+    security(
+        ("Access Token" = [])
+    ),
+    tag = DEVICES_TAG
+)]
 pub async fn get_variables_for_device(
     Path(device_id): Path<i32>,
     Extension(state): Extension<State>,
@@ -728,6 +765,19 @@ pub async fn get_variables_for_device(
     Ok(Json(variables))
 }
 
+#[utoipa::path(
+    post,
+    path = "/devices/{device_id}/variables",
+    request_body = types::NewVariable,
+    responses(
+        (status = 201, description = "Variable added successfully"),
+        (status = 500, description = "Failed to add variable", body = String),
+    ),
+    security(
+        ("Access Token" = [])
+    ),
+    tag = DEVICES_TAG
+)]
 pub async fn add_variable_to_device(
     Path(device_id): Path<i32>,
     Extension(state): Extension<State>,

@@ -37,7 +37,7 @@ pub struct Tag {
     pub color: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, utoipa::ToSchema)]
 pub struct Variable {
     pub id: i32,
     pub device: i32,
@@ -45,7 +45,7 @@ pub struct Variable {
     pub value: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, utoipa::ToSchema)]
 pub struct NewVariable {
     pub name: String,
     pub value: String,
