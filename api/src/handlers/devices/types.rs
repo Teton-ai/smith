@@ -18,7 +18,7 @@ pub struct LeanDevice {
     pub up_to_date: Option<bool>,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, utoipa::ToSchema)]
 pub struct UpdateDeviceRelease {
     pub target_release_id: i32,
 }
@@ -79,7 +79,7 @@ pub struct Note {
     pub note: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, utoipa::ToSchema)]
 pub struct DeviceLedgerItem {
     pub id: i32,
     pub timestamp: Option<chrono::DateTime<chrono::Utc>>,
@@ -87,7 +87,7 @@ pub struct DeviceLedgerItem {
     pub text: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, utoipa::ToSchema)]
 pub struct DeviceLedgerItemPaginated {
     pub ledger: Vec<DeviceLedgerItem>,
     pub next: Option<String>,
@@ -100,7 +100,7 @@ pub struct DeviceIdentifiers {
     pub identifiers: Vec<String>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, utoipa::ToSchema)]
 pub struct DeviceRelease {
     pub previous_release: Option<Release>,
     pub release: Option<Release>,

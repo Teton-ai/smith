@@ -893,6 +893,19 @@ pub async fn update_note_for_device(
 }
 
 #[allow(clippy::collapsible_else_if)]
+#[utoipa::path(
+    get,
+    path = "/devices/{device_id}/ledger",
+    responses(
+        (status = 200, description = "Device ledger entries", body = types::DeviceLedgerItemPaginated),
+        (status = 400, description = "Invalid pagination parameters"),
+        (status = 500, description = "Failed to retrieve device ledger", body = String),
+    ),
+    security(
+        ("Access Token" = [])
+    ),
+    tag = DEVICES_TAG
+)]
 pub async fn get_ledger_for_device(
     host: Host,
     Path(device_id): Path<i32>,
@@ -1301,6 +1314,18 @@ pub async fn get_all_commands_for_device(
     Ok(Json(commands_paginated))
 }
 
+#[utoipa::path(
+    get,
+    path = "/devices/{device_id}/release",
+    responses(
+        (status = 200, description = "Device release information", body = types::DeviceRelease),
+        (status = 500, description = "Failed to retrieve device release", body = String),
+    ),
+    security(
+        ("Access Token" = [])
+    ),
+    tag = DEVICES_TAG
+)]
 pub async fn get_device_release(
     Path(device_id): Path<i32>,
     Extension(state): Extension<State>,
@@ -1380,6 +1405,20 @@ pub async fn get_device_release(
     Ok(Json(device_release))
 }
 
+#[utoipa::path(
+    post,
+    path = "/devices/{device_id}/release",
+    request_body = types::UpdateDeviceRelease,
+    responses(
+        (status = 200, description = "Device target release updated successfully"),
+        (status = 404, description = "Release not found"),
+        (status = 500, description = "Failed to update device target release", body = String),
+    ),
+    security(
+        ("Access Token" = [])
+    ),
+    tag = DEVICES_TAG
+)]
 pub async fn update_device_target_release(
     Path(device_id): Path<i32>,
     Extension(state): Extension<State>,

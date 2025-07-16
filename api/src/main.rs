@@ -238,15 +238,11 @@ async fn start_main_server(config: &'static Config, authorization: Authorization
             handlers::devices::update_variable_for_device
         ))
         .routes(routes!(handlers::devices::update_note_for_device))
-        .route(
-            "/devices/:device_id/release",
-            get(handlers::devices::get_device_release)
-                .post(handlers::devices::update_device_target_release),
-        )
-        .route(
-            "/devices/:device_id/ledger",
-            get(handlers::devices::get_ledger_for_device),
-        )
+        .routes(routes!(
+            handlers::devices::get_device_release,
+            handlers::devices::update_device_target_release
+        ))
+        .routes(routes!(handlers::devices::get_ledger_for_device))
         .route(
             "/devices/:device_id/approval",
             post(handlers::devices::approve_device).delete(handlers::devices::revoke_device),
