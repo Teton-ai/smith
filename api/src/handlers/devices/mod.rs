@@ -398,6 +398,18 @@ pub async fn get_variables(
     Ok(Json(variables))
 }
 
+#[utoipa::path(
+    get,
+    path = "/devices/{device_id}/tags",
+    responses(
+        (status = 200, description = "List of tags for device", body = Vec<types::Tag>),
+        (status = 500, description = "Failed to retrieve tags", body = String),
+    ),
+    security(
+        ("Access Token" = [])
+    ),
+    tag = DEVICES_TAG
+)]
 pub async fn get_tag_for_device(
     Path(device_id): Path<i32>,
     Extension(state): Extension<State>,
@@ -478,6 +490,18 @@ pub async fn get_health_for_device(
     Ok(Json(device_health))
 }
 
+#[utoipa::path(
+    delete,
+    path = "/devices/{device_id}/tags/{tag_id}",
+    responses(
+        (status = 204, description = "Tag deleted successfully"),
+        (status = 500, description = "Failed to delete tag", body = String),
+    ),
+    security(
+        ("Access Token" = [])
+    ),
+    tag = DEVICES_TAG
+)]
 pub async fn delete_tag_from_device(
     Path((device_id, tag_id)): Path<(i32, i32)>,
     Extension(state): Extension<State>,
@@ -520,6 +544,19 @@ pub async fn delete_tag_from_device(
     Ok(StatusCode::NO_CONTENT)
 }
 
+#[utoipa::path(
+    put,
+    path = "/devices/{device_id}/tags/{tag_id}",
+    responses(
+        (status = 201, description = "Tag added successfully"),
+        (status = 304, description = "Tag already exists"),
+        (status = 500, description = "Failed to add tag", body = String),
+    ),
+    security(
+        ("Access Token" = [])
+    ),
+    tag = DEVICES_TAG
+)]
 pub async fn add_tag_to_device(
     Path((device_id, tag_id)): Path<(i32, i32)>,
     Extension(state): Extension<State>,

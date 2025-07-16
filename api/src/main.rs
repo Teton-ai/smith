@@ -224,15 +224,11 @@ async fn start_main_server(config: &'static Config, authorization: Authorization
             get(handlers::packages::get_package_by_id)
                 .delete(handlers::packages::delete_package_by_id),
         )
-        .route(
-            "/devices/:device_id/tags",
-            get(handlers::devices::get_tag_for_device),
-        )
-        .route(
-            "/devices/:device_id/tags/:tag_id",
-            delete(handlers::devices::delete_tag_from_device)
-                .put(handlers::devices::add_tag_to_device),
-        )
+        .routes(routes!(handlers::devices::get_tag_for_device))
+        .routes(routes!(
+            handlers::devices::delete_tag_from_device,
+            handlers::devices::add_tag_to_device
+        ))
         .route(
             "/devices/:device_id/variables",
             get(handlers::devices::get_variables_for_device)
