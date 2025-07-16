@@ -831,6 +831,20 @@ pub async fn add_variable_to_device(
     Ok(StatusCode::CREATED)
 }
 
+#[utoipa::path(
+    put,
+    path = "/devices/{device_id}/note",
+    request_body = types::Note,
+    responses(
+        (status = 200, description = "Note updated successfully"),
+        (status = 304, description = "Note not modified"),
+        (status = 500, description = "Failed to update note", body = String),
+    ),
+    security(
+        ("Access Token" = [])
+    ),
+    tag = DEVICES_TAG
+)]
 pub async fn update_note_for_device(
     Path(device_id): Path<i32>,
     Extension(state): Extension<State>,

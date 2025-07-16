@@ -237,10 +237,7 @@ async fn start_main_server(config: &'static Config, authorization: Authorization
             handlers::devices::delete_variable_from_device,
             handlers::devices::update_variable_for_device
         ))
-        .route(
-            "/devices/:device_id/note",
-            put(handlers::devices::update_note_for_device),
-        )
+        .routes(routes!(handlers::devices::update_note_for_device))
         .route(
             "/devices/:device_id/release",
             get(handlers::devices::get_device_release)

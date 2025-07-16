@@ -74,7 +74,7 @@ pub struct CommandsPaginated {
     pub previous: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, utoipa::ToSchema)]
 pub struct Note {
     pub note: Option<String>,
 }
