@@ -1,21 +1,24 @@
-use crate::config::Config;
-use async_trait::async_trait;
-use russh::{ChannelMsg, Disconnect, client, keys::key};
+use anyhow::Result;
+use russh::keys::*;
+use russh::*;
+use std::convert::TryFrom;
+use std::path::Path;
+use std::time::Duration;
 use std::{env, sync::Arc};
-use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt},
-    process::Command,
-};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::ToSocketAddrs;
 
 struct Client {}
 
-#[async_trait]
+// More SSH event handlers
+// can be defined in this trait
+// In this example, we're only using Channel, so these aren't needed.
 impl client::Handler for Client {
-    type Error = anyhow::Error;
+    type Error = russh::Error;
 
     async fn check_server_key(
         &mut self,
-        _server_public_key: &key::PublicKey,
+        _server_public_key: &ssh_key::PublicKey,
     ) -> Result<bool, Self::Error> {
         Ok(true)
     }
@@ -29,30 +32,57 @@ pub struct Session {
 }
 
 impl Session {
-    pub async fn connect(
-        username: String,
-        password: String,
-        port: u16,
-        config: &Config,
-    ) -> anyhow::Result<Self> {
+    pub async fn connect<P: AsRef<Path>, A: ToSocketAddrs>(
+        key_path: P,
+        user: impl Into<String>,
+        openssh_cert_path: Option<P>,
+        addrs: A,
+    ) -> Result<Self> {
+        let key_pair = load_secret_key(key_path, None)?;
+
+        // load ssh certificate
+        let mut openssh_cert = None;
+        if let Some(cert_path) = openssh_cert_path {
+            openssh_cert = Some(load_openssh_certificate(cert_path)?);
+        }
+
+        let config = client::Config {
+            inactivity_timeout: Some(Duration::from_secs(5)),
+            ..<_>::default()
+        };
+
+        let config = Arc::new(config);
         let sh = Client {};
 
-        let client_config = Arc::new(client::Config::default());
+        let mut session = client::connect(config, addrs, sh).await?;
 
-        let domain = config.tunnel_server();
+        let auth_res = match openssh_cert {
+            Some(cert) => {
+                session
+                    .authenticate_openssh_cert(user, Arc::new(key_pair), cert)
+                    .await?
+            }
+            None => {
+                session
+                    .authenticate_publickey(
+                        user,
+                        PrivateKeyWithHashAlg::new(
+                            Arc::new(key_pair),
+                            session.best_supported_rsa_hash().await?.flatten(),
+                        ),
+                    )
+                    .await?
+            }
+        };
 
-        let mut session = client::connect(client_config, (domain, port), sh).await?;
-
-        let auth = session.authenticate_password(username, password).await?;
-
-        if !auth {
-            return Err(anyhow::anyhow!("Failed to authenticate"));
+        if !auth_res.success() {
+            anyhow::bail!("SSH authentication failed");
         }
 
         Ok(Self { session })
     }
 
-    pub async fn call(&mut self) -> anyhow::Result<u32> {
+    pub async fn call(&mut self, command: &str) -> Result<u32> {
         let mut channel = self.session.channel_open_session().await?;
 
         // This example doesn't terminal resizing after the connection is established
@@ -70,9 +100,9 @@ impl Session {
                 &[], // ideally you want to pass the actual terminal modes here
             )
             .await?;
+        channel.exec(true, command).await?;
 
-        channel.request_shell(true).await?;
-
+        let code;
         let mut stdin = tokio_fd::AsyncFd::try_from(0)?;
         let mut stdout = tokio_fd::AsyncFd::try_from(1)?;
         let mut buf = vec![0; 1024];
@@ -101,7 +131,12 @@ impl Session {
                             stdout.write_all(data).await?;
                             stdout.flush().await?;
                         }
-                        ChannelMsg::Eof => {
+                        // The command has returned an exit code
+                        ChannelMsg::ExitStatus { exit_status } => {
+                            code = exit_status;
+                            if !stdin_closed {
+                                channel.eof().await?;
+                            }
                             break;
                         }
                         _ => {}
@@ -109,43 +144,13 @@ impl Session {
                 },
             }
         }
-        Ok(0)
+        Ok(code)
     }
 
-    pub async fn close(&mut self) -> anyhow::Result<()> {
+    pub async fn close(&mut self) -> Result<()> {
         self.session
             .disconnect(Disconnect::ByApplication, "", "English")
             .await?;
         Ok(())
     }
-}
-
-pub async fn connect_local_port_to_remote_port(
-    config: &Config,
-    username: String,
-    password: String,
-    port: u16,
-) -> anyhow::Result<()> {
-    let tunnel_server = config.tunnel_server();
-    let domain = format!("{username}@{tunnel_server}");
-
-    let child = Command::new("sshpass")
-        .arg("-p")
-        .arg(password)
-        .arg("ssh")
-        .arg("-o")
-        .arg("StrictHostKeyChecking=no")
-        .arg("-L")
-        .arg("9222:localhost:9222")
-        .arg(&domain)
-        .arg("-p")
-        .arg(format!("{}", port))
-        .kill_on_drop(true)
-        .spawn()?;
-
-    let output = child.wait_with_output().await?;
-
-    println!("output: {:?}", output);
-
-    Ok(())
 }
