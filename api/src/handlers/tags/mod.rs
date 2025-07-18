@@ -5,6 +5,20 @@ use tracing::error;
 
 pub mod types;
 
+const TAGS_TAG: &str = "tags";
+
+#[utoipa::path(
+    get,
+    path = "/tags",
+    responses(
+        (status = 200, description = "List of all tags", body = Vec<types::Tag>),
+        (status = 500, description = "Failed to retrieve tags", body = String),
+    ),
+    security(
+        ("Access Token" = [])
+    ),
+    tag = TAGS_TAG
+)]
 pub async fn get_tags(
     Extension(state): Extension<State>,
 ) -> Result<Json<Vec<types::Tag>>, StatusCode> {
@@ -27,6 +41,19 @@ pub async fn get_tags(
     Ok(Json(devices))
 }
 
+#[utoipa::path(
+    post,
+    path = "/tags",
+    request_body = types::NewTag,
+    responses(
+        (status = 200, description = "Tag created successfully", body = types::Tag),
+        (status = 500, description = "Failed to create tag", body = String),
+    ),
+    security(
+        ("Access Token" = [])
+    ),
+    tag = TAGS_TAG
+)]
 pub async fn create_tag(
     Extension(state): Extension<State>,
     Json(tag): Json<types::NewTag>,

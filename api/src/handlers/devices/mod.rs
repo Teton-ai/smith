@@ -33,6 +33,19 @@ pub struct LeanDeviceFilter {
     limit: Option<i64>,
 }
 
+#[utoipa::path(
+    get,
+    path = "/lean/{filter_kind}/{filter_value}",
+    responses(
+        (status = 200, description = "Filtered devices", body = types::LeanResponse),
+        (status = 403, description = "Forbidden"),
+        (status = 500, description = "Failed to retrieve devices", body = String),
+    ),
+    security(
+        ("Access Token" = [])
+    ),
+    tag = DEVICES_TAG
+)]
 // TODO: this is getting crazy huge, maybe it would be nice to have an handler
 // per filter type instead of only 1 to handle all, maybe that could also have
 // some performance beneficts to let axum handle the matching of the arms
@@ -351,6 +364,18 @@ pub async fn get_devices(
     Ok(Json(devices))
 }
 
+#[utoipa::path(
+    get,
+    path = "/devices/tags",
+    responses(
+        (status = 200, description = "List of all device tags", body = Vec<types::Tag>),
+        (status = 500, description = "Failed to retrieve tags", body = String),
+    ),
+    security(
+        ("Access Token" = [])
+    ),
+    tag = DEVICES_TAG
+)]
 pub async fn get_tags(
     Extension(state): Extension<State>,
 ) -> Result<Json<Vec<types::Tag>>, StatusCode> {
@@ -375,6 +400,18 @@ pub async fn get_tags(
     Ok(Json(tags))
 }
 
+#[utoipa::path(
+    get,
+    path = "/devices/variables",
+    responses(
+        (status = 200, description = "List of all device variables", body = Vec<types::Variable>),
+        (status = 500, description = "Failed to retrieve variables", body = String),
+    ),
+    security(
+        ("Access Token" = [])
+    ),
+    tag = DEVICES_TAG
+)]
 pub async fn get_variables(
     Extension(state): Extension<State>,
 ) -> Result<Json<Vec<types::Variable>>, StatusCode> {
@@ -398,6 +435,18 @@ pub async fn get_variables(
     Ok(Json(variables))
 }
 
+#[utoipa::path(
+    get,
+    path = "/devices/{device_id}/tags",
+    responses(
+        (status = 200, description = "List of tags for device", body = Vec<types::Tag>),
+        (status = 500, description = "Failed to retrieve tags", body = String),
+    ),
+    security(
+        ("Access Token" = [])
+    ),
+    tag = DEVICES_TAG
+)]
 pub async fn get_tag_for_device(
     Path(device_id): Path<i32>,
     Extension(state): Extension<State>,
@@ -478,6 +527,18 @@ pub async fn get_health_for_device(
     Ok(Json(device_health))
 }
 
+#[utoipa::path(
+    delete,
+    path = "/devices/{device_id}/tags/{tag_id}",
+    responses(
+        (status = 204, description = "Tag deleted successfully"),
+        (status = 500, description = "Failed to delete tag", body = String),
+    ),
+    security(
+        ("Access Token" = [])
+    ),
+    tag = DEVICES_TAG
+)]
 pub async fn delete_tag_from_device(
     Path((device_id, tag_id)): Path<(i32, i32)>,
     Extension(state): Extension<State>,
@@ -520,6 +581,19 @@ pub async fn delete_tag_from_device(
     Ok(StatusCode::NO_CONTENT)
 }
 
+#[utoipa::path(
+    put,
+    path = "/devices/{device_id}/tags/{tag_id}",
+    responses(
+        (status = 201, description = "Tag added successfully"),
+        (status = 304, description = "Tag already exists"),
+        (status = 500, description = "Failed to add tag", body = String),
+    ),
+    security(
+        ("Access Token" = [])
+    ),
+    tag = DEVICES_TAG
+)]
 pub async fn add_tag_to_device(
     Path((device_id, tag_id)): Path<(i32, i32)>,
     Extension(state): Extension<State>,
@@ -567,6 +641,18 @@ pub async fn add_tag_to_device(
     Ok(StatusCode::CREATED)
 }
 
+#[utoipa::path(
+    delete,
+    path = "/devices/{device_id}/variables/{variable_id}",
+    responses(
+        (status = 204, description = "Variable deleted successfully"),
+        (status = 500, description = "Failed to delete variable", body = String),
+    ),
+    security(
+        ("Access Token" = [])
+    ),
+    tag = DEVICES_TAG
+)]
 pub async fn delete_variable_from_device(
     Path((device_id, variable_id)): Path<(i32, i32)>,
     Extension(state): Extension<State>,
@@ -611,6 +697,19 @@ pub async fn delete_variable_from_device(
     Ok(StatusCode::NO_CONTENT)
 }
 
+#[utoipa::path(
+    put,
+    path = "/devices/{device_id}/variables/{variable_id}",
+    request_body = types::NewVariable,
+    responses(
+        (status = 200, description = "Variable updated successfully"),
+        (status = 500, description = "Failed to update variable", body = String),
+    ),
+    security(
+        ("Access Token" = [])
+    ),
+    tag = DEVICES_TAG
+)]
 pub async fn update_variable_for_device(
     Path((device_id, variable_id)): Path<(i32, i32)>,
     Extension(state): Extension<State>,
@@ -665,6 +764,18 @@ pub async fn update_variable_for_device(
     Ok(StatusCode::NO_CONTENT)
 }
 
+#[utoipa::path(
+    get,
+    path = "/devices/{device_id}/variables",
+    responses(
+        (status = 200, description = "List of variables for device", body = Vec<types::Variable>),
+        (status = 500, description = "Failed to retrieve variables", body = String),
+    ),
+    security(
+        ("Access Token" = [])
+    ),
+    tag = DEVICES_TAG
+)]
 pub async fn get_variables_for_device(
     Path(device_id): Path<i32>,
     Extension(state): Extension<State>,
@@ -691,6 +802,19 @@ pub async fn get_variables_for_device(
     Ok(Json(variables))
 }
 
+#[utoipa::path(
+    post,
+    path = "/devices/{device_id}/variables",
+    request_body = types::NewVariable,
+    responses(
+        (status = 201, description = "Variable added successfully"),
+        (status = 500, description = "Failed to add variable", body = String),
+    ),
+    security(
+        ("Access Token" = [])
+    ),
+    tag = DEVICES_TAG
+)]
 pub async fn add_variable_to_device(
     Path(device_id): Path<i32>,
     Extension(state): Extension<State>,
@@ -744,6 +868,20 @@ pub async fn add_variable_to_device(
     Ok(StatusCode::CREATED)
 }
 
+#[utoipa::path(
+    put,
+    path = "/devices/{device_id}/note",
+    request_body = types::Note,
+    responses(
+        (status = 200, description = "Note updated successfully"),
+        (status = 304, description = "Note not modified"),
+        (status = 500, description = "Failed to update note", body = String),
+    ),
+    security(
+        ("Access Token" = [])
+    ),
+    tag = DEVICES_TAG
+)]
 pub async fn update_note_for_device(
     Path(device_id): Path<i32>,
     Extension(state): Extension<State>,
@@ -792,6 +930,19 @@ pub async fn update_note_for_device(
 }
 
 #[allow(clippy::collapsible_else_if)]
+#[utoipa::path(
+    get,
+    path = "/devices/{device_id}/ledger",
+    responses(
+        (status = 200, description = "Device ledger entries", body = types::DeviceLedgerItemPaginated),
+        (status = 400, description = "Invalid pagination parameters"),
+        (status = 500, description = "Failed to retrieve device ledger", body = String),
+    ),
+    security(
+        ("Access Token" = [])
+    ),
+    tag = DEVICES_TAG
+)]
 pub async fn get_ledger_for_device(
     host: Host,
     Path(device_id): Path<i32>,
@@ -1200,6 +1351,18 @@ pub async fn get_all_commands_for_device(
     Ok(Json(commands_paginated))
 }
 
+#[utoipa::path(
+    get,
+    path = "/devices/{device_id}/release",
+    responses(
+        (status = 200, description = "Device release information", body = types::DeviceRelease),
+        (status = 500, description = "Failed to retrieve device release", body = String),
+    ),
+    security(
+        ("Access Token" = [])
+    ),
+    tag = DEVICES_TAG
+)]
 pub async fn get_device_release(
     Path(device_id): Path<i32>,
     Extension(state): Extension<State>,
@@ -1279,6 +1442,20 @@ pub async fn get_device_release(
     Ok(Json(device_release))
 }
 
+#[utoipa::path(
+    post,
+    path = "/devices/{device_id}/release",
+    request_body = types::UpdateDeviceRelease,
+    responses(
+        (status = 200, description = "Device target release updated successfully"),
+        (status = 404, description = "Release not found"),
+        (status = 500, description = "Failed to update device target release", body = String),
+    ),
+    security(
+        ("Access Token" = [])
+    ),
+    tag = DEVICES_TAG
+)]
 pub async fn update_device_target_release(
     Path(device_id): Path<i32>,
     Extension(state): Extension<State>,
@@ -1316,6 +1493,20 @@ pub async fn update_device_target_release(
     Ok(StatusCode::OK)
 }
 
+#[utoipa::path(
+    put,
+    path = "/devices/release",
+    request_body = types::UpdateDevicesRelease,
+    responses(
+        (status = 200, description = "Devices target release updated successfully"),
+        (status = 404, description = "Release not found"),
+        (status = 500, description = "Failed to update devices target release", body = String),
+    ),
+    security(
+        ("Access Token" = [])
+    ),
+    tag = DEVICES_TAG
+)]
 pub async fn update_devices_target_release(
     Extension(state): Extension<State>,
     Json(devices_release): Json<types::UpdateDevicesRelease>,
@@ -1530,6 +1721,18 @@ pub async fn delete_device(
     Ok(StatusCode::NO_CONTENT)
 }
 
+#[utoipa::path(
+    post,
+    path = "/devices/{device_id}/approval",
+    responses(
+        (status = 200, description = "Device approved successfully"),
+        (status = 500, description = "Failed to approve device", body = String),
+    ),
+    security(
+        ("Access Token" = [])
+    ),
+    tag = DEVICES_TAG
+)]
 pub async fn approve_device(
     Path(device_id): Path<i32>,
     Extension(state): Extension<State>,
@@ -1617,6 +1820,18 @@ pub async fn approve_device(
     Ok(Json(()))
 }
 
+#[utoipa::path(
+    delete,
+    path = "/devices/{device_id}/approval",
+    responses(
+        (status = 200, description = "Device approval revoked successfully"),
+        (status = 500, description = "Failed to revoke device approval", body = String),
+    ),
+    security(
+        ("Access Token" = [])
+    ),
+    tag = DEVICES_TAG
+)]
 pub async fn revoke_device(
     Path(device_id): Path<i32>,
     Extension(state): Extension<State>,
@@ -1658,6 +1873,18 @@ pub async fn revoke_device(
     Ok(Json(()))
 }
 
+#[utoipa::path(
+    delete,
+    path = "/devices/{device_id}/token",
+    responses(
+        (status = 200, description = "Device token deleted successfully"),
+        (status = 500, description = "Failed to delete device token", body = String),
+    ),
+    security(
+        ("Access Token" = [])
+    ),
+    tag = DEVICES_TAG
+)]
 pub async fn delete_token(
     Path(device_id): Path<i32>,
     Extension(state): Extension<State>,
