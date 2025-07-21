@@ -9,7 +9,7 @@ pub struct Command {
     pub data: serde_json::Value,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, utoipa::ToSchema)]
 pub struct DeviceCommandResponse {
     pub device: i32,
     pub serial_number: String,
@@ -25,14 +25,15 @@ pub struct DeviceCommandResponse {
     pub status: Option<i32>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct BundleWithCommands {
+    #[schema(value_type = String)]
     pub uuid: Uuid,
     pub created_on: chrono::DateTime<chrono::Utc>,
     pub responses: Vec<DeviceCommandResponse>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, utoipa::ToSchema)]
 pub struct BundleWithCommandsPaginated {
     pub bundles: Vec<BundleWithCommands>,
     pub next: Option<String>,
@@ -64,8 +65,9 @@ pub struct BundleWithRawResponsesExplicit {
     pub status: Option<i32>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, utoipa::ToSchema)]
 pub struct BundleCommands {
     pub devices: Vec<i32>,
+    #[schema(value_type = Vec<Object>)]
     pub commands: Vec<SafeCommandRequest>,
 }
