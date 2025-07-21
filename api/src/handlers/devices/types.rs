@@ -18,18 +18,18 @@ pub struct LeanDevice {
     pub up_to_date: Option<bool>,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, utoipa::ToSchema)]
 pub struct UpdateDeviceRelease {
     pub target_release_id: i32,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, utoipa::ToSchema)]
 pub struct UpdateDevicesRelease {
     pub target_release_id: i32,
     pub devices: Vec<i32>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, utoipa::ToSchema)]
 pub struct Tag {
     pub id: i32,
     pub device: i32,
@@ -37,7 +37,7 @@ pub struct Tag {
     pub color: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, utoipa::ToSchema)]
 pub struct Variable {
     pub id: i32,
     pub device: i32,
@@ -45,7 +45,7 @@ pub struct Variable {
     pub value: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, utoipa::ToSchema)]
 pub struct NewVariable {
     pub name: String,
     pub value: String,
@@ -74,12 +74,12 @@ pub struct CommandsPaginated {
     pub previous: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, utoipa::ToSchema)]
 pub struct Note {
     pub note: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, utoipa::ToSchema)]
 pub struct DeviceLedgerItem {
     pub id: i32,
     pub timestamp: Option<chrono::DateTime<chrono::Utc>>,
@@ -87,7 +87,7 @@ pub struct DeviceLedgerItem {
     pub text: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, utoipa::ToSchema)]
 pub struct DeviceLedgerItemPaginated {
     pub ledger: Vec<DeviceLedgerItem>,
     pub next: Option<String>,
@@ -100,7 +100,7 @@ pub struct DeviceIdentifiers {
     pub identifiers: Vec<String>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, utoipa::ToSchema)]
 pub struct DeviceRelease {
     pub previous_release: Option<Release>,
     pub release: Option<Release>,

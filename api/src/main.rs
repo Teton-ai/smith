@@ -8,7 +8,7 @@ use axum::{
     Extension,
     extract::Request,
     middleware,
-    routing::{any, delete, get, post, put},
+    routing::{any, get, post},
 };
 use config::Config;
 use handlers::events::PublicEvent;
@@ -226,66 +226,43 @@ async fn start_main_server(config: &'static Config, authorization: Authorization
             get(handlers::packages::get_package_by_id)
                 .delete(handlers::packages::delete_package_by_id),
         )
-        .route(
-            "/devices/:device_id/tags",
-            get(handlers::devices::get_tag_for_device),
-        )
-        .route(
-            "/devices/:device_id/tags/:tag_id",
-            delete(handlers::devices::delete_tag_from_device)
-                .put(handlers::devices::add_tag_to_device),
-        )
-        .route(
-            "/devices/:device_id/variables",
-            get(handlers::devices::get_variables_for_device)
-                .post(handlers::devices::add_variable_to_device),
-        )
-        .route(
-            "/devices/:device_id/variables/:variable_id",
-            delete(handlers::devices::delete_variable_from_device)
-                .put(handlers::devices::update_variable_for_device),
-        )
-        .route(
-            "/devices/:device_id/note",
-            put(handlers::devices::update_note_for_device),
-        )
-        .route(
-            "/devices/:device_id/release",
-            get(handlers::devices::get_device_release)
-                .post(handlers::devices::update_device_target_release),
-        )
-        .route(
-            "/devices/:device_id/ledger",
-            get(handlers::devices::get_ledger_for_device),
-        )
-        .route(
-            "/devices/:device_id/approval",
-            post(handlers::devices::approve_device).delete(handlers::devices::revoke_device),
-        )
-        .route(
-            "/devices/:device_id/token",
-            delete(handlers::devices::delete_token),
-        )
-        .route("/devices/tags", get(handlers::devices::get_tags))
-        .route(
-            "/devices/release",
-            put(handlers::devices::update_devices_target_release),
-        )
-        .route("/devices/variables", get(handlers::devices::get_variables))
-        .route(
-            "/tags",
-            get(handlers::tags::get_tags).post(handlers::tags::create_tag),
-        )
-        .route("/commands", get(handlers::commands::get_commands))
-        .route(
-            "/commands/bundles",
-            get(handlers::commands::get_bundle_commands)
-                .post(handlers::commands::issue_commands_to_devices),
-        )
-        .route(
-            "/lean/:filter_kind/:filter_value",
-            get(handlers::devices::get_devices_new),
-        )
+        .routes(routes!(handlers::devices::get_tag_for_device))
+        .routes(routes!(
+            handlers::devices::delete_tag_from_device,
+            handlers::devices::add_tag_to_device
+        ))
+        .routes(routes!(
+            handlers::devices::get_variables_for_device,
+            handlers::devices::add_variable_to_device
+        ))
+        .routes(routes!(
+            handlers::devices::delete_variable_from_device,
+            handlers::devices::update_variable_for_device
+        ))
+        .routes(routes!(handlers::devices::update_note_for_device))
+        .routes(routes!(
+            handlers::devices::get_device_release,
+            handlers::devices::update_device_target_release
+        ))
+        .routes(routes!(handlers::devices::get_ledger_for_device))
+        .routes(routes!(
+            handlers::devices::approve_device,
+            handlers::devices::revoke_device
+        ))
+        .routes(routes!(handlers::devices::delete_token))
+        .routes(routes!(handlers::devices::get_tags))
+        .routes(routes!(handlers::devices::update_devices_target_release))
+        .routes(routes!(handlers::devices::get_variables))
+        .routes(routes!(
+            handlers::tags::get_tags,
+            handlers::tags::create_tag
+        ))
+        .routes(routes!(handlers::commands::get_commands))
+        .routes(routes!(
+            handlers::commands::get_bundle_commands,
+            handlers::commands::issue_commands_to_devices
+        ))
+        .routes(routes!(handlers::devices::get_devices_new))
         // Auth middleware. Every route prior to this is protected.
         .route_layer(middleware::from_fn(middlewares::authentication::check))
         .routes(routes!(handlers::events::sse_handler))
@@ -359,7 +336,7 @@ async fn start_main_server(config: &'static Config, authorization: Authorization
             "/docs/openapi.json",
             get(move || ready(json_specification.clone())),
         )
-      .layer(CorsLayer::permissive())
+        .layer(CorsLayer::permissive())
         .merge(Scalar::with_url("/docs", api));
 
     let listener = TcpListener::bind("0.0.0.0:8080")
@@ -368,7 +345,7 @@ async fn start_main_server(config: &'static Config, authorization: Authorization
     info!(
         "Smith API running on http://{} (Press Ctrl+C to quit)",
         listener.local_addr().unwrap().to_string()
-      );
+    );
     axum::serve(listener, app.into_make_service())
         .await
         .expect("error: failed to initialize axum server");

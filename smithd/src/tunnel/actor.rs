@@ -1,20 +1,43 @@
 use crate::magic::MagicHandle;
 use crate::shutdown::ShutdownSignals;
+use crate::utils::files::{add_key, ensure_ssh_dir, remove_key};
 use bore_cli::client::Client;
 use std::collections::HashMap;
 use tokio::sync::{mpsc, oneshot};
-use tokio::time::{self, Duration};
+use tokio::time::{self, Duration, Instant};
 use tracing::{error, info};
+use uuid::Uuid;
+
+pub struct RemoteLogin {
+    pub user: String,
+    pub pub_key: String,
+}
 
 struct ForwardConnection {
     created_at: time::Instant,
+    tag: String,
+    remote_login: Option<RemoteLogin>,
     remote: u16,
     task: tokio::task::JoinHandle<()>,
+}
+
+impl ForwardConnection {
+    async fn remove(&self) {
+        self.task.abort();
+        if let Some(remote_login) = &self.remote_login {
+            info!("Removing remote login info");
+            let res = remove_key(&remote_login.user, &self.tag).await;
+            if let Err(err) = res {
+                error!("Failed to remove key: {err}");
+            }
+        }
+    }
 }
 
 pub enum ActorMessage {
     ForwardPort {
         local: u16,
+        remote_login: Option<RemoteLogin>,
         remote: oneshot::Sender<u16>,
     },
     ClosePort {
@@ -46,13 +69,36 @@ impl Actor {
 
     async fn handle_message(&mut self, msg: ActorMessage, server: &str, secret: &str) {
         match msg {
-            ActorMessage::ForwardPort { local, remote } => {
+            ActorMessage::ForwardPort {
+                local,
+                remote_login,
+                remote,
+            } => {
+                let created_at = Instant::now();
+
                 // check if there is already a ForwardConnection for this port
                 if self.ports.contains_key(&local) {
                     error!("Port {} is already forwarded", local);
                     let remote_port = self.ports.get(&local).unwrap().remote;
                     remote.send(remote_port).unwrap();
                     return;
+                }
+
+                let tag = format!("{}-smith", Uuid::new_v4());
+                if let Some(ref remote_login) = remote_login {
+                    info!("Received remote_login info");
+                    let res = ensure_ssh_dir(&remote_login.user).await;
+                    if let Err(err) = res {
+                        error!("Failed to ensure ssh dir: {err}");
+                        _ = remote.send(0);
+                        return;
+                    }
+                    let res = add_key(&remote_login.user, &remote_login.pub_key, tag.clone()).await;
+                    if let Err(err) = res {
+                        error!("Failed to add key: {err}");
+                        _ = remote.send(0);
+                        return;
+                    }
                 }
 
                 let server = server.to_owned();
@@ -86,14 +132,16 @@ impl Actor {
                     local,
                     ForwardConnection {
                         remote: port,
+                        remote_login,
                         task: handle,
-                        created_at: time::Instant::now(),
+                        created_at,
+                        tag,
                     },
                 );
             }
             ActorMessage::ClosePort { local } => {
                 if let Some(conn) = self.ports.remove(&local) {
-                    conn.task.abort();
+                    conn.remove().await;
                 }
             }
         }
@@ -113,7 +161,7 @@ impl Actor {
         for port in to_remove {
             info!("Closing port {} due to timeout", port);
             if let Some(conn) = self.ports.remove(&port) {
-                conn.task.abort();
+                conn.remove().await;
             }
         }
     }

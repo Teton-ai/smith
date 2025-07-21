@@ -142,33 +142,33 @@ pub(super) async fn check_ota(id: i32, download_handle: &DownloaderHandle) -> Sa
     match result_unwrapped {
         DownloadingStatus::Failed => {
             let status = "Failed";
-            return SafeCommandResponse {
+            SafeCommandResponse {
                 id,
                 command: SafeCommandRx::CheckOTAStatus {
                     status: status.to_string(),
                 },
                 status: -1,
-            };
+            }
         }
         DownloadingStatus::Downloading => {
             let status = "Downloading";
-            return SafeCommandResponse {
+            SafeCommandResponse {
                 id,
                 command: SafeCommandRx::CheckOTAStatus {
                     status: status.to_string(),
                 },
                 status: -1,
-            };
+            }
         }
         DownloadingStatus::Success => {
             let status = "Success";
-            return SafeCommandResponse {
+            SafeCommandResponse {
                 id,
                 command: SafeCommandRx::CheckOTAStatus {
                     status: status.to_string(),
                 },
                 status: 0,
-            };
+            }
         }
     }
 }

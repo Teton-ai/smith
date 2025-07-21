@@ -13,6 +13,8 @@ use tracing::error;
 use serde::Deserialize;
 use smith::utils::schema::SafeCommandTx;
 
+const COMMANDS_TAG: &str = "commands";
+
 #[derive(Deserialize, Debug)]
 pub struct PaginationUuid {
     pub starting_after: Option<Uuid>,
@@ -20,6 +22,17 @@ pub struct PaginationUuid {
     pub limit: Option<i32>,
 }
 
+#[utoipa::path(
+    get,
+    path = "/commands",
+    responses(
+        (status = 200, description = "List of available commands"),
+    ),
+    security(
+        ("Access Token" = [])
+    ),
+    tag = COMMANDS_TAG
+)]
 pub async fn get_commands() -> Result<Json<Vec<SafeCommandTx>>, StatusCode> {
     let commands = vec![
         SafeCommandTx::Ping,
@@ -28,7 +41,11 @@ pub async fn get_commands() -> Result<Json<Vec<SafeCommandTx>>, StatusCode> {
         SafeCommandTx::FreeForm {
             cmd: "echo 'Hello, World!'".to_string(),
         },
-        SafeCommandTx::OpenTunnel { port: None },
+        SafeCommandTx::OpenTunnel {
+            port: None,
+            pub_key: None,
+            user: None,
+        },
         SafeCommandTx::CloseTunnel,
         SafeCommandTx::DownloadOTA {
             tools: "ota_tools.tbz2".to_string(),
@@ -42,6 +59,19 @@ pub async fn get_commands() -> Result<Json<Vec<SafeCommandTx>>, StatusCode> {
     Ok(Json(commands))
 }
 
+#[utoipa::path(
+    post,
+    path = "/commands/bundles",
+    request_body = types::BundleCommands,
+    responses(
+        (status = 201, description = "Commands issued successfully"),
+        (status = 500, description = "Failed to issue commands", body = String),
+    ),
+    security(
+        ("Access Token" = [])
+    ),
+    tag = COMMANDS_TAG
+)]
 #[tracing::instrument]
 pub async fn issue_commands_to_devices(
     Extension(state): Extension<State>,
@@ -94,6 +124,19 @@ pub async fn issue_commands_to_devices(
     Ok(StatusCode::CREATED)
 }
 
+#[utoipa::path(
+    get,
+    path = "/commands/bundles",
+    responses(
+        (status = 200, description = "List of command bundles", body = types::BundleWithCommandsPaginated),
+        (status = 400, description = "Invalid pagination parameters"),
+        (status = 500, description = "Failed to retrieve command bundles", body = String),
+    ),
+    security(
+        ("Access Token" = [])
+    ),
+    tag = COMMANDS_TAG
+)]
 #[allow(clippy::collapsible_else_if)]
 #[tracing::instrument]
 pub async fn get_bundle_commands(
