@@ -8,7 +8,6 @@ import {
   Cpu,
   Battery,
   Thermometer,
-  Settings,
   Search,
   Download,
   ChevronDown,
@@ -60,8 +59,6 @@ const DevicesPage = () => {
   }, [devices, searchTerm, filterStatus]);
 
   const getDeviceStatus = (device) => {
-    if (device.status === 'maintenance') return 'maintenance';
-
     const lastSeen = new Date(device.last_seen);
     const now = new Date();
     const diffMinutes = (now - lastSeen) / (1000 * 60);
@@ -83,7 +80,6 @@ const DevicesPage = () => {
     switch (status) {
       case 'online': return <CheckCircle className="w-3 h-3" />;
       case 'offline': return <XCircle className="w-3 h-3" />;
-      case 'maintenance': return <Settings className="w-3 h-3" />;
       default: return <AlertTriangle className="w-3 h-3" />;
     }
   };
@@ -126,7 +122,6 @@ const DevicesPage = () => {
                 <option value="all">All status</option>
                 <option value="online">Online</option>
                 <option value="offline">Offline</option>
-                <option value="maintenance">Maintenance</option>
               </select>
               <ChevronDown className="absolute right-2 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4 pointer-events-none" />
             </div>
