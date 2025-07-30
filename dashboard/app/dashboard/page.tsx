@@ -55,11 +55,11 @@ const AdminPanel = () => {
   }, [callAPI]);
 
   const stats = {
-    total: 0,
-    online: 0,
-    offline: 0,
+    total: dashboardData?.total_count || 0,
+    online: dashboardData?.online_count || 0,
+    offline: dashboardData?.offline_count || 0,
     maintenance: 0,
-    outdated: 0,
+    outdated: dashboardData?.outdated_count || 0,
     lowBattery: 0,
     highTemp: 0
   };
@@ -78,7 +78,7 @@ const AdminPanel = () => {
               <span className="text-2xl font-semibold text-gray-900">{dashboardData?.online_count}</span>
             </div>
             <div className="mt-1 text-xs text-gray-500">
-              {Math.round(dashboardData?.online_count/dashboardData?.total_count*100)}% of fleet
+              {dashboardData?.total_count ? Math.round((dashboardData.online_count / dashboardData.total_count) * 100) : 0}% of fleet
             </div>
           </div>
 
@@ -91,7 +91,7 @@ const AdminPanel = () => {
               <span className="text-2xl font-semibold text-gray-900">{dashboardData?.offline_count}</span>
             </div>
             <div className="mt-1 text-xs text-gray-500">
-              {stats.offline > 0 ? 'Needs attention' : 'All operational'}
+              {dashboardData?.offline_count > 0 ? 'Needs attention' : 'All operational'}
             </div>
           </div>
 
@@ -110,7 +110,7 @@ const AdminPanel = () => {
         </div>
 
         {/* Alerts */}
-        {(stats.offline > 0 || stats.outdated > 0 || stats.lowBattery > 0) && (
+        {(dashboardData?.offline_count > 0 || dashboardData?.outdated_count > 0 || stats.lowBattery > 0) && (
           <div className="border border-yellow-200 rounded-lg p-4 bg-yellow-50">
             <div className="flex items-start space-x-3">
               <AlertTriangle className="w-5 h-5 text-yellow-600 mt-0.5 flex-shrink-0" />
@@ -118,11 +118,11 @@ const AdminPanel = () => {
                 <h3 className="text-sm font-medium text-yellow-800">Action Required</h3>
                 <div className="mt-2 text-sm text-yellow-700">
                   <ul className="space-y-1">
-                    {stats.offline > 0 && (
-                      <li>• {stats.offline} device{stats.offline > 1 ? 's' : ''} offline - check connectivity</li>
+                    {dashboardData?.offline_count > 0 && (
+                      <li>• {dashboardData.offline_count} device{dashboardData.offline_count > 1 ? 's' : ''} offline - check connectivity</li>
                     )}
-                    {stats.outdated > 0 && (
-                      <li>• {stats.outdated} device{stats.outdated > 1 ? 's' : ''} need firmware updates</li>
+                    {dashboardData?.outdated_count > 0 && (
+                      <li>• {dashboardData.outdated_count} device{dashboardData.outdated_count > 1 ? 's' : ''} need firmware updates</li>
                     )}
                     {stats.lowBattery > 0 && (
                       <li>• {stats.lowBattery} device{stats.lowBattery > 1 ? 's' : ''} have low battery</li>
@@ -130,12 +130,12 @@ const AdminPanel = () => {
                   </ul>
                 </div>
                 <div className="mt-3 flex space-x-2">
-                  {stats.offline > 0 && (
+                  {dashboardData?.offline_count > 0 && (
                     <button className="text-xs px-2 py-1 bg-red-600 text-white rounded hover:bg-red-700">
                       View Offline
                     </button>
                   )}
-                  {stats.outdated > 0 && (
+                  {dashboardData?.outdated_count > 0 && (
                     <button className="text-xs px-2 py-1 bg-blue-600 text-white rounded hover:bg-blue-700">
                       Deploy Updates
                     </button>
