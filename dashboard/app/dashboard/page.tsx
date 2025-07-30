@@ -108,67 +108,6 @@ const AdminPanel = () => {
             </div>
           </div>
         </div>
-
-        {/* Alerts */}
-        {(dashboardData?.offline_count > 0 || dashboardData?.outdated_count > 0 || stats.lowBattery > 0) && (
-          <div className="border border-yellow-200 rounded-lg p-4 bg-yellow-50">
-            <div className="flex items-start space-x-3">
-              <AlertTriangle className="w-5 h-5 text-yellow-600 mt-0.5 flex-shrink-0" />
-              <div className="flex-1">
-                <h3 className="text-sm font-medium text-yellow-800">Action Required</h3>
-                <div className="mt-2 text-sm text-yellow-700">
-                  <ul className="space-y-1">
-                    {dashboardData?.offline_count > 0 && (
-                      <li>• {dashboardData.offline_count} device{dashboardData.offline_count > 1 ? 's' : ''} offline - check connectivity</li>
-                    )}
-                    {dashboardData?.outdated_count > 0 && (
-                      <li>• {dashboardData.outdated_count} device{dashboardData.outdated_count > 1 ? 's' : ''} need firmware updates</li>
-                    )}
-                    {stats.lowBattery > 0 && (
-                      <li>• {stats.lowBattery} device{stats.lowBattery > 1 ? 's' : ''} have low battery</li>
-                    )}
-                  </ul>
-                </div>
-                <div className="mt-3 flex space-x-2">
-                  {dashboardData?.offline_count > 0 && (
-                    <button className="text-xs px-2 py-1 bg-red-600 text-white rounded hover:bg-red-700">
-                      View Offline
-                    </button>
-                  )}
-                  {dashboardData?.outdated_count > 0 && (
-                    <button className="text-xs px-2 py-1 bg-blue-600 text-white rounded hover:bg-blue-700">
-                      Deploy Updates
-                    </button>
-                  )}
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Recent Activity */}
-        <div className="border border-gray-200 rounded-lg bg-white">
-          <div className="p-4 border-b border-gray-200">
-            <h3 className="text-lg font-medium text-gray-900">Recent Activity</h3>
-          </div>
-          <div className="p-4 space-y-3">
-            <div className="flex items-center space-x-3 text-sm">
-              <div className="w-2 h-2 bg-green-500 rounded-full"></div>
-              <span className="text-gray-600">IOT-0042 came online</span>
-              <span className="text-gray-400">2 minutes ago</span>
-            </div>
-            <div className="flex items-center space-x-3 text-sm">
-              <div className="w-2 h-2 bg-blue-500 rounded-full"></div>
-              <span className="text-gray-600">Firmware update deployed to 12 devices</span>
-              <span className="text-gray-400">15 minutes ago</span>
-            </div>
-            <div className="flex items-center space-x-3 text-sm">
-              <div className="w-2 h-2 bg-red-500 rounded-full"></div>
-              <span className="text-gray-600">IOT-0018 went offline</span>
-              <span className="text-gray-400">1 hour ago</span>
-            </div>
-          </div>
-        </div>
       </div>
     </PrivateLayout>
   );

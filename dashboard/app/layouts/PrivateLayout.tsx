@@ -16,7 +16,7 @@ export default function PrivateLayout({
   const sidebarItems = [
     { id: 'dashboard', basePath: "/dashboard", label: 'Dashboard', icon: Home },
     { id: 'devices', basePath: "/devices", label: 'Devices', icon: Cpu },
-    // { id: 'distributions', basePath: "/dashboard", label: 'Distributions', icon: Layers },
+    { id: 'distributions', basePath: "/distributions", label: 'Distributions', icon: Layers },
     // { id: 'modems', basePath: "/modems", label: 'Modems', icon: Network },
   ];
   const activeTab = sidebarItems.find(item => item.id === id);
