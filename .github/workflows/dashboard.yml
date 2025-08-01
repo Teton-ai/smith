@@ -27,7 +27,7 @@ jobs:
 
       - name: dashboard version var
         run: |
-          DASHBOARD_VERSION=$(cat dashboard/package.json | jq -r '.version')
+          DASHBOARD_VERSION=$(grep '^version = ' Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
           echo "DASHBOARD_VERSION=${DASHBOARD_VERSION}" >> "$GITHUB_ENV"
 
       - name: Set up Docker Buildx
