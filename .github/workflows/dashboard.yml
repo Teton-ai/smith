@@ -2,6 +2,8 @@ name: dashboard
 
 on:
   push:
+    tags:
+      - '*'
 
 concurrency:
   group: dashboard-${{ github.ref }}
@@ -41,7 +43,7 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: ./dashboard
-          push: false
+          push: true
           tags: |
             tetonai/smith-dashboard
             tetonai/smith-dashboard:${{ env.DASHBOARD_VERSION }}
