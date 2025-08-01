@@ -1,7 +1,5 @@
 {
-  "name": "dashboard",
-  "version": "0.1.0",
-  "private": true,
+  "name": "@teton/smith-dashboard",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
