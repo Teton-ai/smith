@@ -2,8 +2,6 @@ name: dashboard
 
 on:
   push:
-    branches:
-      - '*'
 
 concurrency:
   group: dashboard-${{ github.ref }}
