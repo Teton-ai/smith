@@ -1,6 +1,7 @@
 import { useState, useCallback } from 'react';
 import { useAuth0 } from '@auth0/auth0-react';
 import axios, { AxiosRequestConfig, AxiosError } from 'axios';
+import { useConfig } from './config';
 
 type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
 
@@ -12,10 +13,9 @@ interface SmithAPIHook {
 
 const useSmithAPI = (): SmithAPIHook => {
   const { isAuthenticated, getAccessTokenSilently } = useAuth0();
+  const { config } = useConfig();
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
-
-  const BASE_URL = 'http://127.0.0.1:8080';
 
   const callAPI = useCallback(async <T = unknown>(
     method: HttpMethod = 'GET',
@@ -33,9 +33,9 @@ const useSmithAPI = (): SmithAPIHook => {
     try {
       const token = await getAccessTokenSilently();
 
-      const config: AxiosRequestConfig = {
+      const axiosConfig: AxiosRequestConfig = {
         method,
-        url: `${BASE_URL}${path}`,
+        url: `${config?.API_BASE_URL || 'http://127.0.0.1:8080'}${path}`,
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json',
@@ -43,10 +43,10 @@ const useSmithAPI = (): SmithAPIHook => {
       };
 
       if (body && ['POST', 'PUT', 'PATCH'].includes(method.toUpperCase())) {
-        config.data = body;
+        axiosConfig.data = body;
       }
 
-      const response = await axios(config);
+      const response = await axios(axiosConfig);
       return response.data as T;
 
     } catch (err: unknown) {
@@ -57,7 +57,7 @@ const useSmithAPI = (): SmithAPIHook => {
     } finally {
       setLoading(false);
     }
-  }, [isAuthenticated, getAccessTokenSilently]);
+  }, [isAuthenticated, getAccessTokenSilently, config]);
 
   return { callAPI, loading, error };
 };
