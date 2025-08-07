@@ -446,22 +446,10 @@ const DeviceDetailPage = () => {
               Commands
             </button>
             <button
-              onClick={() => router.push(`/devices/${serial}/releases`)}
-              className="py-2 px-1 border-b-2 border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 font-medium text-sm transition-colors cursor-pointer"
-            >
-              Releases
-            </button>
-            <button
               onClick={() => router.push(`/devices/${serial}/packages`)}
               className="py-2 px-1 border-b-2 border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 font-medium text-sm transition-colors cursor-pointer"
             >
               Packages
-            </button>
-            <button
-              onClick={() => router.push(`/devices/${serial}/logs`)}
-              className="py-2 px-1 border-b-2 border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 font-medium text-sm transition-colors cursor-pointer"
-            >
-              Logs
             </button>
           </nav>
         </div>
@@ -472,18 +460,12 @@ const DeviceDetailPage = () => {
           {/* Device Information */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             <div className="bg-white rounded-lg border border-gray-200 p-6">
-              <h3 className="text-lg font-semibold text-gray-900 mb-4">Device Information</h3>
+              <h3 className="text-lg font-semibold text-gray-900 mb-4">System Information</h3>
               <div className="space-y-3">
                 {device.system_info?.smith?.version && (
                   <div className="flex justify-between">
                     <span className="text-gray-700">Agent</span>
                     <span className="font-mono text-sm text-gray-900">{device.system_info.smith.version}</span>
-                  </div>
-                )}
-                {device.system_info?.proc?.version && (
-                  <div className="flex justify-between">
-                    <span className="text-gray-700">Kernel Version</span>
-                    <span className="font-mono text-sm text-gray-900">{device.system_info.proc.version}</span>
                   </div>
                 )}
                 {device.system_info?.os_release?.pretty_name && (
@@ -492,55 +474,16 @@ const DeviceDetailPage = () => {
                     <span className="font-mono text-sm text-gray-900">{device.system_info.os_release.pretty_name}</span>
                   </div>
                 )}
-                {device.system_info?.device_tree?.model && (
+                {device.system_info?.proc?.version && (
                   <div className="flex justify-between">
-                    <span className="text-gray-700">Model</span>
-                    <span className="font-mono text-sm text-gray-900">{device.system_info.device_tree.model}</span>
+                    <span className="text-gray-700">Kernel</span>
+                    <span className="font-mono text-sm text-gray-900">{device.system_info.proc.version}</span>
                   </div>
                 )}
-                <div className="flex justify-between">
-                  <span className="text-gray-700">Registered</span>
-                  <span className="text-sm text-gray-900">{new Date(device.created_on).toLocaleString()}</span>
-                </div>
                 {device.system_info?.proc?.stat?.btime && (
                   <div className="flex justify-between">
                     <span className="text-gray-700">Boot Time</span>
                     <span className="text-sm text-gray-900">{new Date(device.system_info.proc.stat.btime * 1000).toLocaleString()}</span>
-                  </div>
-                )}
-                {device.system_info?.hostname && (
-                  <div className="flex justify-between">
-                    <span className="text-gray-700">Hostname</span>
-                    <span className="font-mono text-sm text-gray-900">{device.system_info.hostname}</span>
-                  </div>
-                )}
-                {device.modem_id ? (
-                  <>
-                    <div className="flex justify-between">
-                      <span className="text-gray-700">Modem</span>
-                      <span className="font-mono text-sm text-gray-900">
-                        {modem ? (
-                          <div className="text-right">
-                            {modem.network_provider && (
-                              <div className="font-semibold text-blue-600">
-                                {modem.network_provider}
-                              </div>
-                            )}
-                            <div>IMEI: {modem.imei}</div>
-                            <div className="text-xs text-gray-600">
-                              {modem.on_dongle ? 'External Dongle' : 'Built-in'}
-                            </div>
-                          </div>
-                        ) : (
-                          `ID: ${device.modem_id}`
-                        )}
-                      </span>
-                    </div>
-                  </>
-                ) : (
-                  <div className="flex justify-between">
-                    <span className="text-gray-700">Modem</span>
-                    <span className="text-sm text-gray-500">None</span>
                   </div>
                 )}
                 {device.release_id && (
