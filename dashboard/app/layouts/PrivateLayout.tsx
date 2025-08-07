@@ -1,5 +1,5 @@
-import React, {useState} from "react";
-import { Cpu, HardDrive, Home, Layers, Menu, Network, X } from "lucide-react";
+import React from "react";
+import { Cpu, Home, Layers } from "lucide-react";
 import { useRouter } from "next/navigation";
 import Logo from "@/app/components/logo";
 import Profile from "@/app/components/profile";
@@ -12,93 +12,89 @@ export default function PrivateLayout({
   children: React.ReactNode;
 }>) {
   const router = useRouter();
-  const [sidebarOpen, setSidebarOpen] = useState(false);
-  const sidebarItems = [
+  const navigationItems = [
     { id: 'dashboard', basePath: "/dashboard", label: 'Dashboard', icon: Home },
     { id: 'devices', basePath: "/devices", label: 'Devices', icon: Cpu },
     { id: 'distributions', basePath: "/distributions", label: 'Distributions', icon: Layers },
     // { id: 'modems', basePath: "/modems", label: 'Modems', icon: Network },
   ];
-  const activeTab = sidebarItems.find(item => item.id === id);
 
   return (
-    <div className="min-h-screen bg-gray-50 flex">
-      {/* Sidebar */}
-      <div className={`${sidebarOpen ? 'translate-x-0' : '-translate-x-full'} fixed inset-y-0 left-0 z-50 w-64 bg-white border-r border-gray-200 transform transition-transform duration-300 ease-in-out lg:translate-x-0 lg:static lg:inset-0`}>
-        <div className="flex items-center justify-between h-16 px-4 border-b border-gray-200">
-          <div className="flex items-center space-x-2">
-            <Logo color="black" />
-            <span className="text-lg font-semibold text-gray-900">Smith</span>
+    <div className="min-h-screen bg-gray-50">
+      {/* Top Navigation Bar */}
+      <header className="bg-white border-b border-gray-200 sticky top-0 z-50">
+        <div className="mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex items-center justify-between h-16">
+            {/* Left side - Logo and Navigation */}
+            <div className="flex items-center space-x-8">
+              {/* Logo */}
+              <div 
+                className="flex items-center space-x-2 cursor-pointer hover:opacity-80 transition-opacity duration-200"
+                onClick={() => router.push('/dashboard')}
+              >
+                <Logo color="black" />
+                <span className="text-xl font-semibold text-gray-900">Smith</span>
+              </div>
+              
+              {/* Navigation Items */}
+              <nav className="hidden md:flex space-x-1">
+                {navigationItems.map((item) => {
+                  const Icon = item.icon;
+                  const isActive = id === item.id;
+                  return (
+                    <button
+                      key={item.id}
+                      onClick={() => router.push(item.basePath)}
+                      className={`${
+                        isActive
+                          ? 'text-gray-900 bg-gray-100'
+                          : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'
+                      } px-3 py-2 rounded-md text-sm font-medium transition-colors duration-200 flex items-center space-x-2 cursor-pointer`}
+                    >
+                      <Icon className="w-4 h-4" />
+                      <span>{item.label}</span>
+                    </button>
+                  );
+                })}
+              </nav>
+            </div>
+
+            {/* Right side - Profile */}
+            <div className="flex items-center">
+              <Profile />
+            </div>
           </div>
-          <button
-            onClick={() => setSidebarOpen(false)}
-            className="lg:hidden p-1 rounded-md text-gray-400 hover:text-gray-500"
-          >
-            <X className="w-5 h-5" />
-          </button>
         </div>
 
-        <nav className="mt-5 px-2">
-          <div className="space-y-1">
-            {sidebarItems.map((item) => {
+        {/* Mobile Navigation */}
+        <div className="md:hidden border-t border-gray-200 bg-white">
+          <nav className="px-4 py-2 space-y-1">
+            {navigationItems.map((item) => {
               const Icon = item.icon;
+              const isActive = id === item.id;
               return (
                 <button
                   key={item.id}
-                  onClick={() => {
-                    router.push(item.basePath);
-                    setSidebarOpen(false);
-                  }}
+                  onClick={() => router.push(item.basePath)}
                   className={`${
-                    id === item.id
-                      ? 'bg-blue-50 border-blue-500 text-blue-700'
-                      : 'border-transparent text-gray-600 hover:bg-gray-50 hover:text-gray-900'
-                  } group flex items-center px-2 py-2 text-sm font-medium rounded-md border-l-4 w-full hover:cursor-pointer`}
+                    isActive
+                      ? 'text-gray-900 bg-gray-100'
+                      : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'
+                  } group flex items-center px-2 py-2 text-base font-medium rounded-md w-full transition-colors duration-200 cursor-pointer`}
                 >
                   <Icon className="mr-3 h-5 w-5" />
                   {item.label}
                 </button>
               );
             })}
-          </div>
-        </nav>
-      </div>
+          </nav>
+        </div>
+      </header>
 
       {/* Main Content */}
-      <div className="flex-1 lg:pl-0">
-        {/* Header */}
-        <div className="bg-white border-b border-gray-200">
-          <div className="px-4 sm:px-6 lg:px-8">
-            <div className="flex justify-between items-center h-16">
-              <div className="flex items-center">
-                <button
-                  onClick={() => setSidebarOpen(true)}
-                  className="lg:hidden p-2 rounded-md text-gray-400 hover:text-gray-500"
-                >
-                  <Menu className="w-5 h-5" />
-                </button>
-                <h1 className="ml-2 lg:ml-0 text-2xl font-semibold text-gray-900 capitalize">
-                  {activeTab?.label}
-                </h1>
-              </div>
-              <Profile/>
-            </div>
-          </div>
-        </div>
-
-        {/* Page Content */}
-        <main className="px-4 sm:px-6 lg:px-8 py-6">
-          {children}
-        </main>
-      </div>
-
-      {/* Sidebar Overlay */}
-      {sidebarOpen && (
-        <div
-          className="fixed inset-0 z-40 bg-gray-600 bg-opacity-75 lg:hidden"
-          onClick={() => setSidebarOpen(false)}
-        />
-      )}
+      <main className="mx-auto px-4 sm:px-6 lg:px-8 py-6">
+        {children}
+      </main>
     </div>
   );
 };
