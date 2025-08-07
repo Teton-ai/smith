@@ -2,24 +2,128 @@
 
 import React, { useState, useEffect } from 'react';
 import {
-  AlertTriangle,
-  CheckCircle,
-  XCircle,
   Cpu,
-  Battery,
-  Thermometer,
   Search,
-  Download,
-  ChevronDown,
   GitBranch,
-  Clock,
 } from 'lucide-react';
 import PrivateLayout from "@/app/layouts/PrivateLayout";
 import useSmithAPI from "@/app/hooks/smith-api";
 
+const Tooltip = ({ children, content }: { children: React.ReactNode, content: string }) => {
+  const [isVisible, setIsVisible] = useState(false);
+  const [position, setPosition] = useState<'top' | 'right'>('top');
+  const containerRef = React.useRef<HTMLDivElement>(null);
+
+  const handleMouseEnter = () => {
+    setIsVisible(true);
+    if (containerRef.current) {
+      const rect = containerRef.current.getBoundingClientRect();
+      const viewportWidth = window.innerWidth;
+      
+      // If tooltip would be cut off on the left side, position it to the right
+      if (rect.left < 150) {
+        setPosition('right');
+      } else {
+        setPosition('top');
+      }
+    }
+  };
+
+  return (
+    <div 
+      ref={containerRef}
+      className="relative inline-block"
+      onMouseEnter={handleMouseEnter}
+      onMouseLeave={() => setIsVisible(false)}
+    >
+      {children}
+      {isVisible && (
+        <>
+          {position === 'top' ? (
+            <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-2 py-1 text-xs text-white bg-gray-800 rounded shadow-lg whitespace-nowrap z-50">
+              {content}
+              <div className="absolute top-full left-1/2 transform -translate-x-1/2 w-0 h-0 border-l-4 border-r-4 border-t-4 border-l-transparent border-r-transparent border-t-gray-800"></div>
+            </div>
+          ) : (
+            <div className="absolute left-full top-1/2 transform -translate-y-1/2 ml-2 px-2 py-1 text-xs text-white bg-gray-800 rounded shadow-lg whitespace-nowrap z-50">
+              {content}
+              <div className="absolute right-full top-1/2 transform -translate-y-1/2 w-0 h-0 border-t-4 border-b-4 border-r-4 border-t-transparent border-b-transparent border-r-gray-800"></div>
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+};
+
+const DeviceSkeleton = () => (
+  <div className="px-4 py-3 animate-pulse">
+    <div className="grid grid-cols-7 gap-4 items-center">
+      <div className="col-span-4">
+        <div className="flex items-center space-x-3">
+          <div className="w-4 h-4 bg-gray-300 rounded flex-shrink-0"></div>
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center space-x-2">
+              <div className="w-2 h-2 bg-gray-300 rounded-full flex-shrink-0"></div>
+              <div className="h-4 bg-gray-300 rounded w-32"></div>
+            </div>
+            <div className="h-3 bg-gray-200 rounded w-24 mt-1"></div>
+          </div>
+        </div>
+      </div>
+      
+      <div className="col-span-2">
+        <div className="h-4 bg-gray-300 rounded w-20"></div>
+      </div>
+      
+      <div className="col-span-1">
+        <div className="flex items-center space-x-1">
+          <div className="w-3 h-3 bg-gray-300 rounded flex-shrink-0"></div>
+          <div className="h-3 bg-gray-300 rounded w-12"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+);
+
+const LoadingSkeleton = () => (
+  <div className="divide-y divide-gray-200">
+    {Array.from({ length: 6 }, (_, i) => (
+      <DeviceSkeleton key={i} />
+    ))}
+  </div>
+);
+
+interface SystemInfo {
+  device_tree?: {
+    model?: string
+    serial_number?: string
+  }
+  hostname?: string
+  os_release?: {
+    pretty_name?: string
+    version_id?: string
+  }
+  smith?: {
+    version?: string
+  }
+  proc?: {
+    version?: string
+  }
+}
+
 interface Device {
+  id: number
   serial_number: string
-  last_seen: string
+  note?: string
+  last_seen: string | null
+  created_on: string
+  approved: boolean
+  has_token: boolean
+  release_id: number | null
+  target_release_id: number | null
+  system_info: SystemInfo | null
+  modem_id: number | null
 }
 
 const DevicesPage = () => {
@@ -27,7 +131,6 @@ const DevicesPage = () => {
   const [devices, setDevices] = useState<Device[]>([]);
   const [filteredDevices, setFilteredDevices] = useState<Device[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
-  const [filterStatus, setFilterStatus] = useState('all');
 
   useEffect(() => {
     const fetchDashboard = async () => {
@@ -39,50 +142,84 @@ const DevicesPage = () => {
     fetchDashboard();
   }, [callAPI]);
 
-  // Filter devices based on search and status
+  // Filter and sort devices - show only authorized devices, filter by search, and sort by latest online
   useEffect(() => {
-    let filtered = devices;
+    // First filter to only show authorized devices (has_token = true)
+    let filtered = devices.filter(device => device.has_token);
 
     if (searchTerm) {
       filtered = filtered.filter(device =>
-        device.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        device.id.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        device.location.toLowerCase().includes(searchTerm.toLowerCase())
+        device.serial_number?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        device.system_info?.hostname?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        device.system_info?.device_tree?.model?.toLowerCase().includes(searchTerm.toLowerCase())
       );
     }
 
-    if (filterStatus !== 'all') {
-      filtered = filtered.filter(device => device.status === filterStatus);
-    }
+    // Sort devices by latest online (most recent first)
+    filtered = filtered.sort((a, b) => {
+      // Online devices first, then sort by last seen time (most recent first)
+      const statusA = getDeviceStatus(a);
+      const statusB = getDeviceStatus(b);
+      
+      if (statusA === 'online' && statusB !== 'online') return -1;
+      if (statusB === 'online' && statusA !== 'online') return 1;
+      
+      // If both have same status, sort by most recent last_seen
+      // Handle null last_seen values (put them at the end)
+      if (!a.last_seen && !b.last_seen) return 0;
+      if (!a.last_seen) return 1;
+      if (!b.last_seen) return -1;
+      
+      return new Date(b.last_seen).getTime() - new Date(a.last_seen).getTime();
+    });
 
     setFilteredDevices(filtered);
-  }, [devices, searchTerm, filterStatus]);
+  }, [devices, searchTerm]);
 
-  const getDeviceStatus = (device) => {
+  const getDeviceStatus = (device: Device) => {
+    if (!device.last_seen) return 'offline';
+    
     const lastSeen = new Date(device.last_seen);
     const now = new Date();
-    const diffMinutes = (now - lastSeen) / (1000 * 60);
+    const diffMinutes = (now.getTime() - lastSeen.getTime()) / (1000 * 60);
 
     return diffMinutes <= 3 ? 'online' : 'offline';
   };
 
-  const getStatusColor = (device) => {
+  const getDeviceName = (device: Device) => {
+    return device.system_info?.hostname || 
+           device.system_info?.device_tree?.model || 
+           device.serial_number;
+  };
+
+  const getOSVersion = (device: Device) => {
+    const osRelease = device.system_info?.os_release;
+    if (!osRelease) return 'Unknown';
+    
+    if (osRelease.pretty_name) {
+      return osRelease.pretty_name;
+    }
+    
+    if (osRelease.version_id) {
+      return `Ubuntu ${osRelease.version_id}`;
+    }
+    
+    return 'Unknown';
+  };
+
+  const getSmithVersion = (device: Device) => {
+    return device.system_info?.smith?.version || 'N/A';
+  };
+
+  const getStatusTooltip = (device: Device) => {
     const status = getDeviceStatus(device);
-    switch (status) {
-      case 'online': return 'text-green-700 bg-green-50 border-green-200';
-      case 'offline': return 'text-red-700 bg-red-50 border-red-200';
-      default: return 'text-gray-700 bg-gray-50 border-gray-200';
+    if (status === 'online') {
+      return 'Online - Last seen: ' + (device.last_seen ? formatTimeAgo(new Date(device.last_seen)) + ' ago' : 'Never');
+    } else {
+      return 'Offline - Last seen: ' + (device.last_seen ? formatTimeAgo(new Date(device.last_seen)) + ' ago' : 'Never');
     }
   };
 
-  const getStatusIcon = (device) => {
-    const status = getDeviceStatus(device);
-    switch (status) {
-      case 'online': return <CheckCircle className="w-3 h-3" />;
-      case 'offline': return <XCircle className="w-3 h-3" />;
-      default: return <AlertTriangle className="w-3 h-3" />;
-    }
-  };
 
   const formatTimeAgo = (date) => {
     const now = new Date();
@@ -99,7 +236,7 @@ const DevicesPage = () => {
   return (
     <PrivateLayout id="devices">
       <div className="space-y-6">
-        {/* Filters */}
+        {/* Search and Device Count */}
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-center space-x-4">
             <div className="relative">
@@ -109,117 +246,77 @@ const DevicesPage = () => {
                 placeholder="Search devices..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                className="pl-10 pr-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
+                className="pl-10 pr-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm text-gray-900 placeholder-gray-400"
               />
-            </div>
-
-            <div className="relative">
-              <select
-                value={filterStatus}
-                onChange={(e) => setFilterStatus(e.target.value)}
-                className="appearance-none pl-3 pr-8 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm bg-white"
-              >
-                <option value="all">All status</option>
-                <option value="online">Online</option>
-                <option value="offline">Offline</option>
-              </select>
-              <ChevronDown className="absolute right-2 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4 pointer-events-none" />
             </div>
           </div>
 
           <div className="mt-4 sm:mt-0 flex items-center space-x-3">
-          <span className="text-sm text-gray-500">
-            {filteredDevices.length} device{filteredDevices.length !== 1 ? 's' : ''}
-          </span>
+            <span className="text-sm text-gray-500">
+              {loading ? 'Loading...' : `${filteredDevices.length} authorized device${filteredDevices.length !== 1 ? 's' : ''}`}
+            </span>
           </div>
         </div>
 
         {/* Device List */}
         <div className="border border-gray-200 rounded-lg overflow-hidden bg-white">
           <div className="bg-gray-50 px-4 py-3 border-b border-gray-200">
-            <div className="grid grid-cols-12 gap-4 text-xs font-medium text-gray-500 uppercase tracking-wide">
+            <div className="grid grid-cols-7 gap-4 text-xs font-medium text-gray-500 uppercase tracking-wide">
               <div className="col-span-4">Device</div>
-              <div className="col-span-2">Status</div>
-              <div className="col-span-2">Location</div>
-              <div className="col-span-1">Version</div>
-              <div className="col-span-2">Health</div>
-              <div className="col-span-1">Updated</div>
+              <div className="col-span-2">OS Version</div>
+              <div className="col-span-1">Smith Version</div>
             </div>
           </div>
 
-          <div className="divide-y divide-gray-200">
-            {filteredDevices.map((device) => (
+          {loading ? (
+            <LoadingSkeleton />
+          ) : (
+            <div className="divide-y divide-gray-200">
+              {filteredDevices.map((device) => (
               <div key={device.id} className="px-4 py-3 hover:bg-gray-50">
-                <div className="grid grid-cols-12 gap-4 items-center">
+                <div className="grid grid-cols-7 gap-4 items-center">
                   <div className="col-span-4">
                     <div className="flex items-center space-x-3">
                       <Cpu className="w-4 h-4 text-gray-400 flex-shrink-0" />
-                      <div className="min-w-0">
-                        <div className="text-sm font-medium text-gray-900 truncate">
-                          {device.name}
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center space-x-2">
+                          <Tooltip content={getStatusTooltip(device)}>
+                            <div 
+                              className={`w-2 h-2 rounded-full flex-shrink-0 cursor-help ${
+                                getDeviceStatus(device) === 'online' 
+                                  ? 'bg-green-500 animate-pulse' 
+                                  : 'bg-red-500'
+                              }`}
+                            ></div>
+                          </Tooltip>
+                          <div className="text-sm font-medium text-gray-900 truncate">
+                            {getDeviceName(device)}
+                          </div>
                         </div>
-                        <div className="text-xs text-gray-500 font-mono">
+                        <div className="text-xs text-gray-500 font-mono mt-0.5">
                           {device.serial_number}
                         </div>
                       </div>
                     </div>
                   </div>
 
-                  <div className="col-span-2">
-                    <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium border ${getStatusColor(device)}`}>
-                      {getStatusIcon(device)}
-                      <span className="ml-1.5 capitalize">{getDeviceStatus(device)}</span>
-                    </span>
-                  </div>
-
                   <div className="col-span-2 text-sm text-gray-600">
-                    {device.location}
+                    {getOSVersion(device)}
                   </div>
 
                   <div className="col-span-1">
                     <div className="flex items-center space-x-1">
                       <GitBranch className="w-3 h-3 text-gray-400" />
                       <span className="text-xs font-mono text-gray-600">
-                      {device.firmwareVersion}
-                    </span>
-                      {device.firmwareVersion !== device.latestVersion && (
-                        <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-yellow-100 text-yellow-800 border border-yellow-200">
-                        <Download className="w-2.5 h-2.5 mr-0.5" />
-                        Update
+                        {getSmithVersion(device)}
                       </span>
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="col-span-2">
-                    <div className="flex items-center space-x-3">
-                      <div className="flex items-center space-x-1">
-                        <Battery className="w-3 h-3 text-gray-400" />
-                        <span className={`text-xs ${device.batteryLevel < 20 ? 'text-red-600 font-medium' : 'text-gray-600'}`}>
-                        {device.batteryLevel}%
-                      </span>
-                      </div>
-                      <div className="flex items-center space-x-1">
-                        <Thermometer className="w-3 h-3 text-gray-400" />
-                        <span className={`text-xs ${device.temperature > 35 ? 'text-red-600 font-medium' : 'text-gray-600'}`}>
-                        {device.temperature}°
-                      </span>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="col-span-1">
-                    <div className="flex items-center space-x-1">
-                      <Clock className="w-3 h-3 text-gray-400" />
-                      <span className="text-xs text-gray-500">
-                      {formatTimeAgo(device.lastSeen)}
-                    </span>
                     </div>
                   </div>
                 </div>
               </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
     </PrivateLayout>
