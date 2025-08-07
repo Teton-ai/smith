@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import {
   Cpu,
   Search,
@@ -127,6 +128,7 @@ interface Device {
 }
 
 const DevicesPage = () => {
+  const router = useRouter();
   const { callAPI, loading, error } = useSmithAPI();
   const [devices, setDevices] = useState<Device[]>([]);
   const [filteredDevices, setFilteredDevices] = useState<Device[]>([]);
@@ -273,7 +275,11 @@ const DevicesPage = () => {
           ) : (
             <div className="divide-y divide-gray-200">
               {filteredDevices.map((device) => (
-              <div key={device.id} className="px-4 py-3 hover:bg-gray-50">
+              <div 
+                key={device.id} 
+                className="px-4 py-3 hover:bg-gray-50 cursor-pointer transition-colors"
+                onClick={() => router.push(`/devices/${device.serial_number}`)}
+              >
                 <div className="grid grid-cols-7 gap-4 items-center">
                   <div className="col-span-4">
                     <div className="flex items-center space-x-3">
