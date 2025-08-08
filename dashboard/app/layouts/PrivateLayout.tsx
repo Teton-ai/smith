@@ -1,5 +1,5 @@
 import React from "react";
-import { Cpu, Home, Layers } from "lucide-react";
+import { Cpu, Home, Layers, FileText } from "lucide-react";
 import { useRouter } from "next/navigation";
 import Logo from "@/app/components/logo";
 import Profile from "@/app/components/profile";
@@ -59,8 +59,16 @@ export default function PrivateLayout({
               </nav>
             </div>
 
-            {/* Right side - Profile */}
-            <div className="flex items-center">
+            {/* Right side - Docs and Profile */}
+            <div className="flex items-center space-x-3">
+              {/* Docs Button */}
+              <button
+                onClick={() => window.open('https://docs.smith.teton.ai', '_blank')}
+                className="text-gray-600 hover:text-gray-900 hover:bg-gray-50 px-3 py-2 rounded-md text-sm font-medium transition-colors duration-200 flex items-center space-x-2 cursor-pointer"
+              >
+                <FileText className="w-4 h-4" />
+                <span className="hidden sm:inline">Docs</span>
+              </button>
               <Profile />
             </div>
           </div>
