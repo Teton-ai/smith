@@ -448,7 +448,7 @@ pub async fn get_variables(
     tag = DEVICES_TAG
 )]
 pub async fn get_tag_for_device(
-    Path(device_id): Path<i32>,
+    Path(device_id): Path<String>,
     Extension(state): Extension<State>,
 ) -> Result<Json<Vec<types::Tag>>, StatusCode> {
     debug!("Getting tags for device {}", device_id);
@@ -461,7 +461,14 @@ pub async fn get_tag_for_device(
             t.color
         FROM tag t
         JOIN tag_device td ON t.id = td.tag_id
-        WHERE td.device_id = $1
+        JOIN device d ON td.device_id = d.id
+        WHERE
+            CASE
+                WHEN $1 ~ '^[0-9]+$' AND length($1) <= 10 THEN
+                    d.id = $1::int4
+                ELSE
+                    d.serial_number = $1
+            END
         ORDER BY t.id"#,
         device_id
     )
@@ -477,7 +484,7 @@ pub async fn get_tag_for_device(
 
 #[utoipa::path(
     get,
-    path = "/devices/:device_id/health",
+    path = "/devices/{device_id}/health",
     responses(
         (status = 200, description = "Device health status", body = Vec<DeviceHealth>),
         (status = 404, description = "Device not found", body = String),
@@ -1108,7 +1115,7 @@ pub struct PaginationId {
 
 #[utoipa::path(
     get,
-    path = "/devices/:device_id/commands",
+    path = "/devices/{device_id}/commands",
     responses(
         (status = StatusCode::OK, description = "Command successfully fetch from to the device"),
         (status = StatusCode::NOT_FOUND, description = "Device not found"),
@@ -1546,7 +1553,7 @@ pub async fn update_devices_target_release(
 
 #[utoipa::path(
     post,
-    path = "/devices/:device_id/commands",
+    path = "/devices/{device_id}/commands",
     responses(
         (status = StatusCode::CREATED, description = "Command successfully issue to device"),
         (status = StatusCode::NOT_FOUND, description = "Device not found"),
@@ -1631,7 +1638,7 @@ pub async fn issue_commands_to_device(
 
 #[utoipa::path(
     get,
-    path = "/devices/:device_id",
+    path = "/devices/{device_id}",
     responses(
         (status = StatusCode::OK, description = "Return found device", body = Device),
         (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to retrieve device"),
@@ -1686,7 +1693,7 @@ pub async fn get_device_info(
 
 #[utoipa::path(
     delete,
-    path = "/devices/:device_id",
+    path = "/devices/{device_id}",
     responses(
         (status = StatusCode::NO_CONTENT, description = "Successfully deleted the device"),
         (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to delete device"),
