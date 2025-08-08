@@ -34,7 +34,7 @@ pub async fn get_modem_list(
 
 #[utoipa::path(
     get,
-    path = "/modems/:modem_id",
+    path = "/modems/{modem_id}",
     responses(
         (status = StatusCode::OK, description = "Return found modem", body = Modem),
         (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to retrieve modem"),

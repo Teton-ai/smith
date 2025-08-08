@@ -214,12 +214,11 @@ const DevicesPage = () => {
   };
 
   const getStatusTooltip = (device: Device) => {
-    const status = getDeviceStatus(device);
-    if (status === 'online') {
-      return 'Online - Last seen: ' + (device.last_seen ? formatTimeAgo(new Date(device.last_seen)) + ' ago' : 'Never');
-    } else {
-      return 'Offline - Last seen: ' + (device.last_seen ? formatTimeAgo(new Date(device.last_seen)) + ' ago' : 'Never');
-    }
+    return 'Last seen: ' + (device.last_seen ? formatTimeAgo(new Date(device.last_seen)) + ' ago' : 'Never');
+  };
+
+  const hasUpdatePending = (device: Device) => {
+    return device.release_id && device.target_release_id && device.release_id !== device.target_release_id;
   };
 
 
@@ -295,8 +294,17 @@ const DevicesPage = () => {
                               }`}
                             ></div>
                           </Tooltip>
-                          <div className="text-sm font-medium text-gray-900 truncate">
-                            {getDeviceName(device)}
+                          <div className="flex items-center space-x-2 min-w-0 flex-1">
+                            <div className="text-sm font-medium text-gray-900 truncate">
+                              {getDeviceName(device)}
+                            </div>
+                            {hasUpdatePending(device) && (
+                              <Tooltip content={`Update pending: Release ${device.release_id} → ${device.target_release_id}`}>
+                                <span className="px-1.5 py-0.5 text-xs font-medium bg-orange-100 text-orange-800 rounded-full cursor-help flex-shrink-0">
+                                  Outdated
+                                </span>
+                              </Tooltip>
+                            )}
                           </div>
                         </div>
                         <div className="text-xs text-gray-500 font-mono mt-0.5">
