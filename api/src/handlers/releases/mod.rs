@@ -48,7 +48,7 @@ pub async fn get_releases(
 #[tracing::instrument]
 #[utoipa::path(
     get,
-    path = "/releases/:release_id",
+    path = "/releases/{release_id}",
     responses(
         (status = StatusCode::OK, description = "Release retrieved successfully", body = distributions::types::Release),
         (status = StatusCode::NOT_FOUND, description = "Release not found"),
@@ -79,7 +79,7 @@ pub async fn get_release(
 #[tracing::instrument]
 #[utoipa::path(
     post,
-    path = "/releases/:release_id",
+    path = "/releases/{release_id}",
     request_body = distributions::types::UpdateRelease,
     responses(
         (status = StatusCode::NO_CONTENT, description = "Release updated successfully"),
@@ -135,7 +135,7 @@ pub async fn update_release(
 #[tracing::instrument]
 #[utoipa::path(
     post,
-    path = "/releases/:release_id/packages",
+    path = "/releases/{release_id}/packages",
         request_body = distributions::types::ReplacementPackage,
     responses(
         (status = StatusCode::CREATED, description = "Package added to release successfully"),
@@ -186,7 +186,7 @@ pub async fn add_package_to_release(
 #[tracing::instrument]
 #[utoipa::path(
     get,
-    path = "/releases/:release_id/packages",
+    path = "/releases/{release_id}/packages",
     responses(
         (status = StatusCode::OK, description = "Release packages retrieved successfully"),
         (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to retrieve release packages"),
@@ -224,7 +224,7 @@ pub async fn get_distribution_release_packages(
 #[tracing::instrument]
 #[utoipa::path(
     put,
-    path = "/releases/:release_id/packages/:package_id",
+    path = "/releases/{release_id}/packages/{package_id}",
     responses(
         (status = StatusCode::OK, description = "Successfully updated release package "),
         (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to update release package"),
@@ -274,7 +274,7 @@ pub async fn update_package_for_release(
 #[tracing::instrument]
 #[utoipa::path(
     delete,
-    path = "/releases/:release_id/packages/:package_id",
+    path = "/releases/{release_id}/packages/{package_id}",
     responses(
         (status = StatusCode::NO_CONTENT, description = "Successfully deleted package from the release"),
         (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to delete the package from the release"),

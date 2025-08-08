@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT\n            t.id,\n            td.device_id as device,\n            t.name,\n            t.color\n        FROM tag t\n        JOIN tag_device td ON t.id = td.tag_id\n        WHERE td.device_id = $1\n        ORDER BY t.id",
+  "query": "SELECT\n            t.id,\n            td.device_id as device,\n            t.name,\n            t.color\n        FROM tag t\n        JOIN tag_device td ON t.id = td.tag_id\n        JOIN device d ON td.device_id = d.id\n        WHERE\n            CASE\n                WHEN $1 ~ '^[0-9]+$' AND length($1) <= 10 THEN\n                    d.id = $1::int4\n                ELSE\n                    d.serial_number = $1\n            END\n        ORDER BY t.id",
   "describe": {
     "columns": [
       {
@@ -26,7 +26,7 @@
     ],
     "parameters": {
       "Left": [
-        "Int4"
+        "Text"
       ]
     },
     "nullable": [
@@ -36,5 +36,5 @@
       true
     ]
   },
-  "hash": "e1af928b0379639673d13f29603852ea5fc6a9895bfb7befe5b30bc1a337d288"
+  "hash": "65265cfd660e730428523483d916bc6504325491ac582727e62a5824b6dd691b"
 }
