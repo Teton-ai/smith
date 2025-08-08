@@ -85,7 +85,7 @@ pub async fn get_networks(
 
 #[utoipa::path(
     get,
-    path = "/networks/:network_id",
+    path = "/networks/{network_id}",
     responses(
         (status = 200, description = "Return found network"),
         (status = 500, description = "Failed to retrieve network", body = String),
@@ -130,7 +130,7 @@ pub async fn get_network_by_id(
 
 #[utoipa::path(
     delete,
-    path = "/networks/:network_id",
+    path = "/networks/{network_id}",
     responses(
         (status = StatusCode::NO_CONTENT, description = "Successfully deleted the network"),
         (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to delete network", body = String),

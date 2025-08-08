@@ -320,7 +320,7 @@ async fn start_main_server(config: &'static Config, authorization: Authorization
         )
         .nest_service("/smith/package", get(handlers::fetch_package))
         .route(
-            "/smith/releases/:release_id/packages",
+            "/smith/releases/{release_id}/packages",
             get(handlers::list_release_packages),
         );
 

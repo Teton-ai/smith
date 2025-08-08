@@ -1932,7 +1932,7 @@ pub async fn delete_token(
 
 #[utoipa::path(
     get,
-    path = "/devices/:serial_number/network",
+    path = "/devices/{serial_number}/network",
     responses(
         (status = StatusCode::OK, description = "Network retrieved successfully"),
         (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to retrieve network"),
@@ -1974,7 +1974,7 @@ pub async fn get_network_for_device(
 
 #[utoipa::path(
     put,
-    path = "/devices/:serial_number/network",
+    path = "/devices/{serial_number}/network",
     responses(
         (status = StatusCode::OK, description = "Successfully updated network"),
         (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to update network"),
@@ -2006,7 +2006,7 @@ pub async fn update_device_network(
 
 #[utoipa::path(
     put,
-    path = "/devices/network/:network",
+    path = "/devices/network/{network}",
     responses(
         (status = StatusCode::OK, description = "Successfully updated networks"),
         (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to update networks"),
