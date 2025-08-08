@@ -152,40 +152,21 @@ const DeviceDetailPage = () => {
   }, [callAPI, serial]);
 
   const getDeviceStatus = () => {
-    if (!device || !device.last_seen) return 'never-seen';
+    if (!device || !device.last_seen) return 'offline';
     
     const lastSeen = new Date(device.last_seen);
     const now = new Date();
     const diffMinutes = (now.getTime() - lastSeen.getTime()) / (1000 * 60);
-    const diffDays = diffMinutes / (60 * 24);
-    const isOnline = diffMinutes <= 3;
     
-    // Check for stuck update first (takes priority, but only if online)
-    if (isOnline && device.release_id && device.target_release_id && device.release_id !== device.target_release_id) {
-      return 'stuck-update';
-    }
-    
-    if (isOnline) return 'online';
-    if (diffDays <= 1) return 'recently-offline';
-    if (diffDays <= 7) return 'offline-week';
-    if (diffDays <= 30) return 'offline-month';
-    return 'abandoned';
+    return diffMinutes <= 3 ? 'online' : 'offline';
   };
 
   const getStatusInfo = (status: string) => {
     switch (status) {
       case 'online':
         return { color: 'text-green-600', icon: <CheckCircle className="w-5 h-5 text-green-500" />, label: 'Online' };
-      case 'stuck-update':
-        return { color: 'text-purple-600', icon: <Clock className="w-5 h-5 text-purple-500" />, label: 'Update Failed' };
-      case 'recently-offline':
-        return { color: 'text-yellow-600', icon: <Clock className="w-5 h-5 text-yellow-500" />, label: 'Recently Offline' };
-      case 'offline-week':
-        return { color: 'text-orange-600', icon: <XCircle className="w-5 h-5 text-orange-500" />, label: 'Offline (1 week)' };
-      case 'offline-month':
-        return { color: 'text-red-600', icon: <XCircle className="w-5 h-5 text-red-500" />, label: 'Offline (1 month)' };
-      case 'never-seen':
-        return { color: 'text-gray-600', icon: <XCircle className="w-5 h-5 text-gray-500" />, label: 'Never Connected' };
+      case 'offline':
+        return { color: 'text-red-600', icon: <XCircle className="w-5 h-5 text-red-500" />, label: 'Offline' };
       default:
         return { color: 'text-gray-600', icon: <XCircle className="w-5 h-5 text-gray-500" />, label: 'Unknown' };
     }
@@ -207,39 +188,19 @@ const DeviceDetailPage = () => {
   const getStatusTooltip = () => {
     if (!device) return '';
     
-    const status = getDeviceStatus();
     const lastSeenText = device.last_seen ? formatTimeAgo(device.last_seen) : 'Never';
-    
-    switch (status) {
-      case 'online':
-        return `Online - Last seen: ${lastSeenText}`;
-      case 'stuck-update':
-        return `Update Failed - Release ${device.release_id} → ${device.target_release_id}`;
-      case 'recently-offline':
-        return `Recently Offline - Last seen: ${lastSeenText}`;
-      case 'offline-week':
-        return `Offline (1 week) - Last seen: ${lastSeenText}`;
-      case 'offline-month':
-        return `Offline (1 month) - Last seen: ${lastSeenText}`;
-      case 'never-seen':
-        return 'Never Connected - Device has not come online';
-      default:
-        return `Status: ${status} - Last seen: ${lastSeenText}`;
-    }
+    return `Last seen: ${lastSeenText}`;
+  };
+
+  const hasUpdatePending = () => {
+    return device && device.release_id && device.target_release_id && device.release_id !== device.target_release_id;
   };
 
   const getStatusDot = (status: string) => {
     switch (status) {
       case 'online':
         return 'bg-green-500 animate-pulse';
-      case 'stuck-update':
-        return 'bg-purple-500 animate-pulse';
-      case 'recently-offline':
-        return 'bg-yellow-500';
-      case 'offline-week':
-        return 'bg-orange-500';
-      case 'offline-month':
-      case 'never-seen':
+      case 'offline':
         return 'bg-red-500';
       default:
         return 'bg-gray-500';
@@ -395,38 +356,37 @@ const DeviceDetailPage = () => {
 
         {/* Device Header */}
         <div className="bg-white rounded-lg border border-gray-200 p-6">
-          <div className="flex items-start justify-between">
-            <div className="flex items-center space-x-4">
-              <div className="p-3 bg-gray-100 rounded-lg">
-                <Cpu className="w-8 h-8 text-gray-600" />
-              </div>
-              <div>
-                <div className="flex items-center space-x-3">
-                  <div className="flex items-center space-x-2">
-                    <Tooltip content={getStatusTooltip()}>
-                      <div className={`w-3 h-3 rounded-full flex-shrink-0 cursor-help ${getStatusDot(status)}`}></div>
-                    </Tooltip>
-                    {connectionType && (
-                      <Tooltip content={getConnectionTooltip(connectionType)}>
-                        <div className="cursor-help">
-                          {getConnectionIcon(connectionType)}
-                        </div>
-                      </Tooltip>
-                    )}
-                  </div>
-                  <h1 className="text-2xl font-bold text-gray-900">{getDeviceName()}</h1>
-                </div>
-                <p className="text-gray-600 mt-1">{getDeviceModel()}</p>
-                <p className="text-sm text-gray-500 font-mono">{device.serial_number}</p>
-              </div>
+          <div className="flex items-center space-x-4">
+            <div className="p-3 bg-gray-100 rounded-lg">
+              <Cpu className="w-8 h-8 text-gray-600" />
             </div>
-            <div className="text-right">
-              <div className={`text-sm font-medium ${statusInfo.color}`}>
-                {statusInfo.label}
+            <div>
+              <div className="flex items-center space-x-3">
+                <div className="flex items-center space-x-2">
+                  <Tooltip content={getStatusTooltip()}>
+                    <div className={`w-3 h-3 rounded-full flex-shrink-0 cursor-help ${getStatusDot(status)}`}></div>
+                  </Tooltip>
+                  {connectionType && (
+                    <Tooltip content={getConnectionTooltip(connectionType)}>
+                      <div className="cursor-help">
+                        {getConnectionIcon(connectionType)}
+                      </div>
+                    </Tooltip>
+                  )}
+                </div>
+                <div className="flex items-center space-x-3">
+                  <h1 className="text-2xl font-bold text-gray-900">{getDeviceName()}</h1>
+                  {hasUpdatePending() && (
+                    <Tooltip content={`Update pending: Release ${device.release_id} → ${device.target_release_id}`}>
+                      <span className="px-2 py-1 text-xs font-medium bg-orange-100 text-orange-800 rounded-full cursor-help">
+                        Outdated
+                      </span>
+                    </Tooltip>
+                  )}
+                </div>
               </div>
-              <div className="text-sm text-gray-700">
-                {device.last_seen ? `Last seen ${formatTimeAgo(device.last_seen)}` : 'Never seen'}
-              </div>
+              <p className="text-gray-600 mt-1">{getDeviceModel()}</p>
+              <p className="text-sm text-gray-500 font-mono">{device.serial_number}</p>
             </div>
           </div>
         </div>
