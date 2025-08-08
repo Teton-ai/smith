@@ -186,8 +186,9 @@ async fn main() -> anyhow::Result<()> {
 
                 let (tx, rx) = oneshot::channel();
                 let username = config.current_tunnel_username();
+                let username_clone = username.clone();
                 let tunnel_openning_handler = tokio::spawn(async move {
-                    api.open_tunnel(id, pub_key, username).await.unwrap();
+                    api.open_tunnel(id, pub_key, username_clone).await.unwrap();
                     pb2.set_message("Request sent to smith 💻");
 
                     let port;
@@ -221,9 +222,15 @@ async fn main() -> anyhow::Result<()> {
 
                 tunnel_openning_handler.await.unwrap();
 
+                
+                // Give the server a moment to set up the SSH tunnel
+                println!("Waiting for tunnel setup...");
+                
+                // Wait for server-side setup to complete
+                tokio::time::sleep(std::time::Duration::from_secs(10)).await;
                 let mut ssh = Session::connect(
                     config.get_identity_file(),
-                    "TODO",
+                    username,
                     None,
                     ("bore.teton.ai", port),
                 )
