@@ -87,17 +87,22 @@ impl Actor {
                 let tag = format!("{}-smith", Uuid::new_v4());
                 if let Some(ref remote_login) = remote_login {
                     info!("Received remote_login info for user: {}", remote_login.user);
-                    info!("Public key: {}", remote_login.pub_key);
                     let res = ensure_ssh_dir(&remote_login.user).await;
                     if let Err(err) = res {
-                        error!("Failed to ensure ssh dir for user '{}': {}", remote_login.user, err);
+                        error!(
+                            "Failed to ensure ssh dir for user '{}': {}",
+                            remote_login.user, err
+                        );
                         _ = remote.send(0);
                         return;
                     }
                     info!("SSH directory ensured for user: {}", remote_login.user);
                     let res = add_key(&remote_login.user, &remote_login.pub_key, tag.clone()).await;
                     if let Err(err) = res {
-                        error!("Failed to add key for user '{}': {}", remote_login.user, err);
+                        error!(
+                            "Failed to add key for user '{}': {}",
+                            remote_login.user, err
+                        );
                         _ = remote.send(0);
                         return;
                     }

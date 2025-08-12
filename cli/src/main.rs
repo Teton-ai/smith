@@ -222,10 +222,9 @@ async fn main() -> anyhow::Result<()> {
 
                 tunnel_openning_handler.await.unwrap();
 
-                
                 // Give the server a moment to set up the SSH tunnel
                 println!("Waiting for tunnel setup...");
-                
+
                 // Wait for server-side setup to complete
                 tokio::time::sleep(std::time::Duration::from_secs(10)).await;
                 let mut ssh = Session::connect(
