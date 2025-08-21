@@ -52,6 +52,26 @@ impl Actor {
         }
     }
 
+    async fn run_dpkg_recovery(&self) -> Result<()> {
+        info!("Running dpkg recovery using systemd-run");
+        let recovery_command = "systemd-run --unit=dpkg-fix --description='Finish broken configs' --property=Type=oneshot --no-ask-password dpkg --configure -a";
+        
+        let output = Command::new("sh")
+            .arg("-c")
+            .arg(recovery_command)
+            .output()
+            .await
+            .with_context(|| "Failed to execute dpkg recovery command")?;
+
+        if output.status.success() {
+            info!("Dpkg recovery completed successfully");
+            Ok(())
+        } else {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            Err(anyhow::anyhow!("Dpkg recovery failed: {}", stderr))
+        }
+    }
+
     async fn handle_message(&mut self, msg: ActorMessage) {
         match msg {
             ActorMessage::Update => {
@@ -331,6 +351,38 @@ impl Actor {
                         } else {
                             let stderr = String::from_utf8_lossy(&status.stderr);
                             error!("Failed to install package {}: {}", package_name, stderr);
+                            
+                            // Check if error is due to dpkg interruption requiring 'dpkg --configure -a'
+                            if stderr.contains("dpkg was interrupted") && stderr.contains("dpkg --configure -a") {
+                                info!("Detected dpkg interruption for package {}, attempting recovery", package_name);
+                                match self.run_dpkg_recovery().await {
+                                    Ok(_) => {
+                                        info!("Dpkg recovery completed, retrying package installation for {}", package_name);
+                                        // Retry the installation after recovery
+                                        match Command::new("sh")
+                                            .arg("-c")
+                                            .arg(&install_command)
+                                            .output()
+                                            .await
+                                        {
+                                            Ok(retry_status) => {
+                                                if retry_status.status.success() {
+                                                    info!("Successfully installed package {} after recovery", package_name);
+                                                } else {
+                                                    let retry_stderr = String::from_utf8_lossy(&retry_status.stderr);
+                                                    error!("Failed to install package {} even after recovery: {}", package_name, retry_stderr);
+                                                }
+                                            }
+                                            Err(e) => {
+                                                error!("Failed to retry install command for {} after recovery: {}", package_name, e);
+                                            }
+                                        }
+                                    }
+                                    Err(e) => {
+                                        error!("Dpkg recovery failed for package {}: {}", package_name, e);
+                                    }
+                                }
+                            }
                         }
                     }
                     Err(e) => {
