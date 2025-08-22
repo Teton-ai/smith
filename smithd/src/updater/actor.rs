@@ -52,10 +52,6 @@ impl Actor {
         }
     }
 
-    async fn run_dpkg_recovery(&self) -> Result<()> {
-        Self::run_dpkg_recovery_static().await
-    }
-
     async fn run_dpkg_recovery_static() -> Result<()> {
         info!("Running dpkg recovery using systemd-run");
         let recovery_command = "systemd-run --unit=dpkg-fix --description='Finish broken configs' --property=Type=oneshot --no-ask-password dpkg --configure -a";
