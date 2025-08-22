@@ -360,49 +360,8 @@ impl Actor {
                                     "Detected dpkg interruption for package {}, attempting recovery",
                                     package_name
                                 );
-                                match self.run_dpkg_recovery().await {
-                                    Ok(_) => {
-                                        info!(
-                                            "Dpkg recovery completed, retrying package installation for {}",
-                                            package_name
-                                        );
-                                        // Retry the installation after recovery
-                                        match Command::new("sh")
-                                            .arg("-c")
-                                            .arg(&install_command)
-                                            .output()
-                                            .await
-                                        {
-                                            Ok(retry_status) => {
-                                                if retry_status.status.success() {
-                                                    info!(
-                                                        "Successfully installed package {} after recovery",
-                                                        package_name
-                                                    );
-                                                } else {
-                                                    let retry_stderr = String::from_utf8_lossy(
-                                                        &retry_status.stderr,
-                                                    );
-                                                    error!(
-                                                        "Failed to install package {} even after recovery: {}",
-                                                        package_name, retry_stderr
-                                                    );
-                                                }
-                                            }
-                                            Err(e) => {
-                                                error!(
-                                                    "Failed to retry install command for {} after recovery: {}",
-                                                    package_name, e
-                                                );
-                                            }
-                                        }
-                                    }
-                                    Err(e) => {
-                                        error!(
-                                            "Dpkg recovery failed for package {}: {}",
-                                            package_name, e
-                                        );
-                                    }
+                                if let Err(e) = self.run_dpkg_recovery().await {
+                                    error!("Dpkg recovery failed: {}", e);
                                 }
                             }
                         }
