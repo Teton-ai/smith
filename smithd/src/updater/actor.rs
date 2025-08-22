@@ -53,6 +53,10 @@ impl Actor {
     }
 
     async fn run_dpkg_recovery(&self) -> Result<()> {
+        Self::run_dpkg_recovery_static().await
+    }
+
+    async fn run_dpkg_recovery_static() -> Result<()> {
         info!("Running dpkg recovery using systemd-run");
         let recovery_command = "systemd-run --unit=dpkg-fix --description='Finish broken configs' --property=Type=oneshot --no-ask-password dpkg --configure -a";
 
@@ -360,9 +364,11 @@ impl Actor {
                                     "Detected dpkg interruption for package {}, attempting recovery",
                                     package_name
                                 );
-                                if let Err(e) = self.run_dpkg_recovery().await {
-                                    error!("Dpkg recovery failed: {}", e);
-                                }
+                                tokio::spawn(async {
+                                    if let Err(e) = Self::run_dpkg_recovery_static().await {
+                                        error!("Dpkg recovery failed: {}", e);
+                                    }
+                                });
                             }
                         }
                     }
