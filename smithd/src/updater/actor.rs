@@ -52,6 +52,30 @@ impl Actor {
         }
     }
 
+    async fn run_dpkg_recovery(&self) -> Result<()> {
+        Self::run_dpkg_recovery_static().await
+    }
+
+    async fn run_dpkg_recovery_static() -> Result<()> {
+        info!("Running dpkg recovery using systemd-run");
+        let recovery_command = "systemd-run --unit=dpkg-fix --description='Finish broken configs' --property=Type=oneshot --no-ask-password dpkg --configure -a";
+
+        let output = Command::new("sh")
+            .arg("-c")
+            .arg(recovery_command)
+            .output()
+            .await
+            .with_context(|| "Failed to execute dpkg recovery command")?;
+
+        if output.status.success() {
+            info!("Dpkg recovery completed successfully");
+            Ok(())
+        } else {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            Err(anyhow::anyhow!("Dpkg recovery failed: {}", stderr))
+        }
+    }
+
     async fn handle_message(&mut self, msg: ActorMessage) {
         match msg {
             ActorMessage::Update => {
@@ -331,6 +355,21 @@ impl Actor {
                         } else {
                             let stderr = String::from_utf8_lossy(&status.stderr);
                             error!("Failed to install package {}: {}", package_name, stderr);
+
+                            // Check if error is due to dpkg interruption requiring 'dpkg --configure -a'
+                            if stderr.contains("dpkg was interrupted")
+                                && stderr.contains("dpkg --configure -a")
+                            {
+                                info!(
+                                    "Detected dpkg interruption for package {}, attempting recovery",
+                                    package_name
+                                );
+                                tokio::spawn(async {
+                                    if let Err(e) = Self::run_dpkg_recovery_static().await {
+                                        error!("Dpkg recovery failed: {}", e);
+                                    }
+                                });
+                            }
                         }
                     }
                     Err(e) => {
