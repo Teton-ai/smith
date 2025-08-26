@@ -13,6 +13,9 @@ import {
   CheckCircle,
   Clock,
   Computer,
+  TrendingUp,
+  Eye,
+  EyeOff,
 } from 'lucide-react';
 import PrivateLayout from "@/app/layouts/PrivateLayout";
 import useSmithAPI from "@/app/hooks/smith-api";
@@ -37,6 +40,40 @@ const DistributionsPage = () => {
   const { callAPI, loading, error } = useSmithAPI();
   const [distributions, setDistributions] = useState<Distribution[]>([]);
   const [rollouts, setRollouts] = useState<Map<number, Rollout>>(new Map());
+  const [showEmptyDistributions, setShowEmptyDistributions] = useState(false);
+
+  // Calculate overall rollout stats
+  const totalDevicesAcrossAll = Array.from(rollouts.values()).reduce(
+    (sum, rollout) => sum + (rollout.total_devices || 0),
+    0
+  );
+  const updatedDevicesAcrossAll = Array.from(rollouts.values()).reduce(
+    (sum, rollout) => sum + (rollout.updated_devices || 0),
+    0
+  );
+  const pendingDevicesAcrossAll = Array.from(rollouts.values()).reduce(
+    (sum, rollout) => sum + (rollout.pending_devices || 0),
+    0
+  );
+
+  const overallProgress = totalDevicesAcrossAll > 0 
+    ? Math.round((updatedDevicesAcrossAll / totalDevicesAcrossAll) * 100)
+    : 0;
+
+  // Filter distributions based on device count
+  const distributionsWithDevices = distributions.filter(dist => {
+    const rollout = rollouts.get(dist.id);
+    return rollout && (rollout.total_devices || 0) > 0;
+  });
+
+  const distributionsWithoutDevices = distributions.filter(dist => {
+    const rollout = rollouts.get(dist.id);
+    return !rollout || (rollout.total_devices || 0) === 0;
+  });
+
+  const displayedDistributions = showEmptyDistributions 
+    ? distributions 
+    : distributionsWithDevices;
 
   useEffect(() => {
     const fetchDistributions = async () => {
@@ -118,23 +155,64 @@ const DistributionsPage = () => {
   return (
     <PrivateLayout id="distributions">
       <div className="space-y-6">
-        {/* Distributions Count */}
-        <div className="flex justify-end">
-          <span className="text-sm text-gray-500">
-            {distributions.length} distribution{distributions.length !== 1 ? 's' : ''}
-          </span>
+        {/* Header with compact rollout overview */}
+        <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+          <div>
+            <h2 className="text-xl font-semibold text-gray-900">Distributions</h2>
+            <div className="flex items-center space-x-4 text-sm text-gray-500">
+              <span>
+                {displayedDistributions.length} distribution{displayedDistributions.length !== 1 ? 's' : ''} shown
+              </span>
+              {distributionsWithoutDevices.length > 0 && (
+                <button
+                  onClick={() => setShowEmptyDistributions(!showEmptyDistributions)}
+                  className="flex items-center space-x-1 text-blue-600 hover:text-blue-800"
+                >
+                  {showEmptyDistributions ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
+                  <span>
+                    {showEmptyDistributions ? 'Hide' : 'Show'} {distributionsWithoutDevices.length} empty
+                  </span>
+                </button>
+              )}
+            </div>
+          </div>
+          
+          {totalDevicesAcrossAll > 0 && (
+            <div className="flex items-center gap-6 text-sm">
+              <div className="flex items-center space-x-2">
+                <TrendingUp className="w-4 h-4 text-blue-500" />
+                <span className="font-medium text-gray-700">{overallProgress}% Complete</span>
+              </div>
+              <div className="flex items-center space-x-4 text-gray-600">
+                <span className="flex items-center space-x-1">
+                  <Computer className="w-3 h-3" />
+                  <span>{totalDevicesAcrossAll} total</span>
+                </span>
+                <span className="flex items-center space-x-1">
+                  <CheckCircle className="w-3 h-3 text-green-500" />
+                  <span>{updatedDevicesAcrossAll} updated</span>
+                </span>
+                {pendingDevicesAcrossAll > 0 && (
+                  <span className="flex items-center space-x-1">
+                    <Clock className="w-3 h-3 text-orange-500" />
+                    <span>{pendingDevicesAcrossAll} pending</span>
+                  </span>
+                )}
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Distributions List */}
         <div className="bg-white rounded border border-gray-200 overflow-hidden">
-          {distributions.length === 0 ? (
+          {displayedDistributions.length === 0 ? (
             <div className="p-6 text-center">
               <Layers className="w-8 h-8 text-gray-400 mx-auto mb-2" />
               <p className="text-sm text-gray-500">No distributions found</p>
             </div>
           ) : (
             <div className="divide-y divide-gray-200">
-              {distributions.map((distribution) => (
+              {displayedDistributions.map((distribution) => (
                 <div 
                   key={distribution.id} 
                   className="p-3 hover:bg-gray-50 cursor-pointer transition-colors"
@@ -158,30 +236,58 @@ const DistributionsPage = () => {
                           )}
                         </div>
                         {rollouts.has(distribution.id) && (
-                          <div className="flex items-center space-x-4 mt-2">
+                          <div className="mt-3">
                             {(() => {
                               const rollout = rollouts.get(distribution.id)!;
+                              const progress = rollout.total_devices && rollout.total_devices > 0 
+                                ? Math.round((rollout.updated_devices || 0) / rollout.total_devices * 100)
+                                : 0;
+                              
+                              const progressColor = progress === 100 
+                                ? 'bg-green-500' 
+                                : progress >= 75 
+                                ? 'bg-blue-500' 
+                                : progress >= 50 
+                                ? 'bg-yellow-500' 
+                                : 'bg-red-500';
+
                               return (
-                                <>
-                                  {rollout.total_devices !== null && (
-                                    <div className="flex items-center space-x-1 text-xs text-gray-600">
-                                      <Computer className="w-3 h-3 text-indigo-500" />
-                                      <span>{rollout.total_devices} total</span>
+                                <div className="space-y-2">
+                                  {/* Progress Bar with inline percentage */}
+                                  <div className="flex items-center space-x-3">
+                                    <div className="flex-1 bg-gray-200 rounded-full h-2">
+                                      <div 
+                                        className={`h-2 rounded-full transition-all duration-300 ${progressColor}`}
+                                        style={{ width: `${progress}%` }}
+                                      />
                                     </div>
-                                  )}
-                                  {rollout.updated_devices !== null && (
-                                    <div className="flex items-center space-x-1 text-xs text-gray-600">
-                                      <CheckCircle className="w-3 h-3 text-green-500" />
-                                      <span>{rollout.updated_devices} updated</span>
-                                    </div>
-                                  )}
-                                  {rollout.pending_devices !== null && rollout.pending_devices > 0 && (
-                                    <div className="flex items-center space-x-1 text-xs text-gray-600">
-                                      <Clock className="w-3 h-3 text-orange-500" />
-                                      <span>{rollout.pending_devices} pending</span>
-                                    </div>
-                                  )}
-                                </>
+                                    <span className="text-xs font-semibold text-gray-700 min-w-0">
+                                      {progress}%
+                                    </span>
+                                  </div>
+                                  
+                                  {/* Device counts */}
+                                  <div className="flex items-center space-x-4 text-xs text-gray-600">
+                                    {rollout.total_devices !== null && (
+                                      <div className="flex items-center space-x-1">
+                                        <Computer className="w-3 h-3 text-indigo-500" />
+                                        <span>{rollout.total_devices} total</span>
+                                      </div>
+                                    )}
+                                    {rollout.updated_devices !== null && (
+                                      <div className="flex items-center space-x-1">
+                                        <CheckCircle className="w-3 h-3 text-green-500" />
+                                        <span>{rollout.updated_devices} updated</span>
+                                      </div>
+                                    )}
+                                    {rollout.pending_devices !== null && rollout.pending_devices > 0 && (
+                                      <div className="flex items-center space-x-1">
+                                        <Clock className="w-3 h-3 text-orange-500" />
+                                        <span>{rollout.pending_devices} pending</span>
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
                               );
                             })()}
                           </div>
