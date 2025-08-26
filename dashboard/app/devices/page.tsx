@@ -6,6 +6,8 @@ import {
   Cpu,
   Search,
   GitBranch,
+  Eye,
+  EyeOff,
 } from 'lucide-react';
 import PrivateLayout from "@/app/layouts/PrivateLayout";
 import useSmithAPI from "@/app/hooks/smith-api";
@@ -133,6 +135,7 @@ const DevicesPage = () => {
   const [devices, setDevices] = useState<Device[]>([]);
   const [filteredDevices, setFilteredDevices] = useState<Device[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
+  const [showLongOfflineDevices, setShowLongOfflineDevices] = useState(false);
 
   useEffect(() => {
     const fetchDashboard = async () => {
@@ -148,6 +151,11 @@ const DevicesPage = () => {
   useEffect(() => {
     // First filter to only show authorized devices (has_token = true)
     let filtered = devices.filter(device => device.has_token);
+
+    // Filter out long offline devices unless toggle is on
+    if (!showLongOfflineDevices) {
+      filtered = filtered.filter(device => !isLongOffline(device));
+    }
 
     if (searchTerm) {
       filtered = filtered.filter(device =>
@@ -176,7 +184,7 @@ const DevicesPage = () => {
     });
 
     setFilteredDevices(filtered);
-  }, [devices, searchTerm]);
+  }, [devices, searchTerm, showLongOfflineDevices]);
 
   const getDeviceStatus = (device: Device) => {
     if (!device.last_seen) return 'offline';
@@ -186,6 +194,16 @@ const DevicesPage = () => {
     const diffMinutes = (now.getTime() - lastSeen.getTime()) / (1000 * 60);
 
     return diffMinutes <= 3 ? 'online' : 'offline';
+  };
+
+  const isLongOffline = (device: Device) => {
+    if (!device.last_seen) return true; // Never seen = long offline
+    
+    const lastSeen = new Date(device.last_seen);
+    const now = new Date();
+    const diffDays = (now.getTime() - lastSeen.getTime()) / (1000 * 60 * 60 * 24);
+    
+    return diffDays > 30;
   };
 
   const getDeviceName = (device: Device) => {
@@ -234,6 +252,10 @@ const DevicesPage = () => {
     return `${minutes}m`;
   };
 
+  // Calculate counts for display
+  const authorizedDevices = devices.filter(device => device.has_token);
+  const longOfflineDevices = authorizedDevices.filter(device => isLongOffline(device));
+
   return (
     <PrivateLayout id="devices">
       <div className="space-y-6">
@@ -254,8 +276,19 @@ const DevicesPage = () => {
 
           <div className="mt-4 sm:mt-0 flex items-center space-x-3">
             <span className="text-sm text-gray-500">
-              {loading ? 'Loading...' : `${filteredDevices.length} authorized device${filteredDevices.length !== 1 ? 's' : ''}`}
+              {loading ? 'Loading...' : `${filteredDevices.length} device${filteredDevices.length !== 1 ? 's' : ''} shown`}
             </span>
+            {longOfflineDevices.length > 0 && (
+              <button
+                onClick={() => setShowLongOfflineDevices(!showLongOfflineDevices)}
+                className="flex items-center space-x-1 text-blue-600 hover:text-blue-800 text-sm"
+              >
+                {showLongOfflineDevices ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
+                <span>
+                  {showLongOfflineDevices ? 'Hide' : 'Show'} {longOfflineDevices.length} long-offline
+                </span>
+              </button>
+            )}
           </div>
         </div>
 

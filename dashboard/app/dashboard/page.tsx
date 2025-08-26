@@ -38,6 +38,7 @@ interface DashboardData {
   archived_count: number,
 }
 
+
 const AdminPanel = () => {
   const router = useRouter();
   const { callAPI } = useSmithAPI();
@@ -84,6 +85,7 @@ const AdminPanel = () => {
           
           setAttentionDevices(needsAttention);
         }
+
       } finally {
         setLoading(false);
       }
