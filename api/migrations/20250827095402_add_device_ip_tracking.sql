@@ -9,7 +9,7 @@ CREATE TABLE IF NOT EXISTS ip_address (
     region TEXT,
     city TEXT,
     isp TEXT,
-    mobile BOOLEAN,
+    coordinates POINT,
     proxy BOOLEAN,
     hosting BOOLEAN,
     created_at TIMESTAMPTZ DEFAULT NOW() NOT NULL,
