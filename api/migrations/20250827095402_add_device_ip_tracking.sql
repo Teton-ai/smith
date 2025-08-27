@@ -1,18 +1,21 @@
-ALTER TABLE device ADD COLUMN IF NOT EXISTS last_ip_address INET;
-
-CREATE TABLE IF NOT EXISTS ip_addresses (
-    ip_address INET PRIMARY KEY,
+CREATE TABLE IF NOT EXISTS ip_address (
+    id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    ip_address INET NOT NULL UNIQUE,
     name TEXT,
     continent TEXT,
-    continent_code TEXT,
-    country_code TEXT,
+    continent_code CHAR(2),
+    country_code CHAR(2),
     country TEXT,
     region TEXT,
     city TEXT,
     isp TEXT,
-    mobile TEXT,
-    proxy TEXT,
-    hosting TEXT,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+    mobile BOOLEAN,
+    proxy BOOLEAN,
+    hosting BOOLEAN,
+    created_at TIMESTAMPTZ DEFAULT NOW() NOT NULL,
+    updated_at TIMESTAMPTZ DEFAULT NOW() NOT NULL
 );
+
+ALTER TABLE device
+    ADD ip_address_id INT,
+    ADD CONSTRAINT fk_ip_address FOREIGN KEY (ip_address_id) REFERENCES ip_address(id);

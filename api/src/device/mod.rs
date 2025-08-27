@@ -189,17 +189,22 @@ impl Device {
         match ip_address {
             Some(ip) => {
                 let ip_network: ipnetwork::IpNetwork = ip.into();
-                sqlx::query!(
-                    "UPDATE device SET last_ping = NOW(), last_ip_address = $2 WHERE id = $1",
-                    device.id,
+                
+                // Insert or get existing IP address record
+                let ip_record = sqlx::query!(
+                    "INSERT INTO ip_address (ip_address, created_at) VALUES ($1, NOW()) 
+                     ON CONFLICT (ip_address) DO UPDATE SET updated_at = NOW()
+                     RETURNING id",
                     ip_network
                 )
-                .execute(&mut *tx)
+                .fetch_one(&mut *tx)
                 .await?;
 
+                // Update device with IP address ID
                 sqlx::query!(
-                    "INSERT INTO ip_addresses (ip_address, created_at) VALUES ($1, NOW()) ON CONFLICT (ip_address) DO NOTHING",
-                    ip_network
+                    "UPDATE device SET last_ping = NOW(), ip_address_id = $2 WHERE id = $1",
+                    device.id,
+                    ip_record.id
                 )
                 .execute(&mut *tx)
                 .await?;
