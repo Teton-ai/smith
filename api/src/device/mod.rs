@@ -191,6 +191,39 @@ impl Device {
         Ok(())
     }
 
+    pub async fn save_last_ping_with_ip(device: &DeviceWithToken, ip_address: Option<std::net::IpAddr>, pool: &PgPool) -> anyhow::Result<()> {
+        let mut tx = pool.begin().await?;
+        match ip_address {
+            Some(ip) => {
+                sqlx::query!(
+                    "UPDATE device SET last_ping = NOW(), last_ip_address = $2 WHERE id = $1",
+                    device.id,
+                    ip
+                )
+                .execute(&mut *tx)
+                .await?;
+                
+                // Insert into ip_addresses table if not exists
+                sqlx::query!(
+                    "INSERT INTO ip_addresses (ip_address, created_at) VALUES ($1, NOW()) ON CONFLICT (ip_address) DO NOTHING",
+                    ip
+                )
+                .execute(&mut *tx)
+                .await?;
+            }
+            None => {
+                sqlx::query!(
+                    "UPDATE device SET last_ping = NOW() WHERE id = $1",
+                    device.id
+                )
+                .execute(&mut *tx)
+                .await?;
+            }
+        }
+        tx.commit().await?;
+        Ok(())
+    }
+
     pub async fn get_target_release(device: &DeviceWithToken, pool: &PgPool) -> Option<i32> {
         if let Ok(device) = sqlx::query!(
             "SELECT target_release_id FROM device WHERE id = $1",
