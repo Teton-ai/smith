@@ -30,6 +30,7 @@ sqlx = { version = "0.7", features = [
     "time",
     "tls-rustls",
     "uuid",
+    "ipnetwork",
 ] }
 thiserror = "1.0.65"
 tokio = { version = "1.41.0", features = ["full"] }
@@ -37,7 +38,8 @@ tower = { version = "0.5.1" }
 tower-http = { version = "0.6.1", features = [
     "compression-full",
     "decompression-full",
-    "cors"
+    "cors",
+    "trace"
 ] }
 tracing = "0.1.40"
 tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }

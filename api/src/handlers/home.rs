@@ -1,17 +1,20 @@
 use crate::State;
 use crate::db::{DBHandler, DeviceWithToken};
 use crate::device::RegistrationError;
+use axum::extract::ConnectInfo;
 use axum::http::StatusCode;
 use axum::{Extension, Json};
 use smith::utils::schema::{
     DeviceRegistration, DeviceRegistrationResponse, HomePost, HomePostResponse,
 };
+use std::net::SocketAddr;
 use std::time::SystemTime;
 use tracing::{debug, error, info};
 
 #[tracing::instrument]
 pub async fn home(
     device: DeviceWithToken,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
     Extension(state): Extension<State>,
     Json(payload): Json<HomePost>,
 ) -> (StatusCode, Json<HomePostResponse>) {
@@ -35,16 +38,17 @@ pub async fn home(
         target_release_id: crate::device::Device::get_target_release(&device, &state.pg_pool).await,
     };
 
+    let client_ip = Some(addr.ip());
     tokio::spawn(async move {
         crate::device::Device::save_release_id(&device, release_id, &state.pg_pool)
             .await
             .unwrap_or_else(|err| {
-                error!("Error saving last ping: {:?}", err);
+                error!("Error saving release_id: {:?}", err);
             });
-        crate::device::Device::save_last_ping(&device, &state.pg_pool)
+        crate::device::Device::save_last_ping_with_ip(&device, client_ip, &state.pg_pool)
             .await
             .unwrap_or_else(|err| {
-                error!("Error saving last ping: {:?}", err);
+                error!("Error saving last ping with IP: {:?}", err);
             });
     });
 

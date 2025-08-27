@@ -4,6 +4,7 @@ pub(crate) use crate::device::schema::Device;
 use serde_json::{Value, json};
 use smith::utils::schema::{DeviceRegistration, DeviceRegistrationResponse};
 use sqlx::PgPool;
+use sqlx::types::ipnetwork;
 use thiserror::Error;
 use tracing::error;
 
@@ -179,14 +180,44 @@ impl Device {
         Err(RegistrationError::NotApprovedDevice)
     }
 
-    pub async fn save_last_ping(device: &DeviceWithToken, pool: &PgPool) -> anyhow::Result<()> {
+    pub async fn save_last_ping_with_ip(
+        device: &DeviceWithToken,
+        ip_address: Option<std::net::IpAddr>,
+        pool: &PgPool,
+    ) -> anyhow::Result<()> {
         let mut tx = pool.begin().await?;
-        sqlx::query!(
-            "UPDATE device SET last_ping = NOW() WHERE id = $1",
-            device.id
-        )
-        .execute(&mut *tx)
-        .await?;
+        match ip_address {
+            Some(ip) => {
+                let ip_network: ipnetwork::IpNetwork = ip.into();
+
+                // Insert or get existing IP address record
+                let ip_record = sqlx::query!(
+                    "INSERT INTO ip_address (ip_address, created_at) VALUES ($1, NOW()) 
+                     ON CONFLICT (ip_address) DO UPDATE SET updated_at = NOW()
+                     RETURNING id",
+                    ip_network
+                )
+                .fetch_one(&mut *tx)
+                .await?;
+
+                // Update device with IP address ID
+                sqlx::query!(
+                    "UPDATE device SET last_ping = NOW(), ip_address_id = $2 WHERE id = $1",
+                    device.id,
+                    ip_record.id
+                )
+                .execute(&mut *tx)
+                .await?;
+            }
+            None => {
+                sqlx::query!(
+                    "UPDATE device SET last_ping = NOW() WHERE id = $1",
+                    device.id
+                )
+                .execute(&mut *tx)
+                .await?;
+            }
+        }
         tx.commit().await?;
         Ok(())
     }

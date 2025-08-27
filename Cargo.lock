@@ -4997,6 +4997,7 @@ dependencies = [
  "hashlink",
  "hex",
  "indexmap 2.10.0",
+ "ipnetwork",
  "log",
  "memchr",
  "once_cell",
@@ -5125,6 +5126,7 @@ dependencies = [
  "hkdf",
  "hmac",
  "home",
+ "ipnetwork",
  "itoa",
  "log",
  "md-5",
@@ -5657,6 +5659,7 @@ dependencies = [
  "tower",
  "tower-layer",
  "tower-service",
+ "tracing",
 ]
 
 [[package]]
