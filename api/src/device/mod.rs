@@ -180,18 +180,6 @@ impl Device {
         Err(RegistrationError::NotApprovedDevice)
     }
 
-    pub async fn save_last_ping(device: &DeviceWithToken, pool: &PgPool) -> anyhow::Result<()> {
-        let mut tx = pool.begin().await?;
-        sqlx::query!(
-            "UPDATE device SET last_ping = NOW() WHERE id = $1",
-            device.id
-        )
-        .execute(&mut *tx)
-        .await?;
-        tx.commit().await?;
-        Ok(())
-    }
-
     pub async fn save_last_ping_with_ip(
         device: &DeviceWithToken,
         ip_address: Option<std::net::IpAddr>,
