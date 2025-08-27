@@ -346,9 +346,12 @@ async fn start_main_server(config: &'static Config, authorization: Authorization
         "Smith API running on http://{} (Press Ctrl+C to quit)",
         listener.local_addr().unwrap().to_string()
     );
-    axum::serve(listener, app.into_make_service_with_connect_info::<std::net::SocketAddr>())
-        .await
-        .expect("error: failed to initialize axum server");
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+    )
+    .await
+    .expect("error: failed to initialize axum server");
 }
 
 fn setup_metrics_recorder() -> PrometheusHandle {

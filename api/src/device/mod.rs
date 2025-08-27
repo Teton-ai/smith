@@ -189,7 +189,7 @@ impl Device {
         match ip_address {
             Some(ip) => {
                 let ip_network: ipnetwork::IpNetwork = ip.into();
-                
+
                 // Insert or get existing IP address record
                 let ip_record = sqlx::query!(
                     "INSERT INTO ip_address (ip_address, created_at) VALUES ($1, NOW()) 
