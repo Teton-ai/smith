@@ -284,36 +284,36 @@ impl Device {
             Some(ip) => {
                 let ip_network: ipnetwork::IpNetwork = ip.into();
 
-                // Check if the IP exists and if its geolocation data needs updating
-                let ip_record = sqlx::query!(
-                    r#"
-                    SELECT id, updated_at,
-                           CASE 
-                               WHEN updated_at < NOW() - INTERVAL '24 hours' THEN true 
-                               ELSE false 
-                           END as needs_update
-                    FROM ip_address 
-                    WHERE ip_address = $1
-                    "#,
+                // Insert IP address if it doesn't exist, or get existing ID
+                let insert_result = sqlx::query!(
+                    "INSERT INTO ip_address (ip_address, created_at) VALUES ($1, NOW()) ON CONFLICT (ip_address) DO NOTHING RETURNING id",
                     ip_network
                 )
                 .fetch_optional(&mut *tx)
                 .await?;
 
-                let (ip_id, should_update_geolocation) = match ip_record {
+                let (ip_id, should_update_geolocation) = match insert_result {
                     Some(record) => {
-                        // IP exists, check if it needs geolocation update
-                        (record.id, record.needs_update.unwrap_or(false))
+                        // New IP was inserted, mark for geolocation update
+                        (record.id, true)
                     }
                     None => {
-                        // IP doesn't exist, insert it and mark for geolocation update
-                        let new_record = sqlx::query!(
-                            "INSERT INTO ip_address (ip_address, created_at) VALUES ($1, NOW()) RETURNING id",
+                        // IP already exists, get ID and check if geolocation needs updating
+                        let existing_record = sqlx::query!(
+                            r#"
+                            SELECT id,
+                                   CASE 
+                                       WHEN updated_at < NOW() - INTERVAL '24 hours' THEN true 
+                                       ELSE false 
+                                   END as needs_update
+                            FROM ip_address 
+                            WHERE ip_address = $1
+                            "#,
                             ip_network
                         )
                         .fetch_one(&mut *tx)
                         .await?;
-                        (new_record.id, true)
+                        (existing_record.id, existing_record.needs_update.unwrap_or(false))
                     }
                 };
 
