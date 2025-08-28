@@ -69,7 +69,7 @@ pub async fn get_devices_new(
     );
     let devices = match (filter_kind.as_str(), reverse) {
         ("sn", true) => {
-            sqlx::query_as!(types::LeanDevice, "SELECT id, serial_number, last_ping as last_seen, approved, release_id = target_release_id as up_to_date FROM device WHERE serial_number LIKE '%' || $1 || '%' AND archived = false LIMIT $2", filter_value, limit)
+            sqlx::query_as!(types::LeanDevice, "SELECT id, serial_number, last_ping as last_seen, approved, release_id = target_release_id as up_to_date, ip_address_id FROM device WHERE serial_number LIKE '%' || $1 || '%' AND archived = false LIMIT $2", filter_value, limit)
                 .fetch_all(&state.pg_pool)
                 .await
                 .map_err(|err| {
@@ -78,7 +78,7 @@ pub async fn get_devices_new(
                 })
         },
         ("sn", false) => {
-            sqlx::query_as!(types::LeanDevice, "SELECT id, serial_number, last_ping as last_seen, approved, release_id = target_release_id as up_to_date FROM device WHERE serial_number LIKE '%' || $1 || '%' AND archived = false LIMIT $2", filter_value, limit)
+            sqlx::query_as!(types::LeanDevice, "SELECT id, serial_number, last_ping as last_seen, approved, release_id = target_release_id as up_to_date, ip_address_id FROM device WHERE serial_number LIKE '%' || $1 || '%' AND archived = false LIMIT $2", filter_value, limit)
                 .fetch_all(&state.pg_pool)
                 .await
                 .map_err(|err| {
@@ -88,7 +88,7 @@ pub async fn get_devices_new(
         },
         ("approved", true) => {
             let value = filter_value.parse().unwrap_or(false);
-            sqlx::query_as!(types::LeanDevice, "SELECT id, serial_number, last_ping as last_seen, approved, release_id = target_release_id as up_to_date FROM device WHERE approved != $1 AND archived = false LIMIT $2", value, limit)
+            sqlx::query_as!(types::LeanDevice, "SELECT id, serial_number, last_ping as last_seen, approved, release_id = target_release_id as up_to_date, ip_address_id FROM device WHERE approved != $1 AND archived = false LIMIT $2", value, limit)
                 .fetch_all(&state.pg_pool)
                 .await
                 .map_err(|err| {
@@ -98,7 +98,7 @@ pub async fn get_devices_new(
         },
         ("approved", false) => {
             let value = filter_value.parse().unwrap_or(false);
-            sqlx::query_as!(types::LeanDevice, "SELECT id, serial_number, last_ping as last_seen, approved, release_id = target_release_id as up_to_date FROM device WHERE approved = $1 AND archived = false LIMIT $2", value, limit)
+            sqlx::query_as!(types::LeanDevice, "SELECT id, serial_number, last_ping as last_seen, approved, release_id = target_release_id as up_to_date, ip_address_id FROM device WHERE approved = $1 AND archived = false LIMIT $2", value, limit)
                 .fetch_all(&state.pg_pool)
                 .await
                 .map_err(|err| {
@@ -112,7 +112,8 @@ pub async fn get_devices_new(
                             d.serial_number,
                             d.last_ping as last_seen,
                             d.approved,
-                            release_id = target_release_id as up_to_date
+                            release_id = target_release_id as up_to_date,
+                            d.ip_address_id
                         FROM device d
                         JOIN tag_device td ON d.id = td.device_id
                         JOIN tag t ON td.tag_id = t.id
@@ -132,7 +133,8 @@ pub async fn get_devices_new(
                 d.serial_number,
                 d.last_ping as last_seen,
                 d.approved,
-                release_id = target_release_id as up_to_date
+                release_id = target_release_id as up_to_date,
+                d.ip_address_id
                 FROM device d
                 JOIN tag_device td ON d.id = td.device_id
                 JOIN tag t ON td.tag_id = t.id
@@ -148,7 +150,7 @@ pub async fn get_devices_new(
         ("distro", false) => {
             sqlx::query_as!(types::LeanDevice, r#"
                 SELECT d.id, d.serial_number, d.last_ping as last_seen, d.approved,
-                release_id = target_release_id as up_to_date
+                release_id = target_release_id as up_to_date, d.ip_address_id
                 FROM device d
                 LEFT JOIN release r ON r.id = d.release_id
                 LEFT JOIN distribution dist ON r.distribution_id = dist.id
@@ -164,7 +166,7 @@ pub async fn get_devices_new(
         ("distro", true) => {
             sqlx::query_as!(types::LeanDevice, r#"
                 SELECT d.id, d.serial_number, d.last_ping as last_seen, d.approved,
-                release_id = target_release_id as up_to_date
+                release_id = target_release_id as up_to_date, d.ip_address_id
                 FROM device d
                 LEFT JOIN release r ON r.id = d.release_id
                 LEFT JOIN distribution dist ON r.distribution_id = dist.id
@@ -181,7 +183,7 @@ pub async fn get_devices_new(
         ("release", false) => {
             sqlx::query_as!(types::LeanDevice, r#"
                 SELECT d.id, d.serial_number, d.last_ping as last_seen, d.approved,
-                release_id = target_release_id as up_to_date
+                release_id = target_release_id as up_to_date, d.ip_address_id
                 FROM device d
                 LEFT JOIN release r ON r.id = d.release_id
                 WHERE r.version = $1 AND d.archived = false
@@ -197,7 +199,7 @@ pub async fn get_devices_new(
         ("release", true) => {
             sqlx::query_as!(types::LeanDevice, r#"
                 SELECT d.id, d.serial_number, d.last_ping as last_seen, d.approved,
-                release_id = target_release_id as up_to_date
+                release_id = target_release_id as up_to_date, d.ip_address_id
                 FROM device d
                 LEFT JOIN release r ON r.id = d.release_id
                 WHERE r.version != $1 AND d.archived = false
@@ -218,7 +220,7 @@ pub async fn get_devices_new(
             let query = if is_online {
                 r#"
                 SELECT d.id, d.serial_number, d.last_ping as last_seen, d.approved,
-                release_id = target_release_id as up_to_date
+                release_id = target_release_id as up_to_date, d.ip_address_id
                 FROM device d
                 WHERE d.last_ping >= now() - INTERVAL '5 min'
                 AND d.archived = false
@@ -226,7 +228,7 @@ pub async fn get_devices_new(
             } else {
                 r#"
                 SELECT d.id, d.serial_number, d.last_ping as last_seen, d.approved,
-                release_id = target_release_id as up_to_date
+                release_id = target_release_id as up_to_date, d.ip_address_id
                 FROM device d
                 WHERE d.last_ping < now() - INTERVAL '5 min'
                 AND d.archived = false
@@ -249,7 +251,7 @@ pub async fn get_devices_new(
             let query = if is_updated {
                 r#"
                 SELECT d.id, d.serial_number, d.last_ping as last_seen, d.approved,
-                release_id = target_release_id as up_to_date
+                release_id = target_release_id as up_to_date, d.ip_address_id
                 FROM device d
                 WHERE release_id = target_release_id
                 AND d.archived = false
@@ -257,7 +259,7 @@ pub async fn get_devices_new(
             } else {
                 r#"
                 SELECT d.id, d.serial_number, d.last_ping as last_seen, d.approved,
-                release_id = target_release_id as up_to_date
+                release_id = target_release_id as up_to_date, d.ip_address_id
                 FROM device d
                 WHERE release_id != target_release_id
                 AND d.archived = false
@@ -315,7 +317,8 @@ pub async fn get_devices(
                 d.release_id,
                 d.target_release_id,
                 d.system_info,
-                d.modem_id
+                d.modem_id,
+                d.ip_address_id
             FROM device d
             JOIN tag_device td ON d.id = td.device_id
             JOIN tag t ON td.tag_id = t.id
@@ -346,7 +349,8 @@ pub async fn get_devices(
             d.release_id,
             d.target_release_id,
             d.system_info,
-            d.modem_id
+            d.modem_id,
+            d.ip_address_id
         FROM device d
         WHERE ($1::text IS NULL OR d.serial_number = $1)
           AND ($2::boolean IS NULL OR d.approved = $2)
@@ -1666,7 +1670,8 @@ pub async fn get_device_info(
         release_id,
         target_release_id,
         system_info,
-        modem_id
+        modem_id,
+        ip_address_id
         FROM device
         WHERE
             CASE

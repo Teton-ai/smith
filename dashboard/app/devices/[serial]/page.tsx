@@ -13,9 +13,17 @@ import {
   Smartphone,
   Router,
   Signal,
+  MapPin,
+  Globe,
 } from 'lucide-react';
+import dynamic from 'next/dynamic';
 import PrivateLayout from "@/app/layouts/PrivateLayout";
 import useSmithAPI from "@/app/hooks/smith-api";
+
+const LocationMap = dynamic(() => import('./LocationMap'), {
+  ssr: false,
+  loading: () => <div className="h-64 bg-gray-100 rounded-lg flex items-center justify-center">Loading map...</div>
+});
 
 const Tooltip = ({ children, content }: { children: React.ReactNode, content: string }) => {
   const [isVisible, setIsVisible] = React.useState(false);
@@ -75,6 +83,7 @@ interface Device {
   created_on: string;
   approved: boolean;
   modem_id?: number;
+  ip_address_id?: number;
   system_info?: {
     hostname?: string;
     device_tree?: {
@@ -118,12 +127,31 @@ interface Modem {
   // Add other modem fields as needed
 }
 
+interface IpAddressInfo {
+  id: number;
+  ip_address: string;
+  name?: string;
+  continent?: string;
+  continent_code?: string;
+  country_code?: string;
+  country?: string;
+  region?: string;
+  city?: string;
+  isp?: string;
+  coordinates?: [number, number];
+  proxy?: boolean;
+  hosting?: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
 const DeviceDetailPage = () => {
   const params = useParams();
   const router = useRouter();
   const { callAPI } = useSmithAPI();
   const [device, setDevice] = useState<Device | null>(null);
   const [modem, setModem] = useState<Modem | null>(null);
+  const [ipAddressInfo, setIpAddressInfo] = useState<IpAddressInfo | null>(null);
   const [loading, setLoading] = useState(true);
 
   const serial = params.serial as string;
@@ -141,6 +169,14 @@ const DeviceDetailPage = () => {
             const modemData = await callAPI<Modem>('GET', `/modems/${deviceData.modem_id}`);
             if (modemData) {
               setModem(modemData);
+            }
+          }
+
+          // Fetch IP address data if device has an IP address ID
+          if (deviceData.ip_address_id) {
+            const ipData = await callAPI<IpAddressInfo>('GET', `/ip_address/${deviceData.ip_address_id}`);
+            if (ipData) {
+              setIpAddressInfo(ipData);
             }
           }
         }
@@ -284,6 +320,10 @@ const DeviceDetailPage = () => {
   const getDeviceModel = () => {
     if (!device) return '';
     return device.system_info?.device_tree?.model || 'Unknown Device';
+  };
+
+  const getFlagUrl = (countryCode: string) => {
+    return `https://flagicons.lipis.dev/flags/4x3/${countryCode.toLowerCase()}.svg`;
   };
 
   if (loading) {
@@ -543,6 +583,109 @@ const DeviceDetailPage = () => {
                 <p className="text-gray-500 text-sm">No network interface information available</p>
               )}
             </div>
+          </div>
+
+          {/* Location Information Section */}
+          <div className="bg-white rounded-lg border border-gray-200 p-6">
+            <div className="flex items-center space-x-2 mb-4">
+              <MapPin className="w-5 h-5 text-blue-600" />
+              <h3 className="text-lg font-semibold text-gray-900">Location Information</h3>
+            </div>
+
+            {device.ip_address_id ? (
+              ipAddressInfo ? (
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                  {/* Location Details */}
+                  <div className="space-y-4">
+                    <div className="flex items-center space-x-3">
+                      <Globe className="w-4 h-4 text-gray-500" />
+                      <span className="font-mono text-sm text-gray-900">{ipAddressInfo.ip_address}</span>
+                      {ipAddressInfo.country_code && (
+                        <img 
+                          src={getFlagUrl(ipAddressInfo.country_code)} 
+                          alt={ipAddressInfo.country || 'Country flag'} 
+                          className="w-6 h-4 rounded-sm border border-gray-200"
+                          onError={(e) => {
+                            (e.target as HTMLImageElement).style.display = 'none';
+                          }}
+                        />
+                      )}
+                    </div>
+                    
+                    <div className="space-y-3">
+                      {ipAddressInfo.name && (
+                        <div className="flex items-center justify-between">
+                          <span className="text-gray-600">Location Name</span>
+                          <span className="text-gray-900 font-medium">{ipAddressInfo.name}</span>
+                        </div>
+                      )}
+                      {ipAddressInfo.country && (
+                        <div className="flex items-center justify-between">
+                          <span className="text-gray-600">Country</span>
+                          <span className="text-gray-900 font-medium">
+                            {ipAddressInfo.country}
+                            {ipAddressInfo.country_code && ` (${ipAddressInfo.country_code})`}
+                          </span>
+                        </div>
+                      )}
+                      {ipAddressInfo.region && (
+                        <div className="flex items-center justify-between">
+                          <span className="text-gray-600">Region</span>
+                          <span className="text-gray-900 font-medium">{ipAddressInfo.region}</span>
+                        </div>
+                      )}
+                      {ipAddressInfo.city && (
+                        <div className="flex items-center justify-between">
+                          <span className="text-gray-600">City</span>
+                          <span className="text-gray-900 font-medium">{ipAddressInfo.city}</span>
+                        </div>
+                      )}
+                      {ipAddressInfo.isp && (
+                        <div className="flex items-center justify-between">
+                          <span className="text-gray-600">Internet Provider</span>
+                          <span className="text-gray-900 font-medium">{ipAddressInfo.isp}</span>
+                        </div>
+                      )}
+                      {ipAddressInfo.coordinates && (
+                        <div className="flex items-center justify-between">
+                          <span className="text-gray-600">Coordinates</span>
+                          <span className="font-mono text-sm text-gray-900">
+                            {ipAddressInfo.coordinates[0].toFixed(4)}, {ipAddressInfo.coordinates[1].toFixed(4)}
+                          </span>
+                        </div>
+                      )}
+                      <div className="text-xs text-gray-500 pt-2 border-t border-gray-200">
+                        Last updated: {new Date(ipAddressInfo.updated_at).toLocaleString()}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Map */}
+                  <div className="">
+                    <LocationMap 
+                      countryCode={ipAddressInfo.country_code}
+                      city={ipAddressInfo.city}
+                      country={ipAddressInfo.country}
+                    />
+                  </div>
+                </div>
+              ) : (
+                <div className="flex items-center justify-center py-8">
+                  <div className="text-center">
+                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-4"></div>
+                    <p className="text-gray-600">Loading location information...</p>
+                  </div>
+                </div>
+              )
+            ) : (
+              <div className="flex items-center justify-center py-8">
+                <div className="text-center">
+                  <Globe className="w-12 h-12 text-gray-300 mx-auto mb-4" />
+                  <p className="text-gray-500">No location information available</p>
+                  <p className="text-gray-400 text-sm mt-1">This device has no associated IP address data</p>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </div>

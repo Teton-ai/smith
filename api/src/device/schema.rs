@@ -14,4 +14,5 @@ pub struct Device {
     pub target_release_id: Option<i32>,
     pub system_info: Option<serde_json::Value>,
     pub modem_id: Option<i32>,
+    pub ip_address_id: Option<i32>,
 }

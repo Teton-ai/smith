@@ -193,6 +193,7 @@ async fn start_main_server(config: &'static Config, authorization: Authorization
         .routes(routes!(
             handlers::distributions::get_distribution_latest_release
         ))
+        .routes(routes!(handlers::ip_address::get_ip_address_info))
         .routes(routes!(handlers::releases::get_releases))
         .routes(routes!(
             handlers::releases::get_release,

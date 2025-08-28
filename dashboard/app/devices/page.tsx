@@ -61,8 +61,8 @@ const Tooltip = ({ children, content }: { children: React.ReactNode, content: st
 
 const DeviceSkeleton = () => (
   <div className="px-4 py-3 animate-pulse">
-    <div className="grid grid-cols-7 gap-4 items-center">
-      <div className="col-span-4">
+    <div className="grid grid-cols-8 gap-4 items-center">
+      <div className="col-span-3">
         <div className="flex items-center space-x-3">
           <div className="w-4 h-4 bg-gray-300 rounded flex-shrink-0"></div>
           <div className="min-w-0 flex-1">
@@ -72,6 +72,13 @@ const DeviceSkeleton = () => (
             </div>
             <div className="h-3 bg-gray-200 rounded w-24 mt-1"></div>
           </div>
+        </div>
+      </div>
+      
+      <div className="col-span-2">
+        <div className="flex items-center space-x-2">
+          <div className="w-4 h-3 bg-gray-300 rounded-sm flex-shrink-0"></div>
+          <div className="h-4 bg-gray-300 rounded w-20"></div>
         </div>
       </div>
       
@@ -127,6 +134,25 @@ interface Device {
   target_release_id: number | null
   system_info: SystemInfo | null
   modem_id: number | null
+  ip_address_id: number | null
+}
+
+interface IpAddressInfo {
+  id: number
+  ip_address: string
+  name?: string
+  continent?: string
+  continent_code?: string
+  country_code?: string
+  country?: string
+  region?: string
+  city?: string
+  isp?: string
+  coordinates?: [number, number]
+  proxy?: boolean
+  hosting?: boolean
+  created_at: string
+  updated_at: string
 }
 
 const DevicesPage = () => {
@@ -136,6 +162,7 @@ const DevicesPage = () => {
   const [filteredDevices, setFilteredDevices] = useState<Device[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [showLongOfflineDevices, setShowLongOfflineDevices] = useState(false);
+  const [ipAddressCache, setIpAddressCache] = useState<Record<number, IpAddressInfo>>({});
 
   useEffect(() => {
     const fetchDashboard = async () => {
@@ -146,6 +173,26 @@ const DevicesPage = () => {
     };
     fetchDashboard();
   }, [callAPI]);
+
+  // Fetch IP address info for devices that have ip_address_id
+  useEffect(() => {
+    const fetchIpAddresses = async () => {
+      const devicesWithIp = devices.filter(device => device.ip_address_id && !ipAddressCache[device.ip_address_id]);
+      
+      for (const device of devicesWithIp) {
+        if (device.ip_address_id) {
+          const ipInfo = await callAPI<IpAddressInfo>('GET', `/ip_address/${device.ip_address_id}`);
+          if (ipInfo) {
+            setIpAddressCache(prev => ({ ...prev, [device.ip_address_id!]: ipInfo }));
+          }
+        }
+      }
+    };
+    
+    if (devices.length > 0) {
+      fetchIpAddresses();
+    }
+  }, [devices, callAPI, ipAddressCache]);
 
   // Filter and sort devices - show only authorized devices, filter by search, and sort by latest online
   useEffect(() => {
@@ -231,6 +278,15 @@ const DevicesPage = () => {
     return device.system_info?.smith?.version || 'N/A';
   };
 
+  const getIpLocationInfo = (device: Device) => {
+    if (!device.ip_address_id) return null;
+    return ipAddressCache[device.ip_address_id] || null;
+  };
+
+  const getFlagUrl = (countryCode: string) => {
+    return `https://flagicons.lipis.dev/flags/4x3/${countryCode.toLowerCase()}.svg`;
+  };
+
   const getStatusTooltip = (device: Device) => {
     return 'Last seen: ' + (device.last_seen ? formatTimeAgo(new Date(device.last_seen)) + ' ago' : 'Never');
   };
@@ -295,8 +351,9 @@ const DevicesPage = () => {
         {/* Device List */}
         <div className="border border-gray-200 rounded-lg overflow-hidden bg-white">
           <div className="bg-gray-50 px-4 py-3 border-b border-gray-200">
-            <div className="grid grid-cols-7 gap-4 text-xs font-medium text-gray-500 uppercase tracking-wide">
-              <div className="col-span-4">Device</div>
+            <div className="grid grid-cols-8 gap-4 text-xs font-medium text-gray-500 uppercase tracking-wide">
+              <div className="col-span-3">Device</div>
+              <div className="col-span-2">Location</div>
               <div className="col-span-2">OS Version</div>
               <div className="col-span-1">Smith Version</div>
             </div>
@@ -312,8 +369,8 @@ const DevicesPage = () => {
                 className="px-4 py-3 hover:bg-gray-50 cursor-pointer transition-colors"
                 onClick={() => router.push(`/devices/${device.serial_number}`)}
               >
-                <div className="grid grid-cols-7 gap-4 items-center">
-                  <div className="col-span-4">
+                <div className="grid grid-cols-8 gap-4 items-center">
+                  <div className="col-span-3">
                     <div className="flex items-center space-x-3">
                       <Cpu className="w-4 h-4 text-gray-400 flex-shrink-0" />
                       <div className="min-w-0 flex-1">
@@ -345,6 +402,38 @@ const DevicesPage = () => {
                         </div>
                       </div>
                     </div>
+                  </div>
+
+                  <div className="col-span-2">
+                    {(() => {
+                      const ipInfo = getIpLocationInfo(device);
+                      if (!ipInfo) {
+                        return <div className="text-sm text-gray-400">No location data</div>;
+                      }
+                      
+                      const locationParts = [];
+                      if (ipInfo.name) locationParts.push(ipInfo.name);
+                      if (ipInfo.city) locationParts.push(ipInfo.city);
+                      if (ipInfo.country) locationParts.push(ipInfo.country);
+                      
+                      return (
+                        <div className="flex items-center space-x-2">
+                          {ipInfo.country_code && (
+                            <img 
+                              src={getFlagUrl(ipInfo.country_code)} 
+                              alt={ipInfo.country || 'Country flag'} 
+                              className="w-4 h-3 flex-shrink-0 rounded-sm"
+                              onError={(e) => {
+                                (e.target as HTMLImageElement).style.display = 'none';
+                              }}
+                            />
+                          )}
+                          <div className="text-sm text-gray-600 truncate">
+                            {locationParts.join(', ') || 'Unknown location'}
+                          </div>
+                        </div>
+                      );
+                    })()}
                   </div>
 
                   <div className="col-span-2 text-sm text-gray-600">

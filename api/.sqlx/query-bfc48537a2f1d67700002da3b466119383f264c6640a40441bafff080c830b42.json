@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT\n            d.id,\n            d.serial_number,\n            d.note,\n            d.last_ping as last_seen,\n            d.created_on,\n            d.approved,\n            d.token IS NOT NULL as has_token,\n            d.release_id,\n            d.target_release_id,\n            d.system_info,\n            d.modem_id\n        FROM device d\n        WHERE ($1::text IS NULL OR d.serial_number = $1)\n          AND ($2::boolean IS NULL OR d.approved = $2)\n        ORDER BY d.serial_number",
+  "query": "\n        SELECT\n        id,\n        serial_number,\n        note,\n        last_ping as last_seen,\n        created_on,\n        approved,\n        token IS NOT NULL as has_token,\n        release_id,\n        target_release_id,\n        system_info,\n        modem_id,\n        ip_address_id\n        FROM device\n        WHERE\n            CASE\n                WHEN $1 ~ '^[0-9]+$' AND length($1) <= 10 THEN\n                    id = $1::int4\n                ELSE\n                    serial_number = $1\n            END\n        ",
   "describe": {
     "columns": [
       {
@@ -57,12 +57,16 @@
         "ordinal": 10,
         "name": "modem_id",
         "type_info": "Int4"
+      },
+      {
+        "ordinal": 11,
+        "name": "ip_address_id",
+        "type_info": "Int4"
       }
     ],
     "parameters": {
       "Left": [
-        "Text",
-        "Bool"
+        "Text"
       ]
     },
     "nullable": [
@@ -76,8 +80,9 @@
       true,
       true,
       true,
+      true,
       true
     ]
   },
-  "hash": "408dc16b436651abaae2b225245cb25373c97a28dcac7b85350126537d6a9f85"
+  "hash": "bfc48537a2f1d67700002da3b466119383f264c6640a40441bafff080c830b42"
 }
