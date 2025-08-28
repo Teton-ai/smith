@@ -3,6 +3,7 @@ use crate::db::DeviceWithToken;
 pub(crate) use crate::device::schema::Device;
 use serde::Deserialize;
 use serde_json::{Value, json};
+use std::time::Duration;
 use smith::utils::schema::{DeviceRegistration, DeviceRegistrationResponse};
 use sqlx::PgPool;
 use sqlx::types::ipnetwork;
@@ -36,72 +37,124 @@ async fn update_ip_geolocation(
     api_key: &str,
     pool: &PgPool,
 ) -> anyhow::Result<()> {
-    // Call IP-API with API key
-    let url = format!("http://pro.ip-api.com/json/{}?key={}", ip_address, api_key);
-    let client = reqwest::Client::new();
+    // Build URL with HTTPS and field filtering
+    let fields = "status,continent,continentCode,country,countryCode,region,city,lat,lon,isp,proxy,hosting";
+    let url = format!(
+        "https://pro.ip-api.com/json/{}?key={}&fields={}",
+        ip_address, api_key, fields
+    );
 
-    match client.get(&url).send().await {
-        Ok(response) => {
-            match response.json::<IpApiResponse>().await {
-                Ok(api_response) => {
-                    if api_response.status == "success" {
-                        // Update the database with geolocation data using sqlx::query for POINT support
-                        let query = r#"
-                            UPDATE ip_address 
-                            SET 
-                                continent = $2,
-                                continent_code = $3,
-                                country_code = $4,
-                                country = $5,
-                                region = $6,
-                                city = $7,
-                                isp = $8,
-                                coordinates = CASE 
-                                    WHEN $9::float8 IS NOT NULL AND $10::float8 IS NOT NULL 
-                                    THEN point($9, $10) 
-                                    ELSE NULL 
-                                END,
-                                proxy = $11,
-                                hosting = $12,
-                                updated_at = NOW()
-                            WHERE id = $1
-                        "#;
+    // Build client with sensible timeouts
+    let client = reqwest::Client::builder()
+        .connect_timeout(Duration::from_secs(10))
+        .timeout(Duration::from_secs(30))
+        .build()?;
 
-                        sqlx::query(query)
-                            .bind(ip_id)
-                            .bind(&api_response.continent)
-                            .bind(&api_response.continent_code)
-                            .bind(&api_response.country_code)
-                            .bind(&api_response.country)
-                            .bind(&api_response.region)
-                            .bind(&api_response.city)
-                            .bind(&api_response.isp)
-                            .bind(api_response.lon)
-                            .bind(api_response.lat)
-                            .bind(api_response.proxy)
-                            .bind(api_response.hosting)
-                            .execute(pool)
-                            .await?;
+    // Simple retry logic with exponential backoff
+    let mut retry_count = 0;
+    const MAX_RETRIES: u32 = 3;
+    const BASE_DELAY_MS: u64 = 500;
 
-                        debug!("Updated geolocation for IP {} (ID: {})", ip_address, ip_id);
+    loop {
+        match client.get(&url).send().await {
+            Ok(response) => {
+                // Check HTTP status before parsing JSON
+                if let Err(e) = response.error_for_status_ref() {
+                    error!(
+                        "IP-API returned HTTP error for {} (attempt {}): {}",
+                        ip_address, retry_count + 1, e
+                    );
+                    
+                    if retry_count < MAX_RETRIES {
+                        retry_count += 1;
+                        let delay = Duration::from_millis(BASE_DELAY_MS * (1 << (retry_count - 1)));
+                        tokio::time::sleep(delay).await;
+                        continue;
                     } else {
-                        warn!(
-                            "IP-API returned error for {}: {}",
-                            ip_address, api_response.status
-                        );
+                        return Err(anyhow::anyhow!("IP-API HTTP error after {} retries: {}", MAX_RETRIES, e));
                     }
                 }
-                Err(e) => {
-                    warn!("Failed to parse IP-API response for {}: {}", ip_address, e);
+
+                // Parse JSON response
+                match response.json::<IpApiResponse>().await {
+                    Ok(api_response) => {
+                        if api_response.status == "success" {
+                            // Update the database with geolocation data using sqlx::query for POINT support
+                            let query = r#"
+                                UPDATE ip_address 
+                                SET 
+                                    continent = $2,
+                                    continent_code = $3,
+                                    country_code = $4,
+                                    country = $5,
+                                    region = $6,
+                                    city = $7,
+                                    isp = $8,
+                                    coordinates = CASE 
+                                        WHEN $9::float8 IS NOT NULL AND $10::float8 IS NOT NULL 
+                                        THEN point($9, $10) 
+                                        ELSE NULL 
+                                    END,
+                                    proxy = $11,
+                                    hosting = $12,
+                                    updated_at = NOW()
+                                WHERE id = $1
+                            "#;
+
+                            sqlx::query(query)
+                                .bind(ip_id)
+                                .bind(&api_response.continent)
+                                .bind(&api_response.continent_code)
+                                .bind(&api_response.country_code)
+                                .bind(&api_response.country)
+                                .bind(&api_response.region)
+                                .bind(&api_response.city)
+                                .bind(&api_response.isp)
+                                .bind(api_response.lon)
+                                .bind(api_response.lat)
+                                .bind(api_response.proxy)
+                                .bind(api_response.hosting)
+                                .execute(pool)
+                                .await?;
+
+                            debug!("Updated geolocation for IP {} (ID: {})", ip_address, ip_id);
+                            return Ok(());
+                        } else {
+                            warn!(
+                                "IP-API returned error status for {}: {}",
+                                ip_address, api_response.status
+                            );
+                            return Ok(()); // Don't retry on API-level errors (e.g., invalid IP, quota exceeded)
+                        }
+                    }
+                    Err(e) => {
+                        warn!("Failed to parse IP-API JSON response for {} (attempt {}): {}", ip_address, retry_count + 1, e);
+                        
+                        if retry_count < MAX_RETRIES {
+                            retry_count += 1;
+                            let delay = Duration::from_millis(BASE_DELAY_MS * (1 << (retry_count - 1)));
+                            tokio::time::sleep(delay).await;
+                            continue;
+                        } else {
+                            return Err(anyhow::anyhow!("Failed to parse IP-API response after {} retries: {}", MAX_RETRIES, e));
+                        }
+                    }
+                }
+            }
+            Err(e) => {
+                warn!("Network error calling IP-API for {} (attempt {}): {}", ip_address, retry_count + 1, e);
+                
+                if retry_count < MAX_RETRIES {
+                    retry_count += 1;
+                    let delay = Duration::from_millis(BASE_DELAY_MS * (1 << (retry_count - 1)));
+                    tokio::time::sleep(delay).await;
+                    continue;
+                } else {
+                    return Err(anyhow::anyhow!("Network error calling IP-API after {} retries: {}", MAX_RETRIES, e));
                 }
             }
         }
-        Err(e) => {
-            warn!("Failed to call IP-API for {}: {}", ip_address, e);
-        }
     }
-
-    Ok(())
 }
 
 impl Device {
