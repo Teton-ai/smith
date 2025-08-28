@@ -1,13 +1,13 @@
 use crate::config::Config;
 use crate::db::DeviceWithToken;
 pub(crate) use crate::device::schema::Device;
+use serde::Deserialize;
 use serde_json::{Value, json};
 use smith::utils::schema::{DeviceRegistration, DeviceRegistrationResponse};
 use sqlx::PgPool;
 use sqlx::types::ipnetwork;
 use thiserror::Error;
-use tracing::{error, warn, debug};
-use serde::Deserialize;
+use tracing::{debug, error, warn};
 
 pub mod routes;
 pub mod schema;
@@ -30,11 +30,16 @@ struct IpApiResponse {
     continent_code: Option<String>,
 }
 
-async fn update_ip_geolocation(ip_address: std::net::IpAddr, ip_id: i32, api_key: &str, pool: &PgPool) -> anyhow::Result<()> {
+async fn update_ip_geolocation(
+    ip_address: std::net::IpAddr,
+    ip_id: i32,
+    api_key: &str,
+    pool: &PgPool,
+) -> anyhow::Result<()> {
     // Call IP-API with API key
     let url = format!("http://pro.ip-api.com/json/{}?key={}", ip_address, api_key);
     let client = reqwest::Client::new();
-    
+
     match client.get(&url).send().await {
         Ok(response) => {
             match response.json::<IpApiResponse>().await {
@@ -75,12 +80,15 @@ async fn update_ip_geolocation(ip_address: std::net::IpAddr, ip_id: i32, api_key
                             .bind(api_response.lat)
                             .bind(api_response.proxy)
                             .bind(api_response.hosting)
-                        .execute(pool)
-                        .await?;
+                            .execute(pool)
+                            .await?;
 
                         debug!("Updated geolocation for IP {} (ID: {})", ip_address, ip_id);
                     } else {
-                        warn!("IP-API returned error for {}: {}", ip_address, api_response.status);
+                        warn!(
+                            "IP-API returned error for {}: {}",
+                            ip_address, api_response.status
+                        );
                     }
                 }
                 Err(e) => {
@@ -326,12 +334,17 @@ impl Device {
                         let pool_clone = pool.clone();
                         let api_key_clone = api_key.clone();
                         tokio::spawn(async move {
-                            if let Err(e) = update_ip_geolocation(ip, ip_id, &api_key_clone, &pool_clone).await {
+                            if let Err(e) =
+                                update_ip_geolocation(ip, ip_id, &api_key_clone, &pool_clone).await
+                            {
                                 error!("Failed to update geolocation for IP {}: {}", ip, e);
                             }
                         });
                     } else {
-                        debug!("IP-API key not configured, skipping geolocation update for IP {}", ip);
+                        debug!(
+                            "IP-API key not configured, skipping geolocation update for IP {}",
+                            ip
+                        );
                     }
                 }
             }

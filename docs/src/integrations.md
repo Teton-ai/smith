@@ -50,6 +50,36 @@ These integrations are optional and can be enabled by setting specific environme
 - Long-term storage of monitoring data
 - Compatible with Prometheus querying and visualization tools
 
+### [IP-API Geolocation](https://ip-api.com/)
+
+**Purpose:** Automatically enriches device IP addresses with geolocation data including country, city, ISP, and coordinates.
+
+**Configuration:**
+- Set the `IP_API_KEY` environment variable with your IP-API Pro key
+- Example: `IP_API_KEY=your-pro-api-key`
+
+**Features:**
+- **Smart Updates:** Only updates geolocation data when it's older than 24 hours, minimizing API calls
+- **Background Processing:** Geolocation lookups happen asynchronously without blocking device ping responses
+- **Comprehensive Data:** Collects country, city, region, ISP, coordinates, proxy/hosting detection
+- **Graceful Fallback:** When no API key is configured, only stores IP addresses without geolocation data
+
+**Database Schema:**
+The system automatically stores geolocation data in the `ip_address` table with the following fields:
+- `continent`, `continent_code`
+- `country_code`, `country`
+- `region`, `city`
+- `isp`
+- `coordinates` (PostgreSQL POINT type for latitude/longitude)
+- `proxy`, `hosting` (boolean flags)
+- `created_at`, `updated_at` (automatic timestamps)
+
+**Benefits:**
+- Track device geographical distribution
+- Identify unusual network activity (proxy/hosting detection)
+- Generate location-based analytics and insights
+- Minimal impact on API performance due to smart caching
+
 ## Implementation Example
 
 Add these environment variables to your deployment configuration:
@@ -64,6 +94,9 @@ SLACK_HOOK_URL=https://hooks.slack.com/services/your-webhook-url
 # Metrics and Monitoring
 VICTORIA_METRICS_URL=https://your-vm-instance.example.com
 VICTORIA_METRICS_AUTH_TOKEN=your-auth-token
+
+# IP Geolocation
+IP_API_KEY=your-pro-api-key
 ```
 
 ## Additional Information
