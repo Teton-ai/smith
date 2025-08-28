@@ -72,7 +72,7 @@ pub async fn home(
             .unwrap_or_else(|err| {
                 error!("Error saving release_id: {:?}", err);
             });
-        crate::device::Device::save_last_ping_with_ip(&device, client_ip, &state.pg_pool)
+        crate::device::Device::save_last_ping_with_ip(&device, client_ip, &state.pg_pool, state.config)
             .await
             .unwrap_or_else(|err| {
                 error!("Error saving last ping with IP: {:?}", err);

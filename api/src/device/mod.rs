@@ -6,10 +6,95 @@ use smith::utils::schema::{DeviceRegistration, DeviceRegistrationResponse};
 use sqlx::PgPool;
 use sqlx::types::ipnetwork;
 use thiserror::Error;
-use tracing::error;
+use tracing::{error, warn, debug};
+use serde::Deserialize;
 
 pub mod routes;
 pub mod schema;
+
+#[derive(Deserialize, Debug)]
+struct IpApiResponse {
+    status: String,
+    country: Option<String>,
+    #[serde(rename = "countryCode")]
+    country_code: Option<String>,
+    region: Option<String>,
+    city: Option<String>,
+    isp: Option<String>,
+    lat: Option<f64>,
+    lon: Option<f64>,
+    proxy: Option<bool>,
+    hosting: Option<bool>,
+    continent: Option<String>,
+    #[serde(rename = "continentCode")]
+    continent_code: Option<String>,
+}
+
+async fn update_ip_geolocation(ip_address: std::net::IpAddr, ip_id: i32, api_key: &str, pool: &PgPool) -> anyhow::Result<()> {
+    // Call IP-API with API key
+    let url = format!("http://pro.ip-api.com/json/{}?key={}", ip_address, api_key);
+    let client = reqwest::Client::new();
+    
+    match client.get(&url).send().await {
+        Ok(response) => {
+            match response.json::<IpApiResponse>().await {
+                Ok(api_response) => {
+                    if api_response.status == "success" {
+                        // Update the database with geolocation data using sqlx::query for POINT support
+                        let query = r#"
+                            UPDATE ip_address 
+                            SET 
+                                continent = $2,
+                                continent_code = $3,
+                                country_code = $4,
+                                country = $5,
+                                region = $6,
+                                city = $7,
+                                isp = $8,
+                                coordinates = CASE 
+                                    WHEN $9::float8 IS NOT NULL AND $10::float8 IS NOT NULL 
+                                    THEN point($9, $10) 
+                                    ELSE NULL 
+                                END,
+                                proxy = $11,
+                                hosting = $12,
+                                updated_at = NOW()
+                            WHERE id = $1
+                        "#;
+
+                        sqlx::query(query)
+                            .bind(ip_id)
+                            .bind(&api_response.continent)
+                            .bind(&api_response.continent_code)
+                            .bind(&api_response.country_code)
+                            .bind(&api_response.country)
+                            .bind(&api_response.region)
+                            .bind(&api_response.city)
+                            .bind(&api_response.isp)
+                            .bind(api_response.lon)
+                            .bind(api_response.lat)
+                            .bind(api_response.proxy)
+                            .bind(api_response.hosting)
+                        .execute(pool)
+                        .await?;
+
+                        debug!("Updated geolocation for IP {} (ID: {})", ip_address, ip_id);
+                    } else {
+                        warn!("IP-API returned error for {}: {}", ip_address, api_response.status);
+                    }
+                }
+                Err(e) => {
+                    warn!("Failed to parse IP-API response for {}: {}", ip_address, e);
+                }
+            }
+        }
+        Err(e) => {
+            warn!("Failed to call IP-API for {}: {}", ip_address, e);
+        }
+    }
+
+    Ok(())
+}
 
 impl Device {
     pub async fn register_device(
@@ -184,30 +269,71 @@ impl Device {
         device: &DeviceWithToken,
         ip_address: Option<std::net::IpAddr>,
         pool: &PgPool,
+        config: &Config,
     ) -> anyhow::Result<()> {
         let mut tx = pool.begin().await?;
         match ip_address {
             Some(ip) => {
                 let ip_network: ipnetwork::IpNetwork = ip.into();
 
-                // Insert or get existing IP address record
+                // Check if the IP exists and if its geolocation data needs updating
                 let ip_record = sqlx::query!(
-                    "INSERT INTO ip_address (ip_address, created_at) VALUES ($1, NOW()) 
-                     ON CONFLICT (ip_address) DO UPDATE SET updated_at = NOW()
-                     RETURNING id",
+                    r#"
+                    SELECT id, updated_at,
+                           CASE 
+                               WHEN updated_at < NOW() - INTERVAL '24 hours' THEN true 
+                               ELSE false 
+                           END as needs_update
+                    FROM ip_address 
+                    WHERE ip_address = $1
+                    "#,
                     ip_network
                 )
-                .fetch_one(&mut *tx)
+                .fetch_optional(&mut *tx)
                 .await?;
+
+                let (ip_id, should_update_geolocation) = match ip_record {
+                    Some(record) => {
+                        // IP exists, check if it needs geolocation update
+                        (record.id, record.needs_update.unwrap_or(false))
+                    }
+                    None => {
+                        // IP doesn't exist, insert it and mark for geolocation update
+                        let new_record = sqlx::query!(
+                            "INSERT INTO ip_address (ip_address, created_at) VALUES ($1, NOW()) RETURNING id",
+                            ip_network
+                        )
+                        .fetch_one(&mut *tx)
+                        .await?;
+                        (new_record.id, true)
+                    }
+                };
 
                 // Update device with IP address ID
                 sqlx::query!(
                     "UPDATE device SET last_ping = NOW(), ip_address_id = $2 WHERE id = $1",
                     device.id,
-                    ip_record.id
+                    ip_id
                 )
                 .execute(&mut *tx)
                 .await?;
+
+                tx.commit().await?;
+
+                // If geolocation data needs updating and API key is available, spawn a background task
+                if should_update_geolocation {
+                    if let Some(api_key) = &config.ip_api_key {
+                        let pool_clone = pool.clone();
+                        let api_key_clone = api_key.clone();
+                        tokio::spawn(async move {
+                            if let Err(e) = update_ip_geolocation(ip, ip_id, &api_key_clone, &pool_clone).await {
+                                error!("Failed to update geolocation for IP {}: {}", ip, e);
+                            }
+                        });
+                    } else {
+                        debug!("IP-API key not configured, skipping geolocation update for IP {}", ip);
+                    }
+                }
             }
             None => {
                 sqlx::query!(
@@ -216,9 +342,9 @@ impl Device {
                 )
                 .execute(&mut *tx)
                 .await?;
+                tx.commit().await?;
             }
         }
-        tx.commit().await?;
         Ok(())
     }
 
