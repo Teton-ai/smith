@@ -3,10 +3,10 @@ use crate::db::DeviceWithToken;
 pub(crate) use crate::device::schema::Device;
 use serde::Deserialize;
 use serde_json::{Value, json};
-use std::time::Duration;
 use smith::utils::schema::{DeviceRegistration, DeviceRegistrationResponse};
 use sqlx::PgPool;
 use sqlx::types::ipnetwork;
+use std::time::Duration;
 use thiserror::Error;
 use tracing::{debug, error, warn};
 
@@ -38,7 +38,8 @@ async fn update_ip_geolocation(
     pool: &PgPool,
 ) -> anyhow::Result<()> {
     // Build URL with HTTPS and field filtering
-    let fields = "status,continent,continentCode,country,countryCode,region,city,lat,lon,isp,proxy,hosting";
+    let fields =
+        "status,continent,continentCode,country,countryCode,region,city,lat,lon,isp,proxy,hosting";
     let url = format!(
         "https://pro.ip-api.com/json/{}?key={}&fields={}",
         ip_address, api_key, fields
@@ -62,16 +63,22 @@ async fn update_ip_geolocation(
                 if let Err(e) = response.error_for_status_ref() {
                     error!(
                         "IP-API returned HTTP error for {} (attempt {}): {}",
-                        ip_address, retry_count + 1, e
+                        ip_address,
+                        retry_count + 1,
+                        e
                     );
-                    
+
                     if retry_count < MAX_RETRIES {
                         retry_count += 1;
                         let delay = Duration::from_millis(BASE_DELAY_MS * (1 << (retry_count - 1)));
                         tokio::time::sleep(delay).await;
                         continue;
                     } else {
-                        return Err(anyhow::anyhow!("IP-API HTTP error after {} retries: {}", MAX_RETRIES, e));
+                        return Err(anyhow::anyhow!(
+                            "IP-API HTTP error after {} retries: {}",
+                            MAX_RETRIES,
+                            e
+                        ));
                     }
                 }
 
@@ -128,29 +135,48 @@ async fn update_ip_geolocation(
                         }
                     }
                     Err(e) => {
-                        warn!("Failed to parse IP-API JSON response for {} (attempt {}): {}", ip_address, retry_count + 1, e);
-                        
+                        warn!(
+                            "Failed to parse IP-API JSON response for {} (attempt {}): {}",
+                            ip_address,
+                            retry_count + 1,
+                            e
+                        );
+
                         if retry_count < MAX_RETRIES {
                             retry_count += 1;
-                            let delay = Duration::from_millis(BASE_DELAY_MS * (1 << (retry_count - 1)));
+                            let delay =
+                                Duration::from_millis(BASE_DELAY_MS * (1 << (retry_count - 1)));
                             tokio::time::sleep(delay).await;
                             continue;
                         } else {
-                            return Err(anyhow::anyhow!("Failed to parse IP-API response after {} retries: {}", MAX_RETRIES, e));
+                            return Err(anyhow::anyhow!(
+                                "Failed to parse IP-API response after {} retries: {}",
+                                MAX_RETRIES,
+                                e
+                            ));
                         }
                     }
                 }
             }
             Err(e) => {
-                warn!("Network error calling IP-API for {} (attempt {}): {}", ip_address, retry_count + 1, e);
-                
+                warn!(
+                    "Network error calling IP-API for {} (attempt {}): {}",
+                    ip_address,
+                    retry_count + 1,
+                    e
+                );
+
                 if retry_count < MAX_RETRIES {
                     retry_count += 1;
                     let delay = Duration::from_millis(BASE_DELAY_MS * (1 << (retry_count - 1)));
                     tokio::time::sleep(delay).await;
                     continue;
                 } else {
-                    return Err(anyhow::anyhow!("Network error calling IP-API after {} retries: {}", MAX_RETRIES, e));
+                    return Err(anyhow::anyhow!(
+                        "Network error calling IP-API after {} retries: {}",
+                        MAX_RETRIES,
+                        e
+                    ));
                 }
             }
         }
@@ -366,7 +392,10 @@ impl Device {
                         )
                         .fetch_one(&mut *tx)
                         .await?;
-                        (existing_record.id, existing_record.needs_update.unwrap_or(false))
+                        (
+                            existing_record.id,
+                            existing_record.needs_update.unwrap_or(false),
+                        )
                     }
                 };
 
