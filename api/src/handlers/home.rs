@@ -2,17 +2,44 @@ use crate::State;
 use crate::db::{DBHandler, DeviceWithToken};
 use crate::device::RegistrationError;
 use axum::extract::ConnectInfo;
-use axum::http::StatusCode;
+use axum::http::{HeaderMap, StatusCode};
 use axum::{Extension, Json};
 use smith::utils::schema::{
     DeviceRegistration, DeviceRegistrationResponse, HomePost, HomePostResponse,
 };
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::time::SystemTime;
 use tracing::{debug, error, info};
 
+fn extract_client_ip(headers: &HeaderMap, fallback_addr: SocketAddr) -> IpAddr {
+    // Check X-Forwarded-For header first (load balancer/proxy)
+    if let Some(forwarded_for) = headers.get("x-forwarded-for") {
+        if let Ok(forwarded_str) = forwarded_for.to_str() {
+            // X-Forwarded-For can contain multiple IPs, take the first (original client)
+            if let Some(first_ip) = forwarded_str.split(',').next() {
+                if let Ok(ip) = first_ip.trim().parse::<IpAddr>() {
+                    return ip;
+                }
+            }
+        }
+    }
+
+    // Check X-Real-IP header (alternative proxy header)
+    if let Some(real_ip) = headers.get("x-real-ip") {
+        if let Ok(real_ip_str) = real_ip.to_str() {
+            if let Ok(ip) = real_ip_str.parse::<IpAddr>() {
+                return ip;
+            }
+        }
+    }
+
+    // Fall back to direct connection IP
+    fallback_addr.ip()
+}
+
 #[tracing::instrument]
 pub async fn home(
+    headers: HeaderMap,
     device: DeviceWithToken,
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
     Extension(state): Extension<State>,
@@ -38,7 +65,7 @@ pub async fn home(
         target_release_id: crate::device::Device::get_target_release(&device, &state.pg_pool).await,
     };
 
-    let client_ip = Some(addr.ip());
+    let client_ip = Some(extract_client_ip(&headers, addr));
     tokio::spawn(async move {
         crate::device::Device::save_release_id(&device, release_id, &state.pg_pool)
             .await
