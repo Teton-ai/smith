@@ -43,6 +43,7 @@ pub struct Config {
     pub sentry_url: Option<String>,
     pub slack_hook_url: Option<String>,
     pub victoria_metrics_client: Option<VictoriaMetricsClient>,
+    pub ip_api_key: Option<String>,
 }
 
 impl Config {
@@ -59,6 +60,7 @@ impl Config {
             sentry_url: env::var("SENTRY_URL").ok(),
             slack_hook_url: env::var("SLACK_HOOK_URL").ok(),
             victoria_metrics_client: VictoriaMetricsClient::new(),
+            ip_api_key: env::var("IP_API_KEY").ok(),
         })
     }
 }
