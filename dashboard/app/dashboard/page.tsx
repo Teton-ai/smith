@@ -22,12 +22,25 @@ interface Device {
   has_token: boolean;
   release_id?: number;
   target_release_id?: number;
+  release?: Release;
+  target_release?: Release;
   system_info?: {
     hostname?: string;
     device_tree?: {
       model?: string;
     };
   };
+}
+
+interface Release {
+  id: number;
+  distribution_id: number;
+  distribution_architecture: string;
+  distribution_name: string;
+  version: string;
+  draft: boolean;
+  yanked: boolean;
+  created_at: string;
 }
 
 interface DashboardData {
@@ -299,7 +312,7 @@ const AdminPanel = () => {
                             <ChevronRight className="w-3 h-3 text-gray-400 flex-shrink-0" />
                           </div>
                           <p className="text-xs text-purple-600">
-                            {device.release_id} → {device.target_release_id}
+                            {device.release?.version || device.release_id} → {device.target_release?.version || device.target_release_id}
                           </p>
                         </div>
                       );
@@ -310,7 +323,7 @@ const AdminPanel = () => {
                       onClick={() => router.push('/devices')}
                       className="text-sm text-blue-600 hover:text-blue-800 mt-3"
                     >
-                      View all {stuckUpdates.length} devices with failed updates →
+                      View all {stuckUpdates.length} devices with update issues →
                     </button>
                   )}
                 </div>
