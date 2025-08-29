@@ -1,3 +1,4 @@
+use crate::handlers::ip_address::IpAddressInfo;
 use serde::Serialize;
 use sqlx::types::chrono;
 
@@ -15,4 +16,5 @@ pub struct Device {
     pub system_info: Option<serde_json::Value>,
     pub modem_id: Option<i32>,
     pub ip_address_id: Option<i32>,
+    pub ip_address: Option<IpAddressInfo>,
 }

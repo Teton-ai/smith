@@ -135,6 +135,7 @@ interface Device {
   system_info: SystemInfo | null
   modem_id: number | null
   ip_address_id: number | null
+  ip_address: IpAddressInfo | null
 }
 
 interface IpAddressInfo {
@@ -162,7 +163,6 @@ const DevicesPage = () => {
   const [filteredDevices, setFilteredDevices] = useState<Device[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [showLongOfflineDevices, setShowLongOfflineDevices] = useState(false);
-  const [ipAddressCache, setIpAddressCache] = useState<Record<number, IpAddressInfo>>({});
 
   useEffect(() => {
     const fetchDashboard = async () => {
@@ -174,25 +174,6 @@ const DevicesPage = () => {
     fetchDashboard();
   }, [callAPI]);
 
-  // Fetch IP address info for devices that have ip_address_id
-  useEffect(() => {
-    const fetchIpAddresses = async () => {
-      const devicesWithIp = devices.filter(device => device.ip_address_id && !ipAddressCache[device.ip_address_id]);
-      
-      for (const device of devicesWithIp) {
-        if (device.ip_address_id) {
-          const ipInfo = await callAPI<IpAddressInfo>('GET', `/ip_address/${device.ip_address_id}`);
-          if (ipInfo) {
-            setIpAddressCache(prev => ({ ...prev, [device.ip_address_id!]: ipInfo }));
-          }
-        }
-      }
-    };
-    
-    if (devices.length > 0) {
-      fetchIpAddresses();
-    }
-  }, [devices, callAPI, ipAddressCache]);
 
   // Filter and sort devices - show only authorized devices, filter by search, and sort by latest online
   useEffect(() => {
@@ -279,8 +260,7 @@ const DevicesPage = () => {
   };
 
   const getIpLocationInfo = (device: Device) => {
-    if (!device.ip_address_id) return null;
-    return ipAddressCache[device.ip_address_id] || null;
+    return device.ip_address || null;
   };
 
   const getFlagUrl = (countryCode: string) => {

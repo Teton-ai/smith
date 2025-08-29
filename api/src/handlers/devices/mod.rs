@@ -304,8 +304,7 @@ pub async fn get_devices(
     debug!("Getting devices {:?}", filter);
 
     if let Some(tag) = &filter.tag {
-        let devices = sqlx::query_as!(
-            Device,
+        let devices = sqlx::query!(
             r#"SELECT
                 d.id,
                 d.serial_number,
@@ -318,10 +317,27 @@ pub async fn get_devices(
                 d.target_release_id,
                 d.system_info,
                 d.modem_id,
-                d.ip_address_id
+                d.ip_address_id,
+                ip.id as "ip_id?",
+                ip.ip_address as "ip_address?",
+                ip.name as "ip_name?",
+                ip.continent as "ip_continent?",
+                ip.continent_code as "ip_continent_code?",
+                ip.country_code as "ip_country_code?",
+                ip.country as "ip_country?",
+                ip.region as "ip_region?",
+                ip.city as "ip_city?",
+                ip.isp as "ip_isp?",
+                ip.coordinates[0] as "ip_longitude?",
+                ip.coordinates[1] as "ip_latitude?",
+                ip.proxy as "ip_proxy?",
+                ip.hosting as "ip_hosting?",
+                ip.created_at as "ip_created_at?",
+                ip.updated_at as "ip_updated_at?"
             FROM device d
             JOIN tag_device td ON d.id = td.device_id
             JOIN tag t ON td.tag_id = t.id
+            LEFT JOIN ip_address ip ON d.ip_address_id = ip.id
             WHERE t.name = $1
             ORDER BY d.serial_number"#,
             tag
@@ -333,11 +349,58 @@ pub async fn get_devices(
             StatusCode::INTERNAL_SERVER_ERROR
         })?;
 
+        let devices: Vec<Device> = devices
+            .into_iter()
+            .map(|row| {
+                let ip_address = if row.ip_id.is_some() {
+                    let coordinates = match (row.ip_longitude, row.ip_latitude) {
+                        (Some(lon), Some(lat)) => Some((lon, lat)),
+                        _ => None,
+                    };
+
+                    Some(crate::handlers::ip_address::IpAddressInfo {
+                        id: row.ip_id.unwrap(),
+                        ip_address: row.ip_address.unwrap(),
+                        name: row.ip_name,
+                        continent: row.ip_continent,
+                        continent_code: row.ip_continent_code,
+                        country_code: row.ip_country_code,
+                        country: row.ip_country,
+                        region: row.ip_region,
+                        city: row.ip_city,
+                        isp: row.ip_isp,
+                        coordinates,
+                        proxy: row.ip_proxy,
+                        hosting: row.ip_hosting,
+                        created_at: row.ip_created_at.unwrap(),
+                        updated_at: row.ip_updated_at.unwrap(),
+                    })
+                } else {
+                    None
+                };
+
+                Device {
+                    id: row.id,
+                    serial_number: row.serial_number,
+                    note: row.note,
+                    last_seen: row.last_seen,
+                    created_on: row.created_on,
+                    approved: row.approved,
+                    has_token: row.has_token,
+                    release_id: row.release_id,
+                    target_release_id: row.target_release_id,
+                    system_info: row.system_info,
+                    modem_id: row.modem_id,
+                    ip_address_id: row.ip_address_id,
+                    ip_address,
+                }
+            })
+            .collect();
+
         return Ok(Json(devices));
     }
 
-    let devices = sqlx::query_as!(
-        Device,
+    let devices = sqlx::query!(
         r#"SELECT
             d.id,
             d.serial_number,
@@ -350,8 +413,25 @@ pub async fn get_devices(
             d.target_release_id,
             d.system_info,
             d.modem_id,
-            d.ip_address_id
+            d.ip_address_id,
+            ip.id as "ip_id?",
+            ip.ip_address as "ip_address?",
+            ip.name as "ip_name?",
+            ip.continent as "ip_continent?",
+            ip.continent_code as "ip_continent_code?",
+            ip.country_code as "ip_country_code?",
+            ip.country as "ip_country?",
+            ip.region as "ip_region?",
+            ip.city as "ip_city?",
+            ip.isp as "ip_isp?",
+            ip.coordinates[0] as "ip_longitude?",
+            ip.coordinates[1] as "ip_latitude?",
+            ip.proxy as "ip_proxy?",
+            ip.hosting as "ip_hosting?",
+            ip.created_at as "ip_created_at?",
+            ip.updated_at as "ip_updated_at?"
         FROM device d
+        LEFT JOIN ip_address ip ON d.ip_address_id = ip.id
         WHERE ($1::text IS NULL OR d.serial_number = $1)
           AND ($2::boolean IS NULL OR d.approved = $2)
         ORDER BY d.serial_number"#,
@@ -364,6 +444,54 @@ pub async fn get_devices(
         error!("Failed to get devices {err}");
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
+
+    let devices: Vec<Device> = devices
+        .into_iter()
+        .map(|row| {
+            let ip_address = if row.ip_id.is_some() {
+                let coordinates = match (row.ip_longitude, row.ip_latitude) {
+                    (Some(lon), Some(lat)) => Some((lon, lat)),
+                    _ => None,
+                };
+
+                Some(crate::handlers::ip_address::IpAddressInfo {
+                    id: row.ip_id.unwrap(),
+                    ip_address: row.ip_address.unwrap(),
+                    name: row.ip_name,
+                    continent: row.ip_continent,
+                    continent_code: row.ip_continent_code,
+                    country_code: row.ip_country_code,
+                    country: row.ip_country,
+                    region: row.ip_region,
+                    city: row.ip_city,
+                    isp: row.ip_isp,
+                    coordinates,
+                    proxy: row.ip_proxy,
+                    hosting: row.ip_hosting,
+                    created_at: row.ip_created_at.unwrap(),
+                    updated_at: row.ip_updated_at.unwrap(),
+                })
+            } else {
+                None
+            };
+
+            Device {
+                id: row.id,
+                serial_number: row.serial_number,
+                note: row.note,
+                last_seen: row.last_seen,
+                created_on: row.created_on,
+                approved: row.approved,
+                has_token: row.has_token,
+                release_id: row.release_id,
+                target_release_id: row.target_release_id,
+                system_info: row.system_info,
+                modem_id: row.modem_id,
+                ip_address_id: row.ip_address_id,
+                ip_address,
+            }
+        })
+        .collect();
 
     Ok(Json(devices))
 }
@@ -1656,29 +1784,45 @@ pub async fn get_device_info(
     Path(device_id): Path<String>,
     Extension(state): Extension<State>,
 ) -> Result<Json<Device>, StatusCode> {
-    let approval_state = sqlx::query_as!(
-        Device,
+    let device_row = sqlx::query!(
         "
         SELECT
-        id,
-        serial_number,
-        note,
-        last_ping as last_seen,
-        created_on,
-        approved,
-        token IS NOT NULL as has_token,
-        release_id,
-        target_release_id,
-        system_info,
-        modem_id,
-        ip_address_id
-        FROM device
+        d.id,
+        d.serial_number,
+        d.note,
+        d.last_ping as last_seen,
+        d.created_on,
+        d.approved,
+        d.token IS NOT NULL as has_token,
+        d.release_id,
+        d.target_release_id,
+        d.system_info,
+        d.modem_id,
+        d.ip_address_id,
+        ip.id as \"ip_id?\",
+        ip.ip_address as \"ip_address?\",
+        ip.name as \"ip_name?\",
+        ip.continent as \"ip_continent?\",
+        ip.continent_code as \"ip_continent_code?\",
+        ip.country_code as \"ip_country_code?\",
+        ip.country as \"ip_country?\",
+        ip.region as \"ip_region?\",
+        ip.city as \"ip_city?\",
+        ip.isp as \"ip_isp?\",
+        ip.coordinates[0] as \"ip_longitude?\",
+        ip.coordinates[1] as \"ip_latitude?\",
+        ip.proxy as \"ip_proxy?\",
+        ip.hosting as \"ip_hosting?\",
+        ip.created_at as \"ip_created_at?\",
+        ip.updated_at as \"ip_updated_at?\"
+        FROM device d
+        LEFT JOIN ip_address ip ON d.ip_address_id = ip.id
         WHERE
             CASE
                 WHEN $1 ~ '^[0-9]+$' AND length($1) <= 10 THEN
-                    id = $1::int4
+                    d.id = $1::int4
                 ELSE
-                    serial_number = $1
+                    d.serial_number = $1
             END
         ",
         device_id
@@ -1693,7 +1837,50 @@ pub async fn get_device_info(
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
 
-    Ok(Json(approval_state))
+    let ip_address = if device_row.ip_id.is_some() {
+        let coordinates = match (device_row.ip_longitude, device_row.ip_latitude) {
+            (Some(lon), Some(lat)) => Some((lon, lat)),
+            _ => None,
+        };
+
+        Some(crate::handlers::ip_address::IpAddressInfo {
+            id: device_row.ip_id.unwrap(),
+            ip_address: device_row.ip_address.unwrap(),
+            name: device_row.ip_name,
+            continent: device_row.ip_continent,
+            continent_code: device_row.ip_continent_code,
+            country_code: device_row.ip_country_code,
+            country: device_row.ip_country,
+            region: device_row.ip_region,
+            city: device_row.ip_city,
+            isp: device_row.ip_isp,
+            coordinates,
+            proxy: device_row.ip_proxy,
+            hosting: device_row.ip_hosting,
+            created_at: device_row.ip_created_at.unwrap(),
+            updated_at: device_row.ip_updated_at.unwrap(),
+        })
+    } else {
+        None
+    };
+
+    let device = Device {
+        id: device_row.id,
+        serial_number: device_row.serial_number,
+        note: device_row.note,
+        last_seen: device_row.last_seen,
+        created_on: device_row.created_on,
+        approved: device_row.approved,
+        has_token: device_row.has_token,
+        release_id: device_row.release_id,
+        target_release_id: device_row.target_release_id,
+        system_info: device_row.system_info,
+        modem_id: device_row.modem_id,
+        ip_address_id: device_row.ip_address_id,
+        ip_address,
+    };
+
+    Ok(Json(device))
 }
 
 #[utoipa::path(
