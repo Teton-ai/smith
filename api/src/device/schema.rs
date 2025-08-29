@@ -1,5 +1,5 @@
-use crate::handlers::ip_address::IpAddressInfo;
 use crate::handlers::distributions::types::Release;
+use crate::handlers::ip_address::IpAddressInfo;
 use crate::modem::schema::Modem;
 use serde::Serialize;
 use sqlx::types::chrono;

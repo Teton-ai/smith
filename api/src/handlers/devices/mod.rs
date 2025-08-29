@@ -436,7 +436,9 @@ pub async fn get_devices(
                     Some(crate::handlers::distributions::types::Release {
                         id: row.target_release_id_nested.unwrap(),
                         distribution_id: row.target_release_distribution_id.unwrap(),
-                        distribution_architecture: row.target_release_distribution_architecture.unwrap(),
+                        distribution_architecture: row
+                            .target_release_distribution_architecture
+                            .unwrap(),
                         distribution_name: row.target_release_distribution_name.unwrap(),
                         version: row.target_release_version.unwrap(),
                         draft: row.target_release_draft.unwrap(),
@@ -603,7 +605,9 @@ pub async fn get_devices(
                 Some(crate::handlers::distributions::types::Release {
                     id: row.target_release_id_nested.unwrap(),
                     distribution_id: row.target_release_distribution_id.unwrap(),
-                    distribution_architecture: row.target_release_distribution_architecture.unwrap(),
+                    distribution_architecture: row
+                        .target_release_distribution_architecture
+                        .unwrap(),
                     distribution_name: row.target_release_distribution_name.unwrap(),
                     version: row.target_release_version.unwrap(),
                     draft: row.target_release_draft.unwrap(),
