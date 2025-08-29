@@ -15,6 +15,8 @@ import {
   Signal,
   MapPin,
   Globe,
+  GitBranch,
+  Tag,
 } from 'lucide-react';
 import dynamic from 'next/dynamic';
 import PrivateLayout from "@/app/layouts/PrivateLayout";
@@ -85,6 +87,9 @@ interface Device {
   modem_id?: number;
   ip_address_id?: number;
   ip_address?: IpAddressInfo;
+  modem?: Modem;
+  release?: Release;
+  target_release?: Release;
   system_info?: {
     hostname?: string;
     device_tree?: {
@@ -120,13 +125,6 @@ interface Device {
   };
 }
 
-interface Modem {
-  id: number;
-  imei: string;
-  on_dongle: boolean;
-  network_provider?: string;
-  // Add other modem fields as needed
-}
 
 interface IpAddressInfo {
   id: number;
@@ -146,12 +144,30 @@ interface IpAddressInfo {
   updated_at: string;
 }
 
+interface Modem {
+  id: number;
+  imei: string;
+  network_provider: string;
+  updated_at: string;
+  created_at: string;
+}
+
+interface Release {
+  id: number;
+  distribution_id: number;
+  distribution_architecture: string;
+  distribution_name: string;
+  version: string;
+  draft: boolean;
+  yanked: boolean;
+  created_at: string;
+}
+
 const DeviceDetailPage = () => {
   const params = useParams();
   const router = useRouter();
   const { callAPI } = useSmithAPI();
   const [device, setDevice] = useState<Device | null>(null);
-  const [modem, setModem] = useState<Modem | null>(null);
   const [loading, setLoading] = useState(true);
 
   const serial = params.serial as string;
@@ -164,13 +180,6 @@ const DeviceDetailPage = () => {
         if (deviceData) {
           setDevice(deviceData);
           
-          // Fetch modem data if device has a modem
-          if (deviceData.modem_id) {
-            const modemData = await callAPI<Modem>('GET', `/modems/${deviceData.modem_id}`);
-            if (modemData) {
-              setModem(modemData);
-            }
-          }
 
         }
       } finally {
@@ -410,7 +419,7 @@ const DeviceDetailPage = () => {
                 <div className="flex items-center space-x-3">
                   <h1 className="text-2xl font-bold text-gray-900">{getDeviceName()}</h1>
                   {hasUpdatePending() && (
-                    <Tooltip content={`Update pending: Release ${device.release_id} → ${device.target_release_id}`}>
+                    <Tooltip content={`Update pending: ${device.release?.version || device.release_id} → ${device.target_release?.version || device.target_release_id}`}>
                       <span className="px-2 py-1 text-xs font-medium bg-orange-100 text-orange-800 rounded-full cursor-help">
                         Outdated
                       </span>
@@ -479,16 +488,37 @@ const DeviceDetailPage = () => {
                     <span className="text-sm text-gray-900">{new Date(device.system_info.proc.stat.btime * 1000).toLocaleString()}</span>
                   </div>
                 )}
-                {device.release_id && (
-                  <div className="flex justify-between">
-                    <span className="text-gray-700">Current Release</span>
-                    <span className="font-mono text-sm text-gray-900">{device.release_id}</span>
-                  </div>
+                {device.release && (
+                  <>
+                    <div className="flex justify-between">
+                      <span className="text-gray-700 flex items-center">
+                        <GitBranch className="w-4 h-4 text-gray-400 mr-2" />
+                        Distribution
+                      </span>
+                      <span className="font-mono text-sm text-gray-900">
+                        {device.release.distribution_name}
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-700 flex items-center">
+                        <Tag className="w-4 h-4 text-gray-400 mr-2" />
+                        Current Release
+                      </span>
+                      <span className="font-mono text-sm text-gray-900">
+                        {device.release.version}
+                      </span>
+                    </div>
+                  </>
                 )}
-                {device.target_release_id && device.target_release_id !== device.release_id && (
+                {device.target_release && device.target_release_id !== device.release_id && (
                   <div className="flex justify-between">
-                    <span className="text-gray-700">Target Release</span>
-                    <span className="font-mono text-sm text-purple-600">{device.target_release_id}</span>
+                    <span className="text-gray-700 flex items-center">
+                      <Tag className="w-4 h-4 text-purple-400 mr-2" />
+                      Target Release
+                    </span>
+                    <span className="font-mono text-sm text-gray-900">
+                      {device.target_release.version}
+                    </span>
                   </div>
                 )}
               </div>

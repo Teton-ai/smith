@@ -1,4 +1,6 @@
+use crate::handlers::distributions::types::Release;
 use crate::handlers::ip_address::IpAddressInfo;
+use crate::modem::schema::Modem;
 use serde::Serialize;
 use sqlx::types::chrono;
 
@@ -17,4 +19,7 @@ pub struct Device {
     pub modem_id: Option<i32>,
     pub ip_address_id: Option<i32>,
     pub ip_address: Option<IpAddressInfo>,
+    pub modem: Option<Modem>,
+    pub release: Option<Release>,
+    pub target_release: Option<Release>,
 }

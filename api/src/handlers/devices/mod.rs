@@ -333,11 +333,37 @@ pub async fn get_devices(
                 ip.proxy as "ip_proxy?",
                 ip.hosting as "ip_hosting?",
                 ip.created_at as "ip_created_at?",
-                ip.updated_at as "ip_updated_at?"
+                ip.updated_at as "ip_updated_at?",
+                m.id as "modem_id_nested?",
+                m.imei as "modem_imei?",
+                m.network_provider as "modem_network_provider?",
+                m.updated_at as "modem_updated_at?",
+                m.created_at as "modem_created_at?",
+                r.id as "release_id_nested?",
+                r.distribution_id as "release_distribution_id?",
+                rd.architecture as "release_distribution_architecture?",
+                rd.name as "release_distribution_name?",
+                r.version as "release_version?",
+                r.draft as "release_draft?",
+                r.yanked as "release_yanked?",
+                r.created_at as "release_created_at?",
+                tr.id as "target_release_id_nested?",
+                tr.distribution_id as "target_release_distribution_id?",
+                trd.architecture as "target_release_distribution_architecture?",
+                trd.name as "target_release_distribution_name?",
+                tr.version as "target_release_version?",
+                tr.draft as "target_release_draft?",
+                tr.yanked as "target_release_yanked?",
+                tr.created_at as "target_release_created_at?"
             FROM device d
             JOIN tag_device td ON d.id = td.device_id
             JOIN tag t ON td.tag_id = t.id
             LEFT JOIN ip_address ip ON d.ip_address_id = ip.id
+            LEFT JOIN modem m ON d.modem_id = m.id
+            LEFT JOIN release r ON d.release_id = r.id
+            LEFT JOIN distribution rd ON r.distribution_id = rd.id
+            LEFT JOIN release tr ON d.target_release_id = tr.id
+            LEFT JOIN distribution trd ON tr.distribution_id = trd.id
             WHERE t.name = $1
             ORDER BY d.serial_number"#,
             tag
@@ -379,6 +405,50 @@ pub async fn get_devices(
                     None
                 };
 
+                let modem = if row.modem_id_nested.is_some() {
+                    Some(crate::modem::schema::Modem {
+                        id: row.modem_id_nested.unwrap(),
+                        imei: row.modem_imei.unwrap(),
+                        network_provider: row.modem_network_provider.unwrap(),
+                        updated_at: row.modem_updated_at.unwrap(),
+                        created_at: row.modem_created_at.unwrap(),
+                    })
+                } else {
+                    None
+                };
+
+                let release = if row.release_id_nested.is_some() {
+                    Some(crate::handlers::distributions::types::Release {
+                        id: row.release_id_nested.unwrap(),
+                        distribution_id: row.release_distribution_id.unwrap(),
+                        distribution_architecture: row.release_distribution_architecture.unwrap(),
+                        distribution_name: row.release_distribution_name.unwrap(),
+                        version: row.release_version.unwrap(),
+                        draft: row.release_draft.unwrap(),
+                        yanked: row.release_yanked.unwrap(),
+                        created_at: row.release_created_at.unwrap(),
+                    })
+                } else {
+                    None
+                };
+
+                let target_release = if row.target_release_id_nested.is_some() {
+                    Some(crate::handlers::distributions::types::Release {
+                        id: row.target_release_id_nested.unwrap(),
+                        distribution_id: row.target_release_distribution_id.unwrap(),
+                        distribution_architecture: row
+                            .target_release_distribution_architecture
+                            .unwrap(),
+                        distribution_name: row.target_release_distribution_name.unwrap(),
+                        version: row.target_release_version.unwrap(),
+                        draft: row.target_release_draft.unwrap(),
+                        yanked: row.target_release_yanked.unwrap(),
+                        created_at: row.target_release_created_at.unwrap(),
+                    })
+                } else {
+                    None
+                };
+
                 Device {
                     id: row.id,
                     serial_number: row.serial_number,
@@ -393,6 +463,9 @@ pub async fn get_devices(
                     modem_id: row.modem_id,
                     ip_address_id: row.ip_address_id,
                     ip_address,
+                    modem,
+                    release,
+                    target_release,
                 }
             })
             .collect();
@@ -429,9 +502,35 @@ pub async fn get_devices(
             ip.proxy as "ip_proxy?",
             ip.hosting as "ip_hosting?",
             ip.created_at as "ip_created_at?",
-            ip.updated_at as "ip_updated_at?"
+            ip.updated_at as "ip_updated_at?",
+            m.id as "modem_id_nested?",
+            m.imei as "modem_imei?",
+            m.network_provider as "modem_network_provider?",
+            m.updated_at as "modem_updated_at?",
+            m.created_at as "modem_created_at?",
+            r.id as "release_id_nested?",
+            r.distribution_id as "release_distribution_id?",
+            rd.architecture as "release_distribution_architecture?",
+            rd.name as "release_distribution_name?",
+            r.version as "release_version?",
+            r.draft as "release_draft?",
+            r.yanked as "release_yanked?",
+            r.created_at as "release_created_at?",
+            tr.id as "target_release_id_nested?",
+            tr.distribution_id as "target_release_distribution_id?",
+            trd.architecture as "target_release_distribution_architecture?",
+            trd.name as "target_release_distribution_name?",
+            tr.version as "target_release_version?",
+            tr.draft as "target_release_draft?",
+            tr.yanked as "target_release_yanked?",
+            tr.created_at as "target_release_created_at?"
         FROM device d
         LEFT JOIN ip_address ip ON d.ip_address_id = ip.id
+        LEFT JOIN modem m ON d.modem_id = m.id
+        LEFT JOIN release r ON d.release_id = r.id
+        LEFT JOIN distribution rd ON r.distribution_id = rd.id
+        LEFT JOIN release tr ON d.target_release_id = tr.id
+        LEFT JOIN distribution trd ON tr.distribution_id = trd.id
         WHERE ($1::text IS NULL OR d.serial_number = $1)
           AND ($2::boolean IS NULL OR d.approved = $2)
         ORDER BY d.serial_number"#,
@@ -475,6 +574,50 @@ pub async fn get_devices(
                 None
             };
 
+            let modem = if row.modem_id_nested.is_some() {
+                Some(crate::modem::schema::Modem {
+                    id: row.modem_id_nested.unwrap(),
+                    imei: row.modem_imei.unwrap(),
+                    network_provider: row.modem_network_provider.unwrap(),
+                    updated_at: row.modem_updated_at.unwrap(),
+                    created_at: row.modem_created_at.unwrap(),
+                })
+            } else {
+                None
+            };
+
+            let release = if row.release_id_nested.is_some() {
+                Some(crate::handlers::distributions::types::Release {
+                    id: row.release_id_nested.unwrap(),
+                    distribution_id: row.release_distribution_id.unwrap(),
+                    distribution_architecture: row.release_distribution_architecture.unwrap(),
+                    distribution_name: row.release_distribution_name.unwrap(),
+                    version: row.release_version.unwrap(),
+                    draft: row.release_draft.unwrap(),
+                    yanked: row.release_yanked.unwrap(),
+                    created_at: row.release_created_at.unwrap(),
+                })
+            } else {
+                None
+            };
+
+            let target_release = if row.target_release_id_nested.is_some() {
+                Some(crate::handlers::distributions::types::Release {
+                    id: row.target_release_id_nested.unwrap(),
+                    distribution_id: row.target_release_distribution_id.unwrap(),
+                    distribution_architecture: row
+                        .target_release_distribution_architecture
+                        .unwrap(),
+                    distribution_name: row.target_release_distribution_name.unwrap(),
+                    version: row.target_release_version.unwrap(),
+                    draft: row.target_release_draft.unwrap(),
+                    yanked: row.target_release_yanked.unwrap(),
+                    created_at: row.target_release_created_at.unwrap(),
+                })
+            } else {
+                None
+            };
+
             Device {
                 id: row.id,
                 serial_number: row.serial_number,
@@ -489,6 +632,9 @@ pub async fn get_devices(
                 modem_id: row.modem_id,
                 ip_address_id: row.ip_address_id,
                 ip_address,
+                modem,
+                release,
+                target_release,
             }
         })
         .collect();
@@ -1814,9 +1960,35 @@ pub async fn get_device_info(
         ip.proxy as \"ip_proxy?\",
         ip.hosting as \"ip_hosting?\",
         ip.created_at as \"ip_created_at?\",
-        ip.updated_at as \"ip_updated_at?\"
+        ip.updated_at as \"ip_updated_at?\",
+        m.id as \"modem_id_nested?\",
+        m.imei as \"modem_imei?\",
+        m.network_provider as \"modem_network_provider?\",
+        m.updated_at as \"modem_updated_at?\",
+        m.created_at as \"modem_created_at?\",
+        r.id as \"release_id_nested?\",
+        r.distribution_id as \"release_distribution_id?\",
+        rd.architecture as \"release_distribution_architecture?\",
+        rd.name as \"release_distribution_name?\",
+        r.version as \"release_version?\",
+        r.draft as \"release_draft?\",
+        r.yanked as \"release_yanked?\",
+        r.created_at as \"release_created_at?\",
+        tr.id as \"target_release_id_nested?\",
+        tr.distribution_id as \"target_release_distribution_id?\",
+        trd.architecture as \"target_release_distribution_architecture?\",
+        trd.name as \"target_release_distribution_name?\",
+        tr.version as \"target_release_version?\",
+        tr.draft as \"target_release_draft?\",
+        tr.yanked as \"target_release_yanked?\",
+        tr.created_at as \"target_release_created_at?\"
         FROM device d
         LEFT JOIN ip_address ip ON d.ip_address_id = ip.id
+        LEFT JOIN modem m ON d.modem_id = m.id
+        LEFT JOIN release r ON d.release_id = r.id
+        LEFT JOIN distribution rd ON r.distribution_id = rd.id
+        LEFT JOIN release tr ON d.target_release_id = tr.id
+        LEFT JOIN distribution trd ON tr.distribution_id = trd.id
         WHERE
             CASE
                 WHEN $1 ~ '^[0-9]+$' AND length($1) <= 10 THEN
@@ -1864,6 +2036,48 @@ pub async fn get_device_info(
         None
     };
 
+    let modem = if device_row.modem_id_nested.is_some() {
+        Some(crate::modem::schema::Modem {
+            id: device_row.modem_id_nested.unwrap(),
+            imei: device_row.modem_imei.unwrap(),
+            network_provider: device_row.modem_network_provider.unwrap(),
+            updated_at: device_row.modem_updated_at.unwrap(),
+            created_at: device_row.modem_created_at.unwrap(),
+        })
+    } else {
+        None
+    };
+
+    let release = if device_row.release_id_nested.is_some() {
+        Some(crate::handlers::distributions::types::Release {
+            id: device_row.release_id_nested.unwrap(),
+            distribution_id: device_row.release_distribution_id.unwrap(),
+            distribution_architecture: device_row.release_distribution_architecture.unwrap(),
+            distribution_name: device_row.release_distribution_name.unwrap(),
+            version: device_row.release_version.unwrap(),
+            draft: device_row.release_draft.unwrap(),
+            yanked: device_row.release_yanked.unwrap(),
+            created_at: device_row.release_created_at.unwrap(),
+        })
+    } else {
+        None
+    };
+
+    let target_release = if device_row.target_release_id_nested.is_some() {
+        Some(crate::handlers::distributions::types::Release {
+            id: device_row.target_release_id_nested.unwrap(),
+            distribution_id: device_row.target_release_distribution_id.unwrap(),
+            distribution_architecture: device_row.target_release_distribution_architecture.unwrap(),
+            distribution_name: device_row.target_release_distribution_name.unwrap(),
+            version: device_row.target_release_version.unwrap(),
+            draft: device_row.target_release_draft.unwrap(),
+            yanked: device_row.target_release_yanked.unwrap(),
+            created_at: device_row.target_release_created_at.unwrap(),
+        })
+    } else {
+        None
+    };
+
     let device = Device {
         id: device_row.id,
         serial_number: device_row.serial_number,
@@ -1878,6 +2092,9 @@ pub async fn get_device_info(
         modem_id: device_row.modem_id,
         ip_address_id: device_row.ip_address_id,
         ip_address,
+        modem,
+        release,
+        target_release,
     };
 
     Ok(Json(device))
