@@ -16,6 +16,7 @@ pub struct LeanDevice {
     pub last_seen: Option<chrono::DateTime<chrono::Utc>>,
     pub approved: bool,
     pub up_to_date: Option<bool>,
+    pub ip_address_id: Option<i32>,
 }
 
 #[derive(Debug, Deserialize, Serialize, utoipa::ToSchema)]

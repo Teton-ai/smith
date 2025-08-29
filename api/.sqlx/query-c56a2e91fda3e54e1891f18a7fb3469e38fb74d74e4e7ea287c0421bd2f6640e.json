@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT\n                d.id,\n                d.serial_number,\n                d.last_ping as last_seen,\n                d.approved,\n                release_id = target_release_id as up_to_date\n                FROM device d\n                JOIN tag_device td ON d.id = td.device_id\n                JOIN tag t ON td.tag_id = t.id\n                WHERE t.name = $1 AND d.archived = false\n                LIMIT $2",
+  "query": "\n                SELECT d.id, d.serial_number, d.last_ping as last_seen, d.approved,\n                release_id = target_release_id as up_to_date, d.ip_address_id\n                FROM device d\n                LEFT JOIN release r ON r.id = d.release_id\n                LEFT JOIN distribution dist ON r.distribution_id = dist.id\n                WHERE dist.name != $1 AND d.archived = false\n                ORDER BY d.id DESC\n                LIMIT $2",
   "describe": {
     "columns": [
       {
@@ -27,6 +27,11 @@
         "ordinal": 4,
         "name": "up_to_date",
         "type_info": "Bool"
+      },
+      {
+        "ordinal": 5,
+        "name": "ip_address_id",
+        "type_info": "Int4"
       }
     ],
     "parameters": {
@@ -40,8 +45,9 @@
       false,
       true,
       false,
-      null
+      null,
+      true
     ]
   },
-  "hash": "ff7d3781b19596d58db7425a5aca8e3d7c804325054a4650b6521b89e3cddd45"
+  "hash": "c56a2e91fda3e54e1891f18a7fb3469e38fb74d74e4e7ea287c0421bd2f6640e"
 }
