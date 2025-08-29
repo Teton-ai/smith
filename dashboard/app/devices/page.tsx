@@ -8,6 +8,7 @@ import {
   GitBranch,
   Eye,
   EyeOff,
+  Tag,
 } from 'lucide-react';
 import PrivateLayout from "@/app/layouts/PrivateLayout";
 import useSmithAPI from "@/app/hooks/smith-api";
@@ -136,6 +137,9 @@ interface Device {
   modem_id: number | null
   ip_address_id: number | null
   ip_address: IpAddressInfo | null
+  modem: Modem | null
+  release: Release | null
+  target_release: Release | null
 }
 
 interface IpAddressInfo {
@@ -154,6 +158,25 @@ interface IpAddressInfo {
   hosting?: boolean
   created_at: string
   updated_at: string
+}
+
+interface Modem {
+  id: number
+  imei: string
+  network_provider: string
+  updated_at: string
+  created_at: string
+}
+
+interface Release {
+  id: number
+  distribution_id: number
+  distribution_architecture: string
+  distribution_name: string
+  version: string
+  draft: boolean
+  yanked: boolean
+  created_at: string
 }
 
 const DevicesPage = () => {
@@ -255,8 +278,14 @@ const DevicesPage = () => {
     return 'Unknown';
   };
 
-  const getSmithVersion = (device: Device) => {
-    return device.system_info?.smith?.version || 'N/A';
+  const getReleaseInfo = (device: Device) => {
+    if (device.release) {
+      return {
+        distribution: device.release.distribution_name,
+        version: device.release.version
+      };
+    }
+    return null;
   };
 
   const getIpLocationInfo = (device: Device) => {
@@ -334,8 +363,8 @@ const DevicesPage = () => {
             <div className="grid grid-cols-8 gap-4 text-xs font-medium text-gray-500 uppercase tracking-wide">
               <div className="col-span-3">Device</div>
               <div className="col-span-2">Location</div>
-              <div className="col-span-2">OS Version</div>
-              <div className="col-span-1">Smith Version</div>
+              <div className="col-span-2">OS</div>
+              <div className="col-span-1">Release</div>
             </div>
           </div>
 
@@ -421,12 +450,27 @@ const DevicesPage = () => {
                   </div>
 
                   <div className="col-span-1">
-                    <div className="flex items-center space-x-1">
-                      <GitBranch className="w-3 h-3 text-gray-400" />
-                      <span className="text-xs font-mono text-gray-600">
-                        {getSmithVersion(device)}
-                      </span>
-                    </div>
+                    {getReleaseInfo(device) ? (
+                      <div className="flex flex-col space-y-1">
+                        <div className="flex items-center space-x-1">
+                          <GitBranch className="w-3 h-3 text-gray-400" />
+                          <span className="text-xs font-mono text-gray-600">
+                            {getReleaseInfo(device)!.distribution}
+                          </span>
+                        </div>
+                        <div className="flex items-center space-x-1">
+                          <Tag className="w-3 h-3 text-gray-400" />
+                          <span className="text-xs font-mono text-gray-600">
+                            {getReleaseInfo(device)!.version}
+                          </span>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="flex items-center space-x-1">
+                        <GitBranch className="w-3 h-3 text-gray-400" />
+                        <span className="text-xs text-gray-500">No Release</span>
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
