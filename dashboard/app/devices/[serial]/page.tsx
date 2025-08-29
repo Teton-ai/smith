@@ -249,7 +249,7 @@ const DeviceDetailPage = () => {
     if (!device) return null;
     
     // If device has a modem, prioritize cellular
-    if (device.modem_id && modem) {
+    if (device.modem_id && device.modem) {
       return 'cellular';
     }
     
@@ -292,7 +292,7 @@ const DeviceDetailPage = () => {
     
     switch (connectionType) {
       case 'cellular':
-        return `Cellular Connection${modem?.network_provider ? ` - ${modem.network_provider}` : ''}${modem ? `\nIMEI: ${modem.imei}` : ''}${modem?.on_dongle ? '\nExternal Dongle' : '\nBuilt-in Modem'}`;
+        return `Cellular Connection${device.modem?.network_provider ? ` - ${device.modem.network_provider}` : ''}${device.modem ? `\nIMEI: ${device.modem.imei}` : ''}${device.modem?.on_dongle ? '\nExternal Dongle' : '\nBuilt-in Modem'}`;
       case 'wifi': {
         const wifiConnections = device.system_info?.connection_statuses?.filter(
           conn => conn.connection_state === 'connected' && conn.device_type === 'wifi'
