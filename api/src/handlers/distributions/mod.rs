@@ -326,7 +326,7 @@ pub async fn get_distribution_devices(
     let devices = sqlx::query_as!(
         LeanDevice,
         r#"
-        SELECT device.id, serial_number, last_ping as last_seen, approved, release_id = target_release_id as up_to_date FROM device LEFT JOIN release on release_id = release.id where release.distribution_id = $1
+        SELECT device.id, serial_number, last_ping as last_seen, approved, release_id = target_release_id as up_to_date, ip_address_id FROM device LEFT JOIN release on release_id = release.id where release.distribution_id = $1
         "#,
         distribution_id
     )

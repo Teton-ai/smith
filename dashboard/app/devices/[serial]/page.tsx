@@ -13,9 +13,17 @@ import {
   Smartphone,
   Router,
   Signal,
+  MapPin,
+  Globe,
 } from 'lucide-react';
+import dynamic from 'next/dynamic';
 import PrivateLayout from "@/app/layouts/PrivateLayout";
 import useSmithAPI from "@/app/hooks/smith-api";
+
+const LocationMap = dynamic(() => import('./LocationMap'), {
+  ssr: false,
+  loading: () => <div className="h-64 bg-gray-100 rounded-lg flex items-center justify-center">Loading map...</div>
+});
 
 const Tooltip = ({ children, content }: { children: React.ReactNode, content: string }) => {
   const [isVisible, setIsVisible] = React.useState(false);
@@ -75,6 +83,8 @@ interface Device {
   created_on: string;
   approved: boolean;
   modem_id?: number;
+  ip_address_id?: number;
+  ip_address?: IpAddressInfo;
   system_info?: {
     hostname?: string;
     device_tree?: {
@@ -118,6 +128,24 @@ interface Modem {
   // Add other modem fields as needed
 }
 
+interface IpAddressInfo {
+  id: number;
+  ip_address: string;
+  name?: string;
+  continent?: string;
+  continent_code?: string;
+  country_code?: string;
+  country?: string;
+  region?: string;
+  city?: string;
+  isp?: string;
+  coordinates?: [number, number];
+  proxy?: boolean;
+  hosting?: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
 const DeviceDetailPage = () => {
   const params = useParams();
   const router = useRouter();
@@ -143,6 +171,7 @@ const DeviceDetailPage = () => {
               setModem(modemData);
             }
           }
+
         }
       } finally {
         setLoading(false);
@@ -284,6 +313,10 @@ const DeviceDetailPage = () => {
   const getDeviceModel = () => {
     if (!device) return '';
     return device.system_info?.device_tree?.model || 'Unknown Device';
+  };
+
+  const getFlagUrl = (countryCode: string) => {
+    return `https://flagicons.lipis.dev/flags/4x3/${countryCode.toLowerCase()}.svg`;
   };
 
   if (loading) {
@@ -543,6 +576,100 @@ const DeviceDetailPage = () => {
                 <p className="text-gray-500 text-sm">No network interface information available</p>
               )}
             </div>
+          </div>
+
+          {/* Location Information Section */}
+          <div className="bg-white rounded-lg border border-gray-200 p-6">
+            <div className="flex items-center space-x-2 mb-4">
+              <MapPin className="w-5 h-5 text-blue-600" />
+              <h3 className="text-lg font-semibold text-gray-900">Location Information</h3>
+            </div>
+
+            {device.ip_address ? (
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                  {/* Location Details */}
+                  <div className="space-y-4">
+                    <div className="flex items-center space-x-3">
+                      <Globe className="w-4 h-4 text-gray-500" />
+                      <span className="font-mono text-sm text-gray-900">{device.ip_address.ip_address}</span>
+                      {device.ip_address.country_code && (
+                        <img 
+                          src={getFlagUrl(device.ip_address.country_code)} 
+                          alt={device.ip_address.country || 'Country flag'} 
+                          className="w-6 h-4 rounded-sm border border-gray-200"
+                          onError={(e) => {
+                            (e.target as HTMLImageElement).style.display = 'none';
+                          }}
+                        />
+                      )}
+                    </div>
+                    
+                    <div className="space-y-3">
+                      {device.ip_address.name && (
+                        <div className="flex items-center justify-between">
+                          <span className="text-gray-600">Location Name</span>
+                          <span className="text-gray-900 font-medium">{device.ip_address.name}</span>
+                        </div>
+                      )}
+                      {device.ip_address.country && (
+                        <div className="flex items-center justify-between">
+                          <span className="text-gray-600">Country</span>
+                          <span className="text-gray-900 font-medium">
+                            {device.ip_address.country}
+                            {device.ip_address.country_code && ` (${device.ip_address.country_code})`}
+                          </span>
+                        </div>
+                      )}
+                      {device.ip_address.region && (
+                        <div className="flex items-center justify-between">
+                          <span className="text-gray-600">Region</span>
+                          <span className="text-gray-900 font-medium">{device.ip_address.region}</span>
+                        </div>
+                      )}
+                      {device.ip_address.city && (
+                        <div className="flex items-center justify-between">
+                          <span className="text-gray-600">City</span>
+                          <span className="text-gray-900 font-medium">{device.ip_address.city}</span>
+                        </div>
+                      )}
+                      {device.ip_address.isp && (
+                        <div className="flex items-center justify-between">
+                          <span className="text-gray-600">Internet Provider</span>
+                          <span className="text-gray-900 font-medium">{device.ip_address.isp}</span>
+                        </div>
+                      )}
+                      {device.ip_address.coordinates && (
+                        <div className="flex items-center justify-between">
+                          <span className="text-gray-600">Coordinates</span>
+                          <span className="font-mono text-sm text-gray-900">
+                            {device.ip_address.coordinates[0].toFixed(4)}, {device.ip_address.coordinates[1].toFixed(4)}
+                          </span>
+                        </div>
+                      )}
+                      <div className="text-xs text-gray-500 pt-2 border-t border-gray-200">
+                        Last updated: {new Date(device.ip_address.updated_at).toLocaleString()}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Map */}
+                  <div className="">
+                    <LocationMap 
+                      countryCode={device.ip_address.country_code}
+                      city={device.ip_address.city}
+                      country={device.ip_address.country}
+                    />
+                  </div>
+                </div>
+              ) : (
+                <div className="flex items-center justify-center py-8">
+                  <div className="text-center">
+                    <Globe className="w-12 h-12 text-gray-300 mx-auto mb-4" />
+                    <p className="text-gray-500">No location information available</p>
+                    <p className="text-gray-400 text-sm mt-1">This device has no associated IP address data</p>
+                  </div>
+                </div>
+              )}
           </div>
         </div>
       </div>

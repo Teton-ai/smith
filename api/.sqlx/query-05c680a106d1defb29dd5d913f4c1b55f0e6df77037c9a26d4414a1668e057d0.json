@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id, serial_number, last_ping as last_seen, approved, release_id = target_release_id as up_to_date FROM device WHERE approved = $1 AND archived = false LIMIT $2",
+  "query": "SELECT id, serial_number, last_ping as last_seen, approved, release_id = target_release_id as up_to_date, ip_address_id FROM device WHERE serial_number LIKE '%' || $1 || '%' AND archived = false LIMIT $2",
   "describe": {
     "columns": [
       {
@@ -27,11 +27,16 @@
         "ordinal": 4,
         "name": "up_to_date",
         "type_info": "Bool"
+      },
+      {
+        "ordinal": 5,
+        "name": "ip_address_id",
+        "type_info": "Int4"
       }
     ],
     "parameters": {
       "Left": [
-        "Bool",
+        "Text",
         "Int8"
       ]
     },
@@ -40,8 +45,9 @@
       false,
       true,
       false,
-      null
+      null,
+      true
     ]
   },
-  "hash": "02a498afe60d3546c9e0c0c8be167cf066bea29623713e78d5d7ecee418ed854"
+  "hash": "05c680a106d1defb29dd5d913f4c1b55f0e6df77037c9a26d4414a1668e057d0"
 }
