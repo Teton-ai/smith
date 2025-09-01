@@ -25,6 +25,10 @@ pub struct DeviceFilter {
     pub serial_number: Option<String>,
     pub approved: Option<bool>,
     pub tag: Option<String>,
+    pub country: Option<String>,
+    pub city: Option<String>,
+    pub limit: Option<i64>,
+    pub offset: Option<i64>,
 }
 
 #[derive(Deserialize, Debug)]
@@ -302,6 +306,10 @@ pub async fn get_devices(
     filter: Query<DeviceFilter>,
 ) -> Result<Json<Vec<Device>>, StatusCode> {
     debug!("Getting devices {:?}", filter);
+    
+    // Handle pagination with backwards compatibility
+    let limit = filter.limit.unwrap_or(i64::MAX).min(100); // Default no limit, max 100
+    let offset = filter.offset.unwrap_or(0);
 
     if let Some(tag) = &filter.tag {
         let devices = sqlx::query!(
@@ -365,8 +373,15 @@ pub async fn get_devices(
             LEFT JOIN release tr ON d.target_release_id = tr.id
             LEFT JOIN distribution trd ON tr.distribution_id = trd.id
             WHERE t.name = $1
-            ORDER BY d.serial_number"#,
-            tag
+              AND ($2::text IS NULL OR ip.country ILIKE '%' || $2 || '%')
+              AND ($3::text IS NULL OR ip.city ILIKE '%' || $3 || '%')
+            ORDER BY d.serial_number
+            LIMIT $4 OFFSET $5"#,
+            tag,
+            filter.country,
+            filter.city,
+            limit,
+            offset
         )
         .fetch_all(&state.pg_pool)
         .await
@@ -531,11 +546,18 @@ pub async fn get_devices(
         LEFT JOIN distribution rd ON r.distribution_id = rd.id
         LEFT JOIN release tr ON d.target_release_id = tr.id
         LEFT JOIN distribution trd ON tr.distribution_id = trd.id
-        WHERE ($1::text IS NULL OR d.serial_number = $1)
+        WHERE ($1::text IS NULL OR d.serial_number ILIKE '%' || $1 || '%')
           AND ($2::boolean IS NULL OR d.approved = $2)
-        ORDER BY d.serial_number"#,
+          AND ($3::text IS NULL OR ip.country ILIKE '%' || $3 || '%')
+          AND ($4::text IS NULL OR ip.city ILIKE '%' || $4 || '%')
+        ORDER BY d.serial_number
+        LIMIT $5 OFFSET $6"#,
         filter.serial_number,
-        filter.approved
+        filter.approved,
+        filter.country,
+        filter.city,
+        limit,
+        offset
     )
     .fetch_all(&state.pg_pool)
     .await

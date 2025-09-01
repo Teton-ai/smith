@@ -1,4 +1,5 @@
 use crate::handlers::distributions::types::Release;
+use crate::device::Device;
 use serde::{Deserialize, Serialize};
 use sqlx::types::chrono;
 
