@@ -306,7 +306,7 @@ pub async fn get_devices(
     filter: Query<DeviceFilter>,
 ) -> Result<Json<Vec<Device>>, StatusCode> {
     debug!("Getting devices {:?}", filter);
-    
+
     // Handle pagination with backwards compatibility
     let limit = filter.limit.unwrap_or(i64::MAX).min(100); // Default no limit, max 100
     let offset = filter.offset.unwrap_or(0);
