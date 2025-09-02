@@ -311,13 +311,7 @@ const DeviceDetailPage = () => {
     }
   };
 
-  const getDeviceName = () => {
-    if (!device) return serial;
-    return device.system_info?.hostname || 
-           device.hostname || 
-           device.system_info?.device_tree?.model || 
-           device.serial_number;
-  };
+  const getDeviceName = () => device.serial_number;
 
   const getDeviceModel = () => {
     if (!device) return '';
@@ -427,8 +421,6 @@ const DeviceDetailPage = () => {
                   )}
                 </div>
               </div>
-              <p className="text-gray-600 mt-1">{getDeviceModel()}</p>
-              <p className="text-sm text-gray-500 font-mono">{device.serial_number}</p>
             </div>
           </div>
         </div>
