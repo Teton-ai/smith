@@ -146,12 +146,7 @@ const AdminPanel = () => {
     }
   };
 
-  const getDeviceName = (device: Device) => {
-    return device.system_info?.hostname || 
-           device.hostname || 
-           device.system_info?.device_tree?.model || 
-           device.serial_number;
-  };
+  const getDeviceName = (device: Device) => device.serial_number;
 
   const formatTimeAgo = (dateString: string) => {
     const now = new Date();

@@ -257,11 +257,7 @@ const DevicesPage = () => {
     return diffDays > 30;
   };
 
-  const getDeviceName = (device: Device) => {
-    return device.system_info?.hostname || 
-           device.system_info?.device_tree?.model || 
-           device.serial_number;
-  };
+  const getDeviceName = (device: Device) => device.serial_number;
 
   const getOSVersion = (device: Device) => {
     const osRelease = device.system_info?.os_release;
@@ -405,9 +401,6 @@ const DevicesPage = () => {
                               </Tooltip>
                             )}
                           </div>
-                        </div>
-                        <div className="text-xs text-gray-500 font-mono mt-0.5">
-                          {device.serial_number}
                         </div>
                       </div>
                     </div>

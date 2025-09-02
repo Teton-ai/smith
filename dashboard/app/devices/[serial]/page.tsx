@@ -311,13 +311,7 @@ const DeviceDetailPage = () => {
     }
   };
 
-  const getDeviceName = () => {
-    if (!device) return serial;
-    return device.system_info?.hostname || 
-           device.hostname || 
-           device.system_info?.device_tree?.model || 
-           device.serial_number;
-  };
+  const getDeviceName = () => device.serial_number;
 
   const getDeviceModel = () => {
     if (!device) return '';
@@ -427,8 +421,6 @@ const DeviceDetailPage = () => {
                   )}
                 </div>
               </div>
-              <p className="text-gray-600 mt-1">{getDeviceModel()}</p>
-              <p className="text-sm text-gray-500 font-mono">{device.serial_number}</p>
             </div>
           </div>
         </div>
@@ -495,18 +487,24 @@ const DeviceDetailPage = () => {
                         <GitBranch className="w-4 h-4 text-gray-400 mr-2" />
                         Distribution
                       </span>
-                      <span className="font-mono text-sm text-gray-900">
+                      <button
+                        onClick={() => router.push(`/distributions/${device.release.distribution_id}`)}
+                        className="font-mono text-sm text-blue-600 hover:text-blue-800 hover:underline cursor-pointer transition-colors"
+                      >
                         {device.release.distribution_name}
-                      </span>
+                      </button>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-gray-700 flex items-center">
                         <Tag className="w-4 h-4 text-gray-400 mr-2" />
                         Current Release
                       </span>
-                      <span className="font-mono text-sm text-gray-900">
+                      <button
+                        onClick={() => router.push(`/releases/${device.release.id}`)}
+                        className="font-mono text-sm text-blue-600 hover:text-blue-800 hover:underline cursor-pointer transition-colors"
+                      >
                         {device.release.version}
-                      </span>
+                      </button>
                     </div>
                   </>
                 )}
@@ -524,182 +522,183 @@ const DeviceDetailPage = () => {
               </div>
             </div>
 
+            {/* Location Information Section */}
             <div className="bg-white rounded-lg border border-gray-200 p-6">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-lg font-semibold text-gray-900">Network</h3>
-                {device.system_info?.network?.interfaces && (
-                  <span className="text-sm text-gray-600">
-                    {Object.entries(device.system_info.network.interfaces).filter(([name]) => {
-                      const connectionStatus = device.system_info?.connection_statuses?.find(
-                        conn => conn.device_name === name
-                      );
-                      return connectionStatus?.connection_state === 'connected';
-                    }).length} active connections
-                  </span>
-                )}
+              <div className="flex items-center space-x-2 mb-4">
+                <MapPin className="w-5 h-5 text-blue-600" />
+                <h3 className="text-lg font-semibold text-gray-900">Location Information</h3>
               </div>
-              {device.system_info?.network?.interfaces ? (
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                  {Object.entries(device.system_info.network.interfaces).map(([name, iface]) => {
-                    const connectionStatus = device.system_info?.connection_statuses?.find(
-                      conn => conn.device_name === name
-                    );
-                    const isConnected = connectionStatus?.connection_state === 'connected';
-                    const deviceType = connectionStatus?.device_type || 'unknown';
-                    const primaryIP = iface.ips[0];
-                    
-                    return (
-                      <div key={name} className={`p-3 rounded-lg border-2 transition-colors ${
-                        isConnected 
-                          ? 'border-green-200 bg-green-50' 
-                          : 'border-gray-200 bg-gray-50'
-                      }`}>
-                        <div className="flex items-center space-x-2 mb-2">
-                          {deviceType === 'wifi' ? (
-                            isConnected ? <Wifi className="w-4 h-4 text-green-600" /> : <WifiOff className="w-4 h-4 text-gray-400" />
-                          ) : deviceType === 'ethernet' ? (
-                            <Router className="w-4 h-4 text-blue-600" />
-                          ) : (
-                            <Smartphone className="w-4 h-4 text-gray-600" />
-                          )}
-                          <span className="font-mono text-sm font-medium text-gray-900">{name}</span>
-                          <div className={`w-2 h-2 rounded-full ${
-                            isConnected ? 'bg-green-500' : 'bg-gray-400'
-                          }`}></div>
-                        </div>
-                        {primaryIP && (
-                          <div className="text-xs font-mono text-gray-700 mb-1">
-                            {primaryIP}
+
+              {device.ip_address ? (
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                    {/* Map */}
+                    <div>
+                      <LocationMap 
+                        countryCode={device.ip_address.country_code}
+                        city={device.ip_address.city}
+                        country={device.ip_address.country}
+                      />
+                    </div>
+
+                    {/* Location Details */}
+                    <div className="space-y-4">
+                      <div className="flex items-center space-x-3">
+                        <Globe className="w-4 h-4 text-gray-500" />
+                        <span className="font-mono text-sm text-gray-900">{device.ip_address.ip_address}</span>
+                        {device.ip_address.country_code && (
+                          <img 
+                            src={getFlagUrl(device.ip_address.country_code)} 
+                            alt={device.ip_address.country || 'Country flag'} 
+                            className="w-6 h-4 rounded-sm border border-gray-200"
+                            onError={(e) => {
+                              (e.target as HTMLImageElement).style.display = 'none';
+                            }}
+                          />
+                        )}
+                      </div>
+                      
+                      <div className="space-y-3">
+                        {device.ip_address.name && (
+                          <div className="flex items-center justify-between">
+                            <span className="text-gray-600">Location Name</span>
+                            <span className="text-gray-900 font-medium">{device.ip_address.name}</span>
                           </div>
                         )}
-                        <div className="text-xs text-gray-600">
-                          {connectionStatus?.connection_state || 'disconnected'}
-                          {iface.ips.length > 1 && (
-                            <span className="ml-2 text-gray-500">+{iface.ips.length - 1} more</span>
-                          )}
-                        </div>
-                        <details className="mt-2">
-                          <summary className="text-xs text-blue-600 cursor-pointer hover:text-blue-800">
-                            Details
-                          </summary>
-                          <div className="mt-2 pt-2 border-t border-gray-200 space-y-1">
-                            <div className="text-xs text-gray-600">
-                              <span className="font-medium">MAC:</span> <span className="font-mono">{iface.mac_address}</span>
-                            </div>
-                            {iface.ips.length > 1 && (
-                              <div className="text-xs text-gray-600">
-                                <span className="font-medium">All IPs:</span>
-                                <div className="ml-2 space-y-1">
-                                  {iface.ips.map((ip, ipIndex) => (
-                                    <div key={ipIndex} className="font-mono">{ip}</div>
-                                  ))}
-                                </div>
-                              </div>
-                            )}
+                        {device.ip_address.country && (
+                          <div className="flex items-center justify-between">
+                            <span className="text-gray-600">Country</span>
+                            <span className="text-gray-900 font-medium">
+                              {device.ip_address.country}
+                              {device.ip_address.country_code && ` (${device.ip_address.country_code})`}
+                            </span>
                           </div>
-                        </details>
+                        )}
+                        {device.ip_address.region && (
+                          <div className="flex items-center justify-between">
+                            <span className="text-gray-600">Region</span>
+                            <span className="text-gray-900 font-medium">{device.ip_address.region}</span>
+                          </div>
+                        )}
+                        {device.ip_address.city && (
+                          <div className="flex items-center justify-between">
+                            <span className="text-gray-600">City</span>
+                            <span className="text-gray-900 font-medium">{device.ip_address.city}</span>
+                          </div>
+                        )}
+                        {device.ip_address.isp && (
+                          <div className="flex items-center justify-between">
+                            <span className="text-gray-600">Internet Provider</span>
+                            <span className="text-gray-900 font-medium">{device.ip_address.isp}</span>
+                          </div>
+                        )}
+                        {device.ip_address.coordinates && (
+                          <div className="flex items-center justify-between">
+                            <span className="text-gray-600">Coordinates</span>
+                            <span className="font-mono text-sm text-gray-900">
+                              {device.ip_address.coordinates[0].toFixed(4)}, {device.ip_address.coordinates[1].toFixed(4)}
+                            </span>
+                          </div>
+                        )}
+                        <div className="text-xs text-gray-500 pt-2 border-t border-gray-200">
+                          Last updated: {formatTimeAgo(device.ip_address.updated_at)}
+                        </div>
                       </div>
-                    );
-                  })}
-                </div>
-              ) : (
-                <p className="text-gray-500 text-sm">No network interface information available</p>
-              )}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex items-center justify-center py-8">
+                    <div className="text-center">
+                      <Globe className="w-12 h-12 text-gray-300 mx-auto mb-4" />
+                      <p className="text-gray-500">No location information available</p>
+                      <p className="text-gray-400 text-sm mt-1">This device has no associated IP address data</p>
+                    </div>
+                  </div>
+                )}
             </div>
           </div>
 
-          {/* Location Information Section */}
+          {/* Network Section */}
           <div className="bg-white rounded-lg border border-gray-200 p-6">
-            <div className="flex items-center space-x-2 mb-4">
-              <MapPin className="w-5 h-5 text-blue-600" />
-              <h3 className="text-lg font-semibold text-gray-900">Location Information</h3>
-            </div>
-
-            {device.ip_address ? (
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                  {/* Location Details */}
-                  <div className="space-y-4">
-                    <div className="flex items-center space-x-3">
-                      <Globe className="w-4 h-4 text-gray-500" />
-                      <span className="font-mono text-sm text-gray-900">{device.ip_address.ip_address}</span>
-                      {device.ip_address.country_code && (
-                        <img 
-                          src={getFlagUrl(device.ip_address.country_code)} 
-                          alt={device.ip_address.country || 'Country flag'} 
-                          className="w-6 h-4 rounded-sm border border-gray-200"
-                          onError={(e) => {
-                            (e.target as HTMLImageElement).style.display = 'none';
-                          }}
-                        />
-                      )}
-                    </div>
-                    
-                    <div className="space-y-3">
-                      {device.ip_address.name && (
-                        <div className="flex items-center justify-between">
-                          <span className="text-gray-600">Location Name</span>
-                          <span className="text-gray-900 font-medium">{device.ip_address.name}</span>
-                        </div>
-                      )}
-                      {device.ip_address.country && (
-                        <div className="flex items-center justify-between">
-                          <span className="text-gray-600">Country</span>
-                          <span className="text-gray-900 font-medium">
-                            {device.ip_address.country}
-                            {device.ip_address.country_code && ` (${device.ip_address.country_code})`}
-                          </span>
-                        </div>
-                      )}
-                      {device.ip_address.region && (
-                        <div className="flex items-center justify-between">
-                          <span className="text-gray-600">Region</span>
-                          <span className="text-gray-900 font-medium">{device.ip_address.region}</span>
-                        </div>
-                      )}
-                      {device.ip_address.city && (
-                        <div className="flex items-center justify-between">
-                          <span className="text-gray-600">City</span>
-                          <span className="text-gray-900 font-medium">{device.ip_address.city}</span>
-                        </div>
-                      )}
-                      {device.ip_address.isp && (
-                        <div className="flex items-center justify-between">
-                          <span className="text-gray-600">Internet Provider</span>
-                          <span className="text-gray-900 font-medium">{device.ip_address.isp}</span>
-                        </div>
-                      )}
-                      {device.ip_address.coordinates && (
-                        <div className="flex items-center justify-between">
-                          <span className="text-gray-600">Coordinates</span>
-                          <span className="font-mono text-sm text-gray-900">
-                            {device.ip_address.coordinates[0].toFixed(4)}, {device.ip_address.coordinates[1].toFixed(4)}
-                          </span>
-                        </div>
-                      )}
-                      <div className="text-xs text-gray-500 pt-2 border-t border-gray-200">
-                        Last updated: {new Date(device.ip_address.updated_at).toLocaleString()}
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Map */}
-                  <div className="">
-                    <LocationMap 
-                      countryCode={device.ip_address.country_code}
-                      city={device.ip_address.city}
-                      country={device.ip_address.country}
-                    />
-                  </div>
-                </div>
-              ) : (
-                <div className="flex items-center justify-center py-8">
-                  <div className="text-center">
-                    <Globe className="w-12 h-12 text-gray-300 mx-auto mb-4" />
-                    <p className="text-gray-500">No location information available</p>
-                    <p className="text-gray-400 text-sm mt-1">This device has no associated IP address data</p>
-                  </div>
-                </div>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold text-gray-900">Network</h3>
+              {device.system_info?.network?.interfaces && (
+                <span className="text-sm text-gray-600">
+                  {Object.entries(device.system_info.network.interfaces).filter(([name]) => {
+                    const connectionStatus = device.system_info?.connection_statuses?.find(
+                      conn => conn.device_name === name
+                    );
+                    return connectionStatus?.connection_state === 'connected';
+                  }).length} active connections
+                </span>
               )}
+            </div>
+            {device.system_info?.network?.interfaces ? (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                {Object.entries(device.system_info.network.interfaces).map(([name, iface]) => {
+                  const connectionStatus = device.system_info?.connection_statuses?.find(
+                    conn => conn.device_name === name
+                  );
+                  const isConnected = connectionStatus?.connection_state === 'connected';
+                  const deviceType = connectionStatus?.device_type || 'unknown';
+                  const primaryIP = iface.ips[0];
+                  
+                  return (
+                    <div key={name} className={`p-3 rounded-lg border-2 transition-colors ${
+                      isConnected 
+                        ? 'border-green-200 bg-green-50' 
+                        : 'border-gray-200 bg-gray-50'
+                    }`}>
+                      <div className="flex items-center space-x-2 mb-2">
+                        {deviceType === 'wifi' ? (
+                          isConnected ? <Wifi className="w-4 h-4 text-green-600" /> : <WifiOff className="w-4 h-4 text-gray-400" />
+                        ) : deviceType === 'ethernet' ? (
+                          <Router className="w-4 h-4 text-blue-600" />
+                        ) : (
+                          <Smartphone className="w-4 h-4 text-gray-600" />
+                        )}
+                        <span className="font-mono text-sm font-medium text-gray-900">{name}</span>
+                        <div className={`w-2 h-2 rounded-full ${
+                          isConnected ? 'bg-green-500' : 'bg-gray-400'
+                        }`}></div>
+                      </div>
+                      {primaryIP && (
+                        <div className="text-xs font-mono text-gray-700 mb-1">
+                          {primaryIP}
+                        </div>
+                      )}
+                      <div className="text-xs text-gray-600">
+                        {connectionStatus?.connection_state || 'disconnected'}
+                        {iface.ips.length > 1 && (
+                          <span className="ml-2 text-gray-500">+{iface.ips.length - 1} more</span>
+                        )}
+                      </div>
+                      <details className="mt-2">
+                        <summary className="text-xs text-blue-600 cursor-pointer hover:text-blue-800">
+                          Details
+                        </summary>
+                        <div className="mt-2 pt-2 border-t border-gray-200 space-y-1">
+                          <div className="text-xs text-gray-600">
+                            <span className="font-medium">MAC:</span> <span className="font-mono">{iface.mac_address}</span>
+                          </div>
+                          {iface.ips.length > 1 && (
+                            <div className="text-xs text-gray-600">
+                              <span className="font-medium">All IPs:</span>
+                              <div className="ml-2 space-y-1">
+                                {iface.ips.map((ip, ipIndex) => (
+                                  <div key={ipIndex} className="font-mono">{ip}</div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      </details>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <p className="text-gray-500 text-sm">No network interface information available</p>
+            )}
           </div>
         </div>
       </div>

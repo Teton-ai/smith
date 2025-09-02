@@ -398,6 +398,7 @@ pub async fn get_devices(
                         coordinates,
                         proxy: row.ip_proxy,
                         hosting: row.ip_hosting,
+                        device_count: None,
                         created_at: row.ip_created_at.unwrap(),
                         updated_at: row.ip_updated_at.unwrap(),
                     })
@@ -567,6 +568,7 @@ pub async fn get_devices(
                     coordinates,
                     proxy: row.ip_proxy,
                     hosting: row.ip_hosting,
+                    device_count: None,
                     created_at: row.ip_created_at.unwrap(),
                     updated_at: row.ip_updated_at.unwrap(),
                 })
@@ -2029,6 +2031,7 @@ pub async fn get_device_info(
             coordinates,
             proxy: device_row.ip_proxy,
             hosting: device_row.ip_hosting,
+            device_count: None,
             created_at: device_row.ip_created_at.unwrap(),
             updated_at: device_row.ip_updated_at.unwrap(),
         })
