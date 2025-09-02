@@ -3,6 +3,7 @@ description = "Default role"
 inherits = []
 permissions = [
     { action = "read", resource = "devices" },
+    { action = "write", resource = "devices" },
 ]
 
 [roles.admin]
