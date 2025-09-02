@@ -1,13 +1,11 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   Cpu,
   Search,
   GitBranch,
-  Eye,
-  EyeOff,
   Tag,
 } from 'lucide-react';
 import PrivateLayout from "@/app/layouts/PrivateLayout";
@@ -185,39 +183,90 @@ const DevicesPage = () => {
   const [devices, setDevices] = useState<Device[]>([]);
   const [filteredDevices, setFilteredDevices] = useState<Device[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
-  const [showLongOfflineDevices, setShowLongOfflineDevices] = useState(false);
+  const [countryFilter, setCountryFilter] = useState('');
+  const [cityFilter, setCityFilter] = useState('');
+  const [allDevices, setAllDevices] = useState<Device[]>([]);
+  const [hasMoreItems, setHasMoreItems] = useState(true);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const [isInitialLoad, setIsInitialLoad] = useState(true);
+  const itemsPerPage = 50;
 
+  // Initial data fetch - resets when filters change
   useEffect(() => {
-    const fetchDashboard = async () => {
-      const data = await callAPI<Device[]>('GET', '/devices');
+    const fetchInitialData = async () => {
+      setIsInitialLoad(true);
+      const params = new URLSearchParams();
+      params.append('approved', 'true'); // Default to only approved devices
+      params.append('limit', itemsPerPage.toString());
+      params.append('offset', '0');
+      if (countryFilter) params.append('country', countryFilter);
+      if (cityFilter) params.append('city', cityFilter);
+      if (searchTerm) params.append('serial_number', searchTerm);
+      
+      const queryString = params.toString();
+      const url = `/devices?${queryString}`;
+      
+      const data = await callAPI<Device[]>('GET', url);
       if (data) {
-        setDevices(data);
+        setAllDevices(data);
+        setHasMoreItems(data.length === itemsPerPage);
+      }
+      setIsInitialLoad(false);
+    };
+    fetchInitialData();
+  }, [callAPI, countryFilter, cityFilter, searchTerm]);
+
+  // Load more data function for infinite scroll
+  const loadMoreData = useCallback(async () => {
+    if (isLoadingMore || !hasMoreItems) return;
+    
+    setIsLoadingMore(true);
+    const params = new URLSearchParams();
+    params.append('approved', 'true');
+    params.append('limit', itemsPerPage.toString());
+    params.append('offset', allDevices.length.toString());
+    if (countryFilter) params.append('country', countryFilter);
+    if (cityFilter) params.append('city', cityFilter);
+    if (searchTerm) params.append('serial_number', searchTerm);
+    
+    const queryString = params.toString();
+    const url = `/devices?${queryString}`;
+    
+    const data = await callAPI<Device[]>('GET', url);
+    if (data) {
+      setAllDevices(prev => {
+        // Deduplicate devices by ID to avoid duplicate keys
+        const existingIds = new Set(prev.map(d => d.id));
+        const newDevices = data.filter(d => !existingIds.has(d.id));
+        return [...prev, ...newDevices];
+      });
+      setHasMoreItems(data.length === itemsPerPage);
+    }
+    setIsLoadingMore(false);
+  }, [isLoadingMore, hasMoreItems, allDevices.length, countryFilter, cityFilter, searchTerm, callAPI]);
+
+  // Infinite scroll detection
+  useEffect(() => {
+    const handleScroll = () => {
+      // Only trigger if we're scrolling down and near the bottom
+      const scrollTop = document.documentElement.scrollTop;
+      const scrollHeight = document.documentElement.scrollHeight;
+      const clientHeight = window.innerHeight;
+      
+      // Trigger when we're within 200px of the bottom
+      if (scrollTop + clientHeight >= scrollHeight - 200 && !isLoadingMore && hasMoreItems) {
+        loadMoreData();
       }
     };
-    fetchDashboard();
-  }, [callAPI]);
 
+    window.addEventListener('scroll', handleScroll);
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, [loadMoreData, isLoadingMore, hasMoreItems]);
 
-  // Filter and sort devices - show only authorized devices, filter by search, and sort by latest online
+  // Sort devices - all filtering is done server-side
   useEffect(() => {
-    // First filter to only show authorized devices (has_token = true)
-    let filtered = devices.filter(device => device.has_token);
-
-    // Filter out long offline devices unless toggle is on
-    if (!showLongOfflineDevices) {
-      filtered = filtered.filter(device => !isLongOffline(device));
-    }
-
-    if (searchTerm) {
-      filtered = filtered.filter(device =>
-        device.serial_number?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        device.system_info?.hostname?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        device.system_info?.device_tree?.model?.toLowerCase().includes(searchTerm.toLowerCase())
-      );
-    }
-
     // Sort devices by latest online (most recent first)
-    filtered = filtered.sort((a, b) => {
+    const sorted = [...allDevices].sort((a, b) => {
       // Online devices first, then sort by last seen time (most recent first)
       const statusA = getDeviceStatus(a);
       const statusB = getDeviceStatus(b);
@@ -234,8 +283,8 @@ const DevicesPage = () => {
       return new Date(b.last_seen).getTime() - new Date(a.last_seen).getTime();
     });
 
-    setFilteredDevices(filtered);
-  }, [devices, searchTerm, showLongOfflineDevices]);
+    setFilteredDevices(sorted);
+  }, [allDevices]);
 
   const getDeviceStatus = (device: Device) => {
     if (!device.last_seen) return 'offline';
@@ -247,21 +296,8 @@ const DevicesPage = () => {
     return diffMinutes <= 3 ? 'online' : 'offline';
   };
 
-  const isLongOffline = (device: Device) => {
-    if (!device.last_seen) return true; // Never seen = long offline
-    
-    const lastSeen = new Date(device.last_seen);
-    const now = new Date();
-    const diffDays = (now.getTime() - lastSeen.getTime()) / (1000 * 60 * 60 * 24);
-    
-    return diffDays > 30;
-  };
 
-  const getDeviceName = (device: Device) => {
-    return device.system_info?.hostname || 
-           device.system_info?.device_tree?.model || 
-           device.serial_number;
-  };
+  const getDeviceName = (device: Device) => device.serial_number;
 
   const getOSVersion = (device: Device) => {
     const osRelease = device.system_info?.os_release;
@@ -317,16 +353,13 @@ const DevicesPage = () => {
     return `${minutes}m`;
   };
 
-  // Calculate counts for display
-  const authorizedDevices = devices.filter(device => device.has_token);
-  const longOfflineDevices = authorizedDevices.filter(device => isLongOffline(device));
 
   return (
     <PrivateLayout id="devices">
       <div className="space-y-6">
         {/* Search and Device Count */}
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex items-center space-x-4">
+          <div className="flex items-center space-x-4 flex-wrap">
             <div className="relative">
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
               <input
@@ -337,23 +370,27 @@ const DevicesPage = () => {
                 className="pl-10 pr-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm text-gray-900 placeholder-gray-400"
               />
             </div>
+            <input
+              type="text"
+              placeholder="Filter by country..."
+              value={countryFilter}
+              onChange={(e) => setCountryFilter(e.target.value)}
+              className="px-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm text-gray-900 placeholder-gray-400"
+            />
+            <input
+              type="text"
+              placeholder="Filter by city..."
+              value={cityFilter}
+              onChange={(e) => setCityFilter(e.target.value)}
+              className="px-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm text-gray-900 placeholder-gray-400"
+            />
           </div>
 
           <div className="mt-4 sm:mt-0 flex items-center space-x-3">
             <span className="text-sm text-gray-500">
-              {loading ? 'Loading...' : `${filteredDevices.length} device${filteredDevices.length !== 1 ? 's' : ''} shown`}
+              {isInitialLoad ? 'Loading...' : `${filteredDevices.length} device${filteredDevices.length !== 1 ? 's' : ''} shown`}
+              {hasMoreItems && !isInitialLoad && ' (more available)'}
             </span>
-            {longOfflineDevices.length > 0 && (
-              <button
-                onClick={() => setShowLongOfflineDevices(!showLongOfflineDevices)}
-                className="flex items-center space-x-1 text-blue-600 hover:text-blue-800 text-sm"
-              >
-                {showLongOfflineDevices ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
-                <span>
-                  {showLongOfflineDevices ? 'Hide' : 'Show'} {longOfflineDevices.length} long-offline
-                </span>
-              </button>
-            )}
           </div>
         </div>
 
@@ -368,13 +405,13 @@ const DevicesPage = () => {
             </div>
           </div>
 
-          {loading ? (
+          {isInitialLoad ? (
             <LoadingSkeleton />
           ) : (
             <div className="divide-y divide-gray-200">
               {filteredDevices.map((device) => (
               <div 
-                key={device.id} 
+                key={`${device.id}-${device.serial_number}`} 
                 className="px-4 py-3 hover:bg-gray-50 cursor-pointer transition-colors"
                 onClick={() => router.push(`/devices/${device.serial_number}`)}
               >
@@ -405,9 +442,6 @@ const DevicesPage = () => {
                               </Tooltip>
                             )}
                           </div>
-                        </div>
-                        <div className="text-xs text-gray-500 font-mono mt-0.5">
-                          {device.serial_number}
                         </div>
                       </div>
                     </div>
@@ -478,6 +512,18 @@ const DevicesPage = () => {
             </div>
           )}
         </div>
+
+        {/* Load More / Infinite Scroll */}
+        {isLoadingMore && (
+          <div className="flex justify-center py-4">
+            <div className="text-sm text-gray-500">Loading more devices...</div>
+          </div>
+        )}
+        {!hasMoreItems && filteredDevices.length > 0 && (
+          <div className="flex justify-center py-4">
+            <div className="text-sm text-gray-500">No more devices to load</div>
+          </div>
+        )}
       </div>
     </PrivateLayout>
   );
