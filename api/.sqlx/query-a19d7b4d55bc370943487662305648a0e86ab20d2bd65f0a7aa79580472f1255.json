@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT \n            id,\n            ip_address,\n            name,\n            continent,\n            continent_code,\n            country_code,\n            country,\n            region,\n            city,\n            isp,\n            coordinates[0] as longitude,\n            coordinates[1] as latitude,\n            proxy,\n            hosting,\n            created_at,\n            updated_at\n        FROM ip_address \n        WHERE id = $1\n        ",
+  "query": "\n        SELECT \n            ip.id,\n            ip.ip_address,\n            ip.name,\n            ip.continent,\n            ip.continent_code,\n            ip.country_code,\n            ip.country,\n            ip.region,\n            ip.city,\n            ip.isp,\n            ip.coordinates[0] as longitude,\n            ip.coordinates[1] as latitude,\n            ip.proxy,\n            ip.hosting,\n            ip.created_at,\n            ip.updated_at,\n            COUNT(d.id) as device_count\n        FROM ip_address ip\n        LEFT JOIN device d ON d.ip_address_id = ip.id\n        WHERE ip.id = $1\n        GROUP BY ip.id\n        ",
   "describe": {
     "columns": [
       {
@@ -82,6 +82,11 @@
         "ordinal": 15,
         "name": "updated_at",
         "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 16,
+        "name": "device_count",
+        "type_info": "Int8"
       }
     ],
     "parameters": {
@@ -105,8 +110,9 @@
       true,
       true,
       false,
-      false
+      false,
+      null
     ]
   },
-  "hash": "fa4668474dea4a7df2356fb142e654f314b0fbdd736394dd475280e07087c3fc"
+  "hash": "a19d7b4d55bc370943487662305648a0e86ab20d2bd65f0a7aa79580472f1255"
 }
