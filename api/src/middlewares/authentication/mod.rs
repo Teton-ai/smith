@@ -12,6 +12,7 @@ use jwks_client_rs::{JwksClient, source::WebSource};
 use reqwest::Url;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
+use tracing::info;
 
 #[derive(Debug, Serialize, Deserialize)]
 struct Claims {
@@ -20,6 +21,15 @@ struct Claims {
     iat: u64,
     iss: String,
     sub: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Auth0UserInfo {
+    pub sub: String,
+    pub name: Option<String>,
+    pub email: Option<String>,
+    pub picture: Option<String>,
+    pub email_verified: Option<bool>,
 }
 
 pub async fn check(
@@ -66,9 +76,38 @@ pub async fn check(
 
     let authorization = state.authorization.clone();
 
-    let current_user = CurrentUser::build(&pool, &authorization, &claims.sub)
-        .await
-        .map_err(|_| StatusCode::UNAUTHORIZED)?;
+    let current_user = match CurrentUser::id(&pool, &claims.sub).await {
+        Ok(user_id) => CurrentUser::build(&pool, &authorization, user_id).await,
+        Err(sqlx::Error::RowNotFound) => {
+            info!("Creating new User! Exciting");
+            let userinfo_url = format!(
+                "{}/userinfo",
+                std::env::var("AUTH0_ISSUER").map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+            );
+            let client_http = reqwest::Client::new();
+            let userinfo_response = client_http
+                .get(&userinfo_url)
+                .bearer_auth(token)
+                .send()
+                .await
+                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+            let userinfo: Auth0UserInfo = userinfo_response
+                .json()
+                .await
+                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+            info!("{:?}", userinfo);
+
+            let user_id = CurrentUser::create(&pool, &claims.sub, Some(userinfo))
+                .await
+                .map_err(|_| StatusCode::UNAUTHORIZED)?;
+
+            CurrentUser::build(&pool, &authorization, user_id).await
+        }
+        Err(_) => return Err(StatusCode::INTERNAL_SERVER_ERROR),
+    }
+    .map_err(|_| StatusCode::UNAUTHORIZED)?;
 
     request.extensions_mut().insert(current_user);
 

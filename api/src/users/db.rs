@@ -1,5 +1,7 @@
-use crate::middlewares::authorization::{self, AuthorizationConfig};
-use anyhow::Result;
+use crate::middlewares::{
+    authentication::Auth0UserInfo,
+    authorization::{self, AuthorizationConfig},
+};
 use sqlx::PgPool;
 
 #[derive(Clone, Debug)]
@@ -15,51 +17,62 @@ impl CurrentUser {
             .any(|permission| permission.resource == resource && permission.action == action)
     }
 
-    pub async fn build(
-        pg_pool: &PgPool,
-        authorization: &AuthorizationConfig,
-        auth0_sub: &str,
-    ) -> Result<Self> {
-        let user_id = match sqlx::query!(
+    pub async fn id(pg_pool: &PgPool, auth0_sub: &str) -> Result<i32, sqlx::Error> {
+        let user_id = sqlx::query!(
             r#"
                 SELECT id
                 FROM auth.users
                 WHERE auth0_user_id = $1
-                "#,
+            "#,
             auth0_sub
         )
-        .fetch_optional(pg_pool)
+        .fetch_one(pg_pool)
         .await?
-        {
-            Some(record) => record.id,
-            None => {
-                // Insert the user
-                sqlx::query!(
-                    r#"
-                        INSERT INTO auth.users (auth0_user_id)
-                        VALUES ($1)
-                        ON CONFLICT (auth0_user_id) DO NOTHING
-                        "#,
-                    auth0_sub,
-                )
-                .execute(pg_pool)
-                .await?;
+        .id;
 
-                // Now fetch the ID of the newly inserted user
-                sqlx::query!(
-                    r#"
-                        SELECT id
-                        FROM auth.users
-                        WHERE auth0_user_id = $1
-                        "#,
-                    auth0_sub
-                )
-                .fetch_one(pg_pool)
-                .await?
-                .id
-            }
-        };
+        Ok(user_id)
+    }
 
+    pub async fn create(
+        pg_pool: &PgPool,
+        auth0_sub: &str,
+        userinfo: Option<Auth0UserInfo>,
+    ) -> Result<i32, sqlx::Error> {
+        // Insert the user with userinfo if available
+        let email = userinfo.as_ref().and_then(|info| info.email.as_ref());
+        sqlx::query!(
+            r#"
+                INSERT INTO auth.users (auth0_user_id, email)
+                VALUES ($1, $2)
+                ON CONFLICT (auth0_user_id) DO NOTHING
+            "#,
+            auth0_sub,
+            email
+        )
+        .execute(pg_pool)
+        .await?;
+
+        // Now fetch the ID of the newly inserted user
+        let user_id = sqlx::query!(
+            r#"
+                SELECT id
+                FROM auth.users
+                WHERE auth0_user_id = $1
+            "#,
+            auth0_sub
+        )
+        .fetch_one(pg_pool)
+        .await?
+        .id;
+
+        Ok(user_id)
+    }
+
+    pub async fn build(
+        pg_pool: &PgPool,
+        authorization: &AuthorizationConfig,
+        user_id: i32,
+    ) -> Result<Self, sqlx::Error> {
         struct UserRole {
             role: String,
         }
@@ -70,9 +83,9 @@ impl CurrentUser {
                     SELECT users_roles.role
                     FROM auth.users
                     LEFT JOIN auth.users_roles ON users_roles.user_id = users.id
-                    WHERE users.auth0_user_id = $1
+                    WHERE users.id = $1
                 "#,
-            auth0_sub
+            user_id
         )
         .fetch_all(pg_pool)
         .await
