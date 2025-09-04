@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "INSERT INTO release (distribution_id, version, created_by) VALUES ($1, $2, $3) RETURNING id",
+  "query": "INSERT INTO release (distribution_id, version, user_id) VALUES ($1, $2, $3) RETURNING id",
   "describe": {
     "columns": [
       {
@@ -20,5 +20,5 @@
       false
     ]
   },
-  "hash": "225c048035a24f53f3439a52a825db23636d536e52b20d0693ced23e36d0f614"
+  "hash": "93a4d55d68f6345f5a3c7850ac5f9c8e74e9381de64a48034b4f4536886a5a7b"
 }
