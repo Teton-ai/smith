@@ -149,7 +149,7 @@ const DistributionDetailPage = () => {
         {
           type: 'MAJOR',
           version: `${parseInt(major) + 1}.0.0`,
-          description: 'Breaking changes'
+          description: 'Significant new features, may include breaking changes'
         }
       ];
     }
