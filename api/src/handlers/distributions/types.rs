@@ -20,6 +20,7 @@ pub struct Release {
     pub draft: bool,
     pub yanked: bool,
     pub created_at: chrono::DateTime<chrono::Utc>,
+    pub created_by: Option<i32>,
 }
 
 #[derive(Debug, Serialize, Deserialize, utoipa::ToSchema)]

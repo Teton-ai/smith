@@ -347,6 +347,7 @@ pub async fn get_devices(
                 r.draft as "release_draft?",
                 r.yanked as "release_yanked?",
                 r.created_at as "release_created_at?",
+                r.created_by as "release_created_by?",
                 tr.id as "target_release_id_nested?",
                 tr.distribution_id as "target_release_distribution_id?",
                 trd.architecture as "target_release_distribution_architecture?",
@@ -354,7 +355,8 @@ pub async fn get_devices(
                 tr.version as "target_release_version?",
                 tr.draft as "target_release_draft?",
                 tr.yanked as "target_release_yanked?",
-                tr.created_at as "target_release_created_at?"
+                tr.created_at as "target_release_created_at?",
+                tr.created_by as "target_release_created_by?"
             FROM device d
             JOIN tag_device td ON d.id = td.device_id
             JOIN tag t ON td.tag_id = t.id
@@ -428,6 +430,7 @@ pub async fn get_devices(
                         draft: row.release_draft.unwrap(),
                         yanked: row.release_yanked.unwrap(),
                         created_at: row.release_created_at.unwrap(),
+                        created_by: row.release_created_by,
                     })
                 } else {
                     None
@@ -445,6 +448,7 @@ pub async fn get_devices(
                         draft: row.target_release_draft.unwrap(),
                         yanked: row.target_release_yanked.unwrap(),
                         created_at: row.target_release_created_at.unwrap(),
+                        created_by: row.target_release_created_by,
                     })
                 } else {
                     None
@@ -517,6 +521,7 @@ pub async fn get_devices(
             r.draft as "release_draft?",
             r.yanked as "release_yanked?",
             r.created_at as "release_created_at?",
+            r.created_by as "release_created_by?",
             tr.id as "target_release_id_nested?",
             tr.distribution_id as "target_release_distribution_id?",
             trd.architecture as "target_release_distribution_architecture?",
@@ -524,7 +529,8 @@ pub async fn get_devices(
             tr.version as "target_release_version?",
             tr.draft as "target_release_draft?",
             tr.yanked as "target_release_yanked?",
-            tr.created_at as "target_release_created_at?"
+            tr.created_at as "target_release_created_at?",
+            tr.created_by as "target_release_created_by?"
         FROM device d
         LEFT JOIN ip_address ip ON d.ip_address_id = ip.id
         LEFT JOIN modem m ON d.modem_id = m.id
@@ -598,6 +604,7 @@ pub async fn get_devices(
                     draft: row.release_draft.unwrap(),
                     yanked: row.release_yanked.unwrap(),
                     created_at: row.release_created_at.unwrap(),
+                    created_by: row.release_created_by,
                 })
             } else {
                 None
@@ -615,6 +622,7 @@ pub async fn get_devices(
                     draft: row.target_release_draft.unwrap(),
                     yanked: row.target_release_yanked.unwrap(),
                     created_at: row.target_release_created_at.unwrap(),
+                    created_by: row.target_release_created_by,
                 })
             } else {
                 None
@@ -1976,6 +1984,7 @@ pub async fn get_device_info(
         r.draft as \"release_draft?\",
         r.yanked as \"release_yanked?\",
         r.created_at as \"release_created_at?\",
+        r.created_by as \"release_created_by?\",
         tr.id as \"target_release_id_nested?\",
         tr.distribution_id as \"target_release_distribution_id?\",
         trd.architecture as \"target_release_distribution_architecture?\",
@@ -1983,7 +1992,8 @@ pub async fn get_device_info(
         tr.version as \"target_release_version?\",
         tr.draft as \"target_release_draft?\",
         tr.yanked as \"target_release_yanked?\",
-        tr.created_at as \"target_release_created_at?\"
+        tr.created_at as \"target_release_created_at?\",
+        tr.created_by as \"target_release_created_by?\"
         FROM device d
         LEFT JOIN ip_address ip ON d.ip_address_id = ip.id
         LEFT JOIN modem m ON d.modem_id = m.id
@@ -2061,6 +2071,7 @@ pub async fn get_device_info(
             draft: device_row.release_draft.unwrap(),
             yanked: device_row.release_yanked.unwrap(),
             created_at: device_row.release_created_at.unwrap(),
+            created_by: device_row.release_created_by,
         })
     } else {
         None
@@ -2076,6 +2087,7 @@ pub async fn get_device_info(
             draft: device_row.target_release_draft.unwrap(),
             yanked: device_row.target_release_yanked.unwrap(),
             created_at: device_row.target_release_created_at.unwrap(),
+            created_by: device_row.target_release_created_by,
         })
     } else {
         None
