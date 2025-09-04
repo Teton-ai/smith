@@ -181,7 +181,8 @@ pub async fn get_ip_addresses(
         FROM ip_address ip
         LEFT JOIN device d ON d.ip_address_id = ip.id
         GROUP BY ip.id
-        ORDER BY ip.updated_at DESC
+        HAVING COUNT(d.id) > 0
+        ORDER BY COUNT(d.id) DESC
         "#,
     )
     .fetch_all(&state.pg_pool)
