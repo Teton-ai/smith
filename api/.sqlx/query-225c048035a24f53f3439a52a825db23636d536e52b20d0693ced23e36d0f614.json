@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "INSERT INTO release (distribution_id, version) VALUES ($1, $2) RETURNING id",
+  "query": "INSERT INTO release (distribution_id, version, created_by) VALUES ($1, $2, $3) RETURNING id",
   "describe": {
     "columns": [
       {
@@ -12,12 +12,13 @@
     "parameters": {
       "Left": [
         "Int4",
-        "Text"
+        "Text",
+        "Int4"
       ]
     },
     "nullable": [
       false
     ]
   },
-  "hash": "c41cf308d5481e9e8592471ccc5fc671727d11ffe0f6f58a8a54e96b2a5c6457"
+  "hash": "225c048035a24f53f3439a52a825db23636d536e52b20d0693ced23e36d0f614"
 }

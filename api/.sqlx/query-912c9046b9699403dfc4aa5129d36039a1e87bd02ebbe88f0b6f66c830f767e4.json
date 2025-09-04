@@ -35,11 +35,16 @@
       },
       {
         "ordinal": 6,
+        "name": "created_by",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 7,
         "name": "distribution_name",
         "type_info": "Text"
       },
       {
-        "ordinal": 7,
+        "ordinal": 8,
         "name": "distribution_architecture",
         "type_info": "Text"
       }
@@ -57,6 +62,7 @@
       false,
       false,
       false,
+      true,
       false,
       false
     ]
