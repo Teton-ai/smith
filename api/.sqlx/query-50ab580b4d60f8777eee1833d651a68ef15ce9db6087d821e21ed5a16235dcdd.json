@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "INSERT INTO release (distribution_id, version) VALUES ($1, $2) RETURNING id",
+  "query": "\n                SELECT id\n                FROM auth.users\n                WHERE auth0_user_id = $1\n            ",
   "describe": {
     "columns": [
       {
@@ -11,7 +11,6 @@
     ],
     "parameters": {
       "Left": [
-        "Int4",
         "Text"
       ]
     },
@@ -19,5 +18,5 @@
       false
     ]
   },
-  "hash": "c41cf308d5481e9e8592471ccc5fc671727d11ffe0f6f58a8a54e96b2a5c6457"
+  "hash": "50ab580b4d60f8777eee1833d651a68ef15ce9db6087d821e21ed5a16235dcdd"
 }

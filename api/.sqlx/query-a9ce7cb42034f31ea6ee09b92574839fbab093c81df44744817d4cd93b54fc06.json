@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT\n            d.id,\n            d.serial_number,\n            d.note,\n            d.last_ping as last_seen,\n            d.created_on,\n            d.approved,\n            d.token IS NOT NULL as has_token,\n            d.release_id,\n            d.target_release_id,\n            d.system_info,\n            d.modem_id,\n            d.ip_address_id,\n            ip.id as \"ip_id?\",\n            ip.ip_address as \"ip_address?\",\n            ip.name as \"ip_name?\",\n            ip.continent as \"ip_continent?\",\n            ip.continent_code as \"ip_continent_code?\",\n            ip.country_code as \"ip_country_code?\",\n            ip.country as \"ip_country?\",\n            ip.region as \"ip_region?\",\n            ip.city as \"ip_city?\",\n            ip.isp as \"ip_isp?\",\n            ip.coordinates[0] as \"ip_longitude?\",\n            ip.coordinates[1] as \"ip_latitude?\",\n            ip.proxy as \"ip_proxy?\",\n            ip.hosting as \"ip_hosting?\",\n            ip.created_at as \"ip_created_at?\",\n            ip.updated_at as \"ip_updated_at?\",\n            m.id as \"modem_id_nested?\",\n            m.imei as \"modem_imei?\",\n            m.network_provider as \"modem_network_provider?\",\n            m.updated_at as \"modem_updated_at?\",\n            m.created_at as \"modem_created_at?\",\n            r.id as \"release_id_nested?\",\n            r.distribution_id as \"release_distribution_id?\",\n            rd.architecture as \"release_distribution_architecture?\",\n            rd.name as \"release_distribution_name?\",\n            r.version as \"release_version?\",\n            r.draft as \"release_draft?\",\n            r.yanked as \"release_yanked?\",\n            r.created_at as \"release_created_at?\",\n            tr.id as \"target_release_id_nested?\",\n            tr.distribution_id as \"target_release_distribution_id?\",\n            trd.architecture as \"target_release_distribution_architecture?\",\n            trd.name as \"target_release_distribution_name?\",\n            tr.version as \"target_release_version?\",\n            tr.draft as \"target_release_draft?\",\n            tr.yanked as \"target_release_yanked?\",\n            tr.created_at as \"target_release_created_at?\"\n        FROM device d\n        LEFT JOIN ip_address ip ON d.ip_address_id = ip.id\n        LEFT JOIN modem m ON d.modem_id = m.id\n        LEFT JOIN release r ON d.release_id = r.id\n        LEFT JOIN distribution rd ON r.distribution_id = rd.id\n        LEFT JOIN release tr ON d.target_release_id = tr.id\n        LEFT JOIN distribution trd ON tr.distribution_id = trd.id\n        WHERE ($1::text IS NULL OR d.serial_number = $1)\n          AND ($2::boolean IS NULL OR d.approved = $2)\n        ORDER BY d.serial_number",
+  "query": "SELECT\n                d.id,\n                d.serial_number,\n                d.note,\n                d.last_ping as last_seen,\n                d.created_on,\n                d.approved,\n                d.token IS NOT NULL as has_token,\n                d.release_id,\n                d.target_release_id,\n                d.system_info,\n                d.modem_id,\n                d.ip_address_id,\n                ip.id as \"ip_id?\",\n                ip.ip_address as \"ip_address?\",\n                ip.name as \"ip_name?\",\n                ip.continent as \"ip_continent?\",\n                ip.continent_code as \"ip_continent_code?\",\n                ip.country_code as \"ip_country_code?\",\n                ip.country as \"ip_country?\",\n                ip.region as \"ip_region?\",\n                ip.city as \"ip_city?\",\n                ip.isp as \"ip_isp?\",\n                ip.coordinates[0] as \"ip_longitude?\",\n                ip.coordinates[1] as \"ip_latitude?\",\n                ip.proxy as \"ip_proxy?\",\n                ip.hosting as \"ip_hosting?\",\n                ip.created_at as \"ip_created_at?\",\n                ip.updated_at as \"ip_updated_at?\",\n                m.id as \"modem_id_nested?\",\n                m.imei as \"modem_imei?\",\n                m.network_provider as \"modem_network_provider?\",\n                m.updated_at as \"modem_updated_at?\",\n                m.created_at as \"modem_created_at?\",\n                r.id as \"release_id_nested?\",\n                r.distribution_id as \"release_distribution_id?\",\n                rd.architecture as \"release_distribution_architecture?\",\n                rd.name as \"release_distribution_name?\",\n                r.version as \"release_version?\",\n                r.draft as \"release_draft?\",\n                r.yanked as \"release_yanked?\",\n                r.created_at as \"release_created_at?\",\n                r.user_id as \"release_user_id?\",\n                tr.id as \"target_release_id_nested?\",\n                tr.distribution_id as \"target_release_distribution_id?\",\n                trd.architecture as \"target_release_distribution_architecture?\",\n                trd.name as \"target_release_distribution_name?\",\n                tr.version as \"target_release_version?\",\n                tr.draft as \"target_release_draft?\",\n                tr.yanked as \"target_release_yanked?\",\n                tr.created_at as \"target_release_created_at?\",\n                tr.user_id as \"target_release_user_id?\"\n            FROM device d\n            JOIN tag_device td ON d.id = td.device_id\n            JOIN tag t ON td.tag_id = t.id\n            LEFT JOIN ip_address ip ON d.ip_address_id = ip.id\n            LEFT JOIN modem m ON d.modem_id = m.id\n            LEFT JOIN release r ON d.release_id = r.id\n            LEFT JOIN distribution rd ON r.distribution_id = rd.id\n            LEFT JOIN release tr ON d.target_release_id = tr.id\n            LEFT JOIN distribution trd ON tr.distribution_id = trd.id\n            WHERE t.name = $1\n            ORDER BY d.serial_number",
   "describe": {
     "columns": [
       {
@@ -210,49 +210,58 @@
       },
       {
         "ordinal": 41,
-        "name": "target_release_id_nested?",
+        "name": "release_user_id?",
         "type_info": "Int4"
       },
       {
         "ordinal": 42,
-        "name": "target_release_distribution_id?",
+        "name": "target_release_id_nested?",
         "type_info": "Int4"
       },
       {
         "ordinal": 43,
+        "name": "target_release_distribution_id?",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 44,
         "name": "target_release_distribution_architecture?",
         "type_info": "Text"
       },
       {
-        "ordinal": 44,
+        "ordinal": 45,
         "name": "target_release_distribution_name?",
         "type_info": "Text"
       },
       {
-        "ordinal": 45,
+        "ordinal": 46,
         "name": "target_release_version?",
         "type_info": "Text"
       },
       {
-        "ordinal": 46,
+        "ordinal": 47,
         "name": "target_release_draft?",
         "type_info": "Bool"
       },
       {
-        "ordinal": 47,
+        "ordinal": 48,
         "name": "target_release_yanked?",
         "type_info": "Bool"
       },
       {
-        "ordinal": 48,
+        "ordinal": 49,
         "name": "target_release_created_at?",
         "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 50,
+        "name": "target_release_user_id?",
+        "type_info": "Int4"
       }
     ],
     "parameters": {
       "Left": [
-        "Text",
-        "Bool"
+        "Text"
       ]
     },
     "nullable": [
@@ -268,8 +277,8 @@
       true,
       true,
       true,
-      true,
-      true,
+      false,
+      false,
       true,
       true,
       true,
@@ -282,30 +291,32 @@
       null,
       true,
       true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
       true,
-      true,
-      true,
-      true,
-      true,
-      true,
-      true,
-      true,
-      true,
-      true,
-      true,
-      true,
-      true,
-      true,
-      true,
-      true,
-      true,
-      true,
-      true,
-      true,
-      true,
-      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
       true
     ]
   },
-  "hash": "51ae370972e2b79f86bdaf5f35a4bade68c965f6c5d34427f70474fdb667bbeb"
+  "hash": "a9ce7cb42034f31ea6ee09b92574839fbab093c81df44744817d4cd93b54fc06"
 }
