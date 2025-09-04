@@ -79,29 +79,36 @@ pub async fn check(
     let current_user = match CurrentUser::id(&pool, &claims.sub).await {
         Ok(user_id) => CurrentUser::build(&pool, &authorization, user_id).await,
         Err(sqlx::Error::RowNotFound) => {
-            info!("Creating new User! Exciting");
-            let userinfo_url = format!(
-                "{}/userinfo",
-                std::env::var("AUTH0_ISSUER").map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
-            );
-            let client_http = reqwest::Client::new();
-            let userinfo_response = client_http
-                .get(&userinfo_url)
+            info!("Creating user for sub={}", claims.sub);
+            let issuer = Url::parse(
+                &std::env::var("AUTH0_ISSUER").map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?,
+            )
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+            let userinfo_url = issuer
+                .join("userinfo")
+                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+            let client_http = reqwest::Client::builder()
+                .timeout(Duration::from_secs(5))
+                .build()
+                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+            let userinfo: Auth0UserInfo = client_http
+                .get(userinfo_url)
                 .bearer_auth(token)
                 .send()
                 .await
-                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-
-            let userinfo: Auth0UserInfo = userinfo_response
+                .and_then(|r| r.error_for_status())
+                .map_err(|_| StatusCode::UNAUTHORIZED)?
                 .json()
                 .await
                 .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-            info!("{:?}", userinfo);
-
+            info!(
+                "Provisioning user; email_present={}",
+                userinfo.email.is_some()
+            );
             let user_id = CurrentUser::create(&pool, &claims.sub, Some(userinfo))
                 .await
-                .map_err(|_| StatusCode::UNAUTHORIZED)?;
+                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
             CurrentUser::build(&pool, &authorization, user_id).await
         }
