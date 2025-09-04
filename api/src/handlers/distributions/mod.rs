@@ -1,6 +1,7 @@
 use crate::State;
 use crate::handlers::devices::types::{LeanDevice, LeanResponse};
 use crate::handlers::distributions::db::db_get_latest_distribution_release;
+use crate::users::db::CurrentUser;
 use axum::{Extension, Json, extract::Path};
 use axum::{http::StatusCode, response::Result};
 use tracing::error;
@@ -220,6 +221,7 @@ pub async fn get_distribution_latest_release(
 #[tracing::instrument]
 pub async fn create_distribution_release(
     Extension(state): Extension<State>,
+    Extension(current_user): Extension<CurrentUser>,
     Path(distribution_id): Path<i32>,
     Json(distribution_release): Json<types::NewDistributionRelease>,
 ) -> Result<Json<i32>, StatusCode> {
@@ -229,9 +231,10 @@ pub async fn create_distribution_release(
     })?;
 
     let release = sqlx::query!(
-        "INSERT INTO release (distribution_id, version) VALUES ($1, $2) RETURNING id",
+        "INSERT INTO release (distribution_id, version, user_id) VALUES ($1, $2, $3) RETURNING id",
         distribution_id,
-        distribution_release.version
+        distribution_release.version,
+        current_user.user_id
     )
     .fetch_one(&mut *tx)
     .await
