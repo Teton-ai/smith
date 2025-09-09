@@ -48,6 +48,7 @@ const DistributionDetailPage = () => {
   const { callAPI, loading, error } = useSmithAPI();
   const [distribution, setDistribution] = useState<Distribution | null>(null);
   const [releases, setReleases] = useState<Release[]>([]);
+  const [latestRelease, setLatestRelease] = useState<Release | null>(null);
   const [releasesLoading, setReleasesLoading] = useState(false);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [selectedVersionOption, setSelectedVersionOption] = useState<string>('');
@@ -81,6 +82,23 @@ const DistributionDetailPage = () => {
         }
       };
       fetchReleases();
+    }
+  }, [distributionId, callAPI]);
+
+  useEffect(() => {
+    if (distributionId) {
+      const fetchLatestRelease = async () => {
+        try {
+          const data = await callAPI<Release>('GET', `/distributions/${distributionId}/releases/latest`);
+          if (data) {
+            setLatestRelease(data);
+          }
+        } catch (error) {
+          // It's ok if there's no latest release (e.g., only drafts exist)
+          console.log('No latest release found:', error);
+        }
+      };
+      fetchLatestRelease();
     }
   }, [distributionId, callAPI]);
 
@@ -173,12 +191,15 @@ const DistributionDetailPage = () => {
     try {
       const finalVersion = isReleaseCandidate ? `${selectedVersionOption}-rc` : selectedVersionOption;
       
+      // Get packages from the latest release
+      const latestReleasePackages = await callAPI<any[]>('GET', `/releases/${latestRelease.id}/packages`);
+      if (!latestReleasePackages) {
+        throw new Error('Failed to get packages from latest release');
+      }
+
       const requestBody = {
         version: finalVersion,
-        distribution_id: parseInt(distributionId),
-        draft: true,
-        // Copy from the latest non-yanked release
-        base_release_id: latestRelease.id
+        packages: latestReleasePackages.map((p) => p.id),
       };
 
       console.log('Creating draft release:', requestBody);
@@ -427,6 +448,11 @@ const DistributionDetailPage = () => {
                         <div>
                           <div className="flex items-center space-x-2">
                             <h4 className="font-medium text-gray-900">{release.version}</h4>
+                            {latestRelease && latestRelease.id === release.id && (
+                              <span className="px-2 py-1 text-xs font-medium bg-green-100 text-green-800 rounded-full">
+                                Latest
+                              </span>
+                            )}
                             {release.draft && (
                               <span className="px-2 py-1 text-xs font-medium bg-yellow-100 text-yellow-800 rounded-full">
                                 Draft
