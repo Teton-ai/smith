@@ -202,16 +202,10 @@ const DistributionDetailPage = () => {
         packages: latestReleasePackages.map((p) => p.id),
       };
 
-      console.log('Creating draft release:', requestBody);
-
       const newRelease = await callAPI<Release>('POST', `/distributions/${distributionId}/releases`, requestBody);
 
       if (newRelease) {
-        // Add to the beginning of the releases list
-        setReleases(prev => [newRelease, ...prev]);
-        
-        // Navigate to the new draft release page
-        router.push(`/releases/${newRelease.id}`);
+        router.push(`/releases/${newRelease}`);
       }
     } catch (error: any) {
       console.error('Failed to create draft release:', error);
