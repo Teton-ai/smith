@@ -51,6 +51,7 @@ const DistributionDetailPage = () => {
   const [releasesLoading, setReleasesLoading] = useState(false);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [selectedVersionOption, setSelectedVersionOption] = useState<string>('');
+  const [isReleaseCandidate, setIsReleaseCandidate] = useState(false);
   const [creatingDraft, setCreatingDraft] = useState(false);
 
   useEffect(() => {
@@ -170,8 +171,10 @@ const DistributionDetailPage = () => {
 
     setCreatingDraft(true);
     try {
+      const finalVersion = isReleaseCandidate ? `${selectedVersionOption}-rc` : selectedVersionOption;
+      
       const requestBody = {
-        version: selectedVersionOption,
+        version: finalVersion,
         distribution_id: parseInt(distributionId),
         draft: true,
         // Copy from the latest non-yanked release
@@ -196,6 +199,7 @@ const DistributionDetailPage = () => {
       setCreatingDraft(false);
       setShowCreateModal(false);
       setSelectedVersionOption('');
+      setIsReleaseCandidate(false);
     }
   };
 
@@ -206,6 +210,7 @@ const DistributionDetailPage = () => {
       if (options.length > 0) {
         setSelectedVersionOption(options[0].version); // Default to first option (PATCH)
       }
+      setIsReleaseCandidate(false);
       setShowCreateModal(true);
     }
   };
@@ -320,11 +325,34 @@ const DistributionDetailPage = () => {
                 ))}
               </div>
 
+              <div className="mb-6">
+                <label className="flex items-center space-x-3 p-3 border border-gray-200 rounded-lg hover:bg-gray-50 cursor-pointer transition-colors">
+                  <input
+                    type="checkbox"
+                    checked={isReleaseCandidate}
+                    onChange={(e) => setIsReleaseCandidate(e.target.checked)}
+                    className="w-4 h-4 text-orange-600 border-gray-300 rounded focus:ring-orange-500"
+                  />
+                  <div className="flex-1">
+                    <div className="flex items-center space-x-2">
+                      <span className="text-sm font-medium text-gray-900">Release Candidate</span>
+                      <span className="px-2 py-1 text-xs font-medium bg-orange-100 text-orange-700 rounded">
+                        RC
+                      </span>
+                    </div>
+                    <p className="text-xs text-gray-600 mt-1">
+                      Adds "-rc" suffix: {selectedVersionOption ? `${selectedVersionOption}${isReleaseCandidate ? '-rc' : ''}` : 'x.x.x'}
+                    </p>
+                  </div>
+                </label>
+              </div>
+
               <div className="flex justify-end space-x-3">
                 <button
                   onClick={() => {
                     setShowCreateModal(false);
                     setSelectedVersionOption('');
+                    setIsReleaseCandidate(false);
                   }}
                   className="px-4 py-2 text-sm font-medium text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-md transition-all duration-200"
                   disabled={creatingDraft}
