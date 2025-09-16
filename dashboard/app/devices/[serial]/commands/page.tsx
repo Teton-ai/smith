@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import PrivateLayout from "@/app/layouts/PrivateLayout";
 import useSmithAPI from "@/app/hooks/smith-api";
+import DeviceHeader from '../DeviceHeader';
 
 interface Command {
   device: number;
@@ -51,23 +52,30 @@ const CommandsPage = () => {
   const router = useRouter();
   const { callAPI } = useSmithAPI();
   const [commands, setCommands] = useState<Command[]>([]);
+  const [device, setDevice] = useState<any>(null);
   const [loading, setLoading] = useState(true);
 
   const serial = params.serial as string;
 
   useEffect(() => {
-    const fetchCommands = async () => {
+    const fetchData = async () => {
       setLoading(true);
       try {
-        const response = await callAPI<CommandsResponse>('GET', `/devices/${serial}/commands`);
-        if (response) {
-          setCommands(response.commands);
+        const [commandsResponse, deviceData] = await Promise.all([
+          callAPI<CommandsResponse>('GET', `/devices/${serial}/commands`),
+          callAPI('GET', `/devices/${serial}`)
+        ]);
+        if (commandsResponse) {
+          setCommands(commandsResponse.commands);
+        }
+        if (deviceData) {
+          setDevice(deviceData);
         }
       } finally {
         setLoading(false);
       }
     };
-    fetchCommands();
+    fetchData();
   }, [callAPI, serial]);
 
   const formatTimeAgo = (date: string) => {
@@ -176,17 +184,7 @@ const CommandsPage = () => {
         </div>
 
         {/* Device Header */}
-        <div className="bg-white rounded-lg border border-gray-200 p-6">
-          <div className="flex items-center space-x-4">
-            <div className="p-3 bg-gray-100 rounded-lg">
-              <Cpu className="w-8 h-8 text-gray-600" />
-            </div>
-            <div>
-              <h1 className="text-2xl font-bold text-gray-900">{serial}</h1>
-              <p className="text-gray-600 mt-1">Command History</p>
-            </div>
-          </div>
-        </div>
+        <DeviceHeader device={device} serial={serial} />
 
         {/* Tabs */}
         <div className="border-b border-gray-200">
@@ -203,10 +201,10 @@ const CommandsPage = () => {
               Commands
             </button>
             <button
-              onClick={() => router.push(`/devices/${serial}/packages`)}
+              onClick={() => router.push(`/devices/${serial}/about`)}
               className="py-2 px-1 border-b-2 border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 font-medium text-sm transition-colors cursor-pointer"
             >
-              Packages
+              About
             </button>
           </nav>
         </div>
