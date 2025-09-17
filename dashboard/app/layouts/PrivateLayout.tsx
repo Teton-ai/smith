@@ -1,7 +1,7 @@
 import React from "react";
 import { Cpu, Home, Layers, FileText, Globe } from "lucide-react";
 import { useRouter } from "next/navigation";
-import Logo from "@/app/components/logo";
+import Image from "next/image";
 import Profile from "@/app/components/profile";
 
 export default function PrivateLayout({
@@ -29,12 +29,17 @@ export default function PrivateLayout({
             {/* Left side - Logo and Navigation */}
             <div className="flex items-center space-x-8">
               {/* Logo */}
-              <div 
-                className="flex items-center space-x-2 cursor-pointer hover:opacity-80 transition-opacity duration-200"
+              <div
+                className="cursor-pointer hover:opacity-80 transition-opacity duration-200"
                 onClick={() => router.push('/dashboard')}
               >
-                <Logo color="black" />
-                <span className="text-xl font-semibold text-gray-900">Smith</span>
+                <Image
+                  src="/logo.png"
+                  alt="Smith Logo"
+                  width={32}
+                  height={32}
+                  className="shrink-0 rounded-md shadow-sm"
+                />
               </div>
               
               {/* Navigation Items */}

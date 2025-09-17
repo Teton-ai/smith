@@ -10,6 +10,13 @@ export default function Profile() {
   const [isOpen, setIsOpen] = useState(false);
   const dropdownRef = useRef(null);
 
+  // Logout if user is undefined after loading completes
+  useEffect(() => {
+    if (!isLoading && !user) {
+      logout({ logoutParams: { returnTo: window.location.origin } });
+    }
+  }, [isLoading, user, logout]);
+
   // Close dropdown when clicking outside
   useEffect(() => {
     function handleClickOutside(event) {
