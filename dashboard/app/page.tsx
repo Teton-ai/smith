@@ -3,7 +3,7 @@
 import { useAuth0 } from '@auth0/auth0-react';
 import { useRouter } from 'next/navigation';
 import { useEffect } from 'react';
-import Logo from "@/app/components/logo";
+import Image from "next/image";
 
 const LoginPage = () => {
   const { isLoading, error, loginWithPopup } = useAuth0();
@@ -28,11 +28,14 @@ const LoginPage = () => {
       <div className="w-full max-w-md">
         <div className="bg-white border border-gray-200 rounded-lg p-8 shadow-sm">
           <div className="flex flex-col items-center space-y-6">
-            <div className="flex flex-col items-center space-y-3">
-              <div className="flex flex-row gap-3 items-center">
-                <Logo width={36} color="black" />
-                <div className="font-bold text-2xl text-gray-900">Smith</div>
-              </div>
+            <div className="flex flex-col items-center space-y-4">
+              <Image
+                src="/logo.png"
+                alt="Smith Logo"
+                width={100}
+                height={100}
+                className="shrink-0 rounded-xl shadow-md bg-gray-100"
+              />
               <div className="text-gray-600 text-center">Teton&#39;s Fleet Management System</div>
             </div>
 
