@@ -1,0 +1,74 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        INSERT INTO network (network_type, is_network_hidden, ssid, name, description, password)\n        VALUES ($1, $2, $3, $4, $5, $6)\n        RETURNING id, network_type::TEXT as \"network_type\", is_network_hidden, ssid, name, description, password\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "network_type",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "is_network_hidden",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 3,
+        "name": "ssid",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "description",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "password",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        {
+          "Custom": {
+            "name": "network_type",
+            "kind": {
+              "Enum": [
+                "wifi",
+                "ethernet",
+                "dongle"
+              ]
+            }
+          }
+        },
+        "Bool",
+        "Text",
+        "Text",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      null,
+      false,
+      true,
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "85a809f1e106d2294de5e63c694512fe2f02469628ca08c2ce716a25c50b7943"
+}
