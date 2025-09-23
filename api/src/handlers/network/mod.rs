@@ -171,16 +171,13 @@ pub async fn delete_network_by_id(
 pub async fn create_network(
     Extension(state): Extension<State>,
     Json(new_network): Json<NewNetwork>,
-) -> Result<StatusCode, StatusCode> {
-    let mut tx = state.pg_pool.begin().await.map_err(|err| {
-        error!("Failed to start transaction {err}");
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
-
-    let result = sqlx::query!(
+) -> Result<(StatusCode, Json<Network>), StatusCode> {
+    let created_network = sqlx::query_as!(
+        Network,
         r#"
         INSERT INTO network (network_type, is_network_hidden, ssid, name, description, password)
         VALUES ($1, $2, $3, $4, $5, $6)
+        RETURNING id, network_type::TEXT as "network_type", is_network_hidden, ssid, name, description, password
         "#,
         new_network.network_type as NetworkType,
         new_network.is_network_hidden,
@@ -189,21 +186,12 @@ pub async fn create_network(
         new_network.description,
         new_network.password,
     )
-    .execute(&mut *tx)
+    .fetch_one(&state.pg_pool)
     .await
     .map_err(|err| {
-        error!("Failed to insert variable for device {err}");
+        error!("Failed to insert network {err}");
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
 
-    if result.rows_affected() == 0 {
-        return Ok(StatusCode::NOT_MODIFIED);
-    }
-
-    tx.commit().await.map_err(|err| {
-        error!("Failed to commit transaction {err}");
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
-
-    Ok(StatusCode::CREATED)
+    Ok((StatusCode::CREATED, Json(created_network)))
 }
