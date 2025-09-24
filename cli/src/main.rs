@@ -21,22 +21,97 @@ use tokio::sync::oneshot;
 use tunnel::Session;
 
 fn update(_check: bool) -> Result<(), anyhow::Error> {
-    let status = self_update::backends::github::Update::configure()
-        .repo_owner("Teton-ai")
+    let updater = self_update::backends::github::Update::configure()
+        .repo_owner("teton-ai")
         .repo_name("smith")
         .bin_name("sm")
         .show_download_progress(true)
         .current_version(self_update::cargo_crate_version!())
-        .build()?
-        .update()?;
-    println!("Update status: `{}`!", status.version());
+        .build()?;
+
+    match updater.update() {
+        Ok(status) => match status {
+            self_update::Status::UpToDate(version) => {
+                println!("The tool is already up-to-date with version: {}", version);
+            }
+            self_update::Status::Updated(version) => {
+                println!("Successfully updated to version: {}", version);
+            }
+        },
+        Err(e) => {
+            println!("Error during update: {}", e);
+            return Err(anyhow::anyhow!("Update failed"));
+        }
+    }
+
     Ok(())
 }
 
-#[tokio::main(flavor = "current_thread")]
-async fn main() -> anyhow::Result<()> {
+fn check_and_update_if_needed() -> Result<(), anyhow::Error> {
+    let last_check_file = config::Config::get_last_update_check_file();
+
+    let should_check = if last_check_file.exists() {
+        if let Ok(contents) = std::fs::read_to_string(&last_check_file) {
+            if let Ok(timestamp) = contents.trim().parse::<i64>() {
+                let last_check = chrono::DateTime::from_timestamp(timestamp, 0);
+                let now = chrono::Utc::now();
+
+                if let Some(last_check) = last_check {
+                    let duration = now.signed_duration_since(last_check);
+                    duration.num_hours() >= 24
+                } else {
+                    true
+                }
+            } else {
+                true
+            }
+        } else {
+            true
+        }
+    } else {
+        true
+    };
+
+    if should_check {
+        let current_version = self_update::cargo_crate_version!();
+        let updater = self_update::backends::github::Update::configure()
+            .repo_owner("teton-ai")
+            .repo_name("smith")
+            .bin_name("sm")
+            .show_download_progress(false)
+            .current_version(current_version)
+            .build()?;
+
+        if let Ok(status) = updater.get_latest_release() {
+            if status.version != current_version {
+                println!(
+                    "A new version {} is available! Run 'sm update' to update.",
+                    status.version
+                );
+            }
+        }
+
+        let now = chrono::Utc::now().timestamp();
+        std::fs::write(&last_check_file, now.to_string())?;
+    }
+
+    Ok(())
+}
+
+fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
+    if let Some(Commands::Update { check }) = &cli.command {
+        return update(*check);
+    }
+
+    let _ = check_and_update_if_needed();
+
+    run_async(cli)
+}
+
+#[tokio::main(flavor = "current_thread")]
+async fn run_async(cli: Cli) -> anyhow::Result<()> {
     let mut config = match config::Config::load().await {
         Ok(config) => config,
         Err(err) => {
@@ -64,8 +139,8 @@ async fn main() -> anyhow::Result<()> {
 
     match cli.command {
         Some(command) => match command {
-            Commands::Update { check } => {
-                update(check)?;
+            Commands::Update { .. } => {
+                unreachable!("Update command should be handled in main")
             }
             Commands::Profile { profile } => {
                 if let Some(profile) = profile {

@@ -163,6 +163,13 @@ impl Config {
             .unwrap_or_default()
             .to_owned()
     }
+
+    pub fn get_last_update_check_file() -> std::path::PathBuf {
+        dirs::home_dir()
+            .unwrap()
+            .join(".smith")
+            .join("last_update_check")
+    }
 }
 
 impl Display for Config {
