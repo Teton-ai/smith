@@ -91,4 +91,11 @@ pub enum Commands {
         #[arg(value_parser = value_parser!(Shell))]
         shell: Shell,
     },
+
+    /// Update the CLI
+    Update {
+        /// Check for updates without installing
+        #[arg(long)]
+        check: bool,
+    },
 }

@@ -20,6 +20,19 @@ use termion::raw::IntoRawMode;
 use tokio::sync::oneshot;
 use tunnel::Session;
 
+fn update(_check: bool) -> Result<(), anyhow::Error> {
+    let status = self_update::backends::github::Update::configure()
+        .repo_owner("Teton-ai")
+        .repo_name("smith")
+        .bin_name("sm")
+        .show_download_progress(true)
+        .current_version(self_update::cargo_crate_version!())
+        .build()?
+        .update()?;
+    println!("Update status: `{}`!", status.version());
+    Ok(())
+}
+
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
@@ -51,6 +64,9 @@ async fn main() -> anyhow::Result<()> {
 
     match cli.command {
         Some(command) => match command {
+            Commands::Update { check } => {
+                update(check)?;
+            }
             Commands::Profile { profile } => {
                 if let Some(profile) = profile {
                     println!("Changing profile to {}", profile);
