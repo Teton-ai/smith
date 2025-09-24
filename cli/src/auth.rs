@@ -134,14 +134,36 @@ pub async fn show(config: &Config) -> anyhow::Result<()> {
     let secrets = match secrets {
         Some(secrets) => secrets,
         None => {
-            print!("Not logged in");
+            println!("Not logged in");
             return Ok(());
         }
     };
 
-    let current_access_token = secrets.profiles.get(&config.current_profile);
+    let current_profile_secrets = secrets.profiles.get(&config.current_profile);
 
-    println!("{:?}", current_access_token);
+    match current_profile_secrets {
+        Some(profile) => {
+            println!("Profile: {}", config.current_profile);
+            println!("\nAccess Token:");
+            println!("{}", profile.access_token);
+            println!("\nRefresh Token:");
+            println!("{}", profile.refresh_token);
+
+            let claims = decode_claims_without_verification(&profile.access_token)?;
+            let expires_at = chrono::DateTime::from_timestamp(claims.exp, 0)
+                .ok_or_else(|| anyhow!("Invalid timestamp"))?;
+            let now = chrono::Utc::now();
+
+            if claims.exp < now.timestamp() {
+                println!("\nStatus: Expired at {}", expires_at.format("%Y-%m-%d %H:%M:%S UTC"));
+            } else {
+                let duration = expires_at.signed_duration_since(now);
+                println!("\nStatus: Valid for {} more minutes", duration.num_minutes());
+                println!("Expires at: {}", expires_at.format("%Y-%m-%d %H:%M:%S UTC"));
+            }
+        }
+        None => println!("Profile '{}' not found", config.current_profile),
+    }
 
     Ok(())
 }
