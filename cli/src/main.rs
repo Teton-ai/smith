@@ -98,20 +98,15 @@ fn check_and_update_if_needed() -> Result<(), anyhow::Error> {
     Ok(())
 }
 
-fn main() -> anyhow::Result<()> {
+#[tokio::main(flavor = "current_thread")]
+async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
-    if let Some(Commands::Update { check }) = &cli.command {
-        return update(*check);
+    if !matches!(cli.command, Some(Commands::Update { .. })) {
+        let _ = tokio::task::spawn_blocking(check_and_update_if_needed)
+            .await
+            .ok();
     }
-
-    let _ = check_and_update_if_needed();
-
-    run_async(cli)
-}
-
-#[tokio::main(flavor = "current_thread")]
-async fn run_async(cli: Cli) -> anyhow::Result<()> {
     let mut config = match config::Config::load().await {
         Ok(config) => config,
         Err(err) => {
@@ -139,8 +134,10 @@ async fn run_async(cli: Cli) -> anyhow::Result<()> {
 
     match cli.command {
         Some(command) => match command {
-            Commands::Update { .. } => {
-                unreachable!("Update command should be handled in main")
+            Commands::Update { check } => {
+                tokio::task::spawn_blocking(move || update(check))
+                    .await
+                    .expect("Update task panicked")?;
             }
             Commands::Profile { profile } => {
                 if let Some(profile) = profile {
