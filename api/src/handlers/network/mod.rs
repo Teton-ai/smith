@@ -177,7 +177,7 @@ pub async fn create_network(
         r#"
         INSERT INTO network (network_type, is_network_hidden, ssid, name, description, password)
         VALUES ($1, $2, $3, $4, $5, $6)
-        RETURNING id, network_type::TEXT as "network_type", is_network_hidden, ssid, name, description, password
+        RETURNING id, network_type::TEXT as "network_type", is_network_hidden, ssid, name, description, NULL as password
         "#,
         new_network.network_type as NetworkType,
         new_network.is_network_hidden,

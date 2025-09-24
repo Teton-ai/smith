@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        INSERT INTO network (network_type, is_network_hidden, ssid, name, description, password)\n        VALUES ($1, $2, $3, $4, $5, $6)\n        RETURNING id, network_type::TEXT as \"network_type\", is_network_hidden, ssid, name, description, password\n        ",
+  "query": "\n        INSERT INTO network (network_type, is_network_hidden, ssid, name, description, password)\n        VALUES ($1, $2, $3, $4, $5, $6)\n        RETURNING id, network_type::TEXT as \"network_type\", is_network_hidden, ssid, name, description, NULL as password\n        ",
   "describe": {
     "columns": [
       {
@@ -67,8 +67,8 @@
       true,
       false,
       true,
-      true
+      null
     ]
   },
-  "hash": "85a809f1e106d2294de5e63c694512fe2f02469628ca08c2ce716a25c50b7943"
+  "hash": "c063620b614fc9fb2576a79ed67fe0394e602b46697432456183509e17205bc9"
 }
