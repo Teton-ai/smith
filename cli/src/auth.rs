@@ -155,10 +155,16 @@ pub async fn show(config: &Config) -> anyhow::Result<()> {
             let now = chrono::Utc::now();
 
             if claims.exp < now.timestamp() {
-                println!("\nStatus: Expired at {}", expires_at.format("%Y-%m-%d %H:%M:%S UTC"));
+                println!(
+                    "\nStatus: Expired at {}",
+                    expires_at.format("%Y-%m-%d %H:%M:%S UTC")
+                );
             } else {
                 let duration = expires_at.signed_duration_since(now);
-                println!("\nStatus: Valid for {} more minutes", duration.num_minutes());
+                println!(
+                    "\nStatus: Valid for {} more minutes",
+                    duration.num_minutes()
+                );
                 println!("Expires at: {}", expires_at.format("%Y-%m-%d %H:%M:%S UTC"));
             }
         }
