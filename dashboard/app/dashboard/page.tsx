@@ -211,7 +211,10 @@ const AdminPanel = () => {
                 </div>
               </div>
 
-              <div className="bg-white rounded-lg border border-gray-200 p-6">
+              <div
+                className="bg-white rounded-lg border border-gray-200 p-6 hover:bg-gray-50 cursor-pointer transition-colors"
+                onClick={() => router.push('/devices?outdated=true')}
+              >
                 <div className="flex items-center">
                   <Package className="w-8 h-8 text-yellow-500" />
                   <div className="ml-4">
@@ -314,8 +317,8 @@ const AdminPanel = () => {
                     })}
                   </div>
                   {stuckUpdates.length > 8 && (
-                    <button 
-                      onClick={() => router.push('/devices')}
+                    <button
+                      onClick={() => router.push('/devices?outdated=true')}
                       className="text-sm text-blue-600 hover:text-blue-800 mt-3"
                     >
                       View all {stuckUpdates.length} devices with update issues →

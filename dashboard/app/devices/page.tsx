@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import {
   Cpu,
   Search,
@@ -181,11 +181,21 @@ interface Release {
 
 const DevicesPage = () => {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { callAPI, loading, error } = useSmithAPI();
   const [devices, setDevices] = useState<Device[]>([]);
   const [filteredDevices, setFilteredDevices] = useState<Device[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [showLongOfflineDevices, setShowLongOfflineDevices] = useState(false);
+  const [showOutdatedOnly, setShowOutdatedOnly] = useState(false);
+
+  // Sync URL parameters with component state
+  useEffect(() => {
+    const outdated = searchParams.get('outdated');
+    if (outdated === 'true') {
+      setShowOutdatedOnly(true);
+    }
+  }, [searchParams]);
 
   useEffect(() => {
     const fetchDashboard = async () => {
@@ -197,6 +207,23 @@ const DevicesPage = () => {
     fetchDashboard();
   }, [callAPI]);
 
+  // Update URL when filters change
+  const updateURL = (params: Record<string, string | null>) => {
+    const current = new URLSearchParams(Array.from(searchParams.entries()));
+
+    Object.entries(params).forEach(([key, value]) => {
+      if (value === null || value === '') {
+        current.delete(key);
+      } else {
+        current.set(key, value);
+      }
+    });
+
+    const search = current.toString();
+    const query = search ? `?${search}` : '';
+    router.replace(`/devices${query}`);
+  };
+
 
   // Filter and sort devices - show only authorized devices, filter by search, and sort by latest online
   useEffect(() => {
@@ -206,6 +233,11 @@ const DevicesPage = () => {
     // Filter out long offline devices unless toggle is on
     if (!showLongOfflineDevices) {
       filtered = filtered.filter(device => !isLongOffline(device));
+    }
+
+    // Filter to show only outdated devices if toggle is on
+    if (showOutdatedOnly) {
+      filtered = filtered.filter(device => hasUpdatePending(device));
     }
 
     if (searchTerm) {
@@ -221,21 +253,21 @@ const DevicesPage = () => {
       // Online devices first, then sort by last seen time (most recent first)
       const statusA = getDeviceStatus(a);
       const statusB = getDeviceStatus(b);
-      
+
       if (statusA === 'online' && statusB !== 'online') return -1;
       if (statusB === 'online' && statusA !== 'online') return 1;
-      
+
       // If both have same status, sort by most recent last_seen
       // Handle null last_seen values (put them at the end)
       if (!a.last_seen && !b.last_seen) return 0;
       if (!a.last_seen) return 1;
       if (!b.last_seen) return -1;
-      
+
       return new Date(b.last_seen).getTime() - new Date(a.last_seen).getTime();
     });
 
     setFilteredDevices(filtered);
-  }, [devices, searchTerm, showLongOfflineDevices]);
+  }, [devices, searchTerm, showLongOfflineDevices, showOutdatedOnly]);
 
   const getDeviceStatus = (device: Device) => {
     if (!device.last_seen) return 'offline';
@@ -300,6 +332,12 @@ const DevicesPage = () => {
     return device.release_id && device.target_release_id && device.release_id !== device.target_release_id;
   };
 
+  const handleOutdatedToggle = () => {
+    const newValue = !showOutdatedOnly;
+    setShowOutdatedOnly(newValue);
+    updateURL({ outdated: newValue ? 'true' : null });
+  };
+
 
   const formatTimeAgo = (date) => {
     const now = new Date();
@@ -316,6 +354,7 @@ const DevicesPage = () => {
   // Calculate counts for display
   const authorizedDevices = devices.filter(device => device.has_token);
   const longOfflineDevices = authorizedDevices.filter(device => isLongOffline(device));
+  const outdatedDevices = authorizedDevices.filter(device => hasUpdatePending(device));
 
   return (
     <PrivateLayout id="devices">
@@ -339,6 +378,21 @@ const DevicesPage = () => {
             <span className="text-sm text-gray-500">
               {loading ? 'Loading...' : `${filteredDevices.length} device${filteredDevices.length !== 1 ? 's' : ''} shown`}
             </span>
+            {outdatedDevices.length > 0 && (
+              <button
+                onClick={handleOutdatedToggle}
+                className={`flex items-center space-x-1 text-sm ${
+                  showOutdatedOnly
+                    ? 'text-orange-600 hover:text-orange-800'
+                    : 'text-blue-600 hover:text-blue-800'
+                }`}
+              >
+                {showOutdatedOnly ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
+                <span>
+                  {showOutdatedOnly ? 'Show all' : 'Show outdated'}
+                </span>
+              </button>
+            )}
             {longOfflineDevices.length > 0 && (
               <button
                 onClick={() => setShowLongOfflineDevices(!showLongOfflineDevices)}

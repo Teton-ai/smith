@@ -1459,7 +1459,7 @@ pub async fn get_all_commands_for_device(
         }
     };
 
-    let limit = pagination.limit.unwrap_or(5).clamp(0, 5);
+    let limit = pagination.limit.unwrap_or(5).clamp(0, 500);
 
     let mut commands = if let Some(starting_after) = pagination.starting_after {
         sqlx::query_as!(

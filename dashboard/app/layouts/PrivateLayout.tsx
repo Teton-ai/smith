@@ -1,5 +1,5 @@
 import React from "react";
-import { Cpu, Home, Layers, FileText, Globe } from "lucide-react";
+import { Cpu, Home, Layers, FileText, Globe, Smartphone } from "lucide-react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
 import Profile from "@/app/components/profile";
@@ -17,7 +17,7 @@ export default function PrivateLayout({
     { id: 'devices', basePath: "/devices", label: 'Devices', icon: Cpu },
     { id: 'distributions', basePath: "/distributions", label: 'Distributions', icon: Layers },
     { id: 'ip-addresses', basePath: "/ip-addresses", label: 'IP Addresses', icon: Globe },
-    // { id: 'modems', basePath: "/modems", label: 'Modems', icon: Network },
+    { id: 'modems', basePath: "/modems", label: 'Modems', icon: Smartphone },
   ];
 
   return (
