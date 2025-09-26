@@ -10,6 +10,7 @@ Smith consists of three main components:
 
 - **Smith API**: Backend service that manages deployment configurations and fleet status.
 - **SmithD**: Daemon process that runs on each node in the fleet to execute deployments and report status back to the API.
+- **Dashboard**: The Smith Dashboard, a visual interface to see the current status of the fleet.
 - **Smith CLI (sm)** Command Line Interface to interact with the Smith API as a Fleet administrator.
 
 ## LICENSE

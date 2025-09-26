@@ -9,6 +9,7 @@ import {
   Tag,
   Globe,
   Clock,
+  ArrowLeft,
 } from 'lucide-react';
 import PrivateLayout from "@/app/layouts/PrivateLayout";
 import useSmithAPI from "@/app/hooks/smith-api";
@@ -171,23 +172,15 @@ const DeviceAboutPage = () => {
   return (
     <PrivateLayout id="devices">
       <div className="space-y-6">
-        {/* Breadcrumb Navigation */}
-        <div className="flex items-center space-x-2 text-sm text-gray-500">
-          <button 
+        {/* Header with Back Button */}
+        <div className="flex items-center space-x-4">
+          <button
             onClick={() => router.push('/devices')}
-            className="hover:text-gray-700 transition-colors cursor-pointer"
+            className="flex items-center space-x-2 text-gray-600 hover:text-gray-900 transition-colors"
           >
-            Devices
+            <ArrowLeft className="w-4 h-4" />
+            <span className="text-sm font-medium">Back to Devices</span>
           </button>
-          <ChevronRight className="w-4 h-4" />
-          <button 
-            onClick={() => router.push(`/devices/${serial}`)}
-            className="hover:text-gray-700 transition-colors cursor-pointer"
-          >
-            {serial}
-          </button>
-          <ChevronRight className="w-4 h-4" />
-          <span className="text-gray-900 font-medium">About</span>
         </div>
 
         {/* Device Header */}

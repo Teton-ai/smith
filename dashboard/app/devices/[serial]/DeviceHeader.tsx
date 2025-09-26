@@ -10,11 +10,15 @@ import {
   Router,
   Signal,
   Tag,
+  GitBranch,
+  Terminal,
+  Copy,
+  Check,
 } from 'lucide-react';
 
 const Tooltip = ({ children, content }: { children: React.ReactNode, content: string }) => {
   const [isVisible, setIsVisible] = React.useState(false);
-  const [position, setPosition] = React.useState<'top' | 'right'>('top');
+  const [position, setPosition] = React.useState<'top' | 'right' | 'left'>('top');
   const containerRef = React.useRef<HTMLDivElement>(null);
 
   const handleMouseEnter = () => {
@@ -22,9 +26,14 @@ const Tooltip = ({ children, content }: { children: React.ReactNode, content: st
     if (containerRef.current) {
       const rect = containerRef.current.getBoundingClientRect();
       const viewportWidth = window.innerWidth;
-      
-      // If tooltip would be cut off on the left side, position it to the right
-      if (rect.left < 150) {
+
+      // Estimate tooltip width (adjust based on content length)
+      const estimatedTooltipWidth = content.length * 8 + 32; // rough estimate
+
+      // If tooltip would be cut off on the right side, position it to the left
+      if (rect.right + estimatedTooltipWidth > viewportWidth - 20) { // 20px buffer
+        setPosition('left');
+      } else if (rect.left < 150) {
         setPosition('right');
       } else {
         setPosition('top');
@@ -43,14 +52,19 @@ const Tooltip = ({ children, content }: { children: React.ReactNode, content: st
       {isVisible && (
         <>
           {position === 'top' ? (
-            <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-2 py-1 text-xs text-white bg-gray-800 rounded shadow-lg whitespace-nowrap z-50">
+            <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-2 py-1 text-xs text-white bg-gray-800 rounded shadow-lg whitespace-nowrap z-50 pointer-events-none">
               {content}
               <div className="absolute top-full left-1/2 transform -translate-x-1/2 w-0 h-0 border-l-4 border-r-4 border-t-4 border-l-transparent border-r-transparent border-t-gray-800"></div>
             </div>
-          ) : (
-            <div className="absolute left-full top-1/2 transform -translate-y-1/2 ml-2 px-2 py-1 text-xs text-white bg-gray-800 rounded shadow-lg whitespace-nowrap z-50">
+          ) : position === 'right' ? (
+            <div className="absolute left-full top-1/2 transform -translate-y-1/2 ml-2 px-2 py-1 text-xs text-white bg-gray-800 rounded shadow-lg whitespace-nowrap z-50 pointer-events-none">
               {content}
               <div className="absolute right-full top-1/2 transform -translate-y-1/2 w-0 h-0 border-t-4 border-b-4 border-r-4 border-t-transparent border-b-transparent border-r-gray-800"></div>
+            </div>
+          ) : (
+            <div className="absolute right-full top-1/2 transform -translate-y-1/2 mr-2 px-2 py-1 text-xs text-white bg-gray-800 rounded shadow-lg whitespace-nowrap z-50 pointer-events-none">
+              {content}
+              <div className="absolute left-full top-1/2 transform -translate-y-1/2 w-0 h-0 border-t-4 border-b-4 border-l-4 border-t-transparent border-b-transparent border-l-gray-800"></div>
             </div>
           )}
         </>
@@ -140,6 +154,63 @@ interface DeviceHeaderProps {
 }
 
 const DeviceHeader: React.FC<DeviceHeaderProps> = ({ device, serial }) => {
+  const [sshCopied, setSshCopied] = React.useState(false);
+
+  const handleSshTunnel = async () => {
+    const command = `sm tunnel ${device?.serial_number || serial}`;
+    try {
+      await navigator.clipboard.writeText(command);
+      setSshCopied(true);
+      setTimeout(() => setSshCopied(false), 2000);
+    } catch (err) {
+      console.error('Failed to copy to clipboard:', err);
+    }
+  };
+  if (!device) {
+    return (
+      <div className="bg-white rounded-lg border border-gray-200 p-4">
+        <div className="flex items-center space-x-3">
+          <div className="p-2 bg-gray-100 text-gray-600 rounded">
+            <Cpu className="w-5 h-5" />
+          </div>
+          <div className="flex-1">
+            <div className="flex items-center space-x-3">
+              <h1 className="text-xl font-bold text-gray-900">{serial}</h1>
+            </div>
+            <div className="flex items-center space-x-4 mt-1 text-sm text-gray-600">
+              <span>Loading...</span>
+            </div>
+          </div>
+          <div className="flex-shrink-0">
+            <Tooltip content={sshCopied ? "Copied to clipboard!" : `Copy SSH tunnel command: sm tunnel ${serial}`}>
+              <button
+                onClick={handleSshTunnel}
+                className={`flex items-center space-x-2 px-3 py-2 rounded-md text-sm font-medium transition-colors cursor-pointer ${
+                  sshCopied
+                    ? 'bg-green-100 text-green-800 border border-green-200'
+                    : 'bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100'
+                }`}
+              >
+                {sshCopied ? (
+                  <>
+                    <Check className="w-4 h-4" />
+                    <span>Copied!</span>
+                  </>
+                ) : (
+                  <>
+                    <Terminal className="w-4 h-4" />
+                    <Copy className="w-3 h-3" />
+                    <span>SSH</span>
+                  </>
+                )}
+              </button>
+            </Tooltip>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   const formatTimeAgo = (date: string) => {
     const now = new Date();
     const past = new Date(date);
@@ -257,36 +328,72 @@ const DeviceHeader: React.FC<DeviceHeaderProps> = ({ device, serial }) => {
   const connectionType = getPrimaryConnectionType();
 
   return (
-    <div className="bg-white rounded-lg border border-gray-200 p-6">
-      <div className="flex items-center space-x-4">
-        <div className="p-3 bg-gray-100 rounded-lg">
-          <Cpu className="w-8 h-8 text-gray-600" />
+    <div className="bg-white rounded-lg border border-gray-200 p-4">
+      <div className="flex items-center space-x-3">
+        <div className="p-2 bg-gray-100 text-gray-600 rounded">
+          <Cpu className="w-5 h-5" />
         </div>
-        <div>
+        <div className="flex-1">
           <div className="flex items-center space-x-3">
-            <div className="flex items-center space-x-2">
-              <Tooltip content={getStatusTooltip()}>
-                <div className={`w-3 h-3 rounded-full flex-shrink-0 cursor-help ${getStatusDot(status)}`}></div>
+            <h1 className="text-xl font-bold text-gray-900">{getDeviceName()}</h1>
+            <Tooltip content={getStatusTooltip()}>
+              <div className={`w-2 h-2 rounded-full flex-shrink-0 cursor-help ${getStatusDot(status)}`}></div>
+            </Tooltip>
+            {hasUpdatePending() && (
+              <Tooltip content={`Update pending: ${device.release?.version || device.release_id} → ${device.target_release?.version || device.target_release_id}`}>
+                <span className="px-2 py-1 text-xs font-medium bg-orange-100 text-orange-800 rounded-full cursor-help">
+                  Outdated
+                </span>
               </Tooltip>
-              {connectionType && (
-                <Tooltip content={getConnectionTooltip(connectionType)}>
-                  <div className="cursor-help">
-                    {getConnectionIcon(connectionType)}
-                  </div>
-                </Tooltip>
-              )}
-            </div>
-            <div className="flex items-center space-x-3">
-              <h1 className="text-2xl font-bold text-gray-900">{getDeviceName()}</h1>
-              {hasUpdatePending() && (
-                <Tooltip content={`Update pending: ${device.release?.version || device.release_id} → ${device.target_release?.version || device.target_release_id}`}>
-                  <span className="px-2 py-1 text-xs font-medium bg-orange-100 text-orange-800 rounded-full cursor-help">
-                    Outdated
-                  </span>
-                </Tooltip>
-              )}
-            </div>
+            )}
           </div>
+          <div className="flex items-center space-x-4 mt-1 text-sm text-gray-600">
+            {device.release && (
+              <div className="flex items-center space-x-2">
+                <div className="flex items-center space-x-1">
+                  <GitBranch className="w-4 h-4" />
+                  <span className="font-medium">{device.release.distribution_name}</span>
+                </div>
+                <div className="flex items-center space-x-1">
+                  <Tag className="w-4 h-4" />
+                  <span>v{device.release.version}</span>
+                </div>
+              </div>
+            )}
+            {connectionType && (
+              <Tooltip content={getConnectionTooltip(connectionType)}>
+                <div className="flex items-center space-x-1 cursor-help">
+                  {getConnectionIcon(connectionType)}
+                  <span className="capitalize">{connectionType}</span>
+                </div>
+              </Tooltip>
+            )}
+          </div>
+        </div>
+        <div className="flex-shrink-0">
+          <Tooltip content={sshCopied ? "Copied to clipboard!" : `Copy SSH tunnel command: sm tunnel ${device?.serial_number || serial}`}>
+            <button
+              onClick={handleSshTunnel}
+              className={`flex items-center space-x-2 px-3 py-2 rounded-md text-sm font-medium transition-colors cursor-pointer ${
+                sshCopied
+                  ? 'bg-green-100 text-green-800 border border-green-200'
+                  : 'bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100'
+              }`}
+            >
+              {sshCopied ? (
+                <>
+                  <Check className="w-4 h-4" />
+                  <span>Copied!</span>
+                </>
+              ) : (
+                <>
+                  <Terminal className="w-4 h-4" />
+                  <Copy className="w-3 h-3" />
+                  <span>SSH</span>
+                </>
+              )}
+            </button>
+          </Tooltip>
         </div>
       </div>
     </div>
