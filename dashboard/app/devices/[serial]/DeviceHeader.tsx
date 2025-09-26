@@ -10,6 +10,7 @@ import {
   Router,
   Signal,
   Tag,
+  GitBranch,
 } from 'lucide-react';
 
 const Tooltip = ({ children, content }: { children: React.ReactNode, content: string }) => {
@@ -140,6 +141,26 @@ interface DeviceHeaderProps {
 }
 
 const DeviceHeader: React.FC<DeviceHeaderProps> = ({ device, serial }) => {
+  if (!device) {
+    return (
+      <div className="bg-white rounded-lg border border-gray-200 p-4">
+        <div className="flex items-center space-x-3">
+          <div className="p-2 bg-gray-100 text-gray-600 rounded">
+            <Cpu className="w-5 h-5" />
+          </div>
+          <div className="flex-1">
+            <div className="flex items-center space-x-3">
+              <h1 className="text-xl font-bold text-gray-900">{serial}</h1>
+            </div>
+            <div className="flex items-center space-x-4 mt-1 text-sm text-gray-600">
+              <span>Loading...</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   const formatTimeAgo = (date: string) => {
     const now = new Date();
     const past = new Date(date);
@@ -257,35 +278,46 @@ const DeviceHeader: React.FC<DeviceHeaderProps> = ({ device, serial }) => {
   const connectionType = getPrimaryConnectionType();
 
   return (
-    <div className="bg-white rounded-lg border border-gray-200 p-6">
-      <div className="flex items-center space-x-4">
-        <div className="p-3 bg-gray-100 rounded-lg">
-          <Cpu className="w-8 h-8 text-gray-600" />
+    <div className="bg-white rounded-lg border border-gray-200 p-4">
+      <div className="flex items-center space-x-3">
+        <div className="p-2 bg-gray-100 text-gray-600 rounded">
+          <Cpu className="w-5 h-5" />
         </div>
-        <div>
+        <div className="flex-1">
           <div className="flex items-center space-x-3">
-            <div className="flex items-center space-x-2">
-              <Tooltip content={getStatusTooltip()}>
-                <div className={`w-3 h-3 rounded-full flex-shrink-0 cursor-help ${getStatusDot(status)}`}></div>
+            <h1 className="text-xl font-bold text-gray-900">{getDeviceName()}</h1>
+            <Tooltip content={getStatusTooltip()}>
+              <div className={`w-2 h-2 rounded-full flex-shrink-0 cursor-help ${getStatusDot(status)}`}></div>
+            </Tooltip>
+            {hasUpdatePending() && (
+              <Tooltip content={`Update pending: ${device.release?.version || device.release_id} → ${device.target_release?.version || device.target_release_id}`}>
+                <span className="px-2 py-1 text-xs font-medium bg-orange-100 text-orange-800 rounded-full cursor-help">
+                  Outdated
+                </span>
               </Tooltip>
-              {connectionType && (
-                <Tooltip content={getConnectionTooltip(connectionType)}>
-                  <div className="cursor-help">
-                    {getConnectionIcon(connectionType)}
-                  </div>
-                </Tooltip>
-              )}
-            </div>
-            <div className="flex items-center space-x-3">
-              <h1 className="text-2xl font-bold text-gray-900">{getDeviceName()}</h1>
-              {hasUpdatePending() && (
-                <Tooltip content={`Update pending: ${device.release?.version || device.release_id} → ${device.target_release?.version || device.target_release_id}`}>
-                  <span className="px-2 py-1 text-xs font-medium bg-orange-100 text-orange-800 rounded-full cursor-help">
-                    Outdated
-                  </span>
-                </Tooltip>
-              )}
-            </div>
+            )}
+          </div>
+          <div className="flex items-center space-x-4 mt-1 text-sm text-gray-600">
+            {device.release && (
+              <div className="flex items-center space-x-2">
+                <div className="flex items-center space-x-1">
+                  <GitBranch className="w-4 h-4" />
+                  <span className="font-medium">{device.release.distribution_name}</span>
+                </div>
+                <div className="flex items-center space-x-1">
+                  <Tag className="w-4 h-4" />
+                  <span>v{device.release.version}</span>
+                </div>
+              </div>
+            )}
+            {connectionType && (
+              <Tooltip content={getConnectionTooltip(connectionType)}>
+                <div className="flex items-center space-x-1 cursor-help">
+                  {getConnectionIcon(connectionType)}
+                  <span className="capitalize">{connectionType}</span>
+                </div>
+              </Tooltip>
+            )}
           </div>
         </div>
       </div>
