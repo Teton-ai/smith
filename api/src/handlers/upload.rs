@@ -15,7 +15,7 @@ pub struct UploadResult {
 // TODO: Change to streaming, so we are not saving in memory
 #[tracing::instrument]
 pub async fn upload_file(
-    device: DeviceWithToken,
+    _device: DeviceWithToken,
     path: Option<Path<String>>,
     Extension(state): Extension<State>,
     mut multipart: Multipart,

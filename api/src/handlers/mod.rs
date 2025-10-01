@@ -78,7 +78,7 @@ pub struct FetchPackageQuery {
 
 #[tracing::instrument]
 pub async fn fetch_package(
-    //device: DeviceWithToken,
+    _device: DeviceWithToken,
     Extension(state): Extension<State>,
     params: Query<FetchPackageQuery>,
 ) -> Result<Response, Response> {
@@ -126,7 +126,7 @@ pub async fn fetch_package(
 
 #[tracing::instrument]
 pub async fn list_release_packages(
-    //device: DeviceWithToken,
+    _device: DeviceWithToken,
     Path(release_id): Path<i32>,
     Extension(state): Extension<State>,
 ) -> Result<Json<Vec<Package>>, Json<Vec<Package>>> {
