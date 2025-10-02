@@ -6,13 +6,24 @@ use axum::http::StatusCode;
 use axum::{Extension, Json};
 use serde::{Deserialize, Serialize};
 use tracing::error;
+use utoipa::ToSchema;
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct UploadResult {
     pub url: String,
 }
 
 // TODO: Change to streaming, so we are not saving in memory
+#[utoipa::path(
+    post,
+    path = "/smith/upload",
+    responses(
+        (status = 200, description = "File uploaded successfully", body = UploadResult),
+        (status = 400, description = "Bad request"),
+        (status = 500, description = "Internal server error")
+    ),
+    security(("Access Token" = []))
+)]
 #[tracing::instrument]
 pub async fn upload_file(
     _device: DeviceWithToken,
