@@ -37,6 +37,14 @@ fn extract_client_ip(headers: &HeaderMap, fallback_addr: SocketAddr) -> IpAddr {
     fallback_addr.ip()
 }
 
+#[utoipa::path(
+    post,
+    path = "/smith/home",
+    responses(
+        (status = 200, description = "Device home response")
+    ),
+    security(("Access Token" = []))
+)]
 #[tracing::instrument]
 pub async fn home(
     headers: HeaderMap,
@@ -87,6 +95,16 @@ pub async fn home(
     (StatusCode::OK, Json(response))
 }
 
+#[utoipa::path(
+    post,
+    path = "/smith/register",
+    responses(
+        (status = 200, description = "Device registration successful"),
+        (status = 403, description = "Device not approved"),
+        (status = 409, description = "Device already has token"),
+        (status = 500, description = "Internal server error")
+    )
+)]
 #[tracing::instrument]
 pub async fn register_device(
     Extension(state): Extension<State>,

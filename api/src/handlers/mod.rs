@@ -76,6 +76,19 @@ pub struct FetchPackageQuery {
     name: String,
 }
 
+#[utoipa::path(
+    get,
+    path = "/smith/package",
+    params(
+        ("name" = String, Query, description = "Package name to fetch")
+    ),
+    responses(
+        (status = 200, description = "Package data", content_type = "application/octet-stream"),
+        (status = 404, description = "Package not found"),
+        (status = 500, description = "Internal server error")
+    ),
+    security(("Access Token" = []))
+)]
 #[tracing::instrument]
 pub async fn fetch_package(
     _device: DeviceWithToken,
@@ -124,6 +137,18 @@ pub async fn fetch_package(
     Ok(Response::new(stream).into_response())
 }
 
+#[utoipa::path(
+    get,
+    path = "/smith/releases/{release_id}/packages",
+    params(
+        ("release_id" = i32, Path, description = "Release ID")
+    ),
+    responses(
+        (status = 200, description = "List of packages for the release"),
+        (status = 500, description = "Internal server error")
+    ),
+    security(("Access Token" = []))
+)]
 #[tracing::instrument]
 pub async fn list_release_packages(
     _device: DeviceWithToken,
