@@ -1,18 +1,36 @@
 # Smith (Agent Smith) ![GitHub release (latest SemVer)](https://img.shields.io/github/v/release/teton-ai/smith?sort=semver)
 
-<img src="https://docs.smith.teton.ai/logo.png" width="150" style="border-radius: 12%;">
+<p align="center">
+  <img src="https://www.teton.ai/_next/image?url=%2F_next%2Fstatic%2Fmedia%2Fsmith.a4a7eb54.png&w=1080&q=75" alt="Smith Fleet Management" width="600">
+</p>
 
-**Smith**, also known as Agent Smith, is Teton's Fleet Management System. It provides automation to easily deploy and monitor applications at scale.
+**Smith** is an open-source fleet management system built in Rust for managing distributed IoT devices at scale. Born from managing thousands of devices across healthcare facilities, Smith provides the automation and reliability you need to deploy, monitor, and update your fleet with confidence.
+
+## Why Smith?
+
+- **Built for Scale**: Manage everything from hundreds to thousands of devices
+- **Reliable**: Designed for >99% uptime in critical environments
+- **Seamless Updates**: Deploy upgrades and rollbacks with zero manual intervention
+- **Transparent**: Open-source infrastructure you can trust and extend
 
 ## Architecture
 
-Smith consists of three main components:
+Smith consists of five main components:
 
-- **Smith API**: Backend service that manages deployment configurations and fleet status.
-- **SmithD**: Daemon process that runs on each node in the fleet to execute deployments and report status back to the API.
-- **Dashboard**: The Smith Dashboard, a visual interface to see the current status of the fleet.
-- **Smith CLI (sm)** Command Line Interface to interact with the Smith API as a Fleet administrator.
+- **smithd**: Daemon that runs on each device to execute deployments and report status
+- **updater**: Daemon that keeps smithd up to date
+- **api**: Backend service managing deployment configurations and fleet status
+- **dashboard**: Visual interface to monitor your fleet in real-time
+- **cli (sm)**: Command-line tool for fleet administrators
 
-## LICENSE
+## Getting Started
+
+Visit our [documentation](https://docs.smith.teton.ai) to get started with Smith.
+
+## Contributing
+
+We welcome contributions! Whether you're fixing bugs, adding features, or improving documentation, your help makes Smith better for everyone. Check out our issues or submit a PR.
+
+## License
 
 The Smith source and documentation are released under the [Apache License 2.0](./LICENSE)
