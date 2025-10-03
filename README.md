@@ -31,6 +31,10 @@ Visit our [documentation](https://docs.smith.teton.ai) to get started with Smith
 
 We welcome contributions! Whether you're fixing bugs, adding features, or improving documentation, your help makes Smith better for everyone. Check out our issues or submit a PR.
 
+## Security
+
+Security is a top priority for Smith. If you discover a security vulnerability, please email **security@teton.ai**. We operate a bug bounty program and have paid bounties for responsibly disclosed vulnerabilities. See our [Security Policy](./SECURITY.md) for more details.
+
 ## License
 
 The Smith source and documentation are released under the [Apache License 2.0](./LICENSE)
