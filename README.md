@@ -1,7 +1,7 @@
 # Smith (Agent Smith) ![GitHub release (latest SemVer)](https://img.shields.io/github/v/release/teton-ai/smith?sort=semver)
 
 <p align="center">
-  <img src="https://www.teton.ai/_next/image?url=%2F_next%2Fstatic%2Fmedia%2Fsmith.a4a7eb54.png&w=1080&q=75" alt="Smith Fleet Management" width="600">
+  <img src="https://cdn.prod.website-files.com/65d7113b5391824218ef5c3a/68de33d3d5eb5159c0a4be35_oss_smith%202.png" alt="Smith Fleet Management" width="600">
 </p>
 
 **Smith** is an open-source fleet management system built in Rust for managing distributed IoT devices at scale. Born from managing thousands of devices across healthcare facilities, Smith provides the automation and reliability you need to deploy, monitor, and update your fleet with confidence.
