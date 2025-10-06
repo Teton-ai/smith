@@ -7,7 +7,17 @@ use axum::http::StatusCode;
 use axum::{Extension, Json};
 use serde::Deserialize;
 use tracing::error;
+use utoipa::ToSchema;
 
+#[utoipa::path(
+    post,
+    path = "/smith/telemetry/victoria",
+    responses(
+        (status = 200, description = "Victoria metrics data forwarded successfully"),
+        (status = 501, description = "Victoria metrics not implemented"),
+        (status = 500, description = "Internal server error")
+    )
+)]
 pub async fn victoria(
     Extension(state): Extension<State>,
     req: Request<Body>,
@@ -45,12 +55,21 @@ pub async fn victoria(
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema)]
 pub struct NewModem {
     pub imei: String,
     pub network_provider: String,
 }
 
+#[utoipa::path(
+    post,
+    path = "/smith/telemetry/modem",
+    responses(
+        (status = 200, description = "Modem telemetry data processed successfully"),
+        (status = 500, description = "Internal server error")
+    ),
+    security(("Access Token" = []))
+)]
 pub async fn modem(
     device: DeviceWithToken,
     Extension(state): Extension<State>,
