@@ -1,15 +1,9 @@
-use axum::Router;
 use axum::error_handling::HandleErrorLayer;
 use axum::extract::{DefaultBodyLimit, MatchedPath};
 use axum::http::StatusCode;
 use axum::middleware::Next;
 use axum::response::IntoResponse;
-use axum::{
-    Extension,
-    extract::Request,
-    middleware,
-    routing::{any, get, post},
-};
+use axum::{Extension, extract::Request, middleware, routing::get};
 use config::Config;
 use handlers::events::PublicEvent;
 use metrics_exporter_prometheus::{Matcher, PrometheusBuilder, PrometheusHandle};
@@ -125,6 +119,10 @@ impl Modify for SecurityAddon {
 #[derive(OpenApi)]
 #[openapi(modifiers(&SecurityAddon))]
 struct ApiDoc;
+
+#[derive(OpenApi)]
+#[openapi(modifiers(&SecurityAddon))]
+struct SmithApiDoc;
 
 async fn start_main_server(config: &'static Config, authorization: AuthorizationConfig) {
     info!("Starting Smith API v{}", env!("CARGO_PKG_VERSION"));
@@ -276,61 +274,31 @@ async fn start_main_server(config: &'static Config, authorization: Authorization
         .split_for_parts();
 
     // !Routes after the auth layer are not protected!
-    let smith_router = Router::new()
-        .route(
-            "/smith/register",
-            post(handlers::home::register_device).layer(
-                ServiceBuilder::new()
-                    .layer(HandleErrorLayer::new(|_| async move {
-                        (StatusCode::INTERNAL_SERVER_ERROR, "Unhandled server error")
-                    }))
-                    .layer(RequestDecompressionLayer::new()),
-            ),
+    let (smith_router, smith_api) = OpenApiRouter::with_openapi(SmithApiDoc::openapi())
+        .routes(routes!(handlers::home::register_device))
+        .routes(routes!(handlers::home::home))
+        .routes(routes!(telemetry::routes::modem))
+        .routes(routes!(telemetry::routes::victoria))
+        .routes(routes!(handlers::upload::upload_file))
+        .routes(routes!(handlers::download::download_file))
+        .routes(routes!(handlers::fetch_package))
+        .routes(routes!(handlers::list_release_packages))
+        .split_for_parts();
+
+    let smith_router = smith_router
+        .layer(
+            ServiceBuilder::new()
+                .layer(HandleErrorLayer::new(|_| async move {
+                    (StatusCode::INTERNAL_SERVER_ERROR, "Unhandled server error")
+                }))
+                .layer(RequestDecompressionLayer::new()),
         )
-        .route(
-            "/smith/home",
-            post(handlers::home::home).layer(
-                ServiceBuilder::new()
-                    .layer(HandleErrorLayer::new(|_| async move {
-                        (StatusCode::INTERNAL_SERVER_ERROR, "Unhandled server error")
-                    }))
-                    .layer(RequestDecompressionLayer::new()),
-            ),
-        )
-        .route(
-            "/smith/telemetry/modem",
-            post(telemetry::routes::modem).layer(
-                ServiceBuilder::new()
-                    .layer(HandleErrorLayer::new(|_| async move {
-                        (StatusCode::INTERNAL_SERVER_ERROR, "Unhandled server error")
-                    }))
-                    .layer(RequestDecompressionLayer::new()),
-            ),
-        )
-        .route(
-            "/smith/telemetry/victoria",
-            any(telemetry::routes::victoria),
-        )
-        .route(
-            "/smith/upload",
-            post(handlers::upload::upload_file).layer(DefaultBodyLimit::max(512000000)),
-        )
-        .route(
-            "/smith/upload/*path",
-            post(handlers::upload::upload_file).layer(DefaultBodyLimit::max(512000000)),
-        )
-        .route("/smith/download", get(handlers::download::download_file))
-        .route(
-            "/smith/download/*path",
-            get(handlers::download::download_file),
-        )
-        .nest_service("/smith/package", get(handlers::fetch_package))
-        .route(
-            "/smith/releases/:release_id/packages",
-            get(handlers::list_release_packages),
-        );
+        .layer(DefaultBodyLimit::max(512000000));
 
     let json_specification = api.to_pretty_json().expect("API docs generation failed");
+    let smith_json_specification = smith_api
+        .to_pretty_json()
+        .expect("Smith API docs generation failed");
 
     let app = router
         .merge(smith_router)
@@ -342,8 +310,13 @@ async fn start_main_server(config: &'static Config, authorization: Authorization
             "/docs/openapi.json",
             get(move || ready(json_specification.clone())),
         )
+        .route(
+            "/docs/smith/openapi.json",
+            get(move || ready(smith_json_specification.clone())),
+        )
         .layer(CorsLayer::permissive())
-        .merge(Scalar::with_url("/docs", api));
+        .merge(Scalar::with_url("/docs", api))
+        .merge(Scalar::with_url("/docs/smith", smith_api));
 
     let listener = TcpListener::bind("0.0.0.0:8080")
         .await

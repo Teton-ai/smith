@@ -12,6 +12,19 @@ pub struct UploadResult {
     pub url: String,
 }
 
+#[utoipa::path(
+    get,
+    path = "/smith/download/{path}",
+    params(
+        ("path" = String, Path, description = "File path to download")
+    ),
+    responses(
+        (status = 200, description = "File download successful", content_type = "application/octet-stream"),
+        (status = 400, description = "Bad request"),
+        (status = 500, description = "Internal server error")
+    ),
+    security(("Access Token" = []))
+)]
 #[tracing::instrument]
 pub async fn download_file(
     _device: DeviceWithToken,
