@@ -10,6 +10,7 @@ import {
   XCircle,
   Loader2,
   Activity,
+  Monitor,
 } from 'lucide-react';
 import PrivateLayout from "@/app/layouts/PrivateLayout";
 import useSmithAPI from "@/app/hooks/smith-api";
@@ -32,6 +33,15 @@ interface Deployment {
   created_at: string;
 }
 
+interface DeploymentDevice {
+  device_id: number;
+  serial_number: string;
+  release_id: number | null;
+  target_release_id: number | null;
+  last_ping: string | null;
+  added_at: string;
+}
+
 const DeploymentStatusPage = () => {
   const router = useRouter();
   const params = useParams();
@@ -39,6 +49,7 @@ const DeploymentStatusPage = () => {
   const { callAPI } = useSmithAPI();
   const [release, setRelease] = useState<Release | null>(null);
   const [deployment, setDeployment] = useState<Deployment | null>(null);
+  const [devices, setDevices] = useState<DeploymentDevice[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [elapsedTime, setElapsedTime] = useState(0);
@@ -52,6 +63,17 @@ const DeploymentStatusPage = () => {
     } catch (err: any) {
       console.error('Failed to fetch deployment:', err);
       setError(err?.message || 'Failed to fetch deployment status');
+    }
+  }, [releaseId, callAPI]);
+
+  const fetchDevices = useCallback(async () => {
+    try {
+      const devicesData = await callAPI<DeploymentDevice[]>('GET', `/releases/${releaseId}/deployment/devices`);
+      if (devicesData) {
+        setDevices(devicesData);
+      }
+    } catch (err: any) {
+      console.error('Failed to fetch deployment devices:', err);
     }
   }, [releaseId, callAPI]);
 
@@ -73,8 +95,9 @@ const DeploymentStatusPage = () => {
     if (releaseId) {
       fetchRelease();
       fetchDeployment();
+      fetchDevices();
     }
-  }, [releaseId, callAPI, fetchDeployment]);
+  }, [releaseId, callAPI, fetchDeployment, fetchDevices]);
 
   useEffect(() => {
     if (!deployment || deployment.status === 'Done' || deployment.status === 'Failed' || deployment.status === 'Canceled') {
@@ -83,10 +106,11 @@ const DeploymentStatusPage = () => {
 
     const interval = setInterval(() => {
       fetchDeployment();
+      fetchDevices();
     }, 5000);
 
     return () => clearInterval(interval);
-  }, [deployment, fetchDeployment]);
+  }, [deployment, fetchDeployment, fetchDevices]);
 
   useEffect(() => {
     if (!deployment) return;
@@ -104,6 +128,16 @@ const DeploymentStatusPage = () => {
     const mins = Math.floor(seconds / 60);
     const secs = seconds % 60;
     return `${mins}m ${secs}s`;
+  };
+
+  const getDeviceStatus = (device: DeploymentDevice) => {
+    if (device.release_id === device.target_release_id) {
+      return { status: 'updated', label: 'Updated', color: 'text-green-700 bg-green-100 border-green-200' };
+    }
+    if (device.last_ping && moment(device.last_ping).isAfter(moment().subtract(5, 'minutes'))) {
+      return { status: 'updating', label: 'Updating...', color: 'text-blue-700 bg-blue-100 border-blue-200' };
+    }
+    return { status: 'pending', label: 'Pending', color: 'text-gray-700 bg-gray-100 border-gray-200' };
   };
 
   const getStatusIcon = (status: Deployment['status']) => {
@@ -310,6 +344,61 @@ const DeploymentStatusPage = () => {
                   <p className="text-sm text-yellow-800">
                     <strong>Note:</strong> This page will automatically refresh every 5 seconds to show the latest status. You can safely navigate away and return later.
                   </p>
+                </div>
+              )}
+
+              {devices.length > 0 && (
+                <div className="mt-6">
+                  <div className="flex items-center space-x-2 mb-4">
+                    <Monitor className="w-5 h-5 text-gray-700" />
+                    <h3 className="font-semibold text-gray-900">Deployment Devices ({devices.length})</h3>
+                  </div>
+                  <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
+                    <table className="min-w-full divide-y divide-gray-200">
+                      <thead className="bg-gray-50">
+                        <tr>
+                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                            Serial Number
+                          </th>
+                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                            Status
+                          </th>
+                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                            Last Ping
+                          </th>
+                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                            Added
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody className="bg-white divide-y divide-gray-200">
+                        {devices.map((device) => {
+                          const deviceStatus = getDeviceStatus(device);
+                          return (
+                            <tr key={device.device_id} className="hover:bg-gray-50">
+                              <td className="px-4 py-3 text-sm font-mono text-gray-900">
+                                {device.serial_number}
+                              </td>
+                              <td className="px-4 py-3 text-sm">
+                                <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border ${deviceStatus.color}`}>
+                                  {deviceStatus.status === 'updated' && <CheckCircle2 className="w-3 h-3 mr-1" />}
+                                  {deviceStatus.status === 'updating' && <Loader2 className="w-3 h-3 mr-1 animate-spin" />}
+                                  {deviceStatus.status === 'pending' && <Clock className="w-3 h-3 mr-1" />}
+                                  {deviceStatus.label}
+                                </span>
+                              </td>
+                              <td className="px-4 py-3 text-sm text-gray-600">
+                                {device.last_ping ? moment(device.last_ping).fromNow() : 'Never'}
+                              </td>
+                              <td className="px-4 py-3 text-sm text-gray-600">
+                                {moment(device.added_at).fromNow()}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
               )}
             </>

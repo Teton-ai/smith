@@ -1,4 +1,4 @@
-use crate::deployment::schema::{Deployment, DeploymentStatus};
+use crate::deployment::schema::{Deployment, DeploymentDeviceWithStatus, DeploymentStatus};
 use sqlx::PgPool;
 
 pub mod routes;
@@ -193,5 +193,43 @@ WHERE id IN (
         // Commit the transaction
         tx.commit().await?;
         Ok(updated_deployment)
+    }
+
+    pub async fn get_devices(
+        release_id: i32,
+        pg_pool: &PgPool,
+    ) -> anyhow::Result<Vec<DeploymentDeviceWithStatus>> {
+        let deployment = sqlx::query!(
+            "SELECT id FROM deployment WHERE release_id = $1",
+            release_id
+        )
+        .fetch_optional(pg_pool)
+        .await?;
+
+        let Some(deployment) = deployment else {
+            return Ok(Vec::new());
+        };
+
+        let devices = sqlx::query_as!(
+            DeploymentDeviceWithStatus,
+            r#"
+            SELECT
+                d.id AS device_id,
+                d.serial_number,
+                d.release_id,
+                d.target_release_id,
+                d.last_ping,
+                dd.created_at AS added_at
+            FROM deployment_devices dd
+            JOIN device d ON dd.device_id = d.id
+            WHERE dd.deployment_id = $1
+            ORDER BY dd.created_at ASC
+            "#,
+            deployment.id
+        )
+        .fetch_all(pg_pool)
+        .await?;
+
+        Ok(devices)
     }
 }

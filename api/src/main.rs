@@ -221,6 +221,7 @@ async fn start_main_server(config: &'static Config, authorization: Authorization
             handlers::devices::get_all_commands_for_device
         ))
         .routes(routes!(rollout::routes::api_rollout,))
+        .routes(routes!(deployment::routes::api_get_deployment_devices))
         .routes(routes!(
             deployment::routes::api_release_deployment,
             deployment::routes::api_get_release_deployment,
