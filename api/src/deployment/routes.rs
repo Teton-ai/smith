@@ -1,5 +1,5 @@
 use crate::State;
-use crate::deployment::schema::Deployment;
+use crate::deployment::schema::{Deployment, DeploymentDeviceWithStatus};
 use axum::extract::Path;
 use axum::http::StatusCode;
 use axum::{Extension, Json};
@@ -70,4 +70,25 @@ pub async fn api_release_deployment_check_done(
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     Ok((StatusCode::OK, Json(release)))
+}
+
+#[utoipa::path(
+  get,
+  path = "/releases/{release_id}/deployment/devices",
+  responses(
+        (status = StatusCode::OK, body = Vec<DeploymentDeviceWithStatus>),
+  ),
+  security(
+      ("Access Token" = [])
+  ),
+  tag = TAG
+)]
+pub async fn api_get_deployment_devices(
+    Path(release_id): Path<i32>,
+    Extension(state): Extension<State>,
+) -> Result<(StatusCode, Json<Vec<DeploymentDeviceWithStatus>>), StatusCode> {
+    let devices = Deployment::get_devices(release_id, &state.pg_pool)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    Ok((StatusCode::OK, Json(devices)))
 }

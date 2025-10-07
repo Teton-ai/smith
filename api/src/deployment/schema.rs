@@ -26,3 +26,13 @@ pub struct DeploymentDevice {
     pub device_id: i32,
     pub created_at: chrono::DateTime<chrono::Utc>,
 }
+
+#[derive(Serialize, Deserialize, Debug, Clone, ToSchema)]
+pub struct DeploymentDeviceWithStatus {
+    pub device_id: i32,
+    pub serial_number: String,
+    pub release_id: Option<i32>,
+    pub target_release_id: Option<i32>,
+    pub last_ping: Option<chrono::DateTime<chrono::Utc>>,
+    pub added_at: chrono::DateTime<chrono::Utc>,
+}
