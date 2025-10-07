@@ -16,6 +16,7 @@ import {
   Trash2,
   Eye,
   X,
+  Rocket,
 } from 'lucide-react';
 import PrivateLayout from "@/app/layouts/PrivateLayout";
 import useSmithAPI from "@/app/hooks/smith-api";
@@ -72,6 +73,8 @@ const ReleaseDetailPage = () => {
   const [availablePackages, setAvailablePackages] = useState<AvailablePackage[]>([]);
   const [availablePackagesLoading, setAvailablePackagesLoading] = useState(false);
   const [selectedAvailablePackage, setSelectedAvailablePackage] = useState<number | null>(null);
+  const [showDeployModal, setShowDeployModal] = useState(false);
+  const [deploying, setDeploying] = useState(false);
 
   useEffect(() => {
     const fetchRelease = async () => {
@@ -227,6 +230,22 @@ const ReleaseDetailPage = () => {
     await fetchAvailablePackages();
   };
 
+  const handleDeployRelease = async () => {
+    if (!release || deploying) return;
+
+    setDeploying(true);
+    try {
+      await callAPI('POST', `/releases/${releaseId}/deployment`);
+      setShowDeployModal(false);
+      router.push(`/releases/${releaseId}/deployment`);
+    } catch (error: any) {
+      console.error('Failed to deploy release:', error);
+      alert(`Failed to deploy release: ${error?.message || 'Unknown error'}`);
+    } finally {
+      setDeploying(false);
+    }
+  };
+
   if (loading || !release) {
     return (
       <PrivateLayout id="distributions">
@@ -309,6 +328,76 @@ const ReleaseDetailPage = () => {
             </div>
           </div>
         </div>
+
+        {/* Deploy Confirmation Modal */}
+        {showDeployModal && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+            <div className="bg-white rounded-lg shadow-xl p-6 w-[520px]">
+              <div className="flex items-center justify-between mb-6">
+                <h3 className="text-lg font-semibold text-gray-900">Deploy Release v{release.version}</h3>
+                <button
+                  onClick={() => setShowDeployModal(false)}
+                  className="text-gray-400 hover:text-gray-600"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <div className="space-y-4 mb-6">
+                <p className="text-sm text-gray-700">
+                  This will deploy the release in two phases:
+                </p>
+
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                  <h4 className="font-medium text-blue-900 text-sm mb-2">Phase 1: Canary Deployment</h4>
+                  <ul className="text-sm text-blue-800 space-y-1 list-disc list-inside">
+                    <li>Deploy to ~10 recently active devices</li>
+                    <li>Wait for successful updates (up to 5 minutes)</li>
+                  </ul>
+                </div>
+
+                <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+                  <h4 className="font-medium text-green-900 text-sm mb-2">Phase 2: Full Rollout</h4>
+                  <ul className="text-sm text-green-800 space-y-1 list-disc list-inside">
+                    <li>Once canary succeeds, deploy to all remaining devices</li>
+                    <li>Devices will update as they come online</li>
+                  </ul>
+                </div>
+              </div>
+
+              <div className="flex justify-end space-x-3">
+                <button
+                  onClick={() => setShowDeployModal(false)}
+                  disabled={deploying}
+                  className="px-4 py-2 text-sm font-medium text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-md transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleDeployRelease}
+                  disabled={deploying}
+                  className={`flex items-center space-x-2 px-4 py-2 text-sm font-medium rounded-md transition-colors ${
+                    deploying
+                      ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                      : 'bg-blue-600 text-white hover:bg-blue-700'
+                  }`}
+                >
+                  {deploying ? (
+                    <>
+                      <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                      <span>Starting...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Rocket className="w-4 h-4" />
+                      <span>Start Deployment</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Package Management Modals */}
         {showAddPackageModal && (
@@ -406,38 +495,48 @@ const ReleaseDetailPage = () => {
               <h2 className="text-lg font-semibold text-gray-900">Packages</h2>
               <span className="text-sm text-gray-500">({packages.length})</span>
             </div>
-            {release?.draft && (
-              <div className="flex items-center space-x-3">
+            <div className="flex items-center space-x-3">
+              {release?.draft ? (
+                <>
+                  <button
+                    onClick={handlePublishRelease}
+                    disabled={publishing}
+                    className={`flex items-center space-x-2 px-4 py-2 text-sm font-medium rounded-md transition-colors ${
+                      publishing
+                        ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                        : 'bg-green-600 text-white hover:bg-green-700'
+                    }`}
+                  >
+                    {publishing ? (
+                      <>
+                        <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                        <span>Publishing...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Eye className="w-4 h-4" />
+                        <span>Publish Release</span>
+                      </>
+                    )}
+                  </button>
+                  <button
+                    onClick={openAddModal}
+                    className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700 transition-colors"
+                  >
+                    <Plus className="w-4 h-4" />
+                    <span>Add Package</span>
+                  </button>
+                </>
+              ) : !release?.yanked && (
                 <button
-                  onClick={handlePublishRelease}
-                  disabled={publishing}
-                  className={`flex items-center space-x-2 px-4 py-2 text-sm font-medium rounded-md transition-colors ${
-                    publishing
-                      ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
-                      : 'bg-green-600 text-white hover:bg-green-700'
-                  }`}
-                >
-                  {publishing ? (
-                    <>
-                      <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                      <span>Publishing...</span>
-                    </>
-                  ) : (
-                    <>
-                      <Eye className="w-4 h-4" />
-                      <span>Publish Release</span>
-                    </>
-                  )}
-                </button>
-                <button
-                  onClick={openAddModal}
+                  onClick={() => setShowDeployModal(true)}
                   className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700 transition-colors"
                 >
-                  <Plus className="w-4 h-4" />
-                  <span>Add Package</span>
+                  <Rocket className="w-4 h-4" />
+                  <span>Deploy Release</span>
                 </button>
-              </div>
-            )}
+              )}
+            </div>
           </div>
           
           <div className="bg-white rounded border border-gray-200 overflow-hidden">
