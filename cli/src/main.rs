@@ -327,7 +327,7 @@ async fn main() -> anyhow::Result<()> {
                     // We're using `termion` to put the terminal into raw mode, so that we can
                     // display the output of interactive applications correctly
                     let _raw_term = std::io::stdout().into_raw_mode()?;
-                    ssh.call("bash").await.with_context(|| "skill issues")?;
+                    ssh.call().await.with_context(|| "skill issues")?;
                 };
 
                 println!("Exitcode: {:?}", code);
