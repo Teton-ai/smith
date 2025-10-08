@@ -187,13 +187,6 @@ pub struct NetworkStats {
     pub tx_errors: u64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct NetworkMetrics {
-    pub rx_bytes_delta: u64,
-    pub tx_bytes_delta: u64,
-    pub interval_seconds: u64,
-}
-
 pub async fn read_network_stats() -> Result<HashMap<String, NetworkStats>> {
     let content = tokio::fs::read_to_string("/proc/net/dev").await?;
     parse_network_stats(&content)
