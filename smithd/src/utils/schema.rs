@@ -12,6 +12,14 @@ pub struct HomePost {
     pub timestamp: Duration,
     pub responses: Vec<SafeCommandResponse>,
     pub release_id: Option<i32>,
+    pub network_metrics: Option<NetworkMetrics>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct NetworkMetrics {
+    pub rx_bytes_delta: u64,
+    pub tx_bytes_delta: u64,
+    pub interval_seconds: u64,
 }
 
 impl HomePost {
@@ -21,7 +29,13 @@ impl HomePost {
             timestamp,
             responses,
             release_id,
+            network_metrics: None,
         }
+    }
+
+    pub fn with_network_metrics(mut self, network_metrics: Option<NetworkMetrics>) -> Self {
+        self.network_metrics = network_metrics;
+        self
     }
 }
 
