@@ -47,7 +47,7 @@ impl Session {
         }
 
         let config = client::Config {
-            inactivity_timeout: Some(Duration::from_secs(5)),
+            inactivity_timeout: Some(Duration::from_secs(300)),
             ..<_>::default()
         };
 
@@ -82,7 +82,7 @@ impl Session {
         Ok(Self { session })
     }
 
-    pub async fn call(&mut self, command: &str) -> Result<u32> {
+    pub async fn call(&mut self) -> Result<u32> {
         let mut channel = self.session.channel_open_session().await?;
 
         // This example doesn't terminal resizing after the connection is established
@@ -100,7 +100,7 @@ impl Session {
                 &[], // ideally you want to pass the actual terminal modes here
             )
             .await?;
-        channel.exec(true, command).await?;
+        channel.request_shell(true).await?;
 
         let code;
         let mut stdin = tokio_fd::AsyncFd::try_from(0)?;
