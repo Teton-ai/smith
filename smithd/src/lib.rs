@@ -6,6 +6,7 @@ pub mod dbus;
 pub mod downloader;
 pub mod filemanager;
 pub mod magic;
+pub mod network_monitor;
 pub mod police;
 pub mod postman;
 pub mod shutdown;

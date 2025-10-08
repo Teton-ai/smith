@@ -1,12 +1,11 @@
 use crate::commander::CommanderHandle;
 use crate::magic::MagicHandle;
+use crate::network_monitor::NetworkMonitorHandle;
 use crate::police::PoliceHandle;
 use crate::shutdown::ShutdownSignals;
-use crate::utils::network::{
-    NetworkClient, NetworkStats, get_primary_interface_name, read_network_stats,
-};
+use crate::utils::network::NetworkClient;
 use crate::utils::schema::{
-    DeviceRegistration, DeviceRegistrationResponse, HomePost, HomePostResponse, NetworkMetrics,
+    DeviceRegistration, DeviceRegistrationResponse, HomePost, HomePostResponse,
     SafeCommandResponse, SafeCommandRx,
 };
 use crate::utils::system::SystemInfo;
@@ -24,11 +23,10 @@ struct Postman {
     commander: CommanderHandle,
     magic: MagicHandle,
     network: NetworkClient,
+    network_monitor: NetworkMonitorHandle,
     hostname: String,
     token: Option<String>,
     problems: Option<u32>,
-    last_network_stats: Option<NetworkStats>,
-    last_network_check: Option<time::Instant>,
 }
 
 #[derive(Debug)]
@@ -41,6 +39,7 @@ impl Postman {
         receiver: mpsc::Receiver<PostmanMessage>,
         commander: CommanderHandle,
         magic: MagicHandle,
+        network_monitor: NetworkMonitorHandle,
     ) -> Self {
         let network = NetworkClient::default();
 
@@ -51,50 +50,11 @@ impl Postman {
             commander,
             network,
             magic,
+            network_monitor,
             token: None,
             hostname: "".to_owned(),
             problems: None,
-            last_network_stats: None,
-            last_network_check: None,
         }
-    }
-
-    async fn calculate_network_metrics(&mut self) -> Option<NetworkMetrics> {
-        let interface = get_primary_interface_name();
-
-        let current_stats = match read_network_stats().await {
-            Ok(stats) => stats.get(&interface).cloned()?,
-            Err(e) => {
-                error!("Failed to read network stats: {}", e);
-                return None;
-            }
-        };
-
-        let now = time::Instant::now();
-
-        if let (Some(last_stats), Some(last_check)) =
-            (&self.last_network_stats, self.last_network_check)
-        {
-            let interval_seconds = now.duration_since(last_check).as_secs();
-
-            if interval_seconds > 0 {
-                let rx_bytes_delta = current_stats.rx_bytes.saturating_sub(last_stats.rx_bytes);
-                let tx_bytes_delta = current_stats.tx_bytes.saturating_sub(last_stats.tx_bytes);
-
-                self.last_network_stats = Some(current_stats);
-                self.last_network_check = Some(now);
-
-                return Some(NetworkMetrics {
-                    rx_bytes_delta,
-                    tx_bytes_delta,
-                    interval_seconds,
-                });
-            }
-        }
-
-        self.last_network_stats = Some(current_stats);
-        self.last_network_check = Some(now);
-        None
     }
 
     async fn handle_message(&mut self, _msg: PostmanMessage) {}
@@ -145,7 +105,7 @@ impl Postman {
 
                     let responses = self.commander.get_results().await;
                     let release_id = self.magic.get_release_id().await;
-                    let network_metrics = self.calculate_network_metrics().await;
+                    let network_metrics = self.network_monitor.get_metrics().await;
 
                     let ping_home_body = HomePost::new(responses, release_id)
                         .with_network_metrics(network_metrics);
@@ -279,9 +239,17 @@ impl PostmanHandle {
         police: PoliceHandle,
         commander: CommanderHandle,
         magic: MagicHandle,
+        network_monitor: NetworkMonitorHandle,
     ) -> Self {
         let (_sender, receiver) = mpsc::channel(8);
-        let mut actor = Postman::new(shutdown, police, receiver, commander, magic);
+        let mut actor = Postman::new(
+            shutdown,
+            police,
+            receiver,
+            commander,
+            magic,
+            network_monitor,
+        );
         tokio::spawn(async move { actor.run().await });
 
         Self { _sender }
