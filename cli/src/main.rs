@@ -314,7 +314,7 @@ async fn main() -> anyhow::Result<()> {
                 println!("Waiting for tunnel setup...");
 
                 // Wait for server-side setup to complete
-                tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+                tokio::time::sleep(Duration::from_secs(10)).await;
                 let mut ssh = Session::connect(
                     config.get_identity_file(),
                     username,
@@ -326,7 +326,7 @@ async fn main() -> anyhow::Result<()> {
                 let code = {
                     // We're using `termion` to put the terminal into raw mode, so that we can
                     // display the output of interactive applications correctly
-                    let _raw_term = std::io::stdout().into_raw_mode()?;
+                    let _raw_term = io::stdout().into_raw_mode()?;
                     ssh.call().await.with_context(|| "skill issues")?;
                 };
 
@@ -404,7 +404,7 @@ async fn main() -> anyhow::Result<()> {
             }
         },
         None => {
-            println!("No command provided");
+            Cli::command().print_help()?;
         }
     }
 
