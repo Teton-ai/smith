@@ -159,13 +159,15 @@ const ReleaseDetailPage = () => {
 
   const handlePublishRelease = async () => {
     if (!release || !release.draft || publishing) return;
-    
+
     setPublishing(true);
     try {
-      const updatedRelease = await callAPI<Release>('PATCH', `/releases/${releaseId}`, {
+      await callAPI('POST', `/releases/${releaseId}`, {
         draft: false
       });
-      
+
+      // Refresh the release to get updated state
+      const updatedRelease = await callAPI<Release>('GET', `/releases/${releaseId}`);
       if (updatedRelease) {
         setRelease(updatedRelease);
       }
