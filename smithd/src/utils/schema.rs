@@ -12,7 +12,7 @@ pub struct HomePost {
     pub timestamp: Duration,
     pub responses: Vec<SafeCommandResponse>,
     pub release_id: Option<i32>,
-    pub network_metrics: NetworkMetrics,
+    pub network_metrics: Option<NetworkMetrics>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
@@ -33,7 +33,7 @@ impl HomePost {
             timestamp,
             responses,
             release_id,
-            network_metrics,
+            network_metrics: Some(network_metrics),
         }
     }
 }
