@@ -14,7 +14,7 @@ struct NetworkMonitor {
 
 enum NetworkMonitorMessage {
     GetMetrics {
-        sender: oneshot::Sender<Option<NetworkMetrics>>,
+        sender: oneshot::Sender<NetworkMetrics>,
     },
 }
 
@@ -38,12 +38,18 @@ impl NetworkMonitor {
         }
     }
 
-    async fn calculate_metrics(&mut self) -> Option<NetworkMetrics> {
+    async fn calculate_metrics(&mut self) -> NetworkMetrics {
         let current_stats = match read_network_stats().await {
-            Ok(stats) => stats.get(&self.interface).cloned()?,
+            Ok(stats) => match stats.get(&self.interface).cloned() {
+                Some(s) => s,
+                None => {
+                    error!("Interface {} not found", self.interface);
+                    return NetworkMetrics::default();
+                }
+            },
             Err(e) => {
                 error!("Failed to read network stats: {}", e);
-                return None;
+                return NetworkMetrics::default();
             }
         };
 
@@ -59,17 +65,17 @@ impl NetworkMonitor {
                 self.last_stats = Some(current_stats);
                 self.last_check = Some(now);
 
-                return Some(NetworkMetrics {
+                return NetworkMetrics {
                     rx_bytes_delta,
                     tx_bytes_delta,
                     interval_seconds,
-                });
+                };
             }
         }
 
         self.last_stats = Some(current_stats);
         self.last_check = Some(now);
-        None
+        NetworkMetrics::default()
     }
 
     async fn run(&mut self) {
@@ -102,10 +108,10 @@ impl NetworkMonitorHandle {
         Self { sender }
     }
 
-    pub async fn get_metrics(&self) -> Option<NetworkMetrics> {
+    pub async fn get_metrics(&self) -> NetworkMetrics {
         let (sender, receiver) = oneshot::channel();
         let msg = NetworkMonitorMessage::GetMetrics { sender };
         _ = self.sender.send(msg).await;
-        receiver.await.unwrap_or(None)
+        receiver.await.unwrap_or_default()
     }
 }

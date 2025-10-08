@@ -107,8 +107,7 @@ impl Postman {
                     let release_id = self.magic.get_release_id().await;
                     let network_metrics = self.network_monitor.get_metrics().await;
 
-                    let ping_home_body = HomePost::new(responses, release_id)
-                        .with_network_metrics(network_metrics);
+                    let ping_home_body = HomePost::new(responses, release_id, network_metrics);
 
                     let response = self.ping_home(ping_home_body).await;
                     let target_release_id = response.target_release_id;
