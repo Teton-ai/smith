@@ -3,6 +3,7 @@ use crate::commander::CommanderHandle;
 use crate::dbus::DbusHandle;
 use crate::downloader::DownloaderHandle;
 use crate::filemanager::FileManagerHandle;
+use crate::logstream::LogStreamHandle;
 use crate::magic::MagicHandle;
 use crate::police::PoliceHandle;
 use crate::postman::PostmanHandle;
@@ -23,6 +24,8 @@ pub async fn run() {
 
     let tunnel = TunnelHandle::new(shutdown.signals(), configuration.clone());
 
+    let logstream = LogStreamHandle::new(shutdown.signals());
+
     let police = PoliceHandle::new(shutdown.signals());
 
     let updater = UpdaterHandle::new(shutdown.signals(), configuration.clone());
@@ -37,6 +40,7 @@ pub async fn run() {
         updater.clone(),
         downloader.clone(),
         filemanager.clone(),
+        logstream.clone(),
     );
 
     let _postman = PostmanHandle::new(

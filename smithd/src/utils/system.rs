@@ -172,7 +172,7 @@ async fn get_last_boot_time() -> u64 {
 
 pub fn get_serial_number() -> String {
     get_raw_serial_number()
-        .unwrap_or_else(|| "1234".to_owned())
+        .unwrap_or_else(|| "1234567890123".to_owned())
         .trim()
         .trim_matches(char::is_whitespace)
         .trim_matches(char::from(0))
