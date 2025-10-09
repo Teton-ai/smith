@@ -165,4 +165,56 @@ impl SmithAPI {
 
         Ok(())
     }
+
+    pub async fn send_logs_command(&self, device_id: u64) -> Result<()> {
+        let client = Client::new();
+
+        let logs_command = schema::SafeCommandRequest {
+            id: 0,
+            command: schema::SafeCommandTx::FreeForm {
+                cmd: String::from("journalctl -r -n 500"),
+            },
+            continue_on_error: false,
+        };
+
+        let resp = client
+            .post(format!("{}/devices/{device_id}/commands", self.domain))
+            .header("Authorization", format!("Bearer {}", &self.bearer_token))
+            .json(&serde_json::json!([logs_command]))
+            .send();
+
+        let response_code = resp.await?.status();
+
+        if response_code != 201 {
+            return Err(anyhow::anyhow!("Failed to send logs command"));
+        }
+
+        Ok(())
+    }
+
+    pub async fn send_service_status_command(&self, device_id: u64, unit: String) -> Result<()> {
+        let client = Client::new();
+
+        let service_command = schema::SafeCommandRequest {
+            id: 0,
+            command: schema::SafeCommandTx::FreeForm {
+                cmd: format!("systemctl status {}", unit),
+            },
+            continue_on_error: false,
+        };
+
+        let resp = client
+            .post(format!("{}/devices/{device_id}/commands", self.domain))
+            .header("Authorization", format!("Bearer {}", &self.bearer_token))
+            .json(&serde_json::json!([service_command]))
+            .send();
+
+        let response_code = resp.await?.status();
+
+        if response_code != 201 {
+            return Err(anyhow::anyhow!("Failed to send service status command"));
+        }
+
+        Ok(())
+    }
 }

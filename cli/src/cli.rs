@@ -45,6 +45,23 @@ pub enum DevicesCommands {
         /// Device serial number or ID
         device: String,
     },
+    /// Get logs for a specific device
+    Logs {
+        /// Device serial number
+        serial_number: String,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum ServiceCommands {
+    /// Get status of a systemd service
+    Status {
+        /// Service unit name
+        #[arg(short, long)]
+        unit: String,
+        /// Device serial number
+        serial_number: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -63,6 +80,12 @@ pub enum Commands {
     Devices {
         #[clap(subcommand)]
         command: DevicesCommands,
+    },
+
+    /// Service management commands
+    Service {
+        #[clap(subcommand)]
+        command: ServiceCommands,
     },
 
     /// Lists distributions and information

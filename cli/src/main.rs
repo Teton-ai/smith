@@ -6,7 +6,7 @@ mod print;
 mod schema;
 mod tunnel;
 
-use crate::cli::{Cli, Commands, DevicesCommands, DistroCommands};
+use crate::cli::{Cli, Commands, DevicesCommands, DistroCommands, ServiceCommands};
 use crate::print::TablePrint;
 use anyhow::Context;
 use api::SmithAPI;
@@ -216,6 +216,125 @@ async fn main() -> anyhow::Result<()> {
                         "The device will download a 20MB test file and report back the results."
                     );
                     println!("Check the dashboard to see the results.");
+                }
+                DevicesCommands::Logs { serial_number } => {
+                    let secrets = auth::get_secrets(&config)
+                        .await
+                        .with_context(|| "Error getting token")?
+                        .with_context(|| "No Token found, please Login")?;
+
+                    let api = SmithAPI::new(secrets, &config);
+
+                    let devices = api.get_devices(Some(serial_number.clone())).await?;
+
+                    let parsed: Value = serde_json::from_str(&devices)?;
+
+                    let id = parsed[0]["id"]
+                        .as_u64()
+                        .with_context(|| "Device not found")?;
+
+                    println!(
+                        "Fetching logs for device [{}] {}",
+                        id,
+                        &serial_number.bold()
+                    );
+
+                    let pb = ProgressBar::new_spinner();
+                    pb.enable_steady_tick(Duration::from_millis(50));
+                    pb.set_style(
+                        ProgressStyle::with_template("{spinner:.blue} {msg}")
+                            .unwrap()
+                            .tick_strings(&["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]),
+                    );
+                    pb.set_message("Sending request to device");
+
+                    api.send_logs_command(id).await?;
+                    pb.set_message("Request sent, waiting for device");
+
+                    let logs;
+                    loop {
+                        let response = api.get_last_command(id).await?;
+
+                        if response["fetched"].is_boolean()
+                            && response["fetched"].as_bool().unwrap_or(false)
+                        {
+                            pb.set_message("Command fetched by device");
+                        }
+
+                        if response["response"].is_object() {
+                            logs = response["response"]["FreeForm"]["stdout"]
+                                .as_str()
+                                .with_context(|| "Failed to get logs from response")?
+                                .to_string();
+                            break;
+                        }
+
+                        thread::sleep(Duration::from_secs(1));
+                    }
+
+                    pb.finish_and_clear();
+                    println!("{}", logs);
+                }
+            },
+            Commands::Service { command } => match command {
+                ServiceCommands::Status { unit, serial_number } => {
+                    let secrets = auth::get_secrets(&config)
+                        .await
+                        .with_context(|| "Error getting token")?
+                        .with_context(|| "No Token found, please Login")?;
+
+                    let api = SmithAPI::new(secrets, &config);
+
+                    let devices = api.get_devices(Some(serial_number.clone())).await?;
+
+                    let parsed: Value = serde_json::from_str(&devices)?;
+
+                    let id = parsed[0]["id"]
+                        .as_u64()
+                        .with_context(|| "Device not found")?;
+
+                    println!(
+                        "Checking status of {} on device [{}] {}",
+                        unit.bold(),
+                        id,
+                        &serial_number.bold()
+                    );
+
+                    let pb = ProgressBar::new_spinner();
+                    pb.enable_steady_tick(Duration::from_millis(50));
+                    pb.set_style(
+                        ProgressStyle::with_template("{spinner:.blue} {msg}")
+                            .unwrap()
+                            .tick_strings(&["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]),
+                    );
+                    pb.set_message("Sending request to device");
+
+                    api.send_service_status_command(id, unit).await?;
+                    pb.set_message("Request sent, waiting for device");
+
+                    let status;
+                    loop {
+                        let response = api.get_last_command(id).await?;
+
+                        if response["fetched"].is_boolean()
+                            && response["fetched"].as_bool().unwrap_or(false)
+                        {
+                            pb.set_message("Command fetched by device");
+                        }
+
+                        if response["response"].is_object() {
+                            status = response["response"]["FreeForm"]["stdout"]
+                                .as_str()
+                                .with_context(|| "Failed to get status from response")?
+                                .to_string();
+                            break;
+                        }
+
+                        thread::sleep(Duration::from_secs(1));
+                    }
+
+                    pb.finish_and_clear();
+                    println!("{}", status);
                 }
             },
             Commands::Distributions { command } => match command {
