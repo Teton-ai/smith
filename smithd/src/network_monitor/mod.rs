@@ -19,7 +19,10 @@ enum NetworkMonitorMessage {
 }
 
 impl NetworkMonitor {
-    async fn new(shutdown: ShutdownSignals, receiver: mpsc::Receiver<NetworkMonitorMessage>) -> Self {
+    async fn new(
+        shutdown: ShutdownSignals,
+        receiver: mpsc::Receiver<NetworkMonitorMessage>,
+    ) -> Self {
         let interface = get_primary_interface_name()
             .await
             .inspect_err(|e| error!("Failed to get primary interface name: {}", e))
