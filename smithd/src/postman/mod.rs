@@ -135,7 +135,6 @@ impl Postman {
 
     async fn ensure_token(&mut self) -> Result<(), anyhow::Error> {
         if self.token.is_none() {
-            println!("{}", self.hostname.as_str());
             warn!("!NO TOKEN! trying to register device");
 
             let response = self
