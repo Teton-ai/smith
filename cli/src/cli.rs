@@ -49,6 +49,9 @@ pub enum DevicesCommands {
     Logs {
         /// Device serial number
         serial_number: String,
+        /// Don't wait for result, just queue the command and return immediately (faster, recommended for agents - use 'sm command <id>' to check results later)
+        #[arg(long, default_value = "false")]
+        nowait: bool,
     },
 }
 
@@ -61,6 +64,9 @@ pub enum ServiceCommands {
         unit: String,
         /// Device serial number
         serial_number: String,
+        /// Don't wait for result, just queue the command and return immediately (faster, recommended for agents - use 'sm command <id>' to check results later)
+        #[arg(long, default_value = "false")]
+        nowait: bool,
     },
 }
 
@@ -86,6 +92,27 @@ pub enum Commands {
     Service {
         #[clap(subcommand)]
         command: ServiceCommands,
+    },
+
+    /// Get smithd status for a device (runs 'smithd status' command)
+    ///
+    /// Shows comprehensive update status including:
+    /// - Update/upgrade status (whether the system is up-to-date)
+    /// - Installed package versions (currently running on the device)
+    /// - Target package versions (versions that should be running)
+    /// - Update status flag (true/false for each package indicating if it's updated)
+    Status {
+        /// Device serial number
+        serial_number: String,
+        /// Don't wait for result, just queue the command and return immediately (faster, recommended for agents - use 'sm command <id>' to check results later)
+        #[arg(long, default_value = "false")]
+        nowait: bool,
+    },
+
+    /// Check command results by ID (format: device_id:command_id)
+    Command {
+        /// Command IDs to check in format device_id:command_id
+        ids: Vec<String>,
     },
 
     /// Lists distributions and information
@@ -126,4 +153,8 @@ pub enum Commands {
         #[arg(long)]
         check: bool,
     },
+
+    /// Print all available commands in markdown format (useful for agents)
+    #[command(name = "agent-help")]
+    AgentHelp,
 }
