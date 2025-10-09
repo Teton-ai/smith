@@ -19,13 +19,18 @@ enum NetworkMonitorMessage {
 }
 
 impl NetworkMonitor {
-    fn new(shutdown: ShutdownSignals, receiver: mpsc::Receiver<NetworkMonitorMessage>) -> Self {
+    async fn new(shutdown: ShutdownSignals, receiver: mpsc::Receiver<NetworkMonitorMessage>) -> Self {
+        let interface = get_primary_interface_name()
+            .await
+            .inspect_err(|e| error!("Failed to get primary interface name: {}", e))
+            .unwrap_or_else(|_| "eth0".to_string());
+
         Self {
             shutdown,
             receiver,
             last_stats: None,
             last_check: None,
-            interface: get_primary_interface_name(),
+            interface,
         }
     }
 
@@ -102,8 +107,10 @@ pub struct NetworkMonitorHandle {
 impl NetworkMonitorHandle {
     pub fn new(shutdown: ShutdownSignals) -> Self {
         let (sender, receiver) = mpsc::channel(8);
-        let mut actor = NetworkMonitor::new(shutdown, receiver);
-        tokio::spawn(async move { actor.run().await });
+        tokio::spawn(async move {
+            let mut actor = NetworkMonitor::new(shutdown, receiver).await;
+            actor.run().await;
+        });
 
         Self { sender }
     }

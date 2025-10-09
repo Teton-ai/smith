@@ -222,15 +222,17 @@ fn parse_network_stats(content: &str) -> Result<HashMap<String, NetworkStats>> {
     Ok(stats)
 }
 
-pub fn get_primary_interface_name() -> String {
-    if let Ok(content) = std::fs::read_to_string("/proc/net/route") {
-        for line in content.lines().skip(1) {
-            let parts: Vec<&str> = line.split_whitespace().collect();
-            if parts.len() >= 2 && parts[1] == "00000000" {
-                return parts[0].to_string();
-            }
+pub async fn get_primary_interface_name() -> Result<String> {
+    let content = tokio::fs::read_to_string("/proc/net/route")
+        .await
+        .context("Failed to read /proc/net/route")?;
+
+    for line in content.lines().skip(1) {
+        let parts: Vec<&str> = line.split_whitespace().collect();
+        if parts.len() >= 2 && parts[1] == "00000000" {
+            return Ok(parts[0].to_string());
         }
     }
 
-    "eth0".to_string()
+    Ok("eth0".to_string())
 }
