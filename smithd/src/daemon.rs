@@ -4,6 +4,7 @@ use crate::dbus::DbusHandle;
 use crate::downloader::DownloaderHandle;
 use crate::filemanager::FileManagerHandle;
 use crate::magic::MagicHandle;
+use crate::network_monitor::NetworkMonitorHandle;
 use crate::police::PoliceHandle;
 use crate::postman::PostmanHandle;
 use crate::shutdown::ShutdownHandler;
@@ -39,11 +40,14 @@ pub async fn run() {
         filemanager.clone(),
     );
 
+    let network_monitor = NetworkMonitorHandle::new(shutdown.signals());
+
     let _postman = PostmanHandle::new(
         shutdown.signals(),
         police.clone(),
         commander.clone(),
         configuration.clone(),
+        network_monitor.clone(),
     );
 
     let _dbus = DbusHandle::new(

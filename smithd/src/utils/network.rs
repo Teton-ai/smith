@@ -3,6 +3,8 @@ use anyhow::{Context, Result, anyhow};
 use flate2::{Compression, write::GzEncoder};
 use futures_util::StreamExt;
 use reqwest::{Response, StatusCode};
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::{env, io::Write, time::Duration};
 use tokio::io::AsyncWriteExt;
 use tokio::time;
@@ -175,4 +177,62 @@ impl NetworkClient {
 
         Ok(())
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct NetworkStats {
+    pub rx_bytes: u64,
+    pub tx_bytes: u64,
+    pub rx_errors: u64,
+    pub tx_errors: u64,
+}
+
+pub async fn read_network_stats() -> Result<HashMap<String, NetworkStats>> {
+    let content = tokio::fs::read_to_string("/proc/net/dev").await?;
+    parse_network_stats(&content)
+}
+
+fn parse_network_stats(content: &str) -> Result<HashMap<String, NetworkStats>> {
+    let mut stats = HashMap::new();
+
+    for line in content.lines().skip(2) {
+        let parts: Vec<&str> = line.split_whitespace().collect();
+        if parts.len() < 17 {
+            continue;
+        }
+
+        let interface = parts[0].trim_end_matches(':').to_string();
+
+        let rx_bytes = parts[1].parse().unwrap_or(0);
+        let rx_errors = parts[3].parse().unwrap_or(0);
+        let tx_bytes = parts[9].parse().unwrap_or(0);
+        let tx_errors = parts[11].parse().unwrap_or(0);
+
+        stats.insert(
+            interface,
+            NetworkStats {
+                rx_bytes,
+                tx_bytes,
+                rx_errors,
+                tx_errors,
+            },
+        );
+    }
+
+    Ok(stats)
+}
+
+pub async fn get_primary_interface_name() -> Result<String> {
+    let content = tokio::fs::read_to_string("/proc/net/route")
+        .await
+        .context("Failed to read /proc/net/route")?;
+
+    for line in content.lines().skip(1) {
+        let parts: Vec<&str> = line.split_whitespace().collect();
+        if parts.len() >= 2 && parts[1] == "00000000" {
+            return Ok(parts[0].to_string());
+        }
+    }
+
+    Ok("eth0".to_string())
 }

@@ -5,6 +5,9 @@ export DOCKER_CLI_HINTS=false
 dev:
 	docker exec -it smith-smithd cargo run --bin api
 
+run:
+	docker exec -it smith-smithd cargo run --bin smithd
+
 migrate:
 	docker exec -it smith-smithd sh -c "cd api && cargo sqlx migrate run"
 
