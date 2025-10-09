@@ -7,6 +7,7 @@ pub mod events;
 pub mod health;
 pub mod home;
 pub mod ip_address;
+pub mod logs;
 pub mod network;
 pub mod packages;
 pub mod releases;

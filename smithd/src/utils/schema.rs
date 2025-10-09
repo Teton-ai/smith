@@ -96,6 +96,10 @@ pub enum SafeCommandRx {
     CheckOTAStatus {
         status: String,
     },
+    StartLogStream {
+        port: u16,
+    },
+    StopLogStream,
 }
 
 #[derive(Serialize, Deserialize, Default, Debug)]
@@ -133,6 +137,10 @@ pub enum SafeCommandTx {
     },
     CheckOTAStatus,
     StartOTA,
+    StartLogStream {
+        service: Option<String>,
+    },
+    StopLogStream,
 }
 
 // RESPONSE THAT IT GETS

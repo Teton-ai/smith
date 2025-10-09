@@ -1,5 +1,6 @@
 use crate::downloader::DownloaderHandle;
 use crate::filemanager::FileManagerHandle;
+use crate::logstream::LogStreamHandle;
 use crate::shutdown::ShutdownSignals;
 use crate::tunnel::TunnelHandle;
 use crate::updater::UpdaterHandle;
@@ -9,6 +10,7 @@ use tokio::sync::{mpsc, oneshot};
 use tracing::info;
 
 mod free;
+mod logstream;
 mod network;
 mod ota;
 mod restart;
@@ -24,6 +26,7 @@ struct CommandQueueExecutor {
     updater_handle: UpdaterHandle,
     downloader_handle: DownloaderHandle,
     filemanager_handle: FileManagerHandle,
+    logstream_handle: LogStreamHandle,
 }
 
 impl CommandQueueExecutor {
@@ -35,6 +38,7 @@ impl CommandQueueExecutor {
         updater_handle: UpdaterHandle,
         downloader_handle: DownloaderHandle,
         filemanager_handle: FileManagerHandle,
+        logstream_handle: LogStreamHandle,
     ) -> Self {
         Self {
             shutdown,
@@ -44,6 +48,7 @@ impl CommandQueueExecutor {
             updater_handle,
             downloader_handle,
             filemanager_handle,
+            logstream_handle,
         }
     }
 
@@ -86,6 +91,12 @@ impl CommandQueueExecutor {
                 ota::check_ota(action.id, &self.downloader_handle).await
             }
             SafeCommandTx::StartOTA => ota::start_ota(action.id, &self.filemanager_handle).await,
+            SafeCommandTx::StartLogStream { service } => {
+                logstream::start_stream(action.id, &self.logstream_handle, service).await
+            }
+            SafeCommandTx::StopLogStream => {
+                logstream::stop_stream(action.id, &self.logstream_handle).await
+            }
         }
     }
 
@@ -217,6 +228,7 @@ impl CommanderHandle {
         updater: UpdaterHandle,
         downloader: DownloaderHandle,
         filemanager: FileManagerHandle,
+        logstream: LogStreamHandle,
     ) -> Self {
         let (sender, receiver) = mpsc::channel(10);
         let (command_queue_tx, command_queue_rx) = mpsc::channel(10);
@@ -235,6 +247,7 @@ impl CommanderHandle {
             updater,
             downloader,
             filemanager,
+            logstream,
         );
         tokio::spawn(async move { actor.run().await });
         tokio::spawn(async move { actor2.run().await });

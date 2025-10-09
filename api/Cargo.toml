@@ -11,7 +11,7 @@ smith = { path = "../smithd" }
 anyhow.workspace = true
 
 rust-s3 = "0.35.1"
-axum = { version = "0.7", features = ["macros", "multipart"] }
+axum = { version = "0.7", features = ["macros", "multipart", "ws"] }
 axum-extra = { version = "0.9.4", features = ["typed-header", "query"] }
 dotenvy = "0.15.7"
 futures = "0.3.30"
@@ -53,3 +53,5 @@ axum_typed_multipart = { version = "0.13.1" }
 tempfile = "3.13.0"
 tokio-stream = { version = "0.1.16", features = ["sync"] }
 toml = "0.8.20"
+tokio-tungstenite = "0.24"
+futures-util = "0.3"

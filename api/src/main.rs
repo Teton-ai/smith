@@ -270,6 +270,7 @@ async fn start_main_server(config: &'static Config, authorization: Authorization
         // Auth middleware. Every route prior to this is protected.
         .route_layer(middleware::from_fn(middlewares::authentication::check))
         .routes(routes!(handlers::events::sse_handler))
+        .routes(routes!(handlers::logs::stream_device_logs))
         .layer(DefaultBodyLimit::max(891289600))
         .split_for_parts();
 
