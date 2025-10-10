@@ -356,7 +356,10 @@ pub async fn get_devices(
                 tr.draft as "target_release_draft?",
                 tr.yanked as "target_release_yanked?",
                 tr.created_at as "target_release_created_at?",
-                tr.user_id as "target_release_user_id?"
+                tr.user_id as "target_release_user_id?",
+                dn.network_score as "network_score?",
+                dn.source as "network_source?",
+                dn.updated_at as "network_updated_at?"
             FROM device d
             JOIN tag_device td ON d.id = td.device_id
             JOIN tag t ON td.tag_id = t.id
@@ -366,6 +369,7 @@ pub async fn get_devices(
             LEFT JOIN distribution rd ON r.distribution_id = rd.id
             LEFT JOIN release tr ON d.target_release_id = tr.id
             LEFT JOIN distribution trd ON tr.distribution_id = trd.id
+            LEFT JOIN device_network dn ON d.id = dn.device_id
             WHERE t.name = $1
             ORDER BY d.serial_number"#,
             tag
@@ -454,6 +458,16 @@ pub async fn get_devices(
                     None
                 };
 
+                let network = if row.network_score.is_some() {
+                    Some(crate::device::schema::DeviceNetwork {
+                        network_score: row.network_score,
+                        source: row.network_source,
+                        updated_at: row.network_updated_at,
+                    })
+                } else {
+                    None
+                };
+
                 Device {
                     id: row.id,
                     serial_number: row.serial_number,
@@ -471,6 +485,7 @@ pub async fn get_devices(
                     modem,
                     release,
                     target_release,
+                    network,
                 }
             })
             .collect();
@@ -530,7 +545,10 @@ pub async fn get_devices(
             tr.draft as "target_release_draft?",
             tr.yanked as "target_release_yanked?",
             tr.created_at as "target_release_created_at?",
-            tr.user_id as "target_release_user_id?"
+            tr.user_id as "target_release_user_id?",
+            dn.network_score as "network_score?",
+            dn.source as "network_source?",
+            dn.updated_at as "network_updated_at?"
         FROM device d
         LEFT JOIN ip_address ip ON d.ip_address_id = ip.id
         LEFT JOIN modem m ON d.modem_id = m.id
@@ -538,6 +556,7 @@ pub async fn get_devices(
         LEFT JOIN distribution rd ON r.distribution_id = rd.id
         LEFT JOIN release tr ON d.target_release_id = tr.id
         LEFT JOIN distribution trd ON tr.distribution_id = trd.id
+        LEFT JOIN device_network dn ON d.id = dn.device_id
         WHERE ($1::text IS NULL OR d.serial_number = $1)
           AND ($2::boolean IS NULL OR d.approved = $2)
         ORDER BY d.serial_number"#,
@@ -628,6 +647,16 @@ pub async fn get_devices(
                 None
             };
 
+            let network = if row.network_score.is_some() {
+                Some(crate::device::schema::DeviceNetwork {
+                    network_score: row.network_score,
+                    source: row.network_source,
+                    updated_at: row.network_updated_at,
+                })
+            } else {
+                None
+            };
+
             Device {
                 id: row.id,
                 serial_number: row.serial_number,
@@ -645,6 +674,7 @@ pub async fn get_devices(
                 modem,
                 release,
                 target_release,
+                network,
             }
         })
         .collect();
@@ -1993,7 +2023,10 @@ pub async fn get_device_info(
         tr.draft as \"target_release_draft?\",
         tr.yanked as \"target_release_yanked?\",
         tr.created_at as \"target_release_created_at?\",
-        tr.user_id as \"target_release_user_id?\"
+        tr.user_id as \"target_release_user_id?\",
+        dn.network_score as \"network_score?\",
+        dn.source as \"network_source?\",
+        dn.updated_at as \"network_updated_at?\"
         FROM device d
         LEFT JOIN ip_address ip ON d.ip_address_id = ip.id
         LEFT JOIN modem m ON d.modem_id = m.id
@@ -2001,6 +2034,7 @@ pub async fn get_device_info(
         LEFT JOIN distribution rd ON r.distribution_id = rd.id
         LEFT JOIN release tr ON d.target_release_id = tr.id
         LEFT JOIN distribution trd ON tr.distribution_id = trd.id
+        LEFT JOIN device_network dn ON d.id = dn.device_id
         WHERE
             CASE
                 WHEN $1 ~ '^[0-9]+$' AND length($1) <= 10 THEN
@@ -2093,6 +2127,16 @@ pub async fn get_device_info(
         None
     };
 
+    let network = if device_row.network_score.is_some() {
+        Some(crate::device::schema::DeviceNetwork {
+            network_score: device_row.network_score,
+            source: device_row.network_source,
+            updated_at: device_row.network_updated_at,
+        })
+    } else {
+        None
+    };
+
     let device = Device {
         id: device_row.id,
         serial_number: device_row.serial_number,
@@ -2110,6 +2154,7 @@ pub async fn get_device_info(
         modem,
         release,
         target_release,
+        network,
     };
 
     Ok(Json(device))

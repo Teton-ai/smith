@@ -198,6 +198,25 @@ async fn main() -> anyhow::Result<()> {
                     }
                     .print();
                 }
+                DevicesCommands::TestNetwork { device } => {
+                    let secrets = auth::get_secrets(&config)
+                        .await
+                        .with_context(|| "Error getting token")?
+                        .with_context(|| "No Token found, please Login")?;
+
+                    let api = SmithAPI::new(secrets, &config);
+
+                    println!("Sending network test command to device: {}", device.bold());
+                    api.test_network(device).await?;
+                    println!(
+                        "{}",
+                        "Network test command sent successfully!".bright_green()
+                    );
+                    println!(
+                        "The device will download a 20MB test file and report back the results."
+                    );
+                    println!("Check the dashboard to see the results.");
+                }
             },
             Commands::Distributions { command } => match command {
                 DistroCommands::Ls { json } => {

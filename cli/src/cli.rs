@@ -40,6 +40,11 @@ pub enum DevicesCommands {
         #[arg(short, long, default_value = "false")]
         json: bool,
     },
+    /// Test network speed for a device
+    TestNetwork {
+        /// Device serial number or ID
+        device: String,
+    },
 }
 
 #[derive(Subcommand)]

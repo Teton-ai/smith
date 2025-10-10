@@ -5,6 +5,13 @@ use serde::Serialize;
 use sqlx::types::chrono;
 
 #[derive(Debug, Serialize, utoipa::ToSchema)]
+pub struct DeviceNetwork {
+    pub network_score: Option<i32>,
+    pub source: Option<String>,
+    pub updated_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+#[derive(Debug, Serialize, utoipa::ToSchema)]
 pub struct Device {
     pub id: i32,
     pub serial_number: String,
@@ -22,4 +29,5 @@ pub struct Device {
     pub modem: Option<Modem>,
     pub release: Option<Release>,
     pub target_release: Option<Release>,
+    pub network: Option<DeviceNetwork>,
 }

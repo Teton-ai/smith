@@ -83,6 +83,10 @@ pub enum SafeCommandRx {
     CheckOTAStatus {
         status: String,
     },
+    TestNetwork {
+        bytes_downloaded: usize,
+        duration_ms: u64,
+    },
 }
 
 #[derive(Serialize, Deserialize, Default, Debug)]
@@ -120,6 +124,7 @@ pub enum SafeCommandTx {
     },
     CheckOTAStatus,
     StartOTA,
+    TestNetwork,
 }
 
 // RESPONSE THAT IT GETS
