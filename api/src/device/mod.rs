@@ -3,7 +3,7 @@ use crate::db::DeviceWithToken;
 pub(crate) use crate::device::schema::Device;
 use serde::Deserialize;
 use serde_json::{Value, json};
-use smith::utils::schema::{DeviceRegistration, DeviceRegistrationResponse, NetworkMetrics};
+use smith::utils::schema::{DeviceRegistration, DeviceRegistrationResponse};
 use sqlx::PgPool;
 use sqlx::types::ipnetwork;
 use std::time::Duration;
@@ -496,74 +496,6 @@ impl Device {
             tx.commit().await?;
         }
         Ok(())
-    }
-
-    pub async fn update_network_metrics(
-        device: &DeviceWithToken,
-        metrics: &NetworkMetrics,
-        pool: &PgPool,
-    ) -> anyhow::Result<()> {
-        if metrics.interval_seconds == 0 {
-            return Ok(());
-        }
-
-        const MIN_BYTES_FOR_SCORING: u64 = 1_000_000; // 1MB
-
-        if metrics.rx_bytes_delta < MIN_BYTES_FOR_SCORING
-            && metrics.tx_bytes_delta < MIN_BYTES_FOR_SCORING
-        {
-            return Ok(());
-        }
-
-        let rx_mbps =
-            (metrics.rx_bytes_delta as f64 * 8.0) / (metrics.interval_seconds as f64 * 1_000_000.0);
-        let tx_mbps =
-            (metrics.tx_bytes_delta as f64 * 8.0) / (metrics.interval_seconds as f64 * 1_000_000.0);
-
-        let network_score = calculate_network_score(rx_mbps, tx_mbps);
-
-        sqlx::query!(
-            r#"
-            INSERT INTO device_network (device_id, network_score, rx_mbps, tx_mbps, rx_bytes_delta, tx_bytes_delta, interval_seconds, updated_at)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
-            ON CONFLICT (device_id)
-            DO UPDATE SET
-                network_score = EXCLUDED.network_score,
-                rx_mbps = EXCLUDED.rx_mbps,
-                tx_mbps = EXCLUDED.tx_mbps,
-                rx_bytes_delta = EXCLUDED.rx_bytes_delta,
-                tx_bytes_delta = EXCLUDED.tx_bytes_delta,
-                interval_seconds = EXCLUDED.interval_seconds,
-                updated_at = NOW()
-            "#,
-            device.id,
-            network_score,
-            rx_mbps as f32,
-            tx_mbps as f32,
-            metrics.rx_bytes_delta as i64,
-            metrics.tx_bytes_delta as i64,
-            metrics.interval_seconds as i64
-        )
-        .execute(pool)
-        .await?;
-
-        Ok(())
-    }
-}
-
-fn calculate_network_score(rx_mbps: f64, tx_mbps: f64) -> i32 {
-    let avg_mbps = (rx_mbps + tx_mbps) / 2.0;
-
-    if avg_mbps >= 50.0 {
-        5
-    } else if avg_mbps >= 20.0 {
-        4
-    } else if avg_mbps >= 10.0 {
-        3
-    } else if avg_mbps >= 5.0 {
-        2
-    } else {
-        1
     }
 }
 

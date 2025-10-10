@@ -59,7 +59,6 @@ pub async fn home(
     );
 
     let release_id = payload.release_id;
-    let network_metrics = payload.network_metrics.clone();
     DBHandler::save_responses(&device, payload, &state.pg_pool)
         .await
         .unwrap_or_else(|err| {
@@ -91,14 +90,6 @@ pub async fn home(
         .unwrap_or_else(|err| {
             error!("Error saving last ping with IP: {:?}", err);
         });
-
-        if let Some(metrics) = network_metrics {
-            crate::device::Device::update_network_metrics(&device, &metrics, &state.pg_pool)
-                .await
-                .unwrap_or_else(|err| {
-                    error!("Error updating network metrics: {:?}", err);
-                });
-        }
     });
 
     (StatusCode::OK, Json(response))

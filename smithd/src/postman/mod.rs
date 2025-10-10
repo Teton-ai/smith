@@ -1,6 +1,5 @@
 use crate::commander::CommanderHandle;
 use crate::magic::MagicHandle;
-use crate::network_monitor::NetworkMonitorHandle;
 use crate::police::PoliceHandle;
 use crate::shutdown::ShutdownSignals;
 use crate::utils::network::NetworkClient;
@@ -23,7 +22,6 @@ struct Postman {
     commander: CommanderHandle,
     magic: MagicHandle,
     network: NetworkClient,
-    network_monitor: NetworkMonitorHandle,
     hostname: String,
     token: Option<String>,
     problems: Option<u32>,
@@ -39,7 +37,6 @@ impl Postman {
         receiver: mpsc::Receiver<PostmanMessage>,
         commander: CommanderHandle,
         magic: MagicHandle,
-        network_monitor: NetworkMonitorHandle,
     ) -> Self {
         let network = NetworkClient::default();
 
@@ -50,7 +47,6 @@ impl Postman {
             commander,
             network,
             magic,
-            network_monitor,
             token: None,
             hostname: "".to_owned(),
             problems: None,
@@ -105,9 +101,8 @@ impl Postman {
 
                     let responses = self.commander.get_results().await;
                     let release_id = self.magic.get_release_id().await;
-                    let network_metrics = self.network_monitor.get_metrics().await;
 
-                    let ping_home_body = HomePost::new(responses, release_id, network_metrics);
+                    let ping_home_body = HomePost::new(responses, release_id);
 
                     let response = self.ping_home(ping_home_body).await;
                     let target_release_id = response.target_release_id;
@@ -238,17 +233,9 @@ impl PostmanHandle {
         police: PoliceHandle,
         commander: CommanderHandle,
         magic: MagicHandle,
-        network_monitor: NetworkMonitorHandle,
     ) -> Self {
         let (_sender, receiver) = mpsc::channel(8);
-        let mut actor = Postman::new(
-            shutdown,
-            police,
-            receiver,
-            commander,
-            magic,
-            network_monitor,
-        );
+        let mut actor = Postman::new(shutdown, police, receiver, commander, magic);
         tokio::spawn(async move { actor.run().await });
 
         Self { _sender }
