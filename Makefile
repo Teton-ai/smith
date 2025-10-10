@@ -20,3 +20,6 @@ lint:
 
 fix:
 	docker exec -it smith-smithd cargo fix --allow-dirty --allow-staged
+
+run:
+	docker exec -it smith-smithd cargo run --bin smithd
