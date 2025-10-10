@@ -76,6 +76,12 @@ const Tooltip = ({ children, content }: { children: React.ReactNode, content: st
   );
 };
 
+interface DeviceNetwork {
+  network_score?: number;
+  source?: string;
+  updated_at?: string;
+}
+
 interface Device {
   id: number;
   serial_number: string;
@@ -92,6 +98,7 @@ interface Device {
   modem?: Modem;
   release?: Release;
   target_release?: Release;
+  network?: DeviceNetwork;
   system_info?: {
     hostname?: string;
     device_tree?: {

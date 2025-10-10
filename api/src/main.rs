@@ -283,6 +283,7 @@ async fn start_main_server(config: &'static Config, authorization: Authorization
         .routes(routes!(handlers::download::download_file))
         .routes(routes!(handlers::fetch_package))
         .routes(routes!(handlers::list_release_packages))
+        .routes(routes!(handlers::network::test_file))
         .split_for_parts();
 
     let smith_router = smith_router

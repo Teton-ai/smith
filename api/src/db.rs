@@ -130,6 +130,42 @@ impl DBHandler {
                     .execute(pool)
                     .await?;
                 }
+                SafeCommandRx::TestNetwork {
+                    bytes_downloaded,
+                    duration_ms,
+                } => {
+                    if response.status == 0 && duration_ms > 0 {
+                        let download_speed_mbps =
+                            (bytes_downloaded as f64 * 8.0) / (duration_ms as f64 * 1000.0);
+
+                        let network_score = if download_speed_mbps >= 50.0 {
+                            5
+                        } else if download_speed_mbps >= 25.0 {
+                            4
+                        } else if download_speed_mbps >= 10.0 {
+                            3
+                        } else if download_speed_mbps >= 5.0 {
+                            2
+                        } else {
+                            1
+                        };
+
+                        sqlx::query!(
+                            "INSERT INTO device_network (device_id, network_score, source, updated_at)
+                            VALUES ($1, $2, $3, NOW())
+                            ON CONFLICT (device_id)
+                            DO UPDATE SET
+                                network_score = EXCLUDED.network_score,
+                                source = EXCLUDED.source,
+                                updated_at = NOW()",
+                            device.id,
+                            network_score,
+                            "speed_test"
+                        )
+                        .execute(pool)
+                        .await?;
+                    }
+                }
                 _ => {}
             }
             let _response_id = sqlx::query_scalar!(

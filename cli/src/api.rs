@@ -138,4 +138,31 @@ impl SmithAPI {
 
         Ok(last_command.clone())
     }
+
+    pub async fn test_network(&self, device: String) -> Result<()> {
+        let client = Client::new();
+
+        let test_network_command = schema::SafeCommandRequest {
+            id: 0,
+            command: schema::SafeCommandTx::TestNetwork,
+            continue_on_error: false,
+        };
+
+        let resp = client
+            .post(format!("{}/devices/{}/commands", self.domain, device))
+            .header("Authorization", format!("Bearer {}", &self.bearer_token))
+            .json(&serde_json::json!([test_network_command]));
+
+        let response = resp.send().await?;
+        let response_code = response.status();
+
+        if response_code != 201 {
+            return Err(anyhow::anyhow!(
+                "Failed to send network test command: {}",
+                response_code
+            ));
+        }
+
+        Ok(())
+    }
 }

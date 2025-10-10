@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import PrivateLayout from "@/app/layouts/PrivateLayout";
 import useSmithAPI from "@/app/hooks/smith-api";
+import NetworkQualityIndicator from '@/app/components/NetworkQualityIndicator';
 
 const Tooltip = ({ children, content }: { children: React.ReactNode, content: string }) => {
   const [isVisible, setIsVisible] = useState(false);
@@ -123,6 +124,12 @@ interface SystemInfo {
   }
 }
 
+interface DeviceNetwork {
+  network_score?: number
+  source?: string
+  updated_at?: string
+}
+
 interface Device {
   id: number
   serial_number: string
@@ -140,6 +147,7 @@ interface Device {
   modem: Modem | null
   release: Release | null
   target_release: Release | null
+  network: DeviceNetwork | null
 }
 
 interface IpAddressInfo {
@@ -325,7 +333,22 @@ const DevicesPage = () => {
   };
 
   const getStatusTooltip = (device: Device) => {
-    return 'Last seen: ' + (device.last_seen ? formatTimeAgo(new Date(device.last_seen)) + ' ago' : 'Never');
+    const status = getDeviceStatus(device);
+    const networkScore = device.network?.network_score;
+    const lastSeenText = device.last_seen ? formatTimeAgo(new Date(device.last_seen)) + ' ago' : 'Never';
+
+    if (status === 'offline') {
+      return `Offline\nLast seen: ${lastSeenText}`;
+    }
+
+    if (!networkScore) {
+      return `Online\nLast seen: ${lastSeenText}`;
+    }
+
+    const qualityText = networkScore >= 4 ? 'Excellent' : networkScore === 3 ? 'Good' : 'Poor';
+    const lastTested = device.network?.updated_at ? formatTimeAgo(new Date(device.network.updated_at)) + ' ago' : 'never';
+
+    return `Online - ${qualityText} Network (${networkScore}/5)\nLast tested: ${lastTested}\nLast seen: ${lastSeenText}`;
   };
 
   const hasUpdatePending = (device: Device) => {
@@ -435,13 +458,12 @@ const DevicesPage = () => {
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center space-x-2">
                           <Tooltip content={getStatusTooltip(device)}>
-                            <div 
-                              className={`w-2 h-2 rounded-full flex-shrink-0 cursor-help ${
-                                getDeviceStatus(device) === 'online' 
-                                  ? 'bg-green-500 animate-pulse' 
-                                  : 'bg-red-500'
-                              }`}
-                            ></div>
+                            <div className="flex-shrink-0 cursor-help">
+                              <NetworkQualityIndicator
+                                isOnline={getDeviceStatus(device) === 'online'}
+                                networkScore={device.network?.network_score}
+                              />
+                            </div>
                           </Tooltip>
                           <div className="flex items-center space-x-2 min-w-0 flex-1">
                             <div className="text-sm font-medium text-gray-900 truncate">

@@ -86,6 +86,7 @@ impl CommandQueueExecutor {
                 ota::check_ota(action.id, &self.downloader_handle).await
             }
             SafeCommandTx::StartOTA => ota::start_ota(action.id, &self.filemanager_handle).await,
+            SafeCommandTx::TestNetwork => network::test_network(action.id).await,
         }
     }
 

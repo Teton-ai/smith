@@ -1,6 +1,9 @@
+use crate::magic::MagicHandle;
+use crate::shutdown::ShutdownHandler;
 use crate::utils::schema::{Network, SafeCommandResponse, SafeCommandRx};
 use anyhow::{Context, Result};
-use std::time::Duration;
+use reqwest::Client;
+use std::time::{Duration, Instant};
 use tokio::{process::Command, time::timeout};
 
 pub(super) async fn execute(id: i32, network: Network) -> SafeCommandResponse {
@@ -70,4 +73,71 @@ fn process_output(output: std::process::Output) -> (i32, SafeCommandRx) {
     let status_code = output.status.code().unwrap_or(-1);
 
     (status_code, SafeCommandRx::WifiConnect { stdout, stderr })
+}
+
+pub(super) async fn test_network(id: i32) -> SafeCommandResponse {
+    match perform_network_test().await {
+        Ok((bytes_downloaded, duration_ms)) => SafeCommandResponse {
+            id,
+            command: SafeCommandRx::TestNetwork {
+                bytes_downloaded,
+                duration_ms,
+            },
+            status: 0,
+        },
+        Err(e) => {
+            tracing::error!("Network test failed: {}", e);
+            SafeCommandResponse {
+                id,
+                command: SafeCommandRx::TestNetwork {
+                    bytes_downloaded: 0,
+                    duration_ms: 0,
+                },
+                status: -1,
+            }
+        }
+    }
+}
+
+async fn perform_network_test() -> Result<(usize, u64)> {
+    let shutdown = ShutdownHandler::new();
+    let configuration = MagicHandle::new(shutdown.signals());
+    configuration.load(None).await;
+
+    let server_api_url = configuration.get_server().await;
+    let test_url = format!("{}/network/test-file", server_api_url);
+
+    let client = Client::builder()
+        .timeout(Duration::from_secs(60))
+        .build()
+        .context("Failed to create HTTP client")?;
+
+    let start = Instant::now();
+
+    let response = client
+        .get(&test_url)
+        .send()
+        .await
+        .context("Failed to send request")?;
+
+    if !response.status().is_success() {
+        return Err(anyhow::anyhow!(
+            "Server returned status: {}",
+            response.status()
+        ));
+    }
+
+    let mut downloaded: usize = 0;
+    let mut stream = response.bytes_stream();
+
+    use futures_util::StreamExt;
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.context("Failed to read chunk")?;
+        downloaded += chunk.len();
+    }
+
+    let elapsed = start.elapsed();
+    let duration_ms = elapsed.as_millis() as u64;
+
+    Ok((downloaded, duration_ms))
 }
