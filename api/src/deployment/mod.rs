@@ -46,10 +46,14 @@ impl Deployment {
 WITH selected_devices AS (
     SELECT d.id FROM device d
     JOIN release r ON d.release_id = r.id
+    LEFT JOIN device_network dn ON d.id = dn.device_id
     WHERE d.last_ping > NOW() - INTERVAL '5 minutes'
     AND d.release_id = d.target_release_id
     AND r.distribution_id = $1
-    ORDER BY d.last_ping DESC LIMIT 10
+    ORDER BY
+        COALESCE(dn.network_score, 0) DESC,
+        d.last_ping DESC
+    LIMIT 10
 )
 INSERT INTO deployment_devices (deployment_id, device_id)
 SELECT $2, id FROM selected_devices
