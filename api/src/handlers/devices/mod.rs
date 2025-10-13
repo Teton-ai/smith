@@ -2242,6 +2242,7 @@ pub async fn update_device(
     }
 
     if let Some(labels) = payload.labels {
+        let labels_json = serde_json::to_value(&labels).map_err(|_| StatusCode::BAD_REQUEST)?;
         let result = sqlx::query!(
             "
             UPDATE device
@@ -2255,7 +2256,7 @@ pub async fn update_device(
                 END
             ",
             device_id,
-            labels
+            labels_json
         )
         .execute(&state.pg_pool)
         .await
