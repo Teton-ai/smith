@@ -18,6 +18,7 @@ import {
   GitBranch,
   Tag,
   ArrowLeft,
+  Tags,
 } from 'lucide-react';
 import dynamic from 'next/dynamic';
 import PrivateLayout from "@/app/layouts/PrivateLayout";
@@ -99,6 +100,7 @@ interface Device {
   release?: Release;
   target_release?: Release;
   network?: DeviceNetwork;
+  labels?: Record<string, string>;
   system_info?: {
     hostname?: string;
     device_tree?: {
@@ -667,6 +669,27 @@ const DeviceDetailPage = () => {
                   </div>
                 )}
             </div>
+          </div>
+
+          {/* Labels */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            {device.labels && Object.keys(device.labels).length > 0 && (
+              <div className="bg-white rounded-lg border border-gray-200 p-6">
+                <div className="flex items-center space-x-2 mb-4">
+                  <Tags className="w-5 h-5 text-purple-600" />
+                  <h3 className="text-lg font-semibold text-gray-900">Labels</h3>
+                </div>
+                <div className="space-y-2">
+                  {Object.entries(device.labels).map(([key, value]) => (
+                    <div key={key} className="flex items-center p-2 hover:bg-gray-50 rounded">
+                      <span className="text-gray-700 font-mono text-sm min-w-fit mr-3">{key}</span>
+                      <div className="flex-1 border-b border-dotted border-gray-300"></div>
+                      <span className="text-gray-900 font-mono text-sm ml-3">{value}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
 
         </div>

@@ -318,6 +318,7 @@ pub async fn get_devices(
                 d.system_info,
                 d.modem_id,
                 d.ip_address_id,
+                d.labels,
                 ip.id as "ip_id?",
                 ip.ip_address as "ip_address?",
                 ip.name as "ip_name?",
@@ -486,6 +487,9 @@ pub async fn get_devices(
                     release,
                     target_release,
                     network,
+                    labels: crate::device::schema::DeviceLabels(
+                        serde_json::from_value(row.labels).unwrap_or_default(),
+                    ),
                 }
             })
             .collect();
@@ -507,6 +511,7 @@ pub async fn get_devices(
             d.system_info,
             d.modem_id,
             d.ip_address_id,
+            d.labels,
             ip.id as "ip_id?",
             ip.ip_address as "ip_address?",
             ip.name as "ip_name?",
@@ -675,6 +680,9 @@ pub async fn get_devices(
                 release,
                 target_release,
                 network,
+                labels: crate::device::schema::DeviceLabels(
+                    serde_json::from_value(row.labels).unwrap_or_default(),
+                ),
             }
         })
         .collect();
@@ -1985,6 +1993,7 @@ pub async fn get_device_info(
         d.system_info,
         d.modem_id,
         d.ip_address_id,
+        d.labels,
         ip.id as \"ip_id?\",
         ip.ip_address as \"ip_address?\",
         ip.name as \"ip_name?\",
@@ -2155,6 +2164,9 @@ pub async fn get_device_info(
         release,
         target_release,
         network,
+        labels: crate::device::schema::DeviceLabels(
+            serde_json::from_value(device_row.labels).unwrap_or_default(),
+        ),
     };
 
     Ok(Json(device))
