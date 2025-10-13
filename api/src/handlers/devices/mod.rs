@@ -10,6 +10,7 @@ use axum_extra::extract::Query;
 use schema::SafeCommandRequest;
 use serde::Deserialize;
 use sqlx::Row;
+use std::collections::HashMap;
 use tracing::{debug, error};
 pub mod helpers;
 pub mod types;
@@ -2211,7 +2212,7 @@ pub async fn delete_device(
 
 #[derive(serde::Deserialize, utoipa::ToSchema)]
 pub struct UpdateDeviceRequest {
-    pub labels: Option<serde_json::Value>,
+    pub labels: Option<HashMap<String, String>>,
 }
 
 #[utoipa::path(
