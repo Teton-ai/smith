@@ -167,7 +167,7 @@ async fn start_main_server(config: &'static Config, authorization: Authorization
         .routes(routes!(
             handlers::devices::get_device_info,
             handlers::devices::delete_device,
-            handlers::devices::update_device_labels
+            handlers::devices::update_device
         ))
         .routes(routes!(handlers::devices::get_health_for_device))
         .routes(routes!(

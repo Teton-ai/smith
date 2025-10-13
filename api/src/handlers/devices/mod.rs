@@ -2210,29 +2210,29 @@ pub async fn delete_device(
 }
 
 #[derive(serde::Deserialize, utoipa::ToSchema)]
-pub struct UpdateDeviceLabelsRequest {
-    pub labels: serde_json::Value,
+pub struct UpdateDeviceRequest {
+    pub labels: Option<serde_json::Value>,
 }
 
 #[utoipa::path(
     patch,
-    path = "/devices/{device_id}/labels",
-    request_body = UpdateDeviceLabelsRequest,
+    path = "/devices/{device_id}",
+    request_body = UpdateDeviceRequest,
     responses(
-        (status = StatusCode::OK, description = "Device labels updated successfully"),
+        (status = StatusCode::OK, description = "Device updated successfully"),
         (status = StatusCode::NOT_FOUND, description = "Device not found"),
-        (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to update device labels"),
+        (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to update device"),
     ),
     security(
         ("Access Token" = [])
     ),
     tag = DEVICES_TAG
 )]
-pub async fn update_device_labels(
+pub async fn update_device(
     Path(device_id): Path<String>,
     Extension(state): Extension<State>,
     Extension(current_user): Extension<CurrentUser>,
-    Json(payload): Json<UpdateDeviceLabelsRequest>,
+    Json(payload): Json<UpdateDeviceRequest>,
 ) -> Result<StatusCode, StatusCode> {
     let allowed = authorization::check(current_user, "devices", "write");
 
@@ -2240,30 +2240,32 @@ pub async fn update_device_labels(
         return Err(StatusCode::FORBIDDEN);
     }
 
-    let result = sqlx::query!(
-        "
-        UPDATE device
-        SET labels = $2
-        WHERE
-            CASE
-                WHEN $1 ~ '^[0-9]+$' AND length($1) <= 10 THEN
-                    id = $1::int4
-                ELSE
-                    serial_number = $1
-            END
-        ",
-        device_id,
-        payload.labels
-    )
-    .execute(&state.pg_pool)
-    .await
-    .map_err(|err| {
-        error!("Failed to update device labels {err}");
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
+    if let Some(labels) = payload.labels {
+        let result = sqlx::query!(
+            "
+            UPDATE device
+            SET labels = $2
+            WHERE
+                CASE
+                    WHEN $1 ~ '^[0-9]+$' AND length($1) <= 10 THEN
+                        id = $1::int4
+                    ELSE
+                        serial_number = $1
+                END
+            ",
+            device_id,
+            labels
+        )
+        .execute(&state.pg_pool)
+        .await
+        .map_err(|err| {
+            error!("Failed to update device labels {err}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
 
-    if result.rows_affected() == 0 {
-        return Err(StatusCode::NOT_FOUND);
+        if result.rows_affected() == 0 {
+            return Err(StatusCode::NOT_FOUND);
+        }
     }
 
     Ok(StatusCode::OK)
