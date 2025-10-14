@@ -34,6 +34,9 @@ pub struct LeanDeviceFilter {
     limit: Option<i64>,
 }
 
+// TODO: this is getting crazy huge, maybe it would be nice to have an handler
+// per filter type instead of only 1 to handle all, maybe that could also have
+// some performance benefits to let axum handle the matching of the arms
 #[utoipa::path(
     get,
     path = "/lean/{filter_kind}/{filter_value}",
@@ -47,9 +50,10 @@ pub struct LeanDeviceFilter {
     ),
     tag = DEVICES_TAG
 )]
-// TODO: this is getting crazy huge, maybe it would be nice to have an handler
-// per filter type instead of only 1 to handle all, maybe that could also have
-// some performance beneficts to let axum handle the matching of the arms
+#[deprecated(
+    since = "0.2.65",
+    note = "We are moving to `/devices` endpoint and make it support conditional params/filters"
+)]
 pub async fn get_devices_new(
     Extension(state): Extension<State>,
     Extension(current_user): Extension<CurrentUser>,
