@@ -1,8 +1,12 @@
 use crate::handlers::distributions::types::Release;
 use crate::handlers::ip_address::IpAddressInfo;
 use crate::modem::schema::Modem;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use sqlx::types::chrono;
+use std::collections::HashMap;
+
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct DeviceLabels(pub HashMap<String, String>);
 
 #[derive(Debug, Serialize, utoipa::ToSchema)]
 pub struct DeviceNetwork {
@@ -30,4 +34,5 @@ pub struct Device {
     pub release: Option<Release>,
     pub target_release: Option<Release>,
     pub network: Option<DeviceNetwork>,
+    pub labels: DeviceLabels,
 }

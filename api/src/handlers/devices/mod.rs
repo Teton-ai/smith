@@ -10,6 +10,7 @@ use axum_extra::extract::Query;
 use schema::SafeCommandRequest;
 use serde::Deserialize;
 use sqlx::Row;
+use std::collections::HashMap;
 use tracing::{debug, error};
 pub mod helpers;
 pub mod types;
@@ -318,6 +319,7 @@ pub async fn get_devices(
                 d.system_info,
                 d.modem_id,
                 d.ip_address_id,
+                d.labels,
                 ip.id as "ip_id?",
                 ip.ip_address as "ip_address?",
                 ip.name as "ip_name?",
@@ -486,6 +488,9 @@ pub async fn get_devices(
                     release,
                     target_release,
                     network,
+                    labels: crate::device::schema::DeviceLabels(
+                        serde_json::from_value(row.labels).unwrap_or_default(),
+                    ),
                 }
             })
             .collect();
@@ -507,6 +512,7 @@ pub async fn get_devices(
             d.system_info,
             d.modem_id,
             d.ip_address_id,
+            d.labels,
             ip.id as "ip_id?",
             ip.ip_address as "ip_address?",
             ip.name as "ip_name?",
@@ -675,6 +681,9 @@ pub async fn get_devices(
                 release,
                 target_release,
                 network,
+                labels: crate::device::schema::DeviceLabels(
+                    serde_json::from_value(row.labels).unwrap_or_default(),
+                ),
             }
         })
         .collect();
@@ -1985,6 +1994,7 @@ pub async fn get_device_info(
         d.system_info,
         d.modem_id,
         d.ip_address_id,
+        d.labels,
         ip.id as \"ip_id?\",
         ip.ip_address as \"ip_address?\",
         ip.name as \"ip_name?\",
@@ -2155,6 +2165,9 @@ pub async fn get_device_info(
         release,
         target_release,
         network,
+        labels: crate::device::schema::DeviceLabels(
+            serde_json::from_value(device_row.labels).unwrap_or_default(),
+        ),
     };
 
     Ok(Json(device))
@@ -2195,6 +2208,69 @@ pub async fn delete_device(
     })?;
 
     Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(serde::Deserialize, utoipa::ToSchema)]
+pub struct UpdateDeviceRequest {
+    pub labels: Option<HashMap<String, String>>,
+}
+
+#[utoipa::path(
+    patch,
+    path = "/devices/{device_id}",
+    request_body = UpdateDeviceRequest,
+    responses(
+        (status = StatusCode::OK, description = "Device updated successfully"),
+        (status = StatusCode::NOT_FOUND, description = "Device not found"),
+        (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to update device"),
+    ),
+    security(
+        ("Access Token" = [])
+    ),
+    tag = DEVICES_TAG
+)]
+pub async fn update_device(
+    Path(device_id): Path<String>,
+    Extension(state): Extension<State>,
+    Extension(current_user): Extension<CurrentUser>,
+    Json(payload): Json<UpdateDeviceRequest>,
+) -> Result<StatusCode, StatusCode> {
+    let allowed = authorization::check(current_user, "devices", "write");
+
+    if !allowed {
+        return Err(StatusCode::FORBIDDEN);
+    }
+
+    if let Some(labels) = payload.labels {
+        let labels_json = serde_json::to_value(&labels).map_err(|_| StatusCode::BAD_REQUEST)?;
+        let result = sqlx::query!(
+            "
+            UPDATE device
+            SET labels = $2
+            WHERE
+                CASE
+                    WHEN $1 ~ '^[0-9]+$' AND length($1) <= 10 THEN
+                        id = $1::int4
+                    ELSE
+                        serial_number = $1
+                END
+            ",
+            device_id,
+            labels_json
+        )
+        .execute(&state.pg_pool)
+        .await
+        .map_err(|err| {
+            error!("Failed to update device labels {err}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+
+        if result.rows_affected() == 0 {
+            return Err(StatusCode::NOT_FOUND);
+        }
+    }
+
+    Ok(StatusCode::OK)
 }
 
 #[utoipa::path(

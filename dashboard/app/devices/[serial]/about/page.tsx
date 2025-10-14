@@ -31,6 +31,7 @@ interface Device {
   modem?: Modem;
   release?: Release;
   target_release?: Release;
+  labels?: Record<string, string>;
   system_info?: {
     hostname?: string;
     device_tree?: {
