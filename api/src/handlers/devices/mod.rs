@@ -1,4 +1,3 @@
-use super::distributions::types::Release;
 use crate::State;
 use crate::handlers::events::PublicEvent;
 use crate::middlewares::authorization;
@@ -25,6 +24,10 @@ const DEVICES_TAG: &str = "devices";
 pub struct DeviceFilter {
     pub serial_number: Option<String>,
     pub approved: Option<bool>,
+    #[deprecated(
+        since = "0.2.64",
+        note = "Since labels have been released, tags concept be in version 0.74"
+    )]
     pub tag: Option<String>,
 }
 
@@ -306,8 +309,7 @@ pub async fn get_devices(
     Extension(state): Extension<State>,
     filter: Query<DeviceFilter>,
 ) -> Result<Json<Vec<Device>>, StatusCode> {
-    debug!("Getting devices {:?}", filter);
-
+    // TODO: Remove this once fully deprecated
     if let Some(tag) = &filter.tag {
         let devices = sqlx::query!(
             r#"SELECT
