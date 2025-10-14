@@ -2,7 +2,7 @@ use axum::error_handling::HandleErrorLayer;
 use axum::extract::{DefaultBodyLimit, MatchedPath};
 use axum::http::StatusCode;
 use axum::middleware::Next;
-use axum::response::IntoResponse;
+use axum::response::{IntoResponse, Redirect};
 use axum::{Extension, extract::Request, middleware, routing::get};
 use config::Config;
 use handlers::events::PublicEvent;
@@ -303,6 +303,7 @@ async fn start_main_server(config: &'static Config, authorization: Authorization
         .expect("Smith API docs generation failed");
 
     let app = router
+        .route("/", get(|| async { Redirect::temporary("/docs") }))
         .merge(smith_router)
         .route("/metrics", get(move || ready(recorder_handle.render())))
         .route("/health", get(handlers::health::check))
@@ -313,12 +314,12 @@ async fn start_main_server(config: &'static Config, authorization: Authorization
             get(move || ready(json_specification.clone())),
         )
         .route(
-            "/docs/smith/openapi.json",
+            "/smith/docs/openapi.json",
             get(move || ready(smith_json_specification.clone())),
         )
         .layer(CorsLayer::permissive())
         .merge(Scalar::with_url("/docs", api))
-        .merge(Scalar::with_url("/docs/smith", smith_api));
+        .merge(Scalar::with_url("/smith/docs", smith_api));
 
     let listener = TcpListener::bind("0.0.0.0:8080")
         .await
