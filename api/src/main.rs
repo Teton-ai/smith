@@ -3,7 +3,7 @@ use axum::extract::{DefaultBodyLimit, MatchedPath};
 use axum::http::StatusCode;
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Redirect};
-use axum::{Extension, extract::Request, middleware, routing::get};
+use axum::{Extension, Router, extract::Request, middleware, routing::get};
 use config::Config;
 use handlers::events::PublicEvent;
 use metrics_exporter_prometheus::{Matcher, PrometheusBuilder, PrometheusHandle};
@@ -27,7 +27,7 @@ use tracing_subscriber::{EnvFilter, prelude::*};
 use utoipa::openapi::security::{ApiKey, ApiKeyValue, SecurityScheme};
 use utoipa::{Modify, OpenApi};
 use utoipa_axum::{router::OpenApiRouter, routes};
-use utoipa_scalar::{Scalar, Servable as ScalarServable};
+use utoipa_swagger_ui::SwaggerUi;
 
 mod asset;
 mod config;
@@ -117,11 +117,23 @@ impl Modify for SecurityAddon {
 }
 
 #[derive(OpenApi)]
-#[openapi(modifiers(&SecurityAddon))]
+#[openapi(
+    modifiers(&SecurityAddon),
+    info(
+        title = "API",
+        contact(name = "Smith Security Team", email = "security@teton.ai")
+    )
+)]
 struct ApiDoc;
 
 #[derive(OpenApi)]
-#[openapi(modifiers(&SecurityAddon))]
+#[openapi(
+    modifiers(&SecurityAddon),
+    info(
+        title = "Smith API",
+        contact(name = "Smith Security Team", email = "security@teton.ai")
+    )
+)]
 struct SmithApiDoc;
 
 async fn start_main_server(config: &'static Config, authorization: AuthorizationConfig) {
@@ -297,29 +309,17 @@ async fn start_main_server(config: &'static Config, authorization: Authorization
         )
         .layer(DefaultBodyLimit::max(512000000));
 
-    let json_specification = api.to_pretty_json().expect("API docs generation failed");
-    let smith_json_specification = smith_api
-        .to_pretty_json()
-        .expect("Smith API docs generation failed");
-
-    let app = router
+    let app = Router::new()
         .route("/", get(|| async { Redirect::temporary("/docs") }))
+        .merge(router)
         .merge(smith_router)
         .route("/metrics", get(move || ready(recorder_handle.render())))
         .route("/health", get(handlers::health::check))
-        .route_layer(middleware::from_fn(track_metrics))
-        .layer(Extension(state))
-        .route(
-            "/docs/openapi.json",
-            get(move || ready(json_specification.clone())),
-        )
-        .route(
-            "/smith/docs/openapi.json",
-            get(move || ready(smith_json_specification.clone())),
-        )
+        .merge(SwaggerUi::new("/docs").url("/openapi.json", api))
+        .merge(SwaggerUi::new("/smith/docs").url("/smith/openapi.json", smith_api))
         .layer(CorsLayer::permissive())
-        .merge(Scalar::with_url("/docs", api))
-        .merge(Scalar::with_url("/smith/docs", smith_api));
+        .route_layer(middleware::from_fn(track_metrics))
+        .layer(Extension(state));
 
     let listener = TcpListener::bind("0.0.0.0:8080")
         .await

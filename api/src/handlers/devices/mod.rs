@@ -703,6 +703,10 @@ pub async fn get_devices(
     ),
     tag = DEVICES_TAG
 )]
+#[deprecated(
+    since = "0.2.64",
+    note = "Since labels have been released, tags concept be in version 0.74"
+)]
 pub async fn get_tags(
     Extension(state): Extension<State>,
 ) -> Result<Json<Vec<types::Tag>>, StatusCode> {

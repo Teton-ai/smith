@@ -47,7 +47,7 @@ metrics = "0.18"
 metrics-exporter-prometheus = "0.8"
 utoipa = { version = "5", features = ["chrono"] }
 utoipa-axum = "0.1"
-utoipa-scalar = { version = "0.2.0", features = ["axum"] }
+utoipa-swagger-ui = { version = "8.0.3", features = ["axum", "vendored"] }
 debpkg = "0.6.0"
 axum_typed_multipart = { version = "0.13.1" }
 tempfile = "3.13.0"
