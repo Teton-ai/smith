@@ -164,6 +164,7 @@ async fn start_main_server(config: &'static Config, authorization: Authorization
     let recorder_handle = setup_metrics_recorder();
 
     // build our application with a route
+    #[allow(deprecated)]
     let (router, api) = OpenApiRouter::with_openapi(ApiDoc::openapi())
         .routes(routes!(dashboard::api))
         .routes(routes!(handlers::auth::verify_token))
