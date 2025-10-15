@@ -1,14 +1,13 @@
 use crate::State;
+use crate::distribution::Distribution;
 use crate::handlers::devices::types::{LeanDevice, LeanResponse};
-use crate::handlers::distributions::db::db_get_latest_distribution_release;
 use crate::release::Release;
 use crate::user::CurrentUser;
-use axum::{Extension, Json, extract::Path};
-use axum::{http::StatusCode, response::Result};
+use axum::extract::Path;
+use axum::http::StatusCode;
+use axum::{Extension, Json};
+use serde::Deserialize;
 use tracing::error;
-
-pub mod db;
-pub mod types;
 
 const DISTRIBUTIONS_TAG: &str = "distributions";
 
@@ -16,7 +15,7 @@ const DISTRIBUTIONS_TAG: &str = "distributions";
     get,
     path = "/distributions",
     responses(
-        (status = StatusCode::OK, description = "List of distributions retrieved successfully", body = Vec<types::Distribution>),
+        (status = StatusCode::OK, description = "List of distributions retrieved successfully", body = Vec<Distribution>),
         (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to retrieve distributions"),
     ),
     security(
@@ -26,9 +25,9 @@ const DISTRIBUTIONS_TAG: &str = "distributions";
 )]
 pub async fn get_distributions(
     Extension(state): Extension<State>,
-) -> Result<Json<Vec<types::Distribution>>, StatusCode> {
+) -> axum::response::Result<Json<Vec<Distribution>>, StatusCode> {
     let distributions = sqlx::query_as!(
-        types::Distribution,
+        Distribution,
         r#"SELECT
             d.id,
             d.name,
@@ -54,10 +53,17 @@ pub async fn get_distributions(
     Ok(Json(distributions))
 }
 
+#[derive(Debug, Deserialize, utoipa::ToSchema)]
+pub struct NewDistribution {
+    pub name: String,
+    pub description: Option<String>,
+    pub architecture: String,
+}
+
 #[utoipa::path(
     post,
     path = "/distributions",
-    request_body = types::NewDistribution,
+    request_body = NewDistribution,
     responses(
         (status = StatusCode::CREATED, description = "Distribution created successfully"),
         (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to create distribution"),
@@ -69,8 +75,8 @@ pub async fn get_distributions(
 )]
 pub async fn create_distribution(
     Extension(state): Extension<State>,
-    Json(distribution): Json<types::NewDistribution>,
-) -> Result<StatusCode, StatusCode> {
+    Json(distribution): Json<NewDistribution>,
+) -> axum::response::Result<StatusCode, StatusCode> {
     let mut tx = state.pg_pool.begin().await.map_err(|err| {
         error!("Failed to start transaction {err}");
         StatusCode::INTERNAL_SERVER_ERROR
@@ -102,7 +108,7 @@ pub async fn create_distribution(
     get,
     path = "/distributions/{distribution_id}",
     responses(
-        (status = StatusCode::OK, description = "Return found distribution", body = types::Distribution),
+        (status = StatusCode::OK, description = "Return found distribution", body = Distribution),
         (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to retrieve distribution"),
     ),
     security(
@@ -113,9 +119,9 @@ pub async fn create_distribution(
 pub async fn get_distribution_by_id(
     Path(distribution_id): Path<i32>,
     Extension(state): Extension<State>,
-) -> Result<Json<types::Distribution>, StatusCode> {
+) -> axum::response::Result<Json<Distribution>, StatusCode> {
     let distribution = sqlx::query_as!(
-        types::Distribution,
+        Distribution,
         r#"SELECT
             d.id,
             d.name,
@@ -157,7 +163,7 @@ pub async fn get_distribution_by_id(
 pub async fn get_distribution_releases(
     Path(distribution_id): Path<i32>,
     Extension(state): Extension<State>,
-) -> Result<Json<Vec<Release>>, StatusCode> {
+) -> axum::response::Result<Json<Vec<Release>>, StatusCode> {
     let releases = sqlx::query_as!(
         Release,
         r#"
@@ -195,8 +201,8 @@ pub async fn get_distribution_releases(
 pub async fn get_distribution_latest_release(
     Path(distribution_id): Path<i32>,
     Extension(state): Extension<State>,
-) -> Result<Json<Release>, StatusCode> {
-    let release = db_get_latest_distribution_release(distribution_id, &state.pg_pool)
+) -> axum::response::Result<Json<Release>, StatusCode> {
+    let release = Release::get_latest_distribution_release(distribution_id, &state.pg_pool)
         .await
         .map_err(|err| {
             error!("Failed to get latest release {err}");
@@ -206,10 +212,16 @@ pub async fn get_distribution_latest_release(
     Ok(Json(release))
 }
 
+#[derive(Debug, Deserialize, utoipa::ToSchema)]
+pub struct NewDistributionRelease {
+    pub version: String,
+    pub packages: Vec<i32>,
+}
+
 #[utoipa::path(
     post,
     path = "/distributions/{distribution_id}/releases",
-    request_body = types::NewDistributionRelease,
+    request_body = NewDistributionRelease,
     responses(
         (status = StatusCode::CREATED, description = "Distribution release created successfully", body = i32),
         (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to create distribution release"),
@@ -224,8 +236,8 @@ pub async fn create_distribution_release(
     Extension(state): Extension<State>,
     Extension(current_user): Extension<CurrentUser>,
     Path(distribution_id): Path<i32>,
-    Json(distribution_release): Json<types::NewDistributionRelease>,
-) -> Result<Json<i32>, StatusCode> {
+    Json(distribution_release): Json<NewDistributionRelease>,
+) -> axum::response::Result<Json<i32>, StatusCode> {
     let mut tx = state.pg_pool.begin().await.map_err(|err| {
         error!("Failed to start transaction {err}");
         StatusCode::INTERNAL_SERVER_ERROR
@@ -299,7 +311,7 @@ pub async fn create_distribution_release(
 pub async fn delete_distribution_by_id(
     Path(distribution_id): Path<i32>,
     Extension(state): Extension<State>,
-) -> Result<StatusCode, StatusCode> {
+) -> axum::response::Result<StatusCode, StatusCode> {
     sqlx::query!(r#"DELETE FROM distribution WHERE id = $1"#, distribution_id)
         .execute(&state.pg_pool)
         .await
@@ -326,7 +338,7 @@ pub async fn delete_distribution_by_id(
 pub async fn get_distribution_devices(
     Path(distribution_id): Path<i32>,
     Extension(state): Extension<State>,
-) -> Result<Json<LeanResponse>, StatusCode> {
+) -> axum::response::Result<Json<LeanResponse>, StatusCode> {
     let devices = sqlx::query_as!(
         LeanDevice,
         r#"
@@ -337,8 +349,8 @@ pub async fn get_distribution_devices(
     .fetch_all(&state.pg_pool)
     .await
     .map_err(|err| {
-        error!("Failed to fetch devices for distribution {err}");
-        StatusCode::INTERNAL_SERVER_ERROR
+      error!("Failed to fetch devices for distribution {err}");
+      StatusCode::INTERNAL_SERVER_ERROR
     })?;
 
     Ok(Json(LeanResponse {

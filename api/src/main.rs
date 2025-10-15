@@ -34,10 +34,11 @@ mod dashboard;
 mod db;
 mod deployment;
 mod device;
+mod distribution;
 mod event;
 mod handlers;
-pub mod health;
-pub mod ip_address;
+mod health;
+mod ip_address;
 mod metric;
 mod middlewares;
 mod modem;
@@ -201,20 +202,20 @@ async fn start_main_server(config: &'static Config, authorization: Authorization
         .routes(routes!(modem::route::get_modem_list))
         .routes(routes!(modem::route::get_modem_by_id))
         .routes(routes!(
-            handlers::distributions::get_distributions,
-            handlers::distributions::create_distribution
+            distribution::route::get_distributions,
+            distribution::route::create_distribution
         ))
         .routes(routes!(
-            handlers::distributions::get_distribution_by_id,
-            handlers::distributions::delete_distribution_by_id
+            distribution::route::get_distribution_by_id,
+            distribution::route::delete_distribution_by_id
         ))
         .routes(routes!(
-            handlers::distributions::get_distribution_releases,
-            handlers::distributions::create_distribution_release,
+            distribution::route::get_distribution_releases,
+            distribution::route::create_distribution_release,
         ))
-        .routes(routes!(handlers::distributions::get_distribution_devices))
+        .routes(routes!(distribution::route::get_distribution_devices))
         .routes(routes!(
-            handlers::distributions::get_distribution_latest_release
+            distribution::route::get_distribution_latest_release
         ))
         .routes(routes!(ip_address::route::get_ip_addresses,))
         .routes(routes!(

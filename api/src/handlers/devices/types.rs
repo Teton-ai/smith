@@ -95,12 +95,6 @@ pub struct DeviceLedgerItemPaginated {
     pub previous: Option<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct DeviceIdentifiers {
-    pub fa_areas: Vec<String>,
-    pub identifiers: Vec<String>,
-}
-
 #[derive(Debug, Serialize, utoipa::ToSchema)]
 pub struct DeviceRelease {
     pub previous_release: Option<Release>,

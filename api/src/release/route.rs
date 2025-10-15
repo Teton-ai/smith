@@ -1,10 +1,9 @@
 use crate::State;
-use crate::handlers::distributions;
-use crate::handlers::distributions::db::db_get_release_by_id;
 use crate::release::Release;
 use axum::extract::Path;
 use axum::http::StatusCode;
 use axum::{Extension, Json};
+use serde::{Deserialize, Serialize};
 use smith::utils::schema::Package;
 use tracing::error;
 
@@ -64,7 +63,7 @@ pub async fn get_release(
     Path(release_id): Path<i32>,
     Extension(state): Extension<State>,
 ) -> axum::response::Result<Json<Release>, StatusCode> {
-    let release = db_get_release_by_id(release_id, &state.pg_pool)
+    let release = Release::get_release_by_id(release_id, &state.pg_pool)
         .await
         .map_err(|err| {
             error!("Failed to get releases {err}");
@@ -77,11 +76,17 @@ pub async fn get_release(
     Ok(Json(release.unwrap()))
 }
 
+#[derive(Debug, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct UpdateRelease {
+    pub draft: Option<bool>,
+    pub yanked: Option<bool>,
+}
+
 #[tracing::instrument]
 #[utoipa::path(
     post,
     path = "/releases/{release_id}",
-    request_body = distributions::types::UpdateRelease,
+    request_body = UpdateRelease,
     responses(
         (status = StatusCode::NO_CONTENT, description = "Release updated successfully"),
         (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to update release"),
@@ -94,7 +99,7 @@ pub async fn get_release(
 pub async fn update_release(
     Path(release_id): Path<i32>,
     Extension(state): Extension<State>,
-    Json(update_release): Json<distributions::types::UpdateRelease>,
+    Json(update_release): Json<UpdateRelease>,
 ) -> axum::response::Result<StatusCode, StatusCode> {
     let mut tx = state.pg_pool.begin().await.map_err(|err| {
         error!("Failed to start transaction {err}");
@@ -133,11 +138,16 @@ pub async fn update_release(
     Ok(StatusCode::NO_CONTENT)
 }
 
+#[derive(Debug, Deserialize, utoipa::ToSchema)]
+pub struct ReplacementPackage {
+    pub id: i32,
+}
+
 #[tracing::instrument]
 #[utoipa::path(
     post,
     path = "/releases/{release_id}/packages",
-        request_body = distributions::types::ReplacementPackage,
+        request_body = ReplacementPackage,
     responses(
         (status = StatusCode::CREATED, description = "Package added to release successfully"),
         (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to add package to release"),
@@ -150,9 +160,9 @@ pub async fn update_release(
 pub async fn add_package_to_release(
     Path(release_id): Path<i32>,
     Extension(state): Extension<State>,
-    Json(package): Json<distributions::types::ReplacementPackage>,
+    Json(package): Json<ReplacementPackage>,
 ) -> axum::response::Result<StatusCode, StatusCode> {
-    let release = db_get_release_by_id(release_id, &state.pg_pool)
+    let release = Release::get_release_by_id(release_id, &state.pg_pool)
         .await
         .map_err(|err| {
             error!("Failed to get release: {err}");
@@ -238,9 +248,9 @@ pub async fn get_distribution_release_packages(
 pub async fn update_package_for_release(
     Path((release_id, package_id)): Path<(i32, i32)>,
     Extension(state): Extension<State>,
-    Json(package): Json<distributions::types::ReplacementPackage>,
+    Json(package): Json<ReplacementPackage>,
 ) -> axum::response::Result<StatusCode, StatusCode> {
-    let release = db_get_release_by_id(release_id, &state.pg_pool)
+    let release = Release::get_release_by_id(release_id, &state.pg_pool)
         .await
         .map_err(|err| {
             error!("Failed to get release: {err}");
@@ -289,7 +299,7 @@ pub async fn delete_package_for_release(
     Path((release_id, package_id)): Path<(i32, i32)>,
     Extension(state): Extension<State>,
 ) -> axum::response::Result<StatusCode, StatusCode> {
-    let release = db_get_release_by_id(release_id, &state.pg_pool)
+    let release = Release::get_release_by_id(release_id, &state.pg_pool)
         .await
         .map_err(|err| {
             error!("Failed to get releases {err}");

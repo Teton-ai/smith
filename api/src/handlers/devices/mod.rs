@@ -15,7 +15,6 @@ pub mod types;
 use crate::device::{Device, DeviceLabels, DeviceNetwork};
 use crate::event::PublicEvent;
 use crate::handlers::devices::types::DeviceHealth;
-use crate::handlers::distributions::db::db_get_release_by_id;
 use crate::modem::Modem;
 use crate::release::Release;
 use smith::utils::schema;
@@ -1866,7 +1865,7 @@ pub async fn update_devices_target_release(
     Json(devices_release): Json<types::UpdateDevicesRelease>,
 ) -> Result<StatusCode, StatusCode> {
     let target_release_id = devices_release.target_release_id;
-    let release = db_get_release_by_id(target_release_id, &state.pg_pool)
+    let release = Release::get_release_by_id(target_release_id, &state.pg_pool)
         .await
         .map_err(|err| {
             error!("Failed to get target release: {err}");
