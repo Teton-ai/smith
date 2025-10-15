@@ -1,5 +1,5 @@
 use crate::State;
-use crate::modem::schema::Modem;
+use crate::modem::Modem;
 use axum::{Extension, Json, extract::Path};
 use axum::{http::StatusCode, response::Result};
 use tracing::error;

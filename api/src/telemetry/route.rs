@@ -1,6 +1,6 @@
 use crate::State;
 use crate::db::DeviceWithToken;
-use crate::modem::schema::Modem;
+use crate::modem::Modem;
 use axum::body::{Body, to_bytes};
 use axum::extract::Request;
 use axum::http::StatusCode;

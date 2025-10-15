@@ -14,9 +14,10 @@ use std::collections::HashMap;
 use tracing::{debug, error};
 pub mod helpers;
 pub mod types;
-use crate::device::Device;
+use crate::device::{Device, DeviceLabels, DeviceNetwork};
 use crate::handlers::devices::types::DeviceHealth;
 use crate::handlers::distributions::db::db_get_release_by_id;
+use crate::modem::Modem;
 use smith::utils::schema;
 
 const DEVICES_TAG: &str = "devices";
@@ -422,7 +423,7 @@ pub async fn get_devices(
                 };
 
                 let modem = if row.modem_id_nested.is_some() {
-                    Some(crate::modem::schema::Modem {
+                    Some(Modem {
                         id: row.modem_id_nested.unwrap(),
                         imei: row.modem_imei.unwrap(),
                         network_provider: row.modem_network_provider.unwrap(),
@@ -468,7 +469,7 @@ pub async fn get_devices(
                 };
 
                 let network = if row.network_score.is_some() {
-                    Some(crate::device::schema::DeviceNetwork {
+                    Some(DeviceNetwork {
                         network_score: row.network_score,
                         source: row.network_source,
                         updated_at: row.network_updated_at,
@@ -495,9 +496,7 @@ pub async fn get_devices(
                     release,
                     target_release,
                     network,
-                    labels: crate::device::schema::DeviceLabels(
-                        serde_json::from_value(row.labels).unwrap_or_default(),
-                    ),
+                    labels: DeviceLabels(serde_json::from_value(row.labels).unwrap_or_default()),
                 }
             })
             .collect();
@@ -615,7 +614,7 @@ pub async fn get_devices(
             };
 
             let modem = if row.modem_id_nested.is_some() {
-                Some(crate::modem::schema::Modem {
+                Some(Modem {
                     id: row.modem_id_nested.unwrap(),
                     imei: row.modem_imei.unwrap(),
                     network_provider: row.modem_network_provider.unwrap(),
@@ -661,7 +660,7 @@ pub async fn get_devices(
             };
 
             let network = if row.network_score.is_some() {
-                Some(crate::device::schema::DeviceNetwork {
+                Some(DeviceNetwork {
                     network_score: row.network_score,
                     source: row.network_source,
                     updated_at: row.network_updated_at,
@@ -688,9 +687,7 @@ pub async fn get_devices(
                 release,
                 target_release,
                 network,
-                labels: crate::device::schema::DeviceLabels(
-                    serde_json::from_value(row.labels).unwrap_or_default(),
-                ),
+                labels: DeviceLabels(serde_json::from_value(row.labels).unwrap_or_default()),
             }
         })
         .collect();
@@ -2105,7 +2102,7 @@ pub async fn get_device_info(
     };
 
     let modem = if device_row.modem_id_nested.is_some() {
-        Some(crate::modem::schema::Modem {
+        Some(Modem {
             id: device_row.modem_id_nested.unwrap(),
             imei: device_row.modem_imei.unwrap(),
             network_provider: device_row.modem_network_provider.unwrap(),
@@ -2149,7 +2146,7 @@ pub async fn get_device_info(
     };
 
     let network = if device_row.network_score.is_some() {
-        Some(crate::device::schema::DeviceNetwork {
+        Some(DeviceNetwork {
             network_score: device_row.network_score,
             source: device_row.network_source,
             updated_at: device_row.network_updated_at,
@@ -2176,9 +2173,7 @@ pub async fn get_device_info(
         release,
         target_release,
         network,
-        labels: crate::device::schema::DeviceLabels(
-            serde_json::from_value(device_row.labels).unwrap_or_default(),
-        ),
+        labels: DeviceLabels(serde_json::from_value(device_row.labels).unwrap_or_default()),
     };
 
     Ok(Json(device))

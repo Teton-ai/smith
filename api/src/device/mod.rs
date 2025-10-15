@@ -1,17 +1,51 @@
 use crate::config::Config;
 use crate::db::DeviceWithToken;
-pub(crate) use crate::device::schema::Device;
-use serde::Deserialize;
+use crate::handlers::distributions::types::Release;
+use crate::handlers::ip_address::IpAddressInfo;
+use crate::modem::Modem;
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use smith::utils::schema::{DeviceRegistration, DeviceRegistrationResponse};
 use sqlx::PgPool;
-use sqlx::types::ipnetwork;
+use sqlx::types::{chrono, ipnetwork};
+use std::collections::HashMap;
 use std::time::Duration;
 use thiserror::Error;
 use tracing::{debug, error, warn};
 
-pub mod routes;
-pub mod schema;
+pub mod route;
+
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct DeviceLabels(pub HashMap<String, String>);
+
+#[derive(Debug, Serialize, utoipa::ToSchema)]
+pub struct DeviceNetwork {
+    pub network_score: Option<i32>,
+    pub source: Option<String>,
+    pub updated_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+#[derive(Debug, Serialize, utoipa::ToSchema)]
+pub struct Device {
+    pub id: i32,
+    pub serial_number: String,
+    pub note: Option<String>,
+    pub last_seen: Option<chrono::DateTime<chrono::Utc>>,
+    pub created_on: chrono::DateTime<chrono::Utc>,
+    pub approved: bool,
+    pub has_token: Option<bool>,
+    pub release_id: Option<i32>,
+    pub target_release_id: Option<i32>,
+    pub system_info: Option<Value>,
+    pub modem_id: Option<i32>,
+    pub ip_address_id: Option<i32>,
+    pub ip_address: Option<IpAddressInfo>,
+    pub modem: Option<Modem>,
+    pub release: Option<Release>,
+    pub target_release: Option<Release>,
+    pub network: Option<DeviceNetwork>,
+    pub labels: DeviceLabels,
+}
 
 #[derive(Deserialize, Debug)]
 struct IpApiResponse {

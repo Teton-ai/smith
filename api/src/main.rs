@@ -167,7 +167,7 @@ async fn start_main_server(config: &'static Config, authorization: Authorization
     // build our application with a route
     #[allow(deprecated)]
     let (router, api) = OpenApiRouter::with_openapi(ApiDoc::openapi())
-        .routes(routes!(dashboard::api))
+        .routes(routes!(dashboard::route::api))
         .routes(routes!(handlers::auth::verify_token))
         .routes(routes!(
             handlers::network::get_networks,
@@ -188,8 +188,8 @@ async fn start_main_server(config: &'static Config, authorization: Authorization
             handlers::packages::get_packages,
             handlers::packages::release_package
         ))
-        .routes(routes!(modem::routes::get_modem_list))
-        .routes(routes!(modem::routes::get_modem_by_id))
+        .routes(routes!(modem::route::get_modem_list))
+        .routes(routes!(modem::route::get_modem_by_id))
         .routes(routes!(
             handlers::distributions::get_distributions,
             handlers::distributions::create_distribution
@@ -292,8 +292,8 @@ async fn start_main_server(config: &'static Config, authorization: Authorization
     let (smith_router, smith_api) = OpenApiRouter::with_openapi(SmithApiDoc::openapi())
         .routes(routes!(handlers::home::register_device))
         .routes(routes!(handlers::home::home))
-        .routes(routes!(telemetry::routes::modem))
-        .routes(routes!(telemetry::routes::victoria))
+        .routes(routes!(telemetry::route::modem))
+        .routes(routes!(telemetry::route::victoria))
         .routes(routes!(handlers::upload::upload_file))
         .routes(routes!(handlers::download::download_file))
         .routes(routes!(handlers::fetch_package))
