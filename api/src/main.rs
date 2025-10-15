@@ -1,12 +1,10 @@
 use crate::event::PublicEvent;
 use axum::error_handling::HandleErrorLayer;
-use axum::extract::{DefaultBodyLimit, MatchedPath};
+use axum::extract::DefaultBodyLimit;
 use axum::http::StatusCode;
-use axum::middleware::Next;
-use axum::response::{IntoResponse, Redirect};
-use axum::{Extension, Router, extract::Request, middleware, routing::get};
+use axum::response::Redirect;
+use axum::{Extension, Router, middleware, routing::get};
 use config::Config;
-use metrics_exporter_prometheus::{Matcher, PrometheusBuilder, PrometheusHandle};
 use middlewares::authorization::AuthorizationConfig;
 use sqlx::postgres::{PgPool, PgPoolOptions};
 use std::borrow::Cow;
@@ -15,7 +13,6 @@ use std::fs::File;
 use std::future::ready;
 use std::io::Read;
 use std::sync::Arc;
-use std::time::Instant;
 use tokio::net::TcpListener;
 use tokio::sync::broadcast::Sender;
 use tokio::sync::{Mutex, broadcast};
@@ -39,6 +36,7 @@ mod device;
 mod event;
 mod handlers;
 pub mod health;
+mod metric;
 mod middlewares;
 mod modem;
 mod package;
@@ -165,7 +163,7 @@ async fn start_main_server(config: &'static Config, authorization: Authorization
         authorization: Arc::new(authorization),
     };
 
-    let recorder_handle = setup_metrics_recorder();
+    let recorder_handle = metric::setup_metrics_recorder();
 
     let mut api_doc = ApiDoc::openapi();
 
@@ -329,7 +327,7 @@ async fn start_main_server(config: &'static Config, authorization: Authorization
         .merge(SwaggerUi::new("/docs").url("/openapi.json", api_doc))
         .merge(SwaggerUi::new("/smith/docs").url("/smith/openapi.json", smith_api))
         .layer(CorsLayer::permissive())
-        .route_layer(middleware::from_fn(track_metrics))
+        .route_layer(middleware::from_fn(metric::track_metrics))
         .layer(Extension(state));
 
     let listener = TcpListener::bind("0.0.0.0:8080")
@@ -345,46 +343,4 @@ async fn start_main_server(config: &'static Config, authorization: Authorization
     )
     .await
     .expect("error: failed to initialize axum server");
-}
-
-fn setup_metrics_recorder() -> PrometheusHandle {
-    // Metrics
-    const EXPONENTIAL_SECONDS: &[f64] = &[
-        0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0,
-    ];
-
-    PrometheusBuilder::new()
-        .set_buckets_for_metric(
-            Matcher::Full("http_requests_duration_seconds".to_string()),
-            EXPONENTIAL_SECONDS,
-        )
-        .expect("error: failed to build prometheus recorder")
-        .install_recorder()
-        .expect("error: failed to install prometheus recorder")
-}
-
-async fn track_metrics(req: Request, next: Next) -> impl IntoResponse {
-    let start = Instant::now();
-    let path = if let Some(matched_path) = req.extensions().get::<MatchedPath>() {
-        matched_path.as_str().to_owned()
-    } else {
-        req.uri().path().to_owned()
-    };
-    let method = req.method().clone();
-
-    let response = next.run(req).await;
-
-    let latency = start.elapsed().as_secs_f64();
-    let status = response.status().as_u16().to_string();
-
-    let labels = [
-        ("method", method.to_string()),
-        ("path", path),
-        ("status", status),
-    ];
-
-    metrics::increment_counter!("http_requests_total", &labels);
-    metrics::histogram!("http_requests_duration_seconds", latency, &labels);
-
-    response
 }
