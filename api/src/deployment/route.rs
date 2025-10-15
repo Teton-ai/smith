@@ -1,5 +1,5 @@
 use crate::State;
-use crate::deployment::schema::{Deployment, DeploymentDeviceWithStatus};
+use crate::deployment::{Deployment, DeploymentDeviceWithStatus};
 use axum::extract::Path;
 use axum::http::StatusCode;
 use axum::{Extension, Json};

@@ -234,11 +234,11 @@ async fn start_main_server(config: &'static Config, authorization: Authorization
             handlers::devices::get_all_commands_for_device
         ))
         .routes(routes!(rollout::route::api_rollout,))
-        .routes(routes!(deployment::routes::api_get_deployment_devices))
+        .routes(routes!(deployment::route::api_get_deployment_devices))
         .routes(routes!(
-            deployment::routes::api_release_deployment,
-            deployment::routes::api_get_release_deployment,
-            deployment::routes::api_release_deployment_check_done
+            deployment::route::api_release_deployment,
+            deployment::route::api_get_release_deployment,
+            deployment::route::api_release_deployment_check_done
         ))
         .nest_service(
             "/packages/:package_id",
