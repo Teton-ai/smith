@@ -188,13 +188,13 @@ async fn start_main_server(config: &'static Config, authorization: Authorization
             handlers::network::get_network_by_id,
             handlers::network::delete_network_by_id
         ))
-        .routes(routes!(handlers::devices::get_devices))
+        .routes(routes!(device::route::get_devices))
         .routes(routes!(
-            handlers::devices::get_device_info,
-            handlers::devices::delete_device,
-            handlers::devices::update_device
+            device::route::get_device_info,
+            device::route::delete_device,
+            device::route::update_device
         ))
-        .routes(routes!(handlers::devices::get_health_for_device))
+        .routes(routes!(device::route::get_health_for_device))
         .routes(routes!(
             package::route::get_packages,
             package::route::release_package
@@ -236,13 +236,13 @@ async fn start_main_server(config: &'static Config, authorization: Authorization
             release::route::delete_package_for_release
         ))
         .routes(routes!(
-            handlers::devices::get_network_for_device,
-            handlers::devices::update_device_network
+            device::route::get_network_for_device,
+            device::route::update_device_network
         ))
-        .routes(routes!(handlers::devices::update_devices_network))
+        .routes(routes!(device::route::update_devices_network))
         .routes(routes!(
-            handlers::devices::issue_commands_to_device,
-            handlers::devices::get_all_commands_for_device
+            device::route::issue_commands_to_device,
+            device::route::get_all_commands_for_device
         ))
         .routes(routes!(rollout::route::api_rollout,))
         .routes(routes!(deployment::route::api_get_deployment_devices))
@@ -256,33 +256,33 @@ async fn start_main_server(config: &'static Config, authorization: Authorization
             get(handlers::packages::get_package_by_id)
                 .delete(handlers::packages::delete_package_by_id),
         )
-        .routes(routes!(handlers::devices::get_tag_for_device))
+        .routes(routes!(device::route::get_tag_for_device))
         .routes(routes!(
-            handlers::devices::delete_tag_from_device,
-            handlers::devices::add_tag_to_device
+            device::route::delete_tag_from_device,
+            device::route::add_tag_to_device
         ))
         .routes(routes!(
-            handlers::devices::get_variables_for_device,
-            handlers::devices::add_variable_to_device
+            device::route::get_variables_for_device,
+            device::route::add_variable_to_device
         ))
         .routes(routes!(
-            handlers::devices::delete_variable_from_device,
-            handlers::devices::update_variable_for_device
+            device::route::delete_variable_from_device,
+            device::route::update_variable_for_device
         ))
-        .routes(routes!(handlers::devices::update_note_for_device))
+        .routes(routes!(device::route::update_note_for_device))
         .routes(routes!(
-            handlers::devices::get_device_release,
-            handlers::devices::update_device_target_release
+            device::route::get_device_release,
+            device::route::update_device_target_release
         ))
-        .routes(routes!(handlers::devices::get_ledger_for_device))
+        .routes(routes!(device::route::get_ledger_for_device))
         .routes(routes!(
-            handlers::devices::approve_device,
-            handlers::devices::revoke_device
+            device::route::approve_device,
+            device::route::revoke_device
         ))
-        .routes(routes!(handlers::devices::delete_token))
-        .routes(routes!(handlers::devices::get_tags))
-        .routes(routes!(handlers::devices::update_devices_target_release))
-        .routes(routes!(handlers::devices::get_variables))
+        .routes(routes!(device::route::delete_token))
+        .routes(routes!(device::route::get_tags))
+        .routes(routes!(device::route::update_devices_target_release))
+        .routes(routes!(device::route::get_variables))
         .routes(routes!(
             handlers::tags::get_tags,
             handlers::tags::create_tag
@@ -291,7 +291,7 @@ async fn start_main_server(config: &'static Config, authorization: Authorization
             command::route::get_bundle_commands,
             command::route::issue_commands_to_devices
         ))
-        .routes(routes!(handlers::devices::get_devices_new))
+        .routes(routes!(device::route::get_devices_new))
         .routes(routes!(event::route::sse_handler))
         .route_layer(middleware::from_fn(middlewares::authentication::check))
         // TODO: Check why we have this, not good for all routes

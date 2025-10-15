@@ -1,6 +1,6 @@
 use crate::State;
+use crate::device::{LeanDevice, LeanResponse};
 use crate::distribution::Distribution;
-use crate::handlers::devices::types::{LeanDevice, LeanResponse};
 use crate::release::Release;
 use crate::user::CurrentUser;
 use axum::extract::Path;

@@ -1,8 +1,10 @@
-use crate::handlers::devices::types::Variable;
+use crate::device::Variable;
 use axum::http::StatusCode;
 use smith::utils::schema::{SafeCommandRequest, SafeCommandTx};
 use sqlx::PgPool;
 use tracing::error;
+
+// TODO: This file needs to be gone...
 
 pub async fn refresh_device(pg_pool: &PgPool, device_id: i32) -> Result<StatusCode, StatusCode> {
     let mut tx = pg_pool.begin().await.map_err(|err| {

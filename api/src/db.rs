@@ -1,4 +1,4 @@
-use crate::handlers::devices::types::Variable;
+use crate::device::Variable;
 use anyhow::Result;
 use serde_json::Value;
 use serde_json::json;
