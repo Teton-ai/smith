@@ -1,6 +1,7 @@
 use crate::State;
 use crate::handlers::devices::types::{LeanDevice, LeanResponse};
 use crate::handlers::distributions::db::db_get_latest_distribution_release;
+use crate::release::Release;
 use crate::user::CurrentUser;
 use axum::{Extension, Json, extract::Path};
 use axum::{http::StatusCode, response::Result};
@@ -145,7 +146,7 @@ pub async fn get_distribution_by_id(
     get,
     path = "/distributions/{distribution_id}/releases",
     responses(
-        (status = StatusCode::OK, description = "List of releases from given distribution retrieved successfully", body = Vec<types::Release>),
+        (status = StatusCode::OK, description = "List of releases from given distribution retrieved successfully", body = Vec<Release>),
         (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to distribution releases"),
     ),
     security(
@@ -156,9 +157,9 @@ pub async fn get_distribution_by_id(
 pub async fn get_distribution_releases(
     Path(distribution_id): Path<i32>,
     Extension(state): Extension<State>,
-) -> Result<Json<Vec<types::Release>>, StatusCode> {
+) -> Result<Json<Vec<Release>>, StatusCode> {
     let releases = sqlx::query_as!(
-        types::Release,
+        Release,
         r#"
         SELECT release.*,
         distribution.name AS distribution_name,
@@ -183,7 +184,7 @@ pub async fn get_distribution_releases(
     get,
     path = "/distributions/{distribution_id}/releases/latest",
     responses(
-        (status = StatusCode::OK, description = "Get the latest published release for the distribution", body = types::Release),
+        (status = StatusCode::OK, description = "Get the latest published release for the distribution", body = Release),
         (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to latest release"),
     ),
     security(
@@ -194,7 +195,7 @@ pub async fn get_distribution_releases(
 pub async fn get_distribution_latest_release(
     Path(distribution_id): Path<i32>,
     Extension(state): Extension<State>,
-) -> Result<Json<types::Release>, StatusCode> {
+) -> Result<Json<Release>, StatusCode> {
     let release = db_get_latest_distribution_release(distribution_id, &state.pg_pool)
         .await
         .map_err(|err| {

@@ -42,6 +42,7 @@ mod metric;
 mod middlewares;
 mod modem;
 mod package;
+mod release;
 mod rollout;
 mod smith;
 mod storage;
@@ -220,18 +221,18 @@ async fn start_main_server(config: &'static Config, authorization: Authorization
             ip_address::route::get_ip_address_info,
             ip_address::route::update_ip_address
         ))
-        .routes(routes!(handlers::releases::get_releases))
+        .routes(routes!(release::route::get_releases))
         .routes(routes!(
-            handlers::releases::get_release,
-            handlers::releases::update_release
+            release::route::get_release,
+            release::route::update_release
         ))
         .routes(routes!(
-            handlers::releases::get_distribution_release_packages,
-            handlers::releases::add_package_to_release
+            release::route::get_distribution_release_packages,
+            release::route::add_package_to_release
         ))
         .routes(routes!(
-            handlers::releases::update_package_for_release,
-            handlers::releases::delete_package_for_release
+            release::route::update_package_for_release,
+            release::route::delete_package_for_release
         ))
         .routes(routes!(
             handlers::devices::get_network_for_device,

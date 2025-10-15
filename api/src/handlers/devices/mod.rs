@@ -1,4 +1,3 @@
-use super::distributions::types::Release;
 use crate::State;
 use crate::middlewares::authorization;
 use crate::user::CurrentUser;
@@ -18,6 +17,7 @@ use crate::event::PublicEvent;
 use crate::handlers::devices::types::DeviceHealth;
 use crate::handlers::distributions::db::db_get_release_by_id;
 use crate::modem::Modem;
+use crate::release::Release;
 use smith::utils::schema;
 
 const DEVICES_TAG: &str = "devices";
@@ -435,7 +435,7 @@ pub async fn get_devices(
                 };
 
                 let release = if row.release_id_nested.is_some() {
-                    Some(crate::handlers::distributions::types::Release {
+                    Some(Release {
                         id: row.release_id_nested.unwrap(),
                         distribution_id: row.release_distribution_id.unwrap(),
                         distribution_architecture: row.release_distribution_architecture.unwrap(),
@@ -451,7 +451,7 @@ pub async fn get_devices(
                 };
 
                 let target_release = if row.target_release_id_nested.is_some() {
-                    Some(crate::handlers::distributions::types::Release {
+                    Some(Release {
                         id: row.target_release_id_nested.unwrap(),
                         distribution_id: row.target_release_distribution_id.unwrap(),
                         distribution_architecture: row
@@ -626,7 +626,7 @@ pub async fn get_devices(
             };
 
             let release = if row.release_id_nested.is_some() {
-                Some(crate::handlers::distributions::types::Release {
+                Some(Release {
                     id: row.release_id_nested.unwrap(),
                     distribution_id: row.release_distribution_id.unwrap(),
                     distribution_architecture: row.release_distribution_architecture.unwrap(),
@@ -642,7 +642,7 @@ pub async fn get_devices(
             };
 
             let target_release = if row.target_release_id_nested.is_some() {
-                Some(crate::handlers::distributions::types::Release {
+                Some(Release {
                     id: row.target_release_id_nested.unwrap(),
                     distribution_id: row.target_release_distribution_id.unwrap(),
                     distribution_architecture: row
@@ -2126,7 +2126,7 @@ pub async fn get_device_info(
     };
 
     let release = if device_row.release_id_nested.is_some() {
-        Some(crate::handlers::distributions::types::Release {
+        Some(Release {
             id: device_row.release_id_nested.unwrap(),
             distribution_id: device_row.release_distribution_id.unwrap(),
             distribution_architecture: device_row.release_distribution_architecture.unwrap(),
@@ -2142,7 +2142,7 @@ pub async fn get_device_info(
     };
 
     let target_release = if device_row.target_release_id_nested.is_some() {
-        Some(crate::handlers::distributions::types::Release {
+        Some(Release {
             id: device_row.target_release_id_nested.unwrap(),
             distribution_id: device_row.target_release_distribution_id.unwrap(),
             distribution_architecture: device_row.target_release_distribution_architecture.unwrap(),

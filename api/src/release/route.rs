@@ -1,9 +1,10 @@
 use crate::State;
 use crate::handlers::distributions;
 use crate::handlers::distributions::db::db_get_release_by_id;
+use crate::release::Release;
 use axum::extract::Path;
+use axum::http::StatusCode;
 use axum::{Extension, Json};
-use axum::{http::StatusCode, response::Result};
 use smith::utils::schema::Package;
 use tracing::error;
 
@@ -14,7 +15,7 @@ const RELEASES_TAG: &str = "releases";
     get,
     path = "/releases",
     responses(
-        (status = StatusCode::OK, description = "List of releases retrieved successfully", body = Vec<distributions::types::Release>),
+        (status = StatusCode::OK, description = "List of releases retrieved successfully", body = Vec<Release>),
         (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to retrieve releases"),
     ),
     security(
@@ -24,9 +25,9 @@ const RELEASES_TAG: &str = "releases";
 )]
 pub async fn get_releases(
     Extension(state): Extension<State>,
-) -> Result<Json<Vec<distributions::types::Release>>, StatusCode> {
+) -> axum::response::Result<Json<Vec<Release>>, StatusCode> {
     let releases = sqlx::query_as!(
-        distributions::types::Release,
+        Release,
         "
         SELECT release.*,
         distribution.name AS distribution_name,
@@ -50,7 +51,7 @@ pub async fn get_releases(
     get,
     path = "/releases/{release_id}",
     responses(
-        (status = StatusCode::OK, description = "Release retrieved successfully", body = distributions::types::Release),
+        (status = StatusCode::OK, description = "Release retrieved successfully", body = Release),
         (status = StatusCode::NOT_FOUND, description = "Release not found"),
         (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to retrieve release"),
     ),
@@ -62,7 +63,7 @@ pub async fn get_releases(
 pub async fn get_release(
     Path(release_id): Path<i32>,
     Extension(state): Extension<State>,
-) -> Result<Json<distributions::types::Release>, StatusCode> {
+) -> axum::response::Result<Json<Release>, StatusCode> {
     let release = db_get_release_by_id(release_id, &state.pg_pool)
         .await
         .map_err(|err| {
@@ -94,7 +95,7 @@ pub async fn update_release(
     Path(release_id): Path<i32>,
     Extension(state): Extension<State>,
     Json(update_release): Json<distributions::types::UpdateRelease>,
-) -> Result<StatusCode, StatusCode> {
+) -> axum::response::Result<StatusCode, StatusCode> {
     let mut tx = state.pg_pool.begin().await.map_err(|err| {
         error!("Failed to start transaction {err}");
         StatusCode::INTERNAL_SERVER_ERROR
@@ -150,7 +151,7 @@ pub async fn add_package_to_release(
     Path(release_id): Path<i32>,
     Extension(state): Extension<State>,
     Json(package): Json<distributions::types::ReplacementPackage>,
-) -> Result<StatusCode, StatusCode> {
+) -> axum::response::Result<StatusCode, StatusCode> {
     let release = db_get_release_by_id(release_id, &state.pg_pool)
         .await
         .map_err(|err| {
@@ -199,7 +200,7 @@ pub async fn add_package_to_release(
 pub async fn get_distribution_release_packages(
     Path(release_id): Path<i32>,
     Extension(state): Extension<State>,
-) -> Result<Json<Vec<Package>>, StatusCode> {
+) -> axum::response::Result<Json<Vec<Package>>, StatusCode> {
     let packages = sqlx::query_as!(
         Package,
         "
@@ -238,7 +239,7 @@ pub async fn update_package_for_release(
     Path((release_id, package_id)): Path<(i32, i32)>,
     Extension(state): Extension<State>,
     Json(package): Json<distributions::types::ReplacementPackage>,
-) -> Result<StatusCode, StatusCode> {
+) -> axum::response::Result<StatusCode, StatusCode> {
     let release = db_get_release_by_id(release_id, &state.pg_pool)
         .await
         .map_err(|err| {
@@ -287,7 +288,7 @@ pub async fn update_package_for_release(
 pub async fn delete_package_for_release(
     Path((release_id, package_id)): Path<(i32, i32)>,
     Extension(state): Extension<State>,
-) -> Result<StatusCode, StatusCode> {
+) -> axum::response::Result<StatusCode, StatusCode> {
     let release = db_get_release_by_id(release_id, &state.pg_pool)
         .await
         .map_err(|err| {

@@ -2,7 +2,6 @@ pub mod devices;
 pub mod distributions;
 pub mod network;
 pub mod packages;
-pub mod releases;
 pub mod tags;
 
 use crate::State;

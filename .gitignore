@@ -1,5 +1,4 @@
 **/target/
-**/release/
 build-info
 *.tar.gz
 magic.toml

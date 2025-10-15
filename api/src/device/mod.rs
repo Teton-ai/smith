@@ -1,8 +1,8 @@
 use crate::config::Config;
 use crate::db::DeviceWithToken;
-use crate::handlers::distributions::types::Release;
 use crate::ip_address::IpAddressInfo;
 use crate::modem::Modem;
+use crate::release::Release;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use smith::utils::schema::{DeviceRegistration, DeviceRegistrationResponse};

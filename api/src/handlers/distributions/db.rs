@@ -1,4 +1,4 @@
-use crate::handlers::distributions::types::Release;
+use crate::release::Release;
 
 pub async fn db_get_release_by_id(
     release_id: i32,

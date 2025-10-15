@@ -9,6 +9,8 @@ use sqlx::PgPool;
 use thiserror::Error;
 use tracing::{debug, error};
 
+// TODO: Get rid of this db.rs, legacy design and ugly
+
 #[derive(Debug)]
 pub struct DeviceWithToken {
     pub id: i32,
