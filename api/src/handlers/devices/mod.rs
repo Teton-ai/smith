@@ -1,3 +1,4 @@
+use super::distributions::types::Release;
 use crate::State;
 use crate::handlers::events::PublicEvent;
 use crate::middlewares::authorization;
