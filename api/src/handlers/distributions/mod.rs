@@ -1,7 +1,7 @@
 use crate::State;
 use crate::handlers::devices::types::{LeanDevice, LeanResponse};
 use crate::handlers::distributions::db::db_get_latest_distribution_release;
-use crate::users::db::CurrentUser;
+use crate::user::CurrentUser;
 use axum::{Extension, Json, extract::Path};
 use axum::{http::StatusCode, response::Result};
 use tracing::error;

@@ -1,5 +1,5 @@
 mod audience;
-use crate::{State, users::db::CurrentUser};
+use crate::{State, user::CurrentUser};
 use audience::Audience;
 use axum::{
     Extension,

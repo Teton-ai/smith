@@ -1,7 +1,7 @@
 use crate::State;
 use crate::ip_address::IpAddressInfo;
 use crate::middlewares::authorization;
-use crate::users::db::CurrentUser;
+use crate::user::CurrentUser;
 use axum::extract::Path;
 use axum::http::StatusCode;
 use axum::{Extension, Json};

@@ -1,7 +1,7 @@
 use super::distributions::types::Release;
 use crate::State;
 use crate::middlewares::authorization;
-use crate::users::db::CurrentUser;
+use crate::user::CurrentUser;
 use axum::extract::Host;
 use axum::{Extension, Json, extract::Path};
 use axum::{http::StatusCode, response::Result};

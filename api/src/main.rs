@@ -46,7 +46,7 @@ mod rollout;
 mod smith;
 mod storage;
 mod telemetry;
-mod users;
+mod user;
 
 #[derive(Clone, Debug)]
 pub struct State {

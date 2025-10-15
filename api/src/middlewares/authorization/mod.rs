@@ -1,4 +1,4 @@
-use crate::users::db::CurrentUser;
+use crate::user::CurrentUser;
 use anyhow::Result;
 use serde::Deserialize;
 use std::collections::HashMap;
