@@ -4,7 +4,7 @@ use axum::extract::{DefaultBodyLimit, MatchedPath};
 use axum::http::StatusCode;
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Redirect};
-use axum::{Extension, Router, extract::Request, middleware, routing::get};
+use axum::{extract::Request, middleware, routing::get, Extension, Router};
 use config::Config;
 use metrics_exporter_prometheus::{Matcher, PrometheusBuilder, PrometheusHandle};
 use middlewares::authorization::AuthorizationConfig;
@@ -18,12 +18,12 @@ use std::sync::Arc;
 use std::time::Instant;
 use tokio::net::TcpListener;
 use tokio::sync::broadcast::Sender;
-use tokio::sync::{Mutex, broadcast};
+use tokio::sync::{broadcast, Mutex};
 use tower::ServiceBuilder;
 use tower_http::cors::CorsLayer;
 use tower_http::decompression::RequestDecompressionLayer;
 use tracing::info;
-use tracing_subscriber::{EnvFilter, prelude::*};
+use tracing_subscriber::{prelude::*, EnvFilter};
 use utoipa::openapi::security::{ApiKey, ApiKeyValue, SecurityScheme};
 use utoipa::{Modify, OpenApi};
 use utoipa_axum::{router::OpenApiRouter, routes};
@@ -46,6 +46,7 @@ mod smith;
 mod storage;
 mod telemetry;
 mod users;
+pub mod health;
 
 #[derive(Clone, Debug)]
 pub struct State {
@@ -296,11 +297,11 @@ async fn start_main_server(config: &'static Config, authorization: Authorization
         .routes(routes!(smith::route::home))
         .routes(routes!(telemetry::route::modem))
         .routes(routes!(telemetry::route::victoria))
-        .routes(routes!(handlers::upload::upload_file))
-        .routes(routes!(handlers::download::download_file))
-        .routes(routes!(handlers::fetch_package))
-        .routes(routes!(handlers::list_release_packages))
-        .routes(routes!(handlers::network::test_file))
+        .routes(routes!(smith::route::upload_file))
+        .routes(routes!(smith::route::download_file))
+        .routes(routes!(smith::route::fetch_package))
+        .routes(routes!(smith::route::list_release_packages))
+        .routes(routes!(smith::route::test_file))
         .split_for_parts();
 
     let smith_router = smith_router
@@ -318,7 +319,7 @@ async fn start_main_server(config: &'static Config, authorization: Authorization
         .merge(router)
         .merge(smith_router)
         .route("/metrics", get(move || ready(recorder_handle.render())))
-        .route("/health", get(handlers::health::check))
+        .route("/health", get(health::check))
         .merge(SwaggerUi::new("/docs").url("/openapi.json", api))
         .merge(SwaggerUi::new("/smith/docs").url("/smith/openapi.json", smith_api))
         .layer(CorsLayer::permissive())

@@ -3,9 +3,7 @@ use axum::http::StatusCode;
 use axum::response::Result;
 use axum::{
     Extension, Json,
-    body::Body,
     extract::{Path, Query},
-    response::Response,
 };
 use smith::utils::schema::NetworkType;
 use smith::utils::schema::{Network, NewNetwork};
@@ -196,24 +194,4 @@ pub async fn create_network(
     })?;
 
     Ok((StatusCode::CREATED, Json(created_network)))
-}
-
-#[utoipa::path(
-    get,
-    path = "/smith/network/test-file",
-    responses(
-        (status = 200, description = "Returns a 20MB test file for network speed testing"),
-    ),
-    tag = NETWORKS_TAG
-)]
-pub async fn test_file() -> Response<Body> {
-    const FILE_SIZE: usize = 20 * 1024 * 1024; // 20MB
-    let data = vec![0u8; FILE_SIZE];
-
-    Response::builder()
-        .status(StatusCode::OK)
-        .header("Content-Type", "application/octet-stream")
-        .header("Content-Length", FILE_SIZE.to_string())
-        .body(Body::from(data))
-        .unwrap()
 }

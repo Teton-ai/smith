@@ -1,35 +1,25 @@
 pub mod auth;
 pub mod devices;
 pub mod distributions;
-pub mod download;
-pub mod health;
 pub mod ip_address;
 pub mod network;
 pub mod packages;
 pub mod releases;
 pub mod tags;
-pub mod upload;
 
 use crate::State;
 use crate::db::{AuthorizationError, DBHandler, DeviceWithToken};
-use axum::body::Body;
 use axum::{
-    Json, async_trait,
-    extract::{Extension, FromRequestParts, Path, Query},
-    http::{StatusCode, request::Parts},
+    async_trait,
+    extract::{Extension, FromRequestParts},
+    http::{request::Parts, StatusCode},
     response::{IntoResponse, Response},
 };
 use axum_extra::{
+    headers::{authorization::Bearer, Authorization},
     TypedHeader,
-    headers::{Authorization, authorization::Bearer},
 };
-use futures::TryStreamExt;
-use s3::error::S3Error;
-use s3::{Bucket, creds::Credentials};
-use serde::Deserialize;
-use smith::utils::schema::Package;
-use std::error::Error;
-use tracing::{debug, error};
+use tracing::error;
 
 // https://docs.rs/axum/latest/axum/extract/index.html#accessing-other-extractors-in-fromrequest-or-fromrequestparts-implementations
 #[async_trait]
@@ -66,108 +56,4 @@ where
 
         Ok(device) // Assuming `Self` can be created from a token
     }
-}
-
-#[derive(Deserialize, Debug)]
-pub struct FetchPackageQuery {
-    name: String,
-}
-
-#[utoipa::path(
-    get,
-    path = "/smith/package",
-    params(
-        ("name" = String, Query, description = "Package name to fetch")
-    ),
-    responses(
-        (status = 200, description = "Package data", content_type = "application/octet-stream"),
-        (status = 404, description = "Package not found"),
-        (status = 500, description = "Internal server error")
-    ),
-    security(("Access Token" = []))
-)]
-#[tracing::instrument]
-pub async fn fetch_package(
-    _device: DeviceWithToken,
-    Extension(state): Extension<State>,
-    params: Query<FetchPackageQuery>,
-) -> Result<Response, Response> {
-    let deb_package_name = &params.name;
-    debug!("Fetching package {}", &deb_package_name);
-    let bucket = Bucket::new(
-        &state.config.packages_bucket_name,
-        state
-            .config
-            .aws_region
-            .parse()
-            .expect("error: failed to parse AWS region"),
-        Credentials::default().unwrap(),
-    )
-    .map_err(|e| {
-        error!("{:?}", e);
-        StatusCode::INTERNAL_SERVER_ERROR.into_response()
-    })?;
-
-    let stream = bucket
-        .get_object_stream(&deb_package_name)
-        .await
-        .map_err(|e| {
-            error!("{:?}", e);
-            match e {
-                S3Error::HttpFailWithBody(404, _) => (
-                    StatusCode::NOT_FOUND,
-                    format!("{} package not found", &deb_package_name),
-                )
-                    .into_response(),
-
-                _ => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
-            }
-        })?;
-
-    let adapted_stream = stream
-        .bytes
-        .map_ok(|data| data)
-        .map_err(|e| Box::new(e) as Box<dyn Error + Send + Sync + 'static>);
-
-    let stream = Body::from_stream(adapted_stream);
-
-    Ok(Response::new(stream).into_response())
-}
-
-#[utoipa::path(
-    get,
-    path = "/smith/releases/{release_id}/packages",
-    params(
-        ("release_id" = i32, Path, description = "Release ID")
-    ),
-    responses(
-        (status = 200, description = "List of packages for the release"),
-        (status = 500, description = "Internal server error")
-    ),
-    security(("Access Token" = []))
-)]
-#[tracing::instrument]
-pub async fn list_release_packages(
-    _device: DeviceWithToken,
-    Path(release_id): Path<i32>,
-    Extension(state): Extension<State>,
-) -> Result<Json<Vec<Package>>, Json<Vec<Package>>> {
-    let packages = sqlx::query_as!(
-        Package,
-        "
-        SELECT package.*
-        FROM release_packages
-        JOIN package ON package.id = release_packages.package_id
-        WHERE release_packages.release_id = $1
-        ",
-        release_id
-    )
-    .fetch_all(&state.pg_pool)
-    .await
-    .map_err(|err| {
-        error!("Failed to get packages from distribution name {err}");
-        Json(vec![])
-    })?;
-
-    Ok(Json(packages))
 }
