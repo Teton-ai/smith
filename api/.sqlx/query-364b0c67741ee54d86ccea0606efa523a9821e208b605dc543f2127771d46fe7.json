@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT \n            ip.id,\n            ip.ip_address,\n            ip.name,\n            ip.continent,\n            ip.continent_code,\n            ip.country_code,\n            ip.country,\n            ip.region,\n            ip.city,\n            ip.isp,\n            ip.coordinates[0] as longitude,\n            ip.coordinates[1] as latitude,\n            ip.proxy,\n            ip.hosting,\n            ip.created_at,\n            ip.updated_at,\n            COUNT(d.id) as device_count\n        FROM ip_address ip\n        LEFT JOIN device d ON d.ip_address_id = ip.id\n        GROUP BY ip.id\n        HAVING COUNT(d.id) > 0\n        ORDER BY COUNT(d.id) DESC\n        ",
+  "query": "\n        SELECT\n            ip.id,\n            ip.ip_address,\n            ip.name,\n            ip.continent,\n            ip.continent_code,\n            ip.country_code,\n            ip.country,\n            ip.region,\n            ip.city,\n            ip.isp,\n            ip.coordinates[0] as longitude,\n            ip.coordinates[1] as latitude,\n            ip.proxy,\n            ip.hosting,\n            ip.created_at,\n            ip.updated_at,\n            COUNT(d.id) as device_count\n        FROM ip_address ip\n        LEFT JOIN device d ON d.ip_address_id = ip.id\n        WHERE ip.id = $1\n        GROUP BY ip.id\n        ",
   "describe": {
     "columns": [
       {
@@ -90,7 +90,9 @@
       }
     ],
     "parameters": {
-      "Left": []
+      "Left": [
+        "Int4"
+      ]
     },
     "nullable": [
       false,
@@ -112,5 +114,5 @@
       null
     ]
   },
-  "hash": "9dd3334e323dc21bf012d56425807194b428c928b6c5981a090ed42c0478d7c5"
+  "hash": "364b0c67741ee54d86ccea0606efa523a9821e208b605dc543f2127771d46fe7"
 }

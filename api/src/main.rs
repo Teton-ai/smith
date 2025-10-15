@@ -27,6 +27,7 @@ use utoipa_axum::{router::OpenApiRouter, routes};
 use utoipa_swagger_ui::SwaggerUi;
 
 mod asset;
+mod auth;
 mod command;
 mod config;
 mod dashboard;
@@ -176,7 +177,7 @@ async fn start_main_server(config: &'static Config, authorization: Authorization
     #[allow(deprecated)]
     let (protected_router, protected_api) = OpenApiRouter::with_openapi(ApiDoc::openapi())
         .routes(routes!(dashboard::route::api))
-        .routes(routes!(handlers::auth::verify_token))
+        .routes(routes!(auth::route::verify_token))
         .routes(routes!(
             handlers::network::get_networks,
             handlers::network::create_network

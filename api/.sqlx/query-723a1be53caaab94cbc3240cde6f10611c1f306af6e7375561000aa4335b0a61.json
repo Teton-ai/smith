@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        UPDATE ip_address \n        SET name = $1, updated_at = NOW()\n        WHERE id = $2\n        RETURNING \n            id,\n            ip_address,\n            name,\n            continent,\n            continent_code,\n            country_code,\n            country,\n            region,\n            city,\n            isp,\n            coordinates[0] as longitude,\n            coordinates[1] as latitude,\n            proxy,\n            hosting,\n            created_at,\n            updated_at\n        ",
+  "query": "\n        SELECT\n            ip.id,\n            ip.ip_address,\n            ip.name,\n            ip.continent,\n            ip.continent_code,\n            ip.country_code,\n            ip.country,\n            ip.region,\n            ip.city,\n            ip.isp,\n            ip.coordinates[0] as longitude,\n            ip.coordinates[1] as latitude,\n            ip.proxy,\n            ip.hosting,\n            ip.created_at,\n            ip.updated_at,\n            COUNT(d.id) as device_count\n        FROM ip_address ip\n        LEFT JOIN device d ON d.ip_address_id = ip.id\n        GROUP BY ip.id\n        HAVING COUNT(d.id) > 0\n        ORDER BY COUNT(d.id) DESC\n        ",
   "describe": {
     "columns": [
       {
@@ -82,13 +82,15 @@
         "ordinal": 15,
         "name": "updated_at",
         "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 16,
+        "name": "device_count",
+        "type_info": "Int8"
       }
     ],
     "parameters": {
-      "Left": [
-        "Text",
-        "Int4"
-      ]
+      "Left": []
     },
     "nullable": [
       false,
@@ -106,8 +108,9 @@
       true,
       true,
       false,
-      false
+      false,
+      null
     ]
   },
-  "hash": "dd96d25de4beb90c3aba9abfaa0f28cdbece7321d9dfb69afdbbb8d51a07b147"
+  "hash": "723a1be53caaab94cbc3240cde6f10611c1f306af6e7375561000aa4335b0a61"
 }

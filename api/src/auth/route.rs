@@ -1,19 +1,16 @@
-use axum::{Extension, Json};
-use axum::{http::StatusCode, response::Result};
-use tracing::error;
-
 use crate::State;
-
-pub mod types;
+use crate::auth::{DeviceAuth, DeviceTokenForVerification};
+use axum::http::StatusCode;
+use axum::{Extension, Json};
+use tracing::error;
 
 const AUTH_TAG: &str = "auth";
 
-#[tracing::instrument]
 #[utoipa::path(
     post,
     path = "/auth/token",
     responses(
-        (status = StatusCode::OK, description = "Return found device auth", body = types::DeviceAuth),
+        (status = StatusCode::OK, description = "Return found device auth", body = DeviceAuth),
         (status = StatusCode::UNAUTHORIZED, description = "Failed to verify token"),
         (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to retrieve device auth"),
     ),
@@ -22,12 +19,13 @@ const AUTH_TAG: &str = "auth";
     ),
     tag = AUTH_TAG
 )]
+#[tracing::instrument]
 pub async fn verify_token(
     Extension(state): Extension<State>,
-    Json(token): Json<types::DeviceTokenForVerification>,
-) -> Result<Json<types::DeviceAuth>, StatusCode> {
+    Json(token): Json<DeviceTokenForVerification>,
+) -> axum::response::Result<Json<DeviceAuth>, StatusCode> {
     let device = sqlx::query_as!(
-        types::DeviceAuth,
+        DeviceAuth,
         "
         SELECT device.serial_number AS serial_number, device.approved AS authorized
         FROM device
