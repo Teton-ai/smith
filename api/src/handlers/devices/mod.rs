@@ -14,11 +14,11 @@ use tracing::{debug, error};
 pub mod helpers;
 pub mod types;
 use crate::device::{Device, DeviceLabels, DeviceNetwork};
+use crate::event::PublicEvent;
 use crate::handlers::devices::types::DeviceHealth;
 use crate::handlers::distributions::db::db_get_release_by_id;
 use crate::modem::Modem;
 use smith::utils::schema;
-use crate::event::PublicEvent;
 
 const DEVICES_TAG: &str = "devices";
 

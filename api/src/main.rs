@@ -4,7 +4,7 @@ use axum::extract::{DefaultBodyLimit, MatchedPath};
 use axum::http::StatusCode;
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Redirect};
-use axum::{extract::Request, middleware, routing::get, Extension, Router};
+use axum::{Extension, Router, extract::Request, middleware, routing::get};
 use config::Config;
 use metrics_exporter_prometheus::{Matcher, PrometheusBuilder, PrometheusHandle};
 use middlewares::authorization::AuthorizationConfig;
@@ -18,12 +18,12 @@ use std::sync::Arc;
 use std::time::Instant;
 use tokio::net::TcpListener;
 use tokio::sync::broadcast::Sender;
-use tokio::sync::{broadcast, Mutex};
+use tokio::sync::{Mutex, broadcast};
 use tower::ServiceBuilder;
 use tower_http::cors::CorsLayer;
 use tower_http::decompression::RequestDecompressionLayer;
 use tracing::info;
-use tracing_subscriber::{prelude::*, EnvFilter};
+use tracing_subscriber::{EnvFilter, prelude::*};
 use utoipa::openapi::security::{ApiKey, ApiKeyValue, SecurityScheme};
 use utoipa::{Modify, OpenApi};
 use utoipa_axum::{router::OpenApiRouter, routes};
@@ -38,6 +38,7 @@ mod deployment;
 mod device;
 mod event;
 mod handlers;
+pub mod health;
 mod middlewares;
 mod modem;
 mod package;
@@ -46,7 +47,6 @@ mod smith;
 mod storage;
 mod telemetry;
 mod users;
-pub mod health;
 
 #[derive(Clone, Debug)]
 pub struct State {
@@ -167,9 +167,15 @@ async fn start_main_server(config: &'static Config, authorization: Authorization
 
     let recorder_handle = setup_metrics_recorder();
 
-    // build our application with a route
+    let mut api_doc = ApiDoc::openapi();
+
+    let (public_router, public_api) = OpenApiRouter::with_openapi(ApiDoc::openapi())
+        .routes(routes!(command::route::available_commands))
+        .split_for_parts();
+    api_doc.merge(public_api);
+
     #[allow(deprecated)]
-    let (router, api) = OpenApiRouter::with_openapi(ApiDoc::openapi())
+    let (protected_router, protected_api) = OpenApiRouter::with_openapi(ApiDoc::openapi())
         .routes(routes!(dashboard::route::api))
         .routes(routes!(handlers::auth::verify_token))
         .routes(routes!(
@@ -285,13 +291,12 @@ async fn start_main_server(config: &'static Config, authorization: Authorization
         ))
         .routes(routes!(handlers::devices::get_devices_new))
         .routes(routes!(event::route::sse_handler))
-        // Auth middleware. Every route prior to this is protected.
         .route_layer(middleware::from_fn(middlewares::authentication::check))
-        .routes(routes!(command::route::available_commands))
+        // TODO: Check why we have this, not good for all routes
         .layer(DefaultBodyLimit::max(891289600))
         .split_for_parts();
+    api_doc.merge(protected_api);
 
-    // !Routes after the auth layer are not protected!
     let (smith_router, smith_api) = OpenApiRouter::with_openapi(SmithApiDoc::openapi())
         .routes(routes!(smith::route::register_device))
         .routes(routes!(smith::route::home))
@@ -316,11 +321,12 @@ async fn start_main_server(config: &'static Config, authorization: Authorization
 
     let app = Router::new()
         .route("/", get(|| async { Redirect::temporary("/docs") }))
-        .merge(router)
+        .merge(public_router)
+        .merge(protected_router)
         .merge(smith_router)
         .route("/metrics", get(move || ready(recorder_handle.render())))
         .route("/health", get(health::check))
-        .merge(SwaggerUi::new("/docs").url("/openapi.json", api))
+        .merge(SwaggerUi::new("/docs").url("/openapi.json", api_doc))
         .merge(SwaggerUi::new("/smith/docs").url("/smith/openapi.json", smith_api))
         .layer(CorsLayer::permissive())
         .route_layer(middleware::from_fn(track_metrics))

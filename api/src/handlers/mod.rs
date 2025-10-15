@@ -12,12 +12,12 @@ use crate::db::{AuthorizationError, DBHandler, DeviceWithToken};
 use axum::{
     async_trait,
     extract::{Extension, FromRequestParts},
-    http::{request::Parts, StatusCode},
+    http::{StatusCode, request::Parts},
     response::{IntoResponse, Response},
 };
 use axum_extra::{
-    headers::{authorization::Bearer, Authorization},
     TypedHeader,
+    headers::{Authorization, authorization::Bearer},
 };
 use tracing::error;
 
