@@ -4,7 +4,6 @@ pub mod distributions;
 pub mod download;
 pub mod events;
 pub mod health;
-pub mod home;
 pub mod ip_address;
 pub mod network;
 pub mod packages;

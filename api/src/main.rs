@@ -41,6 +41,7 @@ mod middlewares;
 mod modem;
 mod package;
 mod rollout;
+mod smith;
 mod storage;
 mod telemetry;
 mod users;
@@ -290,8 +291,8 @@ async fn start_main_server(config: &'static Config, authorization: Authorization
 
     // !Routes after the auth layer are not protected!
     let (smith_router, smith_api) = OpenApiRouter::with_openapi(SmithApiDoc::openapi())
-        .routes(routes!(handlers::home::register_device))
-        .routes(routes!(handlers::home::home))
+        .routes(routes!(smith::route::register_device))
+        .routes(routes!(smith::route::home))
         .routes(routes!(telemetry::route::modem))
         .routes(routes!(telemetry::route::victoria))
         .routes(routes!(handlers::upload::upload_file))
