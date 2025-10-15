@@ -189,8 +189,8 @@ pub async fn create_network(
     .fetch_one(&state.pg_pool)
     .await
     .map_err(|err| {
-        error!("Failed to insert network {err}");
-        StatusCode::INTERNAL_SERVER_ERROR
+      error!("Failed to insert network {err}");
+      StatusCode::INTERNAL_SERVER_ERROR
     })?;
 
     Ok((StatusCode::CREATED, Json(created_network)))

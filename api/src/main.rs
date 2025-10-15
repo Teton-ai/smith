@@ -42,6 +42,7 @@ mod ip_address;
 mod metric;
 mod middlewares;
 mod modem;
+pub mod network;
 mod package;
 mod release;
 mod rollout;
@@ -181,12 +182,12 @@ async fn start_main_server(config: &'static Config, authorization: Authorization
         .routes(routes!(dashboard::route::api))
         .routes(routes!(auth::route::verify_token))
         .routes(routes!(
-            handlers::network::get_networks,
-            handlers::network::create_network
+            network::route::get_networks,
+            network::route::create_network
         ))
         .routes(routes!(
-            handlers::network::get_network_by_id,
-            handlers::network::delete_network_by_id
+            network::route::get_network_by_id,
+            network::route::delete_network_by_id
         ))
         .routes(routes!(device::route::get_devices))
         .routes(routes!(
