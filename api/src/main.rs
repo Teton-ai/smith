@@ -186,8 +186,8 @@ async fn start_main_server(config: &'static Config, authorization: Authorization
         ))
         .routes(routes!(handlers::devices::get_health_for_device))
         .routes(routes!(
-            handlers::packages::get_packages,
-            handlers::packages::release_package
+            package::route::get_packages,
+            package::route::release_package
         ))
         .routes(routes!(modem::route::get_modem_list))
         .routes(routes!(modem::route::get_modem_by_id))

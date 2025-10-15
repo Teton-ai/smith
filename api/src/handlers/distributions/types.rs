@@ -42,16 +42,6 @@ pub struct NewDistributionRelease {
     pub packages: Vec<i32>,
 }
 
-#[derive(Debug, Serialize, utoipa::ToSchema)]
-pub struct Package {
-    pub id: i32,
-    pub name: String,
-    pub version: String,
-    pub architecture: String,
-    pub file: String,
-    pub created_at: chrono::DateTime<chrono::Utc>,
-}
-
 #[derive(Debug, Deserialize, utoipa::ToSchema)]
 pub struct ReplacementPackage {
     pub id: i32,

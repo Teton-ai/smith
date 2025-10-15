@@ -1,8 +1,21 @@
+pub mod route;
+
 use crate::config::Config;
-use crate::handlers::distributions::types::Package;
 use crate::storage::Storage;
+use serde::Serialize;
 use sqlx::PgPool;
+use sqlx::types::chrono;
 use tracing::error;
+
+#[derive(Debug, Serialize, utoipa::ToSchema)]
+pub struct Package {
+    pub id: i32,
+    pub name: String,
+    pub version: String,
+    pub architecture: String,
+    pub file: String,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+}
 
 impl Package {
     pub async fn new(
