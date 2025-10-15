@@ -782,6 +782,10 @@ pub async fn get_variables(
     ),
     tag = DEVICES_TAG
 )]
+#[deprecated(
+    since = "0.2.64",
+    note = "Since labels have been released, tags concept be in version 0.74"
+)]
 pub async fn get_tag_for_device(
     Path(device_id): Path<String>,
     Extension(state): Extension<State>,
@@ -881,6 +885,10 @@ pub async fn get_health_for_device(
     ),
     tag = DEVICES_TAG
 )]
+#[deprecated(
+    since = "0.2.64",
+    note = "Since labels have been released, tags concept be in version 0.74"
+)]
 pub async fn delete_tag_from_device(
     Path((device_id, tag_id)): Path<(i32, i32)>,
     Extension(state): Extension<State>,
@@ -935,6 +943,10 @@ pub async fn delete_tag_from_device(
         ("Access Token" = [])
     ),
     tag = DEVICES_TAG
+)]
+#[deprecated(
+    since = "0.2.64",
+    note = "Since labels have been released, tags concept be in version 0.74"
 )]
 pub async fn add_tag_to_device(
     Path((device_id, tag_id)): Path<(i32, i32)>,
