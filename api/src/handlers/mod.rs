@@ -1,7 +1,6 @@
 pub mod auth;
 pub mod devices;
 pub mod distributions;
-pub mod ip_address;
 pub mod network;
 pub mod packages;
 pub mod releases;

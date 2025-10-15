@@ -1,7 +1,7 @@
 use crate::asset::Asset;
 use crate::db::{DBHandler, DeviceWithToken};
 use crate::device::{Device, RegistrationError};
-use crate::handlers::ip_address::IpAddressInfo;
+use crate::ip_address::IpAddressInfo;
 use crate::{State, storage};
 use axum::body::Body;
 use axum::extract::{ConnectInfo, Multipart, Path, Query};

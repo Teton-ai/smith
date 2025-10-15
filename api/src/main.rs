@@ -36,6 +36,7 @@ mod device;
 mod event;
 mod handlers;
 pub mod health;
+pub mod ip_address;
 mod metric;
 mod middlewares;
 mod modem;
@@ -213,10 +214,10 @@ async fn start_main_server(config: &'static Config, authorization: Authorization
         .routes(routes!(
             handlers::distributions::get_distribution_latest_release
         ))
-        .routes(routes!(handlers::ip_address::get_ip_addresses,))
+        .routes(routes!(ip_address::route::get_ip_addresses,))
         .routes(routes!(
-            handlers::ip_address::get_ip_address_info,
-            handlers::ip_address::update_ip_address
+            ip_address::route::get_ip_address_info,
+            ip_address::route::update_ip_address
         ))
         .routes(routes!(handlers::releases::get_releases))
         .routes(routes!(

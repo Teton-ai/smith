@@ -1,37 +1,15 @@
 use crate::State;
+use crate::ip_address::IpAddressInfo;
 use crate::middlewares::authorization;
 use crate::users::db::CurrentUser;
+use axum::extract::Path;
 use axum::http::StatusCode;
-use axum::response::Result;
-use axum::{Extension, Json, extract::Path};
+use axum::{Extension, Json};
 use serde::{Deserialize, Serialize};
-use sqlx::types::{chrono, ipnetwork::IpNetwork};
 use tracing::{debug, error};
 use utoipa::ToSchema;
 
 const IP_ADDRESS_TAG: &str = "ip_address";
-
-#[derive(Serialize, Deserialize, ToSchema, Debug)]
-pub struct IpAddressInfo {
-    pub id: i32,
-    #[schema(value_type = String, example = "192.168.1.1")]
-    pub ip_address: IpNetwork,
-    pub name: Option<String>,
-    pub continent: Option<String>,
-    pub continent_code: Option<String>,
-    pub country_code: Option<String>,
-    pub country: Option<String>,
-    pub region: Option<String>,
-    pub city: Option<String>,
-    pub isp: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub coordinates: Option<(f64, f64)>,
-    pub proxy: Option<bool>,
-    pub hosting: Option<bool>,
-    pub device_count: Option<i64>,
-    pub created_at: chrono::DateTime<chrono::Utc>,
-    pub updated_at: chrono::DateTime<chrono::Utc>,
-}
 
 #[utoipa::path(
     get,
@@ -51,7 +29,7 @@ pub async fn get_ip_address_info(
     Extension(state): Extension<State>,
     Extension(current_user): Extension<CurrentUser>,
     Path(ip_address_id): Path<i32>,
-) -> Result<Json<IpAddressInfo>, StatusCode> {
+) -> axum::response::Result<Json<IpAddressInfo>, StatusCode> {
     let allowed = authorization::check(current_user, "devices", "read");
 
     if !allowed {
@@ -62,7 +40,7 @@ pub async fn get_ip_address_info(
 
     let ip_info = sqlx::query!(
         r#"
-        SELECT 
+        SELECT
             ip.id,
             ip.ip_address,
             ip.name,
@@ -160,7 +138,7 @@ pub async fn get_ip_addresses(
 
     let ip_infos = sqlx::query!(
         r#"
-        SELECT 
+        SELECT
             ip.id,
             ip.ip_address,
             ip.name,
@@ -261,10 +239,10 @@ pub async fn update_ip_address(
     // Update the IP address
     let updated_ip = sqlx::query!(
         r#"
-        UPDATE ip_address 
+        UPDATE ip_address
         SET name = $1, updated_at = NOW()
         WHERE id = $2
-        RETURNING 
+        RETURNING
             id,
             ip_address,
             name,

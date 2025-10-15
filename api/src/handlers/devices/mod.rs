@@ -400,7 +400,7 @@ pub async fn get_devices(
                         _ => None,
                     };
 
-                    Some(crate::handlers::ip_address::IpAddressInfo {
+                    Some(crate::ip_address::IpAddressInfo {
                         id: row.ip_id.unwrap(),
                         ip_address: row.ip_address.unwrap(),
                         name: row.ip_name,
@@ -591,7 +591,7 @@ pub async fn get_devices(
                     _ => None,
                 };
 
-                Some(crate::handlers::ip_address::IpAddressInfo {
+                Some(crate::ip_address::IpAddressInfo {
                     id: row.ip_id.unwrap(),
                     ip_address: row.ip_address.unwrap(),
                     name: row.ip_name,
@@ -2091,7 +2091,7 @@ pub async fn get_device_info(
             _ => None,
         };
 
-        Some(crate::handlers::ip_address::IpAddressInfo {
+        Some(crate::ip_address::IpAddressInfo {
             id: device_row.ip_id.unwrap(),
             ip_address: device_row.ip_address.unwrap(),
             name: device_row.ip_name,
