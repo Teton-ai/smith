@@ -1,5 +1,4 @@
 pub mod auth;
-pub mod commands;
 pub mod devices;
 pub mod distributions;
 pub mod download;

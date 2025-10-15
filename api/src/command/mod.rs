@@ -1,13 +1,9 @@
+use sentry::types::Uuid;
 use serde::{Deserialize, Serialize};
 use smith::utils::schema::SafeCommandRequest;
-use sqlx::types::{Uuid, chrono};
+use sqlx::types::chrono;
 
-#[derive(Debug, Serialize)]
-pub struct Command {
-    pub id: i32,
-    pub operation: String,
-    pub data: serde_json::Value,
-}
+pub mod route;
 
 #[derive(Debug, Serialize, Deserialize, Clone, utoipa::ToSchema)]
 pub struct DeviceCommandResponse {
@@ -40,11 +36,11 @@ pub struct BundleWithCommandsPaginated {
     pub previous: Option<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct BundleWithRawResponses {
-    pub uuid: Uuid,
-    pub created_on: chrono::DateTime<chrono::Utc>,
-    pub responses: Option<String>,
+#[derive(Debug, Deserialize, utoipa::ToSchema)]
+pub struct BundleCommands {
+    pub devices: Vec<i32>,
+    #[schema(value_type = Vec<Object>)]
+    pub commands: Vec<SafeCommandRequest>,
 }
 
 #[derive(Debug, Serialize, Deserialize, sqlx::FromRow)]
@@ -63,11 +59,4 @@ pub struct BundleWithRawResponsesExplicit {
     pub response_at: Option<chrono::DateTime<chrono::Utc>>,
     pub response: Option<serde_json::Value>,
     pub status: Option<i32>,
-}
-
-#[derive(Debug, Deserialize, utoipa::ToSchema)]
-pub struct BundleCommands {
-    pub devices: Vec<i32>,
-    #[schema(value_type = Vec<Object>)]
-    pub commands: Vec<SafeCommandRequest>,
 }

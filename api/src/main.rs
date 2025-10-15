@@ -30,6 +30,7 @@ use utoipa_axum::{router::OpenApiRouter, routes};
 use utoipa_swagger_ui::SwaggerUi;
 
 mod asset;
+mod command;
 mod config;
 mod dashboard;
 mod db;
@@ -232,7 +233,7 @@ async fn start_main_server(config: &'static Config, authorization: Authorization
             handlers::devices::issue_commands_to_device,
             handlers::devices::get_all_commands_for_device
         ))
-        .routes(routes!(rollout::routes::api_rollout,))
+        .routes(routes!(rollout::route::api_rollout,))
         .routes(routes!(deployment::routes::api_get_deployment_devices))
         .routes(routes!(
             deployment::routes::api_release_deployment,
@@ -275,14 +276,14 @@ async fn start_main_server(config: &'static Config, authorization: Authorization
             handlers::tags::get_tags,
             handlers::tags::create_tag
         ))
-        .routes(routes!(handlers::commands::get_commands))
         .routes(routes!(
-            handlers::commands::get_bundle_commands,
-            handlers::commands::issue_commands_to_devices
+            command::route::get_bundle_commands,
+            command::route::issue_commands_to_devices
         ))
         .routes(routes!(handlers::devices::get_devices_new))
         // Auth middleware. Every route prior to this is protected.
         .route_layer(middleware::from_fn(middlewares::authentication::check))
+        .routes(routes!(command::route::available_commands))
         .routes(routes!(handlers::events::sse_handler))
         .layer(DefaultBodyLimit::max(891289600))
         .split_for_parts();

@@ -1,8 +1,8 @@
 use crate::State;
-use crate::rollout::schema::DistributionRolloutStats;
 use axum::extract::Path;
 use axum::http::StatusCode;
 use axum::{Extension, Json};
+use crate::rollout::DistributionRolloutStats;
 
 const TAG: &str = "rollout";
 

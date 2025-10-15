@@ -1,26 +1,18 @@
-pub mod types;
-
 use crate::State;
-use axum::{
-    Extension, Json,
-    extract::{Host, Query},
+use crate::command::{
+    BundleCommands, BundleWithCommands, BundleWithCommandsPaginated,
+    BundleWithRawResponsesExplicit, DeviceCommandResponse,
 };
-use axum::{http::StatusCode, response::Result};
-use sqlx::types::Uuid;
+use axum::Json;
+use axum::extract::{Host, Query};
+use axum::{Extension, http::StatusCode, response::Result};
+use sentry::types::Uuid;
+use serde::Deserialize;
+use smith::utils::schema::SafeCommandTx;
 use std::collections::HashMap;
 use tracing::error;
 
-use serde::Deserialize;
-use smith::utils::schema::SafeCommandTx;
-
 const COMMANDS_TAG: &str = "commands";
-
-#[derive(Deserialize, Debug)]
-pub struct PaginationUuid {
-    pub starting_after: Option<Uuid>,
-    pub ending_before: Option<Uuid>,
-    pub limit: Option<i32>,
-}
 
 #[utoipa::path(
     get,
@@ -28,13 +20,10 @@ pub struct PaginationUuid {
     responses(
         (status = 200, description = "List of available commands"),
     ),
-    security(
-        ("Access Token" = [])
-    ),
     tag = COMMANDS_TAG
 )]
-pub async fn get_commands() -> Result<Json<Vec<SafeCommandTx>>, StatusCode> {
-    let commands = vec![
+pub async fn available_commands() -> Result<Json<Vec<SafeCommandTx>>, StatusCode> {
+    Ok(Json(vec![
         SafeCommandTx::Ping,
         SafeCommandTx::Upgrade,
         SafeCommandTx::Restart,
@@ -55,15 +44,13 @@ pub async fn get_commands() -> Result<Json<Vec<SafeCommandTx>>, StatusCode> {
         SafeCommandTx::CheckOTAStatus,
         SafeCommandTx::StartOTA,
         SafeCommandTx::TestNetwork,
-    ];
-
-    Ok(Json(commands))
+    ]))
 }
 
 #[utoipa::path(
     post,
     path = "/commands/bundles",
-    request_body = types::BundleCommands,
+    request_body = BundleCommands,
     responses(
         (status = 201, description = "Commands issued successfully"),
         (status = 500, description = "Failed to issue commands", body = String),
@@ -76,7 +63,7 @@ pub async fn get_commands() -> Result<Json<Vec<SafeCommandTx>>, StatusCode> {
 #[tracing::instrument]
 pub async fn issue_commands_to_devices(
     Extension(state): Extension<State>,
-    Json(bundle_commands): Json<types::BundleCommands>,
+    Json(bundle_commands): Json<BundleCommands>,
 ) -> Result<StatusCode, StatusCode> {
     let mut tx = state.pg_pool.begin().await.map_err(|err| {
         error!("Failed to start transaction {err}");
@@ -125,11 +112,18 @@ pub async fn issue_commands_to_devices(
     Ok(StatusCode::CREATED)
 }
 
+#[derive(Deserialize, Debug)]
+pub struct PaginationUuid {
+    pub starting_after: Option<Uuid>,
+    pub ending_before: Option<Uuid>,
+    pub limit: Option<i32>,
+}
+
 #[utoipa::path(
     get,
     path = "/commands/bundles",
     responses(
-        (status = 200, description = "List of command bundles", body = types::BundleWithCommandsPaginated),
+        (status = 200, description = "List of command bundles", body = BundleWithCommandsPaginated),
         (status = 400, description = "Invalid pagination parameters"),
         (status = 500, description = "Failed to retrieve command bundles", body = String),
     ),
@@ -144,7 +138,7 @@ pub async fn get_bundle_commands(
     host: Host,
     Extension(state): Extension<State>,
     pagination: Query<PaginationUuid>,
-) -> Result<Json<types::BundleWithCommandsPaginated>, StatusCode> {
+) -> Result<Json<BundleWithCommandsPaginated>, StatusCode> {
     if pagination.starting_after.is_some() && pagination.ending_before.is_some() {
         return Err(StatusCode::BAD_REQUEST);
     }
@@ -170,7 +164,7 @@ pub async fn get_bundle_commands(
         "ORDER BY created_on DESC".to_string()
     };
 
-    let raw_bundles: Vec<types::BundleWithRawResponsesExplicit> = sqlx::query_as(&format!(
+    let raw_bundles: Vec<BundleWithRawResponsesExplicit> = sqlx::query_as(&format!(
         r#"WITH latest_bundles AS (
             SELECT *
             FROM command_bundles
@@ -207,7 +201,7 @@ pub async fn get_bundle_commands(
 
     raw_bundles.into_iter().for_each(|raw_bundle| {
         // check if we have already seen this bundle
-        let response = types::DeviceCommandResponse {
+        let response = DeviceCommandResponse {
             device: raw_bundle.device,
             serial_number: raw_bundle.serial_number,
             cmd_id: raw_bundle.cmd_id,
@@ -224,16 +218,16 @@ pub async fn get_bundle_commands(
 
         map_responses
             .entry((raw_bundle.uuid, raw_bundle.created_on))
-            .and_modify(|responses: &mut Vec<types::DeviceCommandResponse>| {
+            .and_modify(|responses: &mut Vec<DeviceCommandResponse>| {
                 responses.push(response.clone());
             })
             .or_insert(vec![response]);
     });
 
-    let mut bundles: Vec<types::BundleWithCommands> = Vec::new();
+    let mut bundles: Vec<BundleWithCommands> = Vec::new();
 
     for (uuid, created_on) in map_responses.keys() {
-        bundles.push(types::BundleWithCommands {
+        bundles.push(BundleWithCommands {
             uuid: *uuid,
             created_on: *created_on,
             responses: map_responses
@@ -324,7 +318,7 @@ pub async fn get_bundle_commands(
         None
     };
 
-    let bundles_paginated = types::BundleWithCommandsPaginated {
+    let bundles_paginated = BundleWithCommandsPaginated {
         bundles,
         next,
         previous,

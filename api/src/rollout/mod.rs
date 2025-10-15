@@ -1,8 +1,16 @@
-pub mod routes;
-pub mod schema;
+pub mod route;
 
-use crate::rollout::schema::DistributionRolloutStats;
+use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
+use utoipa::ToSchema;
+
+#[derive(Serialize, Deserialize, Debug, Clone, ToSchema)]
+pub struct DistributionRolloutStats {
+    pub distribution_id: i32,
+    pub total_devices: Option<i64>,
+    pub updated_devices: Option<i64>,
+    pub pending_devices: Option<i64>,
+}
 
 impl DistributionRolloutStats {
     pub async fn get(distribution_id: i32, pg_pool: &PgPool) -> anyhow::Result<Self> {
