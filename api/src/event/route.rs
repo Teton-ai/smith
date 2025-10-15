@@ -4,16 +4,10 @@ use axum::{
     response::sse::{Event, Sse},
 };
 use futures::stream::Stream;
-use serde::Serialize;
 use std::time::Duration;
 use tokio_stream::{StreamExt as _, wrappers::BroadcastStream};
 
 const EVENTS_TAG: &str = "events";
-
-#[derive(Debug, Clone, Serialize)]
-pub enum PublicEvent {
-    ApprovedDevice { serial_number: String },
-}
 
 #[utoipa::path(
     get,

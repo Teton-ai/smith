@@ -2,7 +2,6 @@ pub mod auth;
 pub mod devices;
 pub mod distributions;
 pub mod download;
-pub mod events;
 pub mod health;
 pub mod ip_address;
 pub mod network;

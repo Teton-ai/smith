@@ -1,6 +1,5 @@
 use super::distributions::types::Release;
 use crate::State;
-use crate::handlers::events::PublicEvent;
 use crate::middlewares::authorization;
 use crate::users::db::CurrentUser;
 use axum::extract::Host;
@@ -19,6 +18,7 @@ use crate::handlers::devices::types::DeviceHealth;
 use crate::handlers::distributions::db::db_get_release_by_id;
 use crate::modem::Modem;
 use smith::utils::schema;
+use crate::event::PublicEvent;
 
 const DEVICES_TAG: &str = "devices";
 

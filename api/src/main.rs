@@ -1,3 +1,4 @@
+use crate::event::PublicEvent;
 use axum::error_handling::HandleErrorLayer;
 use axum::extract::{DefaultBodyLimit, MatchedPath};
 use axum::http::StatusCode;
@@ -5,7 +6,6 @@ use axum::middleware::Next;
 use axum::response::{IntoResponse, Redirect};
 use axum::{Extension, Router, extract::Request, middleware, routing::get};
 use config::Config;
-use handlers::events::PublicEvent;
 use metrics_exporter_prometheus::{Matcher, PrometheusBuilder, PrometheusHandle};
 use middlewares::authorization::AuthorizationConfig;
 use sqlx::postgres::{PgPool, PgPoolOptions};
@@ -36,6 +36,7 @@ mod dashboard;
 mod db;
 mod deployment;
 mod device;
+mod event;
 mod handlers;
 mod middlewares;
 mod modem;
@@ -282,10 +283,10 @@ async fn start_main_server(config: &'static Config, authorization: Authorization
             command::route::issue_commands_to_devices
         ))
         .routes(routes!(handlers::devices::get_devices_new))
+        .routes(routes!(event::route::sse_handler))
         // Auth middleware. Every route prior to this is protected.
         .route_layer(middleware::from_fn(middlewares::authentication::check))
         .routes(routes!(command::route::available_commands))
-        .routes(routes!(handlers::events::sse_handler))
         .layer(DefaultBodyLimit::max(891289600))
         .split_for_parts();
 
