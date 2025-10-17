@@ -21,7 +21,7 @@ const IP_ADDRESS_TAG: &str = "ip_address";
         (status = 500, description = "Failed to retrieve IP address information", body = String),
     ),
     security(
-        ("Access Token" = [])
+        ("auth_token" = [])
     ),
     tag = IP_ADDRESS_TAG
 )]
@@ -120,7 +120,7 @@ pub struct UpdateIpAddressRequest {
         (status = 500, description = "Failed to retrieve IP addresses", body = String),
     ),
     security(
-        ("Access Token" = [])
+        ("auth_token" = [])
     ),
     tag = IP_ADDRESS_TAG
 )]
@@ -215,7 +215,7 @@ pub async fn get_ip_addresses(
         (status = 500, description = "Failed to update IP address", body = String),
     ),
     security(
-        ("Access Token" = [])
+        ("auth_token" = [])
     ),
     tag = IP_ADDRESS_TAG
 )]

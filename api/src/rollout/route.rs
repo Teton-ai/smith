@@ -13,7 +13,7 @@ const TAG: &str = "rollout";
         (status = StatusCode::OK, body = DistributionRolloutStats),
   ),
   security(
-      ("Access Token" = [])
+      ("auth_token" = [])
   ),
   tag = TAG
 )]

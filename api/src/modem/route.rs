@@ -14,7 +14,7 @@ const TAG: &str = "modems";
         (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to retrieve modems"),
     ),
     security(
-        ("Access Token" = [])
+        ("auth_token" = [])
     ),
     tag = TAG
 )]
@@ -40,7 +40,7 @@ pub async fn get_modem_list(
         (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to retrieve modem"),
     ),
     security(
-        ("Access Token" = [])
+        ("auth_token" = [])
     ),
     tag = TAG
 )]

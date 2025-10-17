@@ -60,7 +60,9 @@ pub async fn register_device(
   responses(
         (status = 200, description = "Device home response")
   ),
-  security(("Access Token" = []))
+  security(
+        ("device_token" = [])
+  ),
 )]
 #[tracing::instrument]
 pub async fn home(
@@ -113,7 +115,9 @@ pub async fn home(
         (status = 400, description = "Bad request"),
         (status = 500, description = "Internal server error")
   ),
-  security(("Access Token" = []))
+  security(
+        ("device_token" = [])
+  ),
 )]
 #[tracing::instrument]
 pub async fn download_file(
@@ -165,7 +169,9 @@ pub struct FetchPackageQuery {
         (status = 404, description = "Package not found"),
         (status = 500, description = "Internal server error")
   ),
-  security(("Access Token" = []))
+  security(
+        ("device_token" = [])
+  ),
 )]
 #[tracing::instrument]
 pub async fn fetch_package(
@@ -229,7 +235,9 @@ pub struct UploadResult {
         (status = 400, description = "Bad request"),
         (status = 500, description = "Internal server error")
   ),
-  security(("Access Token" = []))
+  security(
+        ("device_token" = [])
+  ),
 )]
 #[tracing::instrument]
 pub async fn upload_file(
@@ -285,7 +293,9 @@ pub async fn upload_file(
         (status = 200, description = "List of packages for the release"),
         (status = 500, description = "Internal server error")
   ),
-  security(("Access Token" = []))
+  security(
+        ("device_token" = [])
+  ),
 )]
 #[tracing::instrument]
 pub async fn list_release_packages(

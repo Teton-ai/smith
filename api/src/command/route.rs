@@ -56,7 +56,7 @@ pub async fn available_commands() -> Result<Json<Vec<SafeCommandTx>>, StatusCode
         (status = 500, description = "Failed to issue commands", body = String),
     ),
     security(
-        ("Access Token" = [])
+        ("auth_token" = [])
     ),
     tag = COMMANDS_TAG
 )]
@@ -128,7 +128,7 @@ pub struct PaginationUuid {
         (status = 500, description = "Failed to retrieve command bundles", body = String),
     ),
     security(
-        ("Access Token" = [])
+        ("auth_token" = [])
     ),
     tag = COMMANDS_TAG
 )]

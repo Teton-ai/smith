@@ -19,7 +19,7 @@ const DISTRIBUTIONS_TAG: &str = "distributions";
         (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to retrieve distributions"),
     ),
     security(
-        ("Access Token" = [])
+        ("auth_token" = [])
     ),
     tag = DISTRIBUTIONS_TAG
 )]
@@ -69,7 +69,7 @@ pub struct NewDistribution {
         (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to create distribution"),
     ),
     security(
-        ("Access Token" = [])
+        ("auth_token" = [])
     ),
     tag = DISTRIBUTIONS_TAG
 )]
@@ -112,7 +112,7 @@ pub async fn create_distribution(
         (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to retrieve distribution"),
     ),
     security(
-        ("Access Token" = [])
+        ("auth_token" = [])
     ),
     tag = DISTRIBUTIONS_TAG
 )]
@@ -156,7 +156,7 @@ pub async fn get_distribution_by_id(
         (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to distribution releases"),
     ),
     security(
-        ("Access Token" = [])
+        ("auth_token" = [])
     ),
     tag = DISTRIBUTIONS_TAG
 )]
@@ -194,7 +194,7 @@ pub async fn get_distribution_releases(
         (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to latest release"),
     ),
     security(
-        ("Access Token" = [])
+        ("auth_token" = [])
     ),
     tag = DISTRIBUTIONS_TAG
 )]
@@ -227,7 +227,7 @@ pub struct NewDistributionRelease {
         (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to create distribution release"),
     ),
     security(
-        ("Access Token" = [])
+        ("auth_token" = [])
     ),
     tag = DISTRIBUTIONS_TAG
 )]
@@ -304,7 +304,7 @@ pub async fn create_distribution_release(
         (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to delete distribution"),
     ),
     security(
-        ("Access Token" = [])
+        ("auth_token" = [])
     ),
     tag = DISTRIBUTIONS_TAG
 )]
@@ -331,7 +331,7 @@ pub async fn delete_distribution_by_id(
         (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to delete distribution"),
     ),
     security(
-        ("Access Token" = [])
+        ("auth_token" = [])
     ),
     tag = DISTRIBUTIONS_TAG
 )]

@@ -61,7 +61,7 @@ pub async fn get_device(
         (status = 500, description = "Failed to retrieve devices", body = String),
     ),
     security(
-        ("Access Token" = [])
+        ("auth_token" = [])
     ),
     tag = DEVICES_TAG
 )]
@@ -323,7 +323,7 @@ pub struct DeviceFilter {
         (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to retrieve devices"),
     ),
     security(
-        ("Access Token" = [])
+        ("auth_token" = [])
     ),
     tag = DEVICES_TAG
 )]
@@ -532,7 +532,7 @@ pub async fn get_devices(
         (status = 500, description = "Failed to retrieve tags", body = String),
     ),
     security(
-        ("Access Token" = [])
+        ("auth_token" = [])
     ),
     tag = DEVICES_TAG
 )]
@@ -570,7 +570,7 @@ pub async fn get_tags(Extension(state): Extension<State>) -> Result<Json<Vec<Tag
         (status = 500, description = "Failed to retrieve variables", body = String),
     ),
     security(
-        ("Access Token" = [])
+        ("auth_token" = [])
     ),
     tag = DEVICES_TAG
 )]
@@ -605,7 +605,7 @@ pub async fn get_variables(
         (status = 500, description = "Failed to retrieve tags", body = String),
     ),
     security(
-        ("Access Token" = [])
+        ("auth_token" = [])
     ),
     tag = DEVICES_TAG
 )]
@@ -657,7 +657,7 @@ pub async fn get_tag_for_device(
         (status = 500, description = "Failed to retrieve device", body = String),
     ),
     security(
-        ("Access Token" = [])
+        ("auth_token" = [])
     ),
     tag = DEVICES_TAG
 )]
@@ -708,7 +708,7 @@ pub async fn get_health_for_device(
         (status = 500, description = "Failed to delete tag", body = String),
     ),
     security(
-        ("Access Token" = [])
+        ("auth_token" = [])
     ),
     tag = DEVICES_TAG
 )]
@@ -767,7 +767,7 @@ pub async fn delete_tag_from_device(
         (status = 500, description = "Failed to add tag", body = String),
     ),
     security(
-        ("Access Token" = [])
+        ("auth_token" = [])
     ),
     tag = DEVICES_TAG
 )]
@@ -830,7 +830,7 @@ pub async fn add_tag_to_device(
         (status = 500, description = "Failed to delete variable", body = String),
     ),
     security(
-        ("Access Token" = [])
+        ("auth_token" = [])
     ),
     tag = DEVICES_TAG
 )]
@@ -887,7 +887,7 @@ pub async fn delete_variable_from_device(
         (status = 500, description = "Failed to update variable", body = String),
     ),
     security(
-        ("Access Token" = [])
+        ("auth_token" = [])
     ),
     tag = DEVICES_TAG
 )]
@@ -953,7 +953,7 @@ pub async fn update_variable_for_device(
         (status = 500, description = "Failed to retrieve variables", body = String),
     ),
     security(
-        ("Access Token" = [])
+        ("auth_token" = [])
     ),
     tag = DEVICES_TAG
 )]
@@ -992,7 +992,7 @@ pub async fn get_variables_for_device(
         (status = 500, description = "Failed to add variable", body = String),
     ),
     security(
-        ("Access Token" = [])
+        ("auth_token" = [])
     ),
     tag = DEVICES_TAG
 )]
@@ -1059,7 +1059,7 @@ pub async fn add_variable_to_device(
         (status = 500, description = "Failed to update note", body = String),
     ),
     security(
-        ("Access Token" = [])
+        ("auth_token" = [])
     ),
     tag = DEVICES_TAG
 )]
@@ -1120,7 +1120,7 @@ pub async fn update_note_for_device(
         (status = 500, description = "Failed to retrieve device ledger", body = String),
     ),
     security(
-        ("Access Token" = [])
+        ("auth_token" = [])
     ),
     tag = DEVICES_TAG
 )]
@@ -1296,7 +1296,7 @@ pub struct PaginationId {
         (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to fetch device commands"),
     ),
     security(
-        ("Access Token" = [])
+        ("auth_token" = [])
     ),
     tag = DEVICES_TAG
 )]
@@ -1540,7 +1540,7 @@ pub async fn get_all_commands_for_device(
         (status = 500, description = "Failed to retrieve device release", body = String),
     ),
     security(
-        ("Access Token" = [])
+        ("auth_token" = [])
     ),
     tag = DEVICES_TAG
 )]
@@ -1633,7 +1633,7 @@ pub async fn get_device_release(
         (status = 500, description = "Failed to update device target release", body = String),
     ),
     security(
-        ("Access Token" = [])
+        ("auth_token" = [])
     ),
     tag = DEVICES_TAG
 )]
@@ -1684,7 +1684,7 @@ pub async fn update_device_target_release(
         (status = 500, description = "Failed to update devices target release", body = String),
     ),
     security(
-        ("Access Token" = [])
+        ("auth_token" = [])
     ),
     tag = DEVICES_TAG
 )]
@@ -1734,7 +1734,7 @@ pub async fn update_devices_target_release(
         (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to issue command to device"),
     ),
     security(
-        ("Access Token" = [])
+        ("auth_token" = [])
     ),
     tag = DEVICES_TAG
 )]
@@ -1818,7 +1818,7 @@ pub async fn issue_commands_to_device(
         (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to retrieve device"),
     ),
     security(
-        ("Access Token" = [])
+        ("auth_token" = [])
     ),
     tag = DEVICES_TAG
 )]
@@ -2026,7 +2026,7 @@ pub async fn get_device_info(
         (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to delete device"),
     ),
     security(
-        ("Access Token" = [])
+        ("auth_token" = [])
     ),
     tag = DEVICES_TAG
 )]
@@ -2070,7 +2070,7 @@ pub struct UpdateDeviceRequest {
         (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to update device"),
     ),
     security(
-        ("Access Token" = [])
+        ("auth_token" = [])
     ),
     tag = DEVICES_TAG
 )]
@@ -2126,7 +2126,7 @@ pub async fn update_device(
         (status = 500, description = "Failed to approve device", body = String),
     ),
     security(
-        ("Access Token" = [])
+        ("auth_token" = [])
     ),
     tag = DEVICES_TAG
 )]
@@ -2225,7 +2225,7 @@ pub async fn approve_device(
         (status = 500, description = "Failed to revoke device approval", body = String),
     ),
     security(
-        ("Access Token" = [])
+        ("auth_token" = [])
     ),
     tag = DEVICES_TAG
 )]
@@ -2278,7 +2278,7 @@ pub async fn revoke_device(
         (status = 500, description = "Failed to delete device token", body = String),
     ),
     security(
-        ("Access Token" = [])
+        ("auth_token" = [])
     ),
     tag = DEVICES_TAG
 )]
@@ -2328,7 +2328,7 @@ pub async fn delete_token(
         (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to retrieve network"),
     ),
     security(
-        ("Access Token" = [])
+        ("auth_token" = [])
     ),
     tag = DEVICES_TAG
 )]
@@ -2370,7 +2370,7 @@ pub async fn get_network_for_device(
         (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to update network"),
     ),
     security(
-        ("Access Token" = [])
+        ("auth_token" = [])
     ),
     tag = DEVICES_TAG
 )]
@@ -2402,7 +2402,7 @@ pub async fn update_device_network(
         (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to update networks"),
     ),
     security(
-        ("Access Token" = [])
+        ("auth_token" = [])
     ),
     tag = DEVICES_TAG
 )]

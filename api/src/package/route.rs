@@ -18,7 +18,7 @@ const PACKAGES_TAG: &str = "packages";
         (status = 500, description = "Failure", body = String),
     ),
     security(
-        ("Access Token" = [])
+        ("auth_token" = [])
     ),
     tag = PACKAGES_TAG
 )]
@@ -56,7 +56,7 @@ pub struct ReleasePackageRequest {
         (status = 500, description = "Failure", body = String),
     ),
     security(
-        ("Access Token" = [])
+        ("auth_token" = [])
     ),
     tag = PACKAGES_TAG
 )]
