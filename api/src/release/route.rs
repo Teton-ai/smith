@@ -18,7 +18,7 @@ const RELEASES_TAG: &str = "releases";
         (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to retrieve releases"),
     ),
     security(
-        ("Access Token" = [])
+        ("auth_token" = [])
     ),
     tag = RELEASES_TAG
 )]
@@ -55,7 +55,7 @@ pub async fn get_releases(
         (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to retrieve release"),
     ),
     security(
-        ("Access Token" = [])
+        ("auth_token" = [])
     ),
     tag = RELEASES_TAG
 )]
@@ -92,7 +92,7 @@ pub struct UpdateRelease {
         (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to update release"),
     ),
     security(
-        ("Access Token" = [])
+        ("auth_token" = [])
     ),
     tag = RELEASES_TAG
 )]
@@ -153,7 +153,7 @@ pub struct ReplacementPackage {
         (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to add package to release"),
     ),
     security(
-        ("Access Token" = [])
+        ("auth_token" = [])
     ),
     tag = RELEASES_TAG
 )]
@@ -203,7 +203,7 @@ pub async fn add_package_to_release(
         (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to retrieve release packages"),
     ),
     security(
-        ("Access Token" = [])
+        ("auth_token" = [])
     ),
     tag = RELEASES_TAG
 )]
@@ -241,7 +241,7 @@ pub async fn get_distribution_release_packages(
         (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to update release package"),
     ),
     security(
-        ("Access Token" = [])
+        ("auth_token" = [])
     ),
     tag = RELEASES_TAG
 )]
@@ -291,7 +291,7 @@ pub async fn update_package_for_release(
         (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to delete the package from the release"),
     ),
     security(
-        ("Access Token" = [])
+        ("auth_token" = [])
     ),
     tag = RELEASES_TAG
 )]

@@ -15,7 +15,7 @@ const TAGS_TAG: &str = "tags";
         (status = 500, description = "Failed to retrieve tags", body = String),
     ),
     security(
-        ("Access Token" = [])
+        ("auth_token" = [])
     ),
     tag = TAGS_TAG
 )]
@@ -54,7 +54,7 @@ pub async fn get_tags(
         (status = 500, description = "Failed to create tag", body = String),
     ),
     security(
-        ("Access Token" = [])
+        ("auth_token" = [])
     ),
     tag = TAGS_TAG
 )]

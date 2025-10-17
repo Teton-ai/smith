@@ -27,7 +27,7 @@ pub struct DeviceAuthResponse {
         (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to retrieve device auth"),
     ),
     security(
-        ("Access Token" = [])
+        ("auth_token" = [])
     ),
     tag = AUTH_TAG
 )]

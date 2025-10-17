@@ -13,7 +13,7 @@ const TAG: &str = "deployment";
         (status = StatusCode::OK, body = Deployment),
   ),
   security(
-      ("Access Token" = [])
+      ("auth_token" = [])
   ),
   tag = TAG
 )]
@@ -37,7 +37,7 @@ pub async fn api_get_release_deployment(
         (status = StatusCode::OK, body = Deployment),
   ),
   security(
-      ("Access Token" = [])
+      ("auth_token" = [])
   ),
   tag = TAG
 )]
@@ -58,7 +58,7 @@ pub async fn api_release_deployment(
         (status = StatusCode::OK, body = Deployment),
   ),
   security(
-      ("Access Token" = [])
+      ("auth_token" = [])
   ),
   tag = TAG
 )]
@@ -79,7 +79,7 @@ pub async fn api_release_deployment_check_done(
         (status = StatusCode::OK, body = Vec<DeploymentDeviceWithStatus>),
   ),
   security(
-      ("Access Token" = [])
+      ("auth_token" = [])
   ),
   tag = TAG
 )]

@@ -68,7 +68,9 @@ pub struct NewModem {
         (status = 200, description = "Modem telemetry data processed successfully"),
         (status = 500, description = "Internal server error")
     ),
-    security(("Access Token" = []))
+    security(
+        ("device_token" = [])
+    ),
 )]
 pub async fn modem(
     device: DeviceWithToken,

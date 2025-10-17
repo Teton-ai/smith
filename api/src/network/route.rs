@@ -26,7 +26,7 @@ pub struct SerialNumbers {
         (status = 200, description = "List of networks retrieved successfully"),
         (status = 500, description = "Failed to retrieve networks", body = String),
     ),
-    security(("Access Token" = [])),
+    security(("auth_token" = [])),
     tag = NETWORKS_TAG
 )]
 pub async fn get_networks(
@@ -91,7 +91,7 @@ pub async fn get_networks(
         (status = 500, description = "Failed to retrieve network", body = String),
     ),
     security(
-        ("Access Token" = [])
+        ("auth_token" = [])
     ),
     tag = NETWORKS_TAG
 )]
@@ -136,7 +136,7 @@ pub async fn get_network_by_id(
         (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to delete network", body = String),
     ),
     security(
-        ("Access Token" = [])
+        ("auth_token" = [])
     ),
     tag = NETWORKS_TAG
 )]
@@ -164,7 +164,7 @@ pub async fn delete_network_by_id(
         (status = 500, description = "Failed to create network", body = String),
     ),
     security(
-        ("Access Token" = [])
+        ("auth_token" = [])
     ),
     tag = NETWORKS_TAG
 )]
