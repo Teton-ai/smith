@@ -1,8 +1,9 @@
 use crate::State;
 use crate::device::{
-    CommandsPaginated, Device, DeviceCommandResponse, DeviceHealth, DeviceLabels, DeviceLedgerItem,
-    DeviceLedgerItemPaginated, DeviceNetwork, DeviceRelease, LeanDevice, LeanResponse, NewVariable,
-    Note, Tag, UpdateDeviceRelease, UpdateDevicesRelease, Variable, helpers,
+    AuthDevice, CommandsPaginated, Device, DeviceCommandResponse, DeviceHealth, DeviceLabels,
+    DeviceLedgerItem, DeviceLedgerItemPaginated, DeviceNetwork, DeviceRelease, LeanDevice,
+    LeanResponse, NewVariable, Note, RawDevice, Tag, UpdateDeviceRelease, UpdateDevicesRelease,
+    Variable, helpers,
 };
 use crate::event::PublicEvent;
 use crate::middlewares::authorization;
@@ -21,12 +22,31 @@ use sqlx::Row;
 use std::collections::HashMap;
 use tracing::{debug, error};
 
+const DEVICE_TAG: &str = "device";
 const DEVICES_TAG: &str = "devices";
 
 #[derive(Deserialize, Debug)]
 pub struct LeanDeviceFilter {
     reverse: Option<bool>,
     limit: Option<i64>,
+}
+
+#[utoipa::path(
+    get,
+    path = "/device",
+    responses(
+        (status = StatusCode::OK, description = "Return Device Information", body = RawDevice),
+
+    ),
+    security(
+        ("device_token" = [])
+    ),
+    tag = DEVICE_TAG,
+)]
+pub async fn get_device(
+    Extension(AuthDevice(device)): Extension<AuthDevice>,
+) -> axum::response::Result<Json<RawDevice>, StatusCode> {
+    Ok(Json(device))
 }
 
 // TODO: this is getting crazy huge, maybe it would be nice to have an handler

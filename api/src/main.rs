@@ -21,7 +21,7 @@ use tower_http::cors::CorsLayer;
 use tower_http::decompression::RequestDecompressionLayer;
 use tracing::info;
 use tracing_subscriber::{EnvFilter, prelude::*};
-use utoipa::openapi::security::{ApiKey, ApiKeyValue, SecurityScheme};
+use utoipa::openapi::security::{ApiKey, ApiKeyValue, Http, HttpAuthScheme, SecurityScheme};
 use utoipa::{Modify, OpenApi};
 use utoipa_axum::{router::OpenApiRouter, routes};
 use utoipa_swagger_ui::SwaggerUi;
@@ -118,6 +118,14 @@ impl Modify for SecurityAddon {
             components.add_security_scheme(
                 "Access Token",
                 SecurityScheme::ApiKey(ApiKey::Header(ApiKeyValue::new("Authorization"))),
+            );
+            components.add_security_scheme(
+                "device_token",
+                SecurityScheme::Http({
+                    let mut http = Http::new(HttpAuthScheme::Bearer);
+                    http.description = Some("Device token for authentication".to_string());
+                    http
+                }),
             )
         }
     }
@@ -172,9 +180,16 @@ async fn start_main_server(config: &'static Config, authorization: Authorization
 
     let mut api_doc = ApiDoc::openapi();
 
+    let (device_router, device_api) = OpenApiRouter::with_openapi(ApiDoc::openapi())
+        .routes(routes!(device::route::get_device))
+        .route_layer(middleware::from_fn(device::Device::middleware))
+        .split_for_parts();
+    api_doc.merge(device_api);
+
     let (public_router, public_api) = OpenApiRouter::with_openapi(ApiDoc::openapi())
         .routes(routes!(command::route::available_commands))
         .split_for_parts();
+
     api_doc.merge(public_api);
 
     #[allow(deprecated)]
@@ -325,6 +340,7 @@ async fn start_main_server(config: &'static Config, authorization: Authorization
     let app = Router::new()
         .route("/", get(|| async { Redirect::temporary("/docs") }))
         .merge(public_router)
+        .merge(device_router)
         .merge(protected_router)
         .merge(smith_router)
         .route("/metrics", get(move || ready(recorder_handle.render())))

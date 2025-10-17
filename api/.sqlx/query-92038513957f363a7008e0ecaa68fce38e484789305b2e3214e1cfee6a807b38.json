@@ -1,0 +1,118 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT * FROM device WHERE token = $1;",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "serial_number",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "wifi_mac",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "created_on",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 4,
+        "name": "modified_on",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 5,
+        "name": "last_ping",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 6,
+        "name": "note",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "approved",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 8,
+        "name": "token",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 9,
+        "name": "release_id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 10,
+        "name": "target_release_id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 11,
+        "name": "system_info",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 12,
+        "name": "network_id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 13,
+        "name": "modem_id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 14,
+        "name": "archived",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 15,
+        "name": "ip_address_id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 16,
+        "name": "labels",
+        "type_info": "Jsonb"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      false,
+      false,
+      true,
+      true,
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      false,
+      true,
+      false
+    ]
+  },
+  "hash": "92038513957f363a7008e0ecaa68fce38e484789305b2e3214e1cfee6a807b38"
+}
