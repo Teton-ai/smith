@@ -15,6 +15,8 @@ use axum_extra::{
 };
 use tracing::error;
 
+// TODO: DEPRECATED: This FromRequestParts implementation is deprecated.
+// Use middleware::from_fn(device::Device::middleware) instead for device authentication.
 // https://docs.rs/axum/latest/axum/extract/index.html#accessing-other-extractors-in-fromrequest-or-fromrequestparts-implementations
 #[async_trait]
 impl<S> FromRequestParts<S> for DeviceWithToken
