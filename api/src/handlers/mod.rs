@@ -2,7 +2,8 @@ pub mod packages;
 pub mod tags;
 
 use crate::State;
-use crate::db::{AuthorizationError, DBHandler, DeviceWithToken};
+use crate::db::DeviceWithToken;
+use crate::device::Device;
 use axum::{
     async_trait,
     extract::{Extension, FromRequestParts},
@@ -15,6 +16,8 @@ use axum_extra::{
 };
 use tracing::error;
 
+// TODO: DEPRECATED: This FromRequestParts implementation is deprecated.
+// Use middleware::from_fn(device::Device::middleware) instead for device authentication.
 // https://docs.rs/axum/latest/axum/extract/index.html#accessing-other-extractors-in-fromrequest-or-fromrequestparts-implementations
 #[async_trait]
 impl<S> FromRequestParts<S> for DeviceWithToken
@@ -36,18 +39,17 @@ where
             .await
             .map_err(|err| err.into_response())?;
 
-        let device = DBHandler::validate_token(bearer.token(), &state.pg_pool)
+        let device = Device::get_device_from_token(bearer.token().to_string(), &state.pg_pool)
             .await
-            .map_err(|auth_err| match auth_err {
-                AuthorizationError::UnauthorizedDevice => {
-                    (StatusCode::UNAUTHORIZED,).into_response()
-                }
-                AuthorizationError::DatabaseError(err) => {
-                    error!("Database error: {:?}", err);
-                    (StatusCode::INTERNAL_SERVER_ERROR,).into_response()
-                }
-            })?;
+            .map_err(|err| {
+                error!("Database error: {:?}", err);
+                (StatusCode::INTERNAL_SERVER_ERROR,).into_response()
+            })?
+            .ok_or_else(|| (StatusCode::UNAUTHORIZED,).into_response())?;
 
-        Ok(device) // Assuming `Self` can be created from a token
+        Ok(DeviceWithToken {
+            id: device.id,
+            serial_number: device.serial_number,
+        })
     }
 }

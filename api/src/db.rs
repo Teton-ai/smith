@@ -6,7 +6,6 @@ use smith::utils::schema;
 use smith::utils::schema::SafeCommandTx::{UpdateNetwork, UpdateVariables};
 use smith::utils::schema::{HomePost, NetworkType, SafeCommandRequest, SafeCommandRx};
 use sqlx::PgPool;
-use thiserror::Error;
 use tracing::{debug, error};
 
 // TODO: Get rid of this db.rs, legacy design and ugly
@@ -26,29 +25,6 @@ pub struct CommandsDB {
 pub struct DBHandler;
 
 impl DBHandler {
-    pub async fn validate_token(
-        token: &str,
-        pool: &PgPool,
-    ) -> Result<DeviceWithToken, AuthorizationError> {
-        let device = sqlx::query_as!(
-            DeviceWithToken,
-            "SELECT id, serial_number FROM device WHERE token is not null AND token = $1",
-            token
-        )
-        .fetch_optional(pool)
-        .await
-        .map_err(|err| {
-            error!("Failed to fetch device information {err}");
-            AuthorizationError::DatabaseError(err)
-        })?;
-
-        if let Some(device) = device {
-            return Ok(device);
-        }
-
-        Err(AuthorizationError::UnauthorizedDevice)
-    }
-
     pub async fn save_responses(
         device: &DeviceWithToken,
         payload: HomePost,
@@ -286,12 +262,4 @@ impl DBHandler {
         tx.commit().await?;
         Ok(command_ids)
     }
-}
-
-#[derive(Error, Debug)]
-pub enum AuthorizationError {
-    #[error("Database error")]
-    DatabaseError(#[from] sqlx::Error),
-    #[error("Device is not authorized to access the API")]
-    UnauthorizedDevice,
 }

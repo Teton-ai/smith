@@ -1,8 +1,9 @@
 use crate::State;
 use crate::device::{
-    CommandsPaginated, Device, DeviceCommandResponse, DeviceHealth, DeviceLabels, DeviceLedgerItem,
-    DeviceLedgerItemPaginated, DeviceNetwork, DeviceRelease, LeanDevice, LeanResponse, NewVariable,
-    Note, Tag, UpdateDeviceRelease, UpdateDevicesRelease, Variable, helpers,
+    AuthDevice, CommandsPaginated, Device, DeviceCommandResponse, DeviceHealth, DeviceLabels,
+    DeviceLedgerItem, DeviceLedgerItemPaginated, DeviceNetwork, DeviceRelease, LeanDevice,
+    LeanResponse, NewVariable, Note, RawDevice, Tag, UpdateDeviceRelease, UpdateDevicesRelease,
+    Variable, helpers,
 };
 use crate::event::PublicEvent;
 use crate::middlewares::authorization;
@@ -21,12 +22,31 @@ use sqlx::Row;
 use std::collections::HashMap;
 use tracing::{debug, error};
 
+const DEVICE_TAG: &str = "device";
 const DEVICES_TAG: &str = "devices";
 
 #[derive(Deserialize, Debug)]
 pub struct LeanDeviceFilter {
     reverse: Option<bool>,
     limit: Option<i64>,
+}
+
+#[utoipa::path(
+    get,
+    path = "/device",
+    responses(
+        (status = StatusCode::OK, description = "Return Device Information", body = RawDevice),
+
+    ),
+    security(
+        ("device_token" = [])
+    ),
+    tag = DEVICE_TAG,
+)]
+pub async fn get_device(
+    Extension(AuthDevice(device)): Extension<AuthDevice>,
+) -> axum::response::Result<Json<RawDevice>, StatusCode> {
+    Ok(Json(device))
 }
 
 // TODO: this is getting crazy huge, maybe it would be nice to have an handler
@@ -285,15 +305,14 @@ pub async fn get_devices_new(
     }))
 }
 
+/// Query filter for device listing.
 #[derive(Deserialize, Debug)]
 pub struct DeviceFilter {
     pub serial_number: Option<String>,
+    /// Filter by approved status. If None, only approved devices are included by default.
     pub approved: Option<bool>,
-    #[deprecated(
-        since = "0.2.64",
-        note = "Since labels have been released, tags concept be in version 0.74"
-    )]
-    pub tag: Option<String>,
+    /// Filter by archived status. If None, archived devices are excluded by default.
+    pub archived: Option<bool>,
 }
 
 #[utoipa::path(
@@ -312,199 +331,6 @@ pub async fn get_devices(
     Extension(state): Extension<State>,
     filter: Query<DeviceFilter>,
 ) -> axum::response::Result<Json<Vec<Device>>, StatusCode> {
-    // TODO: Remove this once fully deprecated
-    if let Some(tag) = &filter.tag {
-        let devices = sqlx::query!(
-            r#"SELECT
-                d.id,
-                d.serial_number,
-                d.note,
-                d.last_ping as last_seen,
-                d.created_on,
-                d.approved,
-                d.token IS NOT NULL as has_token,
-                d.release_id,
-                d.target_release_id,
-                d.system_info,
-                d.modem_id,
-                d.ip_address_id,
-                d.labels,
-                ip.id as "ip_id?",
-                ip.ip_address as "ip_address?",
-                ip.name as "ip_name?",
-                ip.continent as "ip_continent?",
-                ip.continent_code as "ip_continent_code?",
-                ip.country_code as "ip_country_code?",
-                ip.country as "ip_country?",
-                ip.region as "ip_region?",
-                ip.city as "ip_city?",
-                ip.isp as "ip_isp?",
-                ip.coordinates[0] as "ip_longitude?",
-                ip.coordinates[1] as "ip_latitude?",
-                ip.proxy as "ip_proxy?",
-                ip.hosting as "ip_hosting?",
-                ip.created_at as "ip_created_at?",
-                ip.updated_at as "ip_updated_at?",
-                m.id as "modem_id_nested?",
-                m.imei as "modem_imei?",
-                m.network_provider as "modem_network_provider?",
-                m.updated_at as "modem_updated_at?",
-                m.created_at as "modem_created_at?",
-                r.id as "release_id_nested?",
-                r.distribution_id as "release_distribution_id?",
-                rd.architecture as "release_distribution_architecture?",
-                rd.name as "release_distribution_name?",
-                r.version as "release_version?",
-                r.draft as "release_draft?",
-                r.yanked as "release_yanked?",
-                r.created_at as "release_created_at?",
-                r.user_id as "release_user_id?",
-                tr.id as "target_release_id_nested?",
-                tr.distribution_id as "target_release_distribution_id?",
-                trd.architecture as "target_release_distribution_architecture?",
-                trd.name as "target_release_distribution_name?",
-                tr.version as "target_release_version?",
-                tr.draft as "target_release_draft?",
-                tr.yanked as "target_release_yanked?",
-                tr.created_at as "target_release_created_at?",
-                tr.user_id as "target_release_user_id?",
-                dn.network_score as "network_score?",
-                dn.source as "network_source?",
-                dn.updated_at as "network_updated_at?"
-            FROM device d
-            JOIN tag_device td ON d.id = td.device_id
-            JOIN tag t ON td.tag_id = t.id
-            LEFT JOIN ip_address ip ON d.ip_address_id = ip.id
-            LEFT JOIN modem m ON d.modem_id = m.id
-            LEFT JOIN release r ON d.release_id = r.id
-            LEFT JOIN distribution rd ON r.distribution_id = rd.id
-            LEFT JOIN release tr ON d.target_release_id = tr.id
-            LEFT JOIN distribution trd ON tr.distribution_id = trd.id
-            LEFT JOIN device_network dn ON d.id = dn.device_id
-            WHERE t.name = $1
-            ORDER BY d.serial_number"#,
-            tag
-        )
-        .fetch_all(&state.pg_pool)
-        .await
-        .map_err(|err| {
-            error!("Failed to get devices {err}");
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?;
-
-        let devices: Vec<Device> = devices
-            .into_iter()
-            .map(|row| {
-                let ip_address = if row.ip_id.is_some() {
-                    let coordinates = match (row.ip_longitude, row.ip_latitude) {
-                        (Some(lon), Some(lat)) => Some((lon, lat)),
-                        _ => None,
-                    };
-
-                    Some(crate::ip_address::IpAddressInfo {
-                        id: row.ip_id.unwrap(),
-                        ip_address: row.ip_address.unwrap(),
-                        name: row.ip_name,
-                        continent: row.ip_continent,
-                        continent_code: row.ip_continent_code,
-                        country_code: row.ip_country_code,
-                        country: row.ip_country,
-                        region: row.ip_region,
-                        city: row.ip_city,
-                        isp: row.ip_isp,
-                        coordinates,
-                        proxy: row.ip_proxy,
-                        hosting: row.ip_hosting,
-                        device_count: None,
-                        created_at: row.ip_created_at.unwrap(),
-                        updated_at: row.ip_updated_at.unwrap(),
-                    })
-                } else {
-                    None
-                };
-
-                let modem = if row.modem_id_nested.is_some() {
-                    Some(Modem {
-                        id: row.modem_id_nested.unwrap(),
-                        imei: row.modem_imei.unwrap(),
-                        network_provider: row.modem_network_provider.unwrap(),
-                        updated_at: row.modem_updated_at.unwrap(),
-                        created_at: row.modem_created_at.unwrap(),
-                    })
-                } else {
-                    None
-                };
-
-                let release = if row.release_id_nested.is_some() {
-                    Some(Release {
-                        id: row.release_id_nested.unwrap(),
-                        distribution_id: row.release_distribution_id.unwrap(),
-                        distribution_architecture: row.release_distribution_architecture.unwrap(),
-                        distribution_name: row.release_distribution_name.unwrap(),
-                        version: row.release_version.unwrap(),
-                        draft: row.release_draft.unwrap(),
-                        yanked: row.release_yanked.unwrap(),
-                        created_at: row.release_created_at.unwrap(),
-                        user_id: row.release_user_id,
-                    })
-                } else {
-                    None
-                };
-
-                let target_release = if row.target_release_id_nested.is_some() {
-                    Some(Release {
-                        id: row.target_release_id_nested.unwrap(),
-                        distribution_id: row.target_release_distribution_id.unwrap(),
-                        distribution_architecture: row
-                            .target_release_distribution_architecture
-                            .unwrap(),
-                        distribution_name: row.target_release_distribution_name.unwrap(),
-                        version: row.target_release_version.unwrap(),
-                        draft: row.target_release_draft.unwrap(),
-                        yanked: row.target_release_yanked.unwrap(),
-                        created_at: row.target_release_created_at.unwrap(),
-                        user_id: row.target_release_user_id,
-                    })
-                } else {
-                    None
-                };
-
-                let network = if row.network_score.is_some() {
-                    Some(DeviceNetwork {
-                        network_score: row.network_score,
-                        source: row.network_source,
-                        updated_at: row.network_updated_at,
-                    })
-                } else {
-                    None
-                };
-
-                Device {
-                    id: row.id,
-                    serial_number: row.serial_number,
-                    note: row.note,
-                    last_seen: row.last_seen,
-                    created_on: row.created_on,
-                    approved: row.approved,
-                    has_token: row.has_token,
-                    release_id: row.release_id,
-                    target_release_id: row.target_release_id,
-                    system_info: row.system_info,
-                    modem_id: row.modem_id,
-                    ip_address_id: row.ip_address_id,
-                    ip_address,
-                    modem,
-                    release,
-                    target_release,
-                    network,
-                    labels: DeviceLabels(serde_json::from_value(row.labels).unwrap_or_default()),
-                }
-            })
-            .collect();
-
-        return Ok(Json(devices));
-    }
-
     let devices = sqlx::query!(
         r#"SELECT
             d.id,
@@ -572,9 +398,11 @@ pub async fn get_devices(
         LEFT JOIN device_network dn ON d.id = dn.device_id
         WHERE ($1::text IS NULL OR d.serial_number = $1)
           AND ($2::boolean IS NULL OR d.approved = $2)
+          AND (COALESCE($3, false) = true OR d.archived = false)
         ORDER BY d.serial_number"#,
         filter.serial_number,
-        filter.approved
+        filter.approved,
+        filter.archived
     )
     .fetch_all(&state.pg_pool)
     .await
