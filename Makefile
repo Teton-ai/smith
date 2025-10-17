@@ -1,6 +1,9 @@
 export DOCKER_CLI_HINTS=false
 
-.DEFAULT_GOAL := dev
+.DEFAULT_GOAL := up
+
+up:
+	docker compose up
 
 dev:
 	docker exec -it smith-smithd cargo run --bin api
