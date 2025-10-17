@@ -21,6 +21,8 @@ impl Modem {
         network_provider: String,
         pool: &PgPool,
     ) -> anyhow::Result<Self> {
+        let mut tx = pool.begin().await?;
+
         let modem = sqlx::query_as!(
             Modem,
             "
@@ -32,23 +34,40 @@ impl Modem {
             imei,
             network_provider,
         )
-        .fetch_one(pool)
+        .fetch_one(&mut *tx)
         .await
         .map_err(|err| {
             error!("Failed to save modem info {err}");
             anyhow::anyhow!("Failed to save modem info")
         })?;
+
+        sqlx::query!(
+            "UPDATE device SET modem_id = NULL WHERE modem_id = $1",
+            modem.id
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(|err| {
+            error!(
+                "Failed to clear old modem assignment for modem_id {}; {err}",
+                modem.id
+            );
+            anyhow::anyhow!("Failed to clear old modem assignment")
+        })?;
+
         sqlx::query!(
             "UPDATE device SET modem_id = $1 WHERE serial_number = $2",
             modem.id,
             serial_number
         )
-        .execute(pool)
+        .execute(&mut *tx)
         .await
         .map_err(|err| {
             error!("Failed to update device {serial_number} modem_id; {err}");
             anyhow::anyhow!("Failed to update device info")
         })?;
+
+        tx.commit().await?;
         Ok(modem)
     }
 
