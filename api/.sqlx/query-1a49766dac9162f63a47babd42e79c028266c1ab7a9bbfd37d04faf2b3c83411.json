@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT * FROM device WHERE token = $1;",
+  "query": "SELECT * FROM device WHERE token IS NOT NULL AND token = $1;",
   "describe": {
     "columns": [
       {
@@ -114,5 +114,5 @@
       false
     ]
   },
-  "hash": "92038513957f363a7008e0ecaa68fce38e484789305b2e3214e1cfee6a807b38"
+  "hash": "1a49766dac9162f63a47babd42e79c028266c1ab7a9bbfd37d04faf2b3c83411"
 }

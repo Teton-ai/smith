@@ -554,11 +554,13 @@ impl Device {
         token: String,
         pg_pool: &Pool<Postgres>,
     ) -> anyhow::Result<Option<RawDevice>> {
-        Ok(
-            sqlx::query_as!(RawDevice, "SELECT * FROM device WHERE token = $1;", token)
-                .fetch_optional(pg_pool)
-                .await?,
+        Ok(sqlx::query_as!(
+            RawDevice,
+            "SELECT * FROM device WHERE token IS NOT NULL AND token = $1;",
+            token
         )
+        .fetch_optional(pg_pool)
+        .await?)
     }
 
     /// Axum middleware that authenticates devices using Bearer tokens.
