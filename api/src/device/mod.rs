@@ -8,7 +8,7 @@ use axum::extract::Request;
 use axum::http::{StatusCode, header};
 use axum::middleware::Next;
 use axum::response::Response;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, Serializer};
 use serde_json::{Value, json};
 use smith::utils::schema::{DeviceRegistration, DeviceRegistrationResponse};
 use sqlx::types::chrono::{DateTime, Utc};
@@ -48,6 +48,7 @@ pub struct RawDevice {
     pub created_on: DateTime<Utc>,
     pub note: Option<String>,
     pub approved: bool,
+    #[serde(serialize_with = "serialize_token_presence")]
     pub token: Option<String>,
     pub release_id: Option<i32>,
     pub target_release_id: Option<i32>,
@@ -56,6 +57,16 @@ pub struct RawDevice {
     pub modem_id: Option<i32>,
     pub archived: bool,
     pub ip_address_id: Option<i32>,
+}
+
+fn serialize_token_presence<S>(token: &Option<String>, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+{
+    match token {
+        Some(_) => serializer.serialize_str("[REDACTED]"),
+        None => serializer.serialize_none(),
+    }
 }
 
 #[derive(Debug, Serialize, utoipa::ToSchema)]
