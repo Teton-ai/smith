@@ -335,9 +335,7 @@ pub async fn delete_distribution_by_id(
     ),
     tag = DISTRIBUTIONS_TAG
 )]
-#[deprecated(
-    note = "We are moving to `/devices` endpoint and use release param as filter"
-)]
+#[deprecated(note = "We are moving to `/devices` endpoint and use release param as filter")]
 pub async fn get_distribution_devices(
     Path(distribution_id): Path<i32>,
     Extension(state): Extension<State>,

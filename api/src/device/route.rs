@@ -313,6 +313,11 @@ pub struct DeviceFilter {
     pub approved: Option<bool>,
     /// Filter by archived status. If None, archived devices are excluded by default.
     pub archived: Option<bool>,
+    #[deprecated(
+        since = "0.2.64",
+        note = "Since labels have been released, tags concept be in version 0.74"
+    )]
+    pub tag: Option<String>,
 }
 
 #[utoipa::path(
@@ -389,6 +394,8 @@ pub async fn get_devices(
             dn.source as "network_source?",
             dn.updated_at as "network_updated_at?"
         FROM device d
+        LEFT JOIN tag_device td ON d.id = td.device_id AND $4::text IS NOT NULL
+        LEFT JOIN tag t ON td.tag_id = t.id AND t.name = $4
         LEFT JOIN ip_address ip ON d.ip_address_id = ip.id
         LEFT JOIN modem m ON d.modem_id = m.id
         LEFT JOIN release r ON d.release_id = r.id
@@ -399,10 +406,12 @@ pub async fn get_devices(
         WHERE ($1::text IS NULL OR d.serial_number = $1)
           AND ($2::boolean IS NULL OR d.approved = $2)
           AND (COALESCE($3, false) = true OR d.archived = false)
+          AND ($4::text IS NULL OR t.name IS NOT NULL)
         ORDER BY d.serial_number"#,
         filter.serial_number,
         filter.approved,
-        filter.archived
+        filter.archived,
+        filter.tag
     )
     .fetch_all(&state.pg_pool)
     .await
