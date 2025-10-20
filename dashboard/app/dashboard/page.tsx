@@ -10,9 +10,32 @@ import {
   Cpu,
   ChevronRight,
   Package,
+  AlertCircle,
+  Calendar,
+  Check,
+  X,
 } from 'lucide-react';
 import useSmithAPI from "@/app/hooks/smith-api";
 import PrivateLayout from "@/app/layouts/PrivateLayout";
+import NetworkQualityIndicator from "@/app/components/NetworkQualityIndicator";
+
+interface IpAddressInfo {
+  id: number;
+  ip_address: string;
+  name?: string;
+  continent?: string;
+  continent_code?: string;
+  country_code?: string;
+  country?: string;
+  region?: string;
+  city?: string;
+  isp?: string;
+  coordinates?: [number, number];
+  proxy?: boolean;
+  hosting?: boolean;
+  created_at: string;
+  updated_at: string;
+}
 
 interface Device {
   id: number;
@@ -24,6 +47,10 @@ interface Device {
   target_release_id?: number;
   release?: Release;
   target_release?: Release;
+  network?: {
+    network_score?: number;
+  };
+  ip_address?: IpAddressInfo;
   system_info?: {
     hostname?: string;
     device_tree?: {
@@ -58,7 +85,17 @@ const AdminPanel = () => {
   const [dashboardData, setDashboardData] = useState<DashboardData | null>(null);
   const [devices, setDevices] = useState<Device[]>([]);
   const [attentionDevices, setAttentionDevices] = useState<Device[]>([]);
+  const [unapprovedDevices, setUnapprovedDevices] = useState<Device[]>([]);
+  const [processingDevices, setProcessingDevices] = useState<Set<number>>(new Set());
   const [loading, setLoading] = useState(true);
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+
+  useEffect(() => {
+    if (toast) {
+      const timer = setTimeout(() => setToast(null), 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [toast]);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -68,6 +105,12 @@ const AdminPanel = () => {
         const dashData = await callAPI<DashboardData>('GET', '/dashboard');
         if (dashData) {
           setDashboardData(dashData);
+        }
+
+        // Fetch unapproved devices
+        const unapprovedData = await callAPI<Device[]>('GET', '/devices?approved=false');
+        if (unapprovedData) {
+          setUnapprovedDevices(unapprovedData);
         }
 
         // Fetch devices for attention analysis
@@ -161,6 +204,78 @@ const AdminPanel = () => {
     return `${minutes}m ago`;
   };
 
+  const getFlagUrl = (countryCode: string) => {
+    return `https://flagicons.lipis.dev/flags/4x3/${countryCode.toLowerCase()}.svg`;
+  };
+
+  const handleApprove = async (deviceId: number, e: React.MouseEvent) => {
+    e.stopPropagation();
+
+    const device = unapprovedDevices.find(d => d.id === deviceId);
+    const deviceName = device?.serial_number || 'Device';
+
+    setProcessingDevices(prev => new Set(prev).add(deviceId));
+
+    const success = await callAPI('POST', `/devices/${deviceId}/approval`);
+
+    if (success) {
+      setUnapprovedDevices(prev => prev.filter(d => d.id !== deviceId));
+      setToast({
+        message: `${deviceName} approved successfully`,
+        type: 'success'
+      });
+    } else {
+      setToast({
+        message: `Failed to approve ${deviceName}`,
+        type: 'error'
+      });
+    }
+
+    setProcessingDevices(prev => {
+      const newSet = new Set(prev);
+      newSet.delete(deviceId);
+      return newSet;
+    });
+  };
+
+  const handleReject = async (deviceId: number, e: React.MouseEvent) => {
+    e.stopPropagation();
+
+    const device = unapprovedDevices.find(d => d.id === deviceId);
+    const deviceName = device?.serial_number || 'Device';
+
+    if (!confirm(`Are you sure you want to reject ${deviceName}? This will archive it.`)) {
+      return;
+    }
+
+    setProcessingDevices(prev => new Set(prev).add(deviceId));
+
+    const success = await callAPI('DELETE', `/devices/${deviceId}`);
+
+    if (success) {
+      setUnapprovedDevices(prev => prev.filter(d => d.id !== deviceId));
+      setToast({
+        message: `${deviceName} rejected and archived`,
+        type: 'success'
+      });
+    } else {
+      setToast({
+        message: `Failed to reject ${deviceName}`,
+        type: 'error'
+      });
+    }
+
+    setProcessingDevices(prev => {
+      const newSet = new Set(prev);
+      newSet.delete(deviceId);
+      return newSet;
+    });
+  };
+
+  const getDeviceHostname = (device: Device) => {
+    return device.system_info?.hostname || 'No hostname';
+  };
+
   // Categorize attention devices
   const stuckUpdates = attentionDevices.filter(d => getDeviceStatus(d) === 'stuck-update');
   const recentlyOffline = attentionDevices.filter(d => getDeviceStatus(d) === 'recently-offline');
@@ -171,13 +286,40 @@ const AdminPanel = () => {
 
   return (
     <PrivateLayout id="dashboard">
-      <div className="space-y-6">
+      {/* Toast Notification */}
+      {toast && (
+        <div className={`fixed top-4 right-4 z-50 p-4 rounded-lg shadow-lg border ${
+          toast.type === 'success'
+            ? 'bg-green-50 text-green-800 border-green-200'
+            : 'bg-red-50 text-red-800 border-red-200'
+        } transition-all duration-300 ease-in-out`}>
+          <div className="flex items-center space-x-2">
+            {toast.type === 'success' ? (
+              <Check className="w-5 h-5 text-green-600" />
+            ) : (
+              <X className="w-5 h-5 text-red-600" />
+            )}
+            <span className="text-sm font-medium">{toast.message}</span>
+            <button
+              onClick={() => setToast(null)}
+              className="ml-2 text-gray-400 hover:text-gray-600"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+      )}
+
+      <div className="flex gap-6">
+        {/* Main Content */}
+        <div className="flex-1 space-y-6">
+
         {/* Overview Stats */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
           {loading ? (
             // Skeleton loading for stats
             <>
-              {[...Array(4)].map((_, index) => (
+              {[...Array(2)].map((_, index) => (
                 <div key={index} className="bg-white rounded-lg border border-gray-200 p-6">
                   <div className="flex items-center">
                     <div className="w-8 h-8 bg-gray-200 rounded animate-pulse" />
@@ -203,29 +345,6 @@ const AdminPanel = () => {
 
               <div className="bg-white rounded-lg border border-gray-200 p-6">
                 <div className="flex items-center">
-                  <AlertTriangle className="w-8 h-8 text-red-500" />
-                  <div className="ml-4">
-                    <p className="text-sm font-medium text-gray-600">Need Attention</p>
-                    <p className="text-2xl font-bold text-gray-900">{attentionDevices.length}</p>
-                  </div>
-                </div>
-              </div>
-
-              <div
-                className="bg-white rounded-lg border border-gray-200 p-6 hover:bg-gray-50 cursor-pointer transition-colors"
-                onClick={() => router.push('/devices?outdated=true')}
-              >
-                <div className="flex items-center">
-                  <Package className="w-8 h-8 text-yellow-500" />
-                  <div className="ml-4">
-                    <p className="text-sm font-medium text-gray-600">Outdated</p>
-                    <p className="text-2xl font-bold text-gray-900">{dashboardData?.outdated_count || 0}</p>
-                  </div>
-                </div>
-              </div>
-
-              <div className="bg-white rounded-lg border border-gray-200 p-6">
-                <div className="flex items-center">
                   <Cpu className="w-8 h-8 text-blue-500" />
                   <div className="ml-4">
                     <p className="text-sm font-medium text-gray-600">Total Devices</p>
@@ -237,270 +356,326 @@ const AdminPanel = () => {
           )}
         </div>
 
-        {/* Devices Needing Attention */}
+        {/* Device Status Sections */}
         {loading ? (
-          // Skeleton loading for attention section
-          <div className="bg-white rounded-lg border border-gray-200">
-            <div className="p-6 border-b border-gray-200">
-              <div className="flex items-center space-x-3">
-                <div className="w-6 h-6 bg-gray-200 rounded animate-pulse" />
-                <div>
-                  <div className="h-6 bg-gray-200 rounded w-48 animate-pulse mb-2" />
-                  <div className="h-4 bg-gray-200 rounded w-32 animate-pulse" />
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {[...Array(4)].map((_, sectionIndex) => (
+              <div key={sectionIndex} className="bg-white rounded-lg border border-gray-200">
+                <div className="px-4 py-3 border-b border-gray-200">
+                  <div className="h-5 bg-gray-200 rounded w-32 animate-pulse" />
+                </div>
+                <div className="divide-y divide-gray-200">
+                  {[...Array(3)].map((_, index) => (
+                    <div key={index} className="px-4 py-3">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center space-x-3 flex-1">
+                          <div className="w-4 h-4 bg-gray-200 rounded animate-pulse" />
+                          <div className="h-4 bg-gray-200 rounded w-32 animate-pulse" />
+                        </div>
+                        <div className="h-4 bg-gray-200 rounded w-20 animate-pulse" />
+                      </div>
+                    </div>
+                  ))}
                 </div>
               </div>
-            </div>
-            <div className="p-6">
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {[...Array(6)].map((_, index) => (
-                  <div key={index} className="border border-gray-200 rounded-lg p-4">
-                    <div className="flex items-center justify-between mb-2">
-                      <div className="flex items-center space-x-2">
-                        <div className="w-4 h-4 bg-gray-200 rounded animate-pulse" />
-                        <div className="h-4 bg-gray-200 rounded w-24 animate-pulse" />
-                      </div>
-                      <div className="w-4 h-4 bg-gray-200 rounded animate-pulse" />
-                    </div>
-                    <div className="h-3 bg-gray-200 rounded w-32 animate-pulse mb-2" />
-                    <div className="h-3 bg-gray-200 rounded w-20 animate-pulse" />
-                  </div>
-                ))}
-              </div>
-            </div>
+            ))}
           </div>
         ) : attentionDevices.length > 0 ? (
-          <div className="bg-white rounded-lg border border-red-200">
-            <div className="p-6 border-b border-gray-200 bg-red-50">
-              <div className="flex items-center space-x-3">
-                <AlertTriangle className="w-6 h-6 text-red-500" />
-                <div>
-                  <h3 className="text-lg font-semibold text-red-900">Devices Needing Attention</h3>
-                  <p className="text-sm text-red-700 mt-1">
-                    {attentionDevices.length} device{attentionDevices.length > 1 ? 's' : ''} with failed updates or offline issues
-                  </p>
-                </div>
-              </div>
-            </div>
-            
-            <div className="p-6 space-y-6">
-              {/* Critical - Stuck Updates */}
-              {stuckUpdates.length > 0 && (
-                <div>
-                  <h4 className="text-md font-semibold text-purple-800 mb-3 flex items-center">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* Pending Update Section */}
+            {stuckUpdates.length > 0 && (
+              <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+                <div className="bg-purple-50 px-4 py-3 border-b border-gray-200">
+                  <h4 className="text-sm font-semibold text-purple-800 flex items-center">
                     <Package className="w-4 h-4 mr-2" />
-                    Update Failed ({stuckUpdates.length})
+                    Pending Update ({stuckUpdates.length})
                   </h4>
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
-                    {stuckUpdates.slice(0, 8).map((device) => {
-                      const status = getDeviceStatus(device);
-                      const statusInfo = getStatusInfo(status);
-                      return (
-                        <div 
-                          key={device.id}
-                          className="border border-purple-200 rounded-lg p-3 hover:bg-purple-50 cursor-pointer transition-colors"
-                          onClick={() => router.push(`/devices/${device.serial_number}`)}
-                        >
-                          <div className="flex items-center justify-between mb-1">
-                            <div className="flex items-center space-x-2">
-                              {statusInfo.icon}
-                              <span className="font-mono text-xs font-semibold text-gray-900 truncate">
-                                {getDeviceName(device)}
-                              </span>
-                            </div>
-                            <ChevronRight className="w-3 h-3 text-gray-400 flex-shrink-0" />
+                </div>
+                <div className="divide-y divide-gray-200">
+                  {stuckUpdates.slice(0, 10).map((device) => {
+                    const isOnline = device.last_seen ? (new Date().getTime() - new Date(device.last_seen).getTime()) / (1000 * 60) <= 3 : false;
+                    return (
+                      <div
+                        key={device.id}
+                        className="px-4 py-3 hover:bg-purple-50 cursor-pointer transition-colors"
+                        onClick={() => router.push(`/devices/${device.serial_number}`)}
+                      >
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center space-x-3 flex-1">
+                            {device.ip_address?.country_code && (
+                              <img
+                                src={getFlagUrl(device.ip_address.country_code)}
+                                alt={device.ip_address.country || 'Country flag'}
+                                className="w-4 h-3 flex-shrink-0 rounded-sm"
+                                onError={(e) => {
+                                  (e.target as HTMLImageElement).style.display = 'none';
+                                }}
+                              />
+                            )}
+                            <span className="font-mono text-sm text-gray-900">
+                              {getDeviceName(device)}
+                            </span>
+                            {device.network?.network_score && (
+                              <NetworkQualityIndicator
+                                isOnline={isOnline}
+                                networkScore={device.network.network_score}
+                              />
+                            )}
                           </div>
-                          <p className="text-xs text-purple-600">
-                            {device.release?.version || device.release_id} → {device.target_release?.version || device.target_release_id}
-                          </p>
+                          <div className="flex items-center space-x-3 text-sm">
+                            {device.release?.distribution_name && (
+                              <span className="text-gray-500">
+                                {device.release.distribution_name}
+                              </span>
+                            )}
+                            <span className="text-purple-600 font-mono">
+                              {device.release?.version || device.release_id} → {device.target_release?.version || device.target_release_id}
+                            </span>
+                            <ChevronRight className="w-4 h-4 text-gray-400 flex-shrink-0" />
+                          </div>
                         </div>
-                      );
-                    })}
-                  </div>
-                  {stuckUpdates.length > 8 && (
-                    <button
-                      onClick={() => router.push('/devices?outdated=true')}
-                      className="text-sm text-blue-600 hover:text-blue-800 mt-3"
-                    >
-                      View all {stuckUpdates.length} devices with update issues →
-                    </button>
+                      </div>
+                    );
+                  })}
+                  {stuckUpdates.length > 10 && (
+                    <div className="px-4 py-3 bg-gray-50">
+                      <button
+                        onClick={() => router.push('/devices?outdated=true')}
+                        className="text-sm text-blue-600 hover:text-blue-800"
+                      >
+                        View all {stuckUpdates.length} devices →
+                      </button>
+                    </div>
                   )}
                 </div>
-              )}
+              </div>
+            )}
 
-              {/* Critical - Recently Offline (< 1 day) */}
-              {recentlyOffline.length > 0 && (
-                <div>
-                  <h4 className="text-md font-semibold text-yellow-800 mb-3 flex items-center">
+            {/* Recently Offline Section */}
+            {recentlyOffline.length > 0 && (
+              <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+                <div className="bg-yellow-50 px-4 py-3 border-b border-gray-200">
+                  <h4 className="text-sm font-semibold text-yellow-800 flex items-center">
                     <Clock className="w-4 h-4 mr-2" />
                     Recently Offline ({recentlyOffline.length})
                   </h4>
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
-                    {recentlyOffline.slice(0, 8).map((device) => {
-                      const status = getDeviceStatus(device);
-                      const statusInfo = getStatusInfo(status);
-                      return (
-                        <div 
-                          key={device.id}
-                          className="border border-yellow-200 rounded-lg p-3 hover:bg-yellow-50 cursor-pointer transition-colors"
-                          onClick={() => router.push(`/devices/${device.serial_number}`)}
-                        >
-                          <div className="flex items-center justify-between mb-1">
-                            <div className="flex items-center space-x-2">
-                              {statusInfo.icon}
-                              <span className="font-mono text-xs font-semibold text-gray-900 truncate">
-                                {getDeviceName(device)}
-                              </span>
-                            </div>
-                            <ChevronRight className="w-3 h-3 text-gray-400 flex-shrink-0" />
+                </div>
+                <div className="divide-y divide-gray-200">
+                  {recentlyOffline.slice(0, 10).map((device) => {
+                    return (
+                      <div
+                        key={device.id}
+                        className="px-4 py-3 hover:bg-yellow-50 cursor-pointer transition-colors"
+                        onClick={() => router.push(`/devices/${device.serial_number}`)}
+                      >
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center space-x-3 flex-1">
+                            {device.ip_address?.country_code && (
+                              <img
+                                src={getFlagUrl(device.ip_address.country_code)}
+                                alt={device.ip_address.country || 'Country flag'}
+                                className="w-4 h-3 flex-shrink-0 rounded-sm"
+                                onError={(e) => {
+                                  (e.target as HTMLImageElement).style.display = 'none';
+                                }}
+                              />
+                            )}
+                            <span className="font-mono text-sm text-gray-900">
+                              {getDeviceName(device)}
+                            </span>
                           </div>
-                          <p className="text-xs text-yellow-600">
-                            {device.last_seen ? formatTimeAgo(device.last_seen) : 'Never'}
-                          </p>
+                          <div className="flex items-center space-x-3 text-sm">
+                            <span className="text-gray-500">
+                              {device.last_seen ? formatTimeAgo(device.last_seen) : 'never'}
+                            </span>
+                            <ChevronRight className="w-4 h-4 text-gray-400 flex-shrink-0" />
+                          </div>
                         </div>
-                      );
-                    })}
-                  </div>
-                  {recentlyOffline.length > 8 && (
-                    <button 
-                      onClick={() => router.push('/devices')}
-                      className="text-sm text-blue-600 hover:text-blue-800 mt-3"
-                    >
-                      View all {recentlyOffline.length} recently offline devices →
-                    </button>
+                      </div>
+                    );
+                  })}
+                  {recentlyOffline.length > 10 && (
+                    <div className="px-4 py-3 bg-gray-50">
+                      <button
+                        onClick={() => router.push('/devices')}
+                        className="text-sm text-blue-600 hover:text-blue-800"
+                      >
+                        View all {recentlyOffline.length} devices →
+                      </button>
+                    </div>
                   )}
                 </div>
-              )}
+              </div>
+            )}
 
-              {/* Concerning - Offline for 1 week */}
-              {offlineWeek.length > 0 && (
-                <div>
-                  <h4 className="text-md font-semibold text-orange-800 mb-3 flex items-center">
+            {/* Offline This Week Section */}
+            {offlineWeek.length > 0 && (
+              <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+                <div className="bg-orange-50 px-4 py-3 border-b border-gray-200">
+                  <h4 className="text-sm font-semibold text-orange-800 flex items-center">
                     <AlertTriangle className="w-4 h-4 mr-2" />
                     Offline This Week ({offlineWeek.length})
                   </h4>
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
-                    {offlineWeek.slice(0, 8).map((device) => {
-                      const status = getDeviceStatus(device);
-                      const statusInfo = getStatusInfo(status);
-                      return (
-                        <div 
-                          key={device.id}
-                          className="border border-orange-200 rounded-lg p-3 hover:bg-orange-50 cursor-pointer transition-colors"
-                          onClick={() => router.push(`/devices/${device.serial_number}`)}
-                        >
-                          <div className="flex items-center justify-between mb-1">
-                            <div className="flex items-center space-x-2">
-                              {statusInfo.icon}
-                              <span className="font-mono text-xs font-semibold text-gray-900 truncate">
-                                {getDeviceName(device)}
-                              </span>
-                            </div>
-                            <ChevronRight className="w-3 h-3 text-gray-400 flex-shrink-0" />
+                </div>
+                <div className="divide-y divide-gray-200">
+                  {offlineWeek.slice(0, 10).map((device) => {
+                    return (
+                      <div
+                        key={device.id}
+                        className="px-4 py-3 hover:bg-orange-50 cursor-pointer transition-colors"
+                        onClick={() => router.push(`/devices/${device.serial_number}`)}
+                      >
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center space-x-3 flex-1">
+                            {device.ip_address?.country_code && (
+                              <img
+                                src={getFlagUrl(device.ip_address.country_code)}
+                                alt={device.ip_address.country || 'Country flag'}
+                                className="w-4 h-3 flex-shrink-0 rounded-sm"
+                                onError={(e) => {
+                                  (e.target as HTMLImageElement).style.display = 'none';
+                                }}
+                              />
+                            )}
+                            <span className="font-mono text-sm text-gray-900">
+                              {getDeviceName(device)}
+                            </span>
                           </div>
-                          <p className="text-xs text-orange-600">
-                            {device.last_seen ? formatTimeAgo(device.last_seen) : 'Never'}
-                          </p>
+                          <div className="flex items-center space-x-3 text-sm">
+                            <span className="text-gray-500">
+                              {device.last_seen ? formatTimeAgo(device.last_seen) : 'never'}
+                            </span>
+                            <ChevronRight className="w-4 h-4 text-gray-400 flex-shrink-0" />
+                          </div>
                         </div>
-                      );
-                    })}
-                  </div>
-                  {offlineWeek.length > 8 && (
-                    <button 
-                      onClick={() => router.push('/devices')}
-                      className="text-sm text-blue-600 hover:text-blue-800 mt-3"
-                    >
-                      View all {offlineWeek.length} devices offline this week →
-                    </button>
+                      </div>
+                    );
+                  })}
+                  {offlineWeek.length > 10 && (
+                    <div className="px-4 py-3 bg-gray-50">
+                      <button
+                        onClick={() => router.push('/devices')}
+                        className="text-sm text-blue-600 hover:text-blue-800"
+                      >
+                        View all {offlineWeek.length} devices →
+                      </button>
+                    </div>
                   )}
                 </div>
-              )}
+              </div>
+            )}
 
-              {/* Critical - Offline for 1 month */}
-              {offlineMonth.length > 0 && (
-                <div>
-                  <h4 className="text-md font-semibold text-red-800 mb-3 flex items-center">
+            {/* Long-term Offline Section */}
+            {offlineMonth.length > 0 && (
+              <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+                <div className="bg-red-50 px-4 py-3 border-b border-gray-200">
+                  <h4 className="text-sm font-semibold text-red-800 flex items-center">
                     <XCircle className="w-4 h-4 mr-2" />
                     Long-term Offline ({offlineMonth.length})
                   </h4>
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
-                    {offlineMonth.slice(0, 8).map((device) => {
-                      const status = getDeviceStatus(device);
-                      const statusInfo = getStatusInfo(status);
-                      return (
-                        <div 
-                          key={device.id}
-                          className="border border-red-200 rounded-lg p-3 hover:bg-red-50 cursor-pointer transition-colors"
-                          onClick={() => router.push(`/devices/${device.serial_number}`)}
-                        >
-                          <div className="flex items-center justify-between mb-1">
-                            <div className="flex items-center space-x-2">
-                              {statusInfo.icon}
-                              <span className="font-mono text-xs font-semibold text-gray-900 truncate">
-                                {getDeviceName(device)}
-                              </span>
-                            </div>
-                            <ChevronRight className="w-3 h-3 text-gray-400 flex-shrink-0" />
+                </div>
+                <div className="divide-y divide-gray-200">
+                  {offlineMonth.slice(0, 10).map((device) => {
+                    return (
+                      <div
+                        key={device.id}
+                        className="px-4 py-3 hover:bg-red-50 cursor-pointer transition-colors"
+                        onClick={() => router.push(`/devices/${device.serial_number}`)}
+                      >
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center space-x-3 flex-1">
+                            {device.ip_address?.country_code && (
+                              <img
+                                src={getFlagUrl(device.ip_address.country_code)}
+                                alt={device.ip_address.country || 'Country flag'}
+                                className="w-4 h-3 flex-shrink-0 rounded-sm"
+                                onError={(e) => {
+                                  (e.target as HTMLImageElement).style.display = 'none';
+                                }}
+                              />
+                            )}
+                            <span className="font-mono text-sm text-gray-900">
+                              {getDeviceName(device)}
+                            </span>
                           </div>
-                          <p className="text-xs text-red-600">
-                            {device.last_seen ? formatTimeAgo(device.last_seen) : 'Never'}
-                          </p>
+                          <div className="flex items-center space-x-3 text-sm">
+                            <span className="text-gray-500">
+                              {device.last_seen ? formatTimeAgo(device.last_seen) : 'never'}
+                            </span>
+                            <ChevronRight className="w-4 h-4 text-gray-400 flex-shrink-0" />
+                          </div>
                         </div>
-                      );
-                    })}
-                  </div>
-                  {offlineMonth.length > 8 && (
-                    <button 
-                      onClick={() => router.push('/devices')}
-                      className="text-sm text-blue-600 hover:text-blue-800 mt-3"
-                    >
-                      View all {offlineMonth.length} long-term offline devices →
-                    </button>
+                      </div>
+                    );
+                  })}
+                  {offlineMonth.length > 10 && (
+                    <div className="px-4 py-3 bg-gray-50">
+                      <button
+                        onClick={() => router.push('/devices')}
+                        className="text-sm text-blue-600 hover:text-blue-800"
+                      >
+                        View all {offlineMonth.length} devices →
+                      </button>
+                    </div>
                   )}
                 </div>
-              )}
+              </div>
+            )}
 
-              {/* Never Connected */}
-              {neverSeen.length > 0 && (
-                <div>
-                  <h4 className="text-md font-semibold text-gray-800 mb-3 flex items-center">
+            {/* Never Connected Section */}
+            {neverSeen.length > 0 && (
+              <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+                <div className="bg-gray-50 px-4 py-3 border-b border-gray-200">
+                  <h4 className="text-sm font-semibold text-gray-800 flex items-center">
                     <AlertTriangle className="w-4 h-4 mr-2" />
                     Never Connected ({neverSeen.length})
                   </h4>
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
-                    {neverSeen.slice(0, 8).map((device) => {
-                      const status = getDeviceStatus(device);
-                      const statusInfo = getStatusInfo(status);
-                      return (
-                        <div 
-                          key={device.id}
-                          className="border border-gray-200 rounded-lg p-3 hover:bg-gray-50 cursor-pointer transition-colors"
-                          onClick={() => router.push(`/devices/${device.serial_number}`)}
-                        >
-                          <div className="flex items-center justify-between mb-1">
-                            <div className="flex items-center space-x-2">
-                              {statusInfo.icon}
-                              <span className="font-mono text-xs font-semibold text-gray-900 truncate">
-                                {getDeviceName(device)}
-                              </span>
-                            </div>
-                            <ChevronRight className="w-3 h-3 text-gray-400 flex-shrink-0" />
+                </div>
+                <div className="divide-y divide-gray-200">
+                  {neverSeen.slice(0, 10).map((device) => {
+                    return (
+                      <div
+                        key={device.id}
+                        className="px-4 py-3 hover:bg-gray-50 cursor-pointer transition-colors"
+                        onClick={() => router.push(`/devices/${device.serial_number}`)}
+                      >
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center space-x-3 flex-1">
+                            {device.ip_address?.country_code && (
+                              <img
+                                src={getFlagUrl(device.ip_address.country_code)}
+                                alt={device.ip_address.country || 'Country flag'}
+                                className="w-4 h-3 flex-shrink-0 rounded-sm"
+                                onError={(e) => {
+                                  (e.target as HTMLImageElement).style.display = 'none';
+                                }}
+                              />
+                            )}
+                            <span className="font-mono text-sm text-gray-900">
+                              {getDeviceName(device)}
+                            </span>
                           </div>
-                          <p className="text-xs text-gray-600">Never connected</p>
+                          <div className="flex items-center space-x-3 text-sm">
+                            <span className="text-gray-500">Never</span>
+                            <ChevronRight className="w-4 h-4 text-gray-400 flex-shrink-0" />
+                          </div>
                         </div>
-                      );
-                    })}
-                  </div>
-                  {neverSeen.length > 8 && (
-                    <button 
-                      onClick={() => router.push('/devices')}
-                      className="text-sm text-blue-600 hover:text-blue-800 mt-3"
-                    >
-                      View all {neverSeen.length} devices that never connected →
-                    </button>
+                      </div>
+                    );
+                  })}
+                  {neverSeen.length > 10 && (
+                    <div className="px-4 py-3 bg-gray-50">
+                      <button
+                        onClick={() => router.push('/devices')}
+                        className="text-sm text-blue-600 hover:text-blue-800"
+                      >
+                        View all {neverSeen.length} devices →
+                      </button>
+                    </div>
                   )}
                 </div>
-              )}
-            </div>
+              </div>
+            )}
           </div>
         ) : (
           /* All Good Message */
@@ -516,7 +691,81 @@ const AdminPanel = () => {
             </div>
           </div>
         )}
+        </div>
 
+        {/* Right Sidebar - Unapproved Devices */}
+        <div className="hidden xl:block w-96 space-y-6">
+          <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+            <div className="bg-orange-50 px-4 py-3 border-b border-gray-200">
+              <div className="flex items-center justify-between">
+                <h4 className="text-sm font-semibold text-orange-800">Pending Approval</h4>
+                {!loading && unapprovedDevices.length > 0 && (
+                  <span className="text-xs text-orange-600">{unapprovedDevices.length} device{unapprovedDevices.length !== 1 ? 's' : ''}</span>
+                )}
+              </div>
+            </div>
+            <div className="max-h-[calc(100vh-200px)] overflow-y-auto">
+              {loading ? (
+                <div className="p-4 space-y-3">
+                  {[...Array(3)].map((_, i) => (
+                    <div key={i} className="animate-pulse">
+                      <div className="h-4 bg-gray-200 rounded w-3/4 mb-2"></div>
+                      <div className="h-3 bg-gray-200 rounded w-1/2"></div>
+                    </div>
+                  ))}
+                </div>
+              ) : unapprovedDevices.length === 0 ? (
+                <div className="p-6 text-center">
+                  <CheckCircle className="w-10 h-10 text-green-500 mx-auto mb-2" />
+                  <p className="text-sm font-medium text-gray-900 mb-1">All caught up!</p>
+                  <p className="text-xs text-gray-600">No devices pending approval</p>
+                </div>
+              ) : (
+                <div className="divide-y divide-gray-200">
+                  {unapprovedDevices.map((device) => (
+                    <div key={device.id} className="p-4 hover:bg-gray-50">
+                      <div className="flex items-start justify-between mb-2">
+                        <div className="flex items-center space-x-2 min-w-0 flex-1">
+                          <AlertCircle className="w-4 h-4 text-orange-500 flex-shrink-0" />
+                          <div className="min-w-0">
+                            <p className="text-sm font-medium text-gray-900 truncate">
+                              {device.serial_number}
+                            </p>
+                            <p className="text-xs text-gray-500 truncate">
+                              {getDeviceHostname(device)}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                      <div className="flex items-center space-x-1 text-xs text-gray-500 mb-3">
+                        <Calendar className="w-3 h-3" />
+                        <span>{formatTimeAgo(device.created_on)}</span>
+                      </div>
+                      <div className="flex space-x-2">
+                        <button
+                          onClick={(e) => handleApprove(device.id, e)}
+                          disabled={processingDevices.has(device.id)}
+                          className="flex-1 flex items-center justify-center space-x-1 px-3 py-1.5 text-xs font-medium text-white bg-green-600 hover:bg-green-700 disabled:bg-gray-300 disabled:cursor-not-allowed rounded transition-colors"
+                        >
+                          <CheckCircle className="w-3 h-3" />
+                          <span>Approve</span>
+                        </button>
+                        <button
+                          onClick={(e) => handleReject(device.id, e)}
+                          disabled={processingDevices.has(device.id)}
+                          className="flex-1 flex items-center justify-center space-x-1 px-3 py-1.5 text-xs font-medium text-white bg-red-600 hover:bg-red-700 disabled:bg-gray-300 disabled:cursor-not-allowed rounded transition-colors"
+                        >
+                          <XCircle className="w-3 h-3" />
+                          <span>Reject</span>
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
       </div>
     </PrivateLayout>
   );
