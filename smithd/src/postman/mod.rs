@@ -89,7 +89,7 @@ impl Postman {
 
         const IDLE_INTERVAL_SECS: u64 = 20;
         const ACTIVE_INTERVAL_SECS: u64 = 1;
-        const IDLE_THRESHOLD_TICKS: u32 = 10;
+        const IDLE_THRESHOLD_TICKS: u32 = 60;
 
         let mut keep_alive_interval = time::interval(Duration::from_secs(IDLE_INTERVAL_SECS));
         let mut update_interval = time::interval(Duration::from_secs(300));
