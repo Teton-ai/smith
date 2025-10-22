@@ -133,8 +133,8 @@ impl Postman {
                                 info!("Switching to idle polling mode (20 second interval)");
                                 keep_alive_interval = time::interval(Duration::from_secs(IDLE_INTERVAL_SECS));
                                 keep_alive_interval.reset();
-                                self.idle_ticks_count = 0;
                             }
+                            self.idle_ticks_count = 0;
                         }
                     }
                 }
