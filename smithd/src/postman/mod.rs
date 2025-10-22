@@ -25,6 +25,7 @@ struct Postman {
     hostname: String,
     token: Option<String>,
     problems: Option<u32>,
+    idle_ticks_count: u32,
 }
 
 #[derive(Debug)]
@@ -50,6 +51,7 @@ impl Postman {
             token: None,
             hostname: "".to_owned(),
             problems: None,
+            idle_ticks_count: 0,
         }
     }
 
@@ -85,7 +87,11 @@ impl Postman {
             ])
             .await;
 
-        let mut keep_alive_interval = time::interval(Duration::from_secs(20));
+        const IDLE_INTERVAL_SECS: u64 = 20;
+        const ACTIVE_INTERVAL_SECS: u64 = 1;
+        const IDLE_THRESHOLD_TICKS: u32 = 10;
+
+        let mut keep_alive_interval = time::interval(Duration::from_secs(IDLE_INTERVAL_SECS));
         let mut update_interval = time::interval(Duration::from_secs(300));
 
         loop {
@@ -108,7 +114,29 @@ impl Postman {
                     let target_release_id = response.target_release_id;
                     self.magic.set_target_release_id(target_release_id).await;
 
+                    let has_commands = !response.commands.is_empty();
                     self.commander.execute_api_batch(response.commands).await;
+
+                    if has_commands {
+                        self.idle_ticks_count = 0;
+                        let current_period = keep_alive_interval.period();
+                        if current_period.as_secs() != ACTIVE_INTERVAL_SECS {
+                            info!("Switching to active polling mode (1 second interval)");
+                            keep_alive_interval = time::interval(Duration::from_secs(ACTIVE_INTERVAL_SECS));
+                            keep_alive_interval.reset();
+                        }
+                    } else {
+                        self.idle_ticks_count += 1;
+                        if self.idle_ticks_count >= IDLE_THRESHOLD_TICKS {
+                            let current_period = keep_alive_interval.period();
+                            if current_period.as_secs() != IDLE_INTERVAL_SECS {
+                                info!("Switching to idle polling mode (20 second interval)");
+                                keep_alive_interval = time::interval(Duration::from_secs(IDLE_INTERVAL_SECS));
+                                keep_alive_interval.reset();
+                                self.idle_ticks_count = 0;
+                            }
+                        }
+                    }
                 }
                 _ = update_interval.tick() => {
                     self.commander
