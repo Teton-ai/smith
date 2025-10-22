@@ -32,6 +32,7 @@ pub struct DeviceLabels(pub HashMap<String, String>);
 #[derive(Debug, Serialize, utoipa::ToSchema)]
 pub struct DeviceNetwork {
     pub network_score: Option<i32>,
+    pub download_speed_mbps: Option<f64>,
     pub source: Option<String>,
     pub updated_at: Option<DateTime<Utc>>,
 }

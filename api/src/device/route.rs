@@ -391,6 +391,7 @@ pub async fn get_devices(
             tr.created_at as "target_release_created_at?",
             tr.user_id as "target_release_user_id?",
             dn.network_score as "network_score?",
+            dn.download_speed_mbps as "network_download_speed_mbps?",
             dn.source as "network_source?",
             dn.updated_at as "network_updated_at?"
         FROM device d
@@ -500,6 +501,7 @@ pub async fn get_devices(
             let network = if row.network_score.is_some() {
                 Some(DeviceNetwork {
                     network_score: row.network_score,
+                    download_speed_mbps: row.network_download_speed_mbps,
                     source: row.network_source,
                     updated_at: row.network_updated_at,
                 })
@@ -1891,6 +1893,7 @@ pub async fn get_device_info(
         tr.created_at as \"target_release_created_at?\",
         tr.user_id as \"target_release_user_id?\",
         dn.network_score as \"network_score?\",
+        dn.download_speed_mbps as \"network_download_speed_mbps?\",
         dn.source as \"network_source?\",
         dn.updated_at as \"network_updated_at?\"
         FROM device d
@@ -1996,6 +1999,7 @@ pub async fn get_device_info(
     let network = if device_row.network_score.is_some() {
         Some(DeviceNetwork {
             network_score: device_row.network_score,
+            download_speed_mbps: device_row.network_download_speed_mbps,
             source: device_row.network_source,
             updated_at: device_row.network_updated_at,
         })
