@@ -3,7 +3,7 @@ use crate::device::{
     AuthDevice, CommandsPaginated, Device, DeviceCommandResponse, DeviceHealth, DeviceLabels,
     DeviceLedgerItem, DeviceLedgerItemPaginated, DeviceNetwork, DeviceRelease, LeanDevice,
     LeanResponse, NewVariable, Note, RawDevice, Tag, UpdateDeviceRelease, UpdateDevicesRelease,
-    Variable, helpers,
+    Variable,
 };
 use crate::event::PublicEvent;
 use crate::middlewares::authorization;
@@ -882,8 +882,6 @@ pub async fn delete_variable_from_device(
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
 
-    helpers::refresh_device(&state.pg_pool, device_id).await?;
-
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -948,8 +946,6 @@ pub async fn update_variable_for_device(
         error!("Failed to commit transaction {err}");
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
-
-    helpers::refresh_device(&state.pg_pool, device_id).await?;
 
     Ok(StatusCode::NO_CONTENT)
 }
@@ -1052,8 +1048,6 @@ pub async fn add_variable_to_device(
         error!("Failed to commit transaction {err}");
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
-
-    helpers::refresh_device(&state.pg_pool, device_id).await?;
 
     Ok(StatusCode::CREATED)
 }
