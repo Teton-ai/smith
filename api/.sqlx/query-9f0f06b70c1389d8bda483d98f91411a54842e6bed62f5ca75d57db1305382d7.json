@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT\n        d.id,\n        d.serial_number,\n        d.note,\n        d.last_ping as last_seen,\n        d.created_on,\n        d.approved,\n        d.token IS NOT NULL as has_token,\n        d.release_id,\n        d.target_release_id,\n        d.system_info,\n        d.modem_id,\n        d.ip_address_id,\n        d.labels,\n        ip.id as \"ip_id?\",\n        ip.ip_address as \"ip_address?\",\n        ip.name as \"ip_name?\",\n        ip.continent as \"ip_continent?\",\n        ip.continent_code as \"ip_continent_code?\",\n        ip.country_code as \"ip_country_code?\",\n        ip.country as \"ip_country?\",\n        ip.region as \"ip_region?\",\n        ip.city as \"ip_city?\",\n        ip.isp as \"ip_isp?\",\n        ip.coordinates[0] as \"ip_longitude?\",\n        ip.coordinates[1] as \"ip_latitude?\",\n        ip.proxy as \"ip_proxy?\",\n        ip.hosting as \"ip_hosting?\",\n        ip.created_at as \"ip_created_at?\",\n        ip.updated_at as \"ip_updated_at?\",\n        m.id as \"modem_id_nested?\",\n        m.imei as \"modem_imei?\",\n        m.network_provider as \"modem_network_provider?\",\n        m.updated_at as \"modem_updated_at?\",\n        m.created_at as \"modem_created_at?\",\n        r.id as \"release_id_nested?\",\n        r.distribution_id as \"release_distribution_id?\",\n        rd.architecture as \"release_distribution_architecture?\",\n        rd.name as \"release_distribution_name?\",\n        r.version as \"release_version?\",\n        r.draft as \"release_draft?\",\n        r.yanked as \"release_yanked?\",\n        r.created_at as \"release_created_at?\",\n        r.user_id as \"release_user_id?\",\n        tr.id as \"target_release_id_nested?\",\n        tr.distribution_id as \"target_release_distribution_id?\",\n        trd.architecture as \"target_release_distribution_architecture?\",\n        trd.name as \"target_release_distribution_name?\",\n        tr.version as \"target_release_version?\",\n        tr.draft as \"target_release_draft?\",\n        tr.yanked as \"target_release_yanked?\",\n        tr.created_at as \"target_release_created_at?\",\n        tr.user_id as \"target_release_user_id?\",\n        dn.network_score as \"network_score?\",\n        dn.source as \"network_source?\",\n        dn.updated_at as \"network_updated_at?\"\n        FROM device d\n        LEFT JOIN ip_address ip ON d.ip_address_id = ip.id\n        LEFT JOIN modem m ON d.modem_id = m.id\n        LEFT JOIN release r ON d.release_id = r.id\n        LEFT JOIN distribution rd ON r.distribution_id = rd.id\n        LEFT JOIN release tr ON d.target_release_id = tr.id\n        LEFT JOIN distribution trd ON tr.distribution_id = trd.id\n        LEFT JOIN device_network dn ON d.id = dn.device_id\n        WHERE\n            CASE\n                WHEN $1 ~ '^[0-9]+$' AND length($1) <= 10 THEN\n                    d.id = $1::int4\n                ELSE\n                    d.serial_number = $1\n            END\n        ",
+  "query": "SELECT\n            d.id,\n            d.serial_number,\n            d.note,\n            d.last_ping as last_seen,\n            d.created_on,\n            d.approved,\n            d.token IS NOT NULL as has_token,\n            d.release_id,\n            d.target_release_id,\n            d.system_info,\n            d.modem_id,\n            d.ip_address_id,\n            d.labels,\n            ip.id as \"ip_id?\",\n            ip.ip_address as \"ip_address?\",\n            ip.name as \"ip_name?\",\n            ip.continent as \"ip_continent?\",\n            ip.continent_code as \"ip_continent_code?\",\n            ip.country_code as \"ip_country_code?\",\n            ip.country as \"ip_country?\",\n            ip.region as \"ip_region?\",\n            ip.city as \"ip_city?\",\n            ip.isp as \"ip_isp?\",\n            ip.coordinates[0] as \"ip_longitude?\",\n            ip.coordinates[1] as \"ip_latitude?\",\n            ip.proxy as \"ip_proxy?\",\n            ip.hosting as \"ip_hosting?\",\n            ip.created_at as \"ip_created_at?\",\n            ip.updated_at as \"ip_updated_at?\",\n            m.id as \"modem_id_nested?\",\n            m.imei as \"modem_imei?\",\n            m.network_provider as \"modem_network_provider?\",\n            m.updated_at as \"modem_updated_at?\",\n            m.created_at as \"modem_created_at?\",\n            r.id as \"release_id_nested?\",\n            r.distribution_id as \"release_distribution_id?\",\n            rd.architecture as \"release_distribution_architecture?\",\n            rd.name as \"release_distribution_name?\",\n            r.version as \"release_version?\",\n            r.draft as \"release_draft?\",\n            r.yanked as \"release_yanked?\",\n            r.created_at as \"release_created_at?\",\n            r.user_id as \"release_user_id?\",\n            tr.id as \"target_release_id_nested?\",\n            tr.distribution_id as \"target_release_distribution_id?\",\n            trd.architecture as \"target_release_distribution_architecture?\",\n            trd.name as \"target_release_distribution_name?\",\n            tr.version as \"target_release_version?\",\n            tr.draft as \"target_release_draft?\",\n            tr.yanked as \"target_release_yanked?\",\n            tr.created_at as \"target_release_created_at?\",\n            tr.user_id as \"target_release_user_id?\",\n            dn.network_score as \"network_score?\",\n            dn.download_speed_mbps as \"network_download_speed_mbps?\",\n            dn.source as \"network_source?\",\n            dn.updated_at as \"network_updated_at?\"\n        FROM device d\n        LEFT JOIN tag_device td ON d.id = td.device_id AND $4::text IS NOT NULL\n        LEFT JOIN tag t ON td.tag_id = t.id AND t.name = $4\n        LEFT JOIN ip_address ip ON d.ip_address_id = ip.id\n        LEFT JOIN modem m ON d.modem_id = m.id\n        LEFT JOIN release r ON d.release_id = r.id\n        LEFT JOIN distribution rd ON r.distribution_id = rd.id\n        LEFT JOIN release tr ON d.target_release_id = tr.id\n        LEFT JOIN distribution trd ON tr.distribution_id = trd.id\n        LEFT JOIN device_network dn ON d.id = dn.device_id\n        WHERE ($1::text IS NULL OR d.serial_number = $1)\n          AND ($2::boolean IS NULL OR d.approved = $2)\n          AND (COALESCE($3, false) = true OR d.archived = false)\n          AND ($4::text IS NULL OR t.name IS NOT NULL)\n        ORDER BY d.serial_number",
   "describe": {
     "columns": [
       {
@@ -270,17 +270,25 @@
       },
       {
         "ordinal": 53,
+        "name": "network_download_speed_mbps?",
+        "type_info": "Float8"
+      },
+      {
+        "ordinal": 54,
         "name": "network_source?",
         "type_info": "Text"
       },
       {
-        "ordinal": 54,
+        "ordinal": 55,
         "name": "network_updated_at?",
         "type_info": "Timestamptz"
       }
     ],
     "parameters": {
       "Left": [
+        "Text",
+        "Bool",
+        "Bool",
         "Text"
       ]
     },
@@ -338,9 +346,10 @@
       false,
       true,
       true,
+      true,
       false,
       false
     ]
   },
-  "hash": "e9f864c0f83d8d85f5dd4d74d66b18d82be1a9ea8b1512ce1a21944ebb91e8bd"
+  "hash": "9f0f06b70c1389d8bda483d98f91411a54842e6bed62f5ca75d57db1305382d7"
 }

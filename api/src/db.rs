@@ -129,15 +129,17 @@ impl DBHandler {
                         };
 
                         sqlx::query!(
-                            "INSERT INTO device_network (device_id, network_score, source, updated_at)
-                            VALUES ($1, $2, $3, NOW())
+                            "INSERT INTO device_network (device_id, network_score, download_speed_mbps, source, updated_at)
+                            VALUES ($1, $2, $3, $4, NOW())
                             ON CONFLICT (device_id)
                             DO UPDATE SET
                                 network_score = EXCLUDED.network_score,
+                                download_speed_mbps = EXCLUDED.download_speed_mbps,
                                 source = EXCLUDED.source,
                                 updated_at = NOW()",
                             device.id,
                             network_score,
+                            download_speed_mbps,
                             "speed_test"
                         )
                         .execute(pool)
