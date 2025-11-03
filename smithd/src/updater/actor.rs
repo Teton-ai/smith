@@ -407,7 +407,10 @@ impl Actor {
                         );
                     }
                     Err(_) => {
-                        error!("apt install for package {} timed out after 5 minutes", package_name);
+                        error!(
+                            "apt install for package {} timed out after 5 minutes",
+                            package_name
+                        );
                     }
                 }
             }

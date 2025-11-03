@@ -3,7 +3,7 @@ use super::actor::ActorMessage;
 use crate::magic::MagicHandle;
 use crate::shutdown::ShutdownSignals;
 use tokio::sync::{mpsc, oneshot};
-use tokio::time::{timeout, Duration};
+use tokio::time::{Duration, timeout};
 use tracing::warn;
 
 #[derive(Clone)]
@@ -35,7 +35,8 @@ impl Handler {
         let (rpc, receiver) = oneshot::channel();
 
         // Send status request
-        if self.sender
+        if self
+            .sender
             .send(ActorMessage::StatusReport { rpc })
             .await
             .is_err()
@@ -51,7 +52,9 @@ impl Handler {
                 "Error: Status response channel closed".to_string()
             }
             Err(_) => {
-                warn!("Status request timed out after 5 seconds - system may be busy with update/upgrade");
+                warn!(
+                    "Status request timed out after 5 seconds - system may be busy with update/upgrade"
+                );
                 "Status unavailable (system busy - update or upgrade in progress)".to_string()
             }
         }
