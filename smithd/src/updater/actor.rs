@@ -6,7 +6,7 @@ use anyhow::Result;
 use tokio::process::Command;
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
-use tokio::time;
+use tokio::time::{self, Duration};
 use tracing::{error, info, warn};
 
 #[derive(Debug)]
@@ -17,10 +17,21 @@ pub enum ActorMessage {
     StatusReport { rpc: oneshot::Sender<String> },
 }
 
+#[derive(Clone, Debug, PartialEq)]
 enum Status {
     Idle,
     Updating,
     Upgrading,
+}
+
+impl std::fmt::Display for Status {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Status::Idle => write!(f, "Idle"),
+            Status::Updating => write!(f, "Updating"),
+            Status::Upgrading => write!(f, "Upgrading"),
+        }
+    }
 }
 
 /// Updater Actor
@@ -53,15 +64,22 @@ impl Actor {
     }
 
     async fn run_dpkg_recovery_static() -> Result<()> {
-        info!("Running dpkg recovery using systemd-run");
+        info!("Running dpkg recovery using systemd-run with 5 minute timeout");
         let recovery_command = "systemd-run --unit=dpkg-fix --description='Finish broken configs' --property=Type=oneshot --no-ask-password dpkg --configure -a";
 
-        let output = Command::new("sh")
+        let recovery_future = Command::new("sh")
             .arg("-c")
             .arg(recovery_command)
-            .output()
-            .await
-            .with_context(|| "Failed to execute dpkg recovery command")?;
+            .kill_on_drop(true)
+            .output();
+
+        let output = match time::timeout(Duration::from_secs(300), recovery_future).await {
+            Ok(result) => result.with_context(|| "Failed to execute dpkg recovery command")?,
+            Err(_) => {
+                error!("dpkg recovery timed out after 5 minutes");
+                return Err(anyhow::anyhow!("dpkg recovery timed out"));
+            }
+        };
 
         if output.status.success() {
             info!("Dpkg recovery completed successfully");
@@ -74,38 +92,8 @@ impl Actor {
 
     async fn handle_message(&mut self, msg: ActorMessage) {
         match msg {
-            ActorMessage::Update => {
-                self.update().await;
-            }
-            ActorMessage::Upgrade => {
-                self.upgrade().await;
-            }
-            ActorMessage::Checking => {
-                let release_id = self.magic.get_release_id().await;
-                let target_release_id = self.magic.get_target_release_id().await;
-
-                if release_id != target_release_id {
-                    info!(
-                        "Upgrading from release_id {release_id:?} to target_release_id {target_release_id:?}"
-                    );
-
-                    self.update().await;
-
-                    if matches!(self.last_update, Some(Err(_)) | None) {
-                        return;
-                    }
-
-                    self.upgrade().await;
-
-                    if matches!(self.last_upgrade, Some(Err(_)) | None) {
-                        return;
-                    }
-
-                    self.magic.set_release_id(target_release_id).await;
-                }
-            }
+            // Handle status report immediately without blocking
             ActorMessage::StatusReport { rpc } => {
-                // take the instants and format them nicely with X seconds ago
                 let interval = |time: time::Instant| {
                     let duration = time.elapsed();
                     let seconds = duration.as_secs();
@@ -136,10 +124,58 @@ impl Actor {
                     None => "Never".to_string(),
                 };
 
-                let _rpc = rpc.send(format!(
-                    "Last Update: {} | Last Upgrade: {}",
-                    last_update_string, last_upgrade_string
-                ));
+                let status_string = format!(
+                    "Status: {} | Last Update: {} | Last Upgrade: {}",
+                    self.status, last_update_string, last_upgrade_string
+                );
+
+                let _rpc = rpc.send(status_string);
+            }
+            ActorMessage::Update => {
+                // Skip if already busy
+                if self.status != Status::Idle {
+                    warn!("Update requested but system is already {}, skipping", self.status);
+                    return;
+                }
+                self.update().await;
+            }
+            ActorMessage::Upgrade => {
+                // Skip if already busy
+                if self.status != Status::Idle {
+                    warn!("Upgrade requested but system is already {}, skipping", self.status);
+                    return;
+                }
+                self.upgrade().await;
+            }
+            ActorMessage::Checking => {
+                // Skip if already busy
+                if self.status != Status::Idle {
+                    info!("Skipping automatic check, system is currently {}", self.status);
+                    return;
+                }
+
+                let release_id = self.magic.get_release_id().await;
+                let target_release_id = self.magic.get_target_release_id().await;
+
+                if release_id != target_release_id {
+                    info!(
+                        "Upgrading from release_id {release_id:?} to target_release_id {target_release_id:?}"
+                    );
+
+                    self.update().await;
+
+                    if matches!(self.last_update, Some(Err(_)) | None) {
+                        return;
+                    }
+
+                    self.upgrade().await;
+
+                    if matches!(self.last_upgrade, Some(Err(_)) | None) {
+                        return;
+                    }
+
+                    self.magic.set_release_id(target_release_id).await;
+                }
             }
         }
     }
@@ -163,13 +199,23 @@ impl Actor {
     }
 
     async fn check_for_updates(&self) -> Result<()> {
-        // apt update on check for updates
-        Command::new("sh")
+        // apt update on check for updates with timeout
+        info!("Running apt update with 5 minute timeout");
+        let apt_update_future = Command::new("sh")
             .arg("-c")
             .arg("apt update -y")
-            .output()
-            .await
-            .with_context(|| "Failed to run apt update")?;
+            .kill_on_drop(true)
+            .output();
+
+        match time::timeout(Duration::from_secs(300), apt_update_future).await {
+            Ok(result) => {
+                result.with_context(|| "Failed to run apt update")?;
+            }
+            Err(_) => {
+                error!("apt update timed out after 5 minutes");
+                return Err(anyhow::anyhow!("apt update timed out"));
+            }
+        }
 
         let target_release_id = self
             .magic
@@ -339,13 +385,16 @@ impl Actor {
                     "sudo apt install {} -y --allow-downgrades",
                     package_file.display()
                 );
-                match Command::new("sh")
+
+                info!("Installing package {} with 5 minute timeout", package_name);
+                let install_future = Command::new("sh")
                     .arg("-c")
                     .arg(&install_command)
-                    .output()
-                    .await
-                {
-                    Ok(status) => {
+                    .kill_on_drop(true)
+                    .output();
+
+                match time::timeout(Duration::from_secs(300), install_future).await {
+                    Ok(Ok(status)) => {
                         if status.status.success() {
                             info!("Successfully installed package {}", package_name);
                         } else {
@@ -368,11 +417,14 @@ impl Actor {
                             }
                         }
                     }
-                    Err(e) => {
+                    Ok(Err(e)) => {
                         error!(
                             "Failed to execute install command for {}: {}",
                             package_name, e
                         );
+                    }
+                    Err(_) => {
+                        error!("apt install for package {} timed out after 5 minutes", package_name);
                     }
                 }
             }
