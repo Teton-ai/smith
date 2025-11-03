@@ -92,45 +92,6 @@ impl Actor {
 
     async fn handle_message(&mut self, msg: ActorMessage) {
         match msg {
-            // Handle status report immediately without blocking
-            ActorMessage::StatusReport { rpc } => {
-                let interval = |time: time::Instant| {
-                    let duration = time.elapsed();
-                    let seconds = duration.as_secs();
-                    let minutes = seconds / 60;
-                    let hours = minutes / 60;
-                    let days = hours / 24;
-
-                    if days > 0 {
-                        format!("{} days ago", days)
-                    } else if hours > 0 {
-                        format!("{} hours ago", hours)
-                    } else if minutes > 0 {
-                        format!("{} minutes ago", minutes)
-                    } else {
-                        format!("{} seconds ago", seconds)
-                    }
-                };
-
-                let last_update_string = match &self.last_update {
-                    Some(Ok(time)) => interval(*time),
-                    Some(Err(err)) => format!("Error: {}", err),
-                    None => "Never".to_string(),
-                };
-
-                let last_upgrade_string = match &self.last_upgrade {
-                    Some(Ok(time)) => interval(*time),
-                    Some(Err(err)) => format!("Error: {}", err),
-                    None => "Never".to_string(),
-                };
-
-                let status_string = format!(
-                    "Status: {} | Last Update: {} | Last Upgrade: {}",
-                    self.status, last_update_string, last_upgrade_string
-                );
-
-                let _rpc = rpc.send(status_string);
-            }
             ActorMessage::Update => {
                 // Skip if already busy
                 if self.status != Status::Idle {
@@ -176,6 +137,44 @@ impl Actor {
 
                     self.magic.set_release_id(target_release_id).await;
                 }
+            }
+            ActorMessage::StatusReport { rpc } => {
+                let interval = |time: time::Instant| {
+                    let duration = time.elapsed();
+                    let seconds = duration.as_secs();
+                    let minutes = seconds / 60;
+                    let hours = minutes / 60;
+                    let days = hours / 24;
+
+                    if days > 0 {
+                        format!("{} days ago", days)
+                    } else if hours > 0 {
+                        format!("{} hours ago", hours)
+                    } else if minutes > 0 {
+                        format!("{} minutes ago", minutes)
+                    } else {
+                        format!("{} seconds ago", seconds)
+                    }
+                };
+
+                let last_update_string = match &self.last_update {
+                    Some(Ok(time)) => interval(*time),
+                    Some(Err(err)) => format!("Error: {}", err),
+                    None => "Never".to_string(),
+                };
+
+                let last_upgrade_string = match &self.last_upgrade {
+                    Some(Ok(time)) => interval(*time),
+                    Some(Err(err)) => format!("Error: {}", err),
+                    None => "Never".to_string(),
+                };
+
+                let status_string = format!(
+                    "Status: {} | Last Update: {} | Last Upgrade: {}",
+                    self.status, last_update_string, last_upgrade_string
+                );
+
+                let _rpc = rpc.send(status_string);
             }
         }
     }
