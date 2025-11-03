@@ -93,28 +93,12 @@ impl Actor {
     async fn handle_message(&mut self, msg: ActorMessage) {
         match msg {
             ActorMessage::Update => {
-                // Skip if already busy
-                if self.status != Status::Idle {
-                    warn!("Update requested but system is already {}, skipping", self.status);
-                    return;
-                }
                 self.update().await;
             }
             ActorMessage::Upgrade => {
-                // Skip if already busy
-                if self.status != Status::Idle {
-                    warn!("Upgrade requested but system is already {}, skipping", self.status);
-                    return;
-                }
                 self.upgrade().await;
             }
             ActorMessage::Checking => {
-                // Skip if already busy
-                if self.status != Status::Idle {
-                    info!("Skipping automatic check, system is currently {}", self.status);
-                    return;
-                }
-
                 let release_id = self.magic.get_release_id().await;
                 let target_release_id = self.magic.get_target_release_id().await;
 
