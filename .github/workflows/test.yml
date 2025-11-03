@@ -30,7 +30,7 @@ jobs:
         run: echo "SQLX_OFFLINE=true" > .env
 
       - name: Install SQLx CLI
-        run: cargo install sqlx-cli --no-default-features --features native-tls,postgres
+        run: cargo install sqlx-cli --no-default-features --features native-tls,postgres --locked
 
       - name: Check formatting
         run: cargo fmt -- --check
