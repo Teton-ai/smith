@@ -34,20 +34,26 @@ fn print_markdown_help() {
 
     println!("## Profile Management\n");
     println!("### `sm profile [PROFILE_NAME]`");
-    println!("View or change the current profile. If no profile name is provided, shows the current profile.\n");
+    println!(
+        "View or change the current profile. If no profile name is provided, shows the current profile.\n"
+    );
 
     println!("## Device Management\n");
     println!("### `sm devices ls [--json]`");
     println!("List all devices. Use `--json` flag to output in JSON format.\n");
     println!("### `sm devices logs <SERIAL_NUMBER> [--nowait]`");
     println!("Get logs for a specific device by serial number.");
-    println!("- `--nowait`: Queue the command and return immediately without waiting for results. Use `sm command <id>` to check status later.\n");
+    println!(
+        "- `--nowait`: Queue the command and return immediately without waiting for results. Use `sm command <id>` to check status later.\n"
+    );
 
     println!("## Service Management\n");
     println!("### `sm service status --unit <UNIT> <SERIAL_NUMBER> [--nowait]`");
     println!("Get status of a systemd service on a device.");
     println!("- `--unit`: Service unit name (e.g., smithd.service)");
-    println!("- `--nowait`: Queue the command and return immediately without waiting for results.\n");
+    println!(
+        "- `--nowait`: Queue the command and return immediately without waiting for results.\n"
+    );
 
     println!("## Device Status\n");
     println!("### `sm status <SERIAL_NUMBER> [--nowait]`");
@@ -58,7 +64,9 @@ fn print_markdown_help() {
     println!("- Target package versions (versions that should be running)");
     println!("- Update status flag (true/false for each package indicating if it's updated)");
     println!("\n**Options:**");
-    println!("- `--nowait`: Queue the command and return immediately. Commands typically take at least 30 seconds to complete.\n");
+    println!(
+        "- `--nowait`: Queue the command and return immediately. Commands typically take at least 30 seconds to complete.\n"
+    );
 
     println!("## Command Management\n");
     println!("### `sm command <ID>...`");
@@ -83,7 +91,9 @@ fn print_markdown_help() {
 
     println!("## Utility Commands\n");
     println!("### `sm completion <SHELL>`");
-    println!("Generate shell completion scripts. Supported shells: bash, zsh, fish, powershell, elvish.\n");
+    println!(
+        "Generate shell completion scripts. Supported shells: bash, zsh, fish, powershell, elvish.\n"
+    );
     println!("### `sm update [--check]`");
     println!("Update the CLI tool.");
     println!("- `--check`: Only check for updates without installing\n");
@@ -294,7 +304,10 @@ async fn main() -> anyhow::Result<()> {
                     );
                     println!("Check the dashboard to see the results.");
                 }
-                DevicesCommands::Logs { serial_number, nowait } => {
+                DevicesCommands::Logs {
+                    serial_number,
+                    nowait,
+                } => {
                     let secrets = auth::get_secrets(&config)
                         .await
                         .with_context(|| "Error getting token")?
@@ -330,7 +343,10 @@ async fn main() -> anyhow::Result<()> {
                     if nowait {
                         pb.finish_and_clear();
                         println!("Command queued: {}:{}", device_id, command_id);
-                        println!("Note: Commands typically take at least 30 seconds to complete. Use 'sm command {}:{}' to check status.", device_id, command_id);
+                        println!(
+                            "Note: Commands typically take at least 30 seconds to complete. Use 'sm command {}:{}' to check status.",
+                            device_id, command_id
+                        );
                         return Ok(());
                     }
 
@@ -362,7 +378,11 @@ async fn main() -> anyhow::Result<()> {
                 }
             },
             Commands::Service { command } => match command {
-                ServiceCommands::Status { unit, serial_number, nowait } => {
+                ServiceCommands::Status {
+                    unit,
+                    serial_number,
+                    nowait,
+                } => {
                     let secrets = auth::get_secrets(&config)
                         .await
                         .with_context(|| "Error getting token")?
@@ -399,7 +419,10 @@ async fn main() -> anyhow::Result<()> {
                     if nowait {
                         pb.finish_and_clear();
                         println!("Command queued: {}:{}", device_id, command_id);
-                        println!("Note: Commands typically take at least 30 seconds to complete. Use 'sm command {}:{}' to check status.", device_id, command_id);
+                        println!(
+                            "Note: Commands typically take at least 30 seconds to complete. Use 'sm command {}:{}' to check status.",
+                            device_id, command_id
+                        );
                         return Ok(());
                     }
 
@@ -430,7 +453,10 @@ async fn main() -> anyhow::Result<()> {
                     println!("{}", status);
                 }
             },
-            Commands::Status { serial_number, nowait } => {
+            Commands::Status {
+                serial_number,
+                nowait,
+            } => {
                 let secrets = auth::get_secrets(&config)
                     .await
                     .with_context(|| "Error getting token")?
@@ -466,7 +492,10 @@ async fn main() -> anyhow::Result<()> {
                 if nowait {
                     pb.finish_and_clear();
                     println!("Command queued: {}:{}", device_id, command_id);
-                    println!("Note: Commands typically take at least 30 seconds to complete. Use 'sm command {}:{}' to check status.", device_id, command_id);
+                    println!(
+                        "Note: Commands typically take at least 30 seconds to complete. Use 'sm command {}:{}' to check status.",
+                        device_id, command_id
+                    );
                     return Ok(());
                 }
 
@@ -495,7 +524,7 @@ async fn main() -> anyhow::Result<()> {
 
                 pb.finish_and_clear();
                 println!("{}", status);
-            },
+            }
             Commands::Command { ids } => {
                 let secrets = auth::get_secrets(&config)
                     .await
@@ -540,7 +569,7 @@ async fn main() -> anyhow::Result<()> {
                         println!("---");
                     }
                 }
-            },
+            }
             Commands::Distributions { command } => match command {
                 DistroCommands::Ls { json } => {
                     let secrets = auth::get_secrets(&config)

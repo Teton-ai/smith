@@ -200,7 +200,11 @@ impl SmithAPI {
         Ok((device_id, command_id))
     }
 
-    pub async fn send_service_status_command(&self, device_id: u64, unit: String) -> Result<(u64, u64)> {
+    pub async fn send_service_status_command(
+        &self,
+        device_id: u64,
+        unit: String,
+    ) -> Result<(u64, u64)> {
         let client = Client::new();
 
         let service_command = schema::SafeCommandRequest {
@@ -262,12 +266,19 @@ impl SmithAPI {
         Ok((device_id, command_id))
     }
 
-    pub async fn get_device_command(&self, device_id: u64, command_id: u64) -> Result<serde_json::Value> {
+    pub async fn get_device_command(
+        &self,
+        device_id: u64,
+        command_id: u64,
+    ) -> Result<serde_json::Value> {
         let client = Client::new();
 
         // Get commands for device and filter to find the specific one
         let resp = client
-            .get(format!("{}/devices/{}/commands?limit=500", self.domain, device_id))
+            .get(format!(
+                "{}/devices/{}/commands?limit=500",
+                self.domain, device_id
+            ))
             .header("Authorization", format!("Bearer {}", &self.bearer_token))
             .send();
 
@@ -280,7 +291,9 @@ impl SmithAPI {
         let command = commands
             .iter()
             .find(|cmd| cmd["cmd_id"].as_u64() == Some(command_id))
-            .ok_or_else(|| anyhow::anyhow!("Command {} not found for device {}", command_id, device_id))?;
+            .ok_or_else(|| {
+                anyhow::anyhow!("Command {} not found for device {}", command_id, device_id)
+            })?;
 
         Ok(command.clone())
     }
