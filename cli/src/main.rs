@@ -659,7 +659,12 @@ where
         .as_u64()
         .with_context(|| "Device not found")?;
 
-    println!("{} for device [{}] {}", command_name, id, &serial_number.bold());
+    println!(
+        "{} for device [{}] {}",
+        command_name,
+        id,
+        &serial_number.bold()
+    );
 
     let pb = ProgressBar::new_spinner();
     pb.enable_steady_tick(Duration::from_millis(50));
