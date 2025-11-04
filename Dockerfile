@@ -1,5 +1,5 @@
 ARG RUST_VERSION=1.91.0
-FROM lukemathwalker/cargo-chef:0.1.71-rust-$RUST_VERSION AS chef
+FROM lukemathwalker/cargo-chef:0.1.73-rust-$RUST_VERSION AS chef
 
 ENV SQLX_OFFLINE=true
 WORKDIR /app
