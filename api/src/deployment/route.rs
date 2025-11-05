@@ -115,6 +115,6 @@ pub async fn api_confirm_full_rollout(
         state.config.slack_hook_url.as_deref(),
     )
     .await
-    .map_err(|_| StatusCode::BAD_REQUEST)?;
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     Ok((StatusCode::OK, Json(deployment)))
 }

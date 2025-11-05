@@ -273,7 +273,9 @@ WHERE id IN (
         .await?;
 
         if mismatched_devices_count.unwrap_or(0) > 0 {
-            anyhow::bail!("Cannot confirm full rollout: canary devices have not completed updating");
+            anyhow::bail!(
+                "Cannot confirm full rollout: canary devices have not completed updating"
+            );
         }
 
         let updated_deployment = sqlx::query_as!(
