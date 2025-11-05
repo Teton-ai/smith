@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT COUNT(*)\n             FROM device\n             WHERE device.release_id IN (\n                SELECT id FROM release WHERE distribution_id = $1\n             )",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "ceb4dfc84fd3cee13a4072e76c02adb140af5328c038dea41a71d2aaba1d4fd0"
+}
