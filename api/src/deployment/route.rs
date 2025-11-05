@@ -109,12 +109,8 @@ pub async fn api_confirm_full_rollout(
     Path(release_id): Path<i32>,
     Extension(state): Extension<State>,
 ) -> Result<(StatusCode, Json<Deployment>), StatusCode> {
-    let deployment = Deployment::confirm_full_rollout(
-        release_id,
-        &state.pg_pool,
-        state.config.slack_hook_url.as_deref(),
-    )
-    .await
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let deployment = Deployment::confirm_full_rollout(release_id, &state.pg_pool)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     Ok((StatusCode::OK, Json(deployment)))
 }

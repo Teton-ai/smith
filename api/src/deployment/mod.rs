@@ -213,11 +213,7 @@ WHERE id IN (
         Ok(deployment_obj)
     }
 
-    pub async fn confirm_full_rollout(
-        release_id: i32,
-        pg_pool: &PgPool,
-        slack_hook_url: Option<&str>,
-    ) -> anyhow::Result<Self> {
+    pub async fn confirm_full_rollout(release_id: i32, pg_pool: &PgPool) -> anyhow::Result<Self> {
         let mut tx = pg_pool.begin().await?;
 
         let deployment = sqlx::query!(
@@ -312,51 +308,6 @@ WHERE id IN (
         .await?;
 
         tx.commit().await?;
-
-        if let Some(hook_url) = slack_hook_url {
-            let release_info = sqlx::query!(
-                "SELECT r.version, d.name as distribution_name, d.architecture as distribution_architecture
-                 FROM release r
-                 JOIN distribution d ON r.distribution_id = d.id
-                 WHERE r.id = $1",
-                release_id
-            )
-            .fetch_one(pg_pool)
-            .await?;
-
-            let total_devices = device_count.unwrap_or(0);
-
-            let message = json!({
-                "text": format!("Full rollout confirmed for release v{}", release_info.version),
-                "blocks": [
-                    {
-                        "type": "section",
-                        "text": {
-                            "type": "mrkdwn",
-                            "text": format!("*Full Rollout Started*\n\n*Release:* v{}\n*Distribution:* {} ({})\n*Target Devices:* {}\n\nThe release is now rolling out to all devices in the distribution.",
-                                release_info.version,
-                                release_info.distribution_name,
-                                release_info.distribution_architecture,
-                                total_devices
-                            )
-                        }
-                    }
-                ]
-            });
-
-            let hook_url_owned = hook_url.to_string();
-            tokio::spawn(async move {
-                let client = reqwest::Client::new();
-                let _res = client
-                    .post(&hook_url_owned)
-                    .header("Content-Type", "application/json")
-                    .json(&message)
-                    .send()
-                    .await
-                    .inspect_err(|e| tracing::error!("Failed to send Slack notification: {}", e));
-            });
-        }
-
         Ok(updated_deployment)
     }
 
