@@ -53,6 +53,7 @@ const DeploymentStatusPage = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [elapsedTime, setElapsedTime] = useState(0);
+  const [confirming, setConfirming] = useState(false);
 
   const fetchDeployment = useCallback(async () => {
     try {
@@ -128,6 +129,29 @@ const DeploymentStatusPage = () => {
     const mins = Math.floor(seconds / 60);
     const secs = seconds % 60;
     return `${mins}m ${secs}s`;
+  };
+
+  const isCanaryComplete = () => {
+    if (!deployment || deployment.status !== 'InProgress' || devices.length === 0) {
+      return false;
+    }
+    return devices.every(device => device.release_id === device.target_release_id);
+  };
+
+  const handleConfirmFullRollout = async () => {
+    if (!isCanaryComplete()) return;
+
+    setConfirming(true);
+    try {
+      await callAPI('POST', `/releases/${releaseId}/deployment/confirm`);
+      await fetchDeployment();
+      await fetchDevices();
+    } catch (err: any) {
+      console.error('Failed to confirm full rollout:', err);
+      setError(err?.message || 'Failed to confirm full rollout');
+    } finally {
+      setConfirming(false);
+    }
   };
 
   const getDeviceStatus = (device: DeploymentDevice) => {
@@ -304,11 +328,38 @@ const DeploymentStatusPage = () => {
                     {deployment.status === 'InProgress' && (
                       <div className="space-y-2">
                         <p className="font-medium">Phase 1: Canary Deployment</p>
-                        <p>Deploying to ~10 recently active devices. The system will automatically proceed to full rollout once all canary devices have successfully updated.</p>
-                        <div className="mt-3 flex items-center space-x-2">
-                          <Loader2 className="w-4 h-4 animate-spin" />
-                          <span>Waiting for devices to update...</span>
-                        </div>
+                        {isCanaryComplete() ? (
+                          <>
+                            <p>All canary devices have been successfully updated!</p>
+                            <div className="mt-4">
+                              <button
+                                onClick={handleConfirmFullRollout}
+                                disabled={confirming}
+                                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center space-x-2 transition-colors"
+                              >
+                                {confirming ? (
+                                  <>
+                                    <Loader2 className="w-4 h-4 animate-spin" />
+                                    <span>Confirming...</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <CheckCircle2 className="w-4 h-4" />
+                                    <span>Confirm Full Rollout</span>
+                                  </>
+                                )}
+                              </button>
+                            </div>
+                          </>
+                        ) : (
+                          <>
+                            <p>Deploying to ~10 recently active devices. Please confirm full rollout once all canary devices have successfully updated.</p>
+                            <div className="mt-3 flex items-center space-x-2">
+                              <Loader2 className="w-4 h-4 animate-spin" />
+                              <span>Waiting for devices to update...</span>
+                            </div>
+                          </>
+                        )}
                       </div>
                     )}
                     {deployment.status === 'Done' && (
@@ -326,14 +377,14 @@ const DeploymentStatusPage = () => {
                   </div>
                 </div>
 
-                {deployment.status === 'InProgress' && (
+                {deployment.status === 'InProgress' && !isCanaryComplete() && (
                   <div className="border border-gray-200 bg-gray-50 rounded-lg p-4">
                     <div className="flex items-center space-x-2 mb-3">
                       <Clock className="w-5 h-5 text-gray-600" />
                       <h3 className="font-semibold text-gray-900">Phase 2: Full Rollout</h3>
                     </div>
                     <p className="text-sm text-gray-700">
-                      Will begin automatically after canary deployment completes successfully.
+                      Waiting for canary deployment to complete. You will need to manually confirm to proceed with full rollout.
                     </p>
                   </div>
                 )}
@@ -342,7 +393,7 @@ const DeploymentStatusPage = () => {
               {deployment.status === 'InProgress' && (
                 <div className="mt-6 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
                   <p className="text-sm text-yellow-800">
-                    <strong>Note:</strong> This page will automatically refresh every 5 seconds to show the latest status. You can safely navigate away and return later.
+                    <strong>Note:</strong> This page will automatically refresh every 5 seconds to show the latest status. {isCanaryComplete() ? 'Please confirm full rollout to proceed.' : 'You can safely navigate away and return later.'}
                   </p>
                 </div>
               )}

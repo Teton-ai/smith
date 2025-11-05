@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE device\n             SET target_release_id = $1\n             WHERE device.release_id IN (\n                SELECT id FROM release WHERE distribution_id = $2\n             )",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "526f94c3f29da8c3b7aacfc9e82a0c77446ac1e844887e15e25fdb92a0bbb80c"
+}

@@ -120,7 +120,7 @@ pub struct LeanResponse {
 pub struct LeanDevice {
     pub id: i32,
     pub serial_number: String,
-    pub last_seen: Option<chrono::DateTime<chrono::Utc>>,
+    pub last_seen: Option<DateTime<Utc>>,
     pub approved: bool,
     pub up_to_date: Option<bool>,
     pub ip_address_id: Option<i32>,

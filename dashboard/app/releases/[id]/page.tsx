@@ -355,13 +355,15 @@ const ReleaseDetailPage = () => {
                   <ul className="text-sm text-blue-800 space-y-1 list-disc list-inside">
                     <li>Deploy to ~10 recently active devices</li>
                     <li>Wait for successful updates (up to 5 minutes)</li>
+                    <li>You will be prompted to confirm when complete</li>
                   </ul>
                 </div>
 
                 <div className="bg-green-50 border border-green-200 rounded-lg p-4">
                   <h4 className="font-medium text-green-900 text-sm mb-2">Phase 2: Full Rollout</h4>
                   <ul className="text-sm text-green-800 space-y-1 list-disc list-inside">
-                    <li>Once canary succeeds, deploy to all remaining devices</li>
+                    <li>Manually confirm to proceed after canary success</li>
+                    <li>Deploy to all remaining devices in distribution</li>
                     <li>Devices will update as they come online</li>
                   </ul>
                 </div>

@@ -92,3 +92,29 @@ pub async fn api_get_deployment_devices(
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     Ok((StatusCode::OK, Json(devices)))
 }
+
+#[utoipa::path(
+  post,
+  path = "/releases/{release_id}/deployment/confirm",
+  responses(
+        (status = StatusCode::OK, body = Deployment),
+        (status = StatusCode::BAD_REQUEST, description = "Canary devices have not completed updating"),
+  ),
+  security(
+      ("auth_token" = [])
+  ),
+  tag = TAG
+)]
+pub async fn api_confirm_full_rollout(
+    Path(release_id): Path<i32>,
+    Extension(state): Extension<State>,
+) -> Result<(StatusCode, Json<Deployment>), StatusCode> {
+    let deployment = Deployment::confirm_full_rollout(
+        release_id,
+        &state.pg_pool,
+        state.config.slack_hook_url.as_deref(),
+    )
+    .await
+    .map_err(|_| StatusCode::BAD_REQUEST)?;
+    Ok((StatusCode::OK, Json(deployment)))
+}
