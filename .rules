@@ -21,6 +21,7 @@ Monorepo for an open-source fleet management system:
   - Propagate with `?`
   - Log with `tracing::error!` or `.inspect_err(|e| tracing::error!(...))`
   - Use `match` / `if let Err(...)` for custom handling
+- Don't forget `cargo fmt` when you are done
 
 ## React (dashboard)
 - Next.js is for routing only.

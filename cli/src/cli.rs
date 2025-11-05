@@ -45,6 +45,29 @@ pub enum DevicesCommands {
         /// Device serial number or ID
         device: String,
     },
+    /// Get logs for a specific device
+    Logs {
+        /// Device serial number
+        serial_number: String,
+        /// Don't wait for result, just queue the command and return immediately (faster, recommended for agents - use 'sm command <id>' to check results later)
+        #[arg(long, default_value = "false")]
+        nowait: bool,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum ServiceCommands {
+    /// Get status of a systemd service
+    Status {
+        /// Service unit name
+        #[arg(short, long)]
+        unit: String,
+        /// Device serial number
+        serial_number: String,
+        /// Don't wait for result, just queue the command and return immediately (faster, recommended for agents - use 'sm command <id>' to check results later)
+        #[arg(long, default_value = "false")]
+        nowait: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -63,6 +86,33 @@ pub enum Commands {
     Devices {
         #[clap(subcommand)]
         command: DevicesCommands,
+    },
+
+    /// Service management commands
+    Service {
+        #[clap(subcommand)]
+        command: ServiceCommands,
+    },
+
+    /// Get smithd status for a device (runs 'smithd status' command)
+    ///
+    /// Shows comprehensive update status including:
+    /// - Update/upgrade status (whether the system is up-to-date)
+    /// - Installed package versions (currently running on the device)
+    /// - Target package versions (versions that should be running)
+    /// - Update status flag (true/false for each package indicating if it's updated)
+    Status {
+        /// Device serial number
+        serial_number: String,
+        /// Don't wait for result, just queue the command and return immediately (faster, recommended for agents - use 'sm command <id>' to check results later)
+        #[arg(long, default_value = "false")]
+        nowait: bool,
+    },
+
+    /// Check command results by ID (format: device_id:command_id)
+    Command {
+        /// Command IDs to check in format device_id:command_id
+        ids: Vec<String>,
     },
 
     /// Lists distributions and information
@@ -103,4 +153,8 @@ pub enum Commands {
         #[arg(long)]
         check: bool,
     },
+
+    /// Print all available commands in markdown format (useful for agents)
+    #[command(name = "agent-help")]
+    AgentHelp,
 }

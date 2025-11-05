@@ -6,7 +6,7 @@ mod print;
 mod schema;
 mod tunnel;
 
-use crate::cli::{Cli, Commands, DevicesCommands, DistroCommands};
+use crate::cli::{Cli, Commands, DevicesCommands, DistroCommands, ServiceCommands};
 use crate::print::TablePrint;
 use anyhow::Context;
 use api::SmithAPI;
@@ -19,6 +19,93 @@ use std::{io, thread, time::Duration};
 use termion::raw::IntoRawMode;
 use tokio::sync::oneshot;
 use tunnel::Session;
+
+fn print_markdown_help() {
+    println!("# Smith CLI Commands\n");
+    println!("This is a comprehensive guide to all available `sm` commands.\n");
+
+    println!("## Authentication\n");
+    println!("### `sm auth login [--no-open]`");
+    println!("Login to Smith API. Opens browser by default unless `--no-open` is specified.\n");
+    println!("### `sm auth logout`");
+    println!("Logs out the current session.\n");
+    println!("### `sm auth show`");
+    println!("Shows the current authentication token being used.\n");
+
+    println!("## Profile Management\n");
+    println!("### `sm profile [PROFILE_NAME]`");
+    println!(
+        "View or change the current profile. If no profile name is provided, shows the current profile.\n"
+    );
+
+    println!("## Device Management\n");
+    println!("### `sm devices ls [--json]`");
+    println!("List all devices. Use `--json` flag to output in JSON format.\n");
+    println!("### `sm devices logs <SERIAL_NUMBER> [--nowait]`");
+    println!("Get logs for a specific device by serial number.");
+    println!(
+        "- `--nowait`: Queue the command and return immediately without waiting for results. Use `sm command <id>` to check status later.\n"
+    );
+
+    println!("## Service Management\n");
+    println!("### `sm service status --unit <UNIT> <SERIAL_NUMBER> [--nowait]`");
+    println!("Get status of a systemd service on a device.");
+    println!("- `--unit`: Service unit name (e.g., smithd.service)");
+    println!(
+        "- `--nowait`: Queue the command and return immediately without waiting for results.\n"
+    );
+
+    println!("## Device Status\n");
+    println!("### `sm status <SERIAL_NUMBER> [--nowait]`");
+    println!("Get smithd status for a device (runs 'smithd status' command).");
+    println!("\n**Output includes:**");
+    println!("- Update/upgrade status (whether the system is up-to-date)");
+    println!("- Installed package versions (currently running on the device)");
+    println!("- Target package versions (versions that should be running)");
+    println!("- Update status flag (true/false for each package indicating if it's updated)");
+    println!("\n**Options:**");
+    println!(
+        "- `--nowait`: Queue the command and return immediately. Commands typically take at least 30 seconds to complete.\n"
+    );
+
+    println!("## Command Management\n");
+    println!("### `sm command <ID>...`");
+    println!("Check command results by ID. Format: `device_id:command_id`");
+    println!("Can check multiple commands at once by providing multiple IDs.\n");
+
+    println!("## Distribution Management\n");
+    println!("### `sm distributions ls [--json]` (alias: `sm distro ls`)");
+    println!("List current distributions. Use `--json` flag to output in JSON format.\n");
+    println!("### `sm distributions releases` (alias: `sm distro releases`)");
+    println!("List current distribution releases.\n");
+
+    println!("## Release Management\n");
+    println!("### `sm release <RELEASE_NUMBER> [--deploy]`");
+    println!("Interact with a specific release.");
+    println!("- Without `--deploy`: View release information");
+    println!("- With `--deploy`: Deploy the release and wait for completion (5 minute timeout)\n");
+
+    println!("## Tunneling\n");
+    println!("### `sm tunnel <SERIAL_NUMBER> [--overview-debug]`");
+    println!("Create an SSH tunnel to a device for direct access.\n");
+
+    println!("## Utility Commands\n");
+    println!("### `sm completion <SHELL>`");
+    println!(
+        "Generate shell completion scripts. Supported shells: bash, zsh, fish, powershell, elvish.\n"
+    );
+    println!("### `sm update [--check]`");
+    println!("Update the CLI tool.");
+    println!("- `--check`: Only check for updates without installing\n");
+    println!("### `sm agent-help`");
+    println!("Print this markdown help guide (useful for agents).\n");
+
+    println!("## Notes\n");
+    println!("- Commands with `--nowait` are recommended for agents and automation");
+    println!("- Use `sm command <device_id>:<command_id>` to check the status of queued commands");
+    println!("- Most device commands take at least 30 seconds to complete");
+    println!("- JSON output is available for `devices ls` and `distributions ls` commands");
+}
 
 fn update(_check: bool) -> Result<(), anyhow::Error> {
     let updater = self_update::backends::github::Update::configure()
@@ -217,7 +304,128 @@ async fn main() -> anyhow::Result<()> {
                     );
                     println!("Check the dashboard to see the results.");
                 }
+                DevicesCommands::Logs {
+                    serial_number,
+                    nowait,
+                } => {
+                    let secrets = auth::get_secrets(&config)
+                        .await
+                        .with_context(|| "Error getting token")?
+                        .with_context(|| "No Token found, please Login")?;
+
+                    let api = SmithAPI::new(secrets, &config);
+
+                    let logs = execute_device_command(
+                        &api,
+                        serial_number,
+                        "Fetching logs",
+                        nowait,
+                        |id| api.send_logs_command(id),
+                    )
+                    .await?;
+
+                    if !logs.is_empty() {
+                        println!("{}", logs);
+                    }
+                }
             },
+            Commands::Service { command } => match command {
+                ServiceCommands::Status {
+                    unit,
+                    serial_number,
+                    nowait,
+                } => {
+                    let secrets = auth::get_secrets(&config)
+                        .await
+                        .with_context(|| "Error getting token")?
+                        .with_context(|| "No Token found, please Login")?;
+
+                    let api = SmithAPI::new(secrets, &config);
+
+                    let unit_clone = unit.clone();
+                    let status = execute_device_command(
+                        &api,
+                        serial_number,
+                        &format!("Checking status of {}", unit.bold()),
+                        nowait,
+                        |id| api.send_service_status_command(id, unit_clone),
+                    )
+                    .await?;
+
+                    if !status.is_empty() {
+                        println!("{}", status);
+                    }
+                }
+            },
+            Commands::Status {
+                serial_number,
+                nowait,
+            } => {
+                let secrets = auth::get_secrets(&config)
+                    .await
+                    .with_context(|| "Error getting token")?
+                    .with_context(|| "No Token found, please Login")?;
+
+                let api = SmithAPI::new(secrets, &config);
+
+                let status = execute_device_command(
+                    &api,
+                    serial_number,
+                    "Fetching smithd status",
+                    nowait,
+                    |id| api.send_smithd_status_command(id),
+                )
+                .await?;
+
+                if !status.is_empty() {
+                    println!("{}", status);
+                }
+            }
+            Commands::Command { ids } => {
+                let secrets = auth::get_secrets(&config)
+                    .await
+                    .with_context(|| "Error getting token")?
+                    .with_context(|| "No Token found, please Login")?;
+
+                let api = SmithAPI::new(secrets, &config);
+
+                for id_str in &ids {
+                    let parts: Vec<&str> = id_str.split(':').collect();
+                    if parts.len() != 2 {
+                        return Err(anyhow::anyhow!(
+                            "Invalid command ID format '{}'. Expected format: device_id:command_id",
+                            id_str
+                        ));
+                    }
+
+                    let device_id: u64 = parts[0].parse().with_context(|| {
+                        format!("Invalid device_id in '{}': must be a number", id_str)
+                    })?;
+
+                    let command_id: u64 = parts[1].parse().with_context(|| {
+                        format!("Invalid command_id in '{}': must be a number", id_str)
+                    })?;
+
+                    let command = api.get_device_command(device_id, command_id).await?;
+
+                    println!("Command ID: {}", id_str);
+                    println!("Fetched: {}", command["fetched"].as_bool().unwrap_or(false));
+
+                    if command["response"].is_object() {
+                        if let Some(stdout) = command["response"]["FreeForm"]["stdout"].as_str() {
+                            println!("Output:\n{}", stdout);
+                        } else {
+                            println!("Status: Completed (no output)");
+                        }
+                    } else {
+                        println!("Status: Pending");
+                    }
+
+                    if ids.len() > 1 {
+                        println!("---");
+                    }
+                }
+            }
             Commands::Distributions { command } => match command {
                 DistroCommands::Ls { json } => {
                     let secrets = auth::get_secrets(&config)
@@ -421,6 +629,10 @@ async fn main() -> anyhow::Result<()> {
                 generate(shell, &mut cmd, name, &mut io::stdout());
                 return Ok(());
             }
+            Commands::AgentHelp => {
+                print_markdown_help();
+                return Ok(());
+            }
         },
         None => {
             Cli::command().print_help()?;
@@ -428,6 +640,76 @@ async fn main() -> anyhow::Result<()> {
     }
 
     Ok(())
+}
+
+async fn execute_device_command<F, Fut>(
+    api: &SmithAPI,
+    serial_number: String,
+    command_name: &str,
+    nowait: bool,
+    send_command: F,
+) -> anyhow::Result<String>
+where
+    F: FnOnce(u64) -> Fut,
+    Fut: std::future::Future<Output = anyhow::Result<(u64, u64)>>,
+{
+    let devices = api.get_devices(Some(serial_number.clone())).await?;
+    let parsed: Value = serde_json::from_str(&devices)?;
+    let id = parsed[0]["id"]
+        .as_u64()
+        .with_context(|| "Device not found")?;
+
+    println!(
+        "{} for device [{}] {}",
+        command_name,
+        id,
+        &serial_number.bold()
+    );
+
+    let pb = ProgressBar::new_spinner();
+    pb.enable_steady_tick(Duration::from_millis(50));
+    pb.set_style(
+        ProgressStyle::with_template("{spinner:.blue} {msg}")
+            .unwrap()
+            .tick_strings(&["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]),
+    );
+    pb.set_message("Sending request to device");
+
+    let (device_id, command_id) = send_command(id).await?;
+
+    if nowait {
+        pb.finish_and_clear();
+        println!("Command queued: {}:{}", device_id, command_id);
+        println!(
+            "Note: Commands typically take at least 30 seconds to complete. Use 'sm command {}:{}' to check status.",
+            device_id, command_id
+        );
+        return Ok(String::new());
+    }
+
+    pb.set_message("Request sent, waiting for device");
+
+    let result;
+    loop {
+        let response = api.get_last_command(id).await?;
+
+        if response["fetched"].is_boolean() && response["fetched"].as_bool().unwrap_or(false) {
+            pb.set_message("Command fetched by device");
+        }
+
+        if response["response"].is_object() {
+            result = response["response"]["FreeForm"]["stdout"]
+                .as_str()
+                .with_context(|| "Failed to get output from response")?
+                .to_string();
+            break;
+        }
+
+        thread::sleep(Duration::from_secs(1));
+    }
+
+    pb.finish_and_clear();
+    Ok(result)
 }
 
 fn get_colored_arch(arch: &str) -> String {
