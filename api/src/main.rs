@@ -269,9 +269,9 @@ async fn start_main_server(config: &'static Config, authorization: Authorization
         .routes(routes!(
             deployment::route::api_release_deployment,
             deployment::route::api_get_release_deployment,
-            deployment::route::api_release_deployment_check_done,
-            deployment::route::api_confirm_full_rollout
+            deployment::route::api_release_deployment_check_done
         ))
+        .routes(routes!(deployment::route::api_confirm_full_rollout))
         .nest_service(
             "/packages/:package_id",
             get(handlers::packages::get_package_by_id)
