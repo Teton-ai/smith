@@ -98,22 +98,29 @@ fn is_file_storage_allowed() -> bool {
 }
 
 // Factory function to get the appropriate credential store
-pub fn get_credential_store(_profile: &str) -> Result<Box<dyn CredentialStore>> {
-    // Prefer keychain first (most secure)
-    let keychain = KeychainStore::new();
-
-    // If file storage is allowed, check if file exists and prefer it
-    // (this handles Docker case where keychain won't work but file is mounted)
+pub fn get_credential_store(_profile: &str) -> Box<dyn CredentialStore> {
+    // Check for file first (only if explicitly enabled via env var)
     if is_file_storage_allowed() {
-        let file_store = FileStore::new()?;
-        if file_store.file_exists() {
-            return Ok(Box::new(file_store));
+        if let Ok(file_store) = FileStore::new() {
+            if file_store.file_exists() {
+                return Box::new(file_store);
+            }
         }
-        // File doesn't exist yet - return keychain to try first,
-        // caller will handle fallback to file on keychain failure
-        return Ok(Box::new(keychain));
     }
 
-    // Default: return keychain (will error during actual use if unavailable)
-    Ok(Box::new(keychain))
+    // Try keychain next
+    let keychain = KeychainStore::new();
+    if keychain.get().is_ok() {
+        return Box::new(keychain);
+    }
+
+    // Fall back to file store for writing (only if allowed)
+    if is_file_storage_allowed() {
+        if let Ok(file_store) = FileStore::new() {
+            return Box::new(file_store);
+        }
+    }
+
+    // Last resort: return keychain (will error when used, but prevents panic)
+    Box::new(keychain)
 }
