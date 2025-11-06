@@ -1,11 +1,13 @@
+mod store;
+
 use anyhow::{Result, anyhow};
 use base64::Engine;
-use keyring::Entry;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 use crate::config::Config;
+use store::get_credential_store;
 
 #[derive(Serialize, Deserialize)]
 struct DeviceAuthResponse {
@@ -80,11 +82,10 @@ pub async fn login(config: &Config, open: bool) -> anyhow::Result<()> {
         println!("{:?}", resp);
 
         if let (Some(access_token), Some(refresh_token)) = (resp.access_token, resp.refresh_token) {
-            let user = whoami::username();
-            let entry = Entry::new("SMITH_KEYS", &user)?;
+            let store = get_credential_store();
             let current_profile = config.current_profile.clone();
 
-            let session_secrets = entry.get_password();
+            let session_secrets = store.get();
 
             let mut session_secrets = match session_secrets {
                 Ok(secrets) => serde_json::from_str::<SessionSecrets>(&secrets)?,
@@ -103,7 +104,7 @@ pub async fn login(config: &Config, open: bool) -> anyhow::Result<()> {
                     .profiles
                     .insert(current_profile, new_profile_secrets);
             }
-            entry.set_password(&serde_json::to_string(&session_secrets)?)?;
+            store.set(&serde_json::to_string(&session_secrets)?)?;
 
             break;
         };
@@ -122,9 +123,8 @@ pub async fn login(config: &Config, open: bool) -> anyhow::Result<()> {
 }
 
 pub fn logout() -> anyhow::Result<()> {
-    let user = whoami::username();
-    let entry = Entry::new("SMITH_KEYS", &user)?;
-    entry.delete_credential()?;
+    let store = get_credential_store();
+    store.delete()?;
     print!("Logged out, credentials removed.");
     Ok(())
 }
@@ -258,11 +258,10 @@ pub struct ProfileSecrets {
 }
 
 pub async fn get_secrets(config: &Config) -> Result<Option<SessionSecrets>> {
-    let user = whoami::username();
-    let entry = Entry::new("SMITH_KEYS", &user)?;
+    let store = get_credential_store();
     let current_profile = config.current_profile.clone();
 
-    let session_secrets = entry.get_password();
+    let session_secrets = store.get();
     let mut session_secrets = match session_secrets {
         Ok(secrets) => serde_json::from_str::<SessionSecrets>(&secrets)?,
         Err(_) => return Ok(None),
@@ -310,7 +309,7 @@ pub async fn get_secrets(config: &Config) -> Result<Option<SessionSecrets>> {
         } else {
             return Err(anyhow!("Profile not found"));
         }
-        entry.set_password(&serde_json::to_string(&session_secrets)?)?;
+        store.set(&serde_json::to_string(&session_secrets)?)?;
 
         return Ok(Some(session_secrets));
     }
