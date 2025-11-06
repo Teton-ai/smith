@@ -83,7 +83,7 @@ pub async fn login(config: &Config, open: bool) -> anyhow::Result<()> {
 
         if let (Some(access_token), Some(refresh_token)) = (resp.access_token, resp.refresh_token) {
             let current_profile = config.current_profile.clone();
-            let store = get_credential_store(&current_profile);
+            let store = get_credential_store(&current_profile)?;
 
             let session_secrets = store.get();
 
@@ -123,7 +123,7 @@ pub async fn login(config: &Config, open: bool) -> anyhow::Result<()> {
 }
 
 pub fn logout() -> anyhow::Result<()> {
-    let store = get_credential_store("");
+    let store = get_credential_store("")?;
     store.delete()?;
     print!("Logged out, credentials removed.");
     Ok(())
@@ -259,7 +259,7 @@ pub struct ProfileSecrets {
 
 pub async fn get_secrets(config: &Config) -> Result<Option<SessionSecrets>> {
     let current_profile = config.current_profile.clone();
-    let store = get_credential_store(&current_profile);
+    let store = get_credential_store(&current_profile)?;
 
     let session_secrets = store.get();
     let mut session_secrets = match session_secrets {
