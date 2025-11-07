@@ -1,4 +1,3 @@
-use crate::bouncer::BouncerHandle;
 use crate::commander::CommanderHandle;
 use crate::dbus::DbusHandle;
 use crate::downloader::DownloaderHandle;
@@ -54,13 +53,8 @@ pub async fn run() {
         filemanager.clone(),
     );
 
-    let bouncer = BouncerHandle::new(shutdown.signals(), configuration.clone(), police.clone());
-
     // this will ensure we have a token
     configuration.wait_while_not_registered().await;
-
-    // this will block while we try to have all the checks passing
-    bouncer.ok().await;
 
     // wait for the sweet release of death
     shutdown.wait().await;
