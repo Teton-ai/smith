@@ -176,7 +176,7 @@ dependencies = [
 
 [[package]]
 name = "api"
-version = "0.2.72"
+version = "0.2.73"
 dependencies = [
  "anyhow",
  "axum",
@@ -981,7 +981,7 @@ checksum = "a1d728cc89cf3aee9ff92b05e62b19ee65a02b5702cff7d5a377e32c6ae29d8d"
 
 [[package]]
 name = "cli"
-version = "0.2.72"
+version = "0.2.73"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3256,9 +3256,9 @@ dependencies = [
 
 [[package]]
 name = "openssl"
-version = "0.10.74"
+version = "0.10.75"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "24ad14dd45412269e1a30f52ad8f0664f0f4f4a89ee8fe28c3b3527021ebb654"
+checksum = "08838db121398ad17ab8531ce9de97b244589089e290a384c900cb9ff7434328"
 dependencies = [
  "bitflags 2.10.0",
  "cfg-if",
@@ -3297,9 +3297,9 @@ dependencies = [
 
 [[package]]
 name = "openssl-sys"
-version = "0.9.110"
+version = "0.9.111"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0a9f0075ba3c21b09f8e8b2026584b1d18d49388648f2fbbf3c97ea8deced8e2"
+checksum = "82cab2d520aa75e3c58898289429321eb788c3106963d0dc886ec7a5f4adc321"
 dependencies = [
  "cc",
  "libc",
@@ -4967,7 +4967,7 @@ dependencies = [
 
 [[package]]
 name = "smith"
-version = "0.2.72"
+version = "0.2.73"
 dependencies = [
  "anyhow",
  "bore-cli",
@@ -4999,7 +4999,7 @@ dependencies = [
 
 [[package]]
 name = "smith-updater"
-version = "0.2.72"
+version = "0.2.73"
 dependencies = [
  "clap",
  "smith",
