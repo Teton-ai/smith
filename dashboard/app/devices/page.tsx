@@ -64,7 +64,7 @@ const Tooltip = ({ children, content }: { children: React.ReactNode, content: st
 const DeviceSkeleton = () => (
   <div className="px-4 py-3 animate-pulse">
     <div className="grid grid-cols-8 gap-4 items-center">
-      <div className="col-span-3">
+      <div className="col-span-2">
         <div className="flex items-center space-x-3">
           <div className="w-4 h-4 bg-gray-300 rounded flex-shrink-0"></div>
           <div className="min-w-0 flex-1">
@@ -76,18 +76,25 @@ const DeviceSkeleton = () => (
           </div>
         </div>
       </div>
-      
+
+      <div className="col-span-2">
+        <div className="flex gap-1">
+          <div className="h-5 bg-gray-300 rounded-full w-16"></div>
+          <div className="h-5 bg-gray-300 rounded-full w-16"></div>
+        </div>
+      </div>
+
       <div className="col-span-2">
         <div className="flex items-center space-x-2">
           <div className="w-4 h-3 bg-gray-300 rounded-sm flex-shrink-0"></div>
           <div className="h-4 bg-gray-300 rounded w-20"></div>
         </div>
       </div>
-      
-      <div className="col-span-2">
+
+      <div className="col-span-1">
         <div className="h-4 bg-gray-300 rounded w-20"></div>
       </div>
-      
+
       <div className="col-span-1">
         <div className="flex items-center space-x-1">
           <div className="w-3 h-3 bg-gray-300 rounded flex-shrink-0"></div>
@@ -149,6 +156,7 @@ interface Device {
   release: Release | null
   target_release: Release | null
   network: DeviceNetwork | null
+  labels: Record<string, string>
 }
 
 interface IpAddressInfo {
@@ -437,9 +445,10 @@ const DevicesPage = () => {
         <div className="border border-gray-200 rounded-lg overflow-hidden bg-white">
           <div className="bg-gray-50 px-4 py-3 border-b border-gray-200">
             <div className="grid grid-cols-8 gap-4 text-xs font-medium text-gray-500 uppercase tracking-wide">
-              <div className="col-span-3">Device</div>
+              <div className="col-span-2">Device</div>
+              <div className="col-span-2">Labels</div>
               <div className="col-span-2">Location</div>
-              <div className="col-span-2">OS</div>
+              <div className="col-span-1">OS</div>
               <div className="col-span-1">Release</div>
             </div>
           </div>
@@ -455,7 +464,7 @@ const DevicesPage = () => {
                 onClick={() => router.push(`/devices/${device.serial_number}`)}
               >
                 <div className="grid grid-cols-8 gap-4 items-center">
-                  <div className="col-span-3">
+                  <div className="col-span-2">
                     <div className="flex items-center space-x-3">
                       <Cpu className="w-4 h-4 text-gray-400 flex-shrink-0" />
                       <div className="min-w-0 flex-1">
@@ -483,6 +492,23 @@ const DevicesPage = () => {
                         </div>
                       </div>
                     </div>
+                  </div>
+
+                  <div className="col-span-2">
+                    {device.labels && Object.keys(device.labels).length > 0 ? (
+                      <div className="flex flex-wrap gap-1">
+                        {Object.entries(device.labels).map(([key, value]) => (
+                          <code
+                            key={key}
+                            className="px-1.5 py-0.5 text-xs font-mono bg-gray-100 text-gray-700 rounded border border-gray-200"
+                          >
+                            {key}={value}
+                          </code>
+                        ))}
+                      </div>
+                    ) : (
+                      <span className="text-xs text-gray-400">-</span>
+                    )}
                   </div>
 
                   <div className="col-span-2">
@@ -517,7 +543,7 @@ const DevicesPage = () => {
                     })()}
                   </div>
 
-                  <div className="col-span-2 text-sm text-gray-600">
+                  <div className="col-span-1 text-sm text-gray-600">
                     {getOSVersion(device)}
                   </div>
 
