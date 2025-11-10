@@ -39,8 +39,12 @@ fn print_markdown_help() {
     );
 
     println!("## Device Management\n");
-    println!("### `sm devices ls [--json]`");
-    println!("List all devices. Use `--json` flag to output in JSON format.\n");
+    println!("### `sm devices ls [--json] [-l KEY=VALUE]... [--online|--offline]`");
+    println!("List all devices. Use `--json` flag to output in JSON format.");
+    println!("Use `-l` or `--label` to filter by labels (e.g., `-l department=xd -l region=us`).");
+    println!(
+        "Use `--online` to show only online devices or `--offline` to show only offline devices.\n"
+    );
     println!("### `sm devices logs <SERIAL_NUMBER> [--nowait]`");
     println!("Get logs for a specific device by serial number.");
     println!(
@@ -105,6 +109,10 @@ fn print_markdown_help() {
     println!("- Use `sm command <device_id>:<command_id>` to check the status of queued commands");
     println!("- Most device commands take at least 30 seconds to complete");
     println!("- JSON output is available for `devices ls` and `distributions ls` commands");
+    println!(
+        "- Multiple labels can be combined for filtering (e.g., `sm devices ls -l department=xd -l env=prod`)"
+    );
+    println!("- Devices are considered online if they pinged within the last 5 minutes");
 }
 
 fn update(_check: bool) -> Result<(), anyhow::Error> {
@@ -245,7 +253,12 @@ async fn main() -> anyhow::Result<()> {
                 }
             },
             Commands::Devices { command } => match command {
-                DevicesCommands::Ls { json } => {
+                DevicesCommands::Ls {
+                    json,
+                    labels,
+                    online,
+                    offline,
+                } => {
                     let secrets = auth::get_secrets(&config)
                         .await
                         .with_context(|| "Error getting token")?
@@ -253,7 +266,33 @@ async fn main() -> anyhow::Result<()> {
 
                     let api = SmithAPI::new(secrets, &config);
 
-                    let devices = api.get_devices(None).await?;
+                    let labels_map = if !labels.is_empty() {
+                        let mut map = std::collections::HashMap::new();
+                        for label_str in labels {
+                            let parts: Vec<&str> = label_str.splitn(2, '=').collect();
+                            if parts.len() == 2 {
+                                map.insert(parts[0].to_string(), parts[1].to_string());
+                            } else {
+                                return Err(anyhow::anyhow!(
+                                    "Invalid label format: '{}'. Expected 'key=value'",
+                                    label_str
+                                ));
+                            }
+                        }
+                        Some(map)
+                    } else {
+                        None
+                    };
+
+                    let online_filter = if online {
+                        Some(true)
+                    } else if offline {
+                        Some(false)
+                    } else {
+                        None
+                    };
+
+                    let devices = api.get_devices(None, labels_map, online_filter).await?;
                     if json {
                         println!("{}", devices);
                         return Ok(());
@@ -263,11 +302,22 @@ async fn main() -> anyhow::Result<()> {
                     let rows: Vec<Vec<String>> = parsed_devices
                         .iter()
                         .map(|d| {
+                            let labels_str = if let Some(labels_obj) = d["labels"].as_object() {
+                                labels_obj
+                                    .iter()
+                                    .map(|(k, v)| format!("{}={}", k, v.as_str().unwrap_or("")))
+                                    .collect::<Vec<String>>()
+                                    .join(", ")
+                            } else {
+                                String::new()
+                            };
+
                             vec![
                                 get_online_colored(
                                     d["serial_number"].as_str().unwrap_or(""),
                                     d["last_seen"].as_str().unwrap_or(""),
                                 ),
+                                labels_str,
                                 d["system_info"]["smith"]["version"]
                                     .as_str()
                                     .unwrap_or("")
@@ -278,8 +328,9 @@ async fn main() -> anyhow::Result<()> {
                         .collect();
                     TablePrint {
                         headers: vec![
-                            "Serial Number (online)".to_string(),
-                            "Daemon Version".to_string(),
+                            "Device".to_string(),
+                            "Labels".to_string(),
+                            "Version".to_string(),
                         ],
                         rows,
                     }
@@ -476,7 +527,9 @@ async fn main() -> anyhow::Result<()> {
 
                 let api = SmithAPI::new(secrets, &config);
 
-                let devices = api.get_devices(Some(serial_number.clone())).await?;
+                let devices = api
+                    .get_devices(Some(serial_number.clone()), None, None)
+                    .await?;
 
                 let parsed: Value = serde_json::from_str(&devices)?;
 
@@ -653,7 +706,9 @@ where
     F: FnOnce(u64) -> Fut,
     Fut: std::future::Future<Output = anyhow::Result<(u64, u64)>>,
 {
-    let devices = api.get_devices(Some(serial_number.clone())).await?;
+    let devices = api
+        .get_devices(Some(serial_number.clone()), None, None)
+        .await?;
     let parsed: Value = serde_json::from_str(&devices)?;
     let id = parsed[0]["id"]
         .as_u64()
@@ -729,6 +784,7 @@ fn get_colored_arch(arch: &str) -> String {
 }
 
 fn get_online_colored(serial_number: &str, last_seen: &str) -> String {
+    use chrono_humanize::HumanTime;
     let now = chrono::Utc::now();
 
     match chrono::DateTime::parse_from_rfc3339(last_seen) {
@@ -738,7 +794,8 @@ fn get_online_colored(serial_number: &str, last_seen: &str) -> String {
             if duration.num_minutes() < 5 {
                 serial_number.bright_green().to_string()
             } else {
-                format!("{} (last seen {})", serial_number, last_seen)
+                let human_time = HumanTime::from(parsed_time.with_timezone(&chrono::Utc));
+                format!("{} ({})", serial_number, human_time)
                     .red()
                     .to_string()
             }

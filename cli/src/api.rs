@@ -2,6 +2,7 @@ use anyhow::Result;
 use reqwest::Client;
 use serde_json::Value;
 use smith::utils::schema;
+use std::collections::HashMap;
 
 pub struct SmithAPI {
     domain: String,
@@ -22,13 +23,34 @@ impl SmithAPI {
         }
     }
 
-    pub async fn get_devices(&self, serial_number: Option<String>) -> Result<String> {
+    pub async fn get_devices(
+        &self,
+        serial_number: Option<String>,
+        labels: Option<HashMap<String, String>>,
+        online: Option<bool>,
+    ) -> Result<String> {
         let client = Client::new();
+
+        let mut query_params: Vec<(&str, String)> = vec![];
+
+        if let Some(sn) = serial_number {
+            query_params.push(("serial_number", sn));
+        }
+
+        if let Some(labels_map) = labels {
+            for (key, value) in labels_map {
+                query_params.push(("labels", format!("{}={}", key, value)));
+            }
+        }
+
+        if let Some(is_online) = online {
+            query_params.push(("online", is_online.to_string()));
+        }
 
         let resp = client
             .get(format!("{}/devices", self.domain))
             .header("Authorization", format!("Bearer {}", &self.bearer_token))
-            .query(&[("serial_number", serial_number)])
+            .query(&query_params)
             .send();
 
         let devices = resp.await?.text().await?;
