@@ -318,6 +318,11 @@ pub struct DeviceFilter {
         note = "Since labels have been released, tags concept be in version 0.74"
     )]
     pub tag: Option<String>,
+    /// Filter by labels. Format: key=value. Multiple labels can be provided.
+    #[serde(default)]
+    pub labels: Vec<String>,
+    /// Filter by online status. If true, only devices online in the last 5 minutes.
+    pub online: Option<bool>,
 }
 
 #[utoipa::path(
@@ -336,6 +341,25 @@ pub async fn get_devices(
     Extension(state): Extension<State>,
     filter: Query<DeviceFilter>,
 ) -> axum::response::Result<Json<Vec<Device>>, StatusCode> {
+    let labels_json = if !filter.labels.is_empty() {
+        let mut labels_map = HashMap::new();
+        for label_str in &filter.labels {
+            let parts: Vec<&str> = label_str.splitn(2, '=').collect();
+            if parts.len() == 2 {
+                labels_map.insert(parts[0].to_string(), parts[1].to_string());
+            } else {
+                error!("Invalid label format: {}", label_str);
+                return Err(StatusCode::BAD_REQUEST);
+            }
+        }
+        Some(serde_json::to_value(labels_map).map_err(|err| {
+            error!("Failed to serialize labels filter {err}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?)
+    } else {
+        None
+    };
+
     let devices = sqlx::query!(
         r#"SELECT
             d.id,
@@ -408,11 +432,17 @@ pub async fn get_devices(
           AND ($2::boolean IS NULL OR d.approved = $2)
           AND (COALESCE($3, false) = true OR d.archived = false)
           AND ($4::text IS NULL OR t.name IS NOT NULL)
+          AND ($5::jsonb IS NULL OR d.labels @> $5)
+          AND ($6::boolean IS NULL OR
+               ($6 = true AND d.last_ping >= now() - INTERVAL '5 minutes') OR
+               ($6 = false AND d.last_ping < now() - INTERVAL '5 minutes'))
         ORDER BY d.serial_number"#,
         filter.serial_number,
         filter.approved,
         filter.archived,
-        filter.tag
+        filter.tag,
+        labels_json as _,
+        filter.online
     )
     .fetch_all(&state.pg_pool)
     .await

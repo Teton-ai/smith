@@ -39,6 +39,15 @@ pub enum DevicesCommands {
     Ls {
         #[arg(short, long, default_value = "false")]
         json: bool,
+        /// Filter by labels (format: key=value). Can be used multiple times.
+        #[arg(short, long = "label", value_name = "KEY=VALUE")]
+        labels: Vec<String>,
+        /// Show only online devices (last seen < 5 minutes)
+        #[arg(long, conflicts_with = "offline")]
+        online: bool,
+        /// Show only offline devices (last seen >= 5 minutes)
+        #[arg(long, conflicts_with = "online")]
+        offline: bool,
     },
     /// Test network speed for a device
     TestNetwork {
