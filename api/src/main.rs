@@ -1,13 +1,15 @@
 use crate::event::PublicEvent;
+use crate::sentry::Sentry;
+use ::sentry::integrations::tower::{NewSentryLayer, SentryHttpLayer};
+use axum::body::Body;
 use axum::error_handling::HandleErrorLayer;
 use axum::extract::DefaultBodyLimit;
-use axum::http::StatusCode;
+use axum::http::{Request, StatusCode};
 use axum::response::Redirect;
 use axum::{Extension, Router, middleware, routing::get};
 use config::Config;
 use middlewares::authorization::AuthorizationConfig;
 use sqlx::postgres::{PgPool, PgPoolOptions};
-use std::borrow::Cow;
 use std::env;
 use std::fs::File;
 use std::future::ready;
@@ -46,6 +48,7 @@ pub mod network;
 mod package;
 mod release;
 mod rollout;
+mod sentry;
 mod smith;
 mod storage;
 mod telemetry;
@@ -78,36 +81,18 @@ fn main() {
         Config::new().expect("error: failed to construct config"),
     ));
 
-    if let Some(sentry_url) = &config.sentry_url {
-        // Sentry needs to be initialized outside of an async block.
-        // See https://docs.sentry.io/platforms/rust.
-        let _guard = sentry::init(sentry::ClientOptions {
-            dsn: Some(sentry_url.parse().expect("Invalid Sentry DSN")),
-            traces_sample_rate: 0.75,
-            release: sentry::release_name!(),
-            environment: match env::var("ENVIRONMENT") {
-                Ok(value) => Some(Cow::Owned(value)),
-                Err(_) => Some(Cow::Borrowed("development")),
-            },
-            ..Default::default()
-        });
-    }
-
     tracing_subscriber::registry()
         .with(tracing_subscriber::fmt::layer())
-        .with(sentry_tracing::layer())
         .with(EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")))
         .init();
 
-    // Corresponds to `#[tokio::main]`.
-    // See https://docs.rs/tokio-macros/latest/src/tokio_macros/lib.rs.html#225.
-    tokio::runtime::Builder::new_current_thread()
+    let _sentry_guard = Sentry::init(config);
+
+    tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
         .expect("error: failed to initialize tokio runtime")
-        .block_on(async {
-            _ = tokio::spawn(async move { start_main_server(config, authorization).await }).await;
-        });
+        .block_on(async { start_main_server(config, authorization).await });
 }
 
 struct SecurityAddon;
@@ -354,6 +339,12 @@ async fn start_main_server(config: &'static Config, authorization: Authorization
         .merge(SwaggerUi::new("/smith/docs").url("/smith/openapi.json", smith_api))
         .layer(CorsLayer::permissive())
         .route_layer(middleware::from_fn(metric::track_metrics))
+        .layer(middleware::from_fn(Sentry::capture_errors_middleware))
+        .layer(
+            ServiceBuilder::new()
+                .layer(NewSentryLayer::<Request<Body>>::new_from_top())
+                .layer(SentryHttpLayer::new().enable_transaction()),
+        )
         .layer(Extension(state));
 
     let listener = TcpListener::bind("0.0.0.0:8080")
