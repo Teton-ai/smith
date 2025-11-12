@@ -686,6 +686,195 @@ async fn main() -> anyhow::Result<()> {
                 print_markdown_help();
                 return Ok(());
             }
+            Commands::Run {
+                labels,
+                online,
+                offline,
+                devices: device_filters,
+                wait,
+                command,
+            } => {
+                let secrets = auth::get_secrets(&config)
+                    .await
+                    .with_context(|| "Error getting token")?
+                    .with_context(|| "No Token found, please Login")?;
+
+                let api = SmithAPI::new(secrets, &config);
+
+                let cmd_string = command.join(" ");
+
+                let target_devices = if !device_filters.is_empty() {
+                    let mut devices_vec = Vec::new();
+                    for device_filter in device_filters {
+                        let devices_json = api
+                            .get_devices(Some(device_filter.clone()), None, None)
+                            .await?;
+                        let parsed: Vec<Value> = serde_json::from_str(&devices_json)
+                            .with_context(|| "Failed to parse devices JSON")?;
+                        devices_vec.extend(parsed);
+                    }
+                    devices_vec
+                } else {
+                    let labels_map = if !labels.is_empty() {
+                        let mut map = std::collections::HashMap::new();
+                        for label_str in labels {
+                            let parts: Vec<&str> = label_str.splitn(2, '=').collect();
+                            if parts.len() == 2 {
+                                map.insert(parts[0].to_string(), parts[1].to_string());
+                            } else {
+                                return Err(anyhow::anyhow!(
+                                    "Invalid label format: '{}'. Expected 'key=value'",
+                                    label_str
+                                ));
+                            }
+                        }
+                        Some(map)
+                    } else {
+                        None
+                    };
+
+                    let online_filter = if online {
+                        Some(true)
+                    } else if offline {
+                        Some(false)
+                    } else {
+                        None
+                    };
+
+                    let devices_json = api.get_devices(None, labels_map, online_filter).await?;
+                    serde_json::from_str(&devices_json)
+                        .with_context(|| "Failed to parse devices JSON")?
+                };
+
+                if target_devices.is_empty() {
+                    println!("No devices found matching the specified filters.");
+                    return Ok(());
+                }
+
+                println!(
+                    "Running command '{}' on {} device(s):",
+                    cmd_string.bold(),
+                    target_devices.len()
+                );
+
+                let mut command_ids = Vec::new();
+
+                for device in &target_devices {
+                    let device_id = device["id"]
+                        .as_u64()
+                        .ok_or_else(|| anyhow::anyhow!("Device missing ID field"))?;
+                    let serial_number = device["serial_number"].as_str().unwrap_or("unknown");
+
+                    match api.send_custom_command(device_id, cmd_string.clone()).await {
+                        Ok((dev_id, cmd_id)) => {
+                            command_ids.push((dev_id, cmd_id, serial_number.to_string()));
+                            println!(
+                                "  {} [{}] - Command queued: {}:{}",
+                                serial_number.bright_green(),
+                                dev_id,
+                                dev_id,
+                                cmd_id
+                            );
+                        }
+                        Err(e) => {
+                            println!("  {} [{}] - Failed: {}", serial_number.red(), device_id, e);
+                        }
+                    }
+                }
+
+                if !wait {
+                    println!(
+                        "\n{} Commands sent. Use 'sm command <device_id>:<command_id>' to check status.",
+                        "Note:".bold()
+                    );
+                    return Ok(());
+                }
+
+                println!("\n{} for results...", "Waiting".bold());
+
+                let m = MultiProgress::new();
+                let mut progress_bars = Vec::new();
+
+                for (device_id, command_id, serial_number) in &command_ids {
+                    let pb = m.add(ProgressBar::new_spinner());
+                    pb.enable_steady_tick(Duration::from_millis(50));
+                    pb.set_style(
+                        ProgressStyle::with_template("{spinner:.blue} {msg}")
+                            .unwrap()
+                            .tick_strings(&["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]),
+                    );
+                    pb.set_message(format!(
+                        "{} [{}:{}] Waiting...",
+                        serial_number, device_id, command_id
+                    ));
+                    progress_bars.push((pb, *device_id, *command_id, serial_number.clone()));
+                }
+
+                let mut completed = vec![false; command_ids.len()];
+                let mut results: Vec<(String, String)> =
+                    vec![(String::new(), String::new()); command_ids.len()];
+
+                while !completed.iter().all(|&c| c) {
+                    for (idx, (pb, device_id, command_id, serial_number)) in
+                        progress_bars.iter().enumerate()
+                    {
+                        if completed[idx] {
+                            continue;
+                        }
+
+                        match api.get_device_command(*device_id, *command_id).await {
+                            Ok(response) => {
+                                if response["fetched"].as_bool().unwrap_or(false) && !completed[idx]
+                                {
+                                    pb.set_message(format!(
+                                        "{} [{}:{}] Fetched by device",
+                                        serial_number, device_id, command_id
+                                    ));
+                                }
+
+                                if response["response"].is_object() {
+                                    let output = if let Some(stdout) =
+                                        response["response"]["FreeForm"]["stdout"].as_str()
+                                    {
+                                        stdout.to_string()
+                                    } else {
+                                        String::from("(no output)")
+                                    };
+                                    results[idx] = (serial_number.clone(), output);
+                                    pb.finish_with_message(format!(
+                                        "{} [{}:{}] Completed ✓",
+                                        serial_number.bright_green(),
+                                        device_id,
+                                        command_id
+                                    ));
+                                    completed[idx] = true;
+                                }
+                            }
+                            Err(e) => {
+                                results[idx] = (serial_number.clone(), format!("Error: {}", e));
+                                pb.finish_with_message(format!(
+                                    "{} [{}:{}] Failed ✗",
+                                    serial_number.red(),
+                                    device_id,
+                                    command_id
+                                ));
+                                completed[idx] = true;
+                            }
+                        }
+                    }
+
+                    if !completed.iter().all(|&c| c) {
+                        thread::sleep(Duration::from_secs(1));
+                    }
+                }
+
+                println!("\n{}", "Results:".bold());
+                for (serial_number, output) in results {
+                    println!("\n{} {}:", "Device:".bold(), serial_number.bright_cyan());
+                    println!("{}", output);
+                    println!("{}", "---".dimmed());
+                }
+            }
         },
         None => {
             Cli::command().print_help()?;
