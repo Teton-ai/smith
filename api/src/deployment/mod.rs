@@ -1,5 +1,4 @@
 use serde::{Deserialize, Serialize};
-use serde_json::json;
 use sqlx::PgPool;
 use sqlx::types::chrono;
 use utoipa::ToSchema;
