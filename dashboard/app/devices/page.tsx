@@ -9,6 +9,7 @@ import {
   Eye,
   EyeOff,
   Tag,
+  Loader2,
 } from 'lucide-react';
 import PrivateLayout from "@/app/layouts/PrivateLayout";
 import useSmithAPI from "@/app/hooks/smith-api";
@@ -203,26 +204,80 @@ const DevicesPage = () => {
   const [devices, setDevices] = useState<Device[]>([]);
   const [filteredDevices, setFilteredDevices] = useState<Device[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
-  const [showLongOfflineDevices, setShowLongOfflineDevices] = useState(false);
+  const [debouncedSearchTerm, setDebouncedSearchTerm] = useState('');
   const [showOutdatedOnly, setShowOutdatedOnly] = useState(false);
+  const [labelFilters, setLabelFilters] = useState<Record<string, string>>({});
+  const [onlineStatusFilter, setOnlineStatusFilter] = useState<'all' | 'online' | 'offline'>('all');
+  const [isSearching, setIsSearching] = useState(false);
+
+  // Debounce search term
+  useEffect(() => {
+    setIsSearching(true);
+    const timer = setTimeout(() => {
+      setDebouncedSearchTerm(searchTerm);
+      setIsSearching(false);
+    }, 300);
+
+    return () => {
+      clearTimeout(timer);
+      setIsSearching(false);
+    };
+  }, [searchTerm]);
 
   // Sync URL parameters with component state
   useEffect(() => {
     const outdated = searchParams.get('outdated');
+    const online = searchParams.get('online');
+    const labelsParam = searchParams.get('labels');
+
     if (outdated === 'true') {
       setShowOutdatedOnly(true);
+    }
+
+    if (online) {
+      setOnlineStatusFilter(online as 'all' | 'online' | 'offline');
+    }
+
+    if (labelsParam) {
+      const parsedLabels: Record<string, string> = {};
+      labelsParam.split(',').forEach(label => {
+        const [key, value] = label.split('=');
+        if (key && value) {
+          parsedLabels[key] = value;
+        }
+      });
+      setLabelFilters(parsedLabels);
     }
   }, [searchParams]);
 
   useEffect(() => {
     const fetchDashboard = async () => {
-      const data = await callAPI<Device[]>('GET', '/devices');
+      const params = new URLSearchParams();
+
+      // Add label filters
+      if (Object.keys(labelFilters).length > 0) {
+        Object.entries(labelFilters).forEach(([key, value]) => {
+          params.append('labels', `${key}=${value}`);
+        });
+      }
+
+      // Add online status filter
+      if (onlineStatusFilter === 'online') {
+        params.set('online', 'true');
+      } else if (onlineStatusFilter === 'offline') {
+        params.set('online', 'false');
+      }
+
+      const queryString = params.toString();
+      const endpoint = queryString ? `/devices?${queryString}` : '/devices';
+
+      const data = await callAPI<Device[]>('GET', endpoint);
       if (data) {
         setDevices(data);
       }
     };
     fetchDashboard();
-  }, [callAPI]);
+  }, [callAPI, labelFilters, onlineStatusFilter]);
 
   // Update URL when filters change
   const updateURL = (params: Record<string, string | null>) => {
@@ -242,26 +297,23 @@ const DevicesPage = () => {
   };
 
 
-  // Filter and sort devices - show only authorized devices, filter by search, and sort by latest online
+  // Filter and sort devices - client-side filtering for search and outdated, sorting
   useEffect(() => {
-    // First filter to only show authorized devices (has_token = true)
+    // Backend handles: online status, labels
+    // Client-side handles: search term, outdated filter, sorting
     let filtered = devices.filter(device => device.has_token);
-
-    // Filter out long offline devices unless toggle is on
-    if (!showLongOfflineDevices) {
-      filtered = filtered.filter(device => !isLongOffline(device));
-    }
 
     // Filter to show only outdated devices if toggle is on
     if (showOutdatedOnly) {
       filtered = filtered.filter(device => hasUpdatePending(device));
     }
 
-    if (searchTerm) {
+    // Client-side search filter
+    if (debouncedSearchTerm) {
       filtered = filtered.filter(device =>
-        device.serial_number?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        device.system_info?.hostname?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        device.system_info?.device_tree?.model?.toLowerCase().includes(searchTerm.toLowerCase())
+        device.serial_number?.toLowerCase().includes(debouncedSearchTerm.toLowerCase()) ||
+        device.system_info?.hostname?.toLowerCase().includes(debouncedSearchTerm.toLowerCase()) ||
+        device.system_info?.device_tree?.model?.toLowerCase().includes(debouncedSearchTerm.toLowerCase())
       );
     }
 
@@ -284,26 +336,16 @@ const DevicesPage = () => {
     });
 
     setFilteredDevices(filtered);
-  }, [devices, searchTerm, showLongOfflineDevices, showOutdatedOnly]);
+  }, [devices, debouncedSearchTerm, showOutdatedOnly]);
 
   const getDeviceStatus = (device: Device) => {
     if (!device.last_seen) return 'offline';
-    
+
     const lastSeen = new Date(device.last_seen);
     const now = new Date();
     const diffMinutes = (now.getTime() - lastSeen.getTime()) / (1000 * 60);
 
     return diffMinutes <= 3 ? 'online' : 'offline';
-  };
-
-  const isLongOffline = (device: Device) => {
-    if (!device.last_seen) return true; // Never seen = long offline
-    
-    const lastSeen = new Date(device.last_seen);
-    const now = new Date();
-    const diffDays = (now.getTime() - lastSeen.getTime()) / (1000 * 60 * 60 * 24);
-    
-    return diffDays > 30;
   };
 
   const getDeviceName = (device: Device) => device.serial_number;
@@ -372,6 +414,40 @@ const DevicesPage = () => {
     updateURL({ outdated: newValue ? 'true' : null });
   };
 
+  const addLabelFilter = (labelInput: string) => {
+    const parts = labelInput.split('=');
+    if (parts.length === 2) {
+      const [key, value] = parts;
+      const newFilters = { ...labelFilters, [key.trim()]: value.trim() };
+      setLabelFilters(newFilters);
+
+      // Update URL
+      const labelsString = Object.entries(newFilters)
+        .map(([k, v]) => `${k}=${v}`)
+        .join(',');
+      updateURL({ labels: labelsString });
+    }
+  };
+
+  const removeLabelFilter = (key: string) => {
+    const newFilters = { ...labelFilters };
+    delete newFilters[key];
+    setLabelFilters(newFilters);
+
+    // Update URL
+    const labelsString = Object.keys(newFilters).length > 0
+      ? Object.entries(newFilters)
+          .map(([k, v]) => `${k}=${v}`)
+          .join(',')
+      : null;
+    updateURL({ labels: labelsString });
+  };
+
+  const handleOnlineStatusChange = (status: 'all' | 'online' | 'offline') => {
+    setOnlineStatusFilter(status);
+    updateURL({ online: status === 'all' ? null : status });
+  };
+
 
   const formatTimeAgo = (date) => {
     const now = new Date();
@@ -387,57 +463,117 @@ const DevicesPage = () => {
 
   // Calculate counts for display
   const authorizedDevices = devices.filter(device => device.has_token);
-  const longOfflineDevices = authorizedDevices.filter(device => isLongOffline(device));
   const outdatedDevices = authorizedDevices.filter(device => hasUpdatePending(device));
 
   return (
     <PrivateLayout id="devices">
       <div className="space-y-6">
-        {/* Search and Device Count */}
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex items-center space-x-4">
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+        {/* Search and Filters */}
+        <div className="flex flex-col space-y-3">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+                <input
+                  type="text"
+                  placeholder="Search devices..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="pl-10 pr-10 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm text-gray-900 placeholder-gray-400"
+                />
+                {isSearching && (
+                  <Loader2 className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4 animate-spin" />
+                )}
+              </div>
+
+              {/* Online Status Filter */}
+              <div className="flex space-x-1">
+                <button
+                  onClick={() => handleOnlineStatusChange('all')}
+                  className={`px-3 py-2 text-sm rounded-md transition-colors cursor-pointer ${
+                    onlineStatusFilter === 'all'
+                      ? 'bg-blue-600 text-white'
+                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  }`}
+                >
+                  All
+                </button>
+                <button
+                  onClick={() => handleOnlineStatusChange('online')}
+                  className={`px-3 py-2 text-sm rounded-md transition-colors cursor-pointer ${
+                    onlineStatusFilter === 'online'
+                      ? 'bg-green-600 text-white'
+                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  }`}
+                >
+                  Online
+                </button>
+                <button
+                  onClick={() => handleOnlineStatusChange('offline')}
+                  className={`px-3 py-2 text-sm rounded-md transition-colors cursor-pointer ${
+                    onlineStatusFilter === 'offline'
+                      ? 'bg-gray-600 text-white'
+                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  }`}
+                >
+                  Offline
+                </button>
+              </div>
+
+              {/* Outdated Filter */}
+              {outdatedDevices.length > 0 && (
+                <button
+                  onClick={handleOutdatedToggle}
+                  className={`px-3 py-2 text-sm rounded-md transition-colors cursor-pointer ${
+                    showOutdatedOnly
+                      ? 'bg-orange-600 text-white'
+                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  }`}
+                >
+                  Outdated ({outdatedDevices.length})
+                </button>
+              )}
+
+              {/* Label Filter Input */}
               <input
                 type="text"
-                placeholder="Search devices..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="pl-10 pr-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm text-gray-900 placeholder-gray-400"
+                placeholder="Filter by label(e.g., department=slug)"
+                className="w-64 px-3 py-2 text-sm border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-gray-900 placeholder-gray-400"
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    const input = e.currentTarget;
+                    addLabelFilter(input.value);
+                    input.value = '';
+                  }
+                }}
               />
-            </div>
-          </div>
 
-          <div className="mt-4 sm:mt-0 flex items-center space-x-3">
-            <span className="text-sm text-gray-500">
-              {loading ? 'Loading...' : `${filteredDevices.length} device${filteredDevices.length !== 1 ? 's' : ''} shown`}
-            </span>
-            {outdatedDevices.length > 0 && (
-              <button
-                onClick={handleOutdatedToggle}
-                className={`flex items-center space-x-1 text-sm ${
-                  showOutdatedOnly
-                    ? 'text-orange-600 hover:text-orange-800'
-                    : 'text-blue-600 hover:text-blue-800'
-                }`}
-              >
-                {showOutdatedOnly ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
-                <span>
-                  {showOutdatedOnly ? 'Show all' : 'Show outdated'}
-                </span>
-              </button>
-            )}
-            {longOfflineDevices.length > 0 && (
-              <button
-                onClick={() => setShowLongOfflineDevices(!showLongOfflineDevices)}
-                className="flex items-center space-x-1 text-blue-600 hover:text-blue-800 text-sm"
-              >
-                {showLongOfflineDevices ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
-                <span>
-                  {showLongOfflineDevices ? 'Hide' : 'Show'} {longOfflineDevices.length} long-offline
-                </span>
-              </button>
-            )}
+              {/* Active Label Filters - inline */}
+              {Object.keys(labelFilters).length > 0 && (
+                <>
+                  {Object.entries(labelFilters).map(([key, value]) => (
+                    <div
+                      key={key}
+                      className="flex items-center space-x-1 px-2 py-1 text-sm bg-gray-100 text-gray-700 rounded border border-gray-200"
+                    >
+                      <code className="font-mono text-xs">{key}={value}</code>
+                      <button
+                        onClick={() => removeLabelFilter(key)}
+                        className="text-gray-600 hover:text-gray-800 font-bold cursor-pointer"
+                      >
+                        ×
+                      </button>
+                    </div>
+                  ))}
+                </>
+              )}
+            </div>
+
+            <div className="flex items-center space-x-3">
+              <span className="text-sm text-gray-500">
+                {loading ? 'Loading...' : `${filteredDevices.length} device${filteredDevices.length !== 1 ? 's' : ''}`}
+              </span>
+            </div>
           </div>
         </div>
 
@@ -497,14 +633,34 @@ const DevicesPage = () => {
                   <div className="col-span-2">
                     {device.labels && Object.keys(device.labels).length > 0 ? (
                       <div className="flex flex-wrap gap-1">
-                        {Object.entries(device.labels).map(([key, value]) => (
-                          <code
-                            key={key}
-                            className="px-1.5 py-0.5 text-xs font-mono bg-gray-100 text-gray-700 rounded border border-gray-200"
-                          >
-                            {key}={value}
-                          </code>
-                        ))}
+                        {Object.entries(device.labels).map(([key, value]) => {
+                          const isFiltered = labelFilters[key] === value;
+                          return (
+                            <code
+                              key={key}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                if (isFiltered) {
+                                  removeLabelFilter(key);
+                                } else {
+                                  const newFilters = { ...labelFilters, [key]: value };
+                                  setLabelFilters(newFilters);
+                                  const labelsString = Object.entries(newFilters)
+                                    .map(([k, v]) => `${k}=${v}`)
+                                    .join(',');
+                                  updateURL({ labels: labelsString });
+                                }
+                              }}
+                              className={`px-1.5 py-0.5 text-xs font-mono rounded border cursor-pointer transition-colors ${
+                                isFiltered
+                                  ? 'bg-blue-100 text-blue-800 border-blue-300'
+                                  : 'bg-gray-100 text-gray-700 border-gray-200 hover:bg-gray-200'
+                              }`}
+                            >
+                              {key}={value}
+                            </code>
+                          );
+                        })}
                       </div>
                     ) : (
                       <span className="text-xs text-gray-400">-</span>
