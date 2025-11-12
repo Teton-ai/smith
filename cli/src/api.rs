@@ -319,4 +319,31 @@ impl SmithAPI {
 
         Ok(command.clone())
     }
+
+    pub async fn send_custom_command(&self, device_id: u64, cmd: String) -> Result<(u64, u64)> {
+        let client = Client::new();
+
+        let custom_command = schema::SafeCommandRequest {
+            id: 0,
+            command: schema::SafeCommandTx::FreeForm { cmd },
+            continue_on_error: false,
+        };
+
+        let resp = client
+            .post(format!("{}/devices/{device_id}/commands", self.domain))
+            .header("Authorization", format!("Bearer {}", &self.bearer_token))
+            .json(&serde_json::json!([custom_command]))
+            .send();
+
+        resp.await?.error_for_status()?;
+
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
+        let last_command = self.get_last_command(device_id).await?;
+        let command_id = last_command["cmd_id"]
+            .as_u64()
+            .ok_or_else(|| anyhow::anyhow!("Failed to get command ID from last command"))?;
+
+        Ok((device_id, command_id))
+    }
 }

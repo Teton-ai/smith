@@ -164,6 +164,8 @@ interface DeviceHeaderProps {
 
 const DeviceHeader: React.FC<DeviceHeaderProps> = ({ device, serial }) => {
   const [sshCopied, setSshCopied] = React.useState(false);
+  const [runCommand, setRunCommand] = React.useState('');
+  const [runCopied, setRunCopied] = React.useState(false);
 
   const handleSshTunnel = async () => {
     const command = `sm tunnel ${device?.serial_number || serial}`;
@@ -171,6 +173,18 @@ const DeviceHeader: React.FC<DeviceHeaderProps> = ({ device, serial }) => {
       await navigator.clipboard.writeText(command);
       setSshCopied(true);
       setTimeout(() => setSshCopied(false), 2000);
+    } catch (err) {
+      console.error('Failed to copy to clipboard:', err);
+    }
+  };
+
+  const handleRunCommand = async () => {
+    if (!runCommand.trim()) return;
+    const command = `sm run -d ${device?.serial_number || serial} ${runCommand}`;
+    try {
+      await navigator.clipboard.writeText(command);
+      setRunCopied(true);
+      setTimeout(() => setRunCopied(false), 2000);
     } catch (err) {
       console.error('Failed to copy to clipboard:', err);
     }
@@ -190,7 +204,47 @@ const DeviceHeader: React.FC<DeviceHeaderProps> = ({ device, serial }) => {
               <span>Loading...</span>
             </div>
           </div>
-          <div className="flex-shrink-0">
+          <div className="flex-shrink-0 flex items-center space-x-3">
+            <div className="flex items-center space-x-2">
+              <input
+                type="text"
+                value={runCommand}
+                onChange={(e) => setRunCommand(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    handleRunCommand();
+                  }
+                }}
+                placeholder="Enter command (e.g., ls -la)"
+                className="px-3 py-2 border border-gray-300 rounded-md text-sm text-gray-900 placeholder-gray-400 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent w-64"
+              />
+              <Tooltip content={runCopied ? "Copied to clipboard!" : `Copy command: sm run -d ${serial} ${runCommand || '<command>'}`}>
+                <button
+                  onClick={handleRunCommand}
+                  disabled={!runCommand.trim()}
+                  className={`flex items-center space-x-2 px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+                    runCopied
+                      ? 'bg-green-100 text-green-800 border border-green-200'
+                      : runCommand.trim()
+                      ? 'bg-purple-50 text-purple-700 border border-purple-200 hover:bg-purple-100 cursor-pointer'
+                      : 'bg-gray-100 text-gray-400 border border-gray-200 cursor-not-allowed'
+                  }`}
+                >
+                  {runCopied ? (
+                    <>
+                      <Check className="w-4 h-4" />
+                      <span>Copied!</span>
+                    </>
+                  ) : (
+                    <>
+                      <Terminal className="w-4 h-4" />
+                      <Copy className="w-3 h-3" />
+                      <span>Run</span>
+                    </>
+                  )}
+                </button>
+              </Tooltip>
+            </div>
             <Tooltip content={sshCopied ? "Copied to clipboard!" : `Copy SSH tunnel command: sm tunnel ${serial}`}>
               <button
                 onClick={handleSshTunnel}
@@ -406,7 +460,47 @@ const DeviceHeader: React.FC<DeviceHeaderProps> = ({ device, serial }) => {
             )}
           </div>
         </div>
-        <div className="flex-shrink-0">
+        <div className="flex-shrink-0 flex items-center space-x-3">
+          <div className="flex items-center space-x-2">
+            <input
+              type="text"
+              value={runCommand}
+              onChange={(e) => setRunCommand(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  handleRunCommand();
+                }
+              }}
+              placeholder="Enter command (e.g., ls -la)"
+              className="px-3 py-2 border border-gray-300 rounded-md text-sm text-gray-900 placeholder-gray-400 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent w-64"
+            />
+            <Tooltip content={runCopied ? "Copied to clipboard!" : `Copy command: sm run -d ${device?.serial_number || serial} ${runCommand || '<command>'}`}>
+              <button
+                onClick={handleRunCommand}
+                disabled={!runCommand.trim()}
+                className={`flex items-center space-x-2 px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+                  runCopied
+                    ? 'bg-green-100 text-green-800 border border-green-200'
+                    : runCommand.trim()
+                    ? 'bg-purple-50 text-purple-700 border border-purple-200 hover:bg-purple-100 cursor-pointer'
+                    : 'bg-gray-100 text-gray-400 border border-gray-200 cursor-not-allowed'
+                }`}
+              >
+                {runCopied ? (
+                  <>
+                    <Check className="w-4 h-4" />
+                    <span>Copied!</span>
+                  </>
+                ) : (
+                  <>
+                    <Terminal className="w-4 h-4" />
+                    <Copy className="w-3 h-3" />
+                    <span>Run</span>
+                  </>
+                )}
+              </button>
+            </Tooltip>
+          </div>
           <Tooltip content={sshCopied ? "Copied to clipboard!" : `Copy SSH tunnel command: sm tunnel ${device?.serial_number || serial}`}>
             <button
               onClick={handleSshTunnel}

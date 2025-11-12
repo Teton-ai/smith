@@ -166,4 +166,26 @@ pub enum Commands {
     /// Print all available commands in markdown format (useful for agents)
     #[command(name = "agent-help")]
     AgentHelp,
+
+    /// Run commands on devices with filters (async by default, use --wait to poll for results)
+    Run {
+        /// Filter by labels (format: key=value). Can be used multiple times.
+        #[arg(short, long = "label", value_name = "KEY=VALUE")]
+        labels: Vec<String>,
+        /// Show only online devices (last seen < 5 minutes)
+        #[arg(long, conflicts_with = "offline")]
+        online: bool,
+        /// Show only offline devices (last seen >= 5 minutes)
+        #[arg(long, conflicts_with = "online")]
+        offline: bool,
+        /// Specific device serial numbers or IDs to target
+        #[arg(short, long = "device")]
+        devices: Vec<String>,
+        /// Wait for command results (polls until completion)
+        #[arg(short, long, default_value = "false")]
+        wait: bool,
+        /// Command to execute on the devices
+        #[arg(trailing_var_arg = true, required = true)]
+        command: Vec<String>,
+    },
 }
