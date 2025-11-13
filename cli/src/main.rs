@@ -15,7 +15,7 @@ use clap_complete::generate;
 use colored::Colorize;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use serde_json::Value;
-use std::{io, thread, time::Duration};
+use std::{collections::HashSet, io, thread, time::Duration};
 use termion::raw::IntoRawMode;
 use tokio::sync::oneshot;
 use tunnel::Session;
@@ -762,6 +762,19 @@ async fn main() -> anyhow::Result<()> {
                 let target_devices =
                     resolve_target_devices(&api, device_filters, labels, online, offline).await?;
 
+                // Deduplicate devices by ID to prevent duplicate command execution
+                let mut seen_ids = HashSet::new();
+                let target_devices: Vec<_> = target_devices
+                    .into_iter()
+                    .filter(|device| {
+                        if let Some(id) = device["id"].as_u64() {
+                            seen_ids.insert(id)
+                        } else {
+                            true // Keep devices without numeric IDs
+                        }
+                    })
+                    .collect();
+
                 if target_devices.is_empty() {
                     println!("No devices found matching the specified filters.");
                     return Ok(());
@@ -907,6 +920,19 @@ async fn main() -> anyhow::Result<()> {
 
                 let target_devices =
                     resolve_target_devices(&api, device_filters, labels, online, offline).await?;
+
+                // Deduplicate devices by ID to prevent duplicate label operations
+                let mut seen_ids = HashSet::new();
+                let target_devices: Vec<_> = target_devices
+                    .into_iter()
+                    .filter(|device| {
+                        if let Some(id) = device["id"].as_u64() {
+                            seen_ids.insert(id)
+                        } else {
+                            true // Keep devices without numeric IDs
+                        }
+                    })
+                    .collect();
 
                 if target_devices.is_empty() {
                     println!("No devices found matching the specified filters.");
