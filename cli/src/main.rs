@@ -193,6 +193,62 @@ fn check_and_update_if_needed() -> Result<(), anyhow::Error> {
     Ok(())
 }
 
+fn parse_label_filters(
+    labels: Vec<String>,
+) -> anyhow::Result<Option<std::collections::HashMap<String, String>>> {
+    if labels.is_empty() {
+        return Ok(None);
+    }
+
+    let mut map = std::collections::HashMap::new();
+    for label_str in labels {
+        let parts: Vec<&str> = label_str.splitn(2, '=').collect();
+        if parts.len() == 2 {
+            map.insert(parts[0].to_string(), parts[1].to_string());
+        } else {
+            return Err(anyhow::anyhow!(
+                "Invalid label format: '{}'. Expected 'key=value'",
+                label_str
+            ));
+        }
+    }
+    Ok(Some(map))
+}
+
+async fn resolve_target_devices(
+    api: &SmithAPI,
+    device_filters: Vec<String>,
+    labels: Vec<String>,
+    online: bool,
+    offline: bool,
+) -> anyhow::Result<Vec<serde_json::Value>> {
+    if !device_filters.is_empty() {
+        let mut devices_vec = Vec::new();
+        for device_filter in device_filters {
+            let devices_json = api
+                .get_devices(Some(device_filter.clone()), None, None)
+                .await?;
+            let parsed: Vec<Value> = serde_json::from_str(&devices_json)
+                .with_context(|| "Failed to parse devices JSON")?;
+            devices_vec.extend(parsed);
+        }
+        Ok(devices_vec)
+    } else {
+        let labels_map = parse_label_filters(labels)?;
+
+        let online_filter = if online {
+            Some(true)
+        } else if offline {
+            Some(false)
+        } else {
+            None
+        };
+
+        let devices_json = api.get_devices(None, labels_map, online_filter).await?;
+        serde_json::from_str(&devices_json).with_context(|| "Failed to parse devices JSON")
+    }
+}
+
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
@@ -703,48 +759,8 @@ async fn main() -> anyhow::Result<()> {
 
                 let cmd_string = command.join(" ");
 
-                let target_devices = if !device_filters.is_empty() {
-                    let mut devices_vec = Vec::new();
-                    for device_filter in device_filters {
-                        let devices_json = api
-                            .get_devices(Some(device_filter.clone()), None, None)
-                            .await?;
-                        let parsed: Vec<Value> = serde_json::from_str(&devices_json)
-                            .with_context(|| "Failed to parse devices JSON")?;
-                        devices_vec.extend(parsed);
-                    }
-                    devices_vec
-                } else {
-                    let labels_map = if !labels.is_empty() {
-                        let mut map = std::collections::HashMap::new();
-                        for label_str in labels {
-                            let parts: Vec<&str> = label_str.splitn(2, '=').collect();
-                            if parts.len() == 2 {
-                                map.insert(parts[0].to_string(), parts[1].to_string());
-                            } else {
-                                return Err(anyhow::anyhow!(
-                                    "Invalid label format: '{}'. Expected 'key=value'",
-                                    label_str
-                                ));
-                            }
-                        }
-                        Some(map)
-                    } else {
-                        None
-                    };
-
-                    let online_filter = if online {
-                        Some(true)
-                    } else if offline {
-                        Some(false)
-                    } else {
-                        None
-                    };
-
-                    let devices_json = api.get_devices(None, labels_map, online_filter).await?;
-                    serde_json::from_str(&devices_json)
-                        .with_context(|| "Failed to parse devices JSON")?
-                };
+                let target_devices =
+                    resolve_target_devices(&api, device_filters, labels, online, offline).await?;
 
                 if target_devices.is_empty() {
                     println!("No devices found matching the specified filters.");
@@ -889,66 +905,15 @@ async fn main() -> anyhow::Result<()> {
 
                 let api = SmithAPI::new(secrets, &config);
 
-                let target_devices = if !device_filters.is_empty() {
-                    let mut devices_vec = Vec::new();
-                    for device_filter in device_filters {
-                        let devices_json = api
-                            .get_devices(Some(device_filter.clone()), None, None)
-                            .await?;
-                        let parsed: Vec<Value> = serde_json::from_str(&devices_json)
-                            .with_context(|| "Failed to parse devices JSON")?;
-                        devices_vec.extend(parsed);
-                    }
-                    devices_vec
-                } else {
-                    let labels_map = if !labels.is_empty() {
-                        let mut map = std::collections::HashMap::new();
-                        for label_str in labels {
-                            let parts: Vec<&str> = label_str.splitn(2, '=').collect();
-                            if parts.len() == 2 {
-                                map.insert(parts[0].to_string(), parts[1].to_string());
-                            } else {
-                                return Err(anyhow::anyhow!(
-                                    "Invalid label format: '{}'. Expected 'key=value'",
-                                    label_str
-                                ));
-                            }
-                        }
-                        Some(map)
-                    } else {
-                        None
-                    };
-
-                    let online_filter = if online {
-                        Some(true)
-                    } else if offline {
-                        Some(false)
-                    } else {
-                        None
-                    };
-
-                    let devices_json = api.get_devices(None, labels_map, online_filter).await?;
-                    serde_json::from_str(&devices_json)
-                        .with_context(|| "Failed to parse devices JSON")?
-                };
+                let target_devices =
+                    resolve_target_devices(&api, device_filters, labels, online, offline).await?;
 
                 if target_devices.is_empty() {
                     println!("No devices found matching the specified filters.");
                     return Ok(());
                 }
 
-                let mut new_labels_map = std::collections::HashMap::new();
-                for label_str in set_labels {
-                    let parts: Vec<&str> = label_str.splitn(2, '=').collect();
-                    if parts.len() == 2 {
-                        new_labels_map.insert(parts[0].to_string(), parts[1].to_string());
-                    } else {
-                        return Err(anyhow::anyhow!(
-                            "Invalid label format: '{}'. Expected 'key=value'",
-                            label_str
-                        ));
-                    }
-                }
+                let new_labels_map = parse_label_filters(set_labels)?.unwrap_or_default();
 
                 println!("Setting labels on {} device(s):", target_devices.len());
                 for device in &target_devices {
