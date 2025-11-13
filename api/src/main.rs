@@ -1,3 +1,4 @@
+use crate::auth::DebugJwksClient;
 use crate::event::PublicEvent;
 use crate::sentry::Sentry;
 use ::sentry::integrations::tower::{NewSentryLayer, SentryHttpLayer};
@@ -60,6 +61,7 @@ pub struct State {
     config: &'static Config,
     public_events: Arc<Mutex<Sender<PublicEvent>>>,
     authorization: Arc<AuthorizationConfig>,
+    jwks_client: DebugJwksClient,
 }
 
 fn main() {
@@ -158,11 +160,16 @@ async fn start_main_server(config: &'static Config, authorization: Authorization
     let (tx_message, _rx_message) = broadcast::channel::<PublicEvent>(1);
     let tx_message = Arc::new(Mutex::new(tx_message));
 
+    // Create JwksClient once at startup
+    let jwks_client =
+        DebugJwksClient::init(&config.auth0_issuer).expect("Failed to initialize JWKS client");
+
     let state = State {
         pg_pool: pool,
         config,
         public_events: tx_message,
         authorization: Arc::new(authorization),
+        jwks_client,
     };
 
     let recorder_handle = metric::setup_metrics_recorder();

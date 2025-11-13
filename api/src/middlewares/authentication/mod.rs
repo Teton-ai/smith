@@ -8,7 +8,6 @@ use axum::{
     middleware::Next,
     response::Response,
 };
-use jwks_client_rs::{JwksClient, source::WebSource};
 use reqwest::Url;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
@@ -47,27 +46,11 @@ pub async fn check(
         .and_then(|value| value.strip_prefix("Bearer "))
         .unwrap_or_default();
 
-    let url_string =
-        std::env::var("AUTH0_ISSUER").map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    let url = Url::parse(&url_string)
-        .unwrap()
-        .join(".well-known/jwks.json")
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    // Use the shared JwksClient from state
+    let audience = vec![state.config.auth0_audience.clone()];
 
-    let source: WebSource = WebSource::builder()
-        .build(url)
-        .expect("Failed to build WebSource");
-
-    let client: JwksClient<WebSource> = JwksClient::builder()
-        .time_to_live(Duration::from_secs(60))
-        .build(source);
-
-    // Step 3: Verify the token.
-    let audience = vec![
-        std::env::var("AUTH0_AUDIENCE").expect("error: failed to access AUTH0_AUDIENCE env var"),
-    ];
-
-    let claims = client
+    let claims = state
+        .jwks_client
         .decode::<Claims>(token, &audience)
         .await
         .map_err(|_| StatusCode::UNAUTHORIZED)?;
@@ -80,10 +63,8 @@ pub async fn check(
         Ok(user_id) => CurrentUser::build(&pool, &authorization, user_id).await,
         Err(sqlx::Error::RowNotFound) => {
             info!("Creating user for sub={}", claims.sub);
-            let issuer = Url::parse(
-                &std::env::var("AUTH0_ISSUER").map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?,
-            )
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+            let issuer = Url::parse(&state.config.auth0_issuer)
+                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
             let userinfo_url = issuer
                 .join("userinfo")
                 .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
