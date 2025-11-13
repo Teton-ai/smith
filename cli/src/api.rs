@@ -346,4 +346,22 @@ impl SmithAPI {
 
         Ok((device_id, command_id))
     }
+
+    pub async fn update_device_labels(
+        &self,
+        device_id: u64,
+        labels: HashMap<String, String>,
+    ) -> Result<()> {
+        let client = Client::new();
+
+        let resp = client
+            .patch(format!("{}/devices/{}", self.domain, device_id))
+            .header("Authorization", format!("Bearer {}", &self.bearer_token))
+            .json(&serde_json::json!({ "labels": labels }))
+            .send();
+
+        resp.await?.error_for_status()?;
+
+        Ok(())
+    }
 }

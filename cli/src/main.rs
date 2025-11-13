@@ -15,7 +15,7 @@ use clap_complete::generate;
 use colored::Colorize;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use serde_json::Value;
-use std::{io, thread, time::Duration};
+use std::{collections::HashSet, io, thread, time::Duration};
 use termion::raw::IntoRawMode;
 use tokio::sync::oneshot;
 use tunnel::Session;
@@ -191,6 +191,62 @@ fn check_and_update_if_needed() -> Result<(), anyhow::Error> {
     }
 
     Ok(())
+}
+
+fn parse_label_filters(
+    labels: Vec<String>,
+) -> anyhow::Result<Option<std::collections::HashMap<String, String>>> {
+    if labels.is_empty() {
+        return Ok(None);
+    }
+
+    let mut map = std::collections::HashMap::new();
+    for label_str in labels {
+        let parts: Vec<&str> = label_str.splitn(2, '=').collect();
+        if parts.len() == 2 {
+            map.insert(parts[0].to_string(), parts[1].to_string());
+        } else {
+            return Err(anyhow::anyhow!(
+                "Invalid label format: '{}'. Expected 'key=value'",
+                label_str
+            ));
+        }
+    }
+    Ok(Some(map))
+}
+
+async fn resolve_target_devices(
+    api: &SmithAPI,
+    device_filters: Vec<String>,
+    labels: Vec<String>,
+    online: bool,
+    offline: bool,
+) -> anyhow::Result<Vec<serde_json::Value>> {
+    if !device_filters.is_empty() {
+        let mut devices_vec = Vec::new();
+        for device_filter in device_filters {
+            let devices_json = api
+                .get_devices(Some(device_filter.clone()), None, None)
+                .await?;
+            let parsed: Vec<Value> = serde_json::from_str(&devices_json)
+                .with_context(|| "Failed to parse devices JSON")?;
+            devices_vec.extend(parsed);
+        }
+        Ok(devices_vec)
+    } else {
+        let labels_map = parse_label_filters(labels)?;
+
+        let online_filter = if online {
+            Some(true)
+        } else if offline {
+            Some(false)
+        } else {
+            None
+        };
+
+        let devices_json = api.get_devices(None, labels_map, online_filter).await?;
+        serde_json::from_str(&devices_json).with_context(|| "Failed to parse devices JSON")
+    }
 }
 
 #[tokio::main(flavor = "current_thread")]
@@ -703,48 +759,21 @@ async fn main() -> anyhow::Result<()> {
 
                 let cmd_string = command.join(" ");
 
-                let target_devices = if !device_filters.is_empty() {
-                    let mut devices_vec = Vec::new();
-                    for device_filter in device_filters {
-                        let devices_json = api
-                            .get_devices(Some(device_filter.clone()), None, None)
-                            .await?;
-                        let parsed: Vec<Value> = serde_json::from_str(&devices_json)
-                            .with_context(|| "Failed to parse devices JSON")?;
-                        devices_vec.extend(parsed);
-                    }
-                    devices_vec
-                } else {
-                    let labels_map = if !labels.is_empty() {
-                        let mut map = std::collections::HashMap::new();
-                        for label_str in labels {
-                            let parts: Vec<&str> = label_str.splitn(2, '=').collect();
-                            if parts.len() == 2 {
-                                map.insert(parts[0].to_string(), parts[1].to_string());
-                            } else {
-                                return Err(anyhow::anyhow!(
-                                    "Invalid label format: '{}'. Expected 'key=value'",
-                                    label_str
-                                ));
-                            }
+                let target_devices =
+                    resolve_target_devices(&api, device_filters, labels, online, offline).await?;
+
+                // Deduplicate devices by ID to prevent duplicate command execution
+                let mut seen_ids = HashSet::new();
+                let target_devices: Vec<_> = target_devices
+                    .into_iter()
+                    .filter(|device| {
+                        if let Some(id) = device["id"].as_u64() {
+                            seen_ids.insert(id)
+                        } else {
+                            true // Keep devices without numeric IDs
                         }
-                        Some(map)
-                    } else {
-                        None
-                    };
-
-                    let online_filter = if online {
-                        Some(true)
-                    } else if offline {
-                        Some(false)
-                    } else {
-                        None
-                    };
-
-                    let devices_json = api.get_devices(None, labels_map, online_filter).await?;
-                    serde_json::from_str(&devices_json)
-                        .with_context(|| "Failed to parse devices JSON")?
-                };
+                    })
+                    .collect();
 
                 if target_devices.is_empty() {
                     println!("No devices found matching the specified filters.");
@@ -874,6 +903,102 @@ async fn main() -> anyhow::Result<()> {
                     println!("{}", output);
                     println!("{}", "---".dimmed());
                 }
+            }
+            Commands::Label {
+                labels,
+                online,
+                offline,
+                devices: device_filters,
+                set_labels,
+            } => {
+                let secrets = auth::get_secrets(&config)
+                    .await
+                    .with_context(|| "Error getting token")?
+                    .with_context(|| "No Token found, please Login")?;
+
+                let api = SmithAPI::new(secrets, &config);
+
+                let target_devices =
+                    resolve_target_devices(&api, device_filters, labels, online, offline).await?;
+
+                // Deduplicate devices by ID to prevent duplicate label operations
+                let mut seen_ids = HashSet::new();
+                let target_devices: Vec<_> = target_devices
+                    .into_iter()
+                    .filter(|device| {
+                        if let Some(id) = device["id"].as_u64() {
+                            seen_ids.insert(id)
+                        } else {
+                            true // Keep devices without numeric IDs
+                        }
+                    })
+                    .collect();
+
+                if target_devices.is_empty() {
+                    println!("No devices found matching the specified filters.");
+                    return Ok(());
+                }
+
+                let new_labels_map = parse_label_filters(set_labels)?.unwrap_or_default();
+
+                println!("Setting labels on {} device(s):", target_devices.len());
+                for device in &target_devices {
+                    let serial_number = device["serial_number"].as_str().unwrap_or("unknown");
+                    println!("  - {}", serial_number);
+                }
+                println!("\nLabels to set:");
+                for (key, value) in &new_labels_map {
+                    println!("  {}={}", key, value);
+                }
+
+                print!("\nProceed? [y/N]: ");
+                io::Write::flush(&mut io::stdout())?;
+
+                let mut input = String::new();
+                io::stdin().read_line(&mut input)?;
+
+                if input.trim().to_lowercase() != "y" {
+                    println!("Cancelled.");
+                    return Ok(());
+                }
+
+                println!("\n{} labels to devices...", "Applying".bold());
+
+                for device in &target_devices {
+                    let device_id = device["id"]
+                        .as_u64()
+                        .ok_or_else(|| anyhow::anyhow!("Device missing ID field"))?;
+                    let serial_number = device["serial_number"].as_str().unwrap_or("unknown");
+
+                    let mut device_labels =
+                        if let Some(existing_labels) = device["labels"].as_object() {
+                            existing_labels
+                                .iter()
+                                .map(|(k, v)| (k.clone(), v.as_str().unwrap_or("").to_string()))
+                                .collect::<std::collections::HashMap<String, String>>()
+                        } else {
+                            std::collections::HashMap::new()
+                        };
+
+                    for (key, value) in &new_labels_map {
+                        device_labels.insert(key.clone(), value.clone());
+                    }
+
+                    match api.update_device_labels(device_id, device_labels).await {
+                        Ok(()) => {
+                            println!(
+                                "  {} [{}] - Labels updated",
+                                serial_number.bright_green(),
+                                device_id
+                            );
+                        }
+                        Err(e) => {
+                            println!("  {} [{}] - Failed: {}", serial_number.red(), device_id, e);
+                        }
+                    }
+                }
+
+                println!("\n{}", "Done!".bright_green());
             }
         },
         None => {
