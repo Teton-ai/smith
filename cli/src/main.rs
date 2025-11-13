@@ -950,10 +950,7 @@ async fn main() -> anyhow::Result<()> {
                     }
                 }
 
-                println!(
-                    "Setting labels on {} device(s):",
-                    target_devices.len()
-                );
+                println!("Setting labels on {} device(s):", target_devices.len());
                 for device in &target_devices {
                     let serial_number = device["serial_number"].as_str().unwrap_or("unknown");
                     println!("  - {}", serial_number);
@@ -982,14 +979,15 @@ async fn main() -> anyhow::Result<()> {
                         .ok_or_else(|| anyhow::anyhow!("Device missing ID field"))?;
                     let serial_number = device["serial_number"].as_str().unwrap_or("unknown");
 
-                    let mut device_labels = if let Some(existing_labels) = device["labels"].as_object() {
-                        existing_labels
-                            .iter()
-                            .map(|(k, v)| (k.clone(), v.as_str().unwrap_or("").to_string()))
-                            .collect::<std::collections::HashMap<String, String>>()
-                    } else {
-                        std::collections::HashMap::new()
-                    };
+                    let mut device_labels =
+                        if let Some(existing_labels) = device["labels"].as_object() {
+                            existing_labels
+                                .iter()
+                                .map(|(k, v)| (k.clone(), v.as_str().unwrap_or("").to_string()))
+                                .collect::<std::collections::HashMap<String, String>>()
+                        } else {
+                            std::collections::HashMap::new()
+                        };
 
                     for (key, value) in &new_labels_map {
                         device_labels.insert(key.clone(), value.clone());
@@ -997,7 +995,11 @@ async fn main() -> anyhow::Result<()> {
 
                     match api.update_device_labels(device_id, device_labels).await {
                         Ok(()) => {
-                            println!("  {} [{}] - Labels updated", serial_number.bright_green(), device_id);
+                            println!(
+                                "  {} [{}] - Labels updated",
+                                serial_number.bright_green(),
+                                device_id
+                            );
                         }
                         Err(e) => {
                             println!("  {} [{}] - Failed: {}", serial_number.red(), device_id, e);
