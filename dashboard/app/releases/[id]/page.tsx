@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { useRouter, useParams } from 'next/navigation';
 import {
   Package,
@@ -17,6 +18,11 @@ import {
   Eye,
   X,
   Rocket,
+  Search,
+  RefreshCw,
+  ArrowUp,
+  CheckCircle,
+  XCircle,
 } from 'lucide-react';
 import PrivateLayout from "@/app/layouts/PrivateLayout";
 import useSmithAPI from "@/app/hooks/smith-api";
@@ -70,11 +76,29 @@ const ReleaseDetailPage = () => {
   const [packagesLoading, setPackagesLoading] = useState(false);
   const [publishing, setPublishing] = useState(false);
   const [showAddPackageModal, setShowAddPackageModal] = useState(false);
+  const [showReplacePackageModal, setShowReplacePackageModal] = useState(false);
+  const [packageToReplace, setPackageToReplace] = useState<ReleasePackage | null>(null);
   const [availablePackages, setAvailablePackages] = useState<AvailablePackage[]>([]);
   const [availablePackagesLoading, setAvailablePackagesLoading] = useState(false);
   const [selectedAvailablePackage, setSelectedAvailablePackage] = useState<number | null>(null);
+  const [packageSearchQuery, setPackageSearchQuery] = useState('');
   const [showDeployModal, setShowDeployModal] = useState(false);
   const [deploying, setDeploying] = useState(false);
+  const [mounted, setMounted] = useState(false);
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+  const [upgradingPackages, setUpgradingPackages] = useState<Set<number>>(new Set());
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  useEffect(() => {
+    if (toast) {
+      const timer = setTimeout(() => setToast(null), 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [toast]);
+
 
   useEffect(() => {
     const fetchRelease = async () => {
@@ -110,6 +134,12 @@ const ReleaseDetailPage = () => {
       fetchPackages();
     }
   }, [releaseId, callAPI]);
+
+  useEffect(() => {
+    if (releaseId) {
+      fetchAvailablePackages();
+    }
+  }, [releaseId]);
 
   const formatRelativeTime = (dateString: string) => {
     return moment(dateString).fromNow();
@@ -228,8 +258,123 @@ const ReleaseDetailPage = () => {
 
   const openAddModal = async () => {
     setSelectedAvailablePackage(null);
+    setPackageSearchQuery('');
     setShowAddPackageModal(true);
-    await fetchAvailablePackages();
+    // Only fetch if we don't have packages cached
+    if (availablePackages.length === 0) {
+      await fetchAvailablePackages();
+    }
+  };
+
+  const openReplaceModal = async (pkg: ReleasePackage) => {
+    setPackageToReplace(pkg);
+    setSelectedAvailablePackage(null);
+    setPackageSearchQuery('');
+    setShowReplacePackageModal(true);
+    // Only fetch if we don't have packages cached
+    if (availablePackages.length === 0) {
+      await fetchAvailablePackages();
+    }
+  };
+
+  const handleReplacePackage = async () => {
+    if (!selectedAvailablePackage || !packageToReplace) return;
+
+    try {
+      // Delete old package
+      await callAPI('DELETE', `/releases/${releaseId}/packages/${packageToReplace.id}`);
+
+      // Add new package
+      await callAPI('POST', `/releases/${releaseId}/packages`, {
+        id: selectedAvailablePackage
+      });
+
+      // Refresh packages list
+      const data = await callAPI<ReleasePackage[]>('GET', `/releases/${releaseId}/packages`);
+      if (data) {
+        setPackages(data);
+      }
+      setSelectedAvailablePackage(null);
+      setPackageToReplace(null);
+      setShowReplacePackageModal(false);
+    } catch (error: any) {
+      console.error('Failed to replace package:', error);
+      alert(`Failed to replace package: ${error?.message || 'Unknown error'}`);
+    }
+  };
+
+  const compareVersions = (v1: string, v2: string): number => {
+    const parts1 = v1.replace(/^v/, '').split('.').map(Number);
+    const parts2 = v2.replace(/^v/, '').split('.').map(Number);
+
+    for (let i = 0; i < Math.max(parts1.length, parts2.length); i++) {
+      const part1 = parts1[i] || 0;
+      const part2 = parts2[i] || 0;
+      if (part1 > part2) return 1;
+      if (part1 < part2) return -1;
+    }
+    return 0;
+  };
+
+  const getLatestVersionForPackage = (pkg: ReleasePackage) => {
+    if (availablePackages.length === 0) return null;
+
+    const sameNamePackages = availablePackages.filter(
+      availPkg =>
+        availPkg.name === pkg.name &&
+        availPkg.id !== pkg.id &&
+        (!distribution || availPkg.architecture === distribution.architecture) &&
+        compareVersions(availPkg.version, pkg.version) > 0 // Only show if version is actually higher
+    );
+
+    if (sameNamePackages.length === 0) return null;
+
+    // Sort by semantic version to get the actual latest
+    const sorted = [...sameNamePackages].sort(
+      (a, b) => compareVersions(b.version, a.version)
+    );
+
+    return sorted[0];
+  };
+
+  const handleUpgradePackage = async (pkg: ReleasePackage) => {
+    const latestVersion = getLatestVersionForPackage(pkg);
+    if (!latestVersion) return;
+
+    setUpgradingPackages(prev => new Set(prev).add(pkg.id));
+
+    try {
+      // Delete old package
+      await callAPI('DELETE', `/releases/${releaseId}/packages/${pkg.id}`);
+
+      // Add new package
+      await callAPI('POST', `/releases/${releaseId}/packages`, {
+        id: latestVersion.id
+      });
+
+      // Refresh packages list
+      const data = await callAPI<ReleasePackage[]>('GET', `/releases/${releaseId}/packages`);
+      if (data) {
+        setPackages(data);
+      }
+
+      setToast({
+        message: `Upgraded ${pkg.name} to v${latestVersion.version}`,
+        type: 'success'
+      });
+    } catch (error: any) {
+      console.error('Failed to upgrade package:', error);
+      setToast({
+        message: `Failed to upgrade ${pkg.name}: ${error?.message || 'Unknown error'}`,
+        type: 'error'
+      });
+    } finally {
+      setUpgradingPackages(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(pkg.id);
+        return newSet;
+      });
+    }
   };
 
   const handleDeployRelease = async () => {
@@ -270,6 +415,23 @@ const ReleaseDetailPage = () => {
 
   return (
     <PrivateLayout id="distributions">
+      {/* Toast Notification */}
+      {mounted && toast && createPortal(
+        <div className="fixed top-4 right-4 z-50 animate-in slide-in-from-top-5 duration-300">
+          <div className={`flex items-center space-x-3 px-4 py-3 rounded-lg shadow-lg ${
+            toast.type === 'success' ? 'bg-green-600' : 'bg-red-600'
+          }`}>
+            {toast.type === 'success' ? (
+              <CheckCircle className="w-5 h-5 text-white" />
+            ) : (
+              <XCircle className="w-5 h-5 text-white" />
+            )}
+            <span className="text-white font-medium text-sm">{toast.message}</span>
+          </div>
+        </div>,
+        document.body
+      )}
+
       <div className="space-y-6">
         {/* Header with Back Button */}
         <div className="flex items-center space-x-4">
@@ -332,14 +494,14 @@ const ReleaseDetailPage = () => {
         </div>
 
         {/* Deploy Confirmation Modal */}
-        {showDeployModal && (
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-            <div className="bg-white rounded-lg shadow-xl p-6 w-[520px]">
+        {mounted && showDeployModal && createPortal(
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 animate-in fade-in duration-200">
+            <div className="bg-white rounded-lg shadow-xl p-6 w-[520px] animate-in zoom-in-95 duration-200">
               <div className="flex items-center justify-between mb-6">
                 <h3 className="text-lg font-semibold text-gray-900">Deploy Release v{release.version}</h3>
                 <button
                   onClick={() => setShowDeployModal(false)}
-                  className="text-gray-400 hover:text-gray-600"
+                  className="text-gray-400 hover:text-gray-600 cursor-pointer"
                 >
                   <X className="w-5 h-5" />
                 </button>
@@ -373,7 +535,7 @@ const ReleaseDetailPage = () => {
                 <button
                   onClick={() => setShowDeployModal(false)}
                   disabled={deploying}
-                  className="px-4 py-2 text-sm font-medium text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-md transition-colors"
+                  className="px-4 py-2 text-sm font-medium text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-md transition-colors cursor-pointer"
                 >
                   Cancel
                 </button>
@@ -383,7 +545,7 @@ const ReleaseDetailPage = () => {
                   className={`flex items-center space-x-2 px-4 py-2 text-sm font-medium rounded-md transition-colors ${
                     deploying
                       ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
-                      : 'bg-blue-600 text-white hover:bg-blue-700'
+                      : 'bg-blue-600 text-white hover:bg-blue-700 cursor-pointer'
                   }`}
                 >
                   {deploying ? (
@@ -400,18 +562,147 @@ const ReleaseDetailPage = () => {
                 </button>
               </div>
             </div>
-          </div>
+          </div>,
+          document.body
+        )}
+
+        {/* Replace Package Modal */}
+        {mounted && showReplacePackageModal && packageToReplace && createPortal(
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 animate-in fade-in duration-200">
+            <div className="bg-white rounded-lg shadow-xl p-6 w-[640px] animate-in zoom-in-95 duration-200">
+              <div className="flex items-center justify-between mb-6">
+                <h3 className="text-lg font-semibold text-gray-900">Replace Package: {packageToReplace.name}</h3>
+                <button
+                  onClick={() => setShowReplacePackageModal(false)}
+                  className="text-gray-400 hover:text-gray-600 cursor-pointer"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <div className="mb-4 p-3 bg-gray-50 rounded-md">
+                <div className="text-sm">
+                  <div className="font-medium text-gray-900">Current Version</div>
+                  <div className="text-gray-600 mt-1">
+                    {packageToReplace.name} v{packageToReplace.version}
+                  </div>
+                </div>
+              </div>
+
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Search Versions
+                  </label>
+                  <div className="relative">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                    <input
+                      type="text"
+                      placeholder="Search by version..."
+                      value={packageSearchQuery}
+                      onChange={(e) => setPackageSearchQuery(e.target.value)}
+                      className="w-full pl-10 pr-3 py-2 bg-white text-gray-900 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500 placeholder:text-gray-400"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Available Versions
+                  </label>
+                  {availablePackagesLoading ? (
+                    <div className="flex items-center justify-center py-8">
+                      <div className="text-gray-500 text-sm">Loading available versions...</div>
+                    </div>
+                  ) : (() => {
+                    const filteredPackages = availablePackages
+                      .filter(pkg =>
+                        pkg.name === packageToReplace.name &&
+                        pkg.id !== packageToReplace.id &&
+                        (!distribution || pkg.architecture === distribution.architecture) &&
+                        (packageSearchQuery === '' ||
+                          pkg.version.toLowerCase().includes(packageSearchQuery.toLowerCase()))
+                      )
+                      .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+
+                    return filteredPackages.length === 0 ? (
+                      <div className="text-center py-8 text-gray-500 text-sm">
+                        {packageSearchQuery ? 'No versions match your search' : 'No other versions available'}
+                      </div>
+                    ) : (
+                      <div className="border border-gray-200 rounded-md max-h-[320px] overflow-y-auto">
+                        {filteredPackages.map((pkg) => (
+                          <button
+                            key={pkg.id}
+                            onClick={() => setSelectedAvailablePackage(pkg.id)}
+                            className={`w-full text-left p-3 border-b border-gray-200 last:border-b-0 hover:bg-gray-50 transition-colors cursor-pointer ${
+                              selectedAvailablePackage === pkg.id ? 'bg-blue-50 hover:bg-blue-50' : ''
+                            }`}
+                          >
+                            <div className="flex items-start justify-between">
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center space-x-2">
+                                  <span className="font-medium text-gray-900">{pkg.name}</span>
+                                  <span className="text-xs text-gray-500">v{pkg.version}</span>
+                                  <span className={`px-2 py-0.5 text-xs font-medium rounded ${getArchColor(pkg.architecture)}`}>
+                                    {pkg.architecture}
+                                  </span>
+                                </div>
+                                <div className="text-xs text-gray-500 mt-1 truncate">
+                                  {pkg.file}
+                                </div>
+                              </div>
+                              {selectedAvailablePackage === pkg.id && (
+                                <div className="flex-shrink-0 ml-2">
+                                  <div className="w-5 h-5 bg-blue-600 rounded-full flex items-center justify-center">
+                                    <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                                    </svg>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    );
+                  })()}
+                </div>
+              </div>
+
+              <div className="flex justify-end space-x-3 mt-6">
+                <button
+                  onClick={() => setShowReplacePackageModal(false)}
+                  className="px-4 py-2 text-sm font-medium text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-md transition-colors cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleReplacePackage}
+                  disabled={!selectedAvailablePackage}
+                  className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
+                    !selectedAvailablePackage
+                      ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                      : 'bg-blue-600 text-white hover:bg-blue-700 cursor-pointer'
+                  }`}
+                >
+                  Replace Version
+                </button>
+              </div>
+            </div>
+          </div>,
+          document.body
         )}
 
         {/* Package Management Modals */}
-        {showAddPackageModal && (
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-            <div className="bg-white rounded-lg shadow-xl p-6 w-[480px]">
+        {mounted && showAddPackageModal && createPortal(
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 animate-in fade-in duration-200">
+            <div className="bg-white rounded-lg shadow-xl p-6 w-[640px] animate-in zoom-in-95 duration-200">
               <div className="flex items-center justify-between mb-6">
                 <h3 className="text-lg font-semibold text-gray-900">Add Package to Release</h3>
                 <button
                   onClick={() => setShowAddPackageModal(false)}
-                  className="text-gray-400 hover:text-gray-600"
+                  className="text-gray-400 hover:text-gray-600 cursor-pointer"
                 >
                   <X className="w-5 h-5" />
                 </button>
@@ -420,57 +711,101 @@ const ReleaseDetailPage = () => {
               <div className="space-y-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Select Package *
+                    Search Packages
+                  </label>
+                  <div className="relative">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                    <input
+                      type="text"
+                      placeholder="Search by name or version..."
+                      value={packageSearchQuery}
+                      onChange={(e) => setPackageSearchQuery(e.target.value)}
+                      className="w-full pl-10 pr-3 py-2 bg-white text-gray-900 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500 placeholder:text-gray-400"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Available Packages
                   </label>
                   {availablePackagesLoading ? (
-                    <div className="flex items-center justify-center py-4">
+                    <div className="flex items-center justify-center py-8">
                       <div className="text-gray-500 text-sm">Loading available packages...</div>
                     </div>
-                  ) : (
-                    <select
-                      value={selectedAvailablePackage || ''}
-                      onChange={(e) => setSelectedAvailablePackage(Number(e.target.value) || null)}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500"
-                    >
-                      <option value="">Choose a package...</option>
-                      {availablePackages
-                        .filter(pkg => 
-                          !packages.some(releasePkg => releasePkg.id === pkg.id) &&
-                          (!distribution || pkg.architecture === distribution.architecture)
-                        )
-                        .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
-                        .map((pkg) => (
-                        <option key={pkg.id} value={pkg.id}>
-                          {pkg.name} v{pkg.version} ({pkg.architecture})
-                        </option>
-                      ))}
-                    </select>
-                  )}
-                  {selectedAvailablePackage && (
-                    <div className="mt-3 p-3 bg-gray-50 rounded-md">
-                      {(() => {
-                        const pkg = availablePackages.find(p => p.id === selectedAvailablePackage);
-                        return pkg ? (
-                          <div className="text-sm">
-                            <div className="font-medium text-gray-900">{pkg.name}</div>
-                            <div className="text-gray-600 mt-1">
-                              Version: {pkg.version} • Architecture: {pkg.architecture}
+                  ) : (() => {
+                    // Group packages by name and get only the latest version of each
+                    const packagesByName = new Map<string, AvailablePackage>();
+
+                    availablePackages
+                      .filter(pkg =>
+                        !packages.some(releasePkg => releasePkg.name === pkg.name) &&
+                        (!distribution || pkg.architecture === distribution.architecture)
+                      )
+                      .forEach(pkg => {
+                        const existing = packagesByName.get(pkg.name);
+                        if (!existing || compareVersions(pkg.version, existing.version) > 0) {
+                          packagesByName.set(pkg.name, pkg);
+                        }
+                      });
+
+                    const filteredPackages = Array.from(packagesByName.values())
+                      .filter(pkg =>
+                        packageSearchQuery === '' ||
+                        pkg.name.toLowerCase().includes(packageSearchQuery.toLowerCase()) ||
+                        pkg.version.toLowerCase().includes(packageSearchQuery.toLowerCase())
+                      )
+                      .sort((a, b) => a.name.localeCompare(b.name));
+
+                    return filteredPackages.length === 0 ? (
+                      <div className="text-center py-8 text-gray-500 text-sm">
+                        {packageSearchQuery ? 'No packages match your search' : 'No available packages'}
+                      </div>
+                    ) : (
+                      <div className="border border-gray-200 rounded-md max-h-[320px] overflow-y-auto">
+                        {filteredPackages.map((pkg) => (
+                          <button
+                            key={pkg.id}
+                            onClick={() => setSelectedAvailablePackage(pkg.id)}
+                            className={`w-full text-left p-3 border-b border-gray-200 last:border-b-0 hover:bg-gray-50 transition-colors cursor-pointer ${
+                              selectedAvailablePackage === pkg.id ? 'bg-blue-50 hover:bg-blue-50' : ''
+                            }`}
+                          >
+                            <div className="flex items-start justify-between">
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center space-x-2">
+                                  <span className="font-medium text-gray-900">{pkg.name}</span>
+                                  <span className="text-xs text-gray-500">v{pkg.version}</span>
+                                  <span className={`px-2 py-0.5 text-xs font-medium rounded ${getArchColor(pkg.architecture)}`}>
+                                    {pkg.architecture}
+                                  </span>
+                                </div>
+                                <div className="text-xs text-gray-500 mt-1 truncate">
+                                  {pkg.file}
+                                </div>
+                              </div>
+                              {selectedAvailablePackage === pkg.id && (
+                                <div className="flex-shrink-0 ml-2">
+                                  <div className="w-5 h-5 bg-blue-600 rounded-full flex items-center justify-center">
+                                    <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                                    </svg>
+                                  </div>
+                                </div>
+                              )}
                             </div>
-                            <div className="text-gray-500 mt-1">
-                              File: {pkg.file}
-                            </div>
-                          </div>
-                        ) : null;
-                      })()}
-                    </div>
-                  )}
+                          </button>
+                        ))}
+                      </div>
+                    );
+                  })()}
                 </div>
               </div>
 
               <div className="flex justify-end space-x-3 mt-6">
                 <button
                   onClick={() => setShowAddPackageModal(false)}
-                  className="px-4 py-2 text-sm font-medium text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-md transition-colors"
+                  className="px-4 py-2 text-sm font-medium text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-md transition-colors cursor-pointer"
                 >
                   Cancel
                 </button>
@@ -480,14 +815,15 @@ const ReleaseDetailPage = () => {
                   className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
                     !selectedAvailablePackage
                       ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
-                      : 'bg-blue-600 text-white hover:bg-blue-700'
+                      : 'bg-blue-600 text-white hover:bg-blue-700 cursor-pointer'
                   }`}
                 >
                   Add Package
                 </button>
               </div>
             </div>
-          </div>
+          </div>,
+          document.body
         )}
 
 
@@ -508,7 +844,7 @@ const ReleaseDetailPage = () => {
                     className={`flex items-center space-x-2 px-4 py-2 text-sm font-medium rounded-md transition-colors ${
                       publishing
                         ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
-                        : 'bg-green-600 text-white hover:bg-green-700'
+                        : 'bg-green-600 text-white hover:bg-green-700 cursor-pointer'
                     }`}
                   >
                     {publishing ? (
@@ -525,7 +861,7 @@ const ReleaseDetailPage = () => {
                   </button>
                   <button
                     onClick={openAddModal}
-                    className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700 transition-colors"
+                    className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700 transition-colors cursor-pointer"
                   >
                     <Plus className="w-4 h-4" />
                     <span>Add Package</span>
@@ -534,7 +870,7 @@ const ReleaseDetailPage = () => {
               ) : !release?.yanked && (
                 <button
                   onClick={() => setShowDeployModal(true)}
-                  className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700 transition-colors"
+                  className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700 transition-colors cursor-pointer"
                 >
                   <Rocket className="w-4 h-4" />
                   <span>Deploy Release</span>
@@ -566,6 +902,32 @@ const ReleaseDetailPage = () => {
                           <div className="flex items-center space-x-2">
                             <h4 className="font-medium text-gray-900">{pkg.name}</h4>
                             <span className="text-xs text-gray-500">v{pkg.version}</span>
+                            {release?.draft && (() => {
+                              const latestVersion = getLatestVersionForPackage(pkg);
+                              const isUpgrading = upgradingPackages.has(pkg.id);
+                              return latestVersion ? (
+                                <button
+                                  onClick={() => handleUpgradePackage(pkg)}
+                                  disabled={isUpgrading}
+                                  className={`flex items-center space-x-0.5 px-1.5 py-0.5 text-[10px] font-medium rounded-md transition-all duration-200 ${
+                                    isUpgrading
+                                      ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                                      : 'bg-green-500/20 text-green-700 border border-green-300/30 shadow-sm backdrop-blur-sm hover:bg-green-500/30 hover:border-green-400/40 hover:shadow cursor-pointer'
+                                  }`}
+                                  style={isUpgrading ? {} : { backdropFilter: 'blur(8px)' }}
+                                  title={`Upgrade to v${latestVersion.version}`}
+                                >
+                                  {isUpgrading ? (
+                                    <div className="w-2.5 h-2.5 border-2 border-gray-400 border-t-transparent rounded-full animate-spin"></div>
+                                  ) : (
+                                    <>
+                                      <ArrowUp className="w-2.5 h-2.5" />
+                                      <span>v{latestVersion.version}</span>
+                                    </>
+                                  )}
+                                </button>
+                              ) : null;
+                            })()}
                           </div>
                           {pkg.description && (
                             <p className="mt-1 text-sm text-gray-600">{pkg.description}</p>
@@ -583,8 +945,15 @@ const ReleaseDetailPage = () => {
                       {release?.draft && (
                         <div className="flex items-center space-x-2">
                           <button
+                            onClick={() => openReplaceModal(pkg)}
+                            className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-md transition-colors cursor-pointer"
+                            title="Replace package version"
+                          >
+                            <RefreshCw className="w-4 h-4" />
+                          </button>
+                          <button
                             onClick={() => handleDeletePackage(pkg.id)}
-                            className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors"
+                            className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors cursor-pointer"
                             title="Remove package from release"
                           >
                             <Trash2 className="w-4 h-4" />
