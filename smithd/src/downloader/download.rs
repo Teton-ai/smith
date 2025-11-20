@@ -200,10 +200,9 @@ async fn download_file(
         .and_then(|value| value.to_str().ok());
 
     // Open the file for writing
-    // let mut file = tokio::fs::File::create(local_path).await?;
     let mut file = if resume_download && downloaded > 0 {
         // Check the local file etag
-        if let Some(stored) = xattr::get(local_path, "user")? {
+        if let Some(stored) = xattr::get(local_path, "user.etag")? {
             let stored_etag = String::from_utf8_lossy(&stored);
             if stored_etag != etag.unwrap_or("") {
                 info!(
