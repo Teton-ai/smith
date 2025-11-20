@@ -5479,6 +5479,7 @@ dependencies = [
  "tracing-test",
  "uuid",
  "walkdir",
+ "xattr",
  "zbus",
 ]
 

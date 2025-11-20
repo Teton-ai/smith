@@ -78,7 +78,6 @@ async fn download_file(
     if let Some(r) = recurse {
         if r > 1 {
             // Break out of the recursion loop
-
             stats.error_message = Some("Downloaded 0 bytes too many times".to_owned());
 
             let output = convert_stats_to_string(stats, local_path).await;
@@ -104,6 +103,8 @@ async fn download_file(
             fs::create_dir_all(parent).await?;
         }
     }
+
+    // Check if file already exists and compare its hash
 
     // Check if file already exists and get its size for resuming
     let mut downloaded: u64 = 0;
@@ -182,7 +183,7 @@ async fn download_file(
     // Get the total content length of the object
     let content_length = response
         .headers()
-        .get("Content-Length")
+        .get("content-length")
         .and_then(|value| value.to_str().ok())
         .and_then(|value| value.parse::<u64>().ok());
 
@@ -192,16 +193,46 @@ async fn download_file(
         content_length.unwrap_or(0)
     };
 
+    // Get the etag for verification
+    let etag = response
+        .headers()
+        .get("etag")
+        .and_then(|value| value.to_str().ok());
+
     // Open the file for writing
     // let mut file = tokio::fs::File::create(local_path).await?;
     let mut file = if resume_download && downloaded > 0 {
-        tokio::fs::OpenOptions::new()
-            .write(true)
-            .append(true)
-            .open(local_path)
-            .await?
+        // Check the local file etag
+        if let Some(stored) = xattr::get(local_path, "user")? {
+            let stored_etag = String::from_utf8_lossy(&stored);
+            if stored_etag != etag.unwrap_or("") {
+                info!(
+                    "ETag mismatch (local: {}, remote: {}), restarting download",
+                    stored_etag,
+                    etag.unwrap_or("")
+                );
+                // Remove the existing file and start over
+                tokio::fs::remove_file(local_path).await?;
+
+                // Create new file
+                let res = tokio::fs::File::create(local_path).await?;
+                xattr::set(local_path, "user.etag", etag.unwrap_or("").as_bytes())?;
+
+                res
+            } else {
+                info!("ETag matches, resuming download");
+                tokio::fs::OpenOptions::new()
+                    .write(true)
+                    .append(true)
+                    .open(local_path)
+                    .await?
+            }
+        }
     } else {
-        tokio::fs::File::create(local_path).await?
+        let res = tokio::fs::File::create(local_path).await?;
+        xattr::set(local_path, "user.etag", etag.unwrap_or("").as_bytes())?;
+
+        res
     };
 
     let quota = Quota::per_second(
