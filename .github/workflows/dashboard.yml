@@ -17,7 +17,7 @@ permissions:
 
 jobs:
   ci:
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -30,8 +30,8 @@ jobs:
           DASHBOARD_VERSION=$(grep '^version = ' Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
           echo "DASHBOARD_VERSION=${DASHBOARD_VERSION}" >> "$GITHUB_ENV"
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+      - name: Setup Blacksmith Builder
+        uses: useblacksmith/setup-docker-builder@v1
 
       - name: Log in to the Container registry
         uses: docker/login-action@v3
@@ -40,15 +40,13 @@ jobs:
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Docker Build
-        uses: docker/build-push-action@v5
+        uses: useblacksmith/build-push-action@v2
         with:
           context: ./dashboard
           push: true
           tags: |
             tetonai/smith-dashboard
             tetonai/smith-dashboard:${{ env.DASHBOARD_VERSION }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
           load: true
       - name: Report Status
         if: always()
