@@ -184,6 +184,29 @@ impl DownloaderHandle {
         Ok("Download started, not waiting for result".to_string())
     }
 
+    pub async fn download_blocking(
+        &self,
+        remote_file: &str,
+        local_file: &str,
+        rate: f64,
+    ) -> anyhow::Result<()> {
+        let (rpc, receiver) = oneshot::channel();
+
+        self.sender
+            .send(DownloaderMessage::Download {
+                remote_file: remote_file.to_string(),
+                local_file: local_file.to_string(),
+                rate,
+            })
+            .await
+            .unwrap();
+
+        // Wait for download to finish
+        receiver.await.unwrap()?;
+
+        Ok(())
+    }
+
     pub async fn check_download_status(&self) -> anyhow::Result<DownloadingStatus> {
         // unwrap because if this fails then we are in a bad state
         let (rpc, receiver) = oneshot::channel();

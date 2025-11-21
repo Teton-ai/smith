@@ -127,7 +127,7 @@ impl NetworkClient {
         }
 
         let remote_file = format!("packages/{}", package_name);
-        let _ = downloader.download(remote_file, local_package_path, 5000); // basically
+        let _ = downloader.download_blocking(remote_file, local_package_path, 5000); // basically
         // unlimited rate here
 
         // let query = vec![("name", package_name)];
