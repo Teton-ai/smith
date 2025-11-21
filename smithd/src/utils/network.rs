@@ -106,7 +106,7 @@ impl NetworkClient {
     pub async fn get_package(
         &self,
         package_name: &str,
-        token: &str,
+        // token: &str,
         downloader: &DownloaderHandle,
     ) -> Result<()> {
         let path = env::current_dir()?;
@@ -127,7 +127,13 @@ impl NetworkClient {
         }
 
         let remote_file = format!("packages/{}", package_name);
-        let _ = downloader.download_blocking(remote_file, local_package_path, 5000); // basically
+        let _ = downloader
+            .download_blocking(
+                &remote_file,
+                local_package_path.to_str().unwrap_or(""),
+                5000.0,
+            )
+            .await?; // basically
         // unlimited rate here
 
         // let query = vec![("name", package_name)];

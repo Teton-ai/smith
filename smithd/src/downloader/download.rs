@@ -13,7 +13,6 @@ use tokio::io::AsyncWriteExt;
 use tracing::{error, info};
 
 #[derive(Debug, Clone)]
-
 pub struct DownloadStats {
     pub bytes_downloaded: u64,
     pub elapsed_seconds: f64,
@@ -34,13 +33,13 @@ impl Default for DownloadStats {
     }
 }
 
-pub async fn download_package(
+pub async fn download_file_mb(
     magic: MagicHandle,
     remote_file: String,
     local_file: String,
     rate: f64,
     force_stop: Arc<AtomicBool>,
-) -> anyhow::Result<String> {
+) -> anyhow::Result<DownloadStats> {
     // Convert the MB rate to bytes/sec
     let bytes_per_second = (rate * 1_000_000.0) as u64;
     info!("Rate limit: {} bytes/sec", bytes_per_second);
@@ -66,7 +65,7 @@ async fn download_file(
     bytes_per_second: u64,
     force_stop: Arc<AtomicBool>,
     recurse: Option<u32>,
-) -> anyhow::Result<String> {
+) -> anyhow::Result<DownloadStats> {
     let mut rec_track = 0;
     let mut stats = DownloadStats::default();
     let shutdown = ShutdownHandler::new();
@@ -80,9 +79,7 @@ async fn download_file(
             // Break out of the recursion loop
             stats.error_message = Some("Downloaded 0 bytes too many times".to_owned());
 
-            let output = convert_stats_to_string(stats, local_path).await;
-
-            return Ok(output);
+            return Ok(stats.clone());
         } else {
             rec_track = r + 1
         }
@@ -103,8 +100,6 @@ async fn download_file(
             fs::create_dir_all(parent).await?;
         }
     }
-
-    // Check if file already exists and compare its hash
 
     // Check if file already exists and get its size for resuming
     let mut downloaded: u64 = 0;
@@ -199,6 +194,8 @@ async fn download_file(
         .get("etag")
         .and_then(|value| value.to_str().ok());
 
+    info!("etag from server: {}", etag.unwrap_or("none"));
+
     // Open the file for writing
     let mut file = if resume_download && downloaded > 0 {
         // Check the local file etag
@@ -226,6 +223,13 @@ async fn download_file(
                     .open(local_path)
                     .await?
             }
+        } else {
+            // No stored ETag, cannot verify, restart download
+            tokio::fs::remove_file(local_path).await?;
+            let res = tokio::fs::File::create(local_path).await?;
+            xattr::set(local_path, "user.etag", etag.unwrap_or("").as_bytes())?;
+
+            res
         }
     } else {
         let res = tokio::fs::File::create(local_path).await?;
@@ -340,21 +344,19 @@ async fn download_file(
         }
     }
 
-    let output = convert_stats_to_string(stats, local_path).await;
-
-    Ok(output)
+    Ok(stats.clone())
 }
 
-async fn convert_stats_to_string(stats: DownloadStats, local_path: &str) -> String {
-    if stats.success {
-        format!(
-            "Download of {} succeeded - Downloaded file in {:.2} seconds at {:.2} MB/sec",
-            local_path, stats.elapsed_seconds, stats.average_speed_mbps
-        )
-    } else {
-        format!(
-            "Download of {} failed - {:?}",
-            local_path, stats.error_message
-        )
-    }
-}
+// async fn convert_stats_to_string(stats: DownloadStats, local_path: &str) -> String {
+//     if stats.success {
+//         format!(
+//             "Download of {} succeeded - Downloaded file in {:.2} seconds at {:.2} MB/sec",
+//             local_path, stats.elapsed_seconds, stats.average_speed_mbps
+//         )
+//     } else {
+//         format!(
+//             "Download of {} failed - {:?}",
+//             local_path, stats.error_message
+//         )
+//     }
+// }

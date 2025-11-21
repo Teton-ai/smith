@@ -221,7 +221,7 @@ impl Actor {
         // ask postman for the packages of the target release
         let target_packages = self
             .network
-            .get_release_packages(target_release_id, &token, &self.downloader)
+            .get_release_packages(target_release_id, &token)
             .await?;
 
         info!("== Current packages ==");
@@ -262,7 +262,7 @@ impl Actor {
                 up_to_date = false;
                 // we need to install the package
                 self.network
-                    .get_package(&target_package.file, &token, &self.downloader)
+                    .get_package(&target_package.file, &self.downloader)
                     .await?;
             }
         }
