@@ -10,7 +10,7 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use tokio::fs;
 use tokio::io::AsyncWriteExt;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 #[derive(Debug, Clone)]
 pub struct DownloadStats {
@@ -40,6 +40,7 @@ pub async fn download_file_mb(
     rate: f64,
     force_stop: Arc<AtomicBool>,
 ) -> anyhow::Result<DownloadStats> {
+    info!("Got to download_file_mb with rate: {} MB/sec", rate);
     // Convert the MB rate to bytes/sec
     let bytes_per_second = (rate * 1_000_000.0) as u64;
     info!("Rate limit: {} bytes/sec", bytes_per_second);
@@ -94,6 +95,8 @@ async fn download_file(
         format!("{}/download/{}", &server_api_url, &remote_path)
     };
 
+    info!("Path being pointed to for download: {}", &url);
+
     // Create local file path if it does not exist
     if let Some(parent) = Path::new(local_path).parent() {
         if !parent.exists() {
@@ -107,13 +110,10 @@ async fn download_file(
 
     if let Ok(metadata) = tokio::fs::metadata(local_path).await {
         downloaded = metadata.len();
-        if downloaded > 0 {
-            resume_download = true;
-            info!(
-                "Found existing partial file with {} bytes, attempting to resume",
-                downloaded
-            );
-        }
+        // if downloaded > 0 {
+        //     resume_download = true;
+        //     info!("Found existing file with size {} bytes", downloaded);
+        // }
     }
 
     let initial_response = client
@@ -141,14 +141,71 @@ async fn download_file(
         }
     };
 
+    // Head request to get etage and size before resume attempt
+    let head_response = client.head(presigned_url).send().await?;
+
+    // Get the etag for verification
+    let etag = head_response
+        .headers()
+        .get("etag")
+        .and_then(|value| value.to_str().ok());
+
+    // Get the total content length of the object
+    let content_length = head_response
+        .headers()
+        .get("content-length")
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.parse::<u64>().ok());
+
+    let content_length = match content_length {
+        Some(length) => length,
+        None => {
+            return Err(anyhow::anyhow!("Content-Length header missing or invalid"));
+        }
+    };
+
+    info!(
+        "Remote file - content length: {:?} and etag {:?}",
+        content_length, etag
+    );
+
+    // Check if resume should be true
+    if downloaded > 0 && downloaded < content_length {
+        resume_download = true;
+        info!("Found existing file with size {} bytes", downloaded);
+    }
+
     // Build get based on if some of the file has already been downloaded
     let mut request = client.get(presigned_url);
 
     if resume_download && downloaded > 0 {
-        request = request.header("Range", format!("bytes={}-", downloaded));
-        info!("Requesting to resume from byte {}", downloaded);
+        if let Some(stored) = xattr::get(local_path, "user.etag")? {
+            let stored_etag = String::from_utf8_lossy(&stored);
+            if stored_etag != etag.unwrap_or("") {
+                info!(
+                    "ETag mismatch (local: {}, remote: {}), restarting download",
+                    stored_etag,
+                    etag.unwrap_or("")
+                );
+                // Remove the existing file and start over
+                tokio::fs::remove_file(local_path).await?;
+
+                resume_download = false;
+                downloaded = 0;
+            } else {
+                info!("ETag matches, requesting to resume download");
+                request = request.header("Range", format!("bytes={}-", downloaded));
+            }
+        } else {
+            // No stored ETag, cannot verify, restart download
+            tokio::fs::remove_file(local_path).await?;
+
+            resume_download = false;
+            downloaded = 0;
+        }
     }
 
+    // Send the request to download the file
     let mut response = request.send().await?;
 
     let expected_status = if resume_download && downloaded > 0 {
@@ -159,8 +216,15 @@ async fn download_file(
 
     if response.status() != expected_status {
         if resume_download && response.status() == reqwest::StatusCode::OK {
-            info!("Server does not support resume, starting from beginning");
+            warn!("Server does not support resume, starting from beginning");
+
+            tokio::fs::remove_file(local_path).await?;
+
+            downloaded = 0;
+            resume_download = false;
+
             response = client.get(presigned_url).send().await?;
+
             if !response.status().is_success() {
                 return Err(anyhow::anyhow!(
                     "Failed to download file from pre-signed URL: {:?}",
@@ -175,67 +239,20 @@ async fn download_file(
         }
     }
 
-    // Get the total content length of the object
-    let content_length = response
-        .headers()
-        .get("content-length")
-        .and_then(|value| value.to_str().ok())
-        .and_then(|value| value.parse::<u64>().ok());
-
-    let content_length = if resume_download && downloaded > 0 {
-        downloaded + content_length.unwrap_or(0)
-    } else {
-        content_length.unwrap_or(0)
-    };
-
-    // Get the etag for verification
-    let etag = response
-        .headers()
-        .get("etag")
-        .and_then(|value| value.to_str().ok());
-
-    info!("etag from server: {}", etag.unwrap_or("none"));
-
     // Open the file for writing
     let mut file = if resume_download && downloaded > 0 {
-        // Check the local file etag
-        if let Some(stored) = xattr::get(local_path, "user.etag")? {
-            let stored_etag = String::from_utf8_lossy(&stored);
-            if stored_etag != etag.unwrap_or("") {
-                info!(
-                    "ETag mismatch (local: {}, remote: {}), restarting download",
-                    stored_etag,
-                    etag.unwrap_or("")
-                );
-                // Remove the existing file and start over
-                tokio::fs::remove_file(local_path).await?;
-
-                // Create new file
-                let res = tokio::fs::File::create(local_path).await?;
-                xattr::set(local_path, "user.etag", etag.unwrap_or("").as_bytes())?;
-
-                res
-            } else {
-                info!("ETag matches, resuming download");
-                tokio::fs::OpenOptions::new()
-                    .write(true)
-                    .append(true)
-                    .open(local_path)
-                    .await?
-            }
-        } else {
-            // No stored ETag, cannot verify, restart download
-            tokio::fs::remove_file(local_path).await?;
-            let res = tokio::fs::File::create(local_path).await?;
-            xattr::set(local_path, "user.etag", etag.unwrap_or("").as_bytes())?;
-
-            res
-        }
+        tokio::fs::OpenOptions::new()
+            .write(true)
+            .append(true)
+            .open(local_path)
+            .await?
     } else {
-        let res = tokio::fs::File::create(local_path).await?;
-        xattr::set(local_path, "user.etag", etag.unwrap_or("").as_bytes())?;
+        let f = tokio::fs::File::create(local_path).await?;
+        if let Some(etag) = etag {
+            xattr::set(local_path, "user.etag", etag.as_bytes())?;
+        }
 
-        res
+        f
     };
 
     let quota = Quota::per_second(
@@ -244,7 +261,7 @@ async fn download_file(
 
     let limiter = RateLimiter::direct(quota);
     let mut stream = response.bytes_stream();
-    let mut downloaded: u64 = 0;
+    let mut session_downloaded: u64 = 0;
     let start = std::time::Instant::now();
 
     // Force rate limiter to start empty so we don't have a large burst when starting download
@@ -275,7 +292,7 @@ async fn download_file(
 
                 // Write chunk to file
                 file.write_all(&chunk).await?;
-                downloaded += chunk.len() as u64;
+                session_downloaded += chunk.len() as u64;
             }
 
             Err(e) => {
@@ -291,12 +308,12 @@ async fn download_file(
     let elapsed = start.elapsed().as_secs_f64();
 
     let avg_speed = if elapsed > 0.0 {
-        downloaded as f64 / elapsed
+        session_downloaded as f64 / elapsed
     } else {
         0.0
     };
 
-    stats.bytes_downloaded = downloaded;
+    stats.bytes_downloaded = session_downloaded;
     stats.elapsed_seconds = elapsed;
     stats.average_speed_mbps = avg_speed / 1_000_000.0;
 
@@ -304,16 +321,16 @@ async fn download_file(
         Ok(metadata) => {
             let file_size = metadata.len();
 
-            if file_size != downloaded || file_size != content_length {
+            if file_size != content_length {
                 error!(
                     "Size mismatch: file on disk ({}), downloaded amount ({}), expected content length ({:?})",
-                    file_size, downloaded, content_length
+                    file_size, session_downloaded, content_length
                 );
 
                 return Err(anyhow::anyhow!(
                     "Size mismatch: file on disk ({}), downloaded amount ({}), expected content length ({:?})",
                     file_size,
-                    downloaded,
+                    session_downloaded,
                     content_length
                 ));
             } else if file_size == 0 {
@@ -346,17 +363,3 @@ async fn download_file(
 
     Ok(stats.clone())
 }
-
-// async fn convert_stats_to_string(stats: DownloadStats, local_path: &str) -> String {
-//     if stats.success {
-//         format!(
-//             "Download of {} succeeded - Downloaded file in {:.2} seconds at {:.2} MB/sec",
-//             local_path, stats.elapsed_seconds, stats.average_speed_mbps
-//         )
-//     } else {
-//         format!(
-//             "Download of {} failed - {:?}",
-//             local_path, stats.error_message
-//         )
-//     }
-// }

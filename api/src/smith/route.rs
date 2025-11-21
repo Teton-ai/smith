@@ -106,7 +106,7 @@ pub async fn home(
 
 #[utoipa::path(
   get,
-  path = "/smith/download/{path}",
+  path = "/smith/download/*path",
   params(
         ("path" = String, Path, description = "File path to download")
   ),
@@ -122,14 +122,16 @@ pub async fn home(
 #[tracing::instrument]
 pub async fn download_file(
     _device: DeviceWithToken,
-    path: Option<Path<String>>,
+    path: Path<String>,
     Extension(state): Extension<State>,
 ) -> Result<axum::response::Response<Body>, StatusCode> {
+    error!("Download file requested: {:?}", path);
     // Get file path from request
-    let file_path = match path {
-        Some(p) => p.0,
-        None => return Err(StatusCode::BAD_REQUEST),
-    };
+    // let file_path = match path {
+    //     Some(p) => p.0,
+    //     None => return Err(StatusCode::BAD_REQUEST),
+    // };
+    let file_path = path;
 
     // Strip leading slash if present
     let path = file_path.strip_prefix('/').unwrap_or(file_path.as_str());
