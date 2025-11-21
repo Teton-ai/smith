@@ -25,9 +25,13 @@ pub async fn run() {
 
     let police = PoliceHandle::new(shutdown.signals());
 
-    let updater = UpdaterHandle::new(shutdown.signals(), configuration.clone());
-
     let downloader = DownloaderHandle::new(shutdown.signals(), configuration.clone());
+
+    let updater = UpdaterHandle::new(
+        shutdown.signals(),
+        configuration.clone(),
+        downloader.clone(),
+    );
 
     let filemanager = FileManagerHandle::new(shutdown.signals(), configuration.clone());
 

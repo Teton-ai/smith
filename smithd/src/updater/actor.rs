@@ -1,3 +1,4 @@
+use crate::downloader::DownloaderHandle;
 use crate::magic::MagicHandle;
 use crate::shutdown::{ShutdownHandler, ShutdownSignals};
 use crate::utils::network::NetworkClient;
@@ -43,6 +44,7 @@ pub struct Actor {
     network: NetworkClient,
     last_update: Option<Result<time::Instant>>,
     last_upgrade: Option<Result<time::Instant>>,
+    downloader: DownloaderHandle,
 }
 
 impl Actor {
@@ -50,6 +52,7 @@ impl Actor {
         shutdown: ShutdownSignals,
         receiver: mpsc::Receiver<ActorMessage>,
         magic: MagicHandle,
+        downloader: DownloaderHandle,
     ) -> Self {
         let network = NetworkClient::new();
         Self {
@@ -60,6 +63,7 @@ impl Actor {
             status: Status::Idle,
             last_update: None,
             last_upgrade: None,
+            downloader,
         }
     }
 
@@ -217,7 +221,7 @@ impl Actor {
         // ask postman for the packages of the target release
         let target_packages = self
             .network
-            .get_release_packages(target_release_id, &token)
+            .get_release_packages(target_release_id, &token, &self.downloader)
             .await?;
 
         info!("== Current packages ==");
@@ -258,7 +262,7 @@ impl Actor {
                 up_to_date = false;
                 // we need to install the package
                 self.network
-                    .get_package(&target_package.file, &token)
+                    .get_package(&target_package.file, &token, &self.downloader)
                     .await?;
             }
         }
