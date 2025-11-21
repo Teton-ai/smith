@@ -31,7 +31,6 @@ pub struct DeviceAuthResponse {
     ),
     tag = AUTH_TAG
 )]
-#[tracing::instrument]
 #[deprecated(since = "0.2.66", note = "Since /device have been released")]
 pub async fn verify_token(
     Extension(state): Extension<State>,

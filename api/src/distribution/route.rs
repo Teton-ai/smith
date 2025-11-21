@@ -231,7 +231,6 @@ pub struct NewDistributionRelease {
     ),
     tag = DISTRIBUTIONS_TAG
 )]
-#[tracing::instrument]
 pub async fn create_distribution_release(
     Extension(state): Extension<State>,
     Extension(current_user): Extension<CurrentUser>,

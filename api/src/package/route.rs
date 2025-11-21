@@ -22,7 +22,6 @@ const PACKAGES_TAG: &str = "packages";
     ),
     tag = PACKAGES_TAG
 )]
-#[tracing::instrument]
 pub async fn get_packages(
     Extension(state): Extension<State>,
 ) -> axum::response::Result<Json<Vec<schema::Package>>, StatusCode> {
@@ -60,7 +59,6 @@ pub struct ReleasePackageRequest {
     ),
     tag = PACKAGES_TAG
 )]
-#[tracing::instrument]
 pub async fn release_package(
     Extension(state): Extension<State>,
     TypedMultipart(ReleasePackageRequest { mut file }): TypedMultipart<ReleasePackageRequest>,

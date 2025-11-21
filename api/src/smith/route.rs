@@ -32,7 +32,6 @@ use utoipa::ToSchema;
         (status = 500, description = "Internal server error")
   )
 )]
-#[tracing::instrument]
 pub async fn register_device(
     Extension(state): Extension<State>,
     Json(payload): Json<DeviceRegistration>,
@@ -64,7 +63,6 @@ pub async fn register_device(
         ("device_token" = [])
   ),
 )]
-#[tracing::instrument]
 pub async fn home(
     headers: HeaderMap,
     device: DeviceWithToken,
@@ -119,7 +117,6 @@ pub async fn home(
         ("device_token" = [])
   ),
 )]
-#[tracing::instrument]
 pub async fn download_file(
     _device: DeviceWithToken,
     path: Option<Path<String>>,
@@ -173,7 +170,6 @@ pub struct FetchPackageQuery {
         ("device_token" = [])
   ),
 )]
-#[tracing::instrument]
 pub async fn fetch_package(
     _device: DeviceWithToken,
     Extension(state): Extension<State>,
@@ -239,7 +235,6 @@ pub struct UploadResult {
         ("device_token" = [])
   ),
 )]
-#[tracing::instrument]
 pub async fn upload_file(
     _device: DeviceWithToken,
     path: Option<Path<String>>,
@@ -297,7 +292,6 @@ pub async fn upload_file(
         ("device_token" = [])
   ),
 )]
-#[tracing::instrument]
 pub async fn list_release_packages(
     _device: DeviceWithToken,
     Path(release_id): Path<i32>,
