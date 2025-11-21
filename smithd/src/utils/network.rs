@@ -103,7 +103,12 @@ impl NetworkClient {
             .with_context(|| "Failed to Parse JSON respone")
     }
 
-    pub async fn get_package(&self, package_name: &str, token: &str, downloader: &DownloaderHandle) -> Result<()> {
+    pub async fn get_package(
+        &self,
+        package_name: &str,
+        token: &str,
+        downloader: &DownloaderHandle,
+    ) -> Result<()> {
         let path = env::current_dir()?;
 
         let mut local_packages_folder = path.clone();
@@ -116,14 +121,14 @@ impl NetworkClient {
         local_package_path_tmp.set_extension("tmp");
 
         if local_package_path.exists() {
-            info!("Package already exists locally");
-            return Ok(());
+            info!("Package already exists locally, downloader will check for resume");
         } else {
             info!("Package does not exist locally, fetching...");
         }
 
         let remote_file = format!("packages/{}", package_name);
-        let _ = downloader.download(remote_file, local_file, rate)
+        let _ = downloader.download(remote_file, local_package_path, 5000); // basically
+        // unlimited rate here
 
         // let query = vec![("name", package_name)];
         // let url = format!("{}/package", self.hostname);

@@ -36,7 +36,7 @@ pub(super) async fn download_ota(
         .await;
 
     // Download the OTA tools
-    let remote_file = format!("ota/{}", tools_file);
+    let remote_file = format!("assets/ota/{}", tools_file);
     let local_file = format!(
         "{}/{}",
         OTAConstants::TOOLS_STORAGE,
@@ -47,7 +47,7 @@ pub(super) async fn download_ota(
         .await;
 
     // Download the OTA payload package
-    let remote_file = format!("ota/{}", package_file);
+    let remote_file = format!("assets/ota/{}", package_file);
     let local_file = format!(
         "{}/{}",
         OTAConstants::OTA_STORAGE,
