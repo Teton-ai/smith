@@ -77,14 +77,18 @@ fn process_output(output: std::process::Output) -> (i32, SafeCommandRx) {
 
 pub(super) async fn test_network(id: i32) -> SafeCommandResponse {
     match perform_network_test().await {
-        Ok((bytes_downloaded, duration_ms)) => SafeCommandResponse {
-            id,
-            command: SafeCommandRx::TestNetwork {
-                bytes_downloaded,
-                duration_ms,
-            },
-            status: 0,
-        },
+        Ok((bytes_downloaded, duration_ms, bytes_uploaded, upload_duration_ms)) => {
+            SafeCommandResponse {
+                id,
+                command: SafeCommandRx::TestNetwork {
+                    bytes_downloaded,
+                    duration_ms,
+                    bytes_uploaded: Some(bytes_uploaded),
+                    upload_duration_ms: Some(upload_duration_ms),
+                },
+                status: 0,
+            }
+        }
         Err(e) => {
             tracing::error!("Network test failed: {}", e);
             SafeCommandResponse {
@@ -92,6 +96,8 @@ pub(super) async fn test_network(id: i32) -> SafeCommandResponse {
                 command: SafeCommandRx::TestNetwork {
                     bytes_downloaded: 0,
                     duration_ms: 0,
+                    bytes_uploaded: None,
+                    upload_duration_ms: None,
                 },
                 status: -1,
             }
@@ -99,26 +105,28 @@ pub(super) async fn test_network(id: i32) -> SafeCommandResponse {
     }
 }
 
-async fn perform_network_test() -> Result<(usize, u64)> {
+async fn perform_network_test() -> Result<(usize, u64, usize, u64)> {
     let shutdown = ShutdownHandler::new();
     let configuration = MagicHandle::new(shutdown.signals());
     configuration.load(None).await;
 
     let server_api_url = configuration.get_server().await;
-    let test_url = format!("{}/network/test-file", server_api_url);
+    let download_url = format!("{}/network/test-file", server_api_url);
+    let upload_url = format!("{}/network/test-upload", server_api_url);
 
     let client = Client::builder()
-        .timeout(Duration::from_secs(60))
+        .timeout(Duration::from_secs(120))
         .build()
         .context("Failed to create HTTP client")?;
 
-    let start = Instant::now();
+    // Download test
+    let download_start = Instant::now();
 
     let response = client
-        .get(&test_url)
+        .get(&download_url)
         .send()
         .await
-        .context("Failed to send request")?;
+        .context("Failed to send download request")?;
 
     if !response.status().is_success() {
         return Err(anyhow::anyhow!(
@@ -136,8 +144,27 @@ async fn perform_network_test() -> Result<(usize, u64)> {
         downloaded += chunk.len();
     }
 
-    let elapsed = start.elapsed();
-    let duration_ms = elapsed.as_millis() as u64;
+    let download_duration_ms = download_start.elapsed().as_millis() as u64;
 
-    Ok((downloaded, duration_ms))
+    // Upload test - upload the same amount of data that was downloaded
+    let upload_data = vec![0u8; downloaded];
+    let upload_start = Instant::now();
+
+    let response = client
+        .post(&upload_url)
+        .body(upload_data)
+        .send()
+        .await
+        .context("Failed to send upload request")?;
+
+    if !response.status().is_success() {
+        return Err(anyhow::anyhow!(
+            "Upload server returned status: {}",
+            response.status()
+        ));
+    }
+
+    let upload_duration_ms = upload_start.elapsed().as_millis() as u64;
+
+    Ok((downloaded, download_duration_ms, downloaded, upload_duration_ms))
 }

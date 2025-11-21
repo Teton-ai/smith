@@ -111,10 +111,19 @@ impl DBHandler {
                 SafeCommandRx::TestNetwork {
                     bytes_downloaded,
                     duration_ms,
+                    bytes_uploaded,
+                    upload_duration_ms,
                 } => {
                     if response.status == 0 && duration_ms > 0 {
                         let download_speed_mbps =
                             (bytes_downloaded as f64 * 8.0) / (duration_ms as f64 * 1000.0);
+
+                        let upload_speed_mbps = match (bytes_uploaded, upload_duration_ms) {
+                            (Some(bytes), Some(duration)) if duration > 0 => {
+                                Some((bytes as f64 * 8.0) / (duration as f64 * 1000.0))
+                            }
+                            _ => None,
+                        };
 
                         let network_score = if download_speed_mbps >= 50.0 {
                             5
@@ -129,17 +138,19 @@ impl DBHandler {
                         };
 
                         sqlx::query!(
-                            "INSERT INTO device_network (device_id, network_score, download_speed_mbps, source, updated_at)
-                            VALUES ($1, $2, $3, $4, NOW())
+                            "INSERT INTO device_network (device_id, network_score, download_speed_mbps, upload_speed_mbps, source, updated_at)
+                            VALUES ($1, $2, $3, $4, $5, NOW())
                             ON CONFLICT (device_id)
                             DO UPDATE SET
                                 network_score = EXCLUDED.network_score,
                                 download_speed_mbps = EXCLUDED.download_speed_mbps,
+                                upload_speed_mbps = EXCLUDED.upload_speed_mbps,
                                 source = EXCLUDED.source,
                                 updated_at = NOW()",
                             device.id,
                             network_score,
                             download_speed_mbps,
+                            upload_speed_mbps,
                             "speed_test"
                         )
                         .execute(pool)
