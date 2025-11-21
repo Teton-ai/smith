@@ -21,7 +21,7 @@ jobs:
         arch: [amd64, arm64]
         include:
           - arch: amd64
-            os: blacksmith-4vcpu-ubuntu-2204
+            os: ubuntu-22.04
             package-name-suffix: _amd64
           - arch: arm64
             os: [self-hosted, linux, arm64, aws, ec2, ubuntu-20.04]
