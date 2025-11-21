@@ -135,6 +135,7 @@ interface SystemInfo {
 interface DeviceNetwork {
   network_score?: number
   download_speed_mbps?: number
+  upload_speed_mbps?: number
   source?: string
   updated_at?: string
 }
@@ -387,6 +388,7 @@ const DevicesPage = () => {
     const status = getDeviceStatus(device);
     const networkScore = device.network?.network_score;
     const downloadSpeed = device.network?.download_speed_mbps;
+    const uploadSpeed = device.network?.upload_speed_mbps;
     const lastSeenText = device.last_seen ? formatTimeAgo(new Date(device.last_seen)) + ' ago' : 'Never';
 
     if (status === 'offline') {
@@ -398,7 +400,9 @@ const DevicesPage = () => {
     }
 
     const qualityText = networkScore >= 4 ? 'Excellent' : networkScore === 3 ? 'Good' : 'Poor';
-    const speedText = downloadSpeed ? ` (${downloadSpeed.toFixed(1)} Mbps)` : '';
+    const downloadText = downloadSpeed ? `↓ ${downloadSpeed.toFixed(1)} Mbps` : '';
+    const uploadText = uploadSpeed ? `↑ ${uploadSpeed.toFixed(1)} Mbps` : '';
+    const speedText = downloadText || uploadText ? ` (${[downloadText, uploadText].filter(Boolean).join(' / ')})` : '';
     const lastTested = device.network?.updated_at ? formatTimeAgo(new Date(device.network.updated_at)) + ' ago' : 'never';
 
     return `Online - ${qualityText} Network (${networkScore}/5)${speedText}\nLast tested: ${lastTested}\nLast seen: ${lastSeenText}`;

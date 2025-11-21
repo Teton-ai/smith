@@ -80,6 +80,7 @@ const Tooltip = ({ children, content }: { children: React.ReactNode, content: st
 interface DeviceNetwork {
   network_score?: number;
   download_speed_mbps?: number;
+  upload_speed_mbps?: number;
   source?: string;
   updated_at?: string;
 }

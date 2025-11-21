@@ -335,3 +335,21 @@ pub async fn test_file() -> Response<Body> {
         .body(Body::from(data))
         .unwrap()
 }
+
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct UploadTestResult {
+    pub bytes_received: usize,
+}
+
+#[utoipa::path(
+    post,
+    path = "/smith/network/test-upload",
+    responses(
+        (status = 200, description = "Receives upload data for network speed testing", body = UploadTestResult),
+    )
+)]
+pub async fn test_upload(body: axum::body::Bytes) -> Json<UploadTestResult> {
+    Json(UploadTestResult {
+        bytes_received: body.len(),
+    })
+}

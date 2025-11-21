@@ -86,6 +86,8 @@ pub enum SafeCommandRx {
     TestNetwork {
         bytes_downloaded: usize,
         duration_ms: u64,
+        bytes_uploaded: Option<usize>,
+        upload_duration_ms: Option<u64>,
     },
 }
 
