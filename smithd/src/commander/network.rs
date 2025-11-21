@@ -166,5 +166,10 @@ async fn perform_network_test() -> Result<(usize, u64, usize, u64)> {
 
     let upload_duration_ms = upload_start.elapsed().as_millis() as u64;
 
-    Ok((downloaded, download_duration_ms, downloaded, upload_duration_ms))
+    Ok((
+        downloaded,
+        download_duration_ms,
+        downloaded,
+        upload_duration_ms,
+    ))
 }
