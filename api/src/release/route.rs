@@ -9,7 +9,6 @@ use tracing::error;
 
 const RELEASES_TAG: &str = "releases";
 
-#[tracing::instrument]
 #[utoipa::path(
     get,
     path = "/releases",
@@ -45,7 +44,6 @@ pub async fn get_releases(
     Ok(Json(releases))
 }
 
-#[tracing::instrument]
 #[utoipa::path(
     get,
     path = "/releases/{release_id}",
@@ -82,7 +80,6 @@ pub struct UpdateRelease {
     pub yanked: Option<bool>,
 }
 
-#[tracing::instrument]
 #[utoipa::path(
     post,
     path = "/releases/{release_id}",
@@ -143,7 +140,6 @@ pub struct ReplacementPackage {
     pub id: i32,
 }
 
-#[tracing::instrument]
 #[utoipa::path(
     post,
     path = "/releases/{release_id}/packages",
@@ -194,7 +190,6 @@ pub async fn add_package_to_release(
     Ok(StatusCode::OK)
 }
 
-#[tracing::instrument]
 #[utoipa::path(
     get,
     path = "/releases/{release_id}/packages",
@@ -232,7 +227,6 @@ pub async fn get_distribution_release_packages(
     Ok(Json(packages))
 }
 
-#[tracing::instrument]
 #[utoipa::path(
     put,
     path = "/releases/{release_id}/packages/{package_id}",
@@ -282,7 +276,6 @@ pub async fn update_package_for_release(
     Ok(StatusCode::OK)
 }
 
-#[tracing::instrument]
 #[utoipa::path(
     delete,
     path = "/releases/{release_id}/packages/{package_id}",

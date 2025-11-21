@@ -1336,7 +1336,6 @@ pub struct PaginationId {
     tag = DEVICES_TAG
 )]
 #[allow(clippy::collapsible_else_if)]
-#[tracing::instrument]
 pub async fn get_all_commands_for_device(
     host: Host,
     Path(device_id): Path<String>,

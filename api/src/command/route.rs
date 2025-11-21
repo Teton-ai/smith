@@ -60,7 +60,6 @@ pub async fn available_commands() -> Result<Json<Vec<SafeCommandTx>>, StatusCode
     ),
     tag = COMMANDS_TAG
 )]
-#[tracing::instrument]
 pub async fn issue_commands_to_devices(
     Extension(state): Extension<State>,
     Json(bundle_commands): Json<BundleCommands>,
@@ -133,7 +132,6 @@ pub struct PaginationUuid {
     tag = COMMANDS_TAG
 )]
 #[allow(clippy::collapsible_else_if)]
-#[tracing::instrument]
 pub async fn get_bundle_commands(
     host: Host,
     Extension(state): Extension<State>,
