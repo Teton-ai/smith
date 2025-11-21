@@ -10,17 +10,32 @@ use tracing::{debug, error};
 
 const PACKAGES_TAG: &str = "packages";
 
+/// Retrieve all registered packages ordered by creation time.
+///
+/// # Returns
+///
+/// A `Json<Vec<schema::Package>>` containing the list of packages on success; returns HTTP `500` on failure.
+///
+/// # Examples
+///
+/// ```
+/// use axum::response::Json;
+///
+/// // Construct a JSON value representing packages for documentation purposes.
+/// let packages: Vec<schema::Package> = Vec::new();
+/// let _json: Json<Vec<schema::Package>> = Json(packages);
+/// ```
 #[utoipa::path(
-    get,
-    path = "/packages",
-    responses(
-        (status = 200, description = "List of registered packages"),
-        (status = 500, description = "Failure", body = String),
-    ),
-    security(
-        ("auth_token" = [])
-    ),
-    tag = PACKAGES_TAG
+get,
+path = "/packages",
+responses(
+(status = 200, description = "List of registered packages"),
+(status = 500, description = "Failure", body = String),
+),
+security(
+("auth_token" = [])
+),
+tag = PACKAGES_TAG
 )]
 pub async fn get_packages(
     Extension(state): Extension<State>,
@@ -46,18 +61,41 @@ pub struct ReleasePackageRequest {
     file: FieldData<NamedTempFile>,
 }
 
+/// Handle an incoming multipart package upload, parse the uploaded Debian package, and persist it.
+///
+/// This endpoint accepts a multipart/form-data request containing a Debian package file, extracts
+/// the package control metadata (name, version, architecture), and stores the package using the
+/// application's Package::new routine. On success it responds with HTTP 200; on failure it
+/// returns HTTP 500.
+///
+/// # Examples
+///
+/// ```no_run
+/// use axum::http::StatusCode;
+/// // `state` and `multipart` are placeholders representing the extension State and parsed multipart.
+/// // In an integration test you would construct an HTTP request with multipart/form-data and invoke the handler.
+/// # async fn example(state: crate::State, multipart: crate::ReleasePackageRequest) {
+/// let result: axum::response::Result<StatusCode, StatusCode> =
+///     crate::handlers::release_package(axum::Extension(state), axum_extra::extract::TypedMultipart(multipart)).await;
+/// match result {
+///     Ok(StatusCode::OK) => println!("uploaded"),
+///     Err(StatusCode::INTERNAL_SERVER_ERROR) => println!("failed"),
+///     _ => println!("other"),
+/// }
+/// # }
+/// ```
 #[utoipa::path(
-    put,
-    path = "/packages",
-    request_body(content = ReleasePackageRequest, content_type = "multipart/form-data"),
-    responses(
-        (status = 200, description = "Sucess releasing package"),
-        (status = 500, description = "Failure", body = String),
-    ),
-    security(
-        ("auth_token" = [])
-    ),
-    tag = PACKAGES_TAG
+put,
+path = "/packages",
+request_body(content = ReleasePackageRequest, content_type = "multipart/form-data"),
+responses(
+(status = 200, description = "Sucess releasing package"),
+(status = 500, description = "Failure", body = String),
+),
+security(
+("auth_token" = [])
+),
+tag = PACKAGES_TAG
 )]
 pub async fn release_package(
     Extension(state): Extension<State>,

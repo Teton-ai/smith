@@ -9,17 +9,32 @@ use tracing::error;
 
 const RELEASES_TAG: &str = "releases";
 
+/// Retrieve all releases including their distribution name and architecture.
+///
+/// Fetches every row from the `release` table joined with `distribution` and returns them as a JSON array.
+///
+/// # Examples
+///
+/// ```no_run
+/// use axum::Extension;
+/// use axum::response::Json;
+/// # async fn example(state: crate::State) {
+/// let response: Json<Vec<crate::release::model::Release>> =
+///     crate::release::route::get_releases(Extension(state)).await.unwrap();
+/// let releases = response.0;
+/// # }
+/// ```
 #[utoipa::path(
-    get,
-    path = "/releases",
-    responses(
-        (status = StatusCode::OK, description = "List of releases retrieved successfully", body = Vec<Release>),
-        (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to retrieve releases"),
-    ),
-    security(
-        ("auth_token" = [])
-    ),
-    tag = RELEASES_TAG
+get,
+path = "/releases",
+responses(
+(status = StatusCode::OK, description = "List of releases retrieved successfully", body = Vec<Release>),
+(status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to retrieve releases"),
+),
+security(
+("auth_token" = [])
+),
+tag = RELEASES_TAG
 )]
 pub async fn get_releases(
     Extension(state): Extension<State>,
@@ -140,18 +155,42 @@ pub struct ReplacementPackage {
     pub id: i32,
 }
 
+/// Adds a package to the specified release.
+///
+/// The handler inserts a mapping between the release and the provided package ID
+/// only when the release exists and is a draft that is not yanked.
+///
+/// # Parameters
+///
+/// - `release_id`: ID of the target release.
+/// - `package`: `ReplacementPackage` containing the `id` of the package to add.
+///
+/// # Returns
+///
+/// `StatusCode::OK` on successful insertion; `StatusCode::NOT_FOUND` if the release
+/// does not exist; `StatusCode::CONFLICT` if the release is yanked or not a draft;
+/// `StatusCode::INTERNAL_SERVER_ERROR` for database errors.
+///
+/// # Examples
+///
+/// ```
+/// use crate::api::release::route::ReplacementPackage;
+///
+/// let pkg = ReplacementPackage { id: 42 };
+/// // POST /releases/1/packages with JSON body `pkg`
+/// ```
 #[utoipa::path(
-    post,
-    path = "/releases/{release_id}/packages",
-        request_body = ReplacementPackage,
-    responses(
-        (status = StatusCode::CREATED, description = "Package added to release successfully"),
-        (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to add package to release"),
-    ),
-    security(
-        ("auth_token" = [])
-    ),
-    tag = RELEASES_TAG
+post,
+path = "/releases/{release_id}/packages",
+request_body = ReplacementPackage,
+responses(
+(status = StatusCode::CREATED, description = "Package added to release successfully"),
+(status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to add package to release"),
+),
+security(
+("auth_token" = [])
+),
+tag = RELEASES_TAG
 )]
 pub async fn add_package_to_release(
     Path(release_id): Path<i32>,
@@ -190,17 +229,34 @@ pub async fn add_package_to_release(
     Ok(StatusCode::OK)
 }
 
+/// Fetches all packages associated with a release, ordered by package name.
+///
+/// Returns a JSON array of `Package` objects belonging to the specified release.
+///
+/// # Examples
+///
+/// ```no_run
+/// use reqwest::blocking::Client;
+/// let client = Client::new();
+/// let resp = client
+///     .get("http://localhost:3000/releases/1/packages")
+///     .header("Authorization", "Bearer <token>")
+///     .send()
+///     .expect("request failed");
+/// assert!(resp.status().is_success());
+/// let packages: Vec<your_crate::models::Package> = resp.json().expect("invalid json");
+/// ```
 #[utoipa::path(
-    get,
-    path = "/releases/{release_id}/packages",
-    responses(
-        (status = StatusCode::OK, description = "Release packages retrieved successfully"),
-        (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to retrieve release packages"),
-    ),
-    security(
-        ("auth_token" = [])
-    ),
-    tag = RELEASES_TAG
+get,
+path = "/releases/{release_id}/packages",
+responses(
+(status = StatusCode::OK, description = "Release packages retrieved successfully"),
+(status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to retrieve release packages"),
+),
+security(
+("auth_token" = [])
+),
+tag = RELEASES_TAG
 )]
 pub async fn get_distribution_release_packages(
     Path(release_id): Path<i32>,
@@ -227,17 +283,33 @@ pub async fn get_distribution_release_packages(
     Ok(Json(packages))
 }
 
+/// Update the package associated with a release.
+///
+/// Attempts to replace an existing package entry for the given `release_id` and `package_id` with the provided package ID.
+///
+/// Returns
+///
+/// `StatusCode::OK` on success. Returns `StatusCode::NOT_FOUND` if the release does not exist, `StatusCode::CONFLICT` if the release is yanked or not a draft, and `StatusCode::INTERNAL_SERVER_ERROR` for database errors.
+///
+/// # Examples
+///
+/// ```
+/// use axum::http::StatusCode;
+/// // On success the handler responds with `StatusCode::OK`.
+/// let ok = StatusCode::OK;
+/// assert_eq!(ok, StatusCode::OK);
+/// ```
 #[utoipa::path(
-    put,
-    path = "/releases/{release_id}/packages/{package_id}",
-    responses(
-        (status = StatusCode::OK, description = "Successfully updated release package "),
-        (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to update release package"),
-    ),
-    security(
-        ("auth_token" = [])
-    ),
-    tag = RELEASES_TAG
+put,
+path = "/releases/{release_id}/packages/{package_id}",
+responses(
+(status = StatusCode::OK, description = "Successfully updated release package "),
+(status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to update release package"),
+),
+security(
+("auth_token" = [])
+),
+tag = RELEASES_TAG
 )]
 pub async fn update_package_for_release(
     Path((release_id, package_id)): Path<(i32, i32)>,

@@ -47,18 +47,39 @@ pub async fn available_commands() -> Result<Json<Vec<SafeCommandTx>>, StatusCode
     ]))
 }
 
+/// Create a new command bundle and enqueue each provided command for every specified device.
+///
+/// On success the new bundle is persisted and all command queue entries are inserted.
+///
+/// # Returns
+///
+/// `201 Created` on success, `500 Internal Server Error` if any database operation fails.
+///
+/// # Examples
+///
+/// ```
+/// use axum::Extension;
+/// use axum::Json;
+/// use http::StatusCode;
+/// // Assume `state` is an initialized `State` and `bundle_commands` is constructed.
+/// // let state = ...;
+/// // let bundle_commands = BundleCommands { devices: vec![...], commands: vec![...] };
+///
+/// // let res = issue_commands_to_devices(Extension(state), Json(bundle_commands)).await.unwrap();
+/// // assert_eq!(res, StatusCode::CREATED);
+/// ```
 #[utoipa::path(
-    post,
-    path = "/commands/bundles",
-    request_body = BundleCommands,
-    responses(
-        (status = 201, description = "Commands issued successfully"),
-        (status = 500, description = "Failed to issue commands", body = String),
-    ),
-    security(
-        ("auth_token" = [])
-    ),
-    tag = COMMANDS_TAG
+post,
+path = "/commands/bundles",
+request_body = BundleCommands,
+responses(
+(status = 201, description = "Commands issued successfully"),
+(status = 500, description = "Failed to issue commands", body = String),
+),
+security(
+("auth_token" = [])
+),
+tag = COMMANDS_TAG
 )]
 pub async fn issue_commands_to_devices(
     Extension(state): Extension<State>,
@@ -118,18 +139,37 @@ pub struct PaginationUuid {
     pub limit: Option<i32>,
 }
 
+/// Retrieve a paginated list of command bundles along with their device command responses.
+///
+/// The response contains bundles sorted by creation time (most recent first) and optional
+/// `next`/`previous` URLs when more pages are available. Provide at most one of the pagination
+/// query parameters `starting_after` or `ending_before`; supplying both results in a 400 Bad Request.
+/// Database or internal failures return 500 Internal Server Error.
+///
+/// # Errors
+///
+/// - Returns `StatusCode::BAD_REQUEST` if both `starting_after` and `ending_before` are provided.
+/// - Returns `StatusCode::INTERNAL_SERVER_ERROR` on database/transaction errors.
+///
+/// # Examples
+///
+/// ```no_run
+/// // Fetch the first page of bundles from a running server.
+/// let resp = reqwest::blocking::get("https://example.com/commands/bundles").unwrap();
+/// assert!(resp.status().is_success());
+/// ```
 #[utoipa::path(
-    get,
-    path = "/commands/bundles",
-    responses(
-        (status = 200, description = "List of command bundles", body = BundleWithCommandsPaginated),
-        (status = 400, description = "Invalid pagination parameters"),
-        (status = 500, description = "Failed to retrieve command bundles", body = String),
-    ),
-    security(
-        ("auth_token" = [])
-    ),
-    tag = COMMANDS_TAG
+get,
+path = "/commands/bundles",
+responses(
+(status = 200, description = "List of command bundles", body = BundleWithCommandsPaginated),
+(status = 400, description = "Invalid pagination parameters"),
+(status = 500, description = "Failed to retrieve command bundles", body = String),
+),
+security(
+("auth_token" = [])
+),
+tag = COMMANDS_TAG
 )]
 #[allow(clippy::collapsible_else_if)]
 pub async fn get_bundle_commands(

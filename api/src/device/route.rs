@@ -1322,20 +1322,36 @@ pub struct PaginationId {
     pub limit: Option<i32>,
 }
 
+/// Fetches paginated command records for a specific device.
+///
+/// Supports pagination using `starting_after`, `ending_before`, and `limit`. The handler rejects requests that include both `starting_after` and `ending_before`.
+///
+/// # Examples
+///
+/// ```
+/// // Example request URLs:
+/// // - Get first page (default limit):
+/// //   GET /devices/DEVICE_ID/commands
+/// // - Get next page:
+/// //   GET /devices/DEVICE_ID/commands?starting_after=123&limit=10
+/// // - Get previous page:
+/// //   GET /devices/DEVICE_ID/commands?ending_before=456&limit=10
+/// //
+/// // The response contains a JSON object with `commands`, `next`, and `previous` fields.
+/// ```
 #[utoipa::path(
-    get,
-    path = "/devices/{device_id}/commands",
-    responses(
-        (status = StatusCode::OK, description = "Command successfully fetch from to the device"),
-        (status = StatusCode::NOT_FOUND, description = "Device not found"),
-        (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to fetch device commands"),
-    ),
-    security(
-        ("auth_token" = [])
-    ),
-    tag = DEVICES_TAG
+get,
+path = "/devices/{device_id}/commands",
+responses(
+(status = StatusCode::OK, description = "Command successfully fetch from to the device"),
+(status = StatusCode::NOT_FOUND, description = "Device not found"),
+(status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to fetch device commands"),
+),
+security(
+("auth_token" = [])
+),
+tag = DEVICES_TAG
 )]
-#[allow(clippy::collapsible_else_if)]
 pub async fn get_all_commands_for_device(
     host: Host,
     Path(device_id): Path<String>,

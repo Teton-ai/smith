@@ -218,18 +218,40 @@ pub struct NewDistributionRelease {
     pub packages: Vec<i32>,
 }
 
+/// Creates a new release for the specified distribution and associates the given packages with that release.
+///
+/// This starts a database transaction, inserts a new release record linked to the authenticated user, verifies all provided package IDs exist, inserts the package associations for the new release, and commits the transaction. If any package ID is missing, the request is rejected with a `400 Bad Request`.
+///
+/// # Returns
+///
+/// `Json<i32>` containing the newly created release `id`.
+///
+/// # Examples
+///
+/// ```
+/// use my_crate::models::NewDistributionRelease;
+///
+/// let payload = NewDistributionRelease {
+///     version: "1.0.0".to_string(),
+///     packages: vec![1, 2, 3],
+/// };
+///
+/// // The handler is async and expects application state and an authenticated user.
+/// // This example only demonstrates creating the request payload.
+/// let _ = payload;
+/// ```
 #[utoipa::path(
-    post,
-    path = "/distributions/{distribution_id}/releases",
-    request_body = NewDistributionRelease,
-    responses(
-        (status = StatusCode::CREATED, description = "Distribution release created successfully", body = i32),
-        (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to create distribution release"),
-    ),
-    security(
-        ("auth_token" = [])
-    ),
-    tag = DISTRIBUTIONS_TAG
+post,
+path = "/distributions/{distribution_id}/releases",
+request_body = NewDistributionRelease,
+responses(
+(status = StatusCode::CREATED, description = "Distribution release created successfully", body = i32),
+(status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to create distribution release"),
+),
+security(
+("auth_token" = [])
+),
+tag = DISTRIBUTIONS_TAG
 )]
 pub async fn create_distribution_release(
     Extension(state): Extension<State>,
