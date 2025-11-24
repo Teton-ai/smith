@@ -262,7 +262,7 @@ async fn download_file(
     let start = std::time::Instant::now();
 
     // Force rate limiter to start empty so we don't have a large burst when starting download
-    let max_burst = bytes_per_second as u32;
+    let max_burst = bytes_per_second_u32;
 
     match limiter.check_n(NonZeroU32::new(max_burst).unwrap()) {
         Ok(_) => (),
