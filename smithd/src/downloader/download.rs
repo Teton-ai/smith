@@ -40,14 +40,8 @@ pub async fn download_file_mb(
     rate: f64,
     force_stop: Arc<AtomicBool>,
 ) -> anyhow::Result<DownloadStats> {
-    let clamp = rate > 0.0;
-    if !clamp {
-        error!("Download rate must be greater than 0 MB/s");
-        return Err(anyhow::anyhow!("Download rate must be greater than 0 MB/s"));
-    }
-
     // Convert the MB rate to bytes/sec
-    let bytes_per_second = (rate * 1_000_000.0) as u64;
+    let bytes_per_second = ((rate * 1_000_000.0).ceil() as u64).max(1);
 
     // Example: download at 1MB per second
     let result = download_file(
@@ -254,9 +248,7 @@ async fn download_file(
         f
     };
 
-    let quota = Quota::per_second(
-        NonZeroU32::new(bytes_per_second as u32).unwrap_or(NonZeroU32::new(1).unwrap()),
-    );
+    let quota = Quota::per_second(NonZeroU32::new(bytes_per_second as u32).unwrap());
 
     let limiter = RateLimiter::direct(quota);
     let mut stream = response.bytes_stream();
