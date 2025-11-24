@@ -136,58 +136,6 @@ impl NetworkClient {
             .await?; // basically
         // unlimited rate here
 
-        // let query = vec![("name", package_name)];
-        // let url = format!("{}/package", self.hostname);
-        // let stream = self
-        //     .client
-        //     .get(url)
-        //     .header("Authorization", format!("Bearer {}", token))
-        //     .timeout(Duration::from_secs(10 * 60))
-        //     .query(&query)
-        //     .send()
-        //     .await?;
-
-        //
-        // if stream.status() != 200 {
-        //     return Err(anyhow!("Failed to get package"));
-        // }
-        //
-        // let mut response = stream.bytes_stream();
-        //
-        // let start_time = time::Instant::now();
-        //
-        // tokio::fs::create_dir_all(&local_packages_folder).await?;
-        // let mut file = tokio::fs::File::create(&local_package_path_tmp).await?;
-        // let mut total_bytes = 0u64;
-        // while let Some(chunk) = response.next().await {
-        //     let data = chunk?;
-        //     total_bytes += data.len() as u64;
-        //     file.write_all(&data).await?;
-        // }
-        //
-        // file.flush().await?;
-        //
-        // let download_duration = time::Instant::now() - start_time;
-        //
-        // if total_bytes == 0 {
-        //     error!(
-        //         "Downloaded 0 bytes for package {} — deleting temp file",
-        //         package_name
-        //     );
-        //     tokio::fs::remove_file(&local_package_path_tmp).await.ok();
-        //     return Err(anyhow!(
-        //         "Package {} download failed: 0 bytes received",
-        //         package_name
-        //     ));
-        // }
-        //
-        // tokio::fs::rename(&local_package_path_tmp, &local_package_path).await?;
-        //
-        // info!(
-        //     "Package {} downloaded in {:?} to {:?}",
-        //     package_name, download_duration, local_package_path
-        // );
-
         Ok(())
     }
 }
