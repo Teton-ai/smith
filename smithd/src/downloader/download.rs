@@ -129,31 +129,16 @@ async fn download_file(
         ));
     }
 
-    // Extract the pre-signed URL from the Location header
-    let presigned_url = match initial_response.headers().get("Location") {
-        Some(location) => location
-            .to_str()
-            .map_err(|e| anyhow::anyhow!("Invalid location header: {:?}", e))?,
-        None => {
-            return Err(anyhow::anyhow!(
-                "No pre-signed URL provided in response headers"
-            ));
-        }
-    };
-
-    // Head request to get etage and size before resume attempt
-    let head_response = client.head(presigned_url).send().await?;
-
     // Get the etag for verification
-    let etag = head_response
+    let etag = initial_response
         .headers()
         .get("etag")
         .and_then(|value| value.to_str().ok());
 
     // Get the total content length of the object
-    let content_length = head_response
+    let content_length = initial_response
         .headers()
-        .get("content-length")
+        .get("x-file-size")
         .and_then(|value| value.to_str().ok())
         .and_then(|value| value.parse::<u64>().ok());
 
@@ -168,6 +153,18 @@ async fn download_file(
         "Remote file - content length: {:?} and etag {:?}",
         content_length, etag
     );
+
+    // Extract the pre-signed URL from the Location header
+    let presigned_url = match initial_response.headers().get("Location") {
+        Some(location) => location
+            .to_str()
+            .map_err(|e| anyhow::anyhow!("Invalid location header: {:?}", e))?,
+        None => {
+            return Err(anyhow::anyhow!(
+                "No pre-signed URL provided in response headers"
+            ));
+        }
+    };
 
     // Check if resume should be true
     if downloaded > 0 && downloaded < content_length {
@@ -194,6 +191,7 @@ async fn download_file(
                 downloaded = 0;
             } else {
                 info!("ETag matches, requesting to resume download");
+                resume_download = true;
                 request = request.header("Range", format!("bytes={}-", downloaded));
             }
         } else {

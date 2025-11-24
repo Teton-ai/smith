@@ -319,7 +319,6 @@ async fn start_main_server(config: &'static Config, authorization: Authorization
         .routes(routes!(telemetry::route::victoria))
         .routes(routes!(smith::route::upload_file))
         .routes(routes!(smith::route::download_file))
-        .routes(routes!(smith::route::check_download_file_head))
         .routes(routes!(smith::route::fetch_package))
         .routes(routes!(smith::route::list_release_packages))
         .routes(routes!(smith::route::test_file))

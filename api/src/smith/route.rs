@@ -125,7 +125,6 @@ pub async fn download_file(
     path: Path<String>,
     Extension(state): Extension<State>,
 ) -> Result<axum::response::Response<Body>, StatusCode> {
-    error!("Download file requested: {:?}", path);
     let file_path = path;
 
     // Strip leading slash if present
@@ -167,68 +166,70 @@ pub async fn download_file(
     Ok(response)
 }
 
-#[utoipa::path(
-  head,
-  path = "/smith/download/*path",
-  params(
-        ("path" = String, Path, description = "File path to check")
-  ),
-  responses(
-        (status = 200, description = "File download successful", content_type = "application/octet-stream"),
-        (status = 400, description = "Bad request"),
-        (status = 500, description = "Internal server error")
-  ),
-  security(
-        ("device_token" = [])
-  ),
-)]
-#[tracing::instrument]
-pub async fn check_download_file_head(
-    _device: DeviceWithToken,
-    path: Path<String>,
-    Extension(state): Extension<State>,
-) -> Result<axum::response::Response<Body>, StatusCode> {
-    error!("Download file requested: {:?}", path);
-    let file_path = path;
-
-    // Strip leading slash if present
-    let path = file_path.strip_prefix('/').unwrap_or(file_path.as_str());
-    // Split into bucket, directory path, and file name
-    let (bucket, dir_path, file_name) = if let Some(f_idx) = file_path.find('/') {
-        let bucket = &path[..f_idx];
-        let remaining_path = &path[f_idx + 1..];
-
-        if let Some(r_idx) = remaining_path.rfind('/') {
-            let dir_path = &remaining_path[..r_idx];
-            let file_name = &remaining_path[r_idx + 1..];
-            (bucket, dir_path, file_name)
-        } else {
-            (bucket, "", remaining_path)
-        }
-    } else {
-        (path, "", "")
-    };
-
-    // Add more buckets here if needed
-    let bucket_name = match bucket.to_lowercase().as_str() {
-        "assets" => &state.config.assets_bucket_name,
-        "packages" => &state.config.packages_bucket_name,
-        _ => {
-            error!("Invalid bucket name requested: {}", bucket);
-            return Err(StatusCode::BAD_REQUEST);
-        }
-    };
-
-    // Get a signed link to the s3 file
-    let response = storage::Storage::head_from_s3(bucket_name, Some(dir_path), file_name)
-        .await
-        .map_err(|err| {
-            error!("Failed to get metadata from S3 {:?}", err);
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?;
-
-    Ok(response)
-}
+// #[utoipa::path(
+//   head,
+//   path = "/smith/download/*path",
+//   params(
+//         ("path" = String, Path, description = "File path to check")
+//   ),
+//   responses(
+//         (status = 200, description = "File download successful", content_type = "application/octet-stream"),
+//         (status = 400, description = "Bad request"),
+//         (status = 500, description = "Internal server error")
+//   ),
+//   security(
+//         ("device_token" = [])
+//   ),
+// )]
+// #[tracing::instrument]
+// pub async fn check_download_file_head(
+//     _device: DeviceWithToken,
+//     path: Path<String>,
+//     Extension(state): Extension<State>,
+// ) -> Result<axum::response::Response<Body>, StatusCode> {
+//     error!("Download head ❔ endpoint reached: {:?}", path);
+//     let file_path = path;
+//
+//     // Strip leading slash if present
+//     let path = file_path.strip_prefix('/').unwrap_or(file_path.as_str());
+//     // Split into bucket, directory path, and file name
+//     let (bucket, dir_path, file_name) = if let Some(f_idx) = file_path.find('/') {
+//         let bucket = &path[..f_idx];
+//         let remaining_path = &path[f_idx + 1..];
+//
+//         if let Some(r_idx) = remaining_path.rfind('/') {
+//             let dir_path = &remaining_path[..r_idx];
+//             let file_name = &remaining_path[r_idx + 1..];
+//             (bucket, dir_path, file_name)
+//         } else {
+//             (bucket, "", remaining_path)
+//         }
+//     } else {
+//         (path, "", "")
+//     };
+//
+//     // Add more buckets here if needed
+//     let bucket_name = match bucket.to_lowercase().as_str() {
+//         "assets" => &state.config.assets_bucket_name,
+//         "packages" => &state.config.packages_bucket_name,
+//         _ => {
+//             error!("Invalid bucket name requested: {}", bucket);
+//             return Err(StatusCode::BAD_REQUEST);
+//         }
+//     };
+//
+//     // Get a signed link to the s3 file
+//     let response = storage::Storage::head_from_s3(bucket_name, Some(dir_path), file_name)
+//         .await
+//         .map_err(|err| {
+//             error!("Failed to get metadata from S3 {:?}", err);
+//             StatusCode::INTERNAL_SERVER_ERROR
+//         })?;
+//
+//     error!("Head returning response: {:?}", response);
+//
+//     Ok(response)
+// }
 
 #[derive(Deserialize, Debug)]
 pub struct FetchPackageQuery {
