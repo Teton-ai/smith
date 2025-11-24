@@ -90,7 +90,7 @@ async fn download_file(
     let url = if remote_path.is_empty() {
         format!("{}/download", &server_api_url)
     } else {
-        format!("{}/download/{}", &server_api_url, &remote_path)
+        format!("{}/download?path={}", &server_api_url, &remote_path)
     };
 
     // Create local file path if it does not exist

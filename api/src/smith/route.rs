@@ -20,7 +20,7 @@ use std::error::Error;
 use std::net::SocketAddr;
 use std::time::SystemTime;
 use tracing::{debug, error, info};
-use utoipa::ToSchema;
+use utoipa::{IntoParams, ToSchema};
 
 #[utoipa::path(
   post,
@@ -104,11 +104,16 @@ pub async fn home(
     (StatusCode::OK, Json(response))
 }
 
+#[derive(Deserialize, Debug, IntoParams)]
+pub struct DownloadParams {
+    path: String,
+}
+
 #[utoipa::path(
   get,
-  path = "/smith/download/*path",
+  path = "/smith/download",
   params(
-        ("path" = String, Path, description = "File path to download")
+        DownloadParams
   ),
   responses(
         (status = 200, description = "File download successful", content_type = "application/octet-stream"),
@@ -122,10 +127,10 @@ pub async fn home(
 #[tracing::instrument]
 pub async fn download_file(
     _device: DeviceWithToken,
-    path: Path<String>,
+    Query(params): Query<DownloadParams>,
     Extension(state): Extension<State>,
 ) -> Result<axum::response::Response<Body>, StatusCode> {
-    let file_path = path;
+    let file_path = &params.path;
 
     // Strip leading slash if present
     let path = file_path.strip_prefix('/').unwrap_or(file_path.as_str());
