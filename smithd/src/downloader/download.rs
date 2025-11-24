@@ -128,16 +128,16 @@ async fn download_file(
         .and_then(|value| value.to_str().ok());
 
     // Get the total content length of the object
-    let content_length = initial_response
+    let file_length = initial_response
         .headers()
         .get("x-file-size")
         .and_then(|value| value.to_str().ok())
         .and_then(|value| value.parse::<u64>().ok());
 
-    let content_length = match content_length {
+    let content_length = match file_length {
         Some(length) => length,
         None => {
-            return Err(anyhow::anyhow!("Content-Length header missing or invalid"));
+            return Err(anyhow::anyhow!("File length header missing or invalid"));
         }
     };
 
@@ -180,6 +180,8 @@ async fn download_file(
                 // Check if the full file is already downloaded
                 if downloaded == content_length {
                     info!("File already fully downloaded at {}", local_path);
+                    stats.success = true;
+                    stats.bytes_downloaded = downloaded;
                     return Ok(stats);
                 }
 

@@ -130,13 +130,13 @@ pub async fn download_file(
     // Strip leading slash if present
     let path = file_path.strip_prefix('/').unwrap_or(file_path.as_str());
     // Split into bucket, directory path, and file name
-    let (bucket, dir_path, file_name) = if let Some(f_idx) = file_path.find('/') {
-        let bucket = &path[..f_idx];
-        let remaining_path = &path[f_idx + 1..];
+    let (bucket, dir_path, file_name) = if let Some(first_idx) = path.find('/') {
+        let bucket = &path[..first_idx];
+        let remaining_path = &path[first_idx + 1..];
 
-        if let Some(r_idx) = remaining_path.rfind('/') {
-            let dir_path = &remaining_path[..r_idx];
-            let file_name = &remaining_path[r_idx + 1..];
+        if let Some(last_idx) = remaining_path.rfind('/') {
+            let dir_path = &remaining_path[..last_idx];
+            let file_name = &remaining_path[last_idx + 1..];
             (bucket, dir_path, file_name)
         } else {
             (bucket, "", remaining_path)
@@ -144,6 +144,11 @@ pub async fn download_file(
     } else {
         (path, "", "")
     };
+
+    if file_name.is_empty() || bucket.is_empty() {
+        error!("File name is empty in the requested path: {}", path);
+        return Err(StatusCode::BAD_REQUEST);
+    }
 
     // Add more buckets here if needed
     let bucket_name = match bucket.to_lowercase().as_str() {
