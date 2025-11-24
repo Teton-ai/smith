@@ -40,6 +40,12 @@ pub async fn download_file_mb(
     rate: f64,
     force_stop: Arc<AtomicBool>,
 ) -> anyhow::Result<DownloadStats> {
+    let clamp = rate > 0.0;
+    if !clamp {
+        error!("Download rate must be greater than 0 MB/s");
+        return Err(anyhow::anyhow!("Download rate must be greater than 0 MB/s"));
+    }
+
     // Convert the MB rate to bytes/sec
     let bytes_per_second = (rate * 1_000_000.0) as u64;
 
@@ -137,7 +143,7 @@ async fn download_file(
     let content_length = match file_length {
         Some(length) => length,
         None => {
-            return Err(anyhow::anyhow!("File length header missing or invalid"));
+            return Err(anyhow::anyhow!("x-file-size header missing or invalid"));
         }
     };
 
