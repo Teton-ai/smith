@@ -177,7 +177,14 @@ async fn download_file(
                 resume_download = false;
                 downloaded = 0;
             } else {
+                // Check if the full file is already downloaded
+                if downloaded == content_length {
+                    info!("File already fully downloaded at {}", local_path);
+                    return Ok(stats);
+                }
+
                 resume_download = true;
+                info!("Resuming download from byte {}", downloaded);
                 request = request.header("Range", format!("bytes={}-", downloaded));
             }
         } else {
@@ -254,7 +261,7 @@ async fn download_file(
     match limiter.check_n(NonZeroU32::new(max_burst).unwrap()) {
         Ok(_) => (),
 
-        Err(e) => eprintln!("Rate limit exceeded: {}", e),
+        Err(e) => error!("Rate limit exceeded: {}", e),
     }
 
     while let Some(chunk_result) = stream.next().await {
@@ -271,7 +278,7 @@ async fn download_file(
 
                 // Wait for rate limiter
                 if let Err(e) = limiter.until_n_ready(chunk_size).await {
-                    eprintln!("Rate limit exceeded: {}", e);
+                    warn!("Rate limit exceeded: {}", e);
                 }
 
                 // Write chunk to file
@@ -305,11 +312,11 @@ async fn download_file(
         Ok(metadata) => {
             let file_size = metadata.len();
 
-            if file_size != session_downloaded || file_size != content_length {
-                error!(
-                    "Size mismatch: file on disk ({}), downloaded amount ({}), expected content length ({:?})",
-                    file_size, session_downloaded, content_length
-                );
+            if file_size != content_length {
+                // error!(
+                //     "Size mismatch: file on disk ({}), downloaded amount ({}), expected content length ({:?})",
+                //     file_size, session_downloaded, content_length
+                // );
 
                 return Err(anyhow::anyhow!(
                     "Size mismatch: file on disk ({}), downloaded amount ({}), expected content length ({:?})",
@@ -332,7 +339,10 @@ async fn download_file(
                 ))
                 .await?;
             } else {
-                info!("Downloaded file verification passed");
+                info!(
+                    "Downloaded file verification passed for file {}",
+                    local_path
+                );
                 stats.success = true;
             }
         }
