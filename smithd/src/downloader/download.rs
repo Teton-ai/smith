@@ -40,10 +40,8 @@ pub async fn download_file_mb(
     rate: f64,
     force_stop: Arc<AtomicBool>,
 ) -> anyhow::Result<DownloadStats> {
-    info!("Got to download_file_mb with rate: {} MB/sec", rate);
     // Convert the MB rate to bytes/sec
     let bytes_per_second = (rate * 1_000_000.0) as u64;
-    info!("Rate limit: {} bytes/sec", bytes_per_second);
 
     // Example: download at 1MB per second
     let result = download_file(
@@ -95,8 +93,6 @@ async fn download_file(
         format!("{}/download/{}", &server_api_url, &remote_path)
     };
 
-    info!("Path being pointed to for download: {}", &url);
-
     // Create local file path if it does not exist
     if let Some(parent) = Path::new(local_path).parent() {
         if !parent.exists() {
@@ -110,10 +106,6 @@ async fn download_file(
 
     if let Ok(metadata) = tokio::fs::metadata(local_path).await {
         downloaded = metadata.len();
-        // if downloaded > 0 {
-        //     resume_download = true;
-        //     info!("Found existing file with size {} bytes", downloaded);
-        // }
     }
 
     let initial_response = client
@@ -149,11 +141,6 @@ async fn download_file(
         }
     };
 
-    info!(
-        "Remote file - content length: {:?} and etag {:?}",
-        content_length, etag
-    );
-
     // Extract the pre-signed URL from the Location header
     let presigned_url = match initial_response.headers().get("Location") {
         Some(location) => location
@@ -179,7 +166,7 @@ async fn download_file(
         if let Some(stored) = xattr::get(local_path, "user.etag")? {
             let stored_etag = String::from_utf8_lossy(&stored);
             if stored_etag != etag.unwrap_or("") {
-                info!(
+                warn!(
                     "ETag mismatch (local: {}, remote: {}), restarting download",
                     stored_etag,
                     etag.unwrap_or("")
@@ -190,7 +177,6 @@ async fn download_file(
                 resume_download = false;
                 downloaded = 0;
             } else {
-                info!("ETag matches, requesting to resume download");
                 resume_download = true;
                 request = request.header("Range", format!("bytes={}-", downloaded));
             }
@@ -274,7 +260,7 @@ async fn download_file(
     while let Some(chunk_result) = stream.next().await {
         // Check if download should be forcefully stopped
         if force_stop.load(std::sync::atomic::Ordering::SeqCst) {
-            info!("Timeout interrupt - download stopping forcefully");
+            warn!("Timeout interrupt - download stopping forcefully");
             file.flush().await?;
             break;
         }
@@ -319,7 +305,7 @@ async fn download_file(
         Ok(metadata) => {
             let file_size = metadata.len();
 
-            if file_size != content_length {
+            if file_size != session_downloaded || file_size != content_length {
                 error!(
                     "Size mismatch: file on disk ({}), downloaded amount ({}), expected content length ({:?})",
                     file_size, session_downloaded, content_length
