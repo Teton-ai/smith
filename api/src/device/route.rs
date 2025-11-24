@@ -2159,6 +2159,48 @@ pub async fn update_device(
 }
 
 #[utoipa::path(
+    delete,
+    path = "/labels/{key}",
+    responses(
+        (status = StatusCode::NO_CONTENT, description = "Label deleted from all devices"),
+        (status = StatusCode::FORBIDDEN, description = "Forbidden"),
+        (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to delete label"),
+    ),
+    security(
+        ("auth_token" = [])
+    ),
+    tag = DEVICES_TAG
+)]
+pub async fn delete_label(
+    Path(key): Path<String>,
+    Extension(state): Extension<State>,
+    Extension(current_user): Extension<CurrentUser>,
+) -> axum::response::Result<StatusCode, StatusCode> {
+    let allowed = authorization::check(current_user, "devices", "write");
+
+    if !allowed {
+        return Err(StatusCode::FORBIDDEN);
+    }
+
+    sqlx::query!(
+        r#"
+        UPDATE device
+        SET labels = labels - $1
+        WHERE labels ? $1
+        "#,
+        key
+    )
+    .execute(&state.pg_pool)
+    .await
+    .map_err(|err| {
+        error!("Failed to delete label '{}' from devices: {err}", key);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[utoipa::path(
     post,
     path = "/devices/{device_id}/approval",
     responses(
