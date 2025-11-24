@@ -3,7 +3,7 @@ use crate::shutdown::ShutdownHandler;
 use anyhow;
 use futures::StreamExt;
 use governor::{Quota, RateLimiter};
-use reqwest::Client;
+use reqwest::{Client, Url};
 use std::num::NonZeroU32;
 use std::path::Path;
 use std::sync::Arc;
@@ -90,7 +90,10 @@ async fn download_file(
     let url = if remote_path.is_empty() {
         format!("{}/download", &server_api_url)
     } else {
-        format!("{}/download?path={}", &server_api_url, &remote_path)
+        let mut url = Url::parse(&format!("{}/download", &server_api_url))
+            .map_err(|e| anyhow::anyhow!("Invalid server URL: {}", e))?;
+        url.query_pairs_mut().append_pair("path", remote_path);
+        url.to_string()
     };
 
     // Create local file path if it does not exist
