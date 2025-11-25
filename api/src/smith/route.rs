@@ -20,7 +20,7 @@ use std::error::Error;
 use std::net::SocketAddr;
 use std::time::SystemTime;
 use tracing::{debug, error, info};
-use utoipa::ToSchema;
+use utoipa::{IntoParams, ToSchema};
 
 #[utoipa::path(
   post,
@@ -102,11 +102,16 @@ pub async fn home(
     (StatusCode::OK, Json(response))
 }
 
+#[derive(Deserialize, Debug, IntoParams)]
+pub struct DownloadParams {
+    path: String,
+}
+
 #[utoipa::path(
   get,
-  path = "/smith/download/{path}",
+  path = "/smith/download",
   params(
-        ("path" = String, Path, description = "File path to download")
+        DownloadParams
   ),
   responses(
         (status = 200, description = "File download successful", content_type = "application/octet-stream"),
@@ -119,33 +124,51 @@ pub async fn home(
 )]
 pub async fn download_file(
     _device: DeviceWithToken,
-    path: Option<Path<String>>,
+    Query(params): Query<DownloadParams>,
     Extension(state): Extension<State>,
 ) -> Result<axum::response::Response<Body>, StatusCode> {
-    // Get file path from request
-    let file_path = match path {
-        Some(p) => p.0,
-        None => return Err(StatusCode::BAD_REQUEST),
+    let file_path = &params.path;
+
+    // Strip leading slash if present
+    let path = file_path.strip_prefix('/').unwrap_or(file_path.as_str());
+    // Split into bucket, directory path, and file name
+    let (bucket, dir_path, file_name) = if let Some(first_idx) = path.find('/') {
+        let bucket = &path[..first_idx];
+        let remaining_path = &path[first_idx + 1..];
+
+        if let Some(last_idx) = remaining_path.rfind('/') {
+            let dir_path = &remaining_path[..last_idx];
+            let file_name = &remaining_path[last_idx + 1..];
+            (bucket, dir_path, file_name)
+        } else {
+            (bucket, "", remaining_path)
+        }
+    } else {
+        (path, "", "")
     };
 
-    // Split into directory path and file name
-    let (dir_path, file_name) = if let Some(idx) = file_path.rfind('/') {
-        (&file_path[..idx], &file_path[idx + 1..])
-    } else {
-        ("", file_path.as_str())
+    if file_name.is_empty() || bucket.is_empty() {
+        error!("File name is empty in the requested path: {}", path);
+        return Err(StatusCode::BAD_REQUEST);
+    }
+
+    // Add more buckets here if needed
+    let bucket_name = match bucket.to_lowercase().as_str() {
+        "assets" => &state.config.assets_bucket_name,
+        "packages" => &state.config.packages_bucket_name,
+        _ => {
+            error!("Invalid bucket name requested: {}", bucket);
+            return Err(StatusCode::BAD_REQUEST);
+        }
     };
 
     // Get a signed link to the s3 file
-    let response = storage::Storage::download_from_s3(
-        &state.config.assets_bucket_name,
-        Some(dir_path),
-        file_name,
-    )
-    .await
-    .map_err(|err| {
-        error!("Failed to get signed link from S3 {:?}", err);
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
+    let response = storage::Storage::download_from_s3(bucket_name, Some(dir_path), file_name)
+        .await
+        .map_err(|err| {
+            error!("Failed to get signed link from S3 {:?}", err);
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
 
     Ok(response)
 }

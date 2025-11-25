@@ -52,14 +52,28 @@ impl Storage {
 
         let pre_signed_url = bucket
             .presign_get(
-                object_key, 151200, // 48 hours
+                object_key.clone(),
+                151200, // 48 hours
                 None,
             )
             .await?;
 
+        let (head_object, _code) = bucket.head_object(&object_key.clone()).await?;
+
+        // Get the values, handling Options
+        let content_length = head_object
+            .content_length
+            .ok_or_else(|| anyhow::anyhow!("Content-Length missing"))?;
+
+        let etag = head_object
+            .e_tag
+            .ok_or_else(|| anyhow::anyhow!("ETag missing"))?;
+
         // Create a response with the location header
         let response = axum::response::Response::builder()
             .header(axum::http::header::LOCATION, pre_signed_url)
+            .header("X-File-Size", content_length)
+            .header(axum::http::header::ETAG, etag)
             .body(axum::body::Body::empty())
             .map_err(anyhow::Error::from)?;
 
