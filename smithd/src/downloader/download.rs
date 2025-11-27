@@ -67,8 +67,9 @@ async fn download_file(
 ) -> anyhow::Result<DownloadStats> {
     let mut rec_track = 0;
     let mut stats = DownloadStats::default();
-    let shutdown = ShutdownHandler::new();
-    let configuration = MagicHandle::new(shutdown.signals());
+    // let shutdown = ShutdownHandler::new();
+    // let configuration = MagicHandle::new(shutdown.signals());
+    let configuration = magic.clone();
     configuration.load(None).await;
     let client = Client::new();
     let server_api_url = configuration.get_server().await;
