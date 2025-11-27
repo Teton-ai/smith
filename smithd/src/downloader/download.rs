@@ -70,7 +70,7 @@ async fn download_file(
     // let shutdown = ShutdownHandler::new();
     // let configuration = MagicHandle::new(shutdown.signals());
     let configuration = magic.clone();
-    configuration.load(None).await;
+    // configuration.load(None).await;
     let client = Client::new();
     let server_api_url = configuration.get_server().await;
 
