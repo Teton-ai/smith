@@ -22,6 +22,7 @@ struct PackagesInterface {
     downloader: DownloaderHandle,
     tunnel: TunnelHandle,
     filemanager: FileManagerHandle,
+    runtime_handle: tokio::runtime::Handle,
 }
 
 // interface for the D-Bus service, version 1
@@ -37,8 +38,11 @@ impl PackagesInterface {
         "Packages upgrade scheduled".to_string()
     }
 
-    async fn updater_status(&mut self) -> String {
-        self.updater.status().await
+    fn updater_status(&mut self) -> String {
+        let updater = self.updater.clone();
+        let handle = self.runtime_handle.clone();
+
+        tokio::task::block_in_place(move || handle.block_on(async move { updater.status().await }))
     }
 
     async fn expose_port(&mut self, port: u16) -> String {
@@ -137,6 +141,7 @@ impl DBus {
             downloader: self.downloader.clone(),
             tunnel: self.tunnel.clone(),
             filemanager: self.filemanager.clone(),
+            runtime_handle: tokio::runtime::Handle::current(),
         };
         let _conn = connection::Builder::system()
             .expect("Failed to create D-Bus connection")
