@@ -153,16 +153,10 @@ async fn download_file(
         }
     };
 
-    // Check if resume should be true
-    if downloaded > 0 && downloaded < content_length {
-        resume_download = true;
-        info!("Found existing file with size {} bytes", downloaded);
-    }
-
     // Build get based on if some of the file has already been downloaded
     let mut request = client.get(presigned_url);
 
-    if resume_download && downloaded > 0 {
+    if downloaded > 0 {
         if let Some(stored) = xattr::get(local_path, "user.etag")? {
             let stored_etag = String::from_utf8_lossy(&stored);
 
@@ -176,9 +170,15 @@ async fn download_file(
                         return Ok(stats);
                     }
 
-                    resume_download = true;
-                    info!("Resuming download from byte {}", downloaded);
-                    request = request.header("Range", format!("bytes={}-", downloaded));
+                    if downloaded > content_length {
+                        // Different file somehow (this should never hit)
+                        resume_download = false;
+                        downloaded = 0;
+                    } else {
+                        resume_download = true;
+                        info!("Resuming download from byte {}", downloaded);
+                        request = request.header("Range", format!("bytes={}-", downloaded));
+                    }
                 }
                 Some(etag) => {
                     warn!(
@@ -335,7 +335,7 @@ async fn download_file(
                 error!("File did not install properly. Re-installing");
                 tokio::fs::remove_file(local_path).await?;
 
-                Box::pin(download_file(
+                return Box::pin(download_file(
                     magic,
                     local_path,
                     remote_path,
@@ -343,7 +343,7 @@ async fn download_file(
                     force_stop,
                     Some(rec_track),
                 ))
-                .await?;
+                .await;
             } else {
                 info!(
                     "Downloaded file verification passed for file {}",
