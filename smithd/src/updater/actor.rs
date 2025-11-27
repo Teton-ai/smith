@@ -1,6 +1,6 @@
 use crate::downloader::DownloaderHandle;
 use crate::magic::MagicHandle;
-use crate::shutdown::{ShutdownHandler, ShutdownSignals};
+use crate::shutdown::ShutdownSignals;
 use crate::utils::network::NetworkClient;
 use anyhow::Context;
 use anyhow::Result;
@@ -439,9 +439,7 @@ impl Actor {
     ///
     /// Returns `Ok` if all packages are, `Err` otherwise.
     async fn are_packages_up_to_date(&self) -> Result<()> {
-        let shutdown = ShutdownHandler::new();
-        let configuration = MagicHandle::new(shutdown.signals());
-        configuration.load(None).await;
+        let configuration = self.magic.clone();
 
         let magic_packages = configuration.get_packages().await;
 
