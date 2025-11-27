@@ -67,10 +67,7 @@ async fn download_file(
 ) -> anyhow::Result<DownloadStats> {
     let mut rec_track = 0;
     let mut stats = DownloadStats::default();
-    // let shutdown = ShutdownHandler::new();
-    // let configuration = MagicHandle::new(shutdown.signals());
     let configuration = magic.clone();
-    // configuration.load(None).await;
     let client = Client::new();
     let server_api_url = configuration.get_server().await;
 
@@ -170,39 +167,38 @@ async fn download_file(
         if let Some(stored) = xattr::get(local_path, "user.etag")? {
             let stored_etag = String::from_utf8_lossy(&stored);
 
-            match etag {
-                Some(etag) if stored_etag == etag => {
-                    // Check if the full file is already downloaded
-                    if downloaded == content_length {
-                        info!("File already fully downloaded at {}", local_path);
-                        stats.success = true;
-                        stats.bytes_downloaded = downloaded;
-                        return Ok(stats);
-                    }
-
-                    resume_download = true;
-                    info!("Resuming download from byte {}", downloaded);
-                    request = request.header("Range", format!("bytes={}-", downloaded));
+        match etag {
+            Some(etag) if stored_etag == etag => {
+                // Check if the full file is already downloaded
+                if downloaded == content_length {
+                    info!("File already fully downloaded at {}", local_path);
+                    stats.success = true;
+                    stats.bytes_downloaded = downloaded;
+                    return Ok(stats);
                 }
-                Some(etag) => {
-                    warn!(
-                        "ETag mismatch (local: {}, remote: {}), restarting download",
-                        stored_etag, etag
-                    );
-                    // Remove the existing file and start over
-                    tokio::fs::remove_file(local_path).await?;
 
-                    resume_download = false;
-                    downloaded = 0;
-                }
-                None => {
-                    // No stored ETag, cannot verify, restart download
-                    warn!("No ETag provided by server, restarting download");
-                    tokio::fs::remove_file(local_path).await?;
+                resume_download = true;
+                info!("Resuming download from byte {}", downloaded);
+                request = request.header("Range", format!("bytes={}-", downloaded));
+            }
+            Some(etag) => {
+                warn!(
+                    "ETag mismatch (local: {}, remote: {}), restarting download",
+                    stored_etag, etag
+                );
+                // Remove the existing file and start over
+                tokio::fs::remove_file(local_path).await?;
 
-                    resume_download = false;
-                    downloaded = 0;
-                }
+                resume_download = false;
+                downloaded = 0;
+            }
+            None => {
+                // No stored ETag, cannot verify, restart download
+                warn!("No ETag provided by server, restarting download");
+                tokio::fs::remove_file(local_path).await?;
+
+                resume_download = false;
+                downloaded = 0;
             }
         }
     }
