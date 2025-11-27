@@ -1,6 +1,6 @@
 use crate::downloader::DownloaderHandle;
 use crate::magic::MagicHandle;
-use crate::shutdown::{ShutdownHandler, ShutdownSignals};
+use crate::shutdown::ShutdownSignals;
 use crate::utils::network::NetworkClient;
 use anyhow::Context;
 use anyhow::Result;
