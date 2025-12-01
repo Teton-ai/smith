@@ -17,9 +17,6 @@ enum MagicMessage {
         signal: oneshot::Sender<()>,
         path: Option<String>,
     },
-    GetChecks {
-        sender: oneshot::Sender<Vec<structure::ConfigCheck>>,
-    },
     GetTunnelDetails {
         sender: oneshot::Sender<structure::ConfigTunnel>,
     },
@@ -74,16 +71,6 @@ impl Magic {
                     }
                 }
                 signal.send(()).unwrap();
-            }
-            MagicMessage::GetChecks { sender } => {
-                debug!("Getting Magic checks");
-
-                if let Some(conf) = &self.configuration {
-                    debug!("Sending {} checks", conf.get_checks().len());
-                    _ = sender.send(conf.get_checks());
-                } else {
-                    _ = sender.send(vec![]);
-                }
             }
             MagicMessage::GetTunnelDetails { sender } => {
                 debug!("Getting Magic Tunnel Details");
@@ -263,13 +250,6 @@ impl MagicHandle {
     pub async fn set_target_release_id(&self, target_release_id: Option<i32>) {
         let msg = MagicMessage::SetTargetReleaseId { target_release_id };
         _ = self.sender.send(msg).await;
-    }
-
-    pub async fn get_checks(&self) -> Vec<structure::ConfigCheck> {
-        let (sender, receiver) = oneshot::channel();
-        let msg = MagicMessage::GetChecks { sender };
-        _ = self.sender.send(msg).await;
-        receiver.await.unwrap()
     }
 
     pub async fn get_tunnel_details(&self) -> structure::ConfigTunnel {
