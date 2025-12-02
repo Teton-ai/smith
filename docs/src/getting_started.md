@@ -83,3 +83,12 @@ UPDATE device SET approved = 't', token = '<SAME UUID AS ABOVE>';
 ```
 
 Going back in to the dashboard should show the device as registered.
+
+## Starting the CLI
+
+Run
+```sh
+cargo run --bin sm
+```
+You probably need to run it some times initially since it needs to create some defaults.
+If it shows a list of commands, you are golden.
