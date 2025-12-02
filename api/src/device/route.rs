@@ -341,6 +341,7 @@ pub async fn get_devices(
     Extension(state): Extension<State>,
     filter: Query<DeviceFilter>,
 ) -> axum::response::Result<Json<Vec<Device>>, StatusCode> {
+    dbg!(&filter.labels);
     let labels_json = if !filter.labels.is_empty() {
         let mut labels_map = HashMap::new();
         for label_str in &filter.labels {
