@@ -113,8 +113,10 @@ impl DBHandler {
                     duration_ms,
                     bytes_uploaded,
                     upload_duration_ms,
+                    timed_out,
                 } => {
-                    if response.status == 0 && duration_ms > 0 {
+                    // Record results if we have valid data (even partial results from timeout)
+                    if duration_ms > 0 {
                         let download_speed_mbps =
                             (bytes_downloaded as f64 * 8.0) / (duration_ms as f64 * 1000.0);
 
@@ -125,7 +127,10 @@ impl DBHandler {
                             _ => None,
                         };
 
-                        let network_score = if download_speed_mbps >= 50.0 {
+                        // If the test timed out, the network is too slow - cap score at 1
+                        let network_score = if timed_out {
+                            1
+                        } else if download_speed_mbps >= 50.0 {
                             5
                         } else if download_speed_mbps >= 25.0 {
                             4
