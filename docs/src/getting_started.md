@@ -7,32 +7,10 @@ Follow this guide to get started with local development.
 First, you will need the following stuff installed/setup:
 - Docker
 - 1password
-- rust
 - node
 
-Then, create a `.env` file in the root, fill in these values
-
-```.env
-POSTGRES_USER=postgres
-POSTGRES_PASSWORD=postgres
-DATABASE_URL="postgres://postgres:postgres@postgres:5432/postgres"
-
-PACKAGES_BUCKET_NAME=# Get this from your coworker
-ASSETS_BUCKET_NAME=# Get this from your coworker
-AWS_REGION=eu-north-1
-
-AUTH0_ISSUER=# Get this from your coworker
-AUTH0_AUDIENCE=# Get this from your coworker
-```
-
-Then create a `dashboard/.env` file, and fill it with these values
-```.env
-API_BASE_URL=http://localhost:8080
-AUTH0_DOMAIN=# Get this from your coworker
-AUTH0_CLIENT_ID=# Get this from your coworker
-AUTH0_REDIRECT_URI=http://localhost:3000
-AUTH0_AUDIENCE=# Get this from your coworker
-```
+Then run `make init`. This will initialize the repo with all the stuff you need. At the time of writing this will
+- Create .env files (.env and dashboard/.env) for you. Please fill in the missing values
 
 ## Starting the api
 
@@ -64,15 +42,7 @@ The dashboard should now be running on localhost:3000
 
 ## Starting smithd
 
-First, create a magic.toml in the root with the following content
-```toml
-[meta]
-magic_version = 2
-server = "http://127.0.0.1:8080/smith"
-token = "<GENERATE A RANDOM UUID>"
-```
-
-Then run `make run`, which will start smithd.
+Just run `make run`, which will start smithd and create a magic.toml for you.
 
 You can now open the dashboard, and see a device in the "Pending Approval" box.
 

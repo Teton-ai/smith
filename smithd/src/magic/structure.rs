@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use tokio::fs::File;
 use tokio::io::AsyncWriteExt; // for write_all()
-use tracing::{error, info};
+use tracing::info;
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct MagicFile {
@@ -104,8 +104,23 @@ impl MagicFile {
             info!("Loading magic.toml: ETC");
             Self::load_from_path(magic_in_etc.to_str().unwrap())
         } else {
-            error!("Loading magic.toml: NO MAGIC FILE FOUND");
-            Ok((Self::default(), None))
+            info!("Found no magic.toml, creating a default one");
+            let string = toml::to_string_pretty(&Self {
+                meta: ConfigMeta {
+                    magic_version: 2,
+                    server: "http://127.0.0.1:8080/smith".to_string(),
+                    release_id: None,
+                    target_release_id: None,
+                    token: None,
+                },
+                tunnel: None,
+                scheduler: None,
+                checks: None,
+                metrics: None,
+                packages: None,
+            })?;
+            std::fs::write(magic_in_cwd, string)?;
+            Self::load_from_path(magic_in_cwd.to_str().unwrap())
         }
     }
 

@@ -26,3 +26,7 @@ fix:
 
 run:
 	docker exec -it smith-smithd cargo run --bin smithd
+
+init:
+	echo "Initializing the repo"
+	cp .env.template .env
