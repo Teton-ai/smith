@@ -1,3 +1,4 @@
+include .env
 export DOCKER_CLI_HINTS=false
 
 .DEFAULT_GOAL := up
@@ -26,6 +27,9 @@ fix:
 
 run:
 	docker exec -it smith-smithd cargo run --bin smithd
+
+schema:
+	docker exec smith-postgres pg_dump --schema-only -n public -U $(POSTGRES_USER) postgres > schema.sql
 
 init:
 	echo "Initializing the repo"

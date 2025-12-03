@@ -7,3 +7,5 @@ fleet.sql
 volumes
 .idea
 .env
+
+schema.sql
