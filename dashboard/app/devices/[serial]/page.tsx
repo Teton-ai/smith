@@ -3,20 +3,14 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import {
-  Cpu,
   ChevronRight,
   Wifi,
   WifiOff,
-  CheckCircle,
   XCircle,
-  Clock,
   Smartphone,
   Router,
-  Signal,
   MapPin,
   Globe,
-  GitBranch,
-  Tag,
   ArrowLeft,
   Tags,
 } from 'lucide-react';
@@ -29,53 +23,6 @@ const LocationMap = dynamic(() => import('./LocationMap'), {
   ssr: false,
   loading: () => <div className="h-64 bg-gray-100 rounded-lg flex items-center justify-center">Loading map...</div>
 });
-
-const Tooltip = ({ children, content }: { children: React.ReactNode, content: string }) => {
-  const [isVisible, setIsVisible] = React.useState(false);
-  const [position, setPosition] = React.useState<'top' | 'right'>('top');
-  const containerRef = React.useRef<HTMLDivElement>(null);
-
-  const handleMouseEnter = () => {
-    setIsVisible(true);
-    if (containerRef.current) {
-      const rect = containerRef.current.getBoundingClientRect();
-      const viewportWidth = window.innerWidth;
-      
-      // If tooltip would be cut off on the left side, position it to the right
-      if (rect.left < 150) {
-        setPosition('right');
-      } else {
-        setPosition('top');
-      }
-    }
-  };
-
-  return (
-    <div 
-      ref={containerRef}
-      className="relative inline-block"
-      onMouseEnter={handleMouseEnter}
-      onMouseLeave={() => setIsVisible(false)}
-    >
-      {children}
-      {isVisible && (
-        <>
-          {position === 'top' ? (
-            <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-2 py-1 text-xs text-white bg-gray-800 rounded shadow-lg whitespace-nowrap z-50">
-              {content}
-              <div className="absolute top-full left-1/2 transform -translate-x-1/2 w-0 h-0 border-l-4 border-r-4 border-t-4 border-l-transparent border-r-transparent border-t-gray-800"></div>
-            </div>
-          ) : (
-            <div className="absolute left-full top-1/2 transform -translate-y-1/2 ml-2 px-2 py-1 text-xs text-white bg-gray-800 rounded shadow-lg whitespace-nowrap z-50">
-              {content}
-              <div className="absolute right-full top-1/2 transform -translate-y-1/2 w-0 h-0 border-t-4 border-b-4 border-r-4 border-t-transparent border-b-transparent border-r-gray-800"></div>
-            </div>
-          )}
-        </>
-      )}
-    </div>
-  );
-};
 
 interface DeviceNetwork {
   network_score?: number;
@@ -102,7 +49,7 @@ interface Device {
   release?: Release;
   target_release?: Release;
   network?: DeviceNetwork;
-  labels?: Record<string, string>;
+  labels: string[];
   system_info?: {
     hostname?: string;
     device_tree?: {
@@ -202,135 +149,6 @@ const DeviceDetailPage = () => {
     fetchDevice();
   }, [callAPI, serial]);
 
-  const getDeviceStatus = () => {
-    if (!device || !device.last_seen) return 'offline';
-    
-    const lastSeen = new Date(device.last_seen);
-    const now = new Date();
-    const diffMinutes = (now.getTime() - lastSeen.getTime()) / (1000 * 60);
-    
-    return diffMinutes <= 3 ? 'online' : 'offline';
-  };
-
-  const getStatusInfo = (status: string) => {
-    switch (status) {
-      case 'online':
-        return { color: 'text-green-600', icon: <CheckCircle className="w-5 h-5 text-green-500" />, label: 'Online' };
-      case 'offline':
-        return { color: 'text-red-600', icon: <XCircle className="w-5 h-5 text-red-500" />, label: 'Offline' };
-      default:
-        return { color: 'text-gray-600', icon: <XCircle className="w-5 h-5 text-gray-500" />, label: 'Unknown' };
-    }
-  };
-
-  const formatTimeAgo = (date: string) => {
-    const now = new Date();
-    const past = new Date(date);
-    const diff = now.getTime() - past.getTime();
-    const minutes = Math.floor(diff / 60000);
-    const hours = Math.floor(minutes / 60);
-    const days = Math.floor(hours / 24);
-
-    if (days > 0) return `${days}d ago`;
-    if (hours > 0) return `${hours}h ago`;
-    return `${minutes}m ago`;
-  };
-
-  const getStatusTooltip = () => {
-    if (!device) return '';
-    
-    const lastSeenText = device.last_seen ? formatTimeAgo(device.last_seen) : 'Never';
-    return `Last seen: ${lastSeenText}`;
-  };
-
-  const hasUpdatePending = () => {
-    return device && device.release_id && device.target_release_id && device.release_id !== device.target_release_id;
-  };
-
-  const getStatusDot = (status: string) => {
-    switch (status) {
-      case 'online':
-        return 'bg-green-500 animate-pulse';
-      case 'offline':
-        return 'bg-red-500';
-      default:
-        return 'bg-gray-500';
-    }
-  };
-
-  const getPrimaryConnectionType = () => {
-    if (!device) return null;
-    
-    // If device has a modem, prioritize cellular
-    if (device.modem_id && device.modem) {
-      return 'cellular';
-    }
-    
-    // Check for active network connections
-    const connectedInterfaces = device.system_info?.connection_statuses?.filter(
-      conn => conn.connection_state === 'connected'
-    );
-    
-    if (!connectedInterfaces || connectedInterfaces.length === 0) {
-      return null;
-    }
-    
-    // Prioritize: WiFi > Ethernet > Other
-    if (connectedInterfaces.some(conn => conn.device_type === 'wifi')) {
-      return 'wifi';
-    }
-    
-    if (connectedInterfaces.some(conn => conn.device_type === 'ethernet')) {
-      return 'ethernet';
-    }
-    
-    return 'other';
-  };
-
-  const getConnectionIcon = (connectionType: string | null) => {
-    switch (connectionType) {
-      case 'cellular':
-        return <Signal className="w-4 h-4 text-blue-600" />;
-      case 'wifi':
-        return <Wifi className="w-4 h-4 text-green-600" />;
-      case 'ethernet':
-        return <Router className="w-4 h-4 text-orange-600" />;
-      default:
-        return null;
-    }
-  };
-
-  const getConnectionTooltip = (connectionType: string | null) => {
-    if (!device) return '';
-    
-    switch (connectionType) {
-      case 'cellular':
-        return `Cellular Connection${device.modem?.network_provider ? ` - ${device.modem.network_provider}` : ''}${device.modem ? `\nIMEI: ${device.modem.imei}` : ''}${device.modem?.on_dongle ? '\nExternal Dongle' : '\nBuilt-in Modem'}`;
-      case 'wifi': {
-        const wifiConnections = device.system_info?.connection_statuses?.filter(
-          conn => conn.connection_state === 'connected' && conn.device_type === 'wifi'
-        );
-        const primaryWifi = wifiConnections?.[0];
-        return `WiFi Connection${primaryWifi?.connection_name ? ` - ${primaryWifi.connection_name}` : ''}`;
-      }
-      case 'ethernet': {
-        const ethConnections = device.system_info?.connection_statuses?.filter(
-          conn => conn.connection_state === 'connected' && conn.device_type === 'ethernet'
-        );
-        return `Ethernet Connection${ethConnections ? ` - ${ethConnections.length} interface(s)` : ''}`;
-      }
-      default:
-        return 'No active connection detected';
-    }
-  };
-
-  const getDeviceName = () => device.serial_number;
-
-  const getDeviceModel = () => {
-    if (!device) return '';
-    return device.system_info?.device_tree?.model || 'Unknown Device';
-  };
-
   const getFlagUrl = (countryCode: string) => {
     return `https://flagicons.lipis.dev/flags/4x3/${countryCode.toLowerCase()}.svg`;
   };
@@ -383,10 +201,6 @@ const DeviceDetailPage = () => {
       </PrivateLayout>
     );
   }
-
-  const status = getDeviceStatus();
-  const statusInfo = getStatusInfo(status);
-  const connectionType = getPrimaryConnectionType();
 
   return (
     <PrivateLayout id="devices">
@@ -675,20 +489,21 @@ const DeviceDetailPage = () => {
 
           {/* Labels */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            {device.labels && Object.keys(device.labels).length > 0 && (
+            {device.labels && device.labels.length > 0 && (
               <div className="bg-white rounded-lg border border-gray-200 p-6">
                 <div className="flex items-center space-x-2 mb-4">
                   <Tags className="w-5 h-5 text-purple-600" />
                   <h3 className="text-lg font-semibold text-gray-900">Labels</h3>
                 </div>
                 <div className="space-y-2">
-                  {Object.entries(device.labels).map(([key, value]) => (
-                    <div key={key} className="flex items-center p-2 hover:bg-gray-50 rounded">
+                  {device.labels.map((label) => {
+                    const [key, value] = label.split("=")
+                    return <div key={label} className="flex items-center p-2 hover:bg-gray-50 rounded">
                       <span className="text-gray-700 font-mono text-sm min-w-fit mr-3">{key}</span>
                       <div className="flex-1 border-b border-dotted border-gray-300"></div>
                       <span className="text-gray-900 font-mono text-sm ml-3">{value}</span>
                     </div>
-                  ))}
+                  })}
                 </div>
               </div>
             )}
