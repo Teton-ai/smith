@@ -13,8 +13,8 @@ CREATE TABLE device_label (
     value VARCHAR(255) NOT NULL,
     -- ensure that a label is only applied to a device once, e.g. one device only has one department
     PRIMARY KEY (device_id, label_id),
-    FOREIGN KEY (device_id) REFERENCES device(id),
-    FOREIGN KEY (label_id) REFERENCES label(id)
+    FOREIGN KEY (device_id) REFERENCES device(id) ON DELETE CASCADE,
+    FOREIGN KEY (label_id) REFERENCES label(id) ON DELETE CASCADE
 );
 
 

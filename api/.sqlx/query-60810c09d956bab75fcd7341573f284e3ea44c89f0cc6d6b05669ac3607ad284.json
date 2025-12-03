@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            WITH label_input AS (\n                SELECT *\n                FROM UNNEST($2::text[], $3::text[]) AS t(key, value)\n            ),\n            the_device AS (\n                SELECT d.id\n                FROM device d\n                WHERE \n                    CASE\n                        WHEN $1 ~ '^[0-9]+$' AND length($1) <= 10 THEN\n                            id = $1::int4\n                        ELSE\n                            serial_number = $1\n                    END\n            )\n            INSERT INTO device_label (device_id, label_id, value)\n            SELECT\n                d.id,\n                l.id label_id,\n                i.value\n            FROM label_input i\n            INNER JOIN the_device d ON d.id IS NOT NULL\n            INNER JOIN label l ON l.name = i.key\n            ON CONFLICT (device_id, label_id)\n                DO UPDATE SET value = $3\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "TextArray",
+        "TextArray"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "60810c09d956bab75fcd7341573f284e3ea44c89f0cc6d6b05669ac3607ad284"
+}

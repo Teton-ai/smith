@@ -1,9 +1,8 @@
 use crate::State;
 use crate::device::{
-    AuthDevice, CommandsPaginated, Device, DeviceCommandResponse, DeviceHealth, DeviceLabels,
-    DeviceLedgerItem, DeviceLedgerItemPaginated, DeviceNetwork, DeviceRelease, LeanDevice,
-    LeanResponse, NewVariable, Note, RawDevice, Tag, UpdateDeviceRelease, UpdateDevicesRelease,
-    Variable,
+    AuthDevice, CommandsPaginated, Device, DeviceCommandResponse, DeviceHealth, DeviceLedgerItem,
+    DeviceLedgerItemPaginated, DeviceNetwork, DeviceRelease, LeanDevice, LeanResponse, NewVariable,
+    Note, RawDevice, Tag, UpdateDeviceRelease, UpdateDevicesRelease, Variable,
 };
 use crate::event::PublicEvent;
 use crate::middlewares::authorization;
@@ -341,26 +340,6 @@ pub async fn get_devices(
     Extension(state): Extension<State>,
     filter: Query<DeviceFilter>,
 ) -> axum::response::Result<Json<Vec<Device>>, StatusCode> {
-    dbg!(&filter.labels);
-    let labels_json = if !filter.labels.is_empty() {
-        let mut labels_map = HashMap::new();
-        for label_str in &filter.labels {
-            let parts: Vec<&str> = label_str.splitn(2, '=').collect();
-            if parts.len() == 2 {
-                labels_map.insert(parts[0].to_string(), parts[1].to_string());
-            } else {
-                error!("Invalid label format: {}", label_str);
-                return Err(StatusCode::BAD_REQUEST);
-            }
-        }
-        Some(serde_json::to_value(labels_map).map_err(|err| {
-            error!("Failed to serialize labels filter {err}");
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?)
-    } else {
-        None
-    };
-
     let devices = sqlx::query!(
         r#"SELECT
             d.id,
@@ -375,7 +354,6 @@ pub async fn get_devices(
             d.system_info,
             d.modem_id,
             d.ip_address_id,
-            d.labels,
             ip.id as "ip_id?",
             ip.ip_address as "ip_address?",
             ip.name as "ip_name?",
@@ -419,7 +397,8 @@ pub async fn get_devices(
             dn.download_speed_mbps as "network_download_speed_mbps?",
             dn.upload_speed_mbps as "network_upload_speed_mbps?",
             dn.source as "network_source?",
-            dn.updated_at as "network_updated_at?"
+            dn.updated_at as "network_updated_at?",
+            ARRAY_AGG(l.name || '=' || dl.value) as labels
         FROM device d
         LEFT JOIN tag_device td ON d.id = td.device_id AND $4::text IS NOT NULL
         LEFT JOIN tag t ON td.tag_id = t.id AND t.name = $4
@@ -430,20 +409,24 @@ pub async fn get_devices(
         LEFT JOIN release tr ON d.target_release_id = tr.id
         LEFT JOIN distribution trd ON tr.distribution_id = trd.id
         LEFT JOIN device_network dn ON d.id = dn.device_id
+        LEFT JOIN device_label dl ON dl.device_id = d.id
+        LEFT JOIN label l ON l.id = dl.label_id
         WHERE ($1::text IS NULL OR d.serial_number = $1)
           AND ($2::boolean IS NULL OR d.approved = $2)
           AND (COALESCE($3, false) = true OR d.archived = false)
           AND ($4::text IS NULL OR t.name IS NOT NULL)
-          AND ($5::jsonb IS NULL OR d.labels @> $5)
+          AND (CARDINALITY($5::text[]) > 0 OR l.name || '=' || dl.value = ANY($5))
           AND ($6::boolean IS NULL OR
                ($6 = true AND d.last_ping >= now() - INTERVAL '5 minutes') OR
                ($6 = false AND d.last_ping < now() - INTERVAL '5 minutes'))
-        ORDER BY d.serial_number"#,
+        GROUP BY d.id, ip.id, m.id, r.id, rd.id, tr.id, trd.id, dn.device_id
+        ORDER BY d.serial_number
+        "#,
         filter.serial_number,
         filter.approved,
         filter.archived,
         filter.tag,
-        labels_json as _,
+        filter.labels.as_slice(),
         filter.online
     )
     .fetch_all(&state.pg_pool)
@@ -560,7 +543,7 @@ pub async fn get_devices(
                 release,
                 target_release,
                 network,
-                labels: DeviceLabels(serde_json::from_value(row.labels).unwrap_or_default()),
+                labels: row.labels.unwrap_or_default(),
             }
         })
         .collect();
@@ -1878,7 +1861,6 @@ pub async fn get_device_info(
         d.system_info,
         d.modem_id,
         d.ip_address_id,
-        d.labels,
         ip.id as \"ip_id?\",
         ip.ip_address as \"ip_address?\",
         ip.name as \"ip_name?\",
@@ -1922,7 +1904,8 @@ pub async fn get_device_info(
         dn.download_speed_mbps as \"network_download_speed_mbps?\",
         dn.upload_speed_mbps as \"network_upload_speed_mbps?\",
         dn.source as \"network_source?\",
-        dn.updated_at as \"network_updated_at?\"
+        dn.updated_at as \"network_updated_at?\",
+        ARRAY_AGG(l.name || '=' || dl.value) as labels
         FROM device d
         LEFT JOIN ip_address ip ON d.ip_address_id = ip.id
         LEFT JOIN modem m ON d.modem_id = m.id
@@ -1931,6 +1914,8 @@ pub async fn get_device_info(
         LEFT JOIN release tr ON d.target_release_id = tr.id
         LEFT JOIN distribution trd ON tr.distribution_id = trd.id
         LEFT JOIN device_network dn ON d.id = dn.device_id
+        LEFT JOIN device_label dl ON dl.device_id = d.id
+        LEFT JOIN label l ON l.id = dl.label_id
         WHERE
             CASE
                 WHEN $1 ~ '^[0-9]+$' AND length($1) <= 10 THEN
@@ -1938,6 +1923,7 @@ pub async fn get_device_info(
                 ELSE
                     d.serial_number = $1
             END
+        GROUP BY d.id, ip.id, m.id, r.id, rd.id, tr.id, trd.id, dn.device_id
         ",
         device_id
     )
@@ -2053,7 +2039,7 @@ pub async fn get_device_info(
         release,
         target_release,
         network,
-        labels: DeviceLabels(serde_json::from_value(device_row.labels).unwrap_or_default()),
+        labels: device_row.labels.unwrap_or_default(),
     };
 
     Ok(Json(device))
@@ -2128,26 +2114,59 @@ pub async fn update_device(
     }
 
     if let Some(labels) = payload.labels {
-        let labels_json = serde_json::to_value(&labels).map_err(|_| StatusCode::BAD_REQUEST)?;
-        let result = sqlx::query!(
-            "
-            UPDATE device
-            SET labels = $2
-            WHERE
-                CASE
-                    WHEN $1 ~ '^[0-9]+$' AND length($1) <= 10 THEN
-                        id = $1::int4
-                    ELSE
-                        serial_number = $1
-                END
-            ",
-            device_id,
-            labels_json
+        let keys = labels.keys().map(|key| key.to_string()).collect::<Vec<_>>();
+        let values = labels.into_values().collect::<Vec<_>>();
+        // Ensure the labels exists
+        sqlx::query!(
+            r#"
+            INSERT INTO label (name)
+            SELECT * FROM UNNEST($1::text[])
+            ON CONFLICT (name) DO NOTHING
+            "#,
+            keys.as_slice()
         )
         .execute(&state.pg_pool)
         .await
         .map_err(|err| {
-            error!("Failed to update device labels {err}");
+            error!("Failed to upsert labels {err}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+        let result = sqlx::query!(
+            r#"
+            WITH label_input AS (
+                SELECT *
+                FROM UNNEST($2::text[], $3::text[]) AS t(key, value)
+            ),
+            the_device AS (
+                SELECT d.id
+                FROM device d
+                WHERE 
+                    CASE
+                        WHEN $1 ~ '^[0-9]+$' AND length($1) <= 10 THEN
+                            id = $1::int4
+                        ELSE
+                            serial_number = $1
+                    END
+            )
+            INSERT INTO device_label (device_id, label_id, value)
+            SELECT
+                d.id,
+                l.id label_id,
+                i.value
+            FROM label_input i
+            INNER JOIN the_device d ON d.id IS NOT NULL
+            INNER JOIN label l ON l.name = i.key
+            ON CONFLICT (device_id, label_id)
+                DO UPDATE SET value = $3
+            "#,
+            device_id,
+            keys.as_slice(),
+            values.as_slice(),
+        )
+        .execute(&state.pg_pool)
+        .await
+        .map_err(|err| {
+            error!("Failed to create or update device_labels {err}");
             StatusCode::INTERNAL_SERVER_ERROR
         })?;
 
@@ -2185,16 +2204,15 @@ pub async fn delete_label(
 
     sqlx::query!(
         r#"
-        UPDATE device
-        SET labels = labels - $1
-        WHERE labels ? $1
+        DELETE FROM label
+        WHERE name = $1
         "#,
         key
     )
     .execute(&state.pg_pool)
     .await
     .map_err(|err| {
-        error!("Failed to delete label '{}' from devices: {err}", key);
+        error!("Failed to delete label '{key}': {err}");
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
 

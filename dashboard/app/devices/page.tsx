@@ -155,7 +155,7 @@ interface Device {
   release: Release | null
   target_release: Release | null
   network: DeviceNetwork | null
-  labels: Record<string, string>
+  labels: string[]
 }
 
 interface IpAddressInfo {

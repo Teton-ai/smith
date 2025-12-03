@@ -14,7 +14,6 @@ use smith::utils::schema::{DeviceRegistration, DeviceRegistrationResponse};
 use sqlx::types::chrono::{DateTime, Utc};
 use sqlx::types::{chrono, ipnetwork};
 use sqlx::{PgPool, Pool, Postgres};
-use std::collections::HashMap;
 use std::net::IpAddr;
 use std::time::Duration;
 use thiserror::Error;
@@ -24,9 +23,6 @@ pub mod route;
 
 #[derive(Clone)]
 pub struct AuthDevice(pub RawDevice);
-
-#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
-pub struct DeviceLabels(pub HashMap<String, String>);
 
 #[derive(Debug, Serialize, utoipa::ToSchema)]
 pub struct DeviceNetwork {
@@ -42,7 +38,7 @@ pub struct DeviceNetwork {
 pub struct RawDevice {
     pub id: i32,
     pub serial_number: String,
-    pub labels: Value,
+    pub labels: Vec<String>,
     pub last_ping: Option<DateTime<Utc>>,
     pub wifi_mac: Option<String>,
     pub modified_on: DateTime<Utc>,
@@ -89,7 +85,7 @@ pub struct Device {
     pub release: Option<Release>,
     pub target_release: Option<Release>,
     pub network: Option<DeviceNetwork>,
-    pub labels: DeviceLabels,
+    pub labels: Vec<String>,
 }
 
 #[derive(Deserialize, Debug)]
@@ -557,7 +553,18 @@ impl Device {
     ) -> anyhow::Result<Option<RawDevice>> {
         Ok(sqlx::query_as!(
             RawDevice,
-            "SELECT * FROM device WHERE token IS NOT NULL AND token = $1;",
+            r#"
+            SELECT
+                d.*,
+                COALESCE(ARRAY_AGG(l.name || '=' || dl.value), '{}') as "labels!"
+            FROM device d
+            LEFT JOIN device_label dl ON dl.device_id = d.id
+            LEFT JOIN label l ON l.id = dl.label_id
+            WHERE
+                token IS NOT NULL AND
+                token = $1
+            GROUP BY d.id
+            "#,
             token
         )
         .fetch_optional(pg_pool)

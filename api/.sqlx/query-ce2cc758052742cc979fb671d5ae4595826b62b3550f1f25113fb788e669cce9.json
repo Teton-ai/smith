@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT * FROM device WHERE token IS NOT NULL AND token = $1;",
+  "query": "\n            SELECT\n                d.*,\n                COALESCE(ARRAY_AGG(l.name || '=' || dl.value), '{}') as \"labels!\"\n            FROM device d\n            LEFT JOIN device_label dl ON dl.device_id = d.id\n            LEFT JOIN label l ON l.id = dl.label_id\n            WHERE\n                token IS NOT NULL AND\n                token = $1\n            GROUP BY d.id\n            ",
   "describe": {
     "columns": [
       {
@@ -85,8 +85,8 @@
       },
       {
         "ordinal": 16,
-        "name": "labels",
-        "type_info": "Jsonb"
+        "name": "labels!",
+        "type_info": "TextArray"
       }
     ],
     "parameters": {
@@ -111,8 +111,8 @@
       true,
       false,
       true,
-      false
+      null
     ]
   },
-  "hash": "1a49766dac9162f63a47babd42e79c028266c1ab7a9bbfd37d04faf2b3c83411"
+  "hash": "ce2cc758052742cc979fb671d5ae4595826b62b3550f1f25113fb788e669cce9"
 }
