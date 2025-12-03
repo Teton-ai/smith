@@ -368,7 +368,7 @@ async fn start_main_server(config: &'static Config, authorization: Authorization
                 };
                 tracing::info_span!(
                     "http-request",
-                    "http.request.method" = request.method().to_string(),
+                    "http.request.method" = %request.method(),
                     "http.route" = path
                 )
             }),
