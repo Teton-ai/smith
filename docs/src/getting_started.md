@@ -44,15 +44,7 @@ The dashboard should now be running on localhost:3000
 
 Just run `make run`, which will start smithd and create a magic.toml for you.
 
-You can now open the dashboard, and see a device in the "Pending Approval" box.
-
-Now open your favorite database editor, open the database, and then type
-
-```psql
-UPDATE device SET approved = 't', token = '<SAME UUID AS ABOVE>';
-```
-
-Going back in to the dashboard should show the device as registered.
+You can now open the dashboard, and see a device in the "Pending Approval" box. Press approve, and you should be golden.
 
 ## Starting the CLI
 

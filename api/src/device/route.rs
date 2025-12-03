@@ -2204,7 +2204,7 @@ pub async fn delete_label(
     post,
     path = "/devices/{device_id}/approval",
     responses(
-        (status = 200, description = "Device approved successfully"),
+        (status = 200, description = "Device approved successfully", body = bool),
         (status = 500, description = "Failed to approve device", body = String),
     ),
     security(
@@ -2215,7 +2215,7 @@ pub async fn delete_label(
 pub async fn approve_device(
     Path(device_id): Path<i32>,
     Extension(state): Extension<State>,
-) -> axum::response::Result<Json<()>, StatusCode> {
+) -> axum::response::Result<Json<bool>, StatusCode> {
     let mut tx = state.pg_pool.begin().await.map_err(|err| {
         error!("Failed to start transaction {err}");
         StatusCode::INTERNAL_SERVER_ERROR
@@ -2260,7 +2260,12 @@ pub async fn approve_device(
     })?;
 
     sqlx::query!(
-        r#"INSERT INTO tag_device (device_id, tag_id) VALUES ($1, $2)"#,
+        r#"
+        INSERT INTO tag_device (device_id, tag_id)
+        VALUES ($1, $2)
+        ON CONFLICT (tag_id, device_id)
+            DO NOTHING
+        "#,
         device_id,
         tag_id
     )
@@ -2296,7 +2301,7 @@ pub async fn approve_device(
     let guard = tx_message.lock().await;
     (*guard).send(msg).expect("failed to send");
 
-    Ok(Json(()))
+    Ok(Json(true))
 }
 
 #[utoipa::path(
