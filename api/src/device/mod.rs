@@ -556,7 +556,7 @@ impl Device {
             r#"
             SELECT
                 d.*,
-                COALESCE(ARRAY_AGG(l.name || '=' || dl.value), '{}') as "labels!"
+                COALESCE(ARRAY_REMOVE(ARRAY_AGG(l.name || '=' || dl.value), NULL), '{}') as "labels!"
             FROM device d
             LEFT JOIN device_label dl ON dl.device_id = d.id
             LEFT JOIN label l ON l.id = dl.label_id

@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT\n                d.*,\n                COALESCE(ARRAY_AGG(l.name || '=' || dl.value), '{}') as \"labels!\"\n            FROM device d\n            LEFT JOIN device_label dl ON dl.device_id = d.id\n            LEFT JOIN label l ON l.id = dl.label_id\n            WHERE\n                token IS NOT NULL AND\n                token = $1\n            GROUP BY d.id\n            ",
+  "query": "\n            SELECT\n                d.*,\n                COALESCE(ARRAY_REMOVE(ARRAY_AGG(l.name || '=' || dl.value), NULL), '{}') as \"labels!\"\n            FROM device d\n            LEFT JOIN device_label dl ON dl.device_id = d.id\n            LEFT JOIN label l ON l.id = dl.label_id\n            WHERE\n                token IS NOT NULL AND\n                token = $1\n            GROUP BY d.id\n            ",
   "describe": {
     "columns": [
       {
@@ -114,5 +114,5 @@
       null
     ]
   },
-  "hash": "ce2cc758052742cc979fb671d5ae4595826b62b3550f1f25113fb788e669cce9"
+  "hash": "672deb1c9961f56c005f04fc4ac48f499a619e78e00bb397b1d8201ce78e2ca6"
 }
