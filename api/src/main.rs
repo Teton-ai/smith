@@ -4,7 +4,7 @@ use crate::sentry::Sentry;
 use ::sentry::integrations::tower::{NewSentryLayer, SentryHttpLayer};
 use axum::body::Body;
 use axum::error_handling::HandleErrorLayer;
-use axum::extract::DefaultBodyLimit;
+use axum::extract::{DefaultBodyLimit, MatchedPath};
 use axum::http::{Request, StatusCode};
 use axum::response::Redirect;
 use axum::{Extension, Router, middleware, routing::get};
@@ -361,10 +361,15 @@ async fn start_main_server(config: &'static Config, authorization: Authorization
         )
         .layer(
             TraceLayer::new_for_http().make_span_with(|request: &Request<Body>| {
+                let path = if let Some(path) = request.extensions().get::<MatchedPath>() {
+                    path.as_str()
+                } else {
+                    request.uri().path()
+                };
                 tracing::info_span!(
                     "http-request",
-                    method = request.method().to_string(),
-                    endpoint = request.uri().to_string(),
+                    "http.request.method" = request.method().to_string(),
+                    "http.route" = path
                 )
             }),
         )
