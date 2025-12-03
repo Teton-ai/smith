@@ -22,6 +22,7 @@ use tokio::sync::{Mutex, broadcast};
 use tower::ServiceBuilder;
 use tower_http::cors::CorsLayer;
 use tower_http::decompression::RequestDecompressionLayer;
+use tower_http::trace::TraceLayer;
 use tracing::info;
 use tracing_subscriber::{EnvFilter, prelude::*};
 use utoipa::openapi::security::{Http, HttpAuthScheme, SecurityScheme};
@@ -84,7 +85,11 @@ fn main() {
     ));
 
     tracing_subscriber::registry()
-        .with(tracing_subscriber::fmt::layer())
+        .with(
+            tracing_subscriber::fmt::layer()
+                .with_line_number(true)
+                .compact(),
+        )
         .with(EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")))
         .init();
 
@@ -353,6 +358,15 @@ async fn start_main_server(config: &'static Config, authorization: Authorization
             ServiceBuilder::new()
                 .layer(NewSentryLayer::<Request<Body>>::new_from_top())
                 .layer(SentryHttpLayer::new().enable_transaction()),
+        )
+        .layer(
+            TraceLayer::new_for_http().make_span_with(|request: &Request<Body>| {
+                tracing::info_span!(
+                    "http-request",
+                    method = request.method().to_string(),
+                    endpoint = request.uri().to_string(),
+                )
+            }),
         )
         .layer(Extension(state));
 
