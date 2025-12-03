@@ -630,18 +630,17 @@ const DevicesPage = () => {
                   <div className="col-span-2">
                     {device.labels && Object.keys(device.labels).length > 0 ? (
                       <div className="flex flex-wrap gap-1">
-                        {Object.entries(device.labels).map(([key, value]) => {
-                          const filter = `${key}=${value}`;
-                          const isFiltered = labelFilters.includes(filter);
+                        {device.labels.map((label) => {
+                          const isFiltered = labelFilters.includes(label);
                           return (
                             <code
-                              key={key}
+                              key={label}
                               onClick={(e) => {
                                 e.stopPropagation();
                                 if (isFiltered) {
-                                  removeLabelFilter(key);
+                                  removeLabelFilter(label);
                                 } else {
-                                  const newFilters = [...labelFilters, `${key}=${value}`];
+                                  const newFilters = [...labelFilters, label];
                                   setLabelFilters(newFilters);
                                   const labelsString = newFilters.join(',');
                                   updateURL({ labels: labelsString });
@@ -653,7 +652,7 @@ const DevicesPage = () => {
                                   : 'bg-gray-100 text-gray-700 border-gray-200 hover:bg-gray-200'
                               }`}
                             >
-                              {key}={value}
+                              {label}
                             </code>
                           );
                         })}
