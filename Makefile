@@ -33,4 +33,5 @@ schema:
 
 init:
 	echo "Initializing the repo"
-	cp .env.template .env
+	test -f .env || cp .env.template .env
+	test -f dashboard/.env || cp dashboard/.env.template dashboard/.env
