@@ -2157,7 +2157,7 @@ pub async fn update_device(
             INNER JOIN the_device d ON d.id IS NOT NULL
             INNER JOIN label l ON l.name = i.key
             ON CONFLICT (device_id, label_id)
-                DO UPDATE SET value = $3
+                DO UPDATE SET value = EXCLUDED.value
             "#,
             device_id,
             keys.as_slice(),

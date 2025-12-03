@@ -628,7 +628,7 @@ const DevicesPage = () => {
                   </div>
 
                   <div className="col-span-2">
-                    {device.labels && Object.keys(device.labels).length > 0 ? (
+                    {device.labels.length > 0 ? (
                       <div className="flex flex-wrap gap-1">
                         {device.labels.map((label) => {
                           const isFiltered = labelFilters.includes(label);
