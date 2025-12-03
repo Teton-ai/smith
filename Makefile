@@ -30,3 +30,8 @@ run:
 
 schema:
 	docker exec smith-postgres pg_dump --schema-only -n public -U $(POSTGRES_USER) postgres > schema.sql
+
+init:
+	echo "Initializing the repo"
+	test -f .env || cp .env.template .env
+	test -f dashboard/.env || cp dashboard/.env.template dashboard/.env
