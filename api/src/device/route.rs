@@ -2132,6 +2132,28 @@ pub async fn update_device(
             error!("Failed to upsert labels {err}");
             StatusCode::INTERNAL_SERVER_ERROR
         })?;
+        // Remove previous labels on device
+        sqlx::query!(
+            r#"
+            DELETE FROM device_label
+            USING device d
+            WHERE 
+                d.id = device_label.device_id AND
+                CASE
+                    WHEN $1 ~ '^[0-9]+$' AND length($1) <= 10 THEN
+                        d.id = $1::int4
+                    ELSE
+                        d.serial_number = $1
+                END
+            "#,
+            device_id
+        )
+        .execute(&state.pg_pool)
+        .await
+        .map_err(|err| {
+            error!("Failed to remove previous device_labels on device {err}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
         let result = sqlx::query!(
             r#"
             WITH label_input AS (
