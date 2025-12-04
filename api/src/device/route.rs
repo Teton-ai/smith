@@ -2113,6 +2113,10 @@ pub async fn update_device(
     if !allowed {
         return Err(StatusCode::FORBIDDEN);
     }
+    let mut tx = state.pg_pool.begin().await.map_err(|err| {
+        error!("Failed to start transaction {err}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
 
     if let Some(labels) = payload.labels {
         let keys = labels.keys().map(|key| key.to_string()).collect::<Vec<_>>();
@@ -2126,7 +2130,7 @@ pub async fn update_device(
             "#,
             keys.as_slice()
         )
-        .execute(&state.pg_pool)
+        .execute(&mut *tx)
         .await
         .map_err(|err| {
             error!("Failed to upsert labels {err}");
@@ -2148,7 +2152,7 @@ pub async fn update_device(
             "#,
             device_id
         )
-        .execute(&state.pg_pool)
+        .execute(&mut *tx)
         .await
         .map_err(|err| {
             error!("Failed to remove previous device_labels on device {err}");
@@ -2186,7 +2190,7 @@ pub async fn update_device(
             keys.as_slice(),
             values.as_slice(),
         )
-        .execute(&state.pg_pool)
+        .execute(&mut *tx)
         .await
         .map_err(|err| {
             error!("Failed to create or update device_labels {err}");
@@ -2194,9 +2198,15 @@ pub async fn update_device(
         })?;
 
         if result.rows_affected() == 0 {
+            tx.rollback().await.ok();
             return Err(StatusCode::NOT_FOUND);
         }
     }
+
+    tx.commit().await.map_err(|err| {
+        error!("Failed to commit transaction {err}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
 
     Ok(StatusCode::OK)
 }
