@@ -248,8 +248,8 @@ const DevicesPage = () => {
 
       // Add label filters
       if (labelFilters.length > 0) {
-        labelFilters.forEach((label) => {
-          params.append('labels', label);
+        labelFilters.forEach((filter) => {
+          params.append('labels', filter);
         });
       }
 
@@ -425,13 +425,11 @@ const DevicesPage = () => {
 
   const removeLabelFilter = (labelFilter: string) => {
     const newFilters = structuredClone(labelFilters).filter((currentLabelFilter) => currentLabelFilter != labelFilter);
-
     setLabelFilters(newFilters)
 
     // Update URL
     const labelsString = newFilters.length > 0
-      ? newFilters
-          .join(',')
+      ? newFilters.join(',')
       : null;
     updateURL({ labels: labelsString });
   };
