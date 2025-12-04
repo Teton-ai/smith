@@ -13,7 +13,7 @@
     "leaflet": "^1.9.4",
     "lucide-react": "^0.518.0",
     "moment": "^2.30.1",
-    "next": "15.3.4",
+    "next": "^15.3.6",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-leaflet": "^5.0.0"
