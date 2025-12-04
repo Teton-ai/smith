@@ -2234,43 +2234,6 @@ pub async fn approve_device(
 
     let approved_serial_number = response.serial_number;
 
-    // get tag for trolley
-    let tag_name = "trolley";
-    let query = r#"
-            INSERT INTO tag (name)
-            VALUES ($1)
-            ON CONFLICT (name) DO UPDATE
-            SET name = EXCLUDED.name
-            RETURNING id;
-        "#;
-
-    // Execute the query and get the tag id
-    let row = sqlx::query(query)
-        .bind(tag_name) // Bind the 'trolley' name to the query
-        .fetch_one(&mut *tx)
-        .await
-        .map_err(|err| {
-            error!("Failed to insert tag trolley for device {err}");
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?;
-
-    let tag_id: i32 = row.try_get("id").map_err(|err| {
-        error!("Failed to get tag id for device {err}");
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
-
-    sqlx::query!(
-        r#"INSERT INTO tag_device (device_id, tag_id) VALUES ($1, $2)"#,
-        device_id,
-        tag_id
-    )
-    .execute(&mut *tx)
-    .await
-    .map_err(|err| {
-        error!("Failed to insert tag entry for device {err}");
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
-
     sqlx::query!(
         r#"INSERT INTO ledger (device_id, "class", "text") VALUES ($1, $2, $3)"#,
         device_id,
