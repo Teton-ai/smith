@@ -155,7 +155,7 @@ interface Device {
   release: Release | null
   target_release: Release | null
   network: DeviceNetwork | null
-  labels: string[]
+  labels: Record<string, string>
 }
 
 interface IpAddressInfo {
@@ -237,13 +237,7 @@ const DevicesPage = () => {
     }
 
     if (labelsParam) {
-      const parsedLabels: string[] = [];
-      labelsParam.split(',').forEach(label => {
-        const [key, value] = label.split('=');
-        if (key && value) {
-          parsedLabels.push(`${key}=${value}`);
-        }
-      });
+      const parsedLabels = labelsParam.split(',');
       setLabelFilters(parsedLabels);
     }
   }, [searchParams]);
@@ -628,21 +622,23 @@ const DevicesPage = () => {
                   </div>
 
                   <div className="col-span-2">
-                    {device.labels.length > 0 ? (
+                    {device.labels && Object.keys(device.labels).length > 0 ? (
                       <div className="flex flex-wrap gap-1">
-                        {device.labels.map((label) => {
-                          const isFiltered = labelFilters.includes(label);
+                        {Object.entries(device.labels).map(([key, value]) => {
+                          const filter = `${key}=${value}`
+                          const isFiltered = labelFilters.includes(filter);
                           return (
                             <code
-                              key={label}
+                              key={key}
                               onClick={(e) => {
                                 e.stopPropagation();
                                 if (isFiltered) {
-                                  removeLabelFilter(label);
+                                  removeLabelFilter(filter);
                                 } else {
-                                  const newFilters = [...labelFilters, label];
+                                  const newFilters = [...labelFilters, filter];
                                   setLabelFilters(newFilters);
-                                  const labelsString = newFilters.join(',');
+                                  const labelsString = newFilters
+                                    .join(',');
                                   updateURL({ labels: labelsString });
                                 }
                               }}
@@ -652,7 +648,7 @@ const DevicesPage = () => {
                                   : 'bg-gray-100 text-gray-700 border-gray-200 hover:bg-gray-200'
                               }`}
                             >
-                              {label}
+                              {key}={value}
                             </code>
                           );
                         })}

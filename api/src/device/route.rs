@@ -17,7 +17,7 @@ use axum_extra::extract::Query;
 use serde::Deserialize;
 use smith::utils::schema;
 use smith::utils::schema::SafeCommandRequest;
-use sqlx::Row;
+use sqlx::types::Json as SqlxJson;
 use std::collections::HashMap;
 use tracing::{debug, error};
 
@@ -398,7 +398,7 @@ pub async fn get_devices(
             dn.upload_speed_mbps as "network_upload_speed_mbps?",
             dn.source as "network_source?",
             dn.updated_at as "network_updated_at?",
-            ARRAY_REMOVE(ARRAY_AGG(l.name || '=' || dl.value), NULL) as labels
+            COALESCE(JSONB_OBJECT_AGG(l.name, dl.value) FILTER (WHERE l.name IS NOT NULL), '{}') as "labels!: SqlxJson<HashMap<String, String>>"
         FROM device d
         LEFT JOIN tag_device td ON d.id = td.device_id AND $4::text IS NOT NULL
         LEFT JOIN tag t ON td.tag_id = t.id AND t.name = $4
@@ -543,7 +543,7 @@ pub async fn get_devices(
                 release,
                 target_release,
                 network,
-                labels: row.labels.unwrap_or_default(),
+                labels: row.labels,
             }
         })
         .collect();
@@ -1847,7 +1847,7 @@ pub async fn get_device_info(
     Extension(state): Extension<State>,
 ) -> axum::response::Result<Json<Device>, StatusCode> {
     let device_row = sqlx::query!(
-        "
+        r#"
         SELECT
         d.id,
         d.serial_number,
@@ -1861,51 +1861,51 @@ pub async fn get_device_info(
         d.system_info,
         d.modem_id,
         d.ip_address_id,
-        ip.id as \"ip_id?\",
-        ip.ip_address as \"ip_address?\",
-        ip.name as \"ip_name?\",
-        ip.continent as \"ip_continent?\",
-        ip.continent_code as \"ip_continent_code?\",
-        ip.country_code as \"ip_country_code?\",
-        ip.country as \"ip_country?\",
-        ip.region as \"ip_region?\",
-        ip.city as \"ip_city?\",
-        ip.isp as \"ip_isp?\",
-        ip.coordinates[0] as \"ip_longitude?\",
-        ip.coordinates[1] as \"ip_latitude?\",
-        ip.proxy as \"ip_proxy?\",
-        ip.hosting as \"ip_hosting?\",
-        ip.created_at as \"ip_created_at?\",
-        ip.updated_at as \"ip_updated_at?\",
-        m.id as \"modem_id_nested?\",
-        m.imei as \"modem_imei?\",
-        m.network_provider as \"modem_network_provider?\",
-        m.updated_at as \"modem_updated_at?\",
-        m.created_at as \"modem_created_at?\",
-        r.id as \"release_id_nested?\",
-        r.distribution_id as \"release_distribution_id?\",
-        rd.architecture as \"release_distribution_architecture?\",
-        rd.name as \"release_distribution_name?\",
-        r.version as \"release_version?\",
-        r.draft as \"release_draft?\",
-        r.yanked as \"release_yanked?\",
-        r.created_at as \"release_created_at?\",
-        r.user_id as \"release_user_id?\",
-        tr.id as \"target_release_id_nested?\",
-        tr.distribution_id as \"target_release_distribution_id?\",
-        trd.architecture as \"target_release_distribution_architecture?\",
-        trd.name as \"target_release_distribution_name?\",
-        tr.version as \"target_release_version?\",
-        tr.draft as \"target_release_draft?\",
-        tr.yanked as \"target_release_yanked?\",
-        tr.created_at as \"target_release_created_at?\",
-        tr.user_id as \"target_release_user_id?\",
-        dn.network_score as \"network_score?\",
-        dn.download_speed_mbps as \"network_download_speed_mbps?\",
-        dn.upload_speed_mbps as \"network_upload_speed_mbps?\",
-        dn.source as \"network_source?\",
-        dn.updated_at as \"network_updated_at?\",
-        ARRAY_REMOVE(ARRAY_AGG(l.name || '=' || dl.value), NULL) as labels
+        ip.id as "ip_id?",
+        ip.ip_address as "ip_address?",
+        ip.name as "ip_name?",
+        ip.continent as "ip_continent?",
+        ip.continent_code as "ip_continent_code?",
+        ip.country_code as "ip_country_code?",
+        ip.country as "ip_country?",
+        ip.region as "ip_region?",
+        ip.city as "ip_city?",
+        ip.isp as "ip_isp?",
+        ip.coordinates[0] as "ip_longitude?",
+        ip.coordinates[1] as "ip_latitude?",
+        ip.proxy as "ip_proxy?",
+        ip.hosting as "ip_hosting?",
+        ip.created_at as "ip_created_at?",
+        ip.updated_at as "ip_updated_at?",
+        m.id as "modem_id_nested?",
+        m.imei as "modem_imei?",
+        m.network_provider as "modem_network_provider?",
+        m.updated_at as "modem_updated_at?",
+        m.created_at as "modem_created_at?",
+        r.id as "release_id_nested?",
+        r.distribution_id as "release_distribution_id?",
+        rd.architecture as "release_distribution_architecture?",
+        rd.name as "release_distribution_name?",
+        r.version as "release_version?",
+        r.draft as "release_draft?",
+        r.yanked as "release_yanked?",
+        r.created_at as "release_created_at?",
+        r.user_id as "release_user_id?",
+        tr.id as "target_release_id_nested?",
+        tr.distribution_id as "target_release_distribution_id?",
+        trd.architecture as "target_release_distribution_architecture?",
+        trd.name as "target_release_distribution_name?",
+        tr.version as "target_release_version?",
+        tr.draft as "target_release_draft?",
+        tr.yanked as "target_release_yanked?",
+        tr.created_at as "target_release_created_at?",
+        tr.user_id as "target_release_user_id?",
+        dn.network_score as "network_score?",
+        dn.download_speed_mbps as "network_download_speed_mbps?",
+        dn.upload_speed_mbps as "network_upload_speed_mbps?",
+        dn.source as "network_source?",
+        dn.updated_at as "network_updated_at?",
+        COALESCE(JSONB_OBJECT_AGG(l.name, dl.value) FILTER (WHERE l.name IS NOT NULL), '{}') as "labels!: SqlxJson<HashMap<String, String>>"
         FROM device d
         LEFT JOIN ip_address ip ON d.ip_address_id = ip.id
         LEFT JOIN modem m ON d.modem_id = m.id
@@ -1924,7 +1924,7 @@ pub async fn get_device_info(
                     d.serial_number = $1
             END
         GROUP BY d.id, ip.id, m.id, r.id, rd.id, tr.id, trd.id, dn.device_id
-        ",
+        "#,
         device_id
     )
     .fetch_one(&state.pg_pool)
@@ -2039,7 +2039,7 @@ pub async fn get_device_info(
         release,
         target_release,
         network,
-        labels: device_row.labels.unwrap_or_default(),
+        labels: device_row.labels,
     };
 
     Ok(Json(device))
@@ -2114,6 +2114,10 @@ pub async fn update_device(
     }
 
     if let Some(labels) = payload.labels {
+        let mut tx = state.pg_pool.begin().await.map_err(|err| {
+            error!("Failed to start transaction {err}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
         let keys = labels.keys().map(|key| key.to_string()).collect::<Vec<_>>();
         let values = labels.into_values().collect::<Vec<_>>();
         // Ensure the labels exists
@@ -2125,10 +2129,32 @@ pub async fn update_device(
             "#,
             keys.as_slice()
         )
-        .execute(&state.pg_pool)
+        .execute(&mut *tx)
         .await
         .map_err(|err| {
             error!("Failed to upsert labels {err}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+        // Remove previous labels on device
+        sqlx::query!(
+            r#"
+            DELETE FROM device_label
+            USING device d
+            WHERE 
+                d.id = device_label.device_id AND
+                CASE
+                    WHEN $1 ~ '^[0-9]+$' AND length($1) <= 10 THEN
+                        d.id = $1::int4
+                    ELSE
+                        d.serial_number = $1
+                END
+            "#,
+            device_id
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(|err| {
+            error!("Failed to remove previous device_labels on device {err}");
             StatusCode::INTERNAL_SERVER_ERROR
         })?;
         let result = sqlx::query!(
@@ -2163,10 +2189,14 @@ pub async fn update_device(
             keys.as_slice(),
             values.as_slice(),
         )
-        .execute(&state.pg_pool)
+        .execute(&mut *tx)
         .await
         .map_err(|err| {
             error!("Failed to create or update device_labels {err}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+        tx.commit().await.map_err(|err| {
+            error!("Failed to commit transaction {err}");
             StatusCode::INTERNAL_SERVER_ERROR
         })?;
 

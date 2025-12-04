@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT\n                d.*,\n                COALESCE(ARRAY_REMOVE(ARRAY_AGG(l.name || '=' || dl.value), NULL), '{}') as \"labels!\"\n            FROM device d\n            LEFT JOIN device_label dl ON dl.device_id = d.id\n            LEFT JOIN label l ON l.id = dl.label_id\n            WHERE\n                token IS NOT NULL AND\n                token = $1\n            GROUP BY d.id\n            ",
+  "query": "\n            SELECT\n                d.*,\n                COALESCE(JSONB_OBJECT_AGG(l.name, dl.value) FILTER (WHERE l.name IS NOT NULL), '{}') as \"labels!: Json<HashMap<String, String>>\"\n            FROM device d\n            LEFT JOIN device_label dl ON dl.device_id = d.id\n            LEFT JOIN label l ON l.id = dl.label_id\n            WHERE\n                token IS NOT NULL AND\n                token = $1\n            GROUP BY d.id\n            ",
   "describe": {
     "columns": [
       {
@@ -85,8 +85,8 @@
       },
       {
         "ordinal": 16,
-        "name": "labels!",
-        "type_info": "TextArray"
+        "name": "labels!: Json<HashMap<String, String>>",
+        "type_info": "Jsonb"
       }
     ],
     "parameters": {
@@ -114,5 +114,5 @@
       null
     ]
   },
-  "hash": "672deb1c9961f56c005f04fc4ac48f499a619e78e00bb397b1d8201ce78e2ca6"
+  "hash": "ffc87acc7ed727e772fa832aeb1912e8f035dfc232cc03d99d0dbd7d50b4d822"
 }
