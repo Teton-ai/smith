@@ -5,6 +5,7 @@ use axum::response::Response;
 use cloudfront_sign::{SignedOptions, get_signed_url};
 use s3::creds::Credentials;
 use s3::{Bucket, Region};
+use tracing::info;
 
 pub struct Storage;
 
@@ -118,7 +119,7 @@ impl Storage {
             .e_tag
             .ok_or_else(|| anyhow::anyhow!("ETag missing"))?;
 
-        let cloudfront_url = format!("https://{}/package-download/{}", cdn_domain, object_key);
+        let cloudfront_url = format!("{}/package-download/{}", cdn_domain, object_key);
 
         // Generate CDN signed URL
         let options = SignedOptions {
