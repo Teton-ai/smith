@@ -2113,12 +2113,12 @@ pub async fn update_device(
     if !allowed {
         return Err(StatusCode::FORBIDDEN);
     }
-    let mut tx = state.pg_pool.begin().await.map_err(|err| {
-        error!("Failed to start transaction {err}");
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
 
     if let Some(labels) = payload.labels {
+        let mut tx = state.pg_pool.begin().await.map_err(|err| {
+            error!("Failed to start transaction {err}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
         let keys = labels.keys().map(|key| key.to_string()).collect::<Vec<_>>();
         let values = labels.into_values().collect::<Vec<_>>();
         // Ensure the labels exists
@@ -2196,17 +2196,15 @@ pub async fn update_device(
             error!("Failed to create or update device_labels {err}");
             StatusCode::INTERNAL_SERVER_ERROR
         })?;
+        tx.commit().await.map_err(|err| {
+            error!("Failed to commit transaction {err}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
 
         if result.rows_affected() == 0 {
-            tx.rollback().await.ok();
             return Err(StatusCode::NOT_FOUND);
         }
     }
-
-    tx.commit().await.map_err(|err| {
-        error!("Failed to commit transaction {err}");
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
 
     Ok(StatusCode::OK)
 }
