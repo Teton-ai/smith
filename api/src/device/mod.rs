@@ -11,9 +11,11 @@ use axum::response::Response;
 use serde::{Deserialize, Serialize, Serializer};
 use serde_json::{Value, json};
 use smith::utils::schema::{DeviceRegistration, DeviceRegistrationResponse};
+use sqlx::types::Json;
 use sqlx::types::chrono::{DateTime, Utc};
 use sqlx::types::{chrono, ipnetwork};
 use sqlx::{PgPool, Pool, Postgres};
+use std::collections::HashMap;
 use std::net::IpAddr;
 use std::time::Duration;
 use thiserror::Error;
@@ -38,7 +40,8 @@ pub struct DeviceNetwork {
 pub struct RawDevice {
     pub id: i32,
     pub serial_number: String,
-    pub labels: Vec<String>,
+    #[schema(value_type = HashMap<String, String>)]
+    pub labels: Json<HashMap<String, String>>,
     pub last_ping: Option<DateTime<Utc>>,
     pub wifi_mac: Option<String>,
     pub modified_on: DateTime<Utc>,
@@ -85,7 +88,8 @@ pub struct Device {
     pub release: Option<Release>,
     pub target_release: Option<Release>,
     pub network: Option<DeviceNetwork>,
-    pub labels: Vec<String>,
+    #[schema(value_type = HashMap<String, String>)]
+    pub labels: Json<HashMap<String, String>>,
 }
 
 #[derive(Deserialize, Debug)]
@@ -556,7 +560,7 @@ impl Device {
             r#"
             SELECT
                 d.*,
-                COALESCE(ARRAY_REMOVE(ARRAY_AGG(l.name || '=' || dl.value), NULL), '{}') as "labels!"
+                COALESCE(JSONB_OBJECT_AGG(l.name, dl.value) FILTER (WHERE l.name IS NOT NULL), '{}') as "labels!: Json<HashMap<String, String>>"
             FROM device d
             LEFT JOIN device_label dl ON dl.device_id = d.id
             LEFT JOIN label l ON l.id = dl.label_id
