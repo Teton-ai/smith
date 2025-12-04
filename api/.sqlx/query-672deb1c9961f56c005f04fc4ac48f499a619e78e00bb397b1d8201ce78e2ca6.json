@@ -1,0 +1,118 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT\n                d.*,\n                COALESCE(ARRAY_REMOVE(ARRAY_AGG(l.name || '=' || dl.value), NULL), '{}') as \"labels!\"\n            FROM device d\n            LEFT JOIN device_label dl ON dl.device_id = d.id\n            LEFT JOIN label l ON l.id = dl.label_id\n            WHERE\n                token IS NOT NULL AND\n                token = $1\n            GROUP BY d.id\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "serial_number",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "wifi_mac",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "created_on",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 4,
+        "name": "modified_on",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 5,
+        "name": "last_ping",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 6,
+        "name": "note",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "approved",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 8,
+        "name": "token",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 9,
+        "name": "release_id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 10,
+        "name": "target_release_id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 11,
+        "name": "system_info",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 12,
+        "name": "network_id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 13,
+        "name": "modem_id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 14,
+        "name": "archived",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 15,
+        "name": "ip_address_id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 16,
+        "name": "labels!",
+        "type_info": "TextArray"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      false,
+      false,
+      true,
+      true,
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      false,
+      true,
+      null
+    ]
+  },
+  "hash": "672deb1c9961f56c005f04fc4ac48f499a619e78e00bb397b1d8201ce78e2ca6"
+}
