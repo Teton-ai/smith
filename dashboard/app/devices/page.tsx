@@ -425,7 +425,7 @@ const DevicesPage = () => {
 
   const removeLabelFilter = (labelFilter: string) => {
     const newFilters = structuredClone(labelFilters).filter((currentLabelFilter) => currentLabelFilter != labelFilter);
-    setLabelFilters(newFilters)
+    setLabelFilters(newFilters);
 
     // Update URL
     const labelsString = newFilters.length > 0
