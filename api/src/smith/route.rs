@@ -153,9 +153,35 @@ pub async fn download_file(
     }
 
     // Add more buckets here if needed
-    let bucket_name = match bucket.to_lowercase().as_str() {
-        "assets" => &state.config.assets_bucket_name,
-        "packages" => &state.config.packages_bucket_name,
+    let response = match bucket.to_lowercase().as_str() {
+        // "packages" => &state.config.packages_bucket_name,
+        // "assets" => &state.config.assets_bucket_name,
+        "packages" => storage::Storage::download_package_from_cdn(
+            &state.config.packages_bucket_name,
+            Some(dir_path),
+            file_name,
+            &state.cloudfront_config.package_domain_name,
+            &state.cloudfront_config.package_key_pair_id,
+            &state.cloudfront_config.package_private_key,
+        )
+        .await
+        .map_err(|err| {
+            error!("Failed to get signed link from S3 {:?}", err);
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?,
+        "assets" => storage::Storage::download_package_from_cdn(
+            &state.config.packages_bucket_name,
+            Some(dir_path),
+            file_name,
+            &state.cloudfront_config.package_domain_name,
+            &state.cloudfront_config.package_key_pair_id,
+            &state.cloudfront_config.package_private_key,
+        )
+        .await
+        .map_err(|err| {
+            error!("Failed to get signed link from S3 {:?}", err);
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?,
         _ => {
             error!("Invalid bucket name requested: {}", bucket);
             return Err(StatusCode::BAD_REQUEST);
@@ -163,12 +189,12 @@ pub async fn download_file(
     };
 
     // Get a signed link to the s3 file
-    let response = storage::Storage::download_from_s3(bucket_name, Some(dir_path), file_name)
-        .await
-        .map_err(|err| {
-            error!("Failed to get signed link from S3 {:?}", err);
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?;
+    // let response = storage::Storage::download_from_s3(bucket_name, Some(dir_path), file_name)
+    //     .await
+    //     .map_err(|err| {
+    //         error!("Failed to get signed link from S3 {:?}", err);
+    //         StatusCode::INTERNAL_SERVER_ERROR
+    //     })?;
 
     Ok(response)
 }

@@ -52,3 +52,6 @@ axum_typed_multipart = { version = "0.13.1" }
 tempfile = "3.13.0"
 tokio-stream = { version = "0.1.16", features = ["sync"] }
 toml = "0.8.20"
+aws-sdk-secretsmanager = "1.95.0"
+aws-config = "1.8.11"
+cloudfront_sign = "0.4.1"

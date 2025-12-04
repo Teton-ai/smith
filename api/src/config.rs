@@ -35,6 +35,13 @@ impl VictoriaMetricsClient {
 }
 
 #[derive(Debug)]
+pub struct CloudFrontConfig {
+    pub package_domain_name: String,
+    pub package_key_pair_id: String,
+    pub package_private_key: String,
+}
+
+#[derive(Debug)]
 pub struct Config {
     pub database_url: String,
     pub packages_bucket_name: String,

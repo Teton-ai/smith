@@ -2,6 +2,7 @@ use crate::auth::DebugJwksClient;
 use crate::event::PublicEvent;
 use crate::sentry::Sentry;
 use ::sentry::integrations::tower::{NewSentryLayer, SentryHttpLayer};
+use aws_config::BehaviorVersion;
 use axum::body::Body;
 use axum::error_handling::HandleErrorLayer;
 use axum::extract::DefaultBodyLimit;
@@ -62,6 +63,7 @@ pub struct State {
     public_events: Arc<Mutex<Sender<PublicEvent>>>,
     authorization: Arc<AuthorizationConfig>,
     jwks_client: DebugJwksClient,
+    cloudfront_config: Arc<config::CloudFrontConfig>,
 }
 
 fn main() {
@@ -142,8 +144,49 @@ struct ApiDoc;
 )]
 struct SmithApiDoc;
 
+async fn load_cloudfront_keys() -> anyhow::Result<config::CloudFrontConfig> {
+    let config = aws_config::load_defaults(BehaviorVersion::latest()).await;
+    let client = aws_sdk_secretsmanager::Client::new(&config);
+
+    let private_key_resp = client
+        .get_secret_value()
+        .secret_id(env::var("CF_FILEDOWN_SIGNINGKEY")?)
+        .send()
+        .await?;
+
+    let private_key = private_key_resp
+        .secret_string
+        .ok_or_else(|| anyhow::anyhow!("CloudFront private key secret is empty"))?
+        .to_string();
+
+    let key_pair_id_resp = client
+        .get_secret_value()
+        .secret_id(env::var("CF_FILEDOWN_KEYPAIRID")?)
+        .send()
+        .await?;
+
+    let key_pair_id = key_pair_id_resp
+        .secret_string
+        .ok_or_else(|| anyhow::anyhow!("CloudFront key pair ID secret is empty"))?
+        .to_string();
+
+    Ok(config::CloudFrontConfig {
+        package_domain_name: env::var("CF_DOMAIN_NAME")?,
+        package_key_pair_id: key_pair_id,
+        package_private_key: private_key,
+    })
+}
+
 async fn start_main_server(config: &'static Config, authorization: AuthorizationConfig) {
     info!("Starting Smith API v{}", env!("CARGO_PKG_VERSION"));
+
+    // AWS secret loading
+    let cloudfront_config = Arc::new(
+        load_cloudfront_keys()
+            .await
+            .expect("Failed to load CloudFront keys"),
+    );
+
     // set up connection pool
     let pool = PgPoolOptions::new()
         .max_connections(100)
@@ -170,6 +213,7 @@ async fn start_main_server(config: &'static Config, authorization: Authorization
         public_events: tx_message,
         authorization: Arc::new(authorization),
         jwks_client,
+        cloudfront_config,
     };
 
     let recorder_handle = metric::setup_metrics_recorder();
