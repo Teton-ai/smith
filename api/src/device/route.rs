@@ -17,7 +17,6 @@ use axum_extra::extract::Query;
 use serde::Deserialize;
 use smith::utils::schema;
 use smith::utils::schema::SafeCommandRequest;
-use sqlx::Row;
 use sqlx::types::Json as SqlxJson;
 use std::collections::HashMap;
 use tracing::{debug, error};
