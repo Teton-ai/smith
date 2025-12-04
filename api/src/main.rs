@@ -5,7 +5,7 @@ use ::sentry::integrations::tower::{NewSentryLayer, SentryHttpLayer};
 use aws_config::BehaviorVersion;
 use axum::body::Body;
 use axum::error_handling::HandleErrorLayer;
-use axum::extract::DefaultBodyLimit;
+use axum::extract::{DefaultBodyLimit, MatchedPath};
 use axum::http::{Request, StatusCode};
 use axum::response::Redirect;
 use axum::{Extension, Router, middleware, routing::get};
@@ -23,6 +23,7 @@ use tokio::sync::{Mutex, broadcast};
 use tower::ServiceBuilder;
 use tower_http::cors::CorsLayer;
 use tower_http::decompression::RequestDecompressionLayer;
+use tower_http::trace::TraceLayer;
 use tracing::info;
 use tracing_subscriber::{EnvFilter, prelude::*};
 use utoipa::openapi::security::{Http, HttpAuthScheme, SecurityScheme};
@@ -86,7 +87,11 @@ fn main() {
     ));
 
     tracing_subscriber::registry()
-        .with(tracing_subscriber::fmt::layer())
+        .with(
+            tracing_subscriber::fmt::layer()
+                .with_line_number(true)
+                .compact(),
+        )
         .with(EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")))
         .init();
 
@@ -397,6 +402,20 @@ async fn start_main_server(config: &'static Config, authorization: Authorization
             ServiceBuilder::new()
                 .layer(NewSentryLayer::<Request<Body>>::new_from_top())
                 .layer(SentryHttpLayer::new().enable_transaction()),
+        )
+        .layer(
+            TraceLayer::new_for_http().make_span_with(|request: &Request<Body>| {
+                let path = if let Some(path) = request.extensions().get::<MatchedPath>() {
+                    path.as_str()
+                } else {
+                    request.uri().path()
+                };
+                tracing::info_span!(
+                    "http-request",
+                    "http.request.method" = %request.method(),
+                    "http.route" = path
+                )
+            }),
         )
         .layer(Extension(state));
 

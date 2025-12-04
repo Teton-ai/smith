@@ -6,8 +6,6 @@ import {
   Cpu,
   Search,
   GitBranch,
-  Eye,
-  EyeOff,
   Tag,
   Loader2,
 } from 'lucide-react';
@@ -24,7 +22,6 @@ const Tooltip = ({ children, content }: { children: React.ReactNode, content: st
     setIsVisible(true);
     if (containerRef.current) {
       const rect = containerRef.current.getBoundingClientRect();
-      const viewportWidth = window.innerWidth;
       
       // If tooltip would be cut off on the left side, position it to the right
       if (rect.left < 150) {
@@ -158,7 +155,7 @@ interface Device {
   release: Release | null
   target_release: Release | null
   network: DeviceNetwork | null
-  labels: Record<string, string>
+  labels: string[]
 }
 
 interface IpAddressInfo {
@@ -201,13 +198,13 @@ interface Release {
 const DevicesPage = () => {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { callAPI, loading, error } = useSmithAPI();
+  const { callAPI, loading } = useSmithAPI();
   const [devices, setDevices] = useState<Device[]>([]);
   const [filteredDevices, setFilteredDevices] = useState<Device[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [debouncedSearchTerm, setDebouncedSearchTerm] = useState('');
   const [showOutdatedOnly, setShowOutdatedOnly] = useState(false);
-  const [labelFilters, setLabelFilters] = useState<Record<string, string>>({});
+  const [labelFilters, setLabelFilters] = useState<string[]>([]);
   const [onlineStatusFilter, setOnlineStatusFilter] = useState<'all' | 'online' | 'offline'>('all');
   const [isSearching, setIsSearching] = useState(false);
 
@@ -240,11 +237,11 @@ const DevicesPage = () => {
     }
 
     if (labelsParam) {
-      const parsedLabels: Record<string, string> = {};
+      const parsedLabels: string[] = [];
       labelsParam.split(',').forEach(label => {
         const [key, value] = label.split('=');
         if (key && value) {
-          parsedLabels[key] = value;
+          parsedLabels.push(`${key}=${value}`);
         }
       });
       setLabelFilters(parsedLabels);
@@ -256,9 +253,9 @@ const DevicesPage = () => {
       const params = new URLSearchParams();
 
       // Add label filters
-      if (Object.keys(labelFilters).length > 0) {
-        Object.entries(labelFilters).forEach(([key, value]) => {
-          params.append('labels', `${key}=${value}`);
+      if (labelFilters.length > 0) {
+        labelFilters.forEach((filter) => {
+          params.append('labels', filter);
         });
       }
 
@@ -422,27 +419,23 @@ const DevicesPage = () => {
     const parts = labelInput.split('=');
     if (parts.length === 2) {
       const [key, value] = parts;
-      const newFilters = { ...labelFilters, [key.trim()]: value.trim() };
+      const newFilters = [ ...labelFilters, `${key.trim()}=${value.trim()}` ];
       setLabelFilters(newFilters);
 
       // Update URL
-      const labelsString = Object.entries(newFilters)
-        .map(([k, v]) => `${k}=${v}`)
+      const labelsString = newFilters
         .join(',');
       updateURL({ labels: labelsString });
     }
   };
 
-  const removeLabelFilter = (key: string) => {
-    const newFilters = { ...labelFilters };
-    delete newFilters[key];
+  const removeLabelFilter = (labelFilter: string) => {
+    const newFilters = structuredClone(labelFilters).filter((currentLabelFilter) => currentLabelFilter != labelFilter);
     setLabelFilters(newFilters);
 
     // Update URL
-    const labelsString = Object.keys(newFilters).length > 0
-      ? Object.entries(newFilters)
-          .map(([k, v]) => `${k}=${v}`)
-          .join(',')
+    const labelsString = newFilters.length > 0
+      ? newFilters.join(',')
       : null;
     updateURL({ labels: labelsString });
   };
@@ -453,9 +446,9 @@ const DevicesPage = () => {
   };
 
 
-  const formatTimeAgo = (date) => {
+  const formatTimeAgo = (date: Date) => {
     const now = new Date();
-    const diff = now - date;
+    const diff = now.getTime() - date.getTime();
     const minutes = Math.floor(diff / 60000);
     const hours = Math.floor(minutes / 60);
     const days = Math.floor(hours / 24);
@@ -553,16 +546,16 @@ const DevicesPage = () => {
               />
 
               {/* Active Label Filters - inline */}
-              {Object.keys(labelFilters).length > 0 && (
+              {labelFilters.length > 0 && (
                 <>
-                  {Object.entries(labelFilters).map(([key, value]) => (
+                  {labelFilters.map((filter) => (
                     <div
-                      key={key}
+                      key={filter}
                       className="flex items-center space-x-1 px-2 py-1 text-sm bg-gray-100 text-gray-700 rounded border border-gray-200"
                     >
-                      <code className="font-mono text-xs">{key}={value}</code>
+                      <code className="font-mono text-xs">{filter}</code>
                       <button
-                        onClick={() => removeLabelFilter(key)}
+                        onClick={() => removeLabelFilter(filter)}
                         className="text-gray-600 hover:text-gray-800 font-bold cursor-pointer"
                       >
                         ×
@@ -635,23 +628,21 @@ const DevicesPage = () => {
                   </div>
 
                   <div className="col-span-2">
-                    {device.labels && Object.keys(device.labels).length > 0 ? (
+                    {device.labels.length > 0 ? (
                       <div className="flex flex-wrap gap-1">
-                        {Object.entries(device.labels).map(([key, value]) => {
-                          const isFiltered = labelFilters[key] === value;
+                        {device.labels.map((label) => {
+                          const isFiltered = labelFilters.includes(label);
                           return (
                             <code
-                              key={key}
+                              key={label}
                               onClick={(e) => {
                                 e.stopPropagation();
                                 if (isFiltered) {
-                                  removeLabelFilter(key);
+                                  removeLabelFilter(label);
                                 } else {
-                                  const newFilters = { ...labelFilters, [key]: value };
+                                  const newFilters = [...labelFilters, label];
                                   setLabelFilters(newFilters);
-                                  const labelsString = Object.entries(newFilters)
-                                    .map(([k, v]) => `${k}=${v}`)
-                                    .join(',');
+                                  const labelsString = newFilters.join(',');
                                   updateURL({ labels: labelsString });
                                 }
                               }}
@@ -661,7 +652,7 @@ const DevicesPage = () => {
                                   : 'bg-gray-100 text-gray-700 border-gray-200 hover:bg-gray-200'
                               }`}
                             >
-                              {key}={value}
+                              {label}
                             </code>
                           );
                         })}

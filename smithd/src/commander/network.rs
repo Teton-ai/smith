@@ -76,36 +76,53 @@ fn process_output(output: std::process::Output) -> (i32, SafeCommandRx) {
 }
 
 pub(super) async fn test_network(id: i32) -> SafeCommandResponse {
-    match perform_network_test().await {
-        Ok((bytes_downloaded, duration_ms, bytes_uploaded, upload_duration_ms)) => {
-            SafeCommandResponse {
-                id,
-                command: SafeCommandRx::TestNetwork {
-                    bytes_downloaded,
-                    duration_ms,
-                    bytes_uploaded: Some(bytes_uploaded),
-                    upload_duration_ms: Some(upload_duration_ms),
-                },
-                status: 0,
-            }
-        }
+    let result = perform_network_test().await;
+    SafeCommandResponse {
+        id,
+        command: SafeCommandRx::TestNetwork {
+            bytes_downloaded: result.bytes_downloaded,
+            duration_ms: result.duration_ms,
+            bytes_uploaded: result.bytes_uploaded,
+            upload_duration_ms: result.upload_duration_ms,
+            timed_out: result.timed_out,
+        },
+        status: if result.timed_out || result.error {
+            -1
+        } else {
+            0
+        },
+    }
+}
+
+const NETWORK_TEST_TIMEOUT: Duration = Duration::from_secs(30);
+
+struct NetworkTestResult {
+    bytes_downloaded: usize,
+    duration_ms: u64,
+    bytes_uploaded: Option<usize>,
+    upload_duration_ms: Option<u64>,
+    timed_out: bool,
+    error: bool,
+}
+
+async fn perform_network_test() -> NetworkTestResult {
+    match perform_network_test_inner().await {
+        Ok(result) => result,
         Err(e) => {
             tracing::error!("Network test failed: {}", e);
-            SafeCommandResponse {
-                id,
-                command: SafeCommandRx::TestNetwork {
-                    bytes_downloaded: 0,
-                    duration_ms: 0,
-                    bytes_uploaded: None,
-                    upload_duration_ms: None,
-                },
-                status: -1,
+            NetworkTestResult {
+                bytes_downloaded: 0,
+                duration_ms: 0,
+                bytes_uploaded: None,
+                upload_duration_ms: None,
+                timed_out: false,
+                error: true,
             }
         }
     }
 }
 
-async fn perform_network_test() -> Result<(usize, u64, usize, u64)> {
+async fn perform_network_test_inner() -> Result<NetworkTestResult> {
     let shutdown = ShutdownHandler::new();
     let configuration = MagicHandle::new(shutdown.signals());
     configuration.load(None).await;
@@ -114,19 +131,30 @@ async fn perform_network_test() -> Result<(usize, u64, usize, u64)> {
     let download_url = format!("{}/network/test-file", server_api_url);
     let upload_url = format!("{}/network/test-upload", server_api_url);
 
+    // No global timeout on client - we handle timeouts per-phase
     let client = Client::builder()
-        .timeout(Duration::from_secs(120))
         .build()
         .context("Failed to create HTTP client")?;
 
-    // Download test
+    // Download test with timeout
     let download_start = Instant::now();
+    let mut downloaded: usize = 0;
+    let mut download_timed_out = false;
 
-    let response = client
-        .get(&download_url)
-        .send()
-        .await
-        .context("Failed to send download request")?;
+    let response = match timeout(NETWORK_TEST_TIMEOUT, client.get(&download_url).send()).await {
+        Ok(Ok(resp)) => resp,
+        Ok(Err(e)) => return Err(e.into()),
+        Err(_) => {
+            return Ok(NetworkTestResult {
+                bytes_downloaded: 0,
+                duration_ms: NETWORK_TEST_TIMEOUT.as_millis() as u64,
+                bytes_uploaded: None,
+                upload_duration_ms: None,
+                timed_out: true,
+                error: false,
+            });
+        }
+    };
 
     if !response.status().is_success() {
         return Err(anyhow::anyhow!(
@@ -135,41 +163,80 @@ async fn perform_network_test() -> Result<(usize, u64, usize, u64)> {
         ));
     }
 
-    let mut downloaded: usize = 0;
     let mut stream = response.bytes_stream();
-
     use futures_util::StreamExt;
-    while let Some(chunk) = stream.next().await {
-        let chunk = chunk.context("Failed to read chunk")?;
-        downloaded += chunk.len();
+
+    loop {
+        let remaining = NETWORK_TEST_TIMEOUT.saturating_sub(download_start.elapsed());
+        if remaining.is_zero() {
+            download_timed_out = true;
+            break;
+        }
+
+        match timeout(remaining, stream.next()).await {
+            Ok(Some(Ok(chunk))) => {
+                downloaded += chunk.len();
+            }
+            Ok(Some(Err(e))) => return Err(e.into()),
+            Ok(None) => break, // Stream finished
+            Err(_) => {
+                download_timed_out = true;
+                break;
+            }
+        }
     }
 
     let download_duration_ms = download_start.elapsed().as_millis() as u64;
 
-    // Upload test - upload the same amount of data that was downloaded
+    // If download timed out, return partial results (skip upload)
+    if download_timed_out {
+        return Ok(NetworkTestResult {
+            bytes_downloaded: downloaded,
+            duration_ms: download_duration_ms,
+            bytes_uploaded: None,
+            upload_duration_ms: None,
+            timed_out: true,
+            error: false,
+        });
+    }
+
+    // Upload test with timeout
     let upload_data = vec![0u8; downloaded];
     let upload_start = Instant::now();
 
-    let response = client
-        .post(&upload_url)
-        .body(upload_data)
-        .send()
-        .await
-        .context("Failed to send upload request")?;
+    let upload_result = timeout(
+        NETWORK_TEST_TIMEOUT,
+        client.post(&upload_url).body(upload_data).send(),
+    )
+    .await;
 
-    if !response.status().is_success() {
-        return Err(anyhow::anyhow!(
+    match upload_result {
+        Ok(Ok(resp)) if resp.status().is_success() => {
+            let upload_duration_ms = upload_start.elapsed().as_millis() as u64;
+            Ok(NetworkTestResult {
+                bytes_downloaded: downloaded,
+                duration_ms: download_duration_ms,
+                bytes_uploaded: Some(downloaded),
+                upload_duration_ms: Some(upload_duration_ms),
+                timed_out: false,
+                error: false,
+            })
+        }
+        Ok(Ok(resp)) => Err(anyhow::anyhow!(
             "Upload server returned status: {}",
-            response.status()
-        ));
+            resp.status()
+        )),
+        Ok(Err(e)) => Err(e.into()),
+        Err(_) => {
+            // Upload timed out - return download results with upload timeout
+            Ok(NetworkTestResult {
+                bytes_downloaded: downloaded,
+                duration_ms: download_duration_ms,
+                bytes_uploaded: Some(0),
+                upload_duration_ms: Some(NETWORK_TEST_TIMEOUT.as_millis() as u64),
+                timed_out: true,
+                error: false,
+            })
+        }
     }
-
-    let upload_duration_ms = upload_start.elapsed().as_millis() as u64;
-
-    Ok((
-        downloaded,
-        download_duration_ms,
-        downloaded,
-        upload_duration_ms,
-    ))
 }
