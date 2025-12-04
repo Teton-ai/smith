@@ -204,7 +204,7 @@ const DevicesPage = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [debouncedSearchTerm, setDebouncedSearchTerm] = useState('');
   const [showOutdatedOnly, setShowOutdatedOnly] = useState(false);
-  const [labelFilters, setLabelFilters] = useState<Record<string, string>>({});
+  const [labelFilters, setLabelFilters] = useState<string[]>([]);
   const [onlineStatusFilter, setOnlineStatusFilter] = useState<'all' | 'online' | 'offline'>('all');
   const [isSearching, setIsSearching] = useState(false);
 
@@ -237,13 +237,7 @@ const DevicesPage = () => {
     }
 
     if (labelsParam) {
-      const parsedLabels: Record<string, string> = {};
-      labelsParam.split(',').forEach(label => {
-        const [key, value] = label.split('=');
-        if (key && value) {
-          parsedLabels[key] = value;
-        }
-      });
+      const parsedLabels = labelsParam.split(',');
       setLabelFilters(parsedLabels);
     }
   }, [searchParams]);
@@ -253,9 +247,9 @@ const DevicesPage = () => {
       const params = new URLSearchParams();
 
       // Add label filters
-      if (Object.keys(labelFilters).length > 0) {
-        Object.entries(labelFilters).forEach(([key, value]) => {
-          params.append('labels', `${key}=${value}`);
+      if (labelFilters.length > 0) {
+        labelFilters.forEach((label) => {
+          params.append('labels', label);
         });
       }
 
@@ -419,26 +413,24 @@ const DevicesPage = () => {
     const parts = labelInput.split('=');
     if (parts.length === 2) {
       const [key, value] = parts;
-      const newFilters = { ...labelFilters, [key.trim()]: value.trim() };
+      const newFilters = [ ...labelFilters, `${key.trim()}=${value.trim()}` ];
       setLabelFilters(newFilters);
 
       // Update URL
-      const labelsString = Object.entries(newFilters)
-        .map(([k, v]) => `${k}=${v}`)
+      const labelsString = newFilters
         .join(',');
       updateURL({ labels: labelsString });
     }
   };
 
-  const removeLabelFilter = (key: string) => {
-    const newFilters = { ...labelFilters };
-    delete newFilters[key];
-    setLabelFilters(newFilters);
+  const removeLabelFilter = (labelFilter: string) => {
+    const newFilters = structuredClone(labelFilters).filter((currentLabelFilter) => currentLabelFilter != labelFilter);
+
+    setLabelFilters(newFilters)
 
     // Update URL
-    const labelsString = Object.keys(newFilters).length > 0
-      ? Object.entries(newFilters)
-          .map(([k, v]) => `${k}=${v}`)
+    const labelsString = newFilters.length > 0
+      ? newFilters
           .join(',')
       : null;
     updateURL({ labels: labelsString });
@@ -550,16 +542,16 @@ const DevicesPage = () => {
               />
 
               {/* Active Label Filters - inline */}
-              {Object.keys(labelFilters).length > 0 && (
+              {labelFilters.length > 0 && (
                 <>
-                  {Object.entries(labelFilters).map(([key, value]) => (
+                  {labelFilters.map((filter) => (
                     <div
-                      key={key}
+                      key={filter}
                       className="flex items-center space-x-1 px-2 py-1 text-sm bg-gray-100 text-gray-700 rounded border border-gray-200"
                     >
-                      <code className="font-mono text-xs">{key}={value}</code>
+                      <code className="font-mono text-xs">{filter}</code>
                       <button
-                        onClick={() => removeLabelFilter(key)}
+                        onClick={() => removeLabelFilter(filter)}
                         className="text-gray-600 hover:text-gray-800 font-bold cursor-pointer"
                       >
                         ×
@@ -635,19 +627,19 @@ const DevicesPage = () => {
                     {device.labels && Object.keys(device.labels).length > 0 ? (
                       <div className="flex flex-wrap gap-1">
                         {Object.entries(device.labels).map(([key, value]) => {
-                          const isFiltered = labelFilters[key] === value;
+                          const filter = `${key}=${value}`
+                          const isFiltered = labelFilters.includes(filter);
                           return (
                             <code
                               key={key}
                               onClick={(e) => {
                                 e.stopPropagation();
                                 if (isFiltered) {
-                                  removeLabelFilter(key);
+                                  removeLabelFilter(filter);
                                 } else {
-                                  const newFilters = { ...labelFilters, [key]: value };
+                                  const newFilters = [...labelFilters, filter];
                                   setLabelFilters(newFilters);
-                                  const labelsString = Object.entries(newFilters)
-                                    .map(([k, v]) => `${k}=${v}`)
+                                  const labelsString = newFilters
                                     .join(',');
                                   updateURL({ labels: labelsString });
                                 }
