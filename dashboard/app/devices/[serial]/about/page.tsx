@@ -7,8 +7,6 @@ import {
   XCircle,
   GitBranch,
   Tag,
-  Globe,
-  Clock,
   ArrowLeft,
 } from 'lucide-react';
 import PrivateLayout from "@/app/layouts/PrivateLayout";
@@ -31,7 +29,7 @@ interface Device {
   modem?: Modem;
   release?: Release;
   target_release?: Release;
-  labels?: Record<string, string>;
+  labels: string[];
   system_info?: {
     hostname?: string;
     device_tree?: {

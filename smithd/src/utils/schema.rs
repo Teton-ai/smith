@@ -88,6 +88,7 @@ pub enum SafeCommandRx {
         duration_ms: u64,
         bytes_uploaded: Option<usize>,
         upload_duration_ms: Option<u64>,
+        timed_out: bool,
     },
 }
 
