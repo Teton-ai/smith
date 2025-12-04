@@ -160,9 +160,9 @@ pub async fn download_file(
             &state.config.packages_bucket_name,
             Some(dir_path),
             file_name,
-            &state.cloudfront_config.package_domain_name,
-            &state.cloudfront_config.package_key_pair_id,
-            &state.cloudfront_config.package_private_key,
+            &state.config.cloudfront.package_domain_name,
+            &state.config.cloudfront.package_key_pair_id,
+            &state.config.cloudfront.package_private_key,
         )
         .await
         .map_err(|err| {
