@@ -1,6 +1,11 @@
 use anyhow::Result;
+use models::{
+    deployment::Deployment,
+    device::{CommandsPaginated, Device, DeviceCommandResponse, DeviceFilter},
+    distribution::Distribution,
+    release::Release,
+};
 use reqwest::Client;
-use serde_json::Value;
 use smith::utils::schema;
 use std::collections::HashMap;
 
@@ -23,53 +28,36 @@ impl SmithAPI {
         }
     }
 
-    pub async fn get_devices(
-        &self,
-        serial_number: Option<String>,
-        labels: Option<Vec<String>>,
-        online: Option<bool>,
-    ) -> Result<String> {
+    pub async fn get_devices(&self, query: DeviceFilter) -> Result<Vec<Device>> {
         let client = Client::new();
 
-        let mut query_params: Vec<(&str, String)> = vec![];
-
-        if let Some(sn) = serial_number {
-            query_params.push(("serial_number", sn));
-        }
-
-        if let Some(labels) = labels {
-            for label in labels {
-                query_params.push(("labels", label));
-            }
-        }
-
-        if let Some(is_online) = online {
-            query_params.push(("online", is_online.to_string()));
-        }
-
         let resp = client
-            .get(format!("{}/devices", self.domain))
+            .get(format!(
+                "{}/devices?{}",
+                self.domain,
+                serde_html_form::to_string(&query)?
+            ))
             .header("Authorization", format!("Bearer {}", &self.bearer_token))
-            .query(&query_params)
-            .send();
+            .send()
+            .await?;
 
-        let devices = resp.await?.text().await?;
+        let devices = resp.json().await?;
 
         Ok(devices)
     }
 
-    pub async fn get_release_info(&self, release_id: String) -> Result<Value> {
+    pub async fn get_release_info(&self, release_id: String) -> Result<Release> {
         let client = Client::new();
 
         let resp = client
             .get(format!("{}/releases/{}", self.domain, release_id))
-            .header("Authorization", &self.bearer_token)
+            .header("Authorization", format!("Bearer {}", &self.bearer_token))
             .send();
 
         Ok(resp.await?.error_for_status()?.json().await?)
     }
 
-    pub async fn deploy_release(&self, release_id: String) -> Result<Value> {
+    pub async fn deploy_release(&self, release_id: String) -> Result<Deployment> {
         let client = Client::new();
 
         let resp = client
@@ -77,7 +65,7 @@ impl SmithAPI {
                 "{}/releases/{}/deployment",
                 self.domain, release_id
             ))
-            .header("Authorization", &self.bearer_token)
+            .header("Authorization", format!("Bearer {}", &self.bearer_token))
             .send();
 
         let deployment = resp.await?.error_for_status()?.json().await?;
@@ -85,7 +73,7 @@ impl SmithAPI {
         Ok(deployment)
     }
 
-    pub async fn deploy_release_check_done(&self, release_id: String) -> Result<Value> {
+    pub async fn deploy_release_check_done(&self, release_id: String) -> Result<Deployment> {
         let client = Client::new();
 
         let resp = client
@@ -93,7 +81,7 @@ impl SmithAPI {
                 "{}/releases/{}/deployment",
                 self.domain, release_id
             ))
-            .header("Authorization", &self.bearer_token)
+            .header("Authorization", format!("Bearer {}", &self.bearer_token))
             .send();
 
         let deployment = resp.await?.error_for_status()?.json().await?;
@@ -101,15 +89,17 @@ impl SmithAPI {
         Ok(deployment)
     }
 
-    pub async fn get_distributions(&self) -> Result<String> {
+    pub async fn get_distributions(&self) -> Result<Vec<Distribution>> {
         let client = Client::new();
 
         let resp = client
             .get(format!("{}/distributions", self.domain))
-            .header("Authorization", &self.bearer_token)
-            .send();
+            .header("Authorization", format!("Bearer {}", &self.bearer_token))
+            .send()
+            .await?
+            .error_for_status()?;
 
-        let distros = resp.await?.text().await?;
+        let distros = resp.json().await?;
 
         Ok(distros)
     }
@@ -144,24 +134,23 @@ impl SmithAPI {
         Ok(())
     }
 
-    pub async fn get_last_command(&self, device_id: u64) -> Result<serde_json::Value> {
+    pub async fn get_last_command(&self, device_id: u64) -> Result<DeviceCommandResponse> {
         let client = Client::new();
 
         let resp = client
             .get(format!("{}/devices/{device_id}/commands", self.domain))
             .header("Authorization", format!("Bearer {}", &self.bearer_token))
-            .send();
+            .send()
+            .await?
+            .error_for_status()?;
 
-        let commands = resp.await?.text().await?;
+        let commands: CommandsPaginated = resp.json().await?;
 
-        let commands: Value = serde_json::from_str(&commands)?;
-
-        let last_command = commands["commands"]
-            .as_array()
-            .and_then(|arr| arr.first())
-            .ok_or_else(|| anyhow::anyhow!("No commands found for device"))?;
-
-        Ok(last_command.clone())
+        Ok(commands
+            .commands
+            .first()
+            .ok_or_else(|| anyhow::anyhow!("No commands found for device {device_id}"))?
+            .clone())
     }
 
     pub async fn test_network(&self, device: String) -> Result<()> {
@@ -215,11 +204,8 @@ impl SmithAPI {
 
         // The API returns 201 with empty body, so we need to fetch the last command to get the ID
         let last_command = self.get_last_command(device_id).await?;
-        let command_id = last_command["cmd_id"]
-            .as_u64()
-            .ok_or_else(|| anyhow::anyhow!("Failed to get command ID from last command"))?;
 
-        Ok((device_id, command_id))
+        Ok((device_id, last_command.cmd_id as u64))
     }
 
     pub async fn send_service_status_command(
@@ -250,11 +236,8 @@ impl SmithAPI {
 
         // The API returns 201 with empty body, so we need to fetch the last command to get the ID
         let last_command = self.get_last_command(device_id).await?;
-        let command_id = last_command["cmd_id"]
-            .as_u64()
-            .ok_or_else(|| anyhow::anyhow!("Failed to get command ID from last command"))?;
 
-        Ok((device_id, command_id))
+        Ok((device_id, last_command.cmd_id as u64))
     }
 
     pub async fn send_smithd_status_command(&self, device_id: u64) -> Result<(u64, u64)> {
@@ -281,18 +264,15 @@ impl SmithAPI {
 
         // The API returns 201 with empty body, so we need to fetch the last command to get the ID
         let last_command = self.get_last_command(device_id).await?;
-        let command_id = last_command["cmd_id"]
-            .as_u64()
-            .ok_or_else(|| anyhow::anyhow!("Failed to get command ID from last command"))?;
 
-        Ok((device_id, command_id))
+        Ok((device_id, last_command.cmd_id as u64))
     }
 
     pub async fn get_device_command(
         &self,
         device_id: u64,
         command_id: u64,
-    ) -> Result<serde_json::Value> {
+    ) -> Result<DeviceCommandResponse> {
         let client = Client::new();
 
         // Get commands for device and filter to find the specific one
@@ -304,15 +284,12 @@ impl SmithAPI {
             .header("Authorization", format!("Bearer {}", &self.bearer_token))
             .send();
 
-        let response = resp.await?.error_for_status()?.json::<Value>().await?;
+        let response: CommandsPaginated = resp.await?.error_for_status()?.json().await?;
 
-        let commands = response["commands"]
-            .as_array()
-            .ok_or_else(|| anyhow::anyhow!("Invalid response format"))?;
-
-        let command = commands
+        let command = response
+            .commands
             .iter()
-            .find(|cmd| cmd["cmd_id"].as_u64() == Some(command_id))
+            .find(|cmd| cmd.cmd_id as u64 == command_id)
             .ok_or_else(|| {
                 anyhow::anyhow!("Command {} not found for device {}", command_id, device_id)
             })?;
@@ -340,11 +317,8 @@ impl SmithAPI {
         tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
         let last_command = self.get_last_command(device_id).await?;
-        let command_id = last_command["cmd_id"]
-            .as_u64()
-            .ok_or_else(|| anyhow::anyhow!("Failed to get command ID from last command"))?;
 
-        Ok((device_id, command_id))
+        Ok((device_id, last_command.cmd_id as u64))
     }
 
     pub async fn update_device_labels(

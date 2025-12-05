@@ -1,12 +1,9 @@
 use crate::{downloader::DownloaderHandle, magic::structure::ConfigPackage};
-use anyhow::{Context, Result, anyhow};
+use anyhow::{Context, Result};
 use flate2::{Compression, write::GzEncoder};
-use futures_util::StreamExt;
 use reqwest::{Response, StatusCode};
 use std::{env, io::Write, time::Duration};
-use tokio::io::AsyncWriteExt;
-use tokio::time;
-use tracing::{error, info};
+use tracing::info;
 
 pub struct NetworkClient {
     hostname: String,

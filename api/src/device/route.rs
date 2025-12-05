@@ -1,19 +1,23 @@
 use crate::State;
 use crate::device::{
-    AuthDevice, CommandsPaginated, Device, DeviceCommandResponse, DeviceHealth, DeviceLedgerItem,
-    DeviceLedgerItemPaginated, DeviceNetwork, DeviceRelease, LeanDevice, LeanResponse, NewVariable,
-    Note, RawDevice, Tag, UpdateDeviceRelease, UpdateDevicesRelease, Variable,
+    AuthDevice, DeviceHealth, DeviceLedgerItem, DeviceLedgerItemPaginated, DeviceRelease,
+    LeanDevice, LeanResponse, NewVariable, Note, RawDevice, Tag, UpdateDeviceRelease,
+    UpdateDevicesRelease, Variable,
 };
 use crate::event::PublicEvent;
 use crate::middlewares::authorization;
-use crate::modem::Modem;
-use crate::release::Release;
+use crate::release::get_release_by_id;
 use crate::user::CurrentUser;
 use axum::extract::Host;
 use axum::extract::Path;
 use axum::http::StatusCode;
 use axum::{Extension, Json};
 use axum_extra::extract::Query;
+use models::device::{
+    CommandsPaginated, Device, DeviceCommandResponse, DeviceFilter, DeviceNetwork,
+};
+use models::modem::Modem;
+use models::release::Release;
 use serde::Deserialize;
 use smith::utils::schema;
 use smith::utils::schema::SafeCommandRequest;
@@ -304,26 +308,6 @@ pub async fn get_devices_new(
     }))
 }
 
-/// Query filter for device listing.
-#[derive(Deserialize, Debug)]
-pub struct DeviceFilter {
-    pub serial_number: Option<String>,
-    /// Filter by approved status. If None, only approved devices are included by default.
-    pub approved: Option<bool>,
-    /// Filter by archived status. If None, archived devices are excluded by default.
-    pub archived: Option<bool>,
-    #[deprecated(
-        since = "0.2.64",
-        note = "Since labels have been released, tags concept be in version 0.74"
-    )]
-    pub tag: Option<String>,
-    /// Filter by labels. Format: key=value. Multiple labels can be provided.
-    #[serde(default)]
-    pub labels: Vec<String>,
-    /// Filter by online status. If true, only devices online in the last 5 minutes.
-    pub online: Option<bool>,
-}
-
 #[utoipa::path(
     get,
     path = "/devices",
@@ -445,7 +429,7 @@ pub async fn get_devices(
                     _ => None,
                 };
 
-                Some(crate::ip_address::IpAddressInfo {
+                Some(models::ip_address::IpAddressInfo {
                     id: row.ip_id.unwrap(),
                     ip_address: row.ip_address.unwrap(),
                     name: row.ip_name,
@@ -1713,7 +1697,7 @@ pub async fn update_devices_target_release(
     Json(devices_release): Json<UpdateDevicesRelease>,
 ) -> axum::response::Result<StatusCode, StatusCode> {
     let target_release_id = devices_release.target_release_id;
-    let release = Release::get_release_by_id(target_release_id, &state.pg_pool)
+    let release = get_release_by_id(target_release_id, &state.pg_pool)
         .await
         .map_err(|err| {
             error!("Failed to get target release: {err}");
@@ -1943,7 +1927,7 @@ pub async fn get_device_info(
             _ => None,
         };
 
-        Some(crate::ip_address::IpAddressInfo {
+        Some(models::ip_address::IpAddressInfo {
             id: device_row.ip_id.unwrap(),
             ip_address: device_row.ip_address.unwrap(),
             name: device_row.ip_name,

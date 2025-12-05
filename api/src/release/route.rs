@@ -1,5 +1,5 @@
 use crate::State;
-use crate::release::Release;
+use crate::release::{Release, get_release_by_id};
 use axum::extract::Path;
 use axum::http::StatusCode;
 use axum::{Extension, Json};
@@ -61,7 +61,7 @@ pub async fn get_release(
     Path(release_id): Path<i32>,
     Extension(state): Extension<State>,
 ) -> axum::response::Result<Json<Release>, StatusCode> {
-    let release = Release::get_release_by_id(release_id, &state.pg_pool)
+    let release = get_release_by_id(release_id, &state.pg_pool)
         .await
         .map_err(|err| {
             error!("Failed to get releases {err}");
@@ -158,7 +158,7 @@ pub async fn add_package_to_release(
     Extension(state): Extension<State>,
     Json(package): Json<ReplacementPackage>,
 ) -> axum::response::Result<StatusCode, StatusCode> {
-    let release = Release::get_release_by_id(release_id, &state.pg_pool)
+    let release = get_release_by_id(release_id, &state.pg_pool)
         .await
         .map_err(|err| {
             error!("Failed to get release: {err}");
@@ -244,7 +244,7 @@ pub async fn update_package_for_release(
     Extension(state): Extension<State>,
     Json(package): Json<ReplacementPackage>,
 ) -> axum::response::Result<StatusCode, StatusCode> {
-    let release = Release::get_release_by_id(release_id, &state.pg_pool)
+    let release = get_release_by_id(release_id, &state.pg_pool)
         .await
         .map_err(|err| {
             error!("Failed to get release: {err}");
@@ -292,7 +292,7 @@ pub async fn delete_package_for_release(
     Path((release_id, package_id)): Path<(i32, i32)>,
     Extension(state): Extension<State>,
 ) -> axum::response::Result<StatusCode, StatusCode> {
-    let release = Release::get_release_by_id(release_id, &state.pg_pool)
+    let release = get_release_by_id(release_id, &state.pg_pool)
         .await
         .map_err(|err| {
             error!("Failed to get releases {err}");

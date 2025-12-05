@@ -3,18 +3,19 @@ mod auth;
 mod cli;
 mod config;
 mod print;
-mod schema;
 mod tunnel;
 
 use crate::cli::{Cli, Commands, DevicesCommands, DistroCommands, ServiceCommands};
 use crate::print::TablePrint;
 use anyhow::Context;
 use api::SmithAPI;
+use chrono::{DateTime, Utc};
 use clap::{CommandFactory, Parser};
 use clap_complete::generate;
 use colored::Colorize;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
-use serde_json::Value;
+use models::deployment::DeploymentStatus;
+use models::device::{Device, DeviceFilter};
 use std::{collections::HashSet, io, thread, time::Duration};
 use termion::raw::IntoRawMode;
 use tokio::sync::oneshot;
@@ -177,13 +178,13 @@ fn check_and_update_if_needed() -> Result<(), anyhow::Error> {
             .current_version(current_version)
             .build()?;
 
-        if let Ok(status) = updater.get_latest_release() {
-            if status.version != current_version {
-                println!(
-                    "A new version {} is available! Run 'sm update' to update.",
-                    status.version
-                );
-            }
+        if let Ok(status) = updater.get_latest_release()
+            && status.version != current_version
+        {
+            println!(
+                "A new version {} is available! Run 'sm update' to update.",
+                status.version
+            );
         }
 
         let now = chrono::Utc::now().timestamp();
@@ -221,16 +222,17 @@ async fn resolve_target_devices(
     labels: Vec<String>,
     online: bool,
     offline: bool,
-) -> anyhow::Result<Vec<serde_json::Value>> {
+) -> anyhow::Result<Vec<Device>> {
     if !device_filters.is_empty() {
         let mut devices_vec = Vec::new();
         for device_filter in device_filters {
-            let devices_json = api
-                .get_devices(Some(device_filter.clone()), None, None)
+            let devices = api
+                .get_devices(DeviceFilter {
+                    serial_number: Some(device_filter),
+                    ..Default::default()
+                })
                 .await?;
-            let parsed: Vec<Value> = serde_json::from_str(&devices_json)
-                .with_context(|| "Failed to parse devices JSON")?;
-            devices_vec.extend(parsed);
+            devices_vec.extend(devices);
         }
         Ok(devices_vec)
     } else {
@@ -242,8 +244,12 @@ async fn resolve_target_devices(
             None
         };
 
-        let devices_json = api.get_devices(None, Some(labels), online_filter).await?;
-        serde_json::from_str(&devices_json).with_context(|| "Failed to parse devices JSON")
+        api.get_devices(DeviceFilter {
+            labels,
+            online: online_filter,
+            ..Default::default()
+        })
+        .await
     }
 }
 
@@ -328,37 +334,40 @@ async fn main() -> anyhow::Result<()> {
                         None
                     };
 
-                    let devices = api.get_devices(None, Some(labels), online_filter).await?;
+                    let devices = api
+                        .get_devices(DeviceFilter {
+                            labels,
+                            online: online_filter,
+                            ..Default::default()
+                        })
+                        .await?;
                     if json {
-                        println!("{}", devices);
+                        println!("{}", serde_json::to_string(&devices).unwrap());
                         return Ok(());
                     }
-                    let parsed_devices: Vec<Value> = serde_json::from_str(&devices)
-                        .with_context(|| "Failed to parse devices JSON")?;
-                    let rows: Vec<Vec<String>> = parsed_devices
+                    let rows: Vec<Vec<String>> = devices
                         .iter()
                         .map(|d| {
-                            let labels_str = if let Some(labels_obj) = d["labels"].as_object() {
-                                labels_obj
-                                    .iter()
-                                    .map(|(k, v)| format!("{}={}", k, v.as_str().unwrap_or("")))
-                                    .collect::<Vec<String>>()
-                                    .join(", ")
-                            } else {
-                                String::new()
-                            };
+                            let labels_str = d
+                                .labels
+                                .iter()
+                                .map(|(k, v)| format!("{}={}", k, v))
+                                .collect::<Vec<String>>()
+                                .join(", ");
 
                             vec![
-                                get_online_colored(
-                                    d["serial_number"].as_str().unwrap_or(""),
-                                    d["last_seen"].as_str().unwrap_or(""),
-                                ),
+                                get_online_colored(&d.serial_number, &d.last_seen),
                                 labels_str,
-                                d["system_info"]["smith"]["version"]
-                                    .as_str()
-                                    .unwrap_or("")
-                                    .parse()
-                                    .unwrap(),
+                                d.system_info
+                                    .as_ref()
+                                    .map(|info| {
+                                        info["smith"]["version"]
+                                            .as_str()
+                                            .unwrap_or("")
+                                            .parse()
+                                            .unwrap()
+                                    })
+                                    .unwrap_or_default(),
                             ]
                         })
                         .collect();
@@ -496,10 +505,10 @@ async fn main() -> anyhow::Result<()> {
                     let command = api.get_device_command(device_id, command_id).await?;
 
                     println!("Command ID: {}", id_str);
-                    println!("Fetched: {}", command["fetched"].as_bool().unwrap_or(false));
+                    println!("Fetched: {}", command.fetched);
 
-                    if command["response"].is_object() {
-                        if let Some(stdout) = command["response"]["FreeForm"]["stdout"].as_str() {
+                    if let Some(response) = command.response {
+                        if let Some(stdout) = response["FreeForm"]["stdout"].as_str() {
                             println!("Output:\n{}", stdout);
                         } else {
                             println!("Status: Completed (no output)");
@@ -524,21 +533,15 @@ async fn main() -> anyhow::Result<()> {
 
                     let distros = api.get_distributions().await?;
                     if json {
-                        println!("{}", distros);
+                        println!("{}", serde_json::to_string_pretty(&distros)?);
                         return Ok(());
                     }
-                    let parsed_distros: Vec<Value> = serde_json::from_str(&distros)
-                        .with_context(|| "Failed to parse distributions JSON")?;
-                    let rows: Vec<Vec<String>> = parsed_distros
+                    let rows: Vec<Vec<String>> = distros
                         .iter()
                         .map(|d| {
                             vec![
-                                format!(
-                                    "{} ({})",
-                                    d["name"].as_str().unwrap_or(""),
-                                    get_colored_arch(d["architecture"].as_str().unwrap_or(""))
-                                ),
-                                d["description"].as_str().unwrap_or("").to_string(),
+                                format!("{} ({})", d.name, get_colored_arch(&d.architecture)),
+                                d.description.to_owned().unwrap_or_default(),
                             ]
                         })
                         .collect();
@@ -564,12 +567,13 @@ async fn main() -> anyhow::Result<()> {
                 let api = SmithAPI::new(secrets, &config);
 
                 let devices = api
-                    .get_devices(Some(serial_number.clone()), None, None)
+                    .get_devices(DeviceFilter {
+                        serial_number: Some(serial_number.clone()),
+                        ..Default::default()
+                    })
                     .await?;
 
-                let parsed: Value = serde_json::from_str(&devices)?;
-
-                let id = parsed[0]["id"].as_u64().unwrap();
+                let id = devices[0].id;
 
                 println!(
                     "Creating tunnel for device [{}] {} {:?}",
@@ -592,23 +596,21 @@ async fn main() -> anyhow::Result<()> {
                 let username = config.current_tunnel_username();
                 let username_clone = username.clone();
                 let tunnel_openning_handler = tokio::spawn(async move {
-                    api.open_tunnel(id, pub_key, username_clone).await.unwrap();
+                    api.open_tunnel(id as u64, pub_key, username_clone)
+                        .await
+                        .unwrap();
                     pb2.set_message("Request sent to smith 💻");
 
                     let port;
                     loop {
-                        let response = api.get_last_command(id).await.unwrap();
+                        let response = api.get_last_command(id as u64).await.unwrap();
 
-                        if response["fetched"].is_boolean()
-                            && response["fetched"].as_bool().unwrap()
-                        {
+                        if response.fetched {
                             pb2.set_message("Command fetched by device 👍");
                         }
 
-                        if response["response"].is_object() {
-                            port = response["response"]["OpenTunnel"]["port_server"]
-                                .as_u64()
-                                .unwrap();
+                        if let Some(response) = response.response {
+                            port = response["OpenTunnel"]["port_server"].as_u64().unwrap();
 
                             tx.send(port).unwrap();
                             break;
@@ -639,14 +641,12 @@ async fn main() -> anyhow::Result<()> {
                 )
                 .await?;
                 println!("Connected");
-                let code = {
-                    // We're using `termion` to put the terminal into raw mode, so that we can
-                    // display the output of interactive applications correctly
-                    let _raw_term = io::stdout().into_raw_mode()?;
-                    ssh.call().await.with_context(|| "skill issues")?;
-                };
+                // We're using `termion` to put the terminal into raw mode, so that we can
+                // display the output of interactive applications correctly
+                let _raw_term = io::stdout().into_raw_mode()?;
+                ssh.call().await.with_context(|| "skill issues")?;
 
-                println!("Exitcode: {:?}", code);
+                println!("Exitcode: {:?}", ());
                 ssh.close().await?;
                 return Ok(());
             }
@@ -685,18 +685,17 @@ async fn main() -> anyhow::Result<()> {
                             .await?;
 
                         // Check if the deployment is done
-                        if let Some(status) = deployment.get("status").and_then(|s| s.as_str()) {
-                            println!("Current status: {}", status);
+                        let status = deployment.status;
+                        println!("Current status: {}", status);
 
-                            if status == "Done" {
-                                println!("Deployment completed successfully!");
-                                return Ok(());
-                            }
+                        if status == DeploymentStatus::Done {
+                            println!("Deployment completed successfully!");
+                            return Ok(());
+                        }
 
-                            // If status is "failed" or any other terminal state, we can exit early
-                            if status == "Failed" {
-                                return Err(anyhow::anyhow!("Deployment failed"));
-                            }
+                        // If status is "failed" or any other terminal state, we can exit early
+                        if status == DeploymentStatus::Failed {
+                            return Err(anyhow::anyhow!("Deployment failed"));
                         }
 
                         // Wait before the next check
@@ -708,7 +707,7 @@ async fn main() -> anyhow::Result<()> {
                     }
                 } else {
                     let value = api.get_release_info(release_number).await?;
-                    println!("{}", value);
+                    println!("{}", serde_json::to_string_pretty(&value)?);
                     return Ok(());
                 }
             }
@@ -746,13 +745,7 @@ async fn main() -> anyhow::Result<()> {
                 let mut seen_ids = HashSet::new();
                 let target_devices: Vec<_> = target_devices
                     .into_iter()
-                    .filter(|device| {
-                        if let Some(id) = device["id"].as_u64() {
-                            seen_ids.insert(id)
-                        } else {
-                            true // Keep devices without numeric IDs
-                        }
-                    })
+                    .filter(|device| seen_ids.insert(device.id))
                     .collect();
 
                 if target_devices.is_empty() {
@@ -769,12 +762,13 @@ async fn main() -> anyhow::Result<()> {
                 let mut command_ids = Vec::new();
 
                 for device in &target_devices {
-                    let device_id = device["id"]
-                        .as_u64()
-                        .ok_or_else(|| anyhow::anyhow!("Device missing ID field"))?;
-                    let serial_number = device["serial_number"].as_str().unwrap_or("unknown");
+                    let device_id = device.id;
+                    let serial_number = &device.serial_number;
 
-                    match api.send_custom_command(device_id, cmd_string.clone()).await {
+                    match api
+                        .send_custom_command(device_id as u64, cmd_string.clone())
+                        .await
+                    {
                         Ok((dev_id, cmd_id)) => {
                             command_ids.push((dev_id, cmd_id, serial_number.to_string()));
                             println!(
@@ -833,17 +827,16 @@ async fn main() -> anyhow::Result<()> {
 
                         match api.get_device_command(*device_id, *command_id).await {
                             Ok(response) => {
-                                if response["fetched"].as_bool().unwrap_or(false) && !completed[idx]
-                                {
+                                if response.fetched && !completed[idx] {
                                     pb.set_message(format!(
                                         "{} [{}:{}] Fetched by device",
                                         serial_number, device_id, command_id
                                     ));
                                 }
 
-                                if response["response"].is_object() {
+                                if let Some(response) = response.response {
                                     let output = if let Some(stdout) =
-                                        response["response"]["FreeForm"]["stdout"].as_str()
+                                        response["FreeForm"]["stdout"].as_str()
                                     {
                                         stdout.to_string()
                                     } else {
@@ -905,13 +898,7 @@ async fn main() -> anyhow::Result<()> {
                 let mut seen_ids = HashSet::new();
                 let target_devices: Vec<_> = target_devices
                     .into_iter()
-                    .filter(|device| {
-                        if let Some(id) = device["id"].as_u64() {
-                            seen_ids.insert(id)
-                        } else {
-                            true // Keep devices without numeric IDs
-                        }
-                    })
+                    .filter(|device| seen_ids.insert(device.id))
                     .collect();
 
                 if target_devices.is_empty() {
@@ -923,8 +910,7 @@ async fn main() -> anyhow::Result<()> {
 
                 println!("Setting labels on {} device(s):", target_devices.len());
                 for device in &target_devices {
-                    let serial_number = device["serial_number"].as_str().unwrap_or("unknown");
-                    println!("  - {}", serial_number);
+                    println!("  - {}", device.serial_number);
                 }
                 println!("\nLabels to set:");
                 for (key, value) in &new_labels_map {
@@ -945,26 +931,23 @@ async fn main() -> anyhow::Result<()> {
                 println!("\n{} labels to devices...", "Applying".bold());
 
                 for device in &target_devices {
-                    let device_id = device["id"]
-                        .as_u64()
-                        .ok_or_else(|| anyhow::anyhow!("Device missing ID field"))?;
-                    let serial_number = device["serial_number"].as_str().unwrap_or("unknown");
+                    let device_id = device.id;
+                    let serial_number = &device.serial_number;
 
-                    let mut device_labels =
-                        if let Some(existing_labels) = device["labels"].as_object() {
-                            existing_labels
-                                .iter()
-                                .map(|(k, v)| (k.clone(), v.as_str().unwrap_or("").to_string()))
-                                .collect::<std::collections::HashMap<String, String>>()
-                        } else {
-                            std::collections::HashMap::new()
-                        };
+                    let mut device_labels = device
+                        .labels
+                        .iter()
+                        .map(|(k, v)| (k.clone(), v.to_string()))
+                        .collect::<std::collections::HashMap<String, String>>();
 
                     for (key, value) in &new_labels_map {
                         device_labels.insert(key.clone(), value.clone());
                     }
 
-                    match api.update_device_labels(device_id, device_labels).await {
+                    match api
+                        .update_device_labels(device_id as u64, device_labels)
+                        .await
+                    {
                         Ok(()) => {
                             println!(
                                 "  {} [{}] - Labels updated",
@@ -1001,12 +984,15 @@ where
     Fut: std::future::Future<Output = anyhow::Result<(u64, u64)>>,
 {
     let devices = api
-        .get_devices(Some(serial_number.clone()), None, None)
+        .get_devices(DeviceFilter {
+            serial_number: Some(serial_number.clone()),
+            ..Default::default()
+        })
         .await?;
-    let parsed: Value = serde_json::from_str(&devices)?;
-    let id = parsed[0]["id"]
-        .as_u64()
-        .with_context(|| "Device not found")?;
+    let id = devices
+        .first()
+        .ok_or_else(|| anyhow::anyhow!("Device not found"))?
+        .id;
 
     println!(
         "{} for device [{}] {}",
@@ -1024,7 +1010,7 @@ where
     );
     pb.set_message("Sending request to device");
 
-    let (device_id, command_id) = send_command(id).await?;
+    let (device_id, command_id) = send_command(id as u64).await?;
 
     if nowait {
         pb.finish_and_clear();
@@ -1040,14 +1026,14 @@ where
 
     let result;
     loop {
-        let response = api.get_last_command(id).await?;
+        let response = api.get_last_command(id as u64).await?;
 
-        if response["fetched"].is_boolean() && response["fetched"].as_bool().unwrap_or(false) {
+        if response.fetched {
             pb.set_message("Command fetched by device");
         }
 
-        if response["response"].is_object() {
-            result = response["response"]["FreeForm"]["stdout"]
+        if let Some(response) = response.response {
+            result = response["FreeForm"]["stdout"]
                 .as_str()
                 .with_context(|| "Failed to get output from response")?
                 .to_string();
@@ -1077,12 +1063,12 @@ fn get_colored_arch(arch: &str) -> String {
     }
 }
 
-fn get_online_colored(serial_number: &str, last_seen: &str) -> String {
+fn get_online_colored(serial_number: &str, last_seen: &Option<DateTime<Utc>>) -> String {
     use chrono_humanize::HumanTime;
     let now = chrono::Utc::now();
 
-    match chrono::DateTime::parse_from_rfc3339(last_seen) {
-        Ok(parsed_time) => {
+    match last_seen {
+        Some(parsed_time) => {
             let duration = now.signed_duration_since(parsed_time.with_timezone(&chrono::Utc));
 
             if duration.num_minutes() < 5 {
@@ -1094,6 +1080,6 @@ fn get_online_colored(serial_number: &str, last_seen: &str) -> String {
                     .to_string()
             }
         }
-        Err(_) => format!("{} (Unknown)", serial_number).yellow().to_string(),
+        None => format!("{} (Unknown)", serial_number).yellow().to_string(),
     }
 }

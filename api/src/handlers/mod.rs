@@ -1,9 +1,8 @@
 pub mod packages;
 pub mod tags;
 
-use crate::State;
 use crate::db::DeviceWithToken;
-use crate::device::Device;
+use crate::{State, device::get_device_from_token};
 use axum::{
     async_trait,
     extract::{Extension, FromRequestParts},
@@ -39,7 +38,7 @@ where
             .await
             .map_err(|err| err.into_response())?;
 
-        let device = Device::get_device_from_token(bearer.token().to_string(), &state.pg_pool)
+        let device = get_device_from_token(bearer.token().to_string(), &state.pg_pool)
             .await
             .map_err(|err| {
                 error!("Database error: {:?}", err);
