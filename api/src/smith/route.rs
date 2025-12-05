@@ -173,9 +173,9 @@ pub async fn download_file(
             &state.config.packages_bucket_name,
             Some(dir_path),
             file_name,
-            &state.cloudfront_config.package_domain_name,
-            &state.cloudfront_config.package_key_pair_id,
-            &state.cloudfront_config.package_private_key,
+            &state.config.cloudfront.package_domain_name,
+            &state.config.cloudfront.package_key_pair_id,
+            &state.config.cloudfront.package_private_key,
         )
         .await
         .map_err(|err| {
@@ -187,14 +187,6 @@ pub async fn download_file(
             return Err(StatusCode::BAD_REQUEST);
         }
     };
-
-    // Get a signed link to the s3 file
-    // let response = storage::Storage::download_from_s3(bucket_name, Some(dir_path), file_name)
-    //     .await
-    //     .map_err(|err| {
-    //         error!("Failed to get signed link from S3 {:?}", err);
-    //         StatusCode::INTERNAL_SERVER_ERROR
-    //     })?;
 
     Ok(response)
 }
