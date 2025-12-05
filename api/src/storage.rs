@@ -87,7 +87,6 @@ impl Storage {
         let signed_url = get_signed_url(&cloudfront_url, &options)?;
 
         let response = axum::response::Response::builder()
-            .status(axum::http::StatusCode::FOUND)
             .header(axum::http::header::LOCATION, signed_url)
             .header("X-File-Size", content_length)
             .header(axum::http::header::ETAG, etag)
