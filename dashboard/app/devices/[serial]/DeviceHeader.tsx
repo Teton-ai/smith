@@ -1,12 +1,9 @@
 'use client';
 
 import React from 'react';
-import { useRouter } from 'next/navigation';
 import {
   Cpu,
   Wifi,
-  WifiOff,
-  Smartphone,
   Router,
   Signal,
   Tag,
@@ -298,28 +295,9 @@ const DeviceHeader: React.FC<DeviceHeaderProps> = ({ device, serial }) => {
     return diffMinutes <= 3 ? 'online' : 'offline';
   };
 
-  const getStatusTooltip = () => {
-    if (!device) return '';
-    
-    const lastSeenText = device.last_seen ? formatTimeAgo(device.last_seen) : 'Never';
-    return `Last seen: ${lastSeenText}`;
-  };
-
   const hasUpdatePending = () => {
     return device && device.release_id && device.target_release_id && device.release_id !== device.target_release_id;
   };
-
-  const getStatusDot = (status: string) => {
-    switch (status) {
-      case 'online':
-        return 'bg-green-500 animate-pulse';
-      case 'offline':
-        return 'bg-red-500';
-      default:
-        return 'bg-gray-500';
-    }
-  };
-
 
   const getNetworkQualityTooltip = () => {
     const status = getDeviceStatus();
@@ -434,7 +412,7 @@ const DeviceHeader: React.FC<DeviceHeaderProps> = ({ device, serial }) => {
               </div>
             </Tooltip>
             {hasUpdatePending() && (
-              <Tooltip content={`Update pending: ${device.release?.version || device.release_id} → ${device.target_release?.version || device.target_release_id}`}>
+              <Tooltip content={`Update pending: ${device.release?.distribution_name}@${device.release?.version || device.release_id} → ${device.target_release?.distribution_name}@${device.target_release?.version || device.target_release_id}`}>
                 <span className="px-2 py-1 text-xs font-medium bg-orange-100 text-orange-800 rounded-full cursor-help">
                   Outdated
                 </span>
