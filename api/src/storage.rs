@@ -1,5 +1,5 @@
 use std::borrow::Cow;
-use std::time::{Duration, SystemTime};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use axum::response::Response;
 use cloudfront_sign::{SignedOptions, get_signed_url};
@@ -74,9 +74,12 @@ impl Storage {
         let cloudfront_url = format!("{}/package-download/{}", cdn_domain, object_key);
 
         // Generate CDN signed URL
+        let since_epoch = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
+
         let options = SignedOptions {
             key_pair_id: Cow::from(cdn_key_pair_id.to_string()),
             private_key: Cow::from(cdn_private_key.to_string()),
+            date_less_than: since_epoch.as_secs() + (60 * 60), // 1 hour
             // date_less_than: expiration_timeout,
             ..Default::default()
         };
