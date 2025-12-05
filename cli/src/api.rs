@@ -140,14 +140,16 @@ impl SmithAPI {
         let resp = client
             .get(format!("{}/devices/{device_id}/commands", self.domain))
             .header("Authorization", format!("Bearer {}", &self.bearer_token))
-            .send();
+            .send()
+            .await?
+            .error_for_status()?;
 
-        let commands: CommandsPaginated = resp.await?.json().await?;
+        let commands: CommandsPaginated = resp.json().await?;
 
         Ok(commands
             .commands
             .first()
-            .ok_or_else(|| anyhow::anyhow!("No commands found for device"))?
+            .ok_or_else(|| anyhow::anyhow!("No commands found for device {device_id}"))?
             .clone())
     }
 

@@ -989,7 +989,10 @@ where
             ..Default::default()
         })
         .await?;
-    let id = devices[0].id;
+    let id = devices
+        .first()
+        .ok_or_else(|| anyhow::anyhow!("Device not found"))?
+        .id;
 
     println!(
         "{} for device [{}] {}",
