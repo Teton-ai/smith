@@ -1,11 +1,10 @@
 use std::borrow::Cow;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use axum::response::Response;
 use cloudfront_sign::{SignedOptions, get_signed_url};
 use s3::creds::Credentials;
 use s3::{Bucket, Region};
-use tracing::info;
 
 pub struct Storage;
 
@@ -87,7 +86,6 @@ impl Storage {
         let signed_url = get_signed_url(&cloudfront_url, &options)?;
 
         let response = axum::response::Response::builder()
-            .status(axum::http::StatusCode::FOUND)
             .header(axum::http::header::LOCATION, signed_url)
             .header("X-File-Size", content_length)
             .header(axum::http::header::ETAG, etag)

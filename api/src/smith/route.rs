@@ -166,7 +166,7 @@ pub async fn download_file(
         )
         .await
         .map_err(|err| {
-            error!("Failed to get signed link from S3 {:?}", err);
+            error!("Failed to get signed link from CDN {:?}", err);
             StatusCode::INTERNAL_SERVER_ERROR
         })?,
         // TODO: need to implement asset downloading or put
@@ -182,7 +182,7 @@ pub async fn download_file(
         // )
         // .await
         // .map_err(|err| {
-        //     error!("Failed to get signed link from S3 {:?}", err);
+        //     error!("Failed to get signed link from CDN {:?}", err);
         //     StatusCode::INTERNAL_SERVER_ERROR
         // })?,
         _ => {
