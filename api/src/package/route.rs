@@ -1,10 +1,19 @@
 use crate::State;
+use crate::config::Config;
 use crate::package::Package;
-use axum::extract::Path;
+use axum::body::Body;
+use axum::extract::{Path, Query};
 use axum::http::StatusCode;
+use axum::response::{IntoResponse, Response};
 use axum::{Extension, Json};
 use axum_typed_multipart::{FieldData, TryFromMultipart, TypedMultipart};
+use futures::TryStreamExt;
+use s3::Bucket;
+use s3::creds::Credentials;
+use s3::error::S3Error;
+use serde::Deserialize;
 use smith::utils::schema;
+use std::error::Error;
 use std::io::{Cursor, Read};
 use tempfile::NamedTempFile;
 use tracing::{debug, error};
@@ -136,4 +145,76 @@ pub async fn get_package_latest(
         Some(pkg) => Ok(Json(pkg)),
         None => Err(StatusCode::NOT_FOUND),
     }
+}
+
+/// Streams a package from S3 by its file name.
+/// Returns a streaming response with the package data.
+pub async fn stream_package_from_s3(
+    file_name: &str,
+    config: &Config,
+) -> Result<Response, Response> {
+    let bucket = Bucket::new(
+        &config.packages_bucket_name,
+        config.aws_region.parse().map_err(|e| {
+            error!("Failed to parse AWS region: {:?}", e);
+            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+        })?,
+        Credentials::default().map_err(|e| {
+            error!("Failed to get AWS credentials: {:?}", e);
+            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+        })?,
+    )
+    .map_err(|e| {
+        error!("Failed to create S3 bucket: {:?}", e);
+        StatusCode::INTERNAL_SERVER_ERROR.into_response()
+    })?;
+
+    let stream = bucket.get_object_stream(file_name).await.map_err(|e| {
+        error!("Failed to get package from S3: {:?}", e);
+        match e {
+            S3Error::HttpFailWithBody(404, _) => (
+                StatusCode::NOT_FOUND,
+                format!("{} package not found", file_name),
+            )
+                .into_response(),
+            _ => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+        }
+    })?;
+
+    let adapted_stream = stream
+        .bytes
+        .map_ok(|data| data)
+        .map_err(|e| Box::new(e) as Box<dyn Error + Send + Sync + 'static>);
+
+    let body = Body::from_stream(adapted_stream);
+
+    Ok(Response::new(body).into_response())
+}
+
+#[derive(Debug, Deserialize)]
+pub struct DownloadPackageQuery {
+    pub name: String,
+}
+
+#[utoipa::path(
+    get,
+    path = "/packages/download",
+    params(
+        ("name" = String, Query, description = "File name of the package to download")
+    ),
+    responses(
+        (status = 200, description = "Package data", content_type = "application/octet-stream"),
+        (status = 404, description = "Package not found"),
+        (status = 500, description = "Internal server error")
+    ),
+    security(
+        ("auth_token" = [])
+    ),
+    tag = PACKAGES_TAG
+)]
+pub async fn download_package(
+    Extension(state): Extension<State>,
+    Query(params): Query<DownloadPackageQuery>,
+) -> Result<Response, Response> {
+    stream_package_from_s3(&params.name, state.config).await
 }

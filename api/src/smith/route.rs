@@ -215,7 +215,7 @@ pub async fn fetch_package(
     params: Query<FetchPackageQuery>,
 ) -> Result<Response, Response> {
     debug!("Fetching package {}", &params.name);
-    crate::handlers::packages::stream_package_from_s3(&params.name, state.config).await
+    crate::package::route::stream_package_from_s3(&params.name, state.config).await
 }
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]

@@ -277,6 +277,7 @@ async fn start_main_server(config: &'static Config, authorization: Authorization
             get(handlers::packages::get_package_by_id)
                 .delete(handlers::packages::delete_package_by_id),
         )
+        .routes(routes!(package::route::download_package))
         .routes(routes!(device::route::get_tag_for_device))
         .routes(routes!(
             device::route::delete_tag_from_device,
