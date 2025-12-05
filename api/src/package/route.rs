@@ -81,21 +81,46 @@ pub async fn release_package(
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
 
-    let mut cursor = Cursor::new(&buf);
-    let mut pkg = debpkg::DebPkg::parse(&mut cursor).unwrap();
+    let (pkg_name, pkg_version, pkg_arch) = if file_name.ends_with(".AppImage") {
+        parse_appimage_filename(&file_name).ok_or_else(|| {
+            error!("Failed to parse AppImage filename: {}", file_name);
+            StatusCode::BAD_REQUEST
+        })?
+    } else {
+        let mut cursor = Cursor::new(&buf);
+        let mut pkg = debpkg::DebPkg::parse(&mut cursor).map_err(|err| {
+            error!("Failed to parse deb package: {:?}", err);
+            StatusCode::BAD_REQUEST
+        })?;
 
-    let control_tar = pkg.control().unwrap();
-    let control = debpkg::Control::extract(control_tar).unwrap();
-    let arch = control.get("Architecture").unwrap();
+        let control_tar = pkg.control().map_err(|err| {
+            error!("Failed to get control from deb package: {:?}", err);
+            StatusCode::BAD_REQUEST
+        })?;
+        let control = debpkg::Control::extract(control_tar).map_err(|err| {
+            error!("Failed to extract control from deb package: {:?}", err);
+            StatusCode::BAD_REQUEST
+        })?;
+        let arch = control.get("Architecture").ok_or_else(|| {
+            error!("Missing Architecture field in deb package");
+            StatusCode::BAD_REQUEST
+        })?;
+        (
+            control.name().to_string(),
+            control.version().to_string(),
+            arch.to_string(),
+        )
+    };
+
     debug!("File Name: {}", file_name);
-    debug!("Package Name: {}", control.name());
-    debug!("Package Version: {}", control.version());
-    debug!("Package Architecture: {}", arch);
+    debug!("Package Name: {}", pkg_name);
+    debug!("Package Version: {}", pkg_version);
+    debug!("Package Architecture: {}", pkg_arch);
 
     Package::new(
-        control.name(),
-        control.version(),
-        arch,
+        &pkg_name,
+        &pkg_version,
+        &pkg_arch,
         &file_name,
         &buf,
         state.config,
@@ -107,6 +132,20 @@ pub async fn release_package(
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
     Ok(StatusCode::OK)
+}
+
+/// Parses AppImage filename in format "Name_Version_Arch.AppImage"
+/// e.g. "Teton Craft Table_0.1.0_amd64.AppImage" -> ("Teton Craft Table", "0.1.0", "amd64")
+fn parse_appimage_filename(filename: &str) -> Option<(String, String, String)> {
+    let name_without_ext = filename.strip_suffix(".AppImage")?;
+    let parts: Vec<&str> = name_without_ext.rsplitn(3, '_').collect();
+    if parts.len() != 3 {
+        return None;
+    }
+    let arch = parts[0].to_string();
+    let version = parts[1].to_string();
+    let name = parts[2].to_string();
+    Some((name, version, arch))
 }
 
 #[utoipa::path(
