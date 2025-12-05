@@ -10,15 +10,10 @@ use axum::extract::{ConnectInfo, Multipart, Path, Query};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::{Extension, Json};
-use futures::TryStreamExt;
-use s3::Bucket;
-use s3::creds::Credentials;
-use s3::error::S3Error;
 use serde::{Deserialize, Serialize};
 use smith::utils::schema::{
     DeviceRegistration, DeviceRegistrationResponse, HomePost, HomePostResponse, Package,
 };
-use std::error::Error;
 use std::net::SocketAddr;
 use std::time::SystemTime;
 use tracing::{debug, error, info};
@@ -221,46 +216,8 @@ pub async fn fetch_package(
     Extension(state): Extension<State>,
     params: Query<FetchPackageQuery>,
 ) -> Result<Response, Response> {
-    let deb_package_name = &params.name;
-    debug!("Fetching package {}", &deb_package_name);
-    let bucket = Bucket::new(
-        &state.config.packages_bucket_name,
-        state
-            .config
-            .aws_region
-            .parse()
-            .expect("error: failed to parse AWS region"),
-        Credentials::default().unwrap(),
-    )
-    .map_err(|e| {
-        error!("{:?}", e);
-        StatusCode::INTERNAL_SERVER_ERROR.into_response()
-    })?;
-
-    let stream = bucket
-        .get_object_stream(&deb_package_name)
-        .await
-        .map_err(|e| {
-            error!("{:?}", e);
-            match e {
-                S3Error::HttpFailWithBody(404, _) => (
-                    StatusCode::NOT_FOUND,
-                    format!("{} package not found", &deb_package_name),
-                )
-                    .into_response(),
-
-                _ => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
-            }
-        })?;
-
-    let adapted_stream = stream
-        .bytes
-        .map_ok(|data| data)
-        .map_err(|e| Box::new(e) as Box<dyn Error + Send + Sync + 'static>);
-
-    let stream = Body::from_stream(adapted_stream);
-
-    Ok(Response::new(stream).into_response())
+    debug!("Fetching package {}", &params.name);
+    crate::package::route::stream_package_from_s3(&params.name, state.config).await
 }
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
