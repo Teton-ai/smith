@@ -218,6 +218,7 @@ async fn start_main_server(config: &'static Config, authorization: Authorization
             package::route::get_packages,
             package::route::release_package
         ))
+        .routes(routes!(package::route::get_package_latest))
         .routes(routes!(modem::route::get_modem_list))
         .routes(routes!(modem::route::get_modem_by_id))
         .routes(routes!(

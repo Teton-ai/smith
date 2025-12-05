@@ -1,5 +1,6 @@
 use crate::State;
 use crate::package::Package;
+use axum::extract::Path;
 use axum::http::StatusCode;
 use axum::{Extension, Json};
 use axum_typed_multipart::{FieldData, TryFromMultipart, TypedMultipart};
@@ -97,4 +98,42 @@ pub async fn release_package(
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
     Ok(StatusCode::OK)
+}
+
+#[utoipa::path(
+    get,
+    path = "/packages/{package_name}/latest",
+    params(
+        ("package_name" = String, Path, description = "Package name")
+    ),
+    responses(
+        (status = 200, description = "Latest version of the package", body = Package),
+        (status = 404, description = "Package not found"),
+        (status = 500, description = "Failure", body = String),
+    ),
+    security(
+        ("auth_token" = [])
+    ),
+    tag = PACKAGES_TAG
+)]
+pub async fn get_package_latest(
+    Path(package_name): Path<String>,
+    Extension(state): Extension<State>,
+) -> axum::response::Result<Json<Package>, StatusCode> {
+    let package = sqlx::query_as!(
+        Package,
+        "SELECT * FROM package WHERE name = $1 ORDER BY created_at DESC LIMIT 1",
+        package_name
+    )
+    .fetch_optional(&state.pg_pool)
+    .await
+    .map_err(|err| {
+        error!("Failed to get latest package {err}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    match package {
+        Some(pkg) => Ok(Json(pkg)),
+        None => Err(StatusCode::NOT_FOUND),
+    }
 }
