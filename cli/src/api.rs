@@ -26,7 +26,7 @@ impl SmithAPI {
     pub async fn get_devices(
         &self,
         serial_number: Option<String>,
-        labels: Option<HashMap<String, String>>,
+        labels: Option<Vec<String>>,
         online: Option<bool>,
     ) -> Result<String> {
         let client = Client::new();
@@ -37,9 +37,9 @@ impl SmithAPI {
             query_params.push(("serial_number", sn));
         }
 
-        if let Some(labels_map) = labels {
-            for (key, value) in labels_map {
-                query_params.push(("labels", format!("{}={}", key, value)));
+        if let Some(labels) = labels {
+            for label in labels {
+                query_params.push(("labels", label));
             }
         }
 

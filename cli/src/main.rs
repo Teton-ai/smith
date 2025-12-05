@@ -234,8 +234,6 @@ async fn resolve_target_devices(
         }
         Ok(devices_vec)
     } else {
-        let labels_map = parse_label_filters(labels)?;
-
         let online_filter = if online {
             Some(true)
         } else if offline {
@@ -244,7 +242,7 @@ async fn resolve_target_devices(
             None
         };
 
-        let devices_json = api.get_devices(None, labels_map, online_filter).await?;
+        let devices_json = api.get_devices(None, Some(labels), online_filter).await?;
         serde_json::from_str(&devices_json).with_context(|| "Failed to parse devices JSON")
     }
 }
@@ -322,24 +320,6 @@ async fn main() -> anyhow::Result<()> {
 
                     let api = SmithAPI::new(secrets, &config);
 
-                    let labels_map = if !labels.is_empty() {
-                        let mut map = std::collections::HashMap::new();
-                        for label_str in labels {
-                            let parts: Vec<&str> = label_str.splitn(2, '=').collect();
-                            if parts.len() == 2 {
-                                map.insert(parts[0].to_string(), parts[1].to_string());
-                            } else {
-                                return Err(anyhow::anyhow!(
-                                    "Invalid label format: '{}'. Expected 'key=value'",
-                                    label_str
-                                ));
-                            }
-                        }
-                        Some(map)
-                    } else {
-                        None
-                    };
-
                     let online_filter = if online {
                         Some(true)
                     } else if offline {
@@ -348,7 +328,7 @@ async fn main() -> anyhow::Result<()> {
                         None
                     };
 
-                    let devices = api.get_devices(None, labels_map, online_filter).await?;
+                    let devices = api.get_devices(None, Some(labels), online_filter).await?;
                     if json {
                         println!("{}", devices);
                         return Ok(());
