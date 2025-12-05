@@ -1,11 +1,11 @@
-use std::collections::HashMap;
-
-use crate::{ip_address::IpAddressInfo, modem::Modem, release::Release, system::SystemInfo};
+use crate::{ip_address::IpAddressInfo, modem::Modem, release::Release};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use sqlx::types::{
     Json,
     chrono::{DateTime, Utc},
 };
+use std::collections::HashMap;
 use utoipa::ToSchema;
 
 #[derive(Debug, Serialize, Deserialize, utoipa::ToSchema)]
@@ -28,8 +28,7 @@ pub struct Device {
     pub has_token: Option<bool>,
     pub release_id: Option<i32>,
     pub target_release_id: Option<i32>,
-    #[schema(value_type = Option<SystemInfo>)]
-    pub system_info: Option<Json<SystemInfo>>,
+    pub system_info: Option<Value>,
     pub modem_id: Option<i32>,
     pub ip_address_id: Option<i32>,
     pub ip_address: Option<IpAddressInfo>,

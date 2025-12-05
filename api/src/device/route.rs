@@ -16,7 +16,6 @@ use axum_extra::extract::Query;
 use models::device::{Device, DeviceFilter, DeviceNetwork};
 use models::modem::Modem;
 use models::release::Release;
-use models::system::SystemInfo;
 use serde::Deserialize;
 use smith::utils::schema;
 use smith::utils::schema::SafeCommandRequest;
@@ -334,7 +333,7 @@ pub async fn get_devices(
             d.token IS NOT NULL as has_token,
             d.release_id,
             d.target_release_id,
-            d.system_info AS "system_info: SqlxJson<SystemInfo>",
+            d.system_info,
             d.modem_id,
             d.ip_address_id,
             ip.id as "ip_id?",
@@ -1841,7 +1840,7 @@ pub async fn get_device_info(
         d.token IS NOT NULL as has_token,
         d.release_id,
         d.target_release_id,
-        d.system_info AS "system_info: SqlxJson<SystemInfo>",
+        d.system_info,
         d.modem_id,
         d.ip_address_id,
         ip.id as "ip_id?",

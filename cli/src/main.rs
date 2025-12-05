@@ -9,12 +9,13 @@ use crate::cli::{Cli, Commands, DevicesCommands, DistroCommands, ServiceCommands
 use crate::print::TablePrint;
 use anyhow::Context;
 use api::SmithAPI;
+use chrono::{DateTime, Utc};
 use clap::{CommandFactory, Parser};
 use clap_complete::generate;
 use colored::Colorize;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
+use models::deployment::DeploymentStatus;
 use models::device::{Device, DeviceFilter};
-use serde_json::Value;
 use std::{collections::HashSet, io, thread, time::Duration};
 use termion::raw::IntoRawMode;
 use tokio::sync::oneshot;
@@ -355,12 +356,18 @@ async fn main() -> anyhow::Result<()> {
                                 .join(", ");
 
                             vec![
-                                get_online_colored(
-                                    &d.serial_number,
-                                    &d.last_seen.unwrap_or_default().to_string(),
-                                ),
+                                get_online_colored(&d.serial_number, &d.last_seen),
                                 labels_str,
-                                d.system_info.as_ref().unwrap().smith.version.to_string(),
+                                d.system_info
+                                    .as_ref()
+                                    .map(|info| {
+                                        info["smith"]["version"]
+                                            .as_str()
+                                            .unwrap_or("")
+                                            .parse()
+                                            .unwrap()
+                                    })
+                                    .unwrap_or_default(),
                             ]
                         })
                         .collect();
@@ -526,21 +533,15 @@ async fn main() -> anyhow::Result<()> {
 
                     let distros = api.get_distributions().await?;
                     if json {
-                        println!("{}", distros);
+                        println!("{}", serde_json::to_string_pretty(&distros)?);
                         return Ok(());
                     }
-                    let parsed_distros: Vec<Value> = serde_json::from_str(&distros)
-                        .with_context(|| "Failed to parse distributions JSON")?;
-                    let rows: Vec<Vec<String>> = parsed_distros
+                    let rows: Vec<Vec<String>> = distros
                         .iter()
                         .map(|d| {
                             vec![
-                                format!(
-                                    "{} ({})",
-                                    d["name"].as_str().unwrap_or(""),
-                                    get_colored_arch(d["architecture"].as_str().unwrap_or(""))
-                                ),
-                                d["description"].as_str().unwrap_or("").to_string(),
+                                format!("{} ({})", d.name, get_colored_arch(&d.architecture)),
+                                d.description.to_owned().unwrap_or_default(),
                             ]
                         })
                         .collect();
@@ -690,18 +691,17 @@ async fn main() -> anyhow::Result<()> {
                             .await?;
 
                         // Check if the deployment is done
-                        if let Some(status) = deployment.get("status").and_then(|s| s.as_str()) {
-                            println!("Current status: {}", status);
+                        let status = deployment.status;
+                        println!("Current status: {}", status);
 
-                            if status == "Done" {
-                                println!("Deployment completed successfully!");
-                                return Ok(());
-                            }
+                        if status == DeploymentStatus::Done {
+                            println!("Deployment completed successfully!");
+                            return Ok(());
+                        }
 
-                            // If status is "failed" or any other terminal state, we can exit early
-                            if status == "Failed" {
-                                return Err(anyhow::anyhow!("Deployment failed"));
-                            }
+                        // If status is "failed" or any other terminal state, we can exit early
+                        if status == DeploymentStatus::Failed {
+                            return Err(anyhow::anyhow!("Deployment failed"));
                         }
 
                         // Wait before the next check
@@ -713,7 +713,7 @@ async fn main() -> anyhow::Result<()> {
                     }
                 } else {
                     let value = api.get_release_info(release_number).await?;
-                    println!("{}", value);
+                    println!("{}", serde_json::to_string_pretty(&value)?);
                     return Ok(());
                 }
             }
@@ -1067,12 +1067,12 @@ fn get_colored_arch(arch: &str) -> String {
     }
 }
 
-fn get_online_colored(serial_number: &str, last_seen: &str) -> String {
+fn get_online_colored(serial_number: &str, last_seen: &Option<DateTime<Utc>>) -> String {
     use chrono_humanize::HumanTime;
     let now = chrono::Utc::now();
 
-    match chrono::DateTime::parse_from_rfc3339(last_seen) {
-        Ok(parsed_time) => {
+    match last_seen {
+        Some(parsed_time) => {
             let duration = now.signed_duration_since(parsed_time.with_timezone(&chrono::Utc));
 
             if duration.num_minutes() < 5 {
@@ -1084,6 +1084,6 @@ fn get_online_colored(serial_number: &str, last_seen: &str) -> String {
                     .to_string()
             }
         }
-        Err(_) => format!("{} (Unknown)", serial_number).yellow().to_string(),
+        None => format!("{} (Unknown)", serial_number).yellow().to_string(),
     }
 }

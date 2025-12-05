@@ -1,79 +1,157 @@
-use models::system::{
-    ConnectionStatus, DeviceTree, Network, NetworkItem, OsRelease, Proc, ProcStat, Smith,
-    SystemInfo,
-};
 use pnet::datalink;
 use pnet::datalink::NetworkInterface;
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use serde_json::json;
 use std::collections::HashMap;
+use tracing::{error, info};
 
-pub async fn new_system_info() -> SystemInfo {
-    let os_release = tokio::fs::read_to_string("/etc/os-release")
-        .await
-        .unwrap_or_default();
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Smith {
+    pub version: String,
+}
 
-    SystemInfo {
-        smith: Smith {
-            version: env!("CARGO_PKG_VERSION").to_string(),
-        },
-        hostname: tokio::fs::read_to_string("/etc/hostname")
+#[derive(Debug, Serialize, Deserialize)]
+pub struct OsRelease {
+    pub pretty_name: String,
+    pub version_id: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct DeviceTree {
+    pub serial_number: String,
+    pub model: Option<String>,
+    pub compatible: Option<Vec<String>>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ProcStat {
+    pub btime: u64,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Proc {
+    pub version: String,
+    pub stat: ProcStat,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct NetworkItem {
+    pub ips: Vec<String>,
+    pub mac_address: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Network {
+    pub interfaces: HashMap<String, NetworkItem>,
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Default)]
+pub struct NetworkConfig {
+    pub connection_profile_name: String,
+    pub connection_profile_uuid: String,
+    pub device_type: String,
+    pub device_name: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Default)]
+pub struct ConnectionStatus {
+    pub connection_name: String,
+    pub connection_state: String,
+    pub device_type: String,
+    pub device_name: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct SystemInfo {
+    pub smith: Smith,
+    pub hostname: String,
+    pub os_release: OsRelease,
+    pub proc: Proc,
+    pub network: Network,
+    pub device_tree: DeviceTree,
+    pub connection_statuses: Vec<ConnectionStatus>,
+}
+
+impl SystemInfo {
+    pub async fn new() -> SystemInfo {
+        let os_release = tokio::fs::read_to_string("/etc/os-release")
             .await
-            .unwrap_or_else(|_| "Unknown".to_string())
-            .trim()
-            .to_string(),
-        os_release: OsRelease {
-            pretty_name: os_release
-                .lines()
-                .find(|&line| line.starts_with("PRETTY_NAME="))
-                .map(|s| {
-                    s.trim_start_matches("PRETTY_NAME=")
-                        .trim_matches('"')
-                        .to_string()
-                })
-                .unwrap_or_else(|| "Unknown".to_string()),
-            version_id: os_release
-                .lines()
-                .find(|&line| line.starts_with("VERSION_ID="))
-                .map(|s| {
-                    s.trim_start_matches("VERSION_ID=")
-                        .trim_matches('"')
-                        .to_string()
-                })
-                .unwrap_or_else(|| "Unknown".to_string()),
-        },
-        proc: Proc {
-            version: tokio::fs::read_to_string("/proc/version")
-                .await
-                .unwrap_or_else(|_| "Unknown".to_string())
-                .split_whitespace()
-                .nth(2)
-                .unwrap_or("Unknown")
-                .to_string(),
-            stat: ProcStat {
-                btime: get_last_boot_time().await,
+            .unwrap_or_default();
+
+        SystemInfo {
+            smith: Smith {
+                version: env!("CARGO_PKG_VERSION").to_string(),
             },
-        },
-        network: get_network_info().await,
-        device_tree: DeviceTree {
-            serial_number: tokio::fs::read_to_string("/proc/device-tree/serial-number")
+            hostname: tokio::fs::read_to_string("/etc/hostname")
                 .await
                 .unwrap_or_else(|_| "Unknown".to_string())
-                .trim_matches('\0')
+                .trim()
                 .to_string(),
-            model: tokio::fs::read_to_string("/proc/device-tree/model")
-                .await
-                .ok()
-                .map(|s| s.trim_matches('\0').to_string()),
-            compatible: tokio::fs::read_to_string("/proc/device-tree/compatible")
-                .await
-                .ok()
-                .map(|s| {
-                    s.split('\0')
-                        .filter(|s| !s.is_empty())
-                        .map(|s| s.trim().to_string())
-                        .collect()
-                }),
-        },
-        connection_statuses: get_connection_statuses(),
+            os_release: OsRelease {
+                pretty_name: os_release
+                    .lines()
+                    .find(|&line| line.starts_with("PRETTY_NAME="))
+                    .map(|s| {
+                        s.trim_start_matches("PRETTY_NAME=")
+                            .trim_matches('"')
+                            .to_string()
+                    })
+                    .unwrap_or_else(|| "Unknown".to_string()),
+                version_id: os_release
+                    .lines()
+                    .find(|&line| line.starts_with("VERSION_ID="))
+                    .map(|s| {
+                        s.trim_start_matches("VERSION_ID=")
+                            .trim_matches('"')
+                            .to_string()
+                    })
+                    .unwrap_or_else(|| "Unknown".to_string()),
+            },
+            proc: Proc {
+                version: tokio::fs::read_to_string("/proc/version")
+                    .await
+                    .unwrap_or_else(|_| "Unknown".to_string())
+                    .split_whitespace()
+                    .nth(2)
+                    .unwrap_or("Unknown")
+                    .to_string(),
+                stat: ProcStat {
+                    btime: get_last_boot_time().await,
+                },
+            },
+            network: get_network_info().await,
+            device_tree: DeviceTree {
+                serial_number: tokio::fs::read_to_string("/proc/device-tree/serial-number")
+                    .await
+                    .unwrap_or_else(|_| "Unknown".to_string())
+                    .trim_matches('\0')
+                    .to_string(),
+                model: tokio::fs::read_to_string("/proc/device-tree/model")
+                    .await
+                    .ok()
+                    .map(|s| s.trim_matches('\0').to_string()),
+                compatible: tokio::fs::read_to_string("/proc/device-tree/compatible")
+                    .await
+                    .ok()
+                    .map(|s| {
+                        s.split('\0')
+                            .filter(|s| !s.is_empty())
+                            .map(|s| s.trim().to_string())
+                            .collect()
+                    }),
+            },
+            connection_statuses: get_connection_statuses(),
+        }
+    }
+    pub fn print(&self) {
+        match serde_json::to_string_pretty(&self) {
+            Ok(json) => info!("{}", json),
+            Err(_) => error!("Failed to parse system info"),
+        };
+    }
+    pub fn to_value(&self) -> Value {
+        serde_json::to_value(self).unwrap_or_else(|_| json!({}))
     }
 }
 

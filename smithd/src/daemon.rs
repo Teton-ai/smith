@@ -9,14 +9,11 @@ use crate::postman::PostmanHandle;
 use crate::shutdown::ShutdownHandler;
 use crate::tunnel::TunnelHandle;
 use crate::updater::UpdaterHandle;
-use crate::utils::system::new_system_info;
-use tracing::{error, info};
+use crate::utils::system::SystemInfo;
+use tracing::info;
 
 pub async fn run() {
-    match serde_json::to_string_pretty(&new_system_info().await) {
-        Ok(json) => info!("{}", json),
-        Err(_) => error!("Failed to parse system info"),
-    };
+    SystemInfo::new().await.print();
 
     let shutdown = ShutdownHandler::new();
 

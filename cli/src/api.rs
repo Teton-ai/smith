@@ -1,5 +1,10 @@
 use anyhow::Result;
-use models::device::{Device, DeviceFilter};
+use models::{
+    deployment::Deployment,
+    device::{Device, DeviceFilter},
+    distribution::Distribution,
+    release::Release,
+};
 use reqwest::Client;
 use serde_json::Value;
 use smith::utils::schema;
@@ -37,22 +42,12 @@ impl SmithAPI {
             .send()
             .await?;
 
-        let devices: serde_json::Value = resp.json().await?;
+        let devices = resp.json().await?;
 
-        for (i, device) in devices.as_array().unwrap().iter().enumerate() {
-            match serde_json::from_value::<Device>(device.clone()) {
-                Ok(_) => {}
-                Err(e) => {
-                    println!("ERR {i} {e:?}\n{:#?}", device);
-                    panic!()
-                }
-            }
-        }
-
-        Ok(serde_json::from_value(devices)?)
+        Ok(devices)
     }
 
-    pub async fn get_release_info(&self, release_id: String) -> Result<Value> {
+    pub async fn get_release_info(&self, release_id: String) -> Result<Release> {
         let client = Client::new();
 
         let resp = client
@@ -63,7 +58,7 @@ impl SmithAPI {
         Ok(resp.await?.error_for_status()?.json().await?)
     }
 
-    pub async fn deploy_release(&self, release_id: String) -> Result<Value> {
+    pub async fn deploy_release(&self, release_id: String) -> Result<Deployment> {
         let client = Client::new();
 
         let resp = client
@@ -79,7 +74,7 @@ impl SmithAPI {
         Ok(deployment)
     }
 
-    pub async fn deploy_release_check_done(&self, release_id: String) -> Result<Value> {
+    pub async fn deploy_release_check_done(&self, release_id: String) -> Result<Deployment> {
         let client = Client::new();
 
         let resp = client
@@ -95,7 +90,7 @@ impl SmithAPI {
         Ok(deployment)
     }
 
-    pub async fn get_distributions(&self) -> Result<String> {
+    pub async fn get_distributions(&self) -> Result<Vec<Distribution>> {
         let client = Client::new();
 
         let resp = client
@@ -103,7 +98,7 @@ impl SmithAPI {
             .header("Authorization", &self.bearer_token)
             .send();
 
-        let distros = resp.await?.text().await?;
+        let distros = resp.await?.json().await?;
 
         Ok(distros)
     }

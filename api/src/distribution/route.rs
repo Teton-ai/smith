@@ -1,11 +1,11 @@
 use crate::State;
 use crate::device::{LeanDevice, LeanResponse};
-use crate::distribution::Distribution;
 use crate::release::get_latest_distribution_release;
 use crate::user::CurrentUser;
 use axum::extract::Path;
 use axum::http::StatusCode;
 use axum::{Extension, Json};
+use models::distribution::Distribution;
 use models::release::Release;
 use serde::Deserialize;
 use tracing::error;
