@@ -177,7 +177,7 @@ impl DownloaderHandle {
         remote_file: &str,
         local_file: &str,
         rate: f64,
-    ) -> anyhow::Result<String> {
+    ) -> anyhow::Result<()> {
         // unwrap because if this fails then we are in a bad state
         self.sender
             .send(DownloaderMessage::Download {
@@ -189,7 +189,7 @@ impl DownloaderHandle {
             .await
             .unwrap();
 
-        Ok("Download started, not waiting for result".to_string())
+        Ok(())
     }
 
     pub async fn download_blocking(

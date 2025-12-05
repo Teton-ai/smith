@@ -149,6 +149,7 @@ struct SmithApiDoc;
 
 async fn start_main_server(config: &'static Config, authorization: AuthorizationConfig) {
     info!("Starting Smith API v{}", env!("CARGO_PKG_VERSION"));
+
     // set up connection pool
     let pool = PgPoolOptions::new()
         .max_connections(100)

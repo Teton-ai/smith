@@ -37,10 +37,10 @@ thiserror = "1.0.65"
 tokio = { version = "1.41.0", features = ["full"] }
 tower = { version = "0.5.1" }
 tower-http = { version = "0.6.1", features = [
-    "compression-full",
-    "decompression-full",
-    "cors",
-    "trace"
+  "compression-full",
+  "decompression-full",
+  "cors",
+  "trace",
 ] }
 tracing = "0.1.40"
 tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
@@ -54,3 +54,4 @@ axum_typed_multipart = { version = "0.13.1" }
 tempfile = "3.13.0"
 tokio-stream = { version = "0.1.16", features = ["sync"] }
 toml = "0.8.20"
+cloudfront_sign = "0.4.1"
