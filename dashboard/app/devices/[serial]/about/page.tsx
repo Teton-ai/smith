@@ -271,8 +271,20 @@ const DeviceAboutPage = () => {
                 </div>
               )}
 
-              {/* Target Release */}
+              {/* Target Distribution */}
               {device.target_release && device.target_release_id !== device.release_id && (
+                <>
+                <div className="flex justify-between">
+                  <span className="text-gray-700 flex items-center">
+                    <GitBranch className="w-4 h-4 text-purple-400 mr-2" />
+                    Target Distribution
+                  </span>
+                  <span className="font-mono text-sm text-gray-900">
+                    {device.target_release.distribution_name}
+                  </span>
+                </div>
+
+              {/* Target Release */}
                 <div className="flex justify-between">
                   <span className="text-gray-700 flex items-center">
                     <Tag className="w-4 h-4 text-purple-400 mr-2" />
@@ -282,6 +294,7 @@ const DeviceAboutPage = () => {
                     {device.target_release.version}
                   </span>
                 </div>
+              </>
               )}
 
               {/* Agent Version */}
