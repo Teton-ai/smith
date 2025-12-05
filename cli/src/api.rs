@@ -1,4 +1,5 @@
 use anyhow::Result;
+use models::device::{Device, DeviceFilter};
 use reqwest::Client;
 use serde_json::Value;
 use smith::utils::schema;
@@ -23,39 +24,32 @@ impl SmithAPI {
         }
     }
 
-    pub async fn get_devices(
-        &self,
-        serial_number: Option<String>,
-        labels: Option<HashMap<String, String>>,
-        online: Option<bool>,
-    ) -> Result<String> {
+    pub async fn get_devices(&self, query: DeviceFilter) -> Result<Vec<Device>> {
         let client = Client::new();
 
-        let mut query_params: Vec<(&str, String)> = vec![];
+        let resp = client
+            .get(format!(
+                "{}/devices?{}",
+                self.domain,
+                serde_html_form::to_string(&query)?
+            ))
+            .header("Authorization", format!("Bearer {}", &self.bearer_token))
+            .send()
+            .await?;
 
-        if let Some(sn) = serial_number {
-            query_params.push(("serial_number", sn));
-        }
+        let devices: serde_json::Value = resp.json().await?;
 
-        if let Some(labels_map) = labels {
-            for (key, value) in labels_map {
-                query_params.push(("labels", format!("{}={}", key, value)));
+        for (i, device) in devices.as_array().unwrap().iter().enumerate() {
+            match serde_json::from_value::<Device>(device.clone()) {
+                Ok(_) => {}
+                Err(e) => {
+                    println!("ERR {i} {e:?}\n{:#?}", device);
+                    panic!()
+                }
             }
         }
 
-        if let Some(is_online) = online {
-            query_params.push(("online", is_online.to_string()));
-        }
-
-        let resp = client
-            .get(format!("{}/devices", self.domain))
-            .header("Authorization", format!("Bearer {}", &self.bearer_token))
-            .query(&query_params)
-            .send();
-
-        let devices = resp.await?.text().await?;
-
-        Ok(devices)
+        Ok(serde_json::from_value(devices)?)
     }
 
     pub async fn get_release_info(&self, release_id: String) -> Result<Value> {

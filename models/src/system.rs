@@ -66,5 +66,6 @@ pub struct SystemInfo {
     pub proc: Proc,
     pub network: Network,
     pub device_tree: DeviceTree,
+    #[serde(default)]
     pub connection_statuses: Vec<ConnectionStatus>,
 }

@@ -13,7 +13,7 @@ use axum::extract::Path;
 use axum::http::StatusCode;
 use axum::{Extension, Json};
 use axum_extra::extract::Query;
-use models::device::{Device, DeviceNetwork};
+use models::device::{Device, DeviceFilter, DeviceNetwork};
 use models::modem::Modem;
 use models::release::Release;
 use models::system::SystemInfo;
@@ -305,26 +305,6 @@ pub async fn get_devices_new(
         reverse,
         devices,
     }))
-}
-
-/// Query filter for device listing.
-#[derive(Deserialize, Debug)]
-pub struct DeviceFilter {
-    pub serial_number: Option<String>,
-    /// Filter by approved status. If None, only approved devices are included by default.
-    pub approved: Option<bool>,
-    /// Filter by archived status. If None, archived devices are excluded by default.
-    pub archived: Option<bool>,
-    #[deprecated(
-        since = "0.2.64",
-        note = "Since labels have been released, tags concept be in version 0.74"
-    )]
-    pub tag: Option<String>,
-    /// Filter by labels. Format: key=value. Multiple labels can be provided.
-    #[serde(default)]
-    pub labels: Vec<String>,
-    /// Filter by online status. If true, only devices online in the last 5 minutes.
-    pub online: Option<bool>,
 }
 
 #[utoipa::path(
