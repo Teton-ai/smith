@@ -149,6 +149,7 @@ struct SmithApiDoc;
 
 async fn start_main_server(config: &'static Config, authorization: AuthorizationConfig) {
     info!("Starting Smith API v{}", env!("CARGO_PKG_VERSION"));
+
     // set up connection pool
     let pool = PgPoolOptions::new()
         .max_connections(100)
@@ -183,7 +184,7 @@ async fn start_main_server(config: &'static Config, authorization: Authorization
 
     let (device_router, device_api) = OpenApiRouter::with_openapi(ApiDoc::openapi())
         .routes(routes!(device::route::get_device))
-        .route_layer(middleware::from_fn(device::Device::middleware))
+        .route_layer(middleware::from_fn(device::middleware))
         .split_for_parts();
     api_doc.merge(device_api);
 

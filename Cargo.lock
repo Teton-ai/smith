@@ -324,18 +324,21 @@ dependencies = [
 
 [[package]]
 name = "api"
-version = "0.2.87"
+version = "0.2.88"
 dependencies = [
  "anyhow",
  "axum 0.7.9",
  "axum-extra",
  "axum_typed_multipart",
+ "chrono",
+ "cloudfront_sign",
  "debpkg",
  "dotenvy",
  "futures",
  "jwks_client_rs",
  "metrics",
  "metrics-exporter-prometheus",
+ "models",
  "oauth2",
  "reqwest 0.12.24",
  "rust-s3",
@@ -1157,7 +1160,7 @@ checksum = "a1d728cc89cf3aee9ff92b05e62b19ee65a02b5702cff7d5a377e32c6ae29d8d"
 
 [[package]]
 name = "cli"
-version = "0.2.87"
+version = "0.2.88"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1171,6 +1174,7 @@ dependencies = [
  "ed25519-dalek",
  "indicatif",
  "keyring",
+ "models",
  "open",
  "openssl",
  "rand 0.8.5",
@@ -1178,6 +1182,7 @@ dependencies = [
  "russh",
  "self_update",
  "serde",
+ "serde_html_form",
  "serde_json",
  "smith",
  "strip-ansi-escapes",
@@ -1187,6 +1192,18 @@ dependencies = [
  "toml",
  "unicode-width",
  "whoami",
+]
+
+[[package]]
+name = "cloudfront_sign"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "645d040530a8e39d8a31083d956c72ff77ec6dc13609763080b15360474c7d00"
+dependencies = [
+ "base64 0.22.1",
+ "rsa",
+ "sha1",
+ "thiserror 1.0.69",
 ]
 
 [[package]]
@@ -3246,6 +3263,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "models"
+version = "0.2.87"
+dependencies = [
+ "axum 0.7.9",
+ "chrono",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "utoipa",
+]
+
+[[package]]
 name = "multer"
 version = "3.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4583,6 +4612,7 @@ dependencies = [
  "pkcs1",
  "pkcs8",
  "rand_core 0.6.4",
+ "sha1",
  "sha2",
  "signature",
  "spki",
@@ -5371,7 +5401,7 @@ dependencies = [
 
 [[package]]
 name = "smith"
-version = "0.2.87"
+version = "0.2.88"
 dependencies = [
  "anyhow",
  "bore-cli",
@@ -5382,6 +5412,7 @@ dependencies = [
  "futures",
  "futures-util",
  "governor",
+ "models",
  "nix 0.30.1",
  "pnet",
  "rand 0.8.5",
@@ -5404,7 +5435,7 @@ dependencies = [
 
 [[package]]
 name = "smith-updater"
-version = "0.2.87"
+version = "0.2.88"
 dependencies = [
  "clap",
  "smith",

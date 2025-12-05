@@ -50,6 +50,7 @@ impl PackagesInterface {
         let public_port = self.tunnel.start_tunnel(Some(port), None, None).await;
         public_port.to_string()
     }
+
     async fn download_file_rl(
         &mut self,
         remote_file: &str,
@@ -61,10 +62,10 @@ impl PackagesInterface {
             .download(remote_file, local_file, rate_mb)
             .await
         {
-            Ok(string) => string,
+            Ok(()) => "Download started. Not waiting for result".to_string(),
 
             Err(e) => {
-                let error_str = format!("Download failed - {}", e);
+                let error_str = format!("Download failed: {}", e);
 
                 error_str
             }

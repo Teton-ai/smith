@@ -1,10 +1,10 @@
 use crate::State;
-use crate::ip_address::IpAddressInfo;
 use crate::middlewares::authorization;
 use crate::user::CurrentUser;
 use axum::extract::Path;
 use axum::http::StatusCode;
 use axum::{Extension, Json};
+use models::ip_address::IpAddressInfo;
 use serde::{Deserialize, Serialize};
 use tracing::{debug, error};
 use utoipa::ToSchema;

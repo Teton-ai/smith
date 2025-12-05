@@ -1,6 +1,6 @@
 use crate::State;
 use crate::db::DeviceWithToken;
-use crate::modem::Modem;
+use crate::modem::{clear_modem, save_modem};
 use axum::body::{Body, to_bytes};
 use axum::extract::Request;
 use axum::http::StatusCode;
@@ -80,7 +80,7 @@ pub async fn modem(
     tokio::spawn(async move {
         match modem {
             Some(modem) => {
-                let _ = Modem::save_modem(
+                let _ = save_modem(
                     device.serial_number,
                     modem.imei,
                     modem.network_provider,
@@ -89,7 +89,7 @@ pub async fn modem(
                 .await;
             }
             None => {
-                let _ = Modem::clear_modem(device.serial_number, &state.pg_pool).await;
+                let _ = clear_modem(device.serial_number, &state.pg_pool).await;
             }
         }
     });

@@ -1,7 +1,9 @@
 use crate::asset::Asset;
 use crate::db::{DBHandler, DeviceWithToken};
-use crate::device::{Device, RegistrationError};
-use crate::ip_address::IpAddressInfo;
+use crate::device::{
+    RegistrationError, get_target_release, save_last_ping_with_ip, save_release_id,
+};
+use crate::ip_address::extract_client_ip;
 use crate::{State, storage};
 use axum::body::Body;
 use axum::extract::{ConnectInfo, Multipart, Path, Query};
@@ -36,7 +38,7 @@ pub async fn register_device(
     Extension(state): Extension<State>,
     Json(payload): Json<DeviceRegistration>,
 ) -> (StatusCode, Json<DeviceRegistrationResponse>) {
-    let token = Device::register_device(payload, &state.pg_pool, state.config).await;
+    let token = crate::device::register_device(payload, &state.pg_pool, state.config).await;
 
     match token {
         Ok(token) => (StatusCode::OK, Json(token)),
@@ -82,17 +84,17 @@ pub async fn home(
             .duration_since(SystemTime::UNIX_EPOCH)
             .unwrap_or_default(),
         commands: DBHandler::get_commands(&device, &state.pg_pool).await,
-        target_release_id: Device::get_target_release(&device, &state.pg_pool).await,
+        target_release_id: get_target_release(&device, &state.pg_pool).await,
     };
 
-    let client_ip = Some(IpAddressInfo::extract_client_ip(&headers, addr));
+    let client_ip = Some(extract_client_ip(&headers, addr));
     tokio::spawn(async move {
-        Device::save_release_id(&device, release_id, &state.pg_pool)
+        save_release_id(&device, release_id, &state.pg_pool)
             .await
             .unwrap_or_else(|err| {
                 error!("Error saving release_id: {:?}", err);
             });
-        Device::save_last_ping_with_ip(&device, client_ip, &state.pg_pool, state.config)
+        save_last_ping_with_ip(&device, client_ip, &state.pg_pool, state.config)
             .await
             .unwrap_or_else(|err| {
                 error!("Error saving last ping with IP: {:?}", err);
@@ -153,22 +155,43 @@ pub async fn download_file(
     }
 
     // Add more buckets here if needed
-    let bucket_name = match bucket.to_lowercase().as_str() {
-        "assets" => &state.config.assets_bucket_name,
-        "packages" => &state.config.packages_bucket_name,
+    let response = match bucket.to_lowercase().as_str() {
+        // "packages" => &state.config.packages_bucket_name,
+        // "assets" => &state.config.assets_bucket_name,
+        "packages" => storage::Storage::download_package_from_cdn(
+            &state.config.packages_bucket_name,
+            Some(dir_path),
+            file_name,
+            &state.config.cloudfront.package_domain_name,
+            &state.config.cloudfront.package_key_pair_id,
+            &state.config.cloudfront.package_private_key,
+        )
+        .await
+        .map_err(|err| {
+            error!("Failed to get signed link from S3 {:?}", err);
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?,
+        // TODO: need to implement asset downloading or put
+        // ota stuff in packages bucket
+        //
+        // "assets" => storage::Storage::download_package_from_cdn(
+        //     &state.config.packages_bucket_name,
+        //     Some(dir_path),
+        //     file_name,
+        //     &state.config.cloudfront.package_domain_name,
+        //     &state.config.cloudfront.package_key_pair_id,
+        //     &state.config.cloudfront.package_private_key,
+        // )
+        // .await
+        // .map_err(|err| {
+        //     error!("Failed to get signed link from S3 {:?}", err);
+        //     StatusCode::INTERNAL_SERVER_ERROR
+        // })?,
         _ => {
             error!("Invalid bucket name requested: {}", bucket);
             return Err(StatusCode::BAD_REQUEST);
         }
     };
-
-    // Get a signed link to the s3 file
-    let response = storage::Storage::download_from_s3(bucket_name, Some(dir_path), file_name)
-        .await
-        .map_err(|err| {
-            error!("Failed to get signed link from S3 {:?}", err);
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?;
 
     Ok(response)
 }
