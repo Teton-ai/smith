@@ -144,7 +144,11 @@ impl SmithAPI {
 
         let commands: CommandsPaginated = resp.await?.json().await?;
 
-        Ok(commands.commands.first().unwrap().clone())
+        Ok(commands
+            .commands
+            .first()
+            .ok_or_else(|| anyhow::anyhow!("No commands found for device"))?
+            .clone())
     }
 
     pub async fn test_network(&self, device: String) -> Result<()> {
