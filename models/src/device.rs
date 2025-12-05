@@ -59,3 +59,26 @@ pub struct DeviceFilter {
     /// Filter by online status. If true, only devices online in the last 5 minutes.
     pub online: Option<bool>,
 }
+
+#[derive(Debug, Serialize, Deserialize, utoipa::ToSchema, Clone)]
+pub struct DeviceCommandResponse {
+    pub device: i32,
+    pub serial_number: String,
+    pub cmd_id: i32,
+    pub issued_at: DateTime<Utc>,
+    pub cmd_data: Value,
+    pub cancelled: bool,
+    pub fetched: bool,
+    pub fetched_at: Option<DateTime<Utc>>,
+    pub response_id: Option<i32>,
+    pub response_at: Option<DateTime<Utc>>,
+    pub response: Option<Value>,
+    pub status: Option<i32>,
+}
+
+#[derive(Debug, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct CommandsPaginated {
+    pub commands: Vec<DeviceCommandResponse>,
+    pub next: Option<String>,
+    pub previous: Option<String>,
+}

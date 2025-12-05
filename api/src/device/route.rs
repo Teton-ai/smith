@@ -1,8 +1,8 @@
 use crate::State;
 use crate::device::{
-    AuthDevice, CommandsPaginated, DeviceCommandResponse, DeviceHealth, DeviceLedgerItem,
-    DeviceLedgerItemPaginated, DeviceRelease, LeanDevice, LeanResponse, NewVariable, Note,
-    RawDevice, Tag, UpdateDeviceRelease, UpdateDevicesRelease, Variable,
+    AuthDevice, DeviceHealth, DeviceLedgerItem, DeviceLedgerItemPaginated, DeviceRelease,
+    LeanDevice, LeanResponse, NewVariable, Note, RawDevice, Tag, UpdateDeviceRelease,
+    UpdateDevicesRelease, Variable,
 };
 use crate::event::PublicEvent;
 use crate::middlewares::authorization;
@@ -13,7 +13,9 @@ use axum::extract::Path;
 use axum::http::StatusCode;
 use axum::{Extension, Json};
 use axum_extra::extract::Query;
-use models::device::{Device, DeviceFilter, DeviceNetwork};
+use models::device::{
+    CommandsPaginated, Device, DeviceCommandResponse, DeviceFilter, DeviceNetwork,
+};
 use models::modem::Modem;
 use models::release::Release;
 use serde::Deserialize;

@@ -178,13 +178,13 @@ fn check_and_update_if_needed() -> Result<(), anyhow::Error> {
             .current_version(current_version)
             .build()?;
 
-        if let Ok(status) = updater.get_latest_release() {
-            if status.version != current_version {
-                println!(
-                    "A new version {} is available! Run 'sm update' to update.",
-                    status.version
-                );
-            }
+        if let Ok(status) = updater.get_latest_release()
+            && status.version != current_version
+        {
+            println!(
+                "A new version {} is available! Run 'sm update' to update.",
+                status.version
+            );
         }
 
         let now = chrono::Utc::now().timestamp();
@@ -505,10 +505,10 @@ async fn main() -> anyhow::Result<()> {
                     let command = api.get_device_command(device_id, command_id).await?;
 
                     println!("Command ID: {}", id_str);
-                    println!("Fetched: {}", command["fetched"].as_bool().unwrap_or(false));
+                    println!("Fetched: {}", command.fetched);
 
-                    if command["response"].is_object() {
-                        if let Some(stdout) = command["response"]["FreeForm"]["stdout"].as_str() {
+                    if let Some(response) = command.response {
+                        if let Some(stdout) = response["FreeForm"]["stdout"].as_str() {
                             println!("Output:\n{}", stdout);
                         } else {
                             println!("Status: Completed (no output)");
@@ -605,16 +605,12 @@ async fn main() -> anyhow::Result<()> {
                     loop {
                         let response = api.get_last_command(id as u64).await.unwrap();
 
-                        if response["fetched"].is_boolean()
-                            && response["fetched"].as_bool().unwrap()
-                        {
+                        if response.fetched {
                             pb2.set_message("Command fetched by device 👍");
                         }
 
-                        if response["response"].is_object() {
-                            port = response["response"]["OpenTunnel"]["port_server"]
-                                .as_u64()
-                                .unwrap();
+                        if let Some(response) = response.response {
+                            port = response["OpenTunnel"]["port_server"].as_u64().unwrap();
 
                             tx.send(port).unwrap();
                             break;
@@ -645,14 +641,12 @@ async fn main() -> anyhow::Result<()> {
                 )
                 .await?;
                 println!("Connected");
-                let code = {
-                    // We're using `termion` to put the terminal into raw mode, so that we can
-                    // display the output of interactive applications correctly
-                    let _raw_term = io::stdout().into_raw_mode()?;
-                    ssh.call().await.with_context(|| "skill issues")?;
-                };
+                // We're using `termion` to put the terminal into raw mode, so that we can
+                // display the output of interactive applications correctly
+                let _raw_term = io::stdout().into_raw_mode()?;
+                ssh.call().await.with_context(|| "skill issues")?;
 
-                println!("Exitcode: {:?}", code);
+                println!("Exitcode: {:?}", ());
                 ssh.close().await?;
                 return Ok(());
             }
@@ -833,17 +827,16 @@ async fn main() -> anyhow::Result<()> {
 
                         match api.get_device_command(*device_id, *command_id).await {
                             Ok(response) => {
-                                if response["fetched"].as_bool().unwrap_or(false) && !completed[idx]
-                                {
+                                if response.fetched && !completed[idx] {
                                     pb.set_message(format!(
                                         "{} [{}:{}] Fetched by device",
                                         serial_number, device_id, command_id
                                     ));
                                 }
 
-                                if response["response"].is_object() {
+                                if let Some(response) = response.response {
                                     let output = if let Some(stdout) =
-                                        response["response"]["FreeForm"]["stdout"].as_str()
+                                        response["FreeForm"]["stdout"].as_str()
                                     {
                                         stdout.to_string()
                                     } else {
@@ -1032,12 +1025,12 @@ where
     loop {
         let response = api.get_last_command(id as u64).await?;
 
-        if response["fetched"].is_boolean() && response["fetched"].as_bool().unwrap_or(false) {
+        if response.fetched {
             pb.set_message("Command fetched by device");
         }
 
-        if response["response"].is_object() {
-            result = response["response"]["FreeForm"]["stdout"]
+        if let Some(response) = response.response {
+            result = response["FreeForm"]["stdout"]
                 .as_str()
                 .with_context(|| "Failed to get output from response")?
                 .to_string();
