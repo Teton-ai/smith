@@ -330,6 +330,7 @@ dependencies = [
  "axum 0.7.9",
  "axum-extra",
  "axum_typed_multipart",
+ "cloudfront_sign",
  "debpkg",
  "dotenvy",
  "futures",
@@ -1187,6 +1188,18 @@ dependencies = [
  "toml",
  "unicode-width",
  "whoami",
+]
+
+[[package]]
+name = "cloudfront_sign"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "645d040530a8e39d8a31083d956c72ff77ec6dc13609763080b15360474c7d00"
+dependencies = [
+ "base64 0.22.1",
+ "rsa",
+ "sha1",
+ "thiserror 1.0.69",
 ]
 
 [[package]]
@@ -4583,6 +4596,7 @@ dependencies = [
  "pkcs1",
  "pkcs8",
  "rand_core 0.6.4",
+ "sha1",
  "sha2",
  "signature",
  "spki",
