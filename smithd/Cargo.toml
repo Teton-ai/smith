@@ -13,6 +13,7 @@ name = "smithd"
 path = "src/bin/main.rs"
 
 [dependencies]
+models = { path = "../models" }
 anyhow.workspace = true
 clap = { version = "4.5", features = ["derive"] }
 serde = { version = "1.0", features = ["derive"] }
@@ -35,7 +36,7 @@ reqwest = { version = "0.12", default-features = false, features = [
 bore-cli = "0.5"
 pnet = "0.35"
 walkdir = "2.5"
-chrono = { version = "0.4", features = ["serde"] }
+chrono = { workspace = true }
 governor = "0.10"
 futures = "0.3"
 sqlx = { version = "0.7", features = [

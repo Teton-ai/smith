@@ -7,9 +7,10 @@ use crate::utils::schema::{
     DeviceRegistration, DeviceRegistrationResponse, HomePost, HomePostResponse,
     SafeCommandResponse, SafeCommandRx,
 };
-use crate::utils::system::SystemInfo;
+use crate::utils::system::new_system_info;
 use anyhow::{Result, anyhow};
 use reqwest::{Response, StatusCode};
+use serde_json::json;
 use std::fmt::Write;
 use std::time::Duration;
 use tokio::{sync::mpsc, time};
@@ -73,7 +74,8 @@ impl Postman {
                 SafeCommandResponse {
                     id: -2,
                     command: SafeCommandRx::UpdateSystemInfo {
-                        system_info: SystemInfo::new().await.to_value(),
+                        system_info: serde_json::to_value(&new_system_info().await)
+                            .unwrap_or_else(|_| json!({})),
                     },
                     status: 0,
                 },
@@ -117,7 +119,8 @@ impl Postman {
                             SafeCommandResponse {
                                 id: -2,
                                 command: SafeCommandRx::UpdateSystemInfo {
-                                    system_info: SystemInfo::new().await.to_value(),
+                                    system_info: serde_json::to_value(&new_system_info().await)
+                            .unwrap_or_else(|_| json!({})),
                                 },
                                 status: 0,
                             },

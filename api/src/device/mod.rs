@@ -1,13 +1,11 @@
 use crate::config::Config;
 use crate::db::DeviceWithToken;
-use crate::ip_address::IpAddressInfo;
-use crate::modem::Modem;
-use crate::release::Release;
 use axum::Extension;
 use axum::extract::Request;
 use axum::http::{StatusCode, header};
 use axum::middleware::Next;
 use axum::response::Response;
+use models::release::Release;
 use serde::{Deserialize, Serialize, Serializer};
 use serde_json::{Value, json};
 use smith::utils::schema::{DeviceRegistration, DeviceRegistrationResponse};
@@ -25,15 +23,6 @@ pub mod route;
 
 #[derive(Clone)]
 pub struct AuthDevice(pub RawDevice);
-
-#[derive(Debug, Serialize, utoipa::ToSchema)]
-pub struct DeviceNetwork {
-    pub network_score: Option<i32>,
-    pub download_speed_mbps: Option<f64>,
-    pub upload_speed_mbps: Option<f64>,
-    pub source: Option<String>,
-    pub updated_at: Option<DateTime<Utc>>,
-}
 
 // TODO: Change this, this needs to be device and the other is PublicDevice, API type
 #[derive(Debug, Serialize, utoipa::ToSchema, Clone)]
@@ -67,29 +56,6 @@ where
         Some(_) => serializer.serialize_str("[REDACTED]"),
         None => serializer.serialize_none(),
     }
-}
-
-#[derive(Debug, Serialize, utoipa::ToSchema)]
-pub struct Device {
-    pub id: i32,
-    pub serial_number: String,
-    pub note: Option<String>,
-    pub last_seen: Option<DateTime<Utc>>,
-    pub created_on: DateTime<Utc>,
-    pub approved: bool,
-    pub has_token: Option<bool>,
-    pub release_id: Option<i32>,
-    pub target_release_id: Option<i32>,
-    pub system_info: Option<Value>,
-    pub modem_id: Option<i32>,
-    pub ip_address_id: Option<i32>,
-    pub ip_address: Option<IpAddressInfo>,
-    pub modem: Option<Modem>,
-    pub release: Option<Release>,
-    pub target_release: Option<Release>,
-    pub network: Option<DeviceNetwork>,
-    #[schema(value_type = HashMap<String, String>)]
-    pub labels: Json<HashMap<String, String>>,
 }
 
 #[derive(Deserialize, Debug)]
@@ -372,21 +338,20 @@ async fn update_ip_geolocation(
 
 const BEARER: &str = "Bearer ";
 
-impl Device {
-    pub async fn register_device(
-        payload: DeviceRegistration,
-        pool: &PgPool,
-        config: &Config,
-    ) -> anyhow::Result<DeviceRegistrationResponse, RegistrationError> {
-        let mut tx = pool.begin().await?;
+pub async fn register_device(
+    payload: DeviceRegistration,
+    pool: &PgPool,
+    config: &Config,
+) -> anyhow::Result<DeviceRegistrationResponse, RegistrationError> {
+    let mut tx = pool.begin().await?;
 
-        let serial_sanitized = payload
-            .serial_number
-            .trim()
-            .trim_matches(char::is_whitespace)
-            .trim_matches(char::from(0));
+    let serial_sanitized = payload
+        .serial_number
+        .trim()
+        .trim_matches(char::is_whitespace)
+        .trim_matches(char::from(0));
 
-        let query = r#"
+    let query = r#"
             WITH existing_device AS (
                 SELECT id, serial_number, token, approved, false AS was_inserted
                 FROM device
@@ -405,157 +370,157 @@ impl Device {
             FROM insert_if_missing;
         "#;
 
-        #[derive(sqlx::FromRow)]
-        struct DeviceRow {
-            id: i32,
-            serial_number: String,
-            token: Option<String>,
-            approved: Option<bool>,
-            was_inserted: bool,
+    #[derive(sqlx::FromRow)]
+    struct DeviceRow {
+        id: i32,
+        serial_number: String,
+        token: Option<String>,
+        approved: Option<bool>,
+        was_inserted: bool,
+    }
+
+    let result: DeviceRow = sqlx::query_as::<_, DeviceRow>(query)
+        .bind(serial_sanitized)
+        .fetch_one(&mut *tx)
+        .await?;
+
+    if result.was_inserted {
+        sqlx::query!(
+            "INSERT INTO ledger (device_id, class, text) VALUES ($1, $2, $3);",
+            result.id,
+            "registration",
+            format!("Registered {}", result.serial_number)
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(|err| {
+            error!("Failed to log registration to ledger {err}");
+            RegistrationError::FailedToLogInLedger
+        })?;
+
+        if let Some(slack_hook_url) = &config.slack_hook_url {
+            let message = json!({
+                "text": format!("Device {} registered via API", result.serial_number),
+                "blocks": [
+                    {
+                        "type": "section",
+                        "text": {
+                            "type": "mrkdwn",
+                            "text": format!(
+                                "New device *{}* has registered via the API. Welcome to the fleet! :tada: :hardware:",
+                                result.serial_number,
+                            )
+                        }
+                    },
+                ]
+            });
+            let client = reqwest::Client::new();
+            let _res = client
+                .post(slack_hook_url)
+                .header("Content-Type", "application/json")
+                .json(&message)
+                .send()
+                .await;
         }
+    }
 
-        let result: DeviceRow = sqlx::query_as::<_, DeviceRow>(query)
-            .bind(serial_sanitized)
-            .fetch_one(&mut *tx)
-            .await?;
-
-        if result.was_inserted {
-            sqlx::query!(
-                "INSERT INTO ledger (device_id, class, text) VALUES ($1, $2, $3);",
-                result.id,
-                "registration",
-                format!("Registered {}", result.serial_number)
-            )
-            .execute(&mut *tx)
-            .await
-            .map_err(|err| {
-                error!("Failed to log registration to ledger {err}");
-                RegistrationError::FailedToLogInLedger
-            })?;
-
-            if let Some(slack_hook_url) = &config.slack_hook_url {
-                let message = json!({
-                    "text": format!("Device {} registered via API", result.serial_number),
-                    "blocks": [
-                        {
-                            "type": "section",
-                            "text": {
-                                "type": "mrkdwn",
-                                "text": format!(
-                                    "New device *{}* has registered via the API. Welcome to the fleet! :tada: :hardware:",
-                                    result.serial_number,
-                                )
-                            }
-                        },
-                    ]
-                });
-                let client = reqwest::Client::new();
-                let _res = client
-                    .post(slack_hook_url)
-                    .header("Content-Type", "application/json")
-                    .json(&message)
-                    .send()
-                    .await;
+    if result.approved == Some(true) {
+        match result.token {
+            Some(_) => {
+                tx.rollback().await?;
+                return Err(RegistrationError::NotNullTokenError);
             }
-        }
-
-        if result.approved == Some(true) {
-            match result.token {
-                Some(_) => {
-                    tx.rollback().await?;
-                    return Err(RegistrationError::NotNullTokenError);
-                }
-                None => {
-                    let update_query = r#"
+            None => {
+                let update_query = r#"
                     UPDATE device
                     SET token = gen_random_uuid()::text
                     WHERE serial_number = $1
                     RETURNING token;
                     "#;
 
-                    let updated_result: (String,) = sqlx::query_as(update_query)
-                        .bind(serial_sanitized)
-                        .fetch_one(&mut *tx)
-                        .await?;
-
-                    #[derive(sqlx::FromRow)]
-                    struct VariablesPresetRow {
-                        variables: Value,
-                    }
-
-                    let result_vars = sqlx::query_as!(
-                        VariablesPresetRow,
-                        "SELECT variables FROM variable_preset WHERE title = 'DEFAULT'"
-                    )
+                let updated_result: (String,) = sqlx::query_as(update_query)
+                    .bind(serial_sanitized)
                     .fetch_one(&mut *tx)
-                    .await
-                    .map_err(|err| {
-                        error!("Failed to fetch variables preset {err}");
-                        RegistrationError::DatabaseError(err)
-                    })?;
+                    .await?;
 
-                    for (name, value) in result_vars
-                        .variables
-                        .as_array()
-                        .expect("error: failed to get variable as array")
-                        .iter()
-                        .map(|json_value| {
-                            (
-                                json_value
-                                    .get("name")
-                                    .and_then(|n| n.as_str())
-                                    .expect("error: failed to access name as string"),
-                                json_value
-                                    .get("value")
-                                    .and_then(|v| v.as_str())
-                                    .expect("error: failed to access value as string"),
-                            )
-                        })
-                    {
-                        sqlx::query!(
-                            r#"INSERT INTO variable (name, value, device)
+                #[derive(sqlx::FromRow)]
+                struct VariablesPresetRow {
+                    variables: Value,
+                }
+
+                let result_vars = sqlx::query_as!(
+                    VariablesPresetRow,
+                    "SELECT variables FROM variable_preset WHERE title = 'DEFAULT'"
+                )
+                .fetch_one(&mut *tx)
+                .await
+                .map_err(|err| {
+                    error!("Failed to fetch variables preset {err}");
+                    RegistrationError::DatabaseError(err)
+                })?;
+
+                for (name, value) in result_vars
+                    .variables
+                    .as_array()
+                    .expect("error: failed to get variable as array")
+                    .iter()
+                    .map(|json_value| {
+                        (
+                            json_value
+                                .get("name")
+                                .and_then(|n| n.as_str())
+                                .expect("error: failed to access name as string"),
+                            json_value
+                                .get("value")
+                                .and_then(|v| v.as_str())
+                                .expect("error: failed to access value as string"),
+                        )
+                    })
+                {
+                    sqlx::query!(
+                        r#"INSERT INTO variable (name, value, device)
                             VALUES ($1, $2, $3)
                             ON CONFLICT (device, name)
                             DO UPDATE SET value = EXCLUDED.value"#,
-                            name,
-                            value,
-                            result.id,
-                        )
-                        .execute(&mut *tx)
-                        .await
-                        .map_err(|err| {
-                            error!("Failed to insert variable for device {err}");
-                            RegistrationError::DatabaseError(err)
-                        })?;
-                    }
-
-                    tx.commit().await?;
-                    return Ok(DeviceRegistrationResponse {
-                        token: updated_result.0,
-                    });
+                        name,
+                        value,
+                        result.id,
+                    )
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(|err| {
+                        error!("Failed to insert variable for device {err}");
+                        RegistrationError::DatabaseError(err)
+                    })?;
                 }
+
+                tx.commit().await?;
+                return Ok(DeviceRegistrationResponse {
+                    token: updated_result.0,
+                });
             }
         }
-
-        tx.commit().await?;
-        Err(RegistrationError::NotApprovedDevice)
     }
 
-    /// Retrieves a device by its authentication token.
-    ///
-    /// # Arguments
-    /// * `token` - The authentication token assigned to the device
-    /// * `pg_pool` - PostgreSQL connection pool
-    ///
-    /// # Returns
-    /// * `Ok(Some(RawDevice))` if a device with the token exists
-    /// * `Ok(None)` if no device matches the token
-    /// * `Err` if the database query fails
-    pub async fn get_device_from_token(
-        token: String,
-        pg_pool: &Pool<Postgres>,
-    ) -> anyhow::Result<Option<RawDevice>> {
-        Ok(sqlx::query_as!(
+    tx.commit().await?;
+    Err(RegistrationError::NotApprovedDevice)
+}
+
+/// Retrieves a device by its authentication token.
+///
+/// # Arguments
+/// * `token` - The authentication token assigned to the device
+/// * `pg_pool` - PostgreSQL connection pool
+///
+/// # Returns
+/// * `Ok(Some(RawDevice))` if a device with the token exists
+/// * `Ok(None)` if no device matches the token
+/// * `Err` if the database query fails
+pub async fn get_device_from_token(
+    token: String,
+    pg_pool: &Pool<Postgres>,
+) -> anyhow::Result<Option<RawDevice>> {
+    Ok(sqlx::query_as!(
             RawDevice,
             r#"
             SELECT
@@ -573,76 +538,76 @@ impl Device {
         )
         .fetch_optional(pg_pool)
         .await?)
+}
+
+/// Axum middleware that authenticates devices using Bearer tokens.
+///
+/// Extracts the Bearer token from the Authorization header, validates it against
+/// the database, and injects the authenticated device into request extensions as `AuthDevice`.
+///
+/// # Arguments
+/// * `state` - Application state containing the PostgreSQL connection pool
+/// * `request` - Incoming HTTP request
+/// * `next` - Next middleware/handler in the chain
+///
+/// # Returns
+/// * `Ok(Response)` if authentication succeeds, with `AuthDevice` in request extensions
+/// * `Err(StatusCode::UNAUTHORIZED)` if the token is missing, invalid, or not found
+pub async fn middleware(
+    Extension(state): Extension<crate::State>,
+    mut request: Request,
+    next: Next,
+) -> Result<Response, StatusCode> {
+    let headers = request.headers();
+
+    let authorization_header = headers
+        .get(header::AUTHORIZATION)
+        .ok_or(StatusCode::UNAUTHORIZED)?;
+    let authorization = authorization_header
+        .to_str()
+        .map_err(|_| StatusCode::UNAUTHORIZED)?;
+    if !authorization.starts_with(BEARER) {
+        return Err(StatusCode::UNAUTHORIZED);
     }
+    let bearer_token = authorization.trim_start_matches(BEARER);
+    let device = get_device_from_token(bearer_token.to_string(), &state.pg_pool)
+        .await
+        .map_err(|_| StatusCode::UNAUTHORIZED)?
+        .ok_or(StatusCode::UNAUTHORIZED)?;
 
-    /// Axum middleware that authenticates devices using Bearer tokens.
-    ///
-    /// Extracts the Bearer token from the Authorization header, validates it against
-    /// the database, and injects the authenticated device into request extensions as `AuthDevice`.
-    ///
-    /// # Arguments
-    /// * `state` - Application state containing the PostgreSQL connection pool
-    /// * `request` - Incoming HTTP request
-    /// * `next` - Next middleware/handler in the chain
-    ///
-    /// # Returns
-    /// * `Ok(Response)` if authentication succeeds, with `AuthDevice` in request extensions
-    /// * `Err(StatusCode::UNAUTHORIZED)` if the token is missing, invalid, or not found
-    pub async fn middleware(
-        Extension(state): Extension<crate::State>,
-        mut request: Request,
-        next: Next,
-    ) -> Result<Response, StatusCode> {
-        let headers = request.headers();
+    request.extensions_mut().insert(AuthDevice(device));
 
-        let authorization_header = headers
-            .get(header::AUTHORIZATION)
-            .ok_or(StatusCode::UNAUTHORIZED)?;
-        let authorization = authorization_header
-            .to_str()
-            .map_err(|_| StatusCode::UNAUTHORIZED)?;
-        if !authorization.starts_with(BEARER) {
-            return Err(StatusCode::UNAUTHORIZED);
-        }
-        let bearer_token = authorization.trim_start_matches(BEARER);
-        let device = Self::get_device_from_token(bearer_token.to_string(), &state.pg_pool)
-            .await
-            .map_err(|_| StatusCode::UNAUTHORIZED)?
-            .ok_or(StatusCode::UNAUTHORIZED)?;
+    Ok(next.run(request).await)
+}
 
-        request.extensions_mut().insert(AuthDevice(device));
+pub async fn save_last_ping_with_ip(
+    device: &DeviceWithToken,
+    ip_address: Option<IpAddr>,
+    pool: &PgPool,
+    config: &Config,
+) -> anyhow::Result<()> {
+    let mut tx = pool.begin().await?;
+    match ip_address {
+        Some(ip) => {
+            let ip_network: ipnetwork::IpNetwork = ip.into();
 
-        Ok(next.run(request).await)
-    }
-
-    pub async fn save_last_ping_with_ip(
-        device: &DeviceWithToken,
-        ip_address: Option<IpAddr>,
-        pool: &PgPool,
-        config: &Config,
-    ) -> anyhow::Result<()> {
-        let mut tx = pool.begin().await?;
-        match ip_address {
-            Some(ip) => {
-                let ip_network: ipnetwork::IpNetwork = ip.into();
-
-                // Insert IP address if it doesn't exist, or get existing ID
-                let insert_result = sqlx::query!(
+            // Insert IP address if it doesn't exist, or get existing ID
+            let insert_result = sqlx::query!(
                     "INSERT INTO ip_address (ip_address, created_at) VALUES ($1, NOW()) ON CONFLICT (ip_address) DO NOTHING RETURNING id",
                     ip_network
                 )
                 .fetch_optional(&mut *tx)
                 .await?;
 
-                let (ip_id, should_update_geolocation) = match insert_result {
-                    Some(record) => {
-                        // New IP was inserted, mark for geolocation update
-                        (record.id, true)
-                    }
-                    None => {
-                        // IP already exists, get ID and check if geolocation needs updating
-                        let existing_record = sqlx::query!(
-                            r#"
+            let (ip_id, should_update_geolocation) = match insert_result {
+                Some(record) => {
+                    // New IP was inserted, mark for geolocation update
+                    (record.id, true)
+                }
+                None => {
+                    // IP already exists, get ID and check if geolocation needs updating
+                    let existing_record = sqlx::query!(
+                        r#"
                             SELECT id,
                                    CASE 
                                        WHEN updated_at < NOW() - INTERVAL '24 hours' THEN true 
@@ -651,115 +616,114 @@ impl Device {
                             FROM ip_address 
                             WHERE ip_address = $1
                             "#,
-                            ip_network
-                        )
-                        .fetch_one(&mut *tx)
-                        .await?;
-                        (
-                            existing_record.id,
-                            existing_record.needs_update.unwrap_or(false),
-                        )
-                    }
-                };
+                        ip_network
+                    )
+                    .fetch_one(&mut *tx)
+                    .await?;
+                    (
+                        existing_record.id,
+                        existing_record.needs_update.unwrap_or(false),
+                    )
+                }
+            };
 
-                // Update device with IP address ID
-                sqlx::query!(
-                    "UPDATE device SET last_ping = NOW(), ip_address_id = $2 WHERE id = $1",
-                    device.id,
-                    ip_id
-                )
-                .execute(&mut *tx)
-                .await?;
+            // Update device with IP address ID
+            sqlx::query!(
+                "UPDATE device SET last_ping = NOW(), ip_address_id = $2 WHERE id = $1",
+                device.id,
+                ip_id
+            )
+            .execute(&mut *tx)
+            .await?;
 
-                tx.commit().await?;
+            tx.commit().await?;
 
-                // If geolocation data needs updating and API key is available, spawn a background task
-                if should_update_geolocation {
-                    if let Some(api_key) = &config.ip_api_key {
-                        let pool_clone = pool.clone();
-                        let api_key_clone = api_key.clone();
-                        tokio::spawn(async move {
-                            if let Err(e) =
-                                update_ip_geolocation(ip, ip_id, &api_key_clone, &pool_clone).await
-                            {
-                                error!("Failed to update geolocation for IP {}: {}", ip, e);
-                            }
-                        });
-                    } else {
-                        debug!(
-                            "IP-API key not configured, skipping geolocation update for IP {}",
-                            ip
-                        );
-                    }
+            // If geolocation data needs updating and API key is available, spawn a background task
+            if should_update_geolocation {
+                if let Some(api_key) = &config.ip_api_key {
+                    let pool_clone = pool.clone();
+                    let api_key_clone = api_key.clone();
+                    tokio::spawn(async move {
+                        if let Err(e) =
+                            update_ip_geolocation(ip, ip_id, &api_key_clone, &pool_clone).await
+                        {
+                            error!("Failed to update geolocation for IP {}: {}", ip, e);
+                        }
+                    });
+                } else {
+                    debug!(
+                        "IP-API key not configured, skipping geolocation update for IP {}",
+                        ip
+                    );
                 }
             }
-            None => {
-                sqlx::query!(
-                    "UPDATE device SET last_ping = NOW() WHERE id = $1",
-                    device.id
-                )
-                .execute(&mut *tx)
-                .await?;
-                tx.commit().await?;
-            }
         }
-        Ok(())
-    }
-
-    pub async fn get_target_release(device: &DeviceWithToken, pool: &PgPool) -> Option<i32> {
-        if let Ok(device) = sqlx::query!(
-            "SELECT target_release_id FROM device WHERE id = $1",
-            &device.id
-        )
-        .fetch_one(pool)
-        .await
-        {
-            return device.target_release_id;
+        None => {
+            sqlx::query!(
+                "UPDATE device SET last_ping = NOW() WHERE id = $1",
+                device.id
+            )
+            .execute(&mut *tx)
+            .await?;
+            tx.commit().await?;
         }
-        None
     }
+    Ok(())
+}
 
-    pub async fn save_release_id(
-        device: &DeviceWithToken,
-        release_id: Option<i32>,
-        pool: &PgPool,
-    ) -> anyhow::Result<()> {
-        if let Some(new_release_id) = release_id {
-            let mut tx = pool.begin().await?;
+pub async fn get_target_release(device: &DeviceWithToken, pool: &PgPool) -> Option<i32> {
+    if let Ok(device) = sqlx::query!(
+        "SELECT target_release_id FROM device WHERE id = $1",
+        &device.id
+    )
+    .fetch_one(pool)
+    .await
+    {
+        return device.target_release_id;
+    }
+    None
+}
 
-            let current = sqlx::query!("SELECT release_id FROM device WHERE id = $1", device.id)
-                .fetch_one(&mut *tx)
-                .await?;
+pub async fn save_release_id(
+    device: &DeviceWithToken,
+    release_id: Option<i32>,
+    pool: &PgPool,
+) -> anyhow::Result<()> {
+    if let Some(new_release_id) = release_id {
+        let mut tx = pool.begin().await?;
 
-            if current.release_id != Some(new_release_id) {
+        let current = sqlx::query!("SELECT release_id FROM device WHERE id = $1", device.id)
+            .fetch_one(&mut *tx)
+            .await?;
+
+        if current.release_id != Some(new_release_id) {
+            sqlx::query!(
+                "UPDATE device SET release_id = $1 WHERE id = $2",
+                new_release_id,
+                device.id,
+            )
+            .execute(&mut *tx)
+            .await?;
+
+            if let Some(previous_release_id) = current.release_id {
                 sqlx::query!(
-                    "UPDATE device SET release_id = $1 WHERE id = $2",
-                    new_release_id,
-                    device.id,
-                )
-                .execute(&mut *tx)
-                .await?;
-
-                if let Some(previous_release_id) = current.release_id {
-                    sqlx::query!(
-                        "
+                    "
                         INSERT INTO device_release_upgrades
                         (device_id, previous_release_id, upgraded_release_id)
                         VALUES ($1, $2, $3)
                         ",
-                        device.id,
-                        previous_release_id,
-                        new_release_id
-                    )
-                    .execute(&mut *tx)
-                    .await?;
-                }
+                    device.id,
+                    previous_release_id,
+                    new_release_id
+                )
+                .execute(&mut *tx)
+                .await?;
             }
-
-            tx.commit().await?;
         }
-        Ok(())
+
+        tx.commit().await?;
     }
+    Ok(())
 }
 
 #[derive(Error, Debug)]

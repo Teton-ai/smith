@@ -1,11 +1,12 @@
 use crate::State;
 use crate::device::{LeanDevice, LeanResponse};
 use crate::distribution::Distribution;
-use crate::release::Release;
+use crate::release::get_latest_distribution_release;
 use crate::user::CurrentUser;
 use axum::extract::Path;
 use axum::http::StatusCode;
 use axum::{Extension, Json};
+use models::release::Release;
 use serde::Deserialize;
 use tracing::error;
 
@@ -202,7 +203,7 @@ pub async fn get_distribution_latest_release(
     Path(distribution_id): Path<i32>,
     Extension(state): Extension<State>,
 ) -> axum::response::Result<Json<Release>, StatusCode> {
-    let release = Release::get_latest_distribution_release(distribution_id, &state.pg_pool)
+    let release = get_latest_distribution_release(distribution_id, &state.pg_pool)
         .await
         .map_err(|err| {
             error!("Failed to get latest release {err}");

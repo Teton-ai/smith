@@ -3,7 +3,6 @@ mod auth;
 mod cli;
 mod config;
 mod print;
-mod schema;
 mod tunnel;
 
 use crate::cli::{Cli, Commands, DevicesCommands, DistroCommands, ServiceCommands};

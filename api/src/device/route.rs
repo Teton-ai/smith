@@ -1,19 +1,22 @@
 use crate::State;
 use crate::device::{
-    AuthDevice, CommandsPaginated, Device, DeviceCommandResponse, DeviceHealth, DeviceLedgerItem,
-    DeviceLedgerItemPaginated, DeviceNetwork, DeviceRelease, LeanDevice, LeanResponse, NewVariable,
-    Note, RawDevice, Tag, UpdateDeviceRelease, UpdateDevicesRelease, Variable,
+    AuthDevice, CommandsPaginated, DeviceCommandResponse, DeviceHealth, DeviceLedgerItem,
+    DeviceLedgerItemPaginated, DeviceRelease, LeanDevice, LeanResponse, NewVariable, Note,
+    RawDevice, Tag, UpdateDeviceRelease, UpdateDevicesRelease, Variable,
 };
 use crate::event::PublicEvent;
 use crate::middlewares::authorization;
-use crate::modem::Modem;
-use crate::release::Release;
+use crate::release::get_release_by_id;
 use crate::user::CurrentUser;
 use axum::extract::Host;
 use axum::extract::Path;
 use axum::http::StatusCode;
 use axum::{Extension, Json};
 use axum_extra::extract::Query;
+use models::device::{Device, DeviceNetwork};
+use models::modem::Modem;
+use models::release::Release;
+use models::system::SystemInfo;
 use serde::Deserialize;
 use smith::utils::schema;
 use smith::utils::schema::SafeCommandRequest;
@@ -351,7 +354,7 @@ pub async fn get_devices(
             d.token IS NOT NULL as has_token,
             d.release_id,
             d.target_release_id,
-            d.system_info,
+            d.system_info AS "system_info: SqlxJson<SystemInfo>",
             d.modem_id,
             d.ip_address_id,
             ip.id as "ip_id?",
@@ -445,7 +448,7 @@ pub async fn get_devices(
                     _ => None,
                 };
 
-                Some(crate::ip_address::IpAddressInfo {
+                Some(models::ip_address::IpAddressInfo {
                     id: row.ip_id.unwrap(),
                     ip_address: row.ip_address.unwrap(),
                     name: row.ip_name,
@@ -1713,7 +1716,7 @@ pub async fn update_devices_target_release(
     Json(devices_release): Json<UpdateDevicesRelease>,
 ) -> axum::response::Result<StatusCode, StatusCode> {
     let target_release_id = devices_release.target_release_id;
-    let release = Release::get_release_by_id(target_release_id, &state.pg_pool)
+    let release = get_release_by_id(target_release_id, &state.pg_pool)
         .await
         .map_err(|err| {
             error!("Failed to get target release: {err}");
@@ -1858,7 +1861,7 @@ pub async fn get_device_info(
         d.token IS NOT NULL as has_token,
         d.release_id,
         d.target_release_id,
-        d.system_info,
+        d.system_info AS "system_info: SqlxJson<SystemInfo>",
         d.modem_id,
         d.ip_address_id,
         ip.id as "ip_id?",
@@ -1943,7 +1946,7 @@ pub async fn get_device_info(
             _ => None,
         };
 
-        Some(crate::ip_address::IpAddressInfo {
+        Some(models::ip_address::IpAddressInfo {
             id: device_row.ip_id.unwrap(),
             ip_address: device_row.ip_address.unwrap(),
             name: device_row.ip_name,

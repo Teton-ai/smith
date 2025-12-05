@@ -1,5 +1,5 @@
 use crate::State;
-use crate::device::Device;
+use crate::device::get_device_from_token;
 use axum::http::StatusCode;
 use axum::{Extension, Json};
 use serde::{Deserialize, Serialize};
@@ -36,7 +36,7 @@ pub async fn verify_token(
     Extension(state): Extension<State>,
     Json(body): Json<DeviceTokenForVerification>,
 ) -> axum::response::Result<Json<DeviceAuthResponse>, StatusCode> {
-    let device = Device::get_device_from_token(body.token, &state.pg_pool)
+    let device = get_device_from_token(body.token, &state.pg_pool)
         .await
         .map_err(|err| {
             error!("Failed to get device {err}");
