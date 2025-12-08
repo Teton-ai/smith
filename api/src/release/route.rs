@@ -4,7 +4,7 @@ use axum::extract::Path;
 use axum::http::StatusCode;
 use axum::{Extension, Json};
 use models::release::UpdateRelease;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use smith::utils::schema::Package;
 use tracing::error;
 

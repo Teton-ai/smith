@@ -9,6 +9,7 @@ pub enum ApiError {
     /// 404 Not Found
     NotFound,
     /// 500 Internal Server Error
+    #[allow(dead_code)]
     InternalServerError(anyhow::Error),
 }
 

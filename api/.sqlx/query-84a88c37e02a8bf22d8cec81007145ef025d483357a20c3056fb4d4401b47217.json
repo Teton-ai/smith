@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT release.*,\n        distribution.name AS distribution_name,\n        distribution.architecture AS distribution_architecture\n        FROM release\n        JOIN distribution ON release.distribution_id = distribution.id\n        ",
+  "query": "\n        SELECT release.*,\n        distribution.name AS distribution_name,\n        distribution.architecture AS distribution_architecture\n        FROM release\n        JOIN distribution ON release.distribution_id = distribution.id\n        ORDER BY release.id\n        ",
   "describe": {
     "columns": [
       {
@@ -64,5 +64,5 @@
       false
     ]
   },
-  "hash": "6c51efed6f3e908c55d006d912296074047060b7415b026d0c040f35634e8516"
+  "hash": "84a88c37e02a8bf22d8cec81007145ef025d483357a20c3056fb4d4401b47217"
 }

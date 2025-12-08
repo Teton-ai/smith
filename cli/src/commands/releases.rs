@@ -1,10 +1,9 @@
 use crate::{api::SmithAPI, auth, print::TablePrint};
-use anyhow::{Context as _, bail};
+use anyhow::Context as _;
 use chrono_humanize::HumanTime;
 use clap::{Args, Subcommand};
 use models::{
     deployment::{DeploymentRequest, DeploymentStatus},
-    device::DeviceFilter,
     distribution::NewDistributionRelease,
     release::UpdateRelease,
 };
