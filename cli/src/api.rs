@@ -1,13 +1,29 @@
 use anyhow::Result;
 use models::{
-    deployment::Deployment,
+    deployment::{Deployment, DeploymentRequest},
     device::{CommandsPaginated, Device, DeviceCommandResponse, DeviceFilter},
-    distribution::Distribution,
-    release::Release,
+    distribution::{Distribution, NewDistributionRelease},
+    release::{Release, UpdateRelease},
 };
-use reqwest::Client;
-use smith::utils::schema;
+use reqwest::{Client, Response};
+use smith::utils::schema::{self, Package};
 use std::collections::HashMap;
+
+trait HandleApiError: Sized {
+    async fn handle_error(self) -> anyhow::Result<Self>;
+}
+
+impl HandleApiError for Response {
+    async fn handle_error(self) -> anyhow::Result<Self> {
+        let status = self.status();
+        if status.is_client_error() || status.is_server_error() {
+            let text = self.text().await?;
+            Err(anyhow::anyhow!("Api Error {}. {}", status.as_str(), text))
+        } else {
+            Ok(self)
+        }
+    }
+}
 
 pub struct SmithAPI {
     domain: String,
@@ -26,6 +42,44 @@ impl SmithAPI {
             domain,
             bearer_token,
         }
+    }
+
+    pub async fn get_release_packages(&self, release_id: i32) -> Result<Vec<Package>> {
+        let client = Client::new();
+
+        let resp = client
+            .get(format!("{}/releases/{}/packages", self.domain, release_id))
+            .header("Authorization", format!("Bearer {}", &self.bearer_token))
+            .send()
+            .await?
+            .error_for_status()?;
+
+        let packages = resp.json().await?;
+
+        Ok(packages)
+    }
+
+    pub async fn create_distribution_release(
+        &self,
+        distribution_id: i32,
+        request: NewDistributionRelease,
+    ) -> Result<i32> {
+        let client = Client::new();
+
+        let resp = client
+            .post(format!(
+                "{}/distributions/{}/releases",
+                self.domain, distribution_id
+            ))
+            .header("Authorization", format!("Bearer {}", &self.bearer_token))
+            .json(&request)
+            .send()
+            .await?
+            .error_for_status()?;
+
+        let new_release_id = resp.json().await?;
+
+        Ok(new_release_id)
     }
 
     pub async fn get_devices(&self, query: DeviceFilter) -> Result<Vec<Device>> {
@@ -57,6 +111,34 @@ impl SmithAPI {
         Ok(resp.await?.error_for_status()?.json().await?)
     }
 
+    pub async fn get_distribution_releases(&self, distribution_id: i32) -> Result<Vec<Release>> {
+        let client = Client::new();
+
+        let resp = client
+            .get(format!(
+                "{}/distributions/{}/releases",
+                self.domain, distribution_id
+            ))
+            .header("Authorization", format!("Bearer {}", &self.bearer_token))
+            .send();
+
+        Ok(resp.await?.error_for_status()?.json().await?)
+    }
+
+    pub async fn get_latest_distribution_release(&self, distribution_id: i32) -> Result<Release> {
+        let client = Client::new();
+
+        let resp = client
+            .get(format!(
+                "{}/distributions/{}/releases/latest",
+                self.domain, distribution_id
+            ))
+            .header("Authorization", format!("Bearer {}", &self.bearer_token))
+            .send();
+
+        Ok(resp.await?.error_for_status()?.json().await?)
+    }
+
     pub async fn get_release_info(&self, release_id: String) -> Result<Release> {
         let client = Client::new();
 
@@ -68,7 +150,29 @@ impl SmithAPI {
         Ok(resp.await?.error_for_status()?.json().await?)
     }
 
-    pub async fn deploy_release(&self, release_id: String) -> Result<Deployment> {
+    pub async fn update_release(
+        &self,
+        release_id: i32,
+        update_release: UpdateRelease,
+    ) -> Result<()> {
+        let client = Client::new();
+
+        client
+            .post(format!("{}/releases/{}", self.domain, release_id))
+            .header("Authorization", format!("Bearer {}", &self.bearer_token))
+            .json(&update_release)
+            .send()
+            .await?
+            .error_for_status()?;
+
+        Ok(())
+    }
+
+    pub async fn deploy_release(
+        &self,
+        release_id: String,
+        deployment_request: Option<DeploymentRequest>,
+    ) -> Result<Deployment> {
         let client = Client::new();
 
         let resp = client
@@ -77,9 +181,13 @@ impl SmithAPI {
                 self.domain, release_id
             ))
             .header("Authorization", format!("Bearer {}", &self.bearer_token))
-            .send();
+            .json(&deployment_request)
+            .send()
+            .await?
+            .handle_error()
+            .await?;
 
-        let deployment = resp.await?.error_for_status()?.json().await?;
+        let deployment = resp.json().await?;
 
         Ok(deployment)
     }

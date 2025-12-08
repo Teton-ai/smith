@@ -8,3 +8,9 @@ pub struct Distribution {
     pub architecture: String,
     pub num_packages: Option<i32>,
 }
+
+#[derive(Debug, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct NewDistributionRelease {
+    pub version: String,
+    pub packages: Vec<i32>,
+}

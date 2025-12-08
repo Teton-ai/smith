@@ -1,6 +1,8 @@
 use clap::{Parser, Subcommand, value_parser};
 use clap_complete::Shell;
 
+use crate::commands::releases::ReleasesCommands;
+
 #[derive(Parser)]
 #[command(version, about, long_about = None)]
 pub struct Cli {
@@ -31,21 +33,6 @@ pub enum DistroCommands {
     },
     /// List the current distribution releases
     Releases,
-}
-
-#[derive(Subcommand, Debug)]
-pub enum ReleasesCommands {
-    /// Get releases
-    Get {
-        /// Get a specific release, leave out to get all releases
-        release_number: Option<String>,
-        #[arg(long, default_value = "false")]
-        json: bool,
-    },
-    /// Draft a new release
-    Create,
-    /// Deploy a release
-    Deploy { release_number: String },
 }
 
 #[derive(Subcommand, Debug)]

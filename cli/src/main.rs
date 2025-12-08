@@ -1,6 +1,7 @@
 mod api;
 mod auth;
 mod cli;
+mod commands;
 mod config;
 mod print;
 mod tunnel;
@@ -10,12 +11,10 @@ use crate::print::TablePrint;
 use anyhow::Context;
 use api::SmithAPI;
 use chrono::{DateTime, Utc};
-use chrono_humanize::HumanTime;
 use clap::{CommandFactory, Parser};
 use clap_complete::generate;
 use colored::Colorize;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
-use models::deployment::DeploymentStatus;
 use models::device::{Device, DeviceFilter};
 use std::{collections::HashSet, io, thread, time::Duration};
 use termion::raw::IntoRawMode;
@@ -642,96 +641,9 @@ async fn main() -> anyhow::Result<()> {
                 ssh.close().await?;
                 return Ok(());
             }
-            Commands::Releases { command } => match command {
-                cli::ReleasesCommands::Get {
-                    release_number,
-                    json,
-                } => {
-                    let secrets = auth::get_secrets(&config)
-                        .await
-                        .with_context(|| "Error getting token")?
-                        .with_context(|| "No Token found, please Login")?;
-                    let api = SmithAPI::new(secrets, &config);
-                    let releases = match release_number {
-                        Some(release_number) => {
-                            let release = api.get_release_info(release_number).await?;
-                            vec![release]
-                        }
-                        None => api.get_releases().await?,
-                    };
-                    if json {
-                        println!("{}", serde_json::to_string_pretty(&releases)?);
-                    } else {
-                        let mut table = TablePrint::new_with_headers(vec![
-                            "Id",
-                            "Distribution name",
-                            "Version",
-                            "Created at",
-                        ]);
-                        for release in releases {
-                            table.add_row(vec![
-                                release.id.to_string(),
-                                release.distribution_name,
-                                release.version,
-                                HumanTime::from(release.created_at).to_string(),
-                            ]);
-                        }
-                        table.print();
-                    }
-                }
-                cli::ReleasesCommands::Create => todo!(),
-                cli::ReleasesCommands::Deploy { release_number } => {
-                    let secrets = auth::get_secrets(&config)
-                        .await
-                        .with_context(|| "Error getting token")?
-                        .with_context(|| "No Token found, please Login")?;
-                    let api = SmithAPI::new(secrets, &config);
-                    // Start the deployment
-                    api.deploy_release(release_number.clone()).await?;
-
-                    // Set up polling parameters
-                    let start_time = std::time::Instant::now();
-                    let timeout = std::time::Duration::from_secs(5 * 60); // 5 minutes
-                    let check_interval = std::time::Duration::from_secs(5); // Check every 5 seconds
-
-                    println!("Checking for deployment completion...");
-
-                    // Start polling loop
-                    loop {
-                        // Check if we've exceeded the timeout
-                        if start_time.elapsed() > timeout {
-                            println!("Deployment timed out after 5 minutes");
-                            return Err(anyhow::anyhow!("Deployment timed out after 5 minutes"));
-                        }
-
-                        // Check deployment status
-                        let deployment = api
-                            .deploy_release_check_done(release_number.clone())
-                            .await?;
-
-                        // Check if the deployment is done
-                        let status = deployment.status;
-                        println!("Current status: {}", status);
-
-                        if status == DeploymentStatus::Done {
-                            println!("Deployment completed successfully!");
-                            return Ok(());
-                        }
-
-                        // If status is "failed" or any other terminal state, we can exit early
-                        if status == DeploymentStatus::Failed {
-                            return Err(anyhow::anyhow!("Deployment failed"));
-                        }
-
-                        // Wait before the next check
-                        println!(
-                            "Waiting for devices to update... (elapsed: {:?})",
-                            start_time.elapsed()
-                        );
-                        tokio::time::sleep(check_interval).await;
-                    }
-                }
-            },
+            Commands::Releases { command } => {
+                command.handle(config).await?;
+            }
             Commands::Completion { shell } => {
                 let mut cmd = Cli::command();
                 let name = env!("CARGO_BIN_NAME");

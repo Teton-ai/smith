@@ -3,6 +3,7 @@ use crate::deployment::{
     Deployment, DeploymentDeviceWithStatus, confirm_full_rollout, get_deployment,
     get_devices_in_deployment, new_deployment,
 };
+use crate::error::ApiError;
 use axum::extract::Path;
 use axum::http::StatusCode;
 use axum::{Extension, Json};
@@ -49,12 +50,11 @@ pub async fn api_release_deployment(
     Path(release_id): Path<i32>,
     Extension(state): Extension<State>,
     request: Option<Json<DeploymentRequest>>,
-) -> Result<Json<Deployment>, StatusCode> {
+) -> Result<Json<Deployment>, ApiError> {
     let release = new_deployment(release_id, request.map(|req| req.0), &state.pg_pool)
         .await
-        .map_err(|e| {
-            tracing::error!("Failed to create new deployment: {e}");
-            StatusCode::INTERNAL_SERVER_ERROR
+        .inspect_err(|e| {
+            tracing::error!("Failed to create new deployment: {e:?}");
         })?;
     Ok(Json(release))
 }

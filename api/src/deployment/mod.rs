@@ -6,6 +6,8 @@ use sqlx::PgPool;
 use sqlx::types::chrono;
 use utoipa::ToSchema;
 
+use crate::error::ApiError;
+
 pub mod route;
 
 #[derive(Serialize, Deserialize, Debug, Clone, ToSchema)]
@@ -38,13 +40,14 @@ pub async fn new_deployment(
     release_id: i32,
     request: Option<DeploymentRequest>,
     pg_pool: &PgPool,
-) -> anyhow::Result<Deployment> {
+) -> Result<Deployment, ApiError> {
+    let mut tx = pg_pool.begin().await?;
     // Get the distribution_id for this release
     let release = sqlx::query!(
         "SELECT distribution_id FROM release WHERE id = $1",
         release_id
     )
-    .fetch_one(pg_pool)
+    .fetch_one(&mut *tx)
     .await?;
 
     let deployment = sqlx::query_as!(
@@ -56,10 +59,8 @@ pub async fn new_deployment(
         "#,
         release_id
     )
-    .fetch_one(pg_pool)
+    .fetch_one(&mut *tx)
     .await?;
-
-    let mut tx = pg_pool.begin().await?;
 
     let res = if let Some(canary_device_labels) = request.and_then(|req| req.canary_device_labels)
         && !canary_device_labels.is_empty()
@@ -111,7 +112,10 @@ pub async fn new_deployment(
         .await?
     };
     if res.rows_affected() == 0 {
-        anyhow::bail!("No devices found to release canary against");
+        tx.rollback().await?;
+        return Err(ApiError::bad_request(
+            "Canary release contains no devices, aborting.",
+        ));
     }
 
     sqlx::query!(
