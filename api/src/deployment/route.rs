@@ -6,6 +6,7 @@ use crate::deployment::{
 use axum::extract::Path;
 use axum::http::StatusCode;
 use axum::{Extension, Json};
+use models::deployment::DeploymentRequest;
 
 const TAG: &str = "deployment";
 
@@ -47,11 +48,15 @@ pub async fn api_get_release_deployment(
 pub async fn api_release_deployment(
     Path(release_id): Path<i32>,
     Extension(state): Extension<State>,
-) -> Result<(StatusCode, Json<Deployment>), StatusCode> {
-    let release = new_deployment(release_id, &state.pg_pool)
+    request: Option<Json<DeploymentRequest>>,
+) -> Result<Json<Deployment>, StatusCode> {
+    let release = new_deployment(release_id, request.map(|req| req.0), &state.pg_pool)
         .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    Ok((StatusCode::OK, Json(release)))
+        .map_err(|e| {
+            tracing::error!("Failed to create new deployment: {e}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+    Ok(Json(release))
 }
 
 #[utoipa::path(

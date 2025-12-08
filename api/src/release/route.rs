@@ -32,6 +32,7 @@ pub async fn get_releases(
         distribution.architecture AS distribution_architecture
         FROM release
         JOIN distribution ON release.distribution_id = distribution.id
+        ORDER BY release.id
         ",
     )
     .fetch_all(&state.pg_pool)
