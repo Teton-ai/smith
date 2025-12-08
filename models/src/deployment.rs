@@ -29,3 +29,10 @@ pub struct Deployment {
     pub updated_at: chrono::DateTime<chrono::Utc>,
     pub created_at: chrono::DateTime<chrono::Utc>,
 }
+
+#[derive(Serialize, Deserialize, Debug, Clone, ToSchema)]
+pub struct DeploymentRequest {
+    /// Optionally decide which devices go into the canary release with this filter.
+    /// e.g. `canary_device_labels=["label1=a", "label2=b"]`
+    pub canary_device_labels: Option<Vec<String>>,
+}

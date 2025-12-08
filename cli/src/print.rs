@@ -1,18 +1,46 @@
+use std::borrow::Cow;
 use unicode_width::UnicodeWidthStr;
 
 pub struct TablePrint {
-    pub headers: Vec<String>,
-    pub rows: Vec<Vec<String>>,
+    headers: Vec<Cow<'static, str>>,
+    rows: Vec<Vec<String>>,
 }
 
 impl TablePrint {
+    #[allow(unused)]
+    pub fn new() -> Self {
+        Self {
+            headers: Vec::new(),
+            rows: Vec::new(),
+        }
+    }
+
+    pub fn new_with_headers<S: Into<Cow<'static, str>>>(headers: Vec<S>) -> Self {
+        Self {
+            headers: headers.into_iter().map(|i| i.into()).collect(),
+            rows: Vec::new(),
+        }
+    }
+
+    pub fn add_row(&mut self, row: Vec<String>) -> &mut Self {
+        self.rows.push(row);
+        self
+    }
+
+    #[allow(unused)]
+    pub fn set_header<S: Into<Cow<'static, str>>>(&mut self, header: Vec<S>) -> &mut Self {
+        self.headers = header.into_iter().map(|i| i.into()).collect();
+        self
+    }
+
     pub fn print(&self) {
         let num_columns = self.headers.len();
         let mut column_widths = vec![0; num_columns];
 
         // Calculate width for headers
         for (i, header) in self.headers.iter().enumerate() {
-            column_widths[i] = UnicodeWidthStr::width(header.as_str());
+            let a = header.to_string();
+            column_widths[i] = UnicodeWidthStr::width(a.as_str());
         }
 
         // Calculate width for rows (accounting for visible width, not ANSI codes)

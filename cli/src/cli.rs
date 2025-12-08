@@ -34,6 +34,21 @@ pub enum DistroCommands {
 }
 
 #[derive(Subcommand, Debug)]
+pub enum ReleasesCommands {
+    /// Get releases
+    Get {
+        /// Get a specific release, leave out to get all releases
+        release_number: Option<String>,
+        #[arg(long, default_value = "false")]
+        json: bool,
+    },
+    /// Draft a new release
+    Create,
+    /// Deploy a release
+    Deploy { release_number: String },
+}
+
+#[derive(Subcommand, Debug)]
 pub enum DevicesCommands {
     /// List the current distributions
     Ls {
@@ -125,18 +140,16 @@ pub enum Commands {
     },
 
     /// Lists distributions and information
-    #[command(alias = "distro")]
+    #[command(visible_alias = "distros")]
     Distributions {
         #[clap(subcommand)]
         command: DistroCommands,
     },
 
-    // Interact with a specific Release
-    Release {
-        release_number: String,
-
-        #[arg(short, long, default_value = "false")]
-        deploy: bool,
+    /// Commands related to releases
+    Releases {
+        #[clap(subcommand)]
+        command: ReleasesCommands,
     },
 
     /// Tunneling options into a device

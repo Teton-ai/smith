@@ -10,6 +10,7 @@ use crate::print::TablePrint;
 use anyhow::Context;
 use api::SmithAPI;
 use chrono::{DateTime, Utc};
+use chrono_humanize::HumanTime;
 use clap::{CommandFactory, Parser};
 use clap_complete::generate;
 use colored::Colorize;
@@ -285,7 +286,12 @@ async fn main() -> anyhow::Result<()> {
         }
     };
 
-    println!("{}", config);
+    let mut args = std::env::args();
+    // If --json is used, people probably want to pipe it to jq,
+    // so not printing here, which would otherwise cause issues in jq
+    if !args.any(|arg| arg == "--json") {
+        println!("{}", config);
+    }
 
     match cli.command {
         Some(command) => match command {
@@ -345,41 +351,32 @@ async fn main() -> anyhow::Result<()> {
                         println!("{}", serde_json::to_string(&devices).unwrap());
                         return Ok(());
                     }
-                    let rows: Vec<Vec<String>> = devices
-                        .iter()
-                        .map(|d| {
-                            let labels_str = d
-                                .labels
-                                .iter()
-                                .map(|(k, v)| format!("{}={}", k, v))
-                                .collect::<Vec<String>>()
-                                .join(", ");
+                    let mut table =
+                        TablePrint::new_with_headers(vec!["Device", "Labels", "Version"]);
+                    for d in devices {
+                        let labels_str = d
+                            .labels
+                            .iter()
+                            .map(|(k, v)| format!("{}={}", k, v))
+                            .collect::<Vec<String>>()
+                            .join(", ");
 
-                            vec![
-                                get_online_colored(&d.serial_number, &d.last_seen),
-                                labels_str,
-                                d.system_info
-                                    .as_ref()
-                                    .map(|info| {
-                                        info["smith"]["version"]
-                                            .as_str()
-                                            .unwrap_or("")
-                                            .parse()
-                                            .unwrap()
-                                    })
-                                    .unwrap_or_default(),
-                            ]
-                        })
-                        .collect();
-                    TablePrint {
-                        headers: vec![
-                            "Device".to_string(),
-                            "Labels".to_string(),
-                            "Version".to_string(),
-                        ],
-                        rows,
+                        table.add_row(vec![
+                            get_online_colored(&d.serial_number, &d.last_seen),
+                            labels_str,
+                            d.system_info
+                                .as_ref()
+                                .map(|info| {
+                                    info["smith"]["version"]
+                                        .as_str()
+                                        .unwrap_or("")
+                                        .parse()
+                                        .unwrap()
+                                })
+                                .unwrap_or_default(),
+                        ]);
                     }
-                    .print();
+                    table.print();
                 }
                 DevicesCommands::TestNetwork { device } => {
                     let secrets = auth::get_secrets(&config)
@@ -536,20 +533,15 @@ async fn main() -> anyhow::Result<()> {
                         println!("{}", serde_json::to_string_pretty(&distros)?);
                         return Ok(());
                     }
-                    let rows: Vec<Vec<String>> = distros
-                        .iter()
-                        .map(|d| {
-                            vec![
-                                format!("{} ({})", d.name, get_colored_arch(&d.architecture)),
-                                d.description.to_owned().unwrap_or_default(),
-                            ]
-                        })
-                        .collect();
-                    TablePrint {
-                        headers: vec!["Name (arch)".to_string(), "Description".to_string()],
-                        rows,
+                    let mut table =
+                        TablePrint::new_with_headers(vec!["Name (arch)", "Description"]);
+                    for d in distros {
+                        table.add_row(vec![
+                            format!("{} ({})", d.name, get_colored_arch(&d.architecture)),
+                            d.description.to_owned().unwrap_or_default(),
+                        ]);
                     }
-                    .print();
+                    table.print();
                 }
                 DistroCommands::Releases => {}
             },
@@ -650,17 +642,50 @@ async fn main() -> anyhow::Result<()> {
                 ssh.close().await?;
                 return Ok(());
             }
-            Commands::Release {
-                release_number,
-                deploy,
-            } => {
-                let secrets = auth::get_secrets(&config)
-                    .await
-                    .with_context(|| "Error getting token")?
-                    .with_context(|| "No Token found, please Login")?;
-
-                let api = SmithAPI::new(secrets, &config);
-                if deploy {
+            Commands::Releases { command } => match command {
+                cli::ReleasesCommands::Get {
+                    release_number,
+                    json,
+                } => {
+                    let secrets = auth::get_secrets(&config)
+                        .await
+                        .with_context(|| "Error getting token")?
+                        .with_context(|| "No Token found, please Login")?;
+                    let api = SmithAPI::new(secrets, &config);
+                    let releases = match release_number {
+                        Some(release_number) => {
+                            let release = api.get_release_info(release_number).await?;
+                            vec![release]
+                        }
+                        None => api.get_releases().await?,
+                    };
+                    if json {
+                        println!("{}", serde_json::to_string_pretty(&releases)?);
+                    } else {
+                        let mut table = TablePrint::new_with_headers(vec![
+                            "Id",
+                            "Distribution name",
+                            "Version",
+                            "Created at",
+                        ]);
+                        for release in releases {
+                            table.add_row(vec![
+                                release.id.to_string(),
+                                release.distribution_name,
+                                release.version,
+                                HumanTime::from(release.created_at).to_string(),
+                            ]);
+                        }
+                        table.print();
+                    }
+                }
+                cli::ReleasesCommands::Create => todo!(),
+                cli::ReleasesCommands::Deploy { release_number } => {
+                    let secrets = auth::get_secrets(&config)
+                        .await
+                        .with_context(|| "Error getting token")?
+                        .with_context(|| "No Token found, please Login")?;
+                    let api = SmithAPI::new(secrets, &config);
                     // Start the deployment
                     api.deploy_release(release_number.clone()).await?;
 
@@ -705,12 +730,8 @@ async fn main() -> anyhow::Result<()> {
                         );
                         tokio::time::sleep(check_interval).await;
                     }
-                } else {
-                    let value = api.get_release_info(release_number).await?;
-                    println!("{}", serde_json::to_string_pretty(&value)?);
-                    return Ok(());
                 }
-            }
+            },
             Commands::Completion { shell } => {
                 let mut cmd = Cli::command();
                 let name = env!("CARGO_BIN_NAME");

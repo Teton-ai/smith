@@ -46,6 +46,17 @@ impl SmithAPI {
         Ok(devices)
     }
 
+    pub async fn get_releases(&self) -> Result<Vec<Release>> {
+        let client = Client::new();
+
+        let resp = client
+            .get(format!("{}/releases", self.domain))
+            .header("Authorization", format!("Bearer {}", &self.bearer_token))
+            .send();
+
+        Ok(resp.await?.error_for_status()?.json().await?)
+    }
+
     pub async fn get_release_info(&self, release_id: String) -> Result<Release> {
         let client = Client::new();
 
