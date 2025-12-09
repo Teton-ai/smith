@@ -93,7 +93,8 @@ impl SmithAPI {
             ))
             .header("Authorization", format!("Bearer {}", &self.bearer_token))
             .send()
-            .await?;
+            .await?
+            .error_for_status()?;
 
         let devices = resp.json().await?;
 
@@ -110,7 +111,8 @@ impl SmithAPI {
             ))
             .header("Authorization", format!("Bearer {}", &self.bearer_token))
             .send()
-            .await?;
+            .await?
+            .error_for_status()?;
 
         let device = resp.json().await?;
 
