@@ -403,6 +403,12 @@ pub async fn get_devices(
           AND ($6::boolean IS NULL OR
                ($6 = true AND d.last_ping >= now() - INTERVAL '5 minutes') OR
                ($6 = false AND d.last_ping < now() - INTERVAL '5 minutes'))
+          AND NOT EXISTS (
+              SELECT 1 FROM device_label edl
+              JOIN label el ON el.id = edl.label_id
+              WHERE edl.device_id = d.id
+              AND el.name || '=' || edl.value = ANY($7)
+          )
         GROUP BY d.id, ip.id, m.id, r.id, rd.id, tr.id, trd.id, dn.device_id
         ORDER BY d.serial_number
         "#,
@@ -411,7 +417,8 @@ pub async fn get_devices(
         filter.archived,
         filter.tag,
         filter.labels.as_slice(),
-        filter.online
+        filter.online,
+        state.config.dashboard_excluded_labels.as_slice()
     )
     .fetch_all(&state.pg_pool)
     .await

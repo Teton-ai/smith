@@ -14,6 +14,7 @@ use axum::{Extension, Json};
 pub async fn api(
     Extension(state): Extension<State>,
 ) -> axum::response::Result<Json<Dashboard>, StatusCode> {
-    let dashboard = Dashboard::new(&state.pg_pool).await;
+    let dashboard =
+        Dashboard::new(&state.pg_pool, &state.config.dashboard_excluded_labels).await;
     Ok(Json(dashboard))
 }
