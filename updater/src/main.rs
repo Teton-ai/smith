@@ -1,8 +1,7 @@
-use std::io::Write;
-
 use clap::Parser;
 use smith::magic::MagicHandle;
 use smith::shutdown::ShutdownHandler;
+use std::io::Write;
 use tokio::time;
 use tracing::{error, info};
 
