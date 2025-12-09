@@ -87,7 +87,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             error!("Failed to install smith");
             info!("Output of install command:");
             let _ = std::io::stderr()
-                .write_all(&output.stderr)
+                .write_all(&status.stderr)
                 .inspect_err(|e| error!("Failed to write output of installation to stderr. {e}"));
         }
     } else {
