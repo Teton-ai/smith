@@ -4,7 +4,7 @@ use clap_complete::Shell;
 use crate::commands::{devices::DevicesCommands, releases::ReleasesCommands};
 
 #[derive(Parser)]
-#[command(version, about, long_about = None)]
+#[command(name = "sm", version, about = "Smith CLI - Fleet management tool", long_about = None)]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Option<Commands>,
@@ -51,6 +51,57 @@ pub enum ServiceCommands {
 }
 
 #[derive(Subcommand)]
+pub enum GetResourceType {
+    /// Get device information
+    #[command(visible_alias = "devices")]
+    #[command(visible_alias = "d")]
+    Device {
+        /// Device serial numbers or IDs. If omitted, shows all devices.
+        ids: Vec<String>,
+        #[arg(short, long, default_value = "false")]
+        json: bool,
+        /// Filter by labels (format: key=value). Can be used multiple times.
+        #[arg(short, long = "label", value_name = "KEY=VALUE")]
+        labels: Vec<String>,
+        /// Show only online devices (last seen < 5 minutes)
+        #[arg(long, conflicts_with = "offline")]
+        online: bool,
+        /// Show only offline devices (last seen >= 5 minutes)
+        #[arg(long, conflicts_with = "online")]
+        offline: bool,
+        /// Output format: wide, json, or custom field (e.g., serial_number, id, ip_address)
+        #[arg(short, long)]
+        output: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum RestartResourceType {
+    /// Restart devices
+    #[command(visible_alias = "devices")]
+    #[command(visible_alias = "d")]
+    Device {
+        /// Device serial numbers or IDs to restart
+        ids: Vec<String>,
+        /// Filter by labels (format: key=value). Can be used multiple times.
+        #[arg(short, long = "label", value_name = "KEY=VALUE")]
+        labels: Vec<String>,
+        /// Show only online devices (last seen < 5 minutes)
+        #[arg(long, conflicts_with = "offline")]
+        online: bool,
+        /// Show only offline devices (last seen >= 5 minutes)
+        #[arg(long, conflicts_with = "online")]
+        offline: bool,
+        /// Skip confirmation prompt
+        #[arg(short = 'y', long)]
+        yes: bool,
+        /// Don't wait for result, just queue the command and return immediately
+        #[arg(long, default_value = "false")]
+        nowait: bool,
+    },
+}
+
+#[derive(Subcommand)]
 pub enum Commands {
     /// Commands to handle current profile to use
     Profile { profile: Option<String> },
@@ -60,6 +111,18 @@ pub enum Commands {
         /// lists test values
         #[clap(subcommand)]
         command: AuthCommands,
+    },
+
+    /// Get detailed information about a resource
+    Get {
+        #[clap(subcommand)]
+        resource: GetResourceType,
+    },
+
+    /// Restart devices
+    Restart {
+        #[clap(subcommand)]
+        resource: RestartResourceType,
     },
 
     /// Lists devices and information

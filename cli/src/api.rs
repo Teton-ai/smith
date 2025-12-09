@@ -96,6 +96,19 @@ impl SmithAPI {
             .await?
             .error_for_status()?;
 
+        let status = resp.status();
+
+        if status == 404 {
+            return Ok(Vec::new());
+        }
+
+        if status == 401 {
+            return Err(anyhow::anyhow!(
+                "Authentication failed. Please run 'sm auth login' to authenticate."
+            ));
+        }
+
+        let resp = resp.error_for_status()?;
         let devices = resp.json().await?;
 
         Ok(devices)
@@ -475,5 +488,29 @@ impl SmithAPI {
         resp.await?.error_for_status()?;
 
         Ok(())
+    }
+
+    pub async fn send_restart_command(&self, device_id: u64) -> Result<(u64, u64)> {
+        let client = Client::new();
+
+        let restart_command = schema::SafeCommandRequest {
+            id: 0,
+            command: schema::SafeCommandTx::Restart,
+            continue_on_error: false,
+        };
+
+        let resp = client
+            .post(format!("{}/devices/{device_id}/commands", self.domain))
+            .header("Authorization", format!("Bearer {}", &self.bearer_token))
+            .json(&serde_json::json!([restart_command]))
+            .send();
+
+        resp.await?.error_for_status()?;
+
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
+        let last_command = self.get_last_command(device_id).await?;
+
+        Ok((device_id, last_command.cmd_id as u64))
     }
 }
