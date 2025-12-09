@@ -17,20 +17,40 @@ impl CurrentUser {
             .any(|permission| permission.resource == resource && permission.action == action)
     }
 
-    pub async fn id(pg_pool: &PgPool, auth0_sub: &str) -> Result<i32, sqlx::Error> {
-        let user_id = sqlx::query!(
+    /// Returns (user_id, has_email) if user exists, or RowNotFound if not
+    pub async fn lookup(pg_pool: &PgPool, auth0_sub: &str) -> Result<(i32, bool), sqlx::Error> {
+        let row = sqlx::query!(
             r#"
-                SELECT id
+                SELECT id, email IS NOT NULL as "has_email!"
                 FROM auth.users
                 WHERE auth0_user_id = $1
             "#,
             auth0_sub
         )
         .fetch_one(pg_pool)
-        .await?
-        .id;
+        .await?;
 
-        Ok(user_id)
+        Ok((row.id, row.has_email))
+    }
+
+    pub async fn update_email(
+        pg_pool: &PgPool,
+        user_id: i32,
+        email: &str,
+    ) -> Result<(), sqlx::Error> {
+        sqlx::query!(
+            r#"
+                UPDATE auth.users
+                SET email = $1, updated_at = now()
+                WHERE id = $2
+            "#,
+            email,
+            user_id
+        )
+        .execute(pg_pool)
+        .await?;
+
+        Ok(())
     }
 
     pub async fn create(
@@ -44,7 +64,9 @@ impl CurrentUser {
             r#"
                 INSERT INTO auth.users (auth0_user_id, email)
                 VALUES ($1, $2)
-                ON CONFLICT (auth0_user_id) DO NOTHING
+                ON CONFLICT (auth0_user_id) DO UPDATE
+                SET email = COALESCE(EXCLUDED.email, auth.users.email),
+                    updated_at = now()
             "#,
             auth0_sub,
             email

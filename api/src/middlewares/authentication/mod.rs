@@ -59,43 +59,67 @@ pub async fn check(
 
     let authorization = state.authorization.clone();
 
-    let current_user = match CurrentUser::id(&pool, &claims.sub).await {
-        Ok(user_id) => CurrentUser::build(&pool, &authorization, user_id).await,
+    // Check if user exists and has email populated
+    let needs_userinfo = match CurrentUser::lookup(&pool, &claims.sub).await {
+        Ok((_, has_email)) => !has_email,
+        Err(sqlx::Error::RowNotFound) => true,
+        Err(_) => return Err(StatusCode::INTERNAL_SERVER_ERROR),
+    };
+
+    // Fetch userinfo from Auth0 if user is new or missing email
+    let userinfo = if needs_userinfo {
+        let issuer = Url::parse(&state.config.auth0_issuer)
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        let userinfo_url = issuer
+            .join("userinfo")
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        let client_http = reqwest::Client::builder()
+            .timeout(Duration::from_secs(5))
+            .build()
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        let userinfo: Auth0UserInfo = client_http
+            .get(userinfo_url)
+            .bearer_auth(token)
+            .send()
+            .await
+            .and_then(|r| r.error_for_status())
+            .map_err(|_| StatusCode::UNAUTHORIZED)?
+            .json()
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        Some(userinfo)
+    } else {
+        None
+    };
+
+    // Create or update user as needed
+    let user_id = match CurrentUser::lookup(&pool, &claims.sub).await {
+        Ok((user_id, has_email)) => {
+            // User exists, update email if missing and we have it
+            if !has_email {
+                if let Some(ref info) = userinfo {
+                    if let Some(ref email) = info.email {
+                        info!("Updating email for user_id={}", user_id);
+                        CurrentUser::update_email(&pool, user_id, email)
+                            .await
+                            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+                    }
+                }
+            }
+            user_id
+        }
         Err(sqlx::Error::RowNotFound) => {
             info!("Creating user for sub={}", claims.sub);
-            let issuer = Url::parse(&state.config.auth0_issuer)
-                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-            let userinfo_url = issuer
-                .join("userinfo")
-                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-            let client_http = reqwest::Client::builder()
-                .timeout(Duration::from_secs(5))
-                .build()
-                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-            let userinfo: Auth0UserInfo = client_http
-                .get(userinfo_url)
-                .bearer_auth(token)
-                .send()
+            CurrentUser::create(&pool, &claims.sub, userinfo)
                 .await
-                .and_then(|r| r.error_for_status())
-                .map_err(|_| StatusCode::UNAUTHORIZED)?
-                .json()
-                .await
-                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-
-            info!(
-                "Provisioning user; email_present={}",
-                userinfo.email.is_some()
-            );
-            let user_id = CurrentUser::create(&pool, &claims.sub, Some(userinfo))
-                .await
-                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-
-            CurrentUser::build(&pool, &authorization, user_id).await
+                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
         }
         Err(_) => return Err(StatusCode::INTERNAL_SERVER_ERROR),
-    }
-    .map_err(|_| StatusCode::UNAUTHORIZED)?;
+    };
+
+    let current_user = CurrentUser::build(&pool, &authorization, user_id)
+        .await
+        .map_err(|_| StatusCode::UNAUTHORIZED)?;
 
     request.extensions_mut().insert(current_user);
 
