@@ -37,6 +37,8 @@ interface Release {
   download_count?: number;
   yanked?: boolean;
   draft?: boolean;
+  user_id?: number;
+  user_email?: string;
 }
 
 interface Distribution {

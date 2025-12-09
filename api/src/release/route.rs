@@ -30,9 +30,11 @@ pub async fn get_releases(
         "
         SELECT release.*,
         distribution.name AS distribution_name,
-        distribution.architecture AS distribution_architecture
+        distribution.architecture AS distribution_architecture,
+        auth.users.email AS user_email
         FROM release
         JOIN distribution ON release.distribution_id = distribution.id
+        LEFT JOIN auth.users ON release.user_id = auth.users.id
         ORDER BY release.id
         ",
     )

@@ -38,6 +38,7 @@ interface Release {
   yanked?: boolean;
   draft?: boolean;
   user_id?: number;
+  user_email?: string;
 }
 
 
@@ -302,7 +303,7 @@ const DistributionDetailPage = () => {
                 <h3 className="text-lg font-semibold text-gray-900 mb-2">Draft New Release</h3>
                 <p className="text-sm text-gray-600">
                   Based on <span className="font-medium">{getLatestRelease()?.version}</span> by{' '}
-                  {getLatestRelease()?.user_id ? `User #${getLatestRelease()?.user_id}` : 'Unknown'}
+                  {getLatestRelease()?.user_email || (getLatestRelease()?.user_id ? `User #${getLatestRelease()?.user_id}` : 'Unknown')}
                   {getLatestRelease()?.draft && ' (draft)'}
                 </p>
               </div>
@@ -465,7 +466,7 @@ const DistributionDetailPage = () => {
                             </div>
                             <div className="flex items-center space-x-1">
                               <User className="w-3 h-3" />
-                              <span>{release.user_id ? `User #${release.user_id}` : 'Unknown'}</span>
+                              <span>{release.user_email || (release.user_id ? `User #${release.user_id}` : 'Unknown')}</span>
                             </div>
                             {release.size && (
                               <span>{formatFileSize(release.size)}</span>
