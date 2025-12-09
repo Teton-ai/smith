@@ -7,7 +7,7 @@ mod print;
 mod tunnel;
 
 use crate::cli::{
-    Cli, Commands, DevicesCommands, DistroCommands, GetResourceType, RestartResourceType,
+    Cli, Commands, DistroCommands, GetResourceType, RestartResourceType,
     ServiceCommands,
 };
 use crate::print::TablePrint;
@@ -307,9 +307,7 @@ async fn main() -> anyhow::Result<()> {
                 GetResourceType::Device {
                     ids,
                     json,
-                    labels,
-                    online,
-                    offline,
+                    selector,
                     output,
                 } => {
                     let secrets = auth::get_secrets(&config)
@@ -321,16 +319,16 @@ async fn main() -> anyhow::Result<()> {
 
                     let devices = if ids.is_empty() {
                         // No IDs specified, apply filters
-                        let online_filter = if online {
+                        let online_filter = if selector.online {
                             Some(true)
-                        } else if offline {
+                        } else if selector.offline {
                             Some(false)
                         } else {
                             None
                         };
 
                         api.get_devices(DeviceFilter {
-                            labels,
+                            labels: selector.labels,
                             online: online_filter,
                             ..Default::default()
                         })
@@ -596,9 +594,7 @@ async fn main() -> anyhow::Result<()> {
             Commands::Restart { resource } => match resource {
                 RestartResourceType::Device {
                     ids,
-                    labels,
-                    online,
-                    offline,
+                    selector,
                     yes,
                     nowait,
                 } => {
@@ -610,7 +606,10 @@ async fn main() -> anyhow::Result<()> {
                     let api = SmithAPI::new(secrets, &config);
 
                     // Check if no filters are specified - this should NEVER be allowed
-                    let has_filters = !ids.is_empty() || !labels.is_empty() || online || offline;
+                    let has_filters = !ids.is_empty()
+                        || !selector.labels.is_empty()
+                        || selector.online
+                        || selector.offline;
 
                     if !has_filters {
                         eprintln!(
@@ -642,16 +641,16 @@ async fn main() -> anyhow::Result<()> {
 
                     // Get target devices
                     let target_devices = if ids.is_empty() {
-                        let online_filter = if online {
+                        let online_filter = if selector.online {
                             Some(true)
-                        } else if offline {
+                        } else if selector.offline {
                             Some(false)
                         } else {
                             None
                         };
 
                         api.get_devices(DeviceFilter {
-                            labels,
+                            labels: selector.labels,
                             online: online_filter,
                             ..Default::default()
                         })
@@ -1006,9 +1005,7 @@ async fn main() -> anyhow::Result<()> {
                 return Ok(());
             }
             Commands::Run {
-                labels,
-                online,
-                offline,
+                selector,
                 devices: device_filters,
                 wait,
                 command,
@@ -1022,8 +1019,14 @@ async fn main() -> anyhow::Result<()> {
 
                 let cmd_string = command.join(" ");
 
-                let target_devices =
-                    resolve_target_devices(&api, device_filters, labels, online, offline).await?;
+                let target_devices = resolve_target_devices(
+                    &api,
+                    device_filters,
+                    selector.labels,
+                    selector.online,
+                    selector.offline,
+                )
+                .await?;
 
                 // Deduplicate devices by ID to prevent duplicate command execution
                 let mut seen_ids = HashSet::new();
@@ -1162,9 +1165,7 @@ async fn main() -> anyhow::Result<()> {
                 }
             }
             Commands::Label {
-                labels,
-                online,
-                offline,
+                selector,
                 devices: device_filters,
                 set_labels,
             } => {
@@ -1175,8 +1176,14 @@ async fn main() -> anyhow::Result<()> {
 
                 let api = SmithAPI::new(secrets, &config);
 
-                let target_devices =
-                    resolve_target_devices(&api, device_filters, labels, online, offline).await?;
+                let target_devices = resolve_target_devices(
+                    &api,
+                    device_filters,
+                    selector.labels,
+                    selector.online,
+                    selector.offline,
+                )
+                .await?;
 
                 // Deduplicate devices by ID to prevent duplicate label operations
                 let mut seen_ids = HashSet::new();

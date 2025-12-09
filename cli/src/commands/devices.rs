@@ -1,4 +1,4 @@
-use crate::{api::SmithAPI, auth, execute_device_command, print::TablePrint};
+use crate::{api::SmithAPI, auth, cli::DeviceSelector, execute_device_command, print::TablePrint};
 use anyhow::Context as _;
 use chrono::{DateTime, Utc};
 use clap::{Args, Subcommand};
@@ -10,15 +10,8 @@ pub struct DevicesGet {
     id_or_serial_number: Option<String>,
     #[arg(short, long, default_value = "false")]
     json: bool,
-    /// Filter by labels (format: key=value). Can be used multiple times.
-    #[arg(short, long = "label", value_name = "KEY=VALUE")]
-    labels: Vec<String>,
-    /// Show only online devices (last seen < 5 minutes)
-    #[arg(long, conflicts_with = "offline")]
-    online: bool,
-    /// Show only offline devices (last seen >= 5 minutes)
-    #[arg(long, conflicts_with = "online")]
-    offline: bool,
+    #[command(flatten)]
+    selector: DeviceSelector,
 }
 
 #[derive(Subcommand, Debug)]
@@ -113,9 +106,7 @@ async fn handle_devices_get(get: DevicesGet, config: crate::config::Config) -> a
     let DevicesGet {
         id_or_serial_number,
         json,
-        labels,
-        online,
-        offline,
+        selector,
     } = get;
 
     let secrets = auth::get_secrets(&config)
@@ -125,9 +116,9 @@ async fn handle_devices_get(get: DevicesGet, config: crate::config::Config) -> a
 
     let api = SmithAPI::new(secrets, &config);
 
-    let online_filter = if online {
+    let online_filter = if selector.online {
         Some(true)
-    } else if offline {
+    } else if selector.offline {
         Some(false)
     } else {
         None
@@ -140,7 +131,7 @@ async fn handle_devices_get(get: DevicesGet, config: crate::config::Config) -> a
         }
         None => {
             api.get_devices(DeviceFilter {
-                labels,
+                labels: selector.labels,
                 online: online_filter,
                 ..Default::default()
             })

@@ -1,4 +1,4 @@
-use clap::{Parser, Subcommand, value_parser};
+use clap::{Args, Parser, Subcommand, value_parser};
 use clap_complete::Shell;
 
 use crate::commands::{devices::DevicesCommands, releases::ReleasesCommands};
@@ -8,6 +8,20 @@ use crate::commands::{devices::DevicesCommands, releases::ReleasesCommands};
 pub struct Cli {
     #[command(subcommand)]
     pub command: Option<Commands>,
+}
+
+/// Common device selection arguments
+#[derive(Args, Debug, Clone)]
+pub struct DeviceSelector {
+    /// Filter by labels (format: key=value). Can be used multiple times.
+    #[arg(short, long = "label", value_name = "KEY=VALUE")]
+    pub labels: Vec<String>,
+    /// Show only online devices (last seen < 5 minutes)
+    #[arg(long, conflicts_with = "offline")]
+    pub online: bool,
+    /// Show only offline devices (last seen >= 5 minutes)
+    #[arg(long, conflicts_with = "online")]
+    pub offline: bool,
 }
 
 #[derive(Subcommand)]
@@ -60,15 +74,8 @@ pub enum GetResourceType {
         ids: Vec<String>,
         #[arg(short, long, default_value = "false")]
         json: bool,
-        /// Filter by labels (format: key=value). Can be used multiple times.
-        #[arg(short, long = "label", value_name = "KEY=VALUE")]
-        labels: Vec<String>,
-        /// Show only online devices (last seen < 5 minutes)
-        #[arg(long, conflicts_with = "offline")]
-        online: bool,
-        /// Show only offline devices (last seen >= 5 minutes)
-        #[arg(long, conflicts_with = "online")]
-        offline: bool,
+        #[command(flatten)]
+        selector: DeviceSelector,
         /// Output format: wide, json, or custom field (e.g., serial_number, id, ip_address)
         #[arg(short, long)]
         output: Option<String>,
@@ -83,15 +90,8 @@ pub enum RestartResourceType {
     Device {
         /// Device serial numbers or IDs to restart
         ids: Vec<String>,
-        /// Filter by labels (format: key=value). Can be used multiple times.
-        #[arg(short, long = "label", value_name = "KEY=VALUE")]
-        labels: Vec<String>,
-        /// Show only online devices (last seen < 5 minutes)
-        #[arg(long, conflicts_with = "offline")]
-        online: bool,
-        /// Show only offline devices (last seen >= 5 minutes)
-        #[arg(long, conflicts_with = "online")]
-        offline: bool,
+        #[command(flatten)]
+        selector: DeviceSelector,
         /// Skip confirmation prompt
         #[arg(short = 'y', long)]
         yes: bool,
@@ -201,15 +201,8 @@ pub enum Commands {
 
     /// Run commands on devices with filters (async by default, use --wait to poll for results)
     Run {
-        /// Filter by labels (format: key=value). Can be used multiple times.
-        #[arg(short, long = "label", value_name = "KEY=VALUE")]
-        labels: Vec<String>,
-        /// Show only online devices (last seen < 5 minutes)
-        #[arg(long, conflicts_with = "offline")]
-        online: bool,
-        /// Show only offline devices (last seen >= 5 minutes)
-        #[arg(long, conflicts_with = "online")]
-        offline: bool,
+        #[command(flatten)]
+        selector: DeviceSelector,
         /// Specific device serial numbers or IDs to target
         #[arg(short, long = "device")]
         devices: Vec<String>,
@@ -223,15 +216,8 @@ pub enum Commands {
 
     /// Set labels on devices with filters
     Label {
-        /// Filter by labels (format: key=value). Can be used multiple times.
-        #[arg(short, long = "label", value_name = "KEY=VALUE")]
-        labels: Vec<String>,
-        /// Show only online devices (last seen < 5 minutes)
-        #[arg(long, conflicts_with = "offline")]
-        online: bool,
-        /// Show only offline devices (last seen >= 5 minutes)
-        #[arg(long, conflicts_with = "online")]
-        offline: bool,
+        #[command(flatten)]
+        selector: DeviceSelector,
         /// Specific device serial numbers or IDs to target
         #[arg(short, long = "device")]
         devices: Vec<String>,
