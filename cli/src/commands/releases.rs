@@ -50,7 +50,9 @@ impl ReleasesCommands {
                     .with_context(|| "No Token found, please Login")?;
                 let api = SmithAPI::new(secrets, &config);
                 api.update_release(
-                    release_number.parse().unwrap(),
+                    release_number
+                        .parse()
+                        .context("Failed to parse release number as i32")?,
                     UpdateRelease {
                         draft: Some(false),
                         yanked: None,
@@ -163,7 +165,7 @@ async fn handle_releases_get(
         println!("{}", serde_json::to_string_pretty(&releases)?);
     } else {
         let mut distribution_id = distribution_id;
-        if release_number.is_some_and(|_| releases.len() == 1) {
+        if release_number.is_some() {
             distribution_id = releases.first().map(|r| r.distribution_id);
         }
         let latest_release_id = if let Some(distribution_id) = distribution_id {

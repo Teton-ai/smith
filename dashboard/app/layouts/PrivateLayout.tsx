@@ -88,9 +88,9 @@ export default function PrivateLayout({
               const Icon = item.icon;
               const isActive = id === item.id;
               return (
-                <button
+                <Link
                   key={item.id}
-                  onClick={() => router.push(item.basePath)}
+                  href={item.basePath}
                   className={`${
                     isActive
                       ? 'text-gray-900 bg-gray-100'
@@ -99,7 +99,7 @@ export default function PrivateLayout({
                 >
                   <Icon className="mr-3 h-5 w-5" />
                   {item.label}
-                </button>
+                </Link>
               );
             })}
           </nav>

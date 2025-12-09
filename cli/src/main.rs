@@ -288,7 +288,7 @@ async fn main() -> anyhow::Result<()> {
     let mut args = std::env::args();
     // If --json is used, people probably want to pipe it to jq,
     // so not printing here, which would otherwise cause issues in jq
-    if !args.any(|arg| arg == "--json") {
+    if !args.any(|arg| arg.starts_with("--json")) {
         println!("{}", config);
     }
 

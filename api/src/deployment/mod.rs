@@ -68,12 +68,12 @@ pub async fn new_deployment(
         sqlx::query!(
             r#"
             WITH selected_devices AS (
-                SELECT d.id FROM device d
+                SELECT DISTINCT d.id FROM device d
                 JOIN release r ON d.release_id = r.id
                 LEFT JOIN device_label dl ON dl.device_id = d.id
                 LEFT JOIN label l ON l.id = dl.label_id
                 WHERE
-                    (CARDINALITY($3::text[]) = 0 OR l.name || '=' || dl.value = ANY($3))
+                    l.name || '=' || dl.value = ANY($3)
                     AND d.release_id = d.target_release_id
                     AND r.distribution_id = $1
             )

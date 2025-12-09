@@ -39,8 +39,7 @@ impl TablePrint {
 
         // Calculate width for headers
         for (i, header) in self.headers.iter().enumerate() {
-            let a = header.to_string();
-            column_widths[i] = UnicodeWidthStr::width(a.as_str());
+            column_widths[i] = UnicodeWidthStr::width(header.as_ref());
         }
 
         // Calculate width for rows (accounting for visible width, not ANSI codes)
