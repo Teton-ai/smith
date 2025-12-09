@@ -60,11 +60,15 @@ pub async fn check(
     let authorization = state.authorization.clone();
 
     // Check if user exists and has email populated
-    let needs_userinfo = match CurrentUser::lookup(&pool, &claims.sub).await {
-        Ok((_, has_email)) => !has_email,
-        Err(sqlx::Error::RowNotFound) => true,
+    let existing_user = match CurrentUser::lookup(&pool, &claims.sub).await {
+        Ok((user_id, has_email)) => Some((user_id, has_email)),
+        Err(sqlx::Error::RowNotFound) => None,
         Err(_) => return Err(StatusCode::INTERNAL_SERVER_ERROR),
     };
+
+    let needs_userinfo = existing_user
+        .map(|(_, has_email)| !has_email)
+        .unwrap_or(true);
 
     // Fetch userinfo from Auth0 if user is new or missing email
     let userinfo = if needs_userinfo {
@@ -93,8 +97,8 @@ pub async fn check(
     };
 
     // Create or update user as needed
-    let user_id = match CurrentUser::lookup(&pool, &claims.sub).await {
-        Ok((user_id, has_email)) => {
+    let user_id = match existing_user {
+        Some((user_id, has_email)) => {
             // User exists, update email if missing and we have it
             if !has_email {
                 if let Some(ref info) = userinfo {
@@ -108,13 +112,12 @@ pub async fn check(
             }
             user_id
         }
-        Err(sqlx::Error::RowNotFound) => {
+        None => {
             info!("Creating user for sub={}", claims.sub);
             CurrentUser::create(&pool, &claims.sub, userinfo)
                 .await
                 .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
         }
-        Err(_) => return Err(StatusCode::INTERNAL_SERVER_ERROR),
     };
 
     let current_user = CurrentUser::build(&pool, &authorization, user_id)
