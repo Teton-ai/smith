@@ -1,9 +1,12 @@
 use models::deployment::Deployment;
+use models::deployment::DeploymentRequest;
 use models::deployment::DeploymentStatus;
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 use sqlx::types::chrono;
 use utoipa::ToSchema;
+
+use crate::error::ApiError;
 
 pub mod route;
 
@@ -33,60 +36,96 @@ pub async fn get_deployment(
     .await?)
 }
 
-pub async fn new_deployment(release_id: i32, pg_pool: &PgPool) -> anyhow::Result<Deployment> {
+pub async fn new_deployment(
+    release_id: i32,
+    request: Option<DeploymentRequest>,
+    pg_pool: &PgPool,
+) -> Result<Deployment, ApiError> {
+    let mut tx = pg_pool.begin().await?;
     // Get the distribution_id for this release
     let release = sqlx::query!(
         "SELECT distribution_id FROM release WHERE id = $1",
         release_id
     )
-    .fetch_one(pg_pool)
+    .fetch_one(&mut *tx)
     .await?;
 
     let deployment = sqlx::query_as!(
         Deployment,
         r#"
-    INSERT INTO deployment (release_id, status)
-    VALUES ($1, 'in_progress')
-    RETURNING id, release_id, status AS "status!: DeploymentStatus", updated_at, created_at
-    "#,
+        INSERT INTO deployment (release_id, status)
+        VALUES ($1, 'in_progress')
+        RETURNING id, release_id, status AS "status!: DeploymentStatus", updated_at, created_at
+        "#,
         release_id
     )
-    .fetch_one(pg_pool)
+    .fetch_one(&mut *tx)
     .await?;
 
-    let mut tx = pg_pool.begin().await?;
+    let res = if let Some(canary_device_labels) = request.and_then(|req| req.canary_device_labels)
+        && !canary_device_labels.is_empty()
+    {
+        sqlx::query!(
+            r#"
+            WITH selected_devices AS (
+                SELECT DISTINCT d.id FROM device d
+                JOIN release r ON d.release_id = r.id
+                LEFT JOIN device_label dl ON dl.device_id = d.id
+                LEFT JOIN label l ON l.id = dl.label_id
+                WHERE
+                    l.name || '=' || dl.value = ANY($3)
+                    AND d.release_id = d.target_release_id
+                    AND r.distribution_id = $1
+            )
+            INSERT INTO deployment_devices (deployment_id, device_id)
+            SELECT $2, id FROM selected_devices
+            
+            "#,
+            release.distribution_id,
+            deployment.id,
+            canary_device_labels.as_slice()
+        )
+        .execute(&mut *tx)
+        .await?
+    } else {
+        sqlx::query!(
+            "
+            WITH selected_devices AS (
+                SELECT d.id FROM device d
+                JOIN release r ON d.release_id = r.id
+                LEFT JOIN device_network dn ON d.id = dn.device_id
+                WHERE d.last_ping > NOW() - INTERVAL '5 minutes'
+                AND d.release_id = d.target_release_id
+                AND r.distribution_id = $1
+                ORDER BY
+                    COALESCE(dn.network_score, 0) DESC,
+                    d.last_ping DESC
+                LIMIT 10
+            )
+            INSERT INTO deployment_devices (deployment_id, device_id)
+            SELECT $2, id FROM selected_devices
+            ",
+            release.distribution_id,
+            deployment.id
+        )
+        .execute(&mut *tx)
+        .await?
+    };
+    if res.rows_affected() == 0 {
+        tx.rollback().await?;
+        return Err(ApiError::bad_request(
+            "Canary release contains no devices, aborting.",
+        ));
+    }
 
     sqlx::query!(
         "
-WITH selected_devices AS (
-    SELECT d.id FROM device d
-    JOIN release r ON d.release_id = r.id
-    LEFT JOIN device_network dn ON d.id = dn.device_id
-    WHERE d.last_ping > NOW() - INTERVAL '5 minutes'
-    AND d.release_id = d.target_release_id
-    AND r.distribution_id = $1
-    ORDER BY
-        COALESCE(dn.network_score, 0) DESC,
-        d.last_ping DESC
-    LIMIT 10
-)
-INSERT INTO deployment_devices (deployment_id, device_id)
-SELECT $2, id FROM selected_devices
-",
-        release.distribution_id,
-        deployment.id
-    )
-    .execute(&mut *tx)
-    .await?;
-
-    sqlx::query!(
-        "
-UPDATE device
-SET target_release_id = $1
-WHERE id IN (
-    SELECT device_id FROM deployment_devices WHERE deployment_id = $2
-)
-",
+        UPDATE device
+        SET target_release_id = $1
+        WHERE id IN (
+            SELECT device_id FROM deployment_devices WHERE deployment_id = $2
+        )
+        ",
         release_id,
         deployment.id
     )

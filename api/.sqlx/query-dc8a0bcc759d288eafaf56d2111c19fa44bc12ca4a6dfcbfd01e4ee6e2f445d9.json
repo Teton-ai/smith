@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n    INSERT INTO deployment (release_id, status)\n    VALUES ($1, 'in_progress')\n    RETURNING id, release_id, status AS \"status!: DeploymentStatus\", updated_at, created_at\n    ",
+  "query": "\n        INSERT INTO deployment (release_id, status)\n        VALUES ($1, 'in_progress')\n        RETURNING id, release_id, status AS \"status!: DeploymentStatus\", updated_at, created_at\n        ",
   "describe": {
     "columns": [
       {
@@ -54,5 +54,5 @@
       false
     ]
   },
-  "hash": "c2701b7c95daff39a5b2d51e14957b0eb64e20063e3aa8987735c79f1d617e0d"
+  "hash": "dc8a0bcc759d288eafaf56d2111c19fa44bc12ca4a6dfcbfd01e4ee6e2f445d9"
 }

@@ -1,6 +1,7 @@
 mod api;
 mod auth;
 mod cli;
+mod commands;
 mod config;
 mod print;
 mod tunnel;
@@ -14,7 +15,6 @@ use clap::{CommandFactory, Parser};
 use clap_complete::generate;
 use colored::Colorize;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
-use models::deployment::DeploymentStatus;
 use models::device::{Device, DeviceFilter};
 use std::{collections::HashSet, io, thread, time::Duration};
 use termion::raw::IntoRawMode;
@@ -285,7 +285,12 @@ async fn main() -> anyhow::Result<()> {
         }
     };
 
-    println!("{}", config);
+    let mut args = std::env::args();
+    // If --json is used, people probably want to pipe it to jq,
+    // so not printing here, which would otherwise cause issues in jq
+    if !args.any(|arg| arg.starts_with("--json")) {
+        println!("{}", config);
+    }
 
     match cli.command {
         Some(command) => match command {
@@ -345,41 +350,32 @@ async fn main() -> anyhow::Result<()> {
                         println!("{}", serde_json::to_string(&devices).unwrap());
                         return Ok(());
                     }
-                    let rows: Vec<Vec<String>> = devices
-                        .iter()
-                        .map(|d| {
-                            let labels_str = d
-                                .labels
-                                .iter()
-                                .map(|(k, v)| format!("{}={}", k, v))
-                                .collect::<Vec<String>>()
-                                .join(", ");
+                    let mut table =
+                        TablePrint::new_with_headers(vec!["Device", "Labels", "Version"]);
+                    for d in devices {
+                        let labels_str = d
+                            .labels
+                            .iter()
+                            .map(|(k, v)| format!("{}={}", k, v))
+                            .collect::<Vec<String>>()
+                            .join(", ");
 
-                            vec![
-                                get_online_colored(&d.serial_number, &d.last_seen),
-                                labels_str,
-                                d.system_info
-                                    .as_ref()
-                                    .map(|info| {
-                                        info["smith"]["version"]
-                                            .as_str()
-                                            .unwrap_or("")
-                                            .parse()
-                                            .unwrap()
-                                    })
-                                    .unwrap_or_default(),
-                            ]
-                        })
-                        .collect();
-                    TablePrint {
-                        headers: vec![
-                            "Device".to_string(),
-                            "Labels".to_string(),
-                            "Version".to_string(),
-                        ],
-                        rows,
+                        table.add_row(vec![
+                            get_online_colored(&d.serial_number, &d.last_seen),
+                            labels_str,
+                            d.system_info
+                                .as_ref()
+                                .map(|info| {
+                                    info["smith"]["version"]
+                                        .as_str()
+                                        .unwrap_or("")
+                                        .parse()
+                                        .unwrap()
+                                })
+                                .unwrap_or_default(),
+                        ]);
                     }
-                    .print();
+                    table.print();
                 }
                 DevicesCommands::TestNetwork { device } => {
                     let secrets = auth::get_secrets(&config)
@@ -536,20 +532,15 @@ async fn main() -> anyhow::Result<()> {
                         println!("{}", serde_json::to_string_pretty(&distros)?);
                         return Ok(());
                     }
-                    let rows: Vec<Vec<String>> = distros
-                        .iter()
-                        .map(|d| {
-                            vec![
-                                format!("{} ({})", d.name, get_colored_arch(&d.architecture)),
-                                d.description.to_owned().unwrap_or_default(),
-                            ]
-                        })
-                        .collect();
-                    TablePrint {
-                        headers: vec!["Name (arch)".to_string(), "Description".to_string()],
-                        rows,
+                    let mut table =
+                        TablePrint::new_with_headers(vec!["Name (arch)", "Description"]);
+                    for d in distros {
+                        table.add_row(vec![
+                            format!("{} ({})", d.name, get_colored_arch(&d.architecture)),
+                            d.description.to_owned().unwrap_or_default(),
+                        ]);
                     }
-                    .print();
+                    table.print();
                 }
                 DistroCommands::Releases => {}
             },
@@ -650,66 +641,8 @@ async fn main() -> anyhow::Result<()> {
                 ssh.close().await?;
                 return Ok(());
             }
-            Commands::Release {
-                release_number,
-                deploy,
-            } => {
-                let secrets = auth::get_secrets(&config)
-                    .await
-                    .with_context(|| "Error getting token")?
-                    .with_context(|| "No Token found, please Login")?;
-
-                let api = SmithAPI::new(secrets, &config);
-                if deploy {
-                    // Start the deployment
-                    api.deploy_release(release_number.clone()).await?;
-
-                    // Set up polling parameters
-                    let start_time = std::time::Instant::now();
-                    let timeout = std::time::Duration::from_secs(5 * 60); // 5 minutes
-                    let check_interval = std::time::Duration::from_secs(5); // Check every 5 seconds
-
-                    println!("Checking for deployment completion...");
-
-                    // Start polling loop
-                    loop {
-                        // Check if we've exceeded the timeout
-                        if start_time.elapsed() > timeout {
-                            println!("Deployment timed out after 5 minutes");
-                            return Err(anyhow::anyhow!("Deployment timed out after 5 minutes"));
-                        }
-
-                        // Check deployment status
-                        let deployment = api
-                            .deploy_release_check_done(release_number.clone())
-                            .await?;
-
-                        // Check if the deployment is done
-                        let status = deployment.status;
-                        println!("Current status: {}", status);
-
-                        if status == DeploymentStatus::Done {
-                            println!("Deployment completed successfully!");
-                            return Ok(());
-                        }
-
-                        // If status is "failed" or any other terminal state, we can exit early
-                        if status == DeploymentStatus::Failed {
-                            return Err(anyhow::anyhow!("Deployment failed"));
-                        }
-
-                        // Wait before the next check
-                        println!(
-                            "Waiting for devices to update... (elapsed: {:?})",
-                            start_time.elapsed()
-                        );
-                        tokio::time::sleep(check_interval).await;
-                    }
-                } else {
-                    let value = api.get_release_info(release_number).await?;
-                    println!("{}", serde_json::to_string_pretty(&value)?);
-                    return Ok(());
-                }
+            Commands::Releases { command } => {
+                command.handle(config).await?;
             }
             Commands::Completion { shell } => {
                 let mut cmd = Cli::command();

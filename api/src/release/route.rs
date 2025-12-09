@@ -3,7 +3,8 @@ use crate::release::{Release, get_release_by_id};
 use axum::extract::Path;
 use axum::http::StatusCode;
 use axum::{Extension, Json};
-use serde::{Deserialize, Serialize};
+use models::release::UpdateRelease;
+use serde::Deserialize;
 use smith::utils::schema::Package;
 use tracing::error;
 
@@ -32,6 +33,7 @@ pub async fn get_releases(
         distribution.architecture AS distribution_architecture
         FROM release
         JOIN distribution ON release.distribution_id = distribution.id
+        ORDER BY release.id
         ",
     )
     .fetch_all(&state.pg_pool)
@@ -72,12 +74,6 @@ pub async fn get_release(
         return Err(StatusCode::NOT_FOUND);
     }
     Ok(Json(release.unwrap()))
-}
-
-#[derive(Debug, Serialize, Deserialize, utoipa::ToSchema)]
-pub struct UpdateRelease {
-    pub draft: Option<bool>,
-    pub yanked: Option<bool>,
 }
 
 #[utoipa::path(

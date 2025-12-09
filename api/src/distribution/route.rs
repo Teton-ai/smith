@@ -5,7 +5,7 @@ use crate::user::CurrentUser;
 use axum::extract::Path;
 use axum::http::StatusCode;
 use axum::{Extension, Json};
-use models::distribution::Distribution;
+use models::distribution::{Distribution, NewDistributionRelease};
 use models::release::Release;
 use serde::Deserialize;
 use tracing::error;
@@ -211,12 +211,6 @@ pub async fn get_distribution_latest_release(
         })?;
 
     Ok(Json(release))
-}
-
-#[derive(Debug, Deserialize, utoipa::ToSchema)]
-pub struct NewDistributionRelease {
-    pub version: String,
-    pub packages: Vec<i32>,
 }
 
 #[utoipa::path(

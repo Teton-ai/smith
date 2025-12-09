@@ -39,6 +39,7 @@ mod db;
 mod deployment;
 mod device;
 mod distribution;
+mod error;
 mod event;
 mod handlers;
 mod health;

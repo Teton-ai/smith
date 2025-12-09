@@ -3,11 +3,12 @@ import { Cpu, Home, Layers, FileText, Globe, Smartphone } from "lucide-react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
 import Profile from "@/app/components/profile";
+import Link from "next/link";
 
 export default function PrivateLayout({
-                                        id,
-                                     children,
-                                   }: Readonly<{
+  id,
+  children,
+}: Readonly<{
   id: string
   children: React.ReactNode;
 }>) {
@@ -48,9 +49,9 @@ export default function PrivateLayout({
                   const Icon = item.icon;
                   const isActive = id === item.id;
                   return (
-                    <button
+                    <Link
                       key={item.id}
-                      onClick={() => router.push(item.basePath)}
+                      href={item.basePath}
                       className={`${
                         isActive
                           ? 'text-gray-900 bg-gray-100'
@@ -59,7 +60,7 @@ export default function PrivateLayout({
                     >
                       <Icon className="w-4 h-4" />
                       <span>{item.label}</span>
-                    </button>
+                    </Link>
                   );
                 })}
               </nav>
@@ -87,9 +88,9 @@ export default function PrivateLayout({
               const Icon = item.icon;
               const isActive = id === item.id;
               return (
-                <button
+                <Link
                   key={item.id}
-                  onClick={() => router.push(item.basePath)}
+                  href={item.basePath}
                   className={`${
                     isActive
                       ? 'text-gray-900 bg-gray-100'
@@ -98,7 +99,7 @@ export default function PrivateLayout({
                 >
                   <Icon className="mr-3 h-5 w-5" />
                   {item.label}
-                </button>
+                </Link>
               );
             })}
           </nav>
