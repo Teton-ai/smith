@@ -67,6 +67,8 @@ pub struct Config {
     pub auth0_issuer: String,
     pub auth0_audience: String,
     pub cloudfront: CloudFrontConfig,
+    /// Labels to exclude from dashboard stats, format: "key=value,key2=value2"
+    pub dashboard_excluded_labels: Vec<String>,
 }
 
 impl Config {
@@ -87,6 +89,10 @@ impl Config {
             auth0_issuer: env::var("AUTH0_ISSUER").context("AUTH0_ISSUER is required.")?,
             auth0_audience: env::var("AUTH0_AUDIENCE").context("AUTH0_AUDIENCE is required.")?,
             cloudfront: CloudFrontConfig::new()?,
+            dashboard_excluded_labels: env::var("DASHBOARD_EXCLUDED_LABELS")
+                .ok()
+                .map(|s| s.split(',').map(|l| l.trim().to_string()).collect())
+                .unwrap_or_default(),
         })
     }
 }
