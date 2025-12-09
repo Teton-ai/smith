@@ -18,6 +18,7 @@ import {
 import useSmithAPI from "@/app/hooks/smith-api";
 import PrivateLayout from "@/app/layouts/PrivateLayout";
 import NetworkQualityIndicator from "@/app/components/NetworkQualityIndicator";
+import { useConfig } from "@/app/hooks/config";
 
 interface IpAddressInfo {
   id: number;
@@ -82,10 +83,11 @@ interface DashboardData {
 const AdminPanel = () => {
   const router = useRouter();
   const { callAPI } = useSmithAPI();
+  const { config } = useConfig();
   const [dashboardData, setDashboardData] = useState<DashboardData | null>(null);
-  const [devices, setDevices] = useState<Device[]>([]);
-  const [attentionDevices, setAttentionDevices] = useState<Device[]>([]);
   const [unapprovedDevices, setUnapprovedDevices] = useState<Device[]>([]);
+  const [outdatedDevices, setOutdatedDevices] = useState<Device[]>([]);
+  const [offlineDevices, setOfflineDevices] = useState<Device[]>([]);
   const [processingDevices, setProcessingDevices] = useState<Set<number>>(new Set());
   const [loading, setLoading] = useState(true);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
@@ -101,53 +103,34 @@ const AdminPanel = () => {
     const fetchData = async () => {
       setLoading(true);
       try {
-        // Fetch dashboard stats
-        const dashData = await callAPI<DashboardData>('GET', '/dashboard');
-        if (dashData) {
-          setDashboardData(dashData);
-        }
+        // Build exclude_labels query param
+        const excludeLabels = config?.DASHBOARD_EXCLUDED_LABELS
+          ?.split(',')
+          .map(l => l.trim())
+          .filter(Boolean) || [];
+        const excludeParams = excludeLabels.length > 0
+          ? '&' + excludeLabels.map(l => `exclude_labels=${encodeURIComponent(l)}`).join('&')
+          : '';
 
-        // Fetch unapproved devices
-        const unapprovedData = await callAPI<Device[]>('GET', '/devices?approved=false');
-        if (unapprovedData) {
-          setUnapprovedDevices(unapprovedData);
-        }
+        // Fetch all data in parallel
+        const [dashData, unapprovedData, outdatedData, offlineData] = await Promise.all([
+          callAPI<DashboardData>('GET', '/dashboard'),
+          callAPI<Device[]>('GET', '/devices?approved=false'),
+          callAPI<Device[]>('GET', `/devices?outdated=true&online=true${excludeParams}`),
+          callAPI<Device[]>('GET', `/devices?online=false${excludeParams}`),
+        ]);
 
-        // Fetch devices for attention analysis
-        const devicesData = await callAPI<Device[]>('GET', '/devices');
-        if (devicesData) {
-          const authorizedDevices = devicesData.filter(device => device.has_token);
-          setDevices(authorizedDevices);
-          
-          // Filter devices that need attention
-          const needsAttention = authorizedDevices.filter(device => {
-            // Never seen = needs attention
-            if (!device.last_seen) return true;
-            
-            const lastSeen = new Date(device.last_seen);
-            const now = new Date();
-            const diffMinutes = (now.getTime() - lastSeen.getTime()) / (1000 * 60);
-            const daysSinceLastSeen = diffMinutes / (60 * 24);
-            const isOnline = diffMinutes <= 3;
-            
-            // Stuck on update = needs attention (but only if device is online)
-            if (isOnline && device.release_id && device.target_release_id && device.release_id !== device.target_release_id) {
-              return true;
-            }
-            
-            // Offline for more than 3 minutes but less than 30 days
-            return daysSinceLastSeen > (3 / (24 * 60)) && daysSinceLastSeen <= 30;
-          });
-          
-          setAttentionDevices(needsAttention);
-        }
+        if (dashData) setDashboardData(dashData);
+        if (unapprovedData) setUnapprovedDevices(unapprovedData);
+        if (outdatedData) setOutdatedDevices(outdatedData);
+        if (offlineData) setOfflineDevices(offlineData);
 
       } finally {
         setLoading(false);
       }
     };
     fetchData();
-  }, [callAPI]);
+  }, [callAPI, config]);
 
   const getDeviceStatus = (device: Device) => {
     if (!device.last_seen) return 'never-seen';
@@ -276,12 +259,53 @@ const AdminPanel = () => {
     return device.system_info?.hostname || 'No hostname';
   };
 
-  // Categorize attention devices
-  const stuckUpdates = attentionDevices.filter(d => getDeviceStatus(d) === 'stuck-update');
-  const recentlyOffline = attentionDevices.filter(d => getDeviceStatus(d) === 'recently-offline');
-  const offlineWeek = attentionDevices.filter(d => getDeviceStatus(d) === 'offline-week');
-  const offlineMonth = attentionDevices.filter(d => getDeviceStatus(d) === 'offline-month');
-  const neverSeen = attentionDevices.filter(d => getDeviceStatus(d) === 'never-seen');
+  // Sort by last_seen descending (most recent first), never seen at the end
+  const sortByLastSeen = (a: Device, b: Device) => {
+    if (!a.last_seen && !b.last_seen) return 0;
+    if (!a.last_seen) return 1;
+    if (!b.last_seen) return -1;
+    return new Date(b.last_seen).getTime() - new Date(a.last_seen).getTime();
+  };
+
+  // Outdated devices (pending update) - sorted by last_seen
+  const stuckUpdates = [...outdatedDevices].sort(sortByLastSeen);
+
+  // Offline devices categorized by how long they've been offline
+  const categorizeOffline = (devices: Device[]) => {
+    const now = new Date();
+    const recentlyOffline: Device[] = [];
+    const offlineWeek: Device[] = [];
+    const offlineMonth: Device[] = [];
+    const neverSeen: Device[] = [];
+
+    for (const device of devices) {
+      if (!device.last_seen) {
+        neverSeen.push(device);
+        continue;
+      }
+      const lastSeen = new Date(device.last_seen);
+      const diffDays = (now.getTime() - lastSeen.getTime()) / (1000 * 60 * 60 * 24);
+
+      if (diffDays <= 1) {
+        recentlyOffline.push(device);
+      } else if (diffDays <= 7) {
+        offlineWeek.push(device);
+      } else if (diffDays <= 30) {
+        offlineMonth.push(device);
+      }
+      // Devices offline > 30 days are not shown (considered abandoned)
+    }
+
+    return {
+      recentlyOffline: recentlyOffline.sort(sortByLastSeen),
+      offlineWeek: offlineWeek.sort(sortByLastSeen),
+      offlineMonth: offlineMonth.sort(sortByLastSeen),
+      neverSeen,
+    };
+  };
+
+  const { recentlyOffline, offlineWeek, offlineMonth, neverSeen } = categorizeOffline(offlineDevices);
+  const hasAttentionDevices = stuckUpdates.length > 0 || recentlyOffline.length > 0 || offlineWeek.length > 0 || offlineMonth.length > 0 || neverSeen.length > 0;
 
 
   return (
@@ -380,7 +404,7 @@ const AdminPanel = () => {
               </div>
             ))}
           </div>
-        ) : attentionDevices.length > 0 ? (
+        ) : hasAttentionDevices ? (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             {/* Pending Update Section */}
             {stuckUpdates.length > 0 && (
@@ -441,7 +465,7 @@ const AdminPanel = () => {
                     <div className="px-4 py-3 bg-gray-50">
                       <button
                         onClick={() => router.push('/devices?outdated=true')}
-                        className="text-sm text-blue-600 hover:text-blue-800"
+                        className="text-sm text-blue-600 hover:text-blue-800 cursor-pointer"
                       >
                         View all {stuckUpdates.length} devices →
                       </button>
@@ -498,7 +522,7 @@ const AdminPanel = () => {
                     <div className="px-4 py-3 bg-gray-50">
                       <button
                         onClick={() => router.push('/devices')}
-                        className="text-sm text-blue-600 hover:text-blue-800"
+                        className="text-sm text-blue-600 hover:text-blue-800 cursor-pointer"
                       >
                         View all {recentlyOffline.length} devices →
                       </button>
@@ -555,7 +579,7 @@ const AdminPanel = () => {
                     <div className="px-4 py-3 bg-gray-50">
                       <button
                         onClick={() => router.push('/devices')}
-                        className="text-sm text-blue-600 hover:text-blue-800"
+                        className="text-sm text-blue-600 hover:text-blue-800 cursor-pointer"
                       >
                         View all {offlineWeek.length} devices →
                       </button>
@@ -612,7 +636,7 @@ const AdminPanel = () => {
                     <div className="px-4 py-3 bg-gray-50">
                       <button
                         onClick={() => router.push('/devices')}
-                        className="text-sm text-blue-600 hover:text-blue-800"
+                        className="text-sm text-blue-600 hover:text-blue-800 cursor-pointer"
                       >
                         View all {offlineMonth.length} devices →
                       </button>
@@ -667,7 +691,7 @@ const AdminPanel = () => {
                     <div className="px-4 py-3 bg-gray-50">
                       <button
                         onClick={() => router.push('/devices')}
-                        className="text-sm text-blue-600 hover:text-blue-800"
+                        className="text-sm text-blue-600 hover:text-blue-800 cursor-pointer"
                       >
                         View all {neverSeen.length} devices →
                       </button>
