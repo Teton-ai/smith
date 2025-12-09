@@ -11,6 +11,7 @@ pub struct Release {
     pub yanked: bool,
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub user_id: Option<i32>,
+    pub user_email: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, utoipa::ToSchema)]

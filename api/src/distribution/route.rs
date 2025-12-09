@@ -170,9 +170,11 @@ pub async fn get_distribution_releases(
         r#"
         SELECT release.*,
         distribution.name AS distribution_name,
-        distribution.architecture AS distribution_architecture
+        distribution.architecture AS distribution_architecture,
+        auth.users.email AS user_email
         FROM release
         JOIN distribution ON release.distribution_id = distribution.id
+        LEFT JOIN auth.users ON release.user_id = auth.users.id
         WHERE distribution_id = $1
         ORDER BY release.created_at DESC"#,
         distribution_id

@@ -11,9 +11,11 @@ pub async fn get_release_by_id(
         "
         SELECT release.*,
         distribution.name AS distribution_name,
-        distribution.architecture AS distribution_architecture
+        distribution.architecture AS distribution_architecture,
+        auth.users.email AS user_email
         FROM release
         JOIN distribution ON release.distribution_id = distribution.id
+        LEFT JOIN auth.users ON release.user_id = auth.users.id
         WHERE release.id = $1
         ",
         release_id
@@ -31,9 +33,11 @@ pub async fn get_latest_distribution_release(
         "
         SELECT release.*,
         distribution.name AS distribution_name,
-        distribution.architecture AS distribution_architecture
+        distribution.architecture AS distribution_architecture,
+        auth.users.email AS user_email
         FROM release
         JOIN distribution ON release.distribution_id = distribution.id
+        LEFT JOIN auth.users ON release.user_id = auth.users.id
         WHERE distribution_id = $1
         AND draft = false
         AND yanked = FALSE

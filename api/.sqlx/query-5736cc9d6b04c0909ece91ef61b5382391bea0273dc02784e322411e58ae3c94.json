@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT release.*,\n        distribution.name AS distribution_name,\n        distribution.architecture AS distribution_architecture\n        FROM release\n        JOIN distribution ON release.distribution_id = distribution.id\n        ORDER BY release.id\n        ",
+  "query": "\n        SELECT release.*,\n        distribution.name AS distribution_name,\n        distribution.architecture AS distribution_architecture,\n        auth.users.email AS user_email\n        FROM device\n        LEFT JOIN release ON device.target_release_id = release.id\n        JOIN distribution ON release.distribution_id = distribution.id\n        LEFT JOIN auth.users ON release.user_id = auth.users.id\n        WHERE device.id = $1\n        ",
   "describe": {
     "columns": [
       {
@@ -47,10 +47,17 @@
         "ordinal": 8,
         "name": "distribution_architecture",
         "type_info": "Text"
+      },
+      {
+        "ordinal": 9,
+        "name": "user_email",
+        "type_info": "Varchar"
       }
     ],
     "parameters": {
-      "Left": []
+      "Left": [
+        "Int4"
+      ]
     },
     "nullable": [
       false,
@@ -61,8 +68,9 @@
       false,
       true,
       false,
-      false
+      false,
+      true
     ]
   },
-  "hash": "84a88c37e02a8bf22d8cec81007145ef025d483357a20c3056fb4d4401b47217"
+  "hash": "5736cc9d6b04c0909ece91ef61b5382391bea0273dc02784e322411e58ae3c94"
 }
