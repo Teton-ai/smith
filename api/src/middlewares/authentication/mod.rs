@@ -66,9 +66,13 @@ pub async fn check(
         Err(_) => return Err(StatusCode::INTERNAL_SERVER_ERROR),
     };
 
-    let needs_userinfo = existing_user
-        .map(|(_, has_email)| !has_email)
-        .unwrap_or(true);
+    // M2M tokens have sub claim ending with "@clients" - they can't call /userinfo
+    let is_m2m_token = claims.sub.ends_with("@clients");
+
+    let needs_userinfo = !is_m2m_token
+        && existing_user
+            .map(|(_, has_email)| !has_email)
+            .unwrap_or(true);
 
     // Fetch userinfo from Auth0 if user is new or missing email
     let userinfo = if needs_userinfo {
