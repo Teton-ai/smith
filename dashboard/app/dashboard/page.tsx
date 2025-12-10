@@ -18,6 +18,7 @@ import {
 import useSmithAPI from "@/app/hooks/smith-api";
 import PrivateLayout from "@/app/layouts/PrivateLayout";
 import NetworkQualityIndicator from "@/app/components/NetworkQualityIndicator";
+import Link from 'next/link';
 
 interface IpAddressInfo {
   id: number;
@@ -395,10 +396,10 @@ const AdminPanel = () => {
                   {stuckUpdates.slice(0, 10).map((device) => {
                     const isOnline = device.last_seen ? (new Date().getTime() - new Date(device.last_seen).getTime()) / (1000 * 60) <= 3 : false;
                     return (
-                      <div
+                      <Link
                         key={device.id}
                         className="px-4 py-3 hover:bg-purple-50 cursor-pointer transition-colors"
-                        onClick={() => router.push(`/devices/${device.serial_number}`)}
+                        href={`/devices/${device.serial_number}`}
                       >
                         <div className="flex items-center justify-between">
                           <div className="flex items-center space-x-3 flex-1">
@@ -434,7 +435,7 @@ const AdminPanel = () => {
                             <ChevronRight className="w-4 h-4 text-gray-400 flex-shrink-0" />
                           </div>
                         </div>
-                      </div>
+                      </Link>
                     );
                   })}
                   {stuckUpdates.length > 10 && (
@@ -463,10 +464,10 @@ const AdminPanel = () => {
                 <div className="divide-y divide-gray-200">
                   {recentlyOffline.slice(0, 10).map((device) => {
                     return (
-                      <div
+                      <Link
                         key={device.id}
                         className="px-4 py-3 hover:bg-yellow-50 cursor-pointer transition-colors"
-                        onClick={() => router.push(`/devices/${device.serial_number}`)}
+                        href={`/devices/${device.serial_number}`}
                       >
                         <div className="flex items-center justify-between">
                           <div className="flex items-center space-x-3 flex-1">
@@ -491,7 +492,7 @@ const AdminPanel = () => {
                             <ChevronRight className="w-4 h-4 text-gray-400 flex-shrink-0" />
                           </div>
                         </div>
-                      </div>
+                      </Link>
                     );
                   })}
                   {recentlyOffline.length > 10 && (
@@ -520,10 +521,10 @@ const AdminPanel = () => {
                 <div className="divide-y divide-gray-200">
                   {offlineWeek.slice(0, 10).map((device) => {
                     return (
-                      <div
+                      <Link
                         key={device.id}
                         className="px-4 py-3 hover:bg-orange-50 cursor-pointer transition-colors"
-                        onClick={() => router.push(`/devices/${device.serial_number}`)}
+                        href={`/devices/${device.serial_number}`}
                       >
                         <div className="flex items-center justify-between">
                           <div className="flex items-center space-x-3 flex-1">
@@ -548,7 +549,7 @@ const AdminPanel = () => {
                             <ChevronRight className="w-4 h-4 text-gray-400 flex-shrink-0" />
                           </div>
                         </div>
-                      </div>
+                      </Link>
                     );
                   })}
                   {offlineWeek.length > 10 && (
@@ -577,10 +578,10 @@ const AdminPanel = () => {
                 <div className="divide-y divide-gray-200">
                   {offlineMonth.slice(0, 10).map((device) => {
                     return (
-                      <div
+                      <Link
                         key={device.id}
                         className="px-4 py-3 hover:bg-red-50 cursor-pointer transition-colors"
-                        onClick={() => router.push(`/devices/${device.serial_number}`)}
+                        href={`/devices/${device.serial_number}`}
                       >
                         <div className="flex items-center justify-between">
                           <div className="flex items-center space-x-3 flex-1">
@@ -605,7 +606,7 @@ const AdminPanel = () => {
                             <ChevronRight className="w-4 h-4 text-gray-400 flex-shrink-0" />
                           </div>
                         </div>
-                      </div>
+                      </Link>
                     );
                   })}
                   {offlineMonth.length > 10 && (
