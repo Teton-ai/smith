@@ -6,11 +6,13 @@ mod config;
 mod print;
 mod tunnel;
 
-use crate::cli::{Cli, Commands, DistroCommands, ServiceCommands};
+use crate::cli::{
+    Cli, Commands, DistroCommands, GetResourceType, RestartResourceType, ServiceCommands,
+};
+use crate::commands::devices::get_online_colored;
 use crate::print::TablePrint;
 use anyhow::{Context, bail};
 use api::SmithAPI;
-use chrono::DateTime;
 use chrono_humanize::HumanTime;
 use clap::{CommandFactory, Parser};
 use clap_complete::generate;
@@ -286,13 +288,6 @@ async fn main() -> anyhow::Result<()> {
         }
     };
 
-    let mut args = std::env::args();
-    // If --json is used, people probably want to pipe it to jq,
-    // so not printing here, which would otherwise cause issues in jq
-    if !args.any(|arg| arg.starts_with("--json")) {
-        println!("{}", config);
-    }
-
     match cli.command {
         Some(command) => match command {
             Commands::Update { check } => {
@@ -307,6 +302,456 @@ async fn main() -> anyhow::Result<()> {
                     println!("new: {}", config);
                 }
             }
+            Commands::Get { resource } => match resource {
+                GetResourceType::Device {
+                    ids,
+                    json,
+                    selector,
+                    output,
+                } => {
+                    let secrets = auth::get_secrets(&config)
+                        .await
+                        .with_context(|| "Error getting token")?
+                        .with_context(|| "No Token found, please Login")?;
+
+                    let api = SmithAPI::new(secrets, &config);
+
+                    let devices = if ids.is_empty() {
+                        // No IDs specified, apply filters
+                        let online_filter = if selector.online {
+                            Some(true)
+                        } else if selector.offline {
+                            Some(false)
+                        } else {
+                            None
+                        };
+
+                        api.get_devices(DeviceFilter {
+                            labels: selector.labels,
+                            online: online_filter,
+                            ..Default::default()
+                        })
+                        .await?
+                    } else {
+                        // Get specific devices
+                        let mut all_devices = Vec::new();
+                        for id in ids {
+                            let devices = api
+                                .get_devices(DeviceFilter {
+                                    serial_number: Some(id.clone()),
+                                    ..Default::default()
+                                })
+                                .await
+                                .with_context(|| format!("Failed to fetch device '{}'", id))?;
+
+                            if devices.is_empty() {
+                                eprintln!("{}: Device not found: '{}'", "Warning".yellow(), id);
+                            } else {
+                                all_devices.extend(devices);
+                            }
+                        }
+                        all_devices
+                    };
+
+                    if devices.is_empty() {
+                        println!("No devices found");
+                        return Ok(());
+                    }
+
+                    // Handle output format
+                    if let Some(output_format) = output {
+                        match output_format.as_str() {
+                            "json" => {
+                                println!("{}", serde_json::to_string_pretty(&devices)?);
+                                return Ok(());
+                            }
+                            "wide" => {
+                                // Wide format - will show more columns in table
+                            }
+                            // Custom field selection
+                            field => {
+                                for device in &devices {
+                                    let value = match field {
+                                        "serial_number" => device.serial_number.clone(),
+                                        "id" => device.id.to_string(),
+                                        "ip_address" | "ip" => device
+                                            .ip_address
+                                            .as_ref()
+                                            .map(|ip| ip.ip_address.to_string())
+                                            .unwrap_or_default(),
+                                        "version" => device
+                                            .system_info
+                                            .as_ref()
+                                            .and_then(|info| info["smith"]["version"].as_str())
+                                            .unwrap_or("")
+                                            .to_string(),
+                                        "release" => device
+                                            .release
+                                            .as_ref()
+                                            .map(|r| r.id.to_string())
+                                            .unwrap_or_default(),
+                                        "target_release" => device
+                                            .target_release
+                                            .as_ref()
+                                            .map(|r| r.id.to_string())
+                                            .unwrap_or_default(),
+                                        _ => {
+                                            eprintln!(
+                                                "Unknown field: '{}'. Available fields: serial_number, id, ip_address, version, release, target_release",
+                                                field
+                                            );
+                                            return Err(anyhow::anyhow!("Invalid output field"));
+                                        }
+                                    };
+                                    println!("{}", value);
+                                }
+                                return Ok(());
+                            }
+                        }
+                    }
+
+                    if json {
+                        println!("{}", serde_json::to_string_pretty(&devices)?);
+                        return Ok(());
+                    }
+
+                    // Display devices in table format if multiple, or detailed view if single
+                    if devices.len() == 1 {
+                        let device = &devices[0];
+
+                        // Status line
+                        let status_str = if let Some(last_seen) = &device.last_seen {
+                            use chrono_humanize::HumanTime;
+                            let now = chrono::Utc::now();
+                            let duration =
+                                now.signed_duration_since(last_seen.with_timezone(&chrono::Utc));
+                            if duration.num_minutes() < 5 {
+                                format!("● {}", "online".bright_green())
+                            } else {
+                                let human_time =
+                                    HumanTime::from(last_seen.with_timezone(&chrono::Utc));
+                                format!("○ {} ({})", "offline".red(), human_time)
+                            }
+                        } else {
+                            format!("○ {}", "unknown".yellow())
+                        };
+
+                        // Main info line
+                        let version = device
+                            .system_info
+                            .as_ref()
+                            .and_then(|info| info["smith"]["version"].as_str())
+                            .unwrap_or("unknown");
+
+                        let os_info = device
+                            .system_info
+                            .as_ref()
+                            .and_then(|info| {
+                                let os_name = info.get("os")?.get("name")?.as_str()?;
+                                let arch = info.get("architecture")?.as_str()?;
+                                Some(format!("{}/{}", os_name, arch))
+                            })
+                            .unwrap_or_else(|| "unknown".to_string());
+
+                        println!(
+                            "{} {} {}",
+                            device.serial_number.bold(),
+                            status_str,
+                            format!("(id: {})", device.id).dimmed()
+                        );
+                        println!("  {} {}", "smith:".dimmed(), version);
+                        println!("  {} {}", "os:".dimmed(), os_info);
+
+                        // Release information
+                        if let Some(release) = &device.release {
+                            let target_str = if let Some(target_release) = &device.target_release {
+                                if release.id != target_release.id {
+                                    format!(
+                                        " → {} {}",
+                                        target_release.id,
+                                        "(update available)".yellow()
+                                    )
+                                } else {
+                                    String::new()
+                                }
+                            } else {
+                                String::new()
+                            };
+                            println!("  {} {}{}", "release:".dimmed(), release.id, target_str);
+                        }
+
+                        // IP Address
+                        if let Some(ip_info) = &device.ip_address {
+                            println!("  {} {}", "ip:".dimmed(), ip_info.ip_address);
+                        }
+
+                        // Modem
+                        if let Some(modem) = &device.modem {
+                            println!("  {} {}", "modem:".dimmed(), &modem.network_provider);
+                        }
+
+                        // Network info
+                        if let Some(network) = &device.network {
+                            let mut network_parts = Vec::new();
+                            if let Some(download) = network.download_speed_mbps {
+                                network_parts.push(format!("↓{:.1}Mbps", download));
+                            }
+                            if let Some(upload) = network.upload_speed_mbps {
+                                network_parts.push(format!("↑{:.1}Mbps", upload));
+                            }
+                            if let Some(score) = network.network_score {
+                                network_parts.push(format!("score:{}", score));
+                            }
+                            if !network_parts.is_empty() {
+                                println!("  {} {}", "network:".dimmed(), network_parts.join(" "));
+                            }
+                        }
+
+                        // Note
+                        if let Some(note) = &device.note {
+                            if !note.is_empty() {
+                                println!("  {} {}", "note:".dimmed(), note);
+                            }
+                        }
+
+                        // Labels
+                        if !device.labels.is_empty() {
+                            let labels_str = device
+                                .labels
+                                .iter()
+                                .map(|(k, v)| format!("{}={}", k, v))
+                                .collect::<Vec<String>>()
+                                .join(", ");
+                            println!("  {} {}", "labels:".dimmed(), labels_str.cyan());
+                        }
+                    } else {
+                        // Multiple devices - show table format
+                        let mut table = TablePrint::new_with_headers(vec![
+                            "Device", "Version", "OS/Arch", "Release", "IP", "Labels",
+                        ]);
+                        for d in devices {
+                            let version = d
+                                .system_info
+                                .as_ref()
+                                .and_then(|info| info["smith"]["version"].as_str())
+                                .unwrap_or("unknown")
+                                .to_string();
+
+                            let os_arch = d
+                                .system_info
+                                .as_ref()
+                                .and_then(|info| {
+                                    let os_name = info.get("os")?.get("name")?.as_str()?;
+                                    let arch = info.get("architecture")?.as_str()?;
+                                    Some(format!("{}/{}", os_name, arch))
+                                })
+                                .unwrap_or_else(|| "unknown".to_string());
+
+                            let release_str = if let Some(release) = &d.release {
+                                if let Some(target) = &d.target_release {
+                                    if release.id != target.id {
+                                        format!("{} → {}", release.id, target.id)
+                                    } else {
+                                        release.id.to_string()
+                                    }
+                                } else {
+                                    release.id.to_string()
+                                }
+                            } else {
+                                "-".to_string()
+                            };
+
+                            let ip_str = d
+                                .ip_address
+                                .as_ref()
+                                .map(|ip| ip.ip_address.to_string())
+                                .unwrap_or_else(|| "-".to_string());
+
+                            let labels_str = if d.labels.is_empty() {
+                                "-".to_string()
+                            } else {
+                                d.labels
+                                    .iter()
+                                    .map(|(k, v)| format!("{}={}", k, v))
+                                    .collect::<Vec<String>>()
+                                    .join(", ")
+                            };
+
+                            table.add_row(vec![
+                                get_online_colored(&d.serial_number, &d.last_seen),
+                                version,
+                                os_arch,
+                                release_str,
+                                ip_str,
+                                labels_str,
+                            ]);
+                        }
+                        table.print();
+                    }
+                }
+            },
+            Commands::Restart { resource } => match resource {
+                RestartResourceType::Device {
+                    ids,
+                    selector,
+                    yes,
+                    nowait,
+                } => {
+                    let secrets = auth::get_secrets(&config)
+                        .await
+                        .with_context(|| "Error getting token")?
+                        .with_context(|| "No Token found, please Login")?;
+
+                    let api = SmithAPI::new(secrets, &config);
+
+                    // Check if no filters are specified - this should NEVER be allowed
+                    let has_filters = !ids.is_empty()
+                        || !selector.labels.is_empty()
+                        || selector.online
+                        || selector.offline;
+
+                    if !has_filters {
+                        eprintln!(
+                            "{}",
+                            "Error: No device IDs or filters specified.".red().bold()
+                        );
+                        eprintln!(
+                            "\n{}\n",
+                            "You must specify which devices to restart.".yellow()
+                        );
+                        eprintln!("Examples:");
+                        eprintln!(
+                            "  {} {}",
+                            "sm restart device".bold(),
+                            "<device-id>...".bright_cyan()
+                        );
+                        eprintln!(
+                            "  {} {}",
+                            "sm restart device".bold(),
+                            "-l key=value".bright_cyan()
+                        );
+                        eprintln!(
+                            "  {} {}",
+                            "sm restart device".bold(),
+                            "--online".bright_cyan()
+                        );
+                        return Err(anyhow::anyhow!("Aborted: No device selector specified"));
+                    }
+
+                    // Get target devices
+                    let target_devices = if ids.is_empty() {
+                        let online_filter = if selector.online {
+                            Some(true)
+                        } else if selector.offline {
+                            Some(false)
+                        } else {
+                            None
+                        };
+
+                        api.get_devices(DeviceFilter {
+                            labels: selector.labels,
+                            online: online_filter,
+                            ..Default::default()
+                        })
+                        .await?
+                    } else {
+                        let mut all_devices = Vec::new();
+                        for id in &ids {
+                            let devices = api
+                                .get_devices(DeviceFilter {
+                                    serial_number: Some(id.clone()),
+                                    ..Default::default()
+                                })
+                                .await
+                                .with_context(|| format!("Failed to fetch device '{}'", id))?;
+
+                            if devices.is_empty() {
+                                eprintln!("{}: Device not found: '{}'", "Warning".yellow(), id);
+                            } else {
+                                all_devices.extend(devices);
+                            }
+                        }
+                        all_devices
+                    };
+
+                    // Deduplicate devices
+                    let mut seen_ids = HashSet::new();
+                    let target_devices: Vec<_> = target_devices
+                        .into_iter()
+                        .filter(|device| seen_ids.insert(device.id))
+                        .collect();
+
+                    if target_devices.is_empty() {
+                        println!("No devices found matching the specified filters.");
+                        return Ok(());
+                    }
+
+                    // Show devices and confirm
+                    println!(
+                        "{} {} device(s):",
+                        "Restarting".bold(),
+                        target_devices.len()
+                    );
+                    for device in &target_devices {
+                        println!("  - {}", device.serial_number);
+                    }
+
+                    if !yes {
+                        print!("\n{} [y/N]: ", "Proceed?".bold());
+                        io::Write::flush(&mut io::stdout())?;
+
+                        let mut input = String::new();
+                        io::stdin().read_line(&mut input)?;
+
+                        if input.trim().to_lowercase() != "y" {
+                            println!("Cancelled.");
+                            return Ok(());
+                        }
+                    }
+
+                    println!("\n{} restart commands...", "Sending".bold());
+
+                    let mut command_ids = Vec::new();
+                    for device in &target_devices {
+                        let device_id = device.id;
+                        let serial_number = &device.serial_number;
+
+                        match api.send_restart_command(device_id as u64).await {
+                            Ok((dev_id, cmd_id)) => {
+                                command_ids.push((dev_id, cmd_id, serial_number.to_string()));
+                                println!(
+                                    "  {} [{}] - Restart queued: {}:{}",
+                                    serial_number.bright_green(),
+                                    dev_id,
+                                    dev_id,
+                                    cmd_id
+                                );
+                            }
+                            Err(e) => {
+                                println!(
+                                    "  {} [{}] - Failed: {}",
+                                    serial_number.red(),
+                                    device_id,
+                                    e
+                                );
+                            }
+                        }
+                    }
+
+                    if nowait {
+                        println!(
+                            "\n{} Restart commands sent. Devices will reboot shortly.",
+                            "Done!".bright_green()
+                        );
+                        return Ok(());
+                    }
+
+                    println!(
+                        "\n{}",
+                        "Note: Devices will go offline during restart. This is expected.".dimmed()
+                    );
+                }
+            },
             Commands::Auth { command } => match command {
                 cli::AuthCommands::Login { no_open } => {
                     auth::login(&config, !no_open).await?;
@@ -559,9 +1004,7 @@ async fn main() -> anyhow::Result<()> {
                 return Ok(());
             }
             Commands::Run {
-                labels,
-                online,
-                offline,
+                selector,
                 devices: device_filters,
                 wait,
                 command,
@@ -575,8 +1018,14 @@ async fn main() -> anyhow::Result<()> {
 
                 let cmd_string = command.join(" ");
 
-                let target_devices =
-                    resolve_target_devices(&api, device_filters, labels, online, offline).await?;
+                let target_devices = resolve_target_devices(
+                    &api,
+                    device_filters,
+                    selector.labels,
+                    selector.online,
+                    selector.offline,
+                )
+                .await?;
 
                 // Deduplicate devices by ID to prevent duplicate command execution
                 let mut seen_ids = HashSet::new();
@@ -715,9 +1164,7 @@ async fn main() -> anyhow::Result<()> {
                 }
             }
             Commands::Label {
-                labels,
-                online,
-                offline,
+                selector,
                 devices: device_filters,
                 set_labels,
             } => {
@@ -728,8 +1175,14 @@ async fn main() -> anyhow::Result<()> {
 
                 let api = SmithAPI::new(secrets, &config);
 
-                let target_devices =
-                    resolve_target_devices(&api, device_filters, labels, online, offline).await?;
+                let target_devices = resolve_target_devices(
+                    &api,
+                    device_filters,
+                    selector.labels,
+                    selector.online,
+                    selector.offline,
+                )
+                .await?;
 
                 // Deduplicate devices by ID to prevent duplicate label operations
                 let mut seen_ids = HashSet::new();
