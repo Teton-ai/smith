@@ -7,13 +7,12 @@ mod print;
 mod tunnel;
 
 use crate::cli::{
-    Cli, Commands, DistroCommands, GetResourceType, RestartResourceType,
-    ServiceCommands,
+    Cli, Commands, DistroCommands, GetResourceType, RestartResourceType, ServiceCommands,
 };
+use crate::commands::devices::get_online_colored;
 use crate::print::TablePrint;
 use anyhow::{Context, bail};
 use api::SmithAPI;
-use chrono::DateTime;
 use chrono_humanize::HumanTime;
 use clap::{CommandFactory, Parser};
 use clap_complete::generate;

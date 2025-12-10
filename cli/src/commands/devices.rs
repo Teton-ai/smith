@@ -81,7 +81,7 @@ impl DevicesCommands {
     }
 }
 
-fn get_online_colored(serial_number: &str, last_seen: &Option<DateTime<Utc>>) -> String {
+pub fn get_online_colored(serial_number: &str, last_seen: &Option<DateTime<Utc>>) -> String {
     use chrono_humanize::HumanTime;
     let now = chrono::Utc::now();
 
