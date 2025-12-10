@@ -1,7 +1,7 @@
 use clap::{Parser, Subcommand, value_parser};
 use clap_complete::Shell;
 
-use crate::commands::releases::ReleasesCommands;
+use crate::commands::{devices::DevicesCommands, releases::ReleasesCommands};
 
 #[derive(Parser)]
 #[command(version, about, long_about = None)]
@@ -33,37 +33,6 @@ pub enum DistroCommands {
     },
     /// List the current distribution releases
     Releases,
-}
-
-#[derive(Subcommand, Debug)]
-pub enum DevicesCommands {
-    /// List the current distributions
-    Ls {
-        #[arg(short, long, default_value = "false")]
-        json: bool,
-        /// Filter by labels (format: key=value). Can be used multiple times.
-        #[arg(short, long = "label", value_name = "KEY=VALUE")]
-        labels: Vec<String>,
-        /// Show only online devices (last seen < 5 minutes)
-        #[arg(long, conflicts_with = "offline")]
-        online: bool,
-        /// Show only offline devices (last seen >= 5 minutes)
-        #[arg(long, conflicts_with = "online")]
-        offline: bool,
-    },
-    /// Test network speed for a device
-    TestNetwork {
-        /// Device serial number or ID
-        device: String,
-    },
-    /// Get logs for a specific device
-    Logs {
-        /// Device serial number
-        serial_number: String,
-        /// Don't wait for result, just queue the command and return immediately (faster, recommended for agents - use 'sm command <id>' to check results later)
-        #[arg(long, default_value = "false")]
-        nowait: bool,
-    },
 }
 
 #[derive(Subcommand, Debug)]

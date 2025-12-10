@@ -6,11 +6,12 @@ mod config;
 mod print;
 mod tunnel;
 
-use crate::cli::{Cli, Commands, DevicesCommands, DistroCommands, ServiceCommands};
+use crate::cli::{Cli, Commands, DistroCommands, ServiceCommands};
 use crate::print::TablePrint;
-use anyhow::Context;
+use anyhow::{Context, bail};
 use api::SmithAPI;
-use chrono::{DateTime, Utc};
+use chrono::DateTime;
+use chrono_humanize::HumanTime;
 use clap::{CommandFactory, Parser};
 use clap_complete::generate;
 use colored::Colorize;
@@ -317,110 +318,7 @@ async fn main() -> anyhow::Result<()> {
                     auth::show(&config).await?;
                 }
             },
-            Commands::Devices { command } => match command {
-                DevicesCommands::Ls {
-                    json,
-                    labels,
-                    online,
-                    offline,
-                } => {
-                    let secrets = auth::get_secrets(&config)
-                        .await
-                        .with_context(|| "Error getting token")?
-                        .with_context(|| "No Token found, please Login")?;
-
-                    let api = SmithAPI::new(secrets, &config);
-
-                    let online_filter = if online {
-                        Some(true)
-                    } else if offline {
-                        Some(false)
-                    } else {
-                        None
-                    };
-
-                    let devices = api
-                        .get_devices(DeviceFilter {
-                            labels,
-                            online: online_filter,
-                            ..Default::default()
-                        })
-                        .await?;
-                    if json {
-                        println!("{}", serde_json::to_string(&devices).unwrap());
-                        return Ok(());
-                    }
-                    let mut table =
-                        TablePrint::new_with_headers(vec!["Device", "Labels", "Version"]);
-                    for d in devices {
-                        let labels_str = d
-                            .labels
-                            .iter()
-                            .map(|(k, v)| format!("{}={}", k, v))
-                            .collect::<Vec<String>>()
-                            .join(", ");
-
-                        table.add_row(vec![
-                            get_online_colored(&d.serial_number, &d.last_seen),
-                            labels_str,
-                            d.system_info
-                                .as_ref()
-                                .map(|info| {
-                                    info["smith"]["version"]
-                                        .as_str()
-                                        .unwrap_or("")
-                                        .parse()
-                                        .unwrap()
-                                })
-                                .unwrap_or_default(),
-                        ]);
-                    }
-                    table.print();
-                }
-                DevicesCommands::TestNetwork { device } => {
-                    let secrets = auth::get_secrets(&config)
-                        .await
-                        .with_context(|| "Error getting token")?
-                        .with_context(|| "No Token found, please Login")?;
-
-                    let api = SmithAPI::new(secrets, &config);
-
-                    println!("Sending network test command to device: {}", device.bold());
-                    api.test_network(device).await?;
-                    println!(
-                        "{}",
-                        "Network test command sent successfully!".bright_green()
-                    );
-                    println!(
-                        "The device will download a 20MB test file and report back the results."
-                    );
-                    println!("Check the dashboard to see the results.");
-                }
-                DevicesCommands::Logs {
-                    serial_number,
-                    nowait,
-                } => {
-                    let secrets = auth::get_secrets(&config)
-                        .await
-                        .with_context(|| "Error getting token")?
-                        .with_context(|| "No Token found, please Login")?;
-
-                    let api = SmithAPI::new(secrets, &config);
-
-                    let logs = execute_device_command(
-                        &api,
-                        serial_number,
-                        "Fetching logs",
-                        nowait,
-                        |id| api.send_logs_command(id),
-                    )
-                    .await?;
-
-                    if !logs.is_empty() {
-                        println!("{}", logs);
-                    }
-                }
-            },
+            Commands::Devices { command } => command.handle(config).await?,
             Commands::Service { command } => match command {
                 ServiceCommands::Status {
                     unit,
@@ -557,18 +455,24 @@ async fn main() -> anyhow::Result<()> {
 
                 let api = SmithAPI::new(secrets, &config);
 
-                let devices = api
-                    .get_devices(DeviceFilter {
-                        serial_number: Some(serial_number.clone()),
-                        ..Default::default()
-                    })
-                    .await?;
-
-                let id = devices[0].id;
+                let device = api.get_device(serial_number.clone()).await?;
+                if device.last_seen.is_none_or(|last_seen| {
+                    chrono::Utc::now()
+                        .signed_duration_since(last_seen)
+                        .num_minutes()
+                        >= 5
+                }) {
+                    let mut last_ping = "never".to_string();
+                    if let Some(last_seen) = device.last_seen {
+                        last_ping =
+                            HumanTime::from(last_seen.with_timezone(&chrono::Utc)).to_string();
+                    }
+                    bail!("This device is offline. Last ping was {}", last_ping);
+                }
 
                 println!(
                     "Creating tunnel for device [{}] {} {:?}",
-                    id,
+                    device.id,
                     &serial_number.bold(),
                     overview_debug
                 );
@@ -587,14 +491,14 @@ async fn main() -> anyhow::Result<()> {
                 let username = config.current_tunnel_username();
                 let username_clone = username.clone();
                 let tunnel_openning_handler = tokio::spawn(async move {
-                    api.open_tunnel(id as u64, pub_key, username_clone)
+                    api.open_tunnel(device.id as u64, pub_key, username_clone)
                         .await
                         .unwrap();
                     pb2.set_message("Request sent to smith 💻");
 
                     let port;
                     loop {
-                        let response = api.get_last_command(id as u64).await.unwrap();
+                        let response = api.get_last_command(device.id as u64).await.unwrap();
 
                         if response.fetched {
                             pb2.set_message("Command fetched by device 👍");
@@ -993,26 +897,5 @@ fn get_colored_arch(arch: &str) -> String {
         "s390x" => arch.red().to_string(),
         "riscv64" => arch.bright_purple().to_string(),
         _ => arch.white().to_string(),
-    }
-}
-
-fn get_online_colored(serial_number: &str, last_seen: &Option<DateTime<Utc>>) -> String {
-    use chrono_humanize::HumanTime;
-    let now = chrono::Utc::now();
-
-    match last_seen {
-        Some(parsed_time) => {
-            let duration = now.signed_duration_since(parsed_time.with_timezone(&chrono::Utc));
-
-            if duration.num_minutes() < 5 {
-                serial_number.bright_green().to_string()
-            } else {
-                let human_time = HumanTime::from(parsed_time.with_timezone(&chrono::Utc));
-                format!("{} ({})", serial_number, human_time)
-                    .red()
-                    .to_string()
-            }
-        }
-        None => format!("{} (Unknown)", serial_number).yellow().to_string(),
     }
 }

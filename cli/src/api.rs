@@ -93,11 +93,30 @@ impl SmithAPI {
             ))
             .header("Authorization", format!("Bearer {}", &self.bearer_token))
             .send()
-            .await?;
+            .await?
+            .error_for_status()?;
 
         let devices = resp.json().await?;
 
         Ok(devices)
+    }
+
+    pub async fn get_device(&self, device_id_or_serial_number: String) -> Result<Device> {
+        let client = Client::new();
+
+        let resp = client
+            .get(format!(
+                "{}/devices/{}",
+                self.domain, device_id_or_serial_number
+            ))
+            .header("Authorization", format!("Bearer {}", &self.bearer_token))
+            .send()
+            .await?
+            .error_for_status()?;
+
+        let device = resp.json().await?;
+
+        Ok(device)
     }
 
     pub async fn get_releases(&self) -> Result<Vec<Release>> {
