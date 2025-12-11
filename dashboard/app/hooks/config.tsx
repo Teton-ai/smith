@@ -8,6 +8,7 @@ interface Config {
   AUTH0_REDIRECT_URI: string;
   AUTH0_AUDIENCE: string;
   DASHBOARD_EXCLUDED_LABELS?: string;
+  DEVICE_GRAFANA_URL?: string;
 }
 
 interface ConfigResponse {

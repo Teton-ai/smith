@@ -69,6 +69,8 @@ pub struct DeviceFilter {
     pub offset: Option<i64>,
     /// Search term to filter devices by serial number, hostname, or model.
     pub search: Option<String>,
+    /// Filter by release ID. Only devices with this release_id are included.
+    pub release_id: Option<i32>,
 }
 
 #[derive(Debug, Serialize, Deserialize, utoipa::ToSchema, Clone)]

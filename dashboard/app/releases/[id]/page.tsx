@@ -19,10 +19,11 @@ import {
   X,
   Rocket,
   Search,
-  RefreshCw,
+  ChevronsUpDown,
   ArrowUp,
   CheckCircle,
   XCircle,
+  AlertTriangle,
 } from 'lucide-react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import PrivateLayout from "@/app/layouts/PrivateLayout";
@@ -82,6 +83,9 @@ const ReleaseDetailPage = () => {
   const [packageSearchQuery, setPackageSearchQuery] = useState('');
   const [showDeployModal, setShowDeployModal] = useState(false);
   const [deploying, setDeploying] = useState(false);
+  const [showYankModal, setShowYankModal] = useState(false);
+  const [yanking, setYanking] = useState(false);
+  const [yankReason, setYankReason] = useState('');
   const [mounted, setMounted] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const [upgradingPackages, setUpgradingPackages] = useState<Set<number>>(new Set());
@@ -270,19 +274,23 @@ const ReleaseDetailPage = () => {
   const getLatestVersionForPackage = (pkg: ReleasePackage) => {
     if (availablePackages.length === 0) return null;
 
-    const sameNamePackages = availablePackages.filter(
+    // Find the current package's created_at from availablePackages
+    const currentPkg = availablePackages.find(p => p.id === pkg.id);
+    const currentCreatedAt = currentPkg ? new Date(currentPkg.created_at).getTime() : 0;
+
+    const newerPackages = availablePackages.filter(
       availPkg =>
         availPkg.name === pkg.name &&
         availPkg.id !== pkg.id &&
         (!distribution || availPkg.architecture === distribution.architecture) &&
-        compareVersions(availPkg.version, pkg.version) > 0 // Only show if version is actually higher
+        new Date(availPkg.created_at).getTime() > currentCreatedAt
     );
 
-    if (sameNamePackages.length === 0) return null;
+    if (newerPackages.length === 0) return null;
 
-    // Sort by semantic version to get the actual latest
-    const sorted = [...sameNamePackages].sort(
-      (a, b) => compareVersions(b.version, a.version)
+    // Sort by created_at to get the most recently created
+    const sorted = [...newerPackages].sort(
+      (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
     );
 
     return sorted[0];
@@ -340,6 +348,41 @@ const ReleaseDetailPage = () => {
     }
   };
 
+  const handleYankRelease = async () => {
+    if (!release || yanking) return;
+
+    if (!yankReason.trim()) {
+      setToast({
+        message: 'Please provide a reason for yanking this release',
+        type: 'error'
+      });
+      return;
+    }
+
+    setYanking(true);
+    try {
+      await callAPI('POST', `/releases/${releaseId}`, {
+        yanked: true
+      });
+
+      queryClient.invalidateQueries({ queryKey: ['release', releaseId] });
+      setShowYankModal(false);
+      setYankReason('');
+      setToast({
+        message: 'Release has been yanked',
+        type: 'success'
+      });
+    } catch (error: any) {
+      console.error('Failed to yank release:', error);
+      setToast({
+        message: `Failed to yank release: ${error?.message || 'Unknown error'}`,
+        type: 'error'
+      });
+    } finally {
+      setYanking(false);
+    }
+  };
+
   if (loading || !release) {
     return (
       <PrivateLayout id="distributions">
@@ -384,7 +427,7 @@ const ReleaseDetailPage = () => {
         <div className="flex items-center space-x-4">
           <button
             onClick={() => distribution ? router.push(`/distributions/${distribution.id}`) : router.push('/distributions')}
-            className="flex items-center space-x-2 text-gray-600 hover:text-gray-900 transition-colors"
+            className="flex items-center space-x-2 text-gray-600 hover:text-gray-900 transition-colors cursor-pointer"
           >
             <ArrowLeft className="w-4 h-4" />
             <span className="text-sm font-medium">
@@ -395,48 +438,57 @@ const ReleaseDetailPage = () => {
 
         {/* Release Header */}
         <div className="bg-white rounded-lg border border-gray-200 p-4">
-          <div className="flex items-center space-x-3">
-            <div className="p-2 bg-gray-100 text-gray-600 rounded">
-              <Tag className="w-5 h-5" />
-            </div>
-            <div className="flex-1">
-              <div className="flex items-center space-x-3">
-                <h1 className="text-xl font-bold text-gray-900">Release {release.version}</h1>
-                {release.draft && (
-                  <span className="px-2 py-1 text-xs font-medium bg-yellow-100 text-yellow-800 rounded-full">
-                    Draft
-                  </span>
-                )}
-                {release.yanked && (
-                  <span className="px-2 py-1 text-xs font-medium bg-red-100 text-red-800 rounded-full">
-                    Yanked
-                  </span>
-                )}
+          <div className="flex items-center justify-between">
+            <div className="flex items-center space-x-3">
+              <div className="p-2 bg-gray-100 text-gray-600 rounded">
+                <Tag className="w-5 h-5" />
               </div>
-              <div className="flex items-center space-x-4 mt-1 text-sm text-gray-600">
-                <div className="flex items-center space-x-1">
-                  <Calendar className="w-4 h-4" />
-                  <span>Created {formatRelativeTime(release.created_at)}</span>
-                </div>
-                {distribution && (
-                  <div className="flex items-center space-x-2">
-                    <span className="font-medium">{distribution.name}</span>
-                    <span className={`px-2 py-1 text-xs font-medium rounded-full ${getArchColor(distribution.architecture)}`}>
-                      {distribution.architecture.toUpperCase()}
+              <div className="flex-1">
+                <div className="flex items-center space-x-3">
+                  <h1 className="text-xl font-bold text-gray-900">Release {release.version}</h1>
+                  {release.draft && (
+                    <span className="px-2 py-1 text-xs font-medium bg-yellow-100 text-yellow-800 rounded-full">
+                      Draft
                     </span>
-                  </div>
-                )}
-                {release.size && (
-                  <span>{formatFileSize(release.size)}</span>
-                )}
-                {release.download_count !== undefined && (
+                  )}
+                  {release.yanked && (
+                    <span className="px-2 py-1 text-xs font-medium bg-red-100 text-red-800 rounded-full">
+                      Yanked
+                    </span>
+                  )}
+                </div>
+                <div className="flex items-center space-x-4 mt-1 text-sm text-gray-600">
                   <div className="flex items-center space-x-1">
-                    <Download className="w-4 h-4" />
-                    <span>{release.download_count} downloads</span>
+                    <Calendar className="w-4 h-4" />
+                    <span>Created {formatRelativeTime(release.created_at)}</span>
                   </div>
-                )}
+                  {distribution && (
+                    <div className="flex items-center space-x-2">
+                      <span className="font-medium">{distribution.name}</span>
+                      <span className={`px-2 py-1 text-xs font-medium rounded-full ${getArchColor(distribution.architecture)}`}>
+                        {distribution.architecture.toUpperCase()}
+                      </span>
+                    </div>
+                  )}
+                  {release.size && (
+                    <span>{formatFileSize(release.size)}</span>
+                  )}
+                  {release.download_count !== undefined && (
+                    <div className="flex items-center space-x-1">
+                      <Download className="w-4 h-4" />
+                      <span>{release.download_count} downloads</span>
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
+            <button
+              onClick={() => router.push(`/devices?release_id=${release.id}`)}
+              className="flex items-center space-x-2 px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-md hover:bg-gray-200 transition-colors cursor-pointer"
+            >
+              <Cpu className="w-4 h-4" />
+              <span>View Devices</span>
+            </button>
           </div>
         </div>
 
@@ -504,6 +556,89 @@ const ReleaseDetailPage = () => {
                     <>
                       <Rocket className="w-4 h-4" />
                       <span>Start Deployment</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>,
+          document.body
+        )}
+
+        {/* Yank Release Modal */}
+        {mounted && showYankModal && createPortal(
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 animate-in fade-in duration-200">
+            <div className="bg-white rounded-lg shadow-xl p-6 w-[480px] animate-in zoom-in-95 duration-200">
+              <div className="flex items-center justify-between mb-6">
+                <h3 className="text-lg font-semibold text-gray-900">Yank Release v{release.version}</h3>
+                <button
+                  onClick={() => {
+                    setShowYankModal(false);
+                    setYankReason('');
+                  }}
+                  className="text-gray-400 hover:text-gray-600 cursor-pointer"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <div className="space-y-4 mb-6">
+                <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+                  <div className="flex items-start space-x-3">
+                    <AlertTriangle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
+                    <div>
+                      <h4 className="font-medium text-red-900 text-sm mb-1">Warning</h4>
+                      <p className="text-sm text-red-800">
+                        Yanking a release will prevent devices from updating to this version.
+                        This action cannot be undone.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Reason for yanking
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="e.g., Critical bug discovered"
+                    value={yankReason}
+                    onChange={(e) => setYankReason(e.target.value)}
+                    className="w-full px-3 py-2 bg-white text-gray-900 border border-gray-300 rounded-md focus:ring-red-500 focus:border-red-500 placeholder:text-gray-400"
+                  />
+                </div>
+              </div>
+
+              <div className="flex justify-end space-x-3">
+                <button
+                  onClick={() => {
+                    setShowYankModal(false);
+                    setYankReason('');
+                  }}
+                  disabled={yanking}
+                  className="px-4 py-2 text-sm font-medium text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-md transition-colors cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleYankRelease}
+                  disabled={yanking || !yankReason.trim()}
+                  className={`flex items-center space-x-2 px-4 py-2 text-sm font-medium rounded-md transition-colors ${
+                    yanking || !yankReason.trim()
+                      ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                      : 'bg-red-600 text-white hover:bg-red-700 cursor-pointer'
+                  }`}
+                >
+                  {yanking ? (
+                    <>
+                      <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                      <span>Yanking...</span>
+                    </>
+                  ) : (
+                    <>
+                      <AlertTriangle className="w-4 h-4" />
+                      <span>Yank Release</span>
                     </>
                   )}
                 </button>
@@ -815,13 +950,22 @@ const ReleaseDetailPage = () => {
                   </button>
                 </>
               ) : !release?.yanked && (
-                <button
-                  onClick={() => setShowDeployModal(true)}
-                  className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700 transition-colors cursor-pointer"
-                >
-                  <Rocket className="w-4 h-4" />
-                  <span>Deploy Release</span>
-                </button>
+                <>
+                  <button
+                    onClick={() => setShowYankModal(true)}
+                    className="flex items-center space-x-2 px-4 py-2 bg-red-600 text-white text-sm font-medium rounded-md hover:bg-red-700 transition-colors cursor-pointer"
+                  >
+                    <AlertTriangle className="w-4 h-4" />
+                    <span>Yank Release</span>
+                  </button>
+                  <button
+                    onClick={() => setShowDeployModal(true)}
+                    className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700 transition-colors cursor-pointer"
+                  >
+                    <Rocket className="w-4 h-4" />
+                    <span>Deploy Release</span>
+                  </button>
+                </>
               )}
             </div>
           </div>
@@ -852,28 +996,39 @@ const ReleaseDetailPage = () => {
                             {release?.draft && (() => {
                               const latestVersion = getLatestVersionForPackage(pkg);
                               const isUpgrading = upgradingPackages.has(pkg.id);
-                              return latestVersion ? (
-                                <button
-                                  onClick={() => handleUpgradePackage(pkg)}
-                                  disabled={isUpgrading}
-                                  className={`flex items-center space-x-0.5 px-1.5 py-0.5 text-[10px] font-medium rounded-md transition-all duration-200 ${
-                                    isUpgrading
-                                      ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
-                                      : 'bg-green-500/20 text-green-700 border border-green-300/30 shadow-sm backdrop-blur-sm hover:bg-green-500/30 hover:border-green-400/40 hover:shadow cursor-pointer'
-                                  }`}
-                                  style={isUpgrading ? {} : { backdropFilter: 'blur(8px)' }}
-                                  title={`Upgrade to v${latestVersion.version}`}
-                                >
-                                  {isUpgrading ? (
-                                    <div className="w-2.5 h-2.5 border-2 border-gray-400 border-t-transparent rounded-full animate-spin"></div>
-                                  ) : (
-                                    <>
-                                      <ArrowUp className="w-2.5 h-2.5" />
-                                      <span>v{latestVersion.version}</span>
-                                    </>
+                              return (
+                                <>
+                                  {latestVersion && (
+                                    <button
+                                      onClick={() => handleUpgradePackage(pkg)}
+                                      disabled={isUpgrading}
+                                      className={`flex items-center space-x-0.5 px-1.5 py-0.5 text-[10px] font-medium rounded-md transition-all duration-200 ${
+                                        isUpgrading
+                                          ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                                          : 'bg-green-500/20 text-green-700 border border-green-300/30 shadow-sm backdrop-blur-sm hover:bg-green-500/30 hover:border-green-400/40 hover:shadow cursor-pointer'
+                                      }`}
+                                      style={isUpgrading ? {} : { backdropFilter: 'blur(8px)' }}
+                                      title={`Upgrade to v${latestVersion.version}`}
+                                    >
+                                      {isUpgrading ? (
+                                        <div className="w-2.5 h-2.5 border-2 border-gray-400 border-t-transparent rounded-full animate-spin"></div>
+                                      ) : (
+                                        <>
+                                          <ArrowUp className="w-2.5 h-2.5" />
+                                          <span>v{latestVersion.version}</span>
+                                        </>
+                                      )}
+                                    </button>
                                   )}
-                                </button>
-                              ) : null;
+                                  <button
+                                    onClick={() => openReplaceModal(pkg)}
+                                    className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-md transition-colors cursor-pointer"
+                                    title="Select different version"
+                                  >
+                                    <ChevronsUpDown className="w-4 h-4" />
+                                  </button>
+                                </>
+                              );
                             })()}
                           </div>
                           {pkg.description && (
@@ -890,22 +1045,13 @@ const ReleaseDetailPage = () => {
                         </div>
                       </div>
                       {release?.draft && (
-                        <div className="flex items-center space-x-2">
-                          <button
-                            onClick={() => openReplaceModal(pkg)}
-                            className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-md transition-colors cursor-pointer"
-                            title="Replace package version"
-                          >
-                            <RefreshCw className="w-4 h-4" />
-                          </button>
-                          <button
-                            onClick={() => handleDeletePackage(pkg.id)}
-                            className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors cursor-pointer"
-                            title="Remove package from release"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        </div>
+                        <button
+                          onClick={() => handleDeletePackage(pkg.id)}
+                          className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors cursor-pointer"
+                          title="Remove package from release"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
                       )}
                     </div>
                   </div>

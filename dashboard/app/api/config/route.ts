@@ -7,6 +7,7 @@ export async function GET() {
       AUTH0_REDIRECT_URI: process.env.AUTH0_REDIRECT_URI,
       AUTH0_AUDIENCE: process.env.AUTH0_AUDIENCE,
       DASHBOARD_EXCLUDED_LABELS: process.env.DASHBOARD_EXCLUDED_LABELS,
+      DEVICE_GRAFANA_URL: process.env.DEVICE_GRAFANA_URL,
     }
   });
 }

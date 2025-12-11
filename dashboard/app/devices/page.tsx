@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import {
   Cpu,
@@ -8,8 +8,10 @@ import {
   GitBranch,
   Tag,
   Loader2,
+  X,
+  ChevronDown,
 } from 'lucide-react';
-import { useInfiniteQuery } from '@tanstack/react-query';
+import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import PrivateLayout from "@/app/layouts/PrivateLayout";
 import useSmithAPI from "@/app/hooks/smith-api";
 import NetworkQualityIndicator from '@/app/components/NetworkQualityIndicator';
@@ -208,6 +210,10 @@ const DevicesPage = () => {
   const [labelFilters, setLabelFilters] = useState<string[]>([]);
   const [onlineStatusFilter, setOnlineStatusFilter] = useState<'all' | 'online' | 'offline'>('all');
   const [isSearching, setIsSearching] = useState(false);
+  const [releaseFilter, setReleaseFilter] = useState<number | null>(null);
+  const [showReleaseDropdown, setShowReleaseDropdown] = useState(false);
+  const [releaseSearchQuery, setReleaseSearchQuery] = useState('');
+  const releaseDropdownRef = useRef<HTMLDivElement>(null);
 
   // Build query params for API call
   const buildQueryParams = (offset?: number) => {
@@ -228,6 +234,9 @@ const DevicesPage = () => {
     if (showOutdatedOnly) {
       params.set('outdated', 'true');
     }
+    if (releaseFilter !== null) {
+      params.set('release_id', releaseFilter.toString());
+    }
     params.set('limit', PAGE_SIZE.toString());
     if (offset !== undefined) {
       params.set('offset', offset.toString());
@@ -242,7 +251,7 @@ const DevicesPage = () => {
     hasNextPage,
     isFetchingNextPage,
   } = useInfiniteQuery({
-    queryKey: ['devices', labelFilters, onlineStatusFilter, debouncedSearchTerm, showOutdatedOnly],
+    queryKey: ['devices', labelFilters, onlineStatusFilter, debouncedSearchTerm, showOutdatedOnly, releaseFilter],
     queryFn: ({ pageParam = 0 }) => {
       const queryString = buildQueryParams(pageParam);
       const endpoint = `/devices?${queryString}`;
@@ -264,6 +273,44 @@ const DevicesPage = () => {
     [devicesData]
   );
 
+  // Fetch all releases
+  const { data: allReleases = [] } = useQuery({
+    queryKey: ['all-releases'],
+    queryFn: () => callAPI<Release[]>('GET', '/releases'),
+    select: (data) => data || [],
+  });
+
+  // Group releases by distribution for the dropdown
+  const releasesByDistribution = useMemo(() => {
+    const grouped: Record<string, Release[]> = {};
+    allReleases.forEach((release: Release) => {
+      const distName = release.distribution_name || 'Unknown';
+      if (!grouped[distName]) {
+        grouped[distName] = [];
+      }
+      grouped[distName].push(release);
+    });
+    // Sort releases within each distribution by version (newest first)
+    Object.keys(grouped).forEach(distName => {
+      grouped[distName].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+    });
+    // Filter out distributions that only have draft releases (no published releases)
+    const filteredGrouped: Record<string, Release[]> = {};
+    Object.entries(grouped).forEach(([distName, releases]) => {
+      const hasPublishedRelease = releases.some(r => !r.draft);
+      if (hasPublishedRelease) {
+        filteredGrouped[distName] = releases;
+      }
+    });
+    return filteredGrouped;
+  }, [allReleases]);
+
+  // Get the selected release info for display
+  const selectedRelease = useMemo(() => {
+    if (releaseFilter === null) return null;
+    return allReleases.find((r: Release) => r.id === releaseFilter) || null;
+  }, [releaseFilter, allReleases]);
+
   // Debounce search term
   useEffect(() => {
     setIsSearching(true);
@@ -283,6 +330,7 @@ const DevicesPage = () => {
     const outdated = searchParams.get('outdated');
     const online = searchParams.get('online');
     const labelsParam = searchParams.get('labels');
+    const releaseIdParam = searchParams.get('release_id');
 
     if (outdated === 'true') {
       setShowOutdatedOnly(true);
@@ -295,6 +343,13 @@ const DevicesPage = () => {
     if (labelsParam) {
       const parsedLabels = labelsParam.split(',');
       setLabelFilters(parsedLabels);
+    }
+
+    if (releaseIdParam) {
+      const parsedReleaseId = parseInt(releaseIdParam, 10);
+      if (!isNaN(parsedReleaseId)) {
+        setReleaseFilter(parsedReleaseId);
+      }
     }
   }, [searchParams]);
 
@@ -424,6 +479,30 @@ const DevicesPage = () => {
     updateURL({ online: status === 'all' ? null : status });
   };
 
+  const handleReleaseFilterChange = (releaseId: number | null) => {
+    setReleaseFilter(releaseId);
+    setShowReleaseDropdown(false);
+    setReleaseSearchQuery('');
+    updateURL({ release_id: releaseId !== null ? releaseId.toString() : null });
+  };
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (releaseDropdownRef.current && !releaseDropdownRef.current.contains(event.target as Node)) {
+        setShowReleaseDropdown(false);
+        setReleaseSearchQuery('');
+      }
+    };
+
+    if (showReleaseDropdown) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [showReleaseDropdown]);
 
   const formatTimeAgo = (date: Date) => {
     const now = new Date();
@@ -503,6 +582,115 @@ const DevicesPage = () => {
               >
                 Outdated
               </button>
+
+              {/* Release Filter Dropdown */}
+              <div className="relative" ref={releaseDropdownRef}>
+                <button
+                  onClick={() => setShowReleaseDropdown(!showReleaseDropdown)}
+                  className={`flex items-center space-x-2 px-3 py-2 text-sm rounded-md transition-colors cursor-pointer ${
+                    releaseFilter !== null
+                      ? 'bg-purple-600 text-white'
+                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  }`}
+                >
+                  <GitBranch className="w-4 h-4" />
+                  <span>
+                    {selectedRelease
+                      ? `${selectedRelease.distribution_name} ${selectedRelease.version}`
+                      : 'Release'}
+                  </span>
+                  <ChevronDown className={`w-4 h-4 transition-transform ${showReleaseDropdown ? 'rotate-180' : ''}`} />
+                </button>
+
+                {showReleaseDropdown && (
+                  <div className="absolute top-full left-0 mt-1 w-72 bg-white border border-gray-200 rounded-md shadow-lg z-50">
+                    {/* Search input */}
+                    <div className="p-2 border-b border-gray-200">
+                      <div className="relative">
+                        <Search className="absolute left-2.5 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
+                        <input
+                          type="text"
+                          placeholder="Search releases..."
+                          value={releaseSearchQuery}
+                          onChange={(e) => setReleaseSearchQuery(e.target.value)}
+                          className="w-full pl-8 pr-3 py-1.5 text-sm border border-gray-200 rounded focus:ring-1 focus:ring-purple-500 focus:border-purple-500 text-gray-900 placeholder-gray-400"
+                          onClick={(e) => e.stopPropagation()}
+                        />
+                      </div>
+                    </div>
+
+                    <div className="max-h-64 overflow-y-auto">
+                      {releaseFilter !== null && (
+                        <button
+                          onClick={() => handleReleaseFilterChange(null)}
+                          className="w-full px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 border-b border-gray-200 flex items-center space-x-2 cursor-pointer"
+                        >
+                          <X className="w-4 h-4 text-gray-400" />
+                          <span>Clear filter</span>
+                        </button>
+                      )}
+                      {Object.keys(releasesByDistribution).length === 0 ? (
+                        <div className="px-3 py-4 text-sm text-gray-500 text-center">
+                          No releases available
+                        </div>
+                      ) : (
+                        Object.entries(releasesByDistribution).map(([distName, releases]) => {
+                          // Filter releases by search query
+                          const filteredReleases = releases.filter(release =>
+                            releaseSearchQuery === '' ||
+                            release.version.toLowerCase().includes(releaseSearchQuery.toLowerCase()) ||
+                            distName.toLowerCase().includes(releaseSearchQuery.toLowerCase())
+                          );
+
+                          // If no search query, show only first 5 releases per distribution
+                          const displayReleases = releaseSearchQuery === ''
+                            ? filteredReleases.slice(0, 5)
+                            : filteredReleases;
+
+                          if (displayReleases.length === 0) return null;
+
+                          const hasMore = releaseSearchQuery === '' && filteredReleases.length > 5;
+
+                          return (
+                            <div key={distName}>
+                              <div className="px-3 py-2 text-xs font-semibold text-gray-500 bg-gray-50 uppercase tracking-wide sticky top-0">
+                                {distName}
+                              </div>
+                              {displayReleases.map((release) => (
+                                <button
+                                  key={release.id}
+                                  onClick={() => handleReleaseFilterChange(release.id)}
+                                  className={`w-full px-3 py-2 text-left text-sm hover:bg-gray-50 flex items-center justify-between cursor-pointer ${
+                                    releaseFilter === release.id ? 'bg-purple-50 text-purple-700' : 'text-gray-700'
+                                  }`}
+                                >
+                                  <div className="flex items-center space-x-2">
+                                    <Tag className="w-3 h-3 text-gray-400" />
+                                    <span className="font-mono">{release.version}</span>
+                                  </div>
+                                  <div className="flex items-center space-x-2">
+                                    {release.draft && (
+                                      <span className="px-1.5 py-0.5 text-xs bg-yellow-100 text-yellow-700 rounded">Draft</span>
+                                    )}
+                                    {release.yanked && (
+                                      <span className="px-1.5 py-0.5 text-xs bg-red-100 text-red-700 rounded">Yanked</span>
+                                    )}
+                                  </div>
+                                </button>
+                              ))}
+                              {hasMore && (
+                                <div className="px-3 py-1.5 text-xs text-gray-400 italic">
+                                  +{filteredReleases.length - 5} more (type to search)
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
 
               {/* Label Filter Input */}
               <input

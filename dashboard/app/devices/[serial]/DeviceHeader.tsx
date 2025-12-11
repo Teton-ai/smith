@@ -11,8 +11,11 @@ import {
   Terminal,
   Copy,
   Check,
+  ExternalLink,
+  BarChart3,
 } from 'lucide-react';
 import NetworkQualityIndicator from '@/app/components/NetworkQualityIndicator';
+import { useConfig } from '@/app/hooks/config';
 
 const Tooltip = ({ children, content }: { children: React.ReactNode, content: string }) => {
   const [isVisible, setIsVisible] = React.useState(false);
@@ -164,6 +167,12 @@ const DeviceHeader: React.FC<DeviceHeaderProps> = ({ device, serial }) => {
   const [sshCopied, setSshCopied] = React.useState(false);
   const [runCommand, setRunCommand] = React.useState('');
   const [runCopied, setRunCopied] = React.useState(false);
+  const { config } = useConfig();
+
+  const getGrafanaUrl = () => {
+    if (!config?.DEVICE_GRAFANA_URL) return null;
+    return config.DEVICE_GRAFANA_URL.replace('{serial_number}', device?.serial_number || serial);
+  };
 
   const handleSshTunnel = async () => {
     const command = `sm tunnel ${device?.serial_number || serial}`;
@@ -266,6 +275,20 @@ const DeviceHeader: React.FC<DeviceHeaderProps> = ({ device, serial }) => {
                 )}
               </button>
             </Tooltip>
+            {getGrafanaUrl() && (
+              <Tooltip content="Open Grafana dashboard">
+                <a
+                  href={getGrafanaUrl()!}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center space-x-2 px-3 py-2 rounded-md text-sm font-medium transition-colors cursor-pointer bg-orange-50 text-orange-700 border border-orange-200 hover:bg-orange-100"
+                >
+                  <BarChart3 className="w-4 h-4" />
+                  <ExternalLink className="w-3 h-3" />
+                  <span>Grafana</span>
+                </a>
+              </Tooltip>
+            )}
           </div>
         </div>
       </div>
@@ -506,6 +529,20 @@ const DeviceHeader: React.FC<DeviceHeaderProps> = ({ device, serial }) => {
               )}
             </button>
           </Tooltip>
+          {getGrafanaUrl() && (
+            <Tooltip content="Open Grafana dashboard">
+              <a
+                href={getGrafanaUrl()!}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center space-x-2 px-3 py-2 rounded-md text-sm font-medium transition-colors cursor-pointer bg-orange-50 text-orange-700 border border-orange-200 hover:bg-orange-100"
+              >
+                <BarChart3 className="w-4 h-4" />
+                <ExternalLink className="w-3 h-3" />
+                <span>Grafana</span>
+              </a>
+            </Tooltip>
+          )}
         </div>
       </div>
     </div>
