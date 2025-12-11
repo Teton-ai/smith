@@ -240,7 +240,7 @@ const DistributionDetailPage = () => {
         <div className="flex items-center space-x-4">
           <button
             onClick={() => router.push('/distributions')}
-            className="flex items-center space-x-2 text-gray-600 hover:text-gray-900 transition-colors"
+            className="flex items-center space-x-2 text-gray-600 hover:text-gray-900 transition-colors cursor-pointer"
           >
             <ArrowLeft className="w-4 h-4" />
             <span className="text-sm font-medium">Back to Distributions</span>
@@ -381,7 +381,7 @@ const DistributionDetailPage = () => {
             {releases.length > 0 && (
               <button
                 onClick={openCreateModal}
-                className="flex items-center space-x-2 px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-md hover:bg-green-700 transition-colors"
+                className="flex items-center space-x-2 px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-md hover:bg-green-700 transition-colors cursor-pointer"
               >
                 <Plus className="w-4 h-4" />
                 <span>Draft New Release</span>
