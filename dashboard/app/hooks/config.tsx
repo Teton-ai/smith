@@ -7,6 +7,7 @@ interface Config {
   AUTH0_CLIENT_ID: string;
   AUTH0_REDIRECT_URI: string;
   AUTH0_AUDIENCE: string;
+  DASHBOARD_EXCLUDED_LABELS?: string;
 }
 
 interface ConfigResponse {

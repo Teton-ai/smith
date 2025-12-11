@@ -403,6 +403,15 @@ pub async fn get_devices(
           AND ($6::boolean IS NULL OR
                ($6 = true AND d.last_ping >= now() - INTERVAL '5 minutes') OR
                ($6 = false AND d.last_ping < now() - INTERVAL '5 minutes'))
+          AND ($7::boolean IS NULL OR
+               ($7 = true AND d.release_id != d.target_release_id) OR
+               ($7 = false AND d.release_id = d.target_release_id))
+          AND (CARDINALITY($8::text[]) = 0 OR NOT EXISTS (
+              SELECT 1 FROM device_label edl
+              JOIN label el ON el.id = edl.label_id
+              WHERE edl.device_id = d.id
+              AND el.name || '=' || edl.value = ANY($8)
+          ))
         GROUP BY d.id, ip.id, m.id, r.id, rd.id, tr.id, trd.id, dn.device_id
         ORDER BY d.serial_number
         "#,
@@ -411,7 +420,9 @@ pub async fn get_devices(
         filter.archived,
         filter.tag,
         filter.labels.as_slice(),
-        filter.online
+        filter.online,
+        filter.outdated,
+        filter.exclude_labels.as_slice()
     )
     .fetch_all(&state.pg_pool)
     .await
@@ -474,6 +485,7 @@ pub async fn get_devices(
                     yanked: row.release_yanked.unwrap(),
                     created_at: row.release_created_at.unwrap(),
                     user_id: row.release_user_id,
+                    user_email: None,
                 })
             } else {
                 None
@@ -492,6 +504,7 @@ pub async fn get_devices(
                     yanked: row.target_release_yanked.unwrap(),
                     created_at: row.target_release_created_at.unwrap(),
                     user_id: row.target_release_user_id,
+                    user_email: None,
                 })
             } else {
                 None
@@ -1557,10 +1570,12 @@ pub async fn get_device_release(
         "
         SELECT release.*,
         distribution.name AS distribution_name,
-        distribution.architecture AS distribution_architecture
+        distribution.architecture AS distribution_architecture,
+        auth.users.email AS user_email
         FROM device
         LEFT JOIN release ON device.release_id = release.id
         JOIN distribution ON release.distribution_id = distribution.id
+        LEFT JOIN auth.users ON release.user_id = auth.users.id
         WHERE device.id = $1
         ",
         device_id
@@ -1578,10 +1593,12 @@ pub async fn get_device_release(
             "
         SELECT release.*,
         distribution.name AS distribution_name,
-        distribution.architecture AS distribution_architecture
+        distribution.architecture AS distribution_architecture,
+        auth.users.email AS user_email
         FROM device_release_upgrades
         JOIN release ON release.id = device_release_upgrades.previous_release_id
         JOIN distribution ON release.distribution_id = distribution.id
+        LEFT JOIN auth.users ON release.user_id = auth.users.id
         WHERE device_release_upgrades.device_id = $1
         AND device_release_upgrades.upgraded_release_id = $2
         ",
@@ -1603,10 +1620,12 @@ pub async fn get_device_release(
         "
         SELECT release.*,
         distribution.name AS distribution_name,
-        distribution.architecture AS distribution_architecture
+        distribution.architecture AS distribution_architecture,
+        auth.users.email AS user_email
         FROM device
         LEFT JOIN release ON device.target_release_id = release.id
         JOIN distribution ON release.distribution_id = distribution.id
+        LEFT JOIN auth.users ON release.user_id = auth.users.id
         WHERE device.id = $1
         ",
         device_id
@@ -1972,6 +1991,7 @@ pub async fn get_device_info(
             yanked: device_row.release_yanked.unwrap(),
             created_at: device_row.release_created_at.unwrap(),
             user_id: device_row.release_user_id,
+            user_email: None,
         })
     } else {
         None
@@ -1988,6 +2008,7 @@ pub async fn get_device_info(
             yanked: device_row.target_release_yanked.unwrap(),
             created_at: device_row.target_release_created_at.unwrap(),
             user_id: device_row.target_release_user_id,
+            user_email: None,
         })
     } else {
         None

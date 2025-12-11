@@ -58,6 +58,11 @@ pub struct DeviceFilter {
     pub labels: Vec<String>,
     /// Filter by online status. If true, only devices online in the last 5 minutes.
     pub online: Option<bool>,
+    /// Filter by outdated status. If true, only devices where release_id != target_release_id.
+    pub outdated: Option<bool>,
+    /// Exclude devices with these labels. Format: key=value. Used by dashboard.
+    #[serde(default)]
+    pub exclude_labels: Vec<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, utoipa::ToSchema, Clone)]
