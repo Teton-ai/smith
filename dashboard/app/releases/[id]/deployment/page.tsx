@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import {
   ArrowLeft,
@@ -12,6 +12,7 @@ import {
   Activity,
   Monitor,
 } from 'lucide-react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import PrivateLayout from "@/app/layouts/PrivateLayout";
 import useSmithAPI from "@/app/hooks/smith-api";
 import moment from 'moment';
@@ -47,71 +48,44 @@ const DeploymentStatusPage = () => {
   const params = useParams();
   const releaseId = params.id as string;
   const { callAPI } = useSmithAPI();
-  const [release, setRelease] = useState<Release | null>(null);
-  const [deployment, setDeployment] = useState<Deployment | null>(null);
-  const [devices, setDevices] = useState<DeploymentDevice[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const queryClient = useQueryClient();
   const [elapsedTime, setElapsedTime] = useState(0);
   const [confirming, setConfirming] = useState(false);
 
-  const fetchDeployment = useCallback(async () => {
-    try {
-      const deploymentData = await callAPI<Deployment>('PATCH', `/releases/${releaseId}/deployment`);
-      if (deploymentData) {
-        setDeployment(deploymentData);
+  const { data: release, isLoading: releaseLoading, error: releaseError } = useQuery({
+    queryKey: ['release', releaseId],
+    queryFn: () => callAPI<Release>('GET', `/releases/${releaseId}`),
+    enabled: !!releaseId,
+  });
+
+  const { data: deployment, error: deploymentError } = useQuery({
+    queryKey: ['deployment', releaseId],
+    queryFn: () => callAPI<Deployment>('PATCH', `/releases/${releaseId}/deployment`),
+    enabled: !!releaseId,
+    refetchInterval: (query) => {
+      const data = query.state.data;
+      if (!data || data.status === 'Done' || data.status === 'Failed' || data.status === 'Canceled') {
+        return false;
       }
-    } catch (err: any) {
-      console.error('Failed to fetch deployment:', err);
-      setError(err?.message || 'Failed to fetch deployment status');
-    }
-  }, [releaseId, callAPI]);
+      return 5000;
+    },
+  });
 
-  const fetchDevices = useCallback(async () => {
-    try {
-      const devicesData = await callAPI<DeploymentDevice[]>('GET', `/releases/${releaseId}/deployment/devices`);
-      if (devicesData) {
-        setDevices(devicesData);
+  const { data: devices = [] } = useQuery({
+    queryKey: ['deployment-devices', releaseId],
+    queryFn: () => callAPI<DeploymentDevice[]>('GET', `/releases/${releaseId}/deployment/devices`),
+    enabled: !!releaseId,
+    refetchInterval: (query) => {
+      if (!deployment || deployment.status === 'Done' || deployment.status === 'Failed' || deployment.status === 'Canceled') {
+        return false;
       }
-    } catch (err: any) {
-      console.error('Failed to fetch deployment devices:', err);
-    }
-  }, [releaseId, callAPI]);
+      return 5000;
+    },
+    select: (data) => data || [],
+  });
 
-  useEffect(() => {
-    const fetchRelease = async () => {
-      try {
-        const releaseData = await callAPI<Release>('GET', `/releases/${releaseId}`);
-        if (releaseData) {
-          setRelease(releaseData);
-        }
-      } catch (err: any) {
-        console.error('Failed to fetch release:', err);
-        setError(err?.message || 'Failed to fetch release');
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    if (releaseId) {
-      fetchRelease();
-      fetchDeployment();
-      fetchDevices();
-    }
-  }, [releaseId, callAPI, fetchDeployment, fetchDevices]);
-
-  useEffect(() => {
-    if (!deployment || deployment.status === 'Done' || deployment.status === 'Failed' || deployment.status === 'Canceled') {
-      return;
-    }
-
-    const interval = setInterval(() => {
-      fetchDeployment();
-      fetchDevices();
-    }, 5000);
-
-    return () => clearInterval(interval);
-  }, [deployment, fetchDeployment, fetchDevices]);
+  const loading = releaseLoading;
+  const error = releaseError?.message || deploymentError?.message || null;
 
   useEffect(() => {
     if (!deployment) return;
@@ -144,11 +118,10 @@ const DeploymentStatusPage = () => {
     setConfirming(true);
     try {
       await callAPI('POST', `/releases/${releaseId}/deployment/confirm`);
-      await fetchDeployment();
-      await fetchDevices();
+      queryClient.invalidateQueries({ queryKey: ['deployment', releaseId] });
+      queryClient.invalidateQueries({ queryKey: ['deployment-devices', releaseId] });
     } catch (err: any) {
       console.error('Failed to confirm full rollout:', err);
-      setError(err?.message || 'Failed to confirm full rollout');
     } finally {
       setConfirming(false);
     }

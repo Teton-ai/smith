@@ -15,6 +15,7 @@ import {
   Check,
   X,
 } from 'lucide-react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import useSmithAPI from "@/app/hooks/smith-api";
 import PrivateLayout from "@/app/layouts/PrivateLayout";
 import NetworkQualityIndicator from "@/app/components/NetworkQualityIndicator";
@@ -84,13 +85,47 @@ const AdminPanel = () => {
   const router = useRouter();
   const { callAPI } = useSmithAPI();
   const { config } = useConfig();
-  const [dashboardData, setDashboardData] = useState<DashboardData | null>(null);
-  const [unapprovedDevices, setUnapprovedDevices] = useState<Device[]>([]);
-  const [outdatedDevices, setOutdatedDevices] = useState<Device[]>([]);
-  const [offlineDevices, setOfflineDevices] = useState<Device[]>([]);
+  const queryClient = useQueryClient();
   const [processingDevices, setProcessingDevices] = useState<Set<number>>(new Set());
-  const [loading, setLoading] = useState(true);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+
+  // Build exclude_labels query param
+  const excludeLabels = config?.DASHBOARD_EXCLUDED_LABELS
+    ?.split(',')
+    .map(l => l.trim())
+    .filter(Boolean) || [];
+  const excludeParams = excludeLabels.length > 0
+    ? '&' + excludeLabels.map(l => `exclude_labels=${encodeURIComponent(l)}`).join('&')
+    : '';
+
+  const { data: dashboardData, isLoading: dashboardLoading } = useQuery({
+    queryKey: ['dashboard'],
+    queryFn: () => callAPI<DashboardData>('GET', '/dashboard'),
+    refetchInterval: 5000,
+  });
+
+  const { data: unapprovedDevices = [], isLoading: unapprovedLoading } = useQuery({
+    queryKey: ['devices', 'unapproved'],
+    queryFn: () => callAPI<Device[]>('GET', '/devices?approved=false'),
+    refetchInterval: 5000,
+    select: (data) => data || [],
+  });
+
+  const { data: outdatedDevices = [], isLoading: outdatedLoading } = useQuery({
+    queryKey: ['devices', 'outdated', excludeParams],
+    queryFn: () => callAPI<Device[]>('GET', `/devices?outdated=true&online=true${excludeParams}`),
+    refetchInterval: 5000,
+    select: (data) => data || [],
+  });
+
+  const { data: offlineDevices = [], isLoading: offlineLoading } = useQuery({
+    queryKey: ['devices', 'offline', excludeParams],
+    queryFn: () => callAPI<Device[]>('GET', `/devices?online=false${excludeParams}`),
+    refetchInterval: 5000,
+    select: (data) => data || [],
+  });
+
+  const loading = dashboardLoading || unapprovedLoading || outdatedLoading || offlineLoading;
 
   useEffect(() => {
     if (toast) {
@@ -98,39 +133,6 @@ const AdminPanel = () => {
       return () => clearTimeout(timer);
     }
   }, [toast]);
-
-  useEffect(() => {
-    const fetchData = async () => {
-      setLoading(true);
-      try {
-        // Build exclude_labels query param
-        const excludeLabels = config?.DASHBOARD_EXCLUDED_LABELS
-          ?.split(',')
-          .map(l => l.trim())
-          .filter(Boolean) || [];
-        const excludeParams = excludeLabels.length > 0
-          ? '&' + excludeLabels.map(l => `exclude_labels=${encodeURIComponent(l)}`).join('&')
-          : '';
-
-        // Fetch all data in parallel
-        const [dashData, unapprovedData, outdatedData, offlineData] = await Promise.all([
-          callAPI<DashboardData>('GET', '/dashboard'),
-          callAPI<Device[]>('GET', '/devices?approved=false'),
-          callAPI<Device[]>('GET', `/devices?outdated=true&online=true${excludeParams}`),
-          callAPI<Device[]>('GET', `/devices?online=false${excludeParams}`),
-        ]);
-
-        if (dashData) setDashboardData(dashData);
-        if (unapprovedData) setUnapprovedDevices(unapprovedData);
-        if (outdatedData) setOutdatedDevices(outdatedData);
-        if (offlineData) setOfflineDevices(offlineData);
-
-      } finally {
-        setLoading(false);
-      }
-    };
-    fetchData();
-  }, [callAPI, config]);
 
   const getDeviceStatus = (device: Device) => {
     if (!device.last_seen) return 'never-seen';
@@ -202,7 +204,8 @@ const AdminPanel = () => {
     const success = await callAPI('POST', `/devices/${deviceId}/approval`);
 
     if (success) {
-      setUnapprovedDevices(prev => prev.filter(d => d.id !== deviceId));
+      queryClient.invalidateQueries({ queryKey: ['devices', 'unapproved'] });
+      queryClient.invalidateQueries({ queryKey: ['dashboard'] });
       setToast({
         message: `${deviceName} approved successfully`,
         type: 'success'
@@ -236,7 +239,8 @@ const AdminPanel = () => {
     const success = await callAPI('DELETE', `/devices/${deviceId}`);
 
     if (success) {
-      setUnapprovedDevices(prev => prev.filter(d => d.id !== deviceId));
+      queryClient.invalidateQueries({ queryKey: ['devices', 'unapproved'] });
+      queryClient.invalidateQueries({ queryKey: ['dashboard'] });
       setToast({
         message: `${deviceName} rejected and archived`,
         type: 'success'

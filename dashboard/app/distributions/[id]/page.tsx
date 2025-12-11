@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import {
   Monitor,
@@ -15,6 +15,7 @@ import {
   User,
   Plus,
 } from 'lucide-react';
+import { useQuery } from '@tanstack/react-query';
 import PrivateLayout from "@/app/layouts/PrivateLayout";
 import useSmithAPI from "@/app/hooks/smith-api";
 import moment from 'moment';
@@ -46,62 +47,33 @@ const DistributionDetailPage = () => {
   const router = useRouter();
   const params = useParams();
   const distributionId = params.id as string;
-  const { callAPI, loading, error } = useSmithAPI();
-  const [distribution, setDistribution] = useState<Distribution | null>(null);
-  const [releases, setReleases] = useState<Release[]>([]);
-  const [latestRelease, setLatestRelease] = useState<Release | null>(null);
-  const [releasesLoading, setReleasesLoading] = useState(false);
+  const { callAPI } = useSmithAPI();
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [selectedVersionOption, setSelectedVersionOption] = useState<string>('');
   const [isReleaseCandidate, setIsReleaseCandidate] = useState(false);
   const [creatingDraft, setCreatingDraft] = useState(false);
 
-  useEffect(() => {
-    const fetchDistribution = async () => {
-      const data = await callAPI<Distribution>('GET', `/distributions/${distributionId}`);
-      if (data) {
-        setDistribution(data);
-      }
-    };
+  const { data: distribution, isLoading: loading, error } = useQuery({
+    queryKey: ['distribution', distributionId],
+    queryFn: () => callAPI<Distribution>('GET', `/distributions/${distributionId}`),
+    enabled: !!distributionId,
+    refetchInterval: 5000,
+  });
 
-    if (distributionId) {
-      fetchDistribution();
-    }
-  }, [distributionId, callAPI]);
+  const { data: releases = [], isLoading: releasesLoading } = useQuery({
+    queryKey: ['distribution-releases', distributionId],
+    queryFn: () => callAPI<Release[]>('GET', `/distributions/${distributionId}/releases`),
+    enabled: !!distributionId,
+    refetchInterval: 5000,
+    select: (data) => data || [],
+  });
 
-  useEffect(() => {
-    if (distributionId) {
-      const fetchReleases = async () => {
-        setReleasesLoading(true);
-        try {
-          const data = await callAPI<Release[]>('GET', `/distributions/${distributionId}/releases`);
-          if (data) {
-            setReleases(data);
-          }
-        } finally {
-          setReleasesLoading(false);
-        }
-      };
-      fetchReleases();
-    }
-  }, [distributionId, callAPI]);
-
-  useEffect(() => {
-    if (distributionId) {
-      const fetchLatestRelease = async () => {
-        try {
-          const data = await callAPI<Release>('GET', `/distributions/${distributionId}/releases/latest`);
-          if (data) {
-            setLatestRelease(data);
-          }
-        } catch (error) {
-          // It's ok if there's no latest release (e.g., only drafts exist)
-          console.log('No latest release found:', error);
-        }
-      };
-      fetchLatestRelease();
-    }
-  }, [distributionId, callAPI]);
+  const { data: latestRelease } = useQuery({
+    queryKey: ['distribution-latest-release', distributionId],
+    queryFn: () => callAPI<Release>('GET', `/distributions/${distributionId}/releases/latest`),
+    enabled: !!distributionId,
+    refetchInterval: 5000,
+  });
 
   const getArchIcon = (architecture: string) => {
     switch (architecture.toLowerCase()) {
@@ -255,7 +227,7 @@ const DistributionDetailPage = () => {
     return (
       <PrivateLayout id="distributions">
         <div className="flex items-center justify-center h-32">
-          <div className="text-red-500 text-sm">Error: {error}</div>
+          <div className="text-red-500 text-sm">Error: {error.message}</div>
         </div>
       </PrivateLayout>
     );

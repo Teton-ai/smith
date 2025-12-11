@@ -12,6 +12,7 @@ import {
   Check,
   X,
 } from 'lucide-react';
+import { useQuery } from '@tanstack/react-query';
 import PrivateLayout from "@/app/layouts/PrivateLayout";
 import useSmithAPI from "@/app/hooks/smith-api";
 
@@ -62,12 +63,21 @@ const LoadingSkeleton = () => (
 const ModemsPage = () => {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { callAPI, loading } = useSmithAPI();
-  const [modems, setModems] = useState<ModemInfo[]>([]);
-  const [filteredModems, setFilteredModems] = useState<ModemInfo[]>([]);
+  const { callAPI } = useSmithAPI();
   const [searchTerm, setSearchTerm] = useState('');
-  const [initialLoading, setInitialLoading] = useState(true);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+
+  const { data: modems = [], isLoading: initialLoading } = useQuery({
+    queryKey: ['modems'],
+    queryFn: () => callAPI<ModemInfo[]>('GET', '/modems'),
+    refetchInterval: 5000,
+    select: (data) => {
+      if (!data) return [];
+      return [...data].sort((a, b) =>
+        new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()
+      );
+    },
+  });
 
   // Initialize search term from URL params
   useEffect(() => {
@@ -75,34 +85,12 @@ const ModemsPage = () => {
     setSearchTerm(urlSearch);
   }, [searchParams]);
 
-  useEffect(() => {
-    const fetchModems = async () => {
-      try {
-        const response = await callAPI<ModemInfo[]>('GET', '/modems');
-        if (response) {
-          const sortedModems = response.sort((a, b) =>
-            new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()
-          );
-          setModems(sortedModems);
-        }
-      } finally {
-        setInitialLoading(false);
-      }
-    };
-    fetchModems();
-  }, [callAPI]);
-
-  useEffect(() => {
-    if (searchTerm === '') {
-      setFilteredModems(modems);
-    } else {
-      const filtered = modems.filter(modem =>
+  const filteredModems = searchTerm === ''
+    ? modems
+    : modems.filter(modem =>
         modem.imei.toLowerCase().includes(searchTerm.toLowerCase()) ||
         modem.network_provider.toLowerCase().includes(searchTerm.toLowerCase())
       );
-      setFilteredModems(filtered);
-    }
-  }, [searchTerm, modems]);
 
   // Auto-hide toast after 3 seconds
   useEffect(() => {

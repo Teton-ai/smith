@@ -9,6 +9,7 @@ import {
   Tag,
   Loader2,
 } from 'lucide-react';
+import { useQuery } from '@tanstack/react-query';
 import PrivateLayout from "@/app/layouts/PrivateLayout";
 import useSmithAPI from "@/app/hooks/smith-api";
 import NetworkQualityIndicator from '@/app/components/NetworkQualityIndicator';
@@ -198,8 +199,7 @@ interface Release {
 const DevicesPage = () => {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { callAPI, loading } = useSmithAPI();
-  const [devices, setDevices] = useState<Device[]>([]);
+  const { callAPI } = useSmithAPI();
   const [filteredDevices, setFilteredDevices] = useState<Device[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [debouncedSearchTerm, setDebouncedSearchTerm] = useState('');
@@ -207,6 +207,32 @@ const DevicesPage = () => {
   const [labelFilters, setLabelFilters] = useState<string[]>([]);
   const [onlineStatusFilter, setOnlineStatusFilter] = useState<'all' | 'online' | 'offline'>('all');
   const [isSearching, setIsSearching] = useState(false);
+
+  // Build query params for API call
+  const buildQueryParams = () => {
+    const params = new URLSearchParams();
+    if (labelFilters.length > 0) {
+      labelFilters.forEach((filter) => {
+        params.append('labels', filter);
+      });
+    }
+    if (onlineStatusFilter === 'online') {
+      params.set('online', 'true');
+    } else if (onlineStatusFilter === 'offline') {
+      params.set('online', 'false');
+    }
+    return params.toString();
+  };
+
+  const queryString = buildQueryParams();
+  const endpoint = queryString ? `/devices?${queryString}` : '/devices';
+
+  const { data: devices = [], isLoading: loading } = useQuery({
+    queryKey: ['devices', labelFilters, onlineStatusFilter],
+    queryFn: () => callAPI<Device[]>('GET', endpoint),
+    refetchInterval: 5000,
+    select: (data) => data || [],
+  });
 
   // Debounce search term
   useEffect(() => {
@@ -241,35 +267,6 @@ const DevicesPage = () => {
       setLabelFilters(parsedLabels);
     }
   }, [searchParams]);
-
-  useEffect(() => {
-    const fetchDashboard = async () => {
-      const params = new URLSearchParams();
-
-      // Add label filters
-      if (labelFilters.length > 0) {
-        labelFilters.forEach((filter) => {
-          params.append('labels', filter);
-        });
-      }
-
-      // Add online status filter
-      if (onlineStatusFilter === 'online') {
-        params.set('online', 'true');
-      } else if (onlineStatusFilter === 'offline') {
-        params.set('online', 'false');
-      }
-
-      const queryString = params.toString();
-      const endpoint = queryString ? `/devices?${queryString}` : '/devices';
-
-      const data = await callAPI<Device[]>('GET', endpoint);
-      if (data) {
-        setDevices(data);
-      }
-    };
-    fetchDashboard();
-  }, [callAPI, labelFilters, onlineStatusFilter]);
 
   // Update URL when filters change
   const updateURL = (params: Record<string, string | null>) => {
