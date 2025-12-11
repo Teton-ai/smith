@@ -9,7 +9,7 @@ import {
   Tag,
   Loader2,
 } from 'lucide-react';
-import { useQuery, useInfiniteQuery } from '@tanstack/react-query';
+import { useInfiniteQuery } from '@tanstack/react-query';
 import PrivateLayout from "@/app/layouts/PrivateLayout";
 import useSmithAPI from "@/app/hooks/smith-api";
 import NetworkQualityIndicator from '@/app/components/NetworkQualityIndicator';
