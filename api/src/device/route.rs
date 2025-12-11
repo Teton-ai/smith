@@ -417,6 +417,7 @@ pub async fn get_devices(
               d.system_info->>'hostname' ILIKE '%' || $11 || '%' OR
               d.system_info->'device_tree'->>'model' ILIKE '%' || $11 || '%'
           ))
+          AND ($12::int IS NULL OR d.release_id = $12)
         GROUP BY d.id, ip.id, m.id, r.id, rd.id, tr.id, trd.id, dn.device_id
         ORDER BY d.last_ping DESC NULLS LAST, d.serial_number
         LIMIT $9
@@ -432,7 +433,8 @@ pub async fn get_devices(
         filter.exclude_labels.as_slice(),
         filter.limit.unwrap_or(100).clamp(1, 1000),
         filter.offset.unwrap_or(0).max(0),
-        filter.search
+        filter.search,
+        filter.release_id
     )
     .fetch_all(&state.pg_pool)
     .await
