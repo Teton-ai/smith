@@ -19,7 +19,7 @@ import {
   X,
   Rocket,
   Search,
-  RefreshCw,
+  ArrowLeftRight,
   ArrowUp,
   CheckCircle,
   XCircle,
@@ -274,19 +274,23 @@ const ReleaseDetailPage = () => {
   const getLatestVersionForPackage = (pkg: ReleasePackage) => {
     if (availablePackages.length === 0) return null;
 
-    const sameNamePackages = availablePackages.filter(
+    // Find the current package's created_at from availablePackages
+    const currentPkg = availablePackages.find(p => p.id === pkg.id);
+    const currentCreatedAt = currentPkg ? new Date(currentPkg.created_at).getTime() : 0;
+
+    const newerPackages = availablePackages.filter(
       availPkg =>
         availPkg.name === pkg.name &&
         availPkg.id !== pkg.id &&
         (!distribution || availPkg.architecture === distribution.architecture) &&
-        compareVersions(availPkg.version, pkg.version) > 0 // Only show if version is actually higher
+        new Date(availPkg.created_at).getTime() > currentCreatedAt
     );
 
-    if (sameNamePackages.length === 0) return null;
+    if (newerPackages.length === 0) return null;
 
-    // Sort by semantic version to get the actual latest
-    const sorted = [...sameNamePackages].sort(
-      (a, b) => compareVersions(b.version, a.version)
+    // Sort by created_at to get the most recently created
+    const sorted = [...newerPackages].sort(
+      (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
     );
 
     return sorted[0];
@@ -1027,7 +1031,7 @@ const ReleaseDetailPage = () => {
                             className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-md transition-colors cursor-pointer"
                             title="Replace package version"
                           >
-                            <RefreshCw className="w-4 h-4" />
+                            <ArrowLeftRight className="w-4 h-4" />
                           </button>
                           <button
                             onClick={() => handleDeletePackage(pkg.id)}
