@@ -24,6 +24,7 @@ import {
   CheckCircle,
   XCircle,
 } from 'lucide-react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import PrivateLayout from "@/app/layouts/PrivateLayout";
 import useSmithAPI from "@/app/hooks/smith-api";
 import moment from 'moment';
@@ -71,17 +72,12 @@ const ReleaseDetailPage = () => {
   const router = useRouter();
   const params = useParams();
   const releaseId = params.id as string;
-  const { callAPI, loading, error } = useSmithAPI();
-  const [release, setRelease] = useState<Release | null>(null);
-  const [distribution, setDistribution] = useState<Distribution | null>(null);
-  const [packages, setPackages] = useState<ReleasePackage[]>([]);
-  const [packagesLoading, setPackagesLoading] = useState(false);
+  const { callAPI } = useSmithAPI();
+  const queryClient = useQueryClient();
   const [publishing, setPublishing] = useState(false);
   const [showAddPackageModal, setShowAddPackageModal] = useState(false);
   const [showReplacePackageModal, setShowReplacePackageModal] = useState(false);
   const [packageToReplace, setPackageToReplace] = useState<ReleasePackage | null>(null);
-  const [availablePackages, setAvailablePackages] = useState<AvailablePackage[]>([]);
-  const [availablePackagesLoading, setAvailablePackagesLoading] = useState(false);
   const [selectedAvailablePackage, setSelectedAvailablePackage] = useState<number | null>(null);
   const [packageSearchQuery, setPackageSearchQuery] = useState('');
   const [showDeployModal, setShowDeployModal] = useState(false);
@@ -89,6 +85,35 @@ const ReleaseDetailPage = () => {
   const [mounted, setMounted] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const [upgradingPackages, setUpgradingPackages] = useState<Set<number>>(new Set());
+
+  const { data: release, isLoading: loading, error } = useQuery({
+    queryKey: ['release', releaseId],
+    queryFn: () => callAPI<Release>('GET', `/releases/${releaseId}`),
+    enabled: !!releaseId,
+    refetchInterval: 5000,
+  });
+
+  const { data: distribution } = useQuery({
+    queryKey: ['distribution', release?.distribution_id],
+    queryFn: () => callAPI<Distribution>('GET', `/distributions/${release?.distribution_id}`),
+    enabled: !!release?.distribution_id,
+    refetchInterval: 5000,
+  });
+
+  const { data: packages = [], isLoading: packagesLoading } = useQuery({
+    queryKey: ['release-packages', releaseId],
+    queryFn: () => callAPI<ReleasePackage[]>('GET', `/releases/${releaseId}/packages`),
+    enabled: !!releaseId,
+    refetchInterval: 5000,
+    select: (data) => data || [],
+  });
+
+  const { data: availablePackages = [], isLoading: availablePackagesLoading } = useQuery({
+    queryKey: ['packages'],
+    queryFn: () => callAPI<AvailablePackage[]>('GET', '/packages'),
+    refetchInterval: 5000,
+    select: (data) => data || [],
+  });
 
   useEffect(() => {
     setMounted(true);
@@ -100,48 +125,6 @@ const ReleaseDetailPage = () => {
       return () => clearTimeout(timer);
     }
   }, [toast]);
-
-
-  useEffect(() => {
-    const fetchRelease = async () => {
-      const data = await callAPI<Release>('GET', `/releases/${releaseId}`);
-      if (data) {
-        setRelease(data);
-        
-        // Fetch distribution info
-        const distData = await callAPI<Distribution>('GET', `/distributions/${data.distribution_id}`);
-        if (distData) {
-          setDistribution(distData);
-        }
-      }
-    };
-    if (releaseId) {
-      fetchRelease();
-    }
-  }, [releaseId, callAPI]);
-
-  useEffect(() => {
-    if (releaseId) {
-      const fetchPackages = async () => {
-        setPackagesLoading(true);
-        try {
-          const data = await callAPI<ReleasePackage[]>('GET', `/releases/${releaseId}/packages`);
-          if (data) {
-            setPackages(data);
-          }
-        } finally {
-          setPackagesLoading(false);
-        }
-      };
-      fetchPackages();
-    }
-  }, [releaseId, callAPI]);
-
-  useEffect(() => {
-    if (releaseId) {
-      fetchAvailablePackages();
-    }
-  }, [releaseId]);
 
   const formatRelativeTime = (dateString: string) => {
     return moment(dateString).fromNow();
@@ -198,11 +181,7 @@ const ReleaseDetailPage = () => {
         draft: false
       });
 
-      // Refresh the release to get updated state
-      const updatedRelease = await callAPI<Release>('GET', `/releases/${releaseId}`);
-      if (updatedRelease) {
-        setRelease(updatedRelease);
-      }
+      queryClient.invalidateQueries({ queryKey: ['release', releaseId] });
     } catch (error: any) {
       console.error('Failed to publish release:', error);
       alert(`Failed to publish release: ${error?.message || 'Unknown error'}`);
@@ -211,33 +190,15 @@ const ReleaseDetailPage = () => {
     }
   };
 
-  const fetchAvailablePackages = async () => {
-    setAvailablePackagesLoading(true);
-    try {
-      const data = await callAPI<AvailablePackage[]>('GET', '/packages');
-      if (data) {
-        setAvailablePackages(data);
-      }
-    } catch (error: any) {
-      console.error('Failed to fetch available packages:', error);
-    } finally {
-      setAvailablePackagesLoading(false);
-    }
-  };
-
   const handleAddPackage = async () => {
     if (!selectedAvailablePackage) return;
-    
+
     try {
       await callAPI('POST', `/releases/${releaseId}/packages`, {
         id: selectedAvailablePackage
       });
-      
-      // Refresh packages list
-      const data = await callAPI<ReleasePackage[]>('GET', `/releases/${releaseId}/packages`);
-      if (data) {
-        setPackages(data);
-      }
+
+      queryClient.invalidateQueries({ queryKey: ['release-packages', releaseId] });
       setSelectedAvailablePackage(null);
       setShowAddPackageModal(false);
     } catch (error: any) {
@@ -248,35 +209,27 @@ const ReleaseDetailPage = () => {
 
   const handleDeletePackage = async (packageId: number) => {
     if (!confirm('Are you sure you want to delete this package?')) return;
-    
+
     try {
       await callAPI('DELETE', `/releases/${releaseId}/packages/${packageId}`);
-      setPackages(prev => prev.filter(pkg => pkg.id !== packageId));
+      queryClient.invalidateQueries({ queryKey: ['release-packages', releaseId] });
     } catch (error: any) {
       console.error('Failed to delete package:', error);
       alert(`Failed to delete package: ${error?.message || 'Unknown error'}`);
     }
   };
 
-  const openAddModal = async () => {
+  const openAddModal = () => {
     setSelectedAvailablePackage(null);
     setPackageSearchQuery('');
     setShowAddPackageModal(true);
-    // Only fetch if we don't have packages cached
-    if (availablePackages.length === 0) {
-      await fetchAvailablePackages();
-    }
   };
 
-  const openReplaceModal = async (pkg: ReleasePackage) => {
+  const openReplaceModal = (pkg: ReleasePackage) => {
     setPackageToReplace(pkg);
     setSelectedAvailablePackage(null);
     setPackageSearchQuery('');
     setShowReplacePackageModal(true);
-    // Only fetch if we don't have packages cached
-    if (availablePackages.length === 0) {
-      await fetchAvailablePackages();
-    }
   };
 
   const handleReplacePackage = async () => {
@@ -291,11 +244,7 @@ const ReleaseDetailPage = () => {
         id: selectedAvailablePackage
       });
 
-      // Refresh packages list
-      const data = await callAPI<ReleasePackage[]>('GET', `/releases/${releaseId}/packages`);
-      if (data) {
-        setPackages(data);
-      }
+      queryClient.invalidateQueries({ queryKey: ['release-packages', releaseId] });
       setSelectedAvailablePackage(null);
       setPackageToReplace(null);
       setShowReplacePackageModal(false);
@@ -354,11 +303,7 @@ const ReleaseDetailPage = () => {
         id: latestVersion.id
       });
 
-      // Refresh packages list
-      const data = await callAPI<ReleasePackage[]>('GET', `/releases/${releaseId}/packages`);
-      if (data) {
-        setPackages(data);
-      }
+      queryClient.invalidateQueries({ queryKey: ['release-packages', releaseId] });
 
       setToast({
         message: `Upgraded ${pkg.name} to v${latestVersion.version}`,
@@ -409,7 +354,7 @@ const ReleaseDetailPage = () => {
     return (
       <PrivateLayout id="distributions">
         <div className="flex items-center justify-center h-32">
-          <div className="text-red-500 text-sm">Error: {error}</div>
+          <div className="text-red-500 text-sm">Error: {error.message}</div>
         </div>
       </PrivateLayout>
     );

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   Package,
@@ -18,6 +18,7 @@ import {
   EyeOff,
   Search,
 } from 'lucide-react';
+import { useQuery } from '@tanstack/react-query';
 import PrivateLayout from "@/app/layouts/PrivateLayout";
 import useSmithAPI from "@/app/hooks/smith-api";
 
@@ -38,11 +39,37 @@ interface Rollout {
 
 const DistributionsPage = () => {
   const router = useRouter();
-  const { callAPI, loading, error } = useSmithAPI();
-  const [distributions, setDistributions] = useState<Distribution[]>([]);
-  const [rollouts, setRollouts] = useState<Map<number, Rollout>>(new Map());
+  const { callAPI } = useSmithAPI();
   const [showEmptyDistributions, setShowEmptyDistributions] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
+
+  const { data: distributionsData, isLoading: loading, error } = useQuery({
+    queryKey: ['distributions-with-rollouts'],
+    queryFn: async () => {
+      const data = await callAPI<Distribution[]>('GET', '/distributions');
+      if (!data) return { distributions: [], rollouts: new Map<number, Rollout>() };
+
+      // Fetch rollout data for each distribution
+      const rolloutPromises = data.map(async (dist) => {
+        const rolloutData = await callAPI<Rollout>('GET', `/distributions/${dist.id}/rollout`);
+        return { id: dist.id, rollout: rolloutData };
+      });
+
+      const rolloutResults = await Promise.all(rolloutPromises);
+      const rolloutMap = new Map<number, Rollout>();
+      rolloutResults.forEach(({ id, rollout }) => {
+        if (rollout) {
+          rolloutMap.set(id, rollout);
+        }
+      });
+
+      return { distributions: data, rollouts: rolloutMap };
+    },
+    refetchInterval: 5000,
+  });
+
+  const distributions = distributionsData?.distributions || [];
+  const rollouts = distributionsData?.rollouts || new Map<number, Rollout>();
 
   // Calculate overall rollout stats
   const totalDevicesAcrossAll = Array.from(rollouts.values()).reduce(
@@ -58,7 +85,7 @@ const DistributionsPage = () => {
     0
   );
 
-  const overallProgress = totalDevicesAcrossAll > 0 
+  const overallProgress = totalDevicesAcrossAll > 0
     ? Math.round((updatedDevicesAcrossAll / totalDevicesAcrossAll) * 100)
     : 0;
 
@@ -85,31 +112,6 @@ const DistributionsPage = () => {
   });
 
   const displayedDistributions = filteredDistributions;
-
-  useEffect(() => {
-    const fetchDistributions = async () => {
-      const data = await callAPI<Distribution[]>('GET', '/distributions');
-      if (data) {
-        setDistributions(data);
-        
-        // Fetch rollout data for each distribution
-        const rolloutPromises = data.map(async (dist) => {
-          const rolloutData = await callAPI<Rollout>('GET', `/distributions/${dist.id}/rollout`);
-          return { id: dist.id, rollout: rolloutData };
-        });
-
-        const rolloutResults = await Promise.all(rolloutPromises);
-        const rolloutMap = new Map();
-        rolloutResults.forEach(({ id, rollout }) => {
-          if (rollout) {
-            rolloutMap.set(id, rollout);
-          }
-        });
-        setRollouts(rolloutMap);
-      }
-    };
-    fetchDistributions();
-  }, [callAPI]);
 
   const getArchIcon = (architecture: string) => {
     switch (architecture.toLowerCase()) {
@@ -157,7 +159,7 @@ const DistributionsPage = () => {
     return (
       <PrivateLayout id="distributions">
         <div className="flex items-center justify-center h-32">
-          <div className="text-red-500 text-sm">Error: {error}</div>
+          <div className="text-red-500 text-sm">Error: {error.message}</div>
         </div>
       </PrivateLayout>
     );
