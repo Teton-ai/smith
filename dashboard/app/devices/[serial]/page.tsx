@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import {
   ChevronRight,
@@ -16,6 +16,7 @@ import {
   GitBranch,
   Tag,
 } from 'lucide-react';
+import { useQuery } from '@tanstack/react-query';
 import dynamic from 'next/dynamic';
 import PrivateLayout from "@/app/layouts/PrivateLayout";
 import useSmithAPI from "@/app/hooks/smith-api";
@@ -129,27 +130,14 @@ const DeviceDetailPage = () => {
   const params = useParams();
   const router = useRouter();
   const { callAPI } = useSmithAPI();
-  const [device, setDevice] = useState<Device | null>(null);
-  const [loading, setLoading] = useState(true);
 
   const serial = params.serial as string;
 
-  useEffect(() => {
-    const fetchDevice = async () => {
-      setLoading(true);
-      try {
-        const deviceData = await callAPI<Device>('GET', `/devices/${serial}`);
-        if (deviceData) {
-          setDevice(deviceData);
-          
-
-        }
-      } finally {
-        setLoading(false);
-      }
-    };
-    fetchDevice();
-  }, [callAPI, serial]);
+  const { data: device, isLoading: loading } = useQuery({
+    queryKey: ['device', serial],
+    queryFn: () => callAPI<Device>('GET', `/devices/${serial}`),
+    refetchInterval: 5000,
+  });
 
 
   const getFlagUrl = (countryCode: string) => {

@@ -1,8 +1,9 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { ChevronRight, AlertTriangle, Send, Reply, Copy, Check, ArrowLeft } from 'lucide-react';
+import { useQuery } from '@tanstack/react-query';
 import moment from 'moment';
 import PrivateLayout from "@/app/layouts/PrivateLayout";
 import useSmithAPI from "@/app/hooks/smith-api";
@@ -22,35 +23,24 @@ const CommandsPage = () => {
   const params = useParams();
   const router = useRouter();
   const { callAPI } = useSmithAPI();
-  const [commands, setCommands] = useState<Command[]>([]);
-  const [device, setDevice] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
   const [copiedButtons, setCopiedButtons] = useState<Set<string>>(new Set());
 
   const serial = params.serial as string;
 
-  useEffect(() => {
-    const fetchData = async () => {
-      setLoading(true);
-      try {
-        const [commandsResponse, deviceData] = await Promise.all([
-          callAPI<CommandsResponse>('GET', `/devices/${serial}/commands?limit=500`),
-          callAPI('GET', `/devices/${serial}`)
-        ]);
-        if (commandsResponse) {
-          setCommands(commandsResponse.commands);
-        }
-        if (deviceData) {
-          setDevice(deviceData);
-        }
-      } finally {
-        setLoading(false);
-      }
-    };
+  const { data: commandsData, isLoading: commandsLoading } = useQuery({
+    queryKey: ['commands', serial],
+    queryFn: () => callAPI<CommandsResponse>('GET', `/devices/${serial}/commands?limit=500`),
+    refetchInterval: 5000,
+  });
 
-    fetchData();
-    
-  }, [callAPI, serial]);
+  const { data: device, isLoading: deviceLoading } = useQuery({
+    queryKey: ['device', serial],
+    queryFn: () => callAPI('GET', `/devices/${serial}`),
+    refetchInterval: 5000,
+  });
+
+  const commands = commandsData?.commands || [];
+  const loading = commandsLoading || deviceLoading;
 
   const getCommandDisplay = (cmd: Command) => {
     if (typeof cmd.cmd_data === 'string') {
