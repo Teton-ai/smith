@@ -412,8 +412,15 @@ pub async fn get_devices(
               WHERE edl.device_id = d.id
               AND el.name || '=' || edl.value = ANY($8)
           ))
+          AND ($11::text IS NULL OR (
+              d.serial_number ILIKE '%' || $11 || '%' OR
+              d.system_info->>'hostname' ILIKE '%' || $11 || '%' OR
+              d.system_info->'device_tree'->>'model' ILIKE '%' || $11 || '%'
+          ))
         GROUP BY d.id, ip.id, m.id, r.id, rd.id, tr.id, trd.id, dn.device_id
-        ORDER BY d.serial_number
+        ORDER BY d.last_ping DESC NULLS LAST, d.serial_number
+        LIMIT $9
+        OFFSET $10
         "#,
         filter.serial_number,
         filter.approved,
@@ -422,7 +429,10 @@ pub async fn get_devices(
         filter.labels.as_slice(),
         filter.online,
         filter.outdated,
-        filter.exclude_labels.as_slice()
+        filter.exclude_labels.as_slice(),
+        filter.limit.unwrap_or(100).clamp(1, 1000),
+        filter.offset.unwrap_or(0).max(0),
+        filter.search
     )
     .fetch_all(&state.pg_pool)
     .await

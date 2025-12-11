@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import {
   Cpu,
@@ -9,7 +9,7 @@ import {
   Tag,
   Loader2,
 } from 'lucide-react';
-import { useQuery } from '@tanstack/react-query';
+import { useInfiniteQuery } from '@tanstack/react-query';
 import PrivateLayout from "@/app/layouts/PrivateLayout";
 import useSmithAPI from "@/app/hooks/smith-api";
 import NetworkQualityIndicator from '@/app/components/NetworkQualityIndicator';
@@ -196,11 +196,12 @@ interface Release {
   created_at: string
 }
 
+const PAGE_SIZE = 100;
+
 const DevicesPage = () => {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { callAPI } = useSmithAPI();
-  const [filteredDevices, setFilteredDevices] = useState<Device[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [debouncedSearchTerm, setDebouncedSearchTerm] = useState('');
   const [showOutdatedOnly, setShowOutdatedOnly] = useState(false);
@@ -209,7 +210,7 @@ const DevicesPage = () => {
   const [isSearching, setIsSearching] = useState(false);
 
   // Build query params for API call
-  const buildQueryParams = () => {
+  const buildQueryParams = (offset?: number) => {
     const params = new URLSearchParams();
     if (labelFilters.length > 0) {
       labelFilters.forEach((filter) => {
@@ -221,18 +222,47 @@ const DevicesPage = () => {
     } else if (onlineStatusFilter === 'offline') {
       params.set('online', 'false');
     }
+    if (debouncedSearchTerm) {
+      params.set('search', debouncedSearchTerm);
+    }
+    if (showOutdatedOnly) {
+      params.set('outdated', 'true');
+    }
+    params.set('limit', PAGE_SIZE.toString());
+    if (offset !== undefined) {
+      params.set('offset', offset.toString());
+    }
     return params.toString();
   };
 
-  const queryString = buildQueryParams();
-  const endpoint = queryString ? `/devices?${queryString}` : '/devices';
-
-  const { data: devices = [], isLoading: loading } = useQuery({
-    queryKey: ['devices', labelFilters, onlineStatusFilter],
-    queryFn: () => callAPI<Device[]>('GET', endpoint),
+  const {
+    data: devicesData,
+    isLoading: loading,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+  } = useInfiniteQuery({
+    queryKey: ['devices', labelFilters, onlineStatusFilter, debouncedSearchTerm, showOutdatedOnly],
+    queryFn: ({ pageParam = 0 }) => {
+      const queryString = buildQueryParams(pageParam);
+      const endpoint = `/devices?${queryString}`;
+      return callAPI<Device[]>('GET', endpoint);
+    },
+    initialPageParam: 0,
+    getNextPageParam: (lastPage, allPages) => {
+      if (!lastPage || lastPage.length < PAGE_SIZE) return undefined;
+      return allPages.length * PAGE_SIZE;
+    },
     refetchInterval: 5000,
-    select: (data) => data || [],
   });
+
+  const filteredDevices = useMemo(() =>
+    (devicesData?.pages || [])
+      .filter((page): page is Device[] => Array.isArray(page))
+      .flat()
+      .filter((d): d is Device => d != null && typeof d === 'object' && 'id' in d),
+    [devicesData]
+  );
 
   // Debounce search term
   useEffect(() => {
@@ -284,48 +314,6 @@ const DevicesPage = () => {
     const query = search ? `?${search}` : '';
     router.replace(`/devices${query}`);
   };
-
-
-  // Filter and sort devices - client-side filtering for search and outdated, sorting
-  useEffect(() => {
-    // Backend handles: online status, labels
-    // Client-side handles: search term, outdated filter, sorting
-    let filtered = devices.filter(device => device.has_token);
-
-    // Filter to show only outdated devices if toggle is on
-    if (showOutdatedOnly) {
-      filtered = filtered.filter(device => hasUpdatePending(device));
-    }
-
-    // Client-side search filter
-    if (debouncedSearchTerm) {
-      filtered = filtered.filter(device =>
-        device.serial_number?.toLowerCase().includes(debouncedSearchTerm.toLowerCase()) ||
-        device.system_info?.hostname?.toLowerCase().includes(debouncedSearchTerm.toLowerCase()) ||
-        device.system_info?.device_tree?.model?.toLowerCase().includes(debouncedSearchTerm.toLowerCase())
-      );
-    }
-
-    // Sort devices by latest online (most recent first)
-    filtered = filtered.sort((a, b) => {
-      // Online devices first, then sort by last seen time (most recent first)
-      const statusA = getDeviceStatus(a);
-      const statusB = getDeviceStatus(b);
-
-      if (statusA === 'online' && statusB !== 'online') return -1;
-      if (statusB === 'online' && statusA !== 'online') return 1;
-
-      // If both have same status, sort by most recent last_seen
-      // Handle null last_seen values (put them at the end)
-      if (!a.last_seen && !b.last_seen) return 0;
-      if (!a.last_seen) return 1;
-      if (!b.last_seen) return -1;
-
-      return new Date(b.last_seen).getTime() - new Date(a.last_seen).getTime();
-    });
-
-    setFilteredDevices(filtered);
-  }, [devices, debouncedSearchTerm, showOutdatedOnly]);
 
   const getDeviceStatus = (device: Device) => {
     if (!device.last_seen) return 'offline';
@@ -449,10 +437,6 @@ const DevicesPage = () => {
     return `${minutes}m`;
   };
 
-  // Calculate counts for display
-  const authorizedDevices = devices.filter(device => device.has_token);
-  const outdatedDevices = authorizedDevices.filter(device => hasUpdatePending(device));
-
   return (
     <PrivateLayout id="devices">
       <div className="space-y-6">
@@ -509,18 +493,16 @@ const DevicesPage = () => {
               </div>
 
               {/* Outdated Filter */}
-              {outdatedDevices.length > 0 && (
-                <button
-                  onClick={handleOutdatedToggle}
-                  className={`px-3 py-2 text-sm rounded-md transition-colors cursor-pointer ${
-                    showOutdatedOnly
-                      ? 'bg-orange-600 text-white'
-                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                  }`}
-                >
-                  Outdated ({outdatedDevices.length})
-                </button>
-              )}
+              <button
+                onClick={handleOutdatedToggle}
+                className={`px-3 py-2 text-sm rounded-md transition-colors cursor-pointer ${
+                  showOutdatedOnly
+                    ? 'bg-orange-600 text-white'
+                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                }`}
+              >
+                Outdated
+              </button>
 
               {/* Label Filter Input */}
               <input
@@ -557,11 +539,6 @@ const DevicesPage = () => {
               )}
             </div>
 
-            <div className="flex items-center space-x-3">
-              <span className="text-sm text-gray-500">
-                {loading ? 'Loading...' : `${filteredDevices.length} device${filteredDevices.length !== 1 ? 's' : ''}`}
-              </span>
-            </div>
           </div>
         </div>
 
@@ -717,6 +694,25 @@ const DevicesPage = () => {
                 </div>
               </div>
               ))}
+              {/* Load More Button */}
+              {hasNextPage && (
+                <div className="px-4 py-4 border-t border-gray-200">
+                  <button
+                    onClick={() => fetchNextPage()}
+                    disabled={isFetchingNextPage}
+                    className="w-full py-2 px-4 text-sm font-medium text-blue-600 bg-blue-50 rounded-md hover:bg-blue-100 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer transition-colors"
+                  >
+                    {isFetchingNextPage ? (
+                      <span className="flex items-center justify-center gap-2">
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        Loading more...
+                      </span>
+                    ) : (
+                      `Load more devices`
+                    )}
+                  </button>
+                </div>
+              )}
             </div>
           )}
         </div>
