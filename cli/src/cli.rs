@@ -72,8 +72,6 @@ pub enum GetResourceType {
     Device {
         /// Device serial numbers or IDs. If omitted, shows all devices.
         ids: Vec<String>,
-        #[arg(short, long, default_value = "false")]
-        json: bool,
         #[command(flatten)]
         selector: DeviceSelector,
         /// Output format: wide, json, or custom field (e.g., serial_number, id, ip_address)

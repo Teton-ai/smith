@@ -1,10 +1,10 @@
 use crate::State;
 use crate::device::{
-    AuthDevice, DeviceHealth, DeviceLedgerItem, DeviceLedgerItemPaginated, DeviceRelease,
-    LeanDevice, LeanResponse, NewVariable, Note, RawDevice, Tag, UpdateDeviceRelease,
-    UpdateDevicesRelease, Variable,
+    DeviceHealth, DeviceLedgerItem, DeviceLedgerItemPaginated, DeviceRelease, NewVariable, Note,
+    Tag, UpdateDeviceRelease, UpdateDevicesRelease, Variable,
 };
 use crate::event::PublicEvent;
+use crate::handlers::AuthedDevice;
 use crate::middlewares::authorization;
 use crate::release::get_release_by_id;
 use crate::user::CurrentUser;
@@ -13,12 +13,13 @@ use axum::extract::Path;
 use axum::http::StatusCode;
 use axum::{Extension, Json};
 use axum_extra::extract::Query;
+use chrono::{DateTime, Utc};
 use models::device::{
     CommandsPaginated, Device, DeviceCommandResponse, DeviceFilter, DeviceNetwork,
 };
 use models::modem::Modem;
 use models::release::Release;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize, Serializer};
 use smith::utils::schema;
 use smith::utils::schema::SafeCommandRequest;
 use sqlx::types::Json as SqlxJson;
@@ -28,10 +29,38 @@ use tracing::{debug, error};
 const DEVICE_TAG: &str = "device";
 const DEVICES_TAG: &str = "devices";
 
-#[derive(Deserialize, Debug)]
-pub struct LeanDeviceFilter {
-    reverse: Option<bool>,
-    limit: Option<i64>,
+// TODO: Change this, this needs to be device and the other is PublicDevice, API type
+#[derive(Debug, Serialize, utoipa::ToSchema, Clone)]
+pub struct RawDevice {
+    pub id: i32,
+    pub serial_number: String,
+    #[schema(value_type = HashMap<String, String>)]
+    pub labels: SqlxJson<HashMap<String, String>>,
+    pub last_ping: Option<DateTime<Utc>>,
+    pub wifi_mac: Option<String>,
+    pub modified_on: DateTime<Utc>,
+    pub created_on: DateTime<Utc>,
+    pub note: Option<String>,
+    pub approved: bool,
+    #[serde(serialize_with = "serialize_token_presence")]
+    pub token: Option<String>,
+    pub release_id: Option<i32>,
+    pub target_release_id: Option<i32>,
+    pub system_info: Option<serde_json::Value>,
+    pub network_id: Option<i32>,
+    pub modem_id: Option<i32>,
+    pub archived: bool,
+    pub ip_address_id: Option<i32>,
+}
+
+fn serialize_token_presence<S>(token: &Option<String>, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+{
+    match token {
+        Some(_) => serializer.serialize_str("[REDACTED]"),
+        None => serializer.serialize_none(),
+    }
 }
 
 #[utoipa::path(
@@ -47,265 +76,29 @@ pub struct LeanDeviceFilter {
     tag = DEVICE_TAG,
 )]
 pub async fn get_device(
-    Extension(AuthDevice(device)): Extension<AuthDevice>,
-) -> axum::response::Result<Json<RawDevice>, StatusCode> {
-    Ok(Json(device))
-}
-
-// TODO: this is getting crazy huge, maybe it would be nice to have an handler
-// per filter type instead of only 1 to handle all, maybe that could also have
-// some performance benefits to let axum handle the matching of the arms
-#[utoipa::path(
-    get,
-    path = "/lean/{filter_kind}/{filter_value}",
-    responses(
-        (status = 200, description = "Filtered devices", body = LeanResponse),
-        (status = 403, description = "Forbidden"),
-        (status = 500, description = "Failed to retrieve devices", body = String),
-    ),
-    security(
-        ("auth_token" = [])
-    ),
-    tag = DEVICES_TAG
-)]
-#[deprecated(
-    since = "0.2.65",
-    note = "We are moving to `/devices` endpoint and make it support conditional params/filters"
-)]
-pub async fn get_devices_new(
+    device: AuthedDevice,
     Extension(state): Extension<State>,
-    Extension(current_user): Extension<CurrentUser>,
-    Path((filter_kind, filter_value)): Path<(String, String)>,
-    Query(query_params): Query<LeanDeviceFilter>,
-) -> axum::response::Result<Json<LeanResponse>, StatusCode> {
-    let reverse = query_params.reverse.unwrap_or(false);
-    let limit = query_params.limit.unwrap_or(100);
-
-    let allowed = authorization::check(current_user, "devices", "read");
-
-    if !allowed {
-        return Err(StatusCode::FORBIDDEN);
-    }
-
-    debug!(
-        "Fetching devices with filter kind: {filter_kind}, filter value: {filter_value}, reverse: {reverse}, limit: {limit}"
-    );
-    let devices = match (filter_kind.as_str(), reverse) {
-    ("sn", true) => {
-      sqlx::query_as!(LeanDevice, "SELECT id, serial_number, last_ping as last_seen, approved, release_id = target_release_id as up_to_date, ip_address_id FROM device WHERE serial_number LIKE '%' || $1 || '%' AND archived = false LIMIT $2", filter_value, limit)
-        .fetch_all(&state.pg_pool)
-        .await
-        .map_err(|err| {
-          error!("Failed to get devices {err}");
-          StatusCode::INTERNAL_SERVER_ERROR
-        })
-    },
-    ("sn", false) => {
-      sqlx::query_as!(LeanDevice, "SELECT id, serial_number, last_ping as last_seen, approved, release_id = target_release_id as up_to_date, ip_address_id FROM device WHERE serial_number LIKE '%' || $1 || '%' AND archived = false LIMIT $2", filter_value, limit)
-        .fetch_all(&state.pg_pool)
-        .await
-        .map_err(|err| {
-          error!("Failed to get devices {err}");
-          StatusCode::INTERNAL_SERVER_ERROR
-        })
-    },
-    ("approved", true) => {
-      let value = filter_value.parse().unwrap_or(false);
-      sqlx::query_as!(LeanDevice, "SELECT id, serial_number, last_ping as last_seen, approved, release_id = target_release_id as up_to_date, ip_address_id FROM device WHERE approved != $1 AND archived = false LIMIT $2", value, limit)
-        .fetch_all(&state.pg_pool)
-        .await
-        .map_err(|err| {
-          error!("Failed to get devices {err}");
-          StatusCode::INTERNAL_SERVER_ERROR
-        })
-    },
-    ("approved", false) => {
-      let value = filter_value.parse().unwrap_or(false);
-      sqlx::query_as!(LeanDevice, "SELECT id, serial_number, last_ping as last_seen, approved, release_id = target_release_id as up_to_date, ip_address_id FROM device WHERE approved = $1 AND archived = false LIMIT $2", value, limit)
-        .fetch_all(&state.pg_pool)
-        .await
-        .map_err(|err| {
-          error!("Failed to get devices {err}");
-          StatusCode::INTERNAL_SERVER_ERROR
-        })
-    }
-    ("tag", true) => {
-      sqlx::query_as!(LeanDevice, r#"SELECT
-                            d.id,
-                            d.serial_number,
-                            d.last_ping as last_seen,
-                            d.approved,
-                            release_id = target_release_id as up_to_date,
-                            d.ip_address_id
-                        FROM device d
-                        JOIN tag_device td ON d.id = td.device_id
-                        JOIN tag t ON td.tag_id = t.id
-                        WHERE t.name != $1 AND d.archived = false
-                        LIMIT $2
-                "#, filter_value, limit)
-        .fetch_all(&state.pg_pool)
-        .await
-        .map_err(|err| {
-          error!("Failed to get devices {err}");
-          StatusCode::INTERNAL_SERVER_ERROR
-        })
-    }
-    ("tag", false) => {
-      sqlx::query_as!(LeanDevice, r#"SELECT
-                d.id,
-                d.serial_number,
-                d.last_ping as last_seen,
-                d.approved,
-                release_id = target_release_id as up_to_date,
-                d.ip_address_id
-                FROM device d
-                JOIN tag_device td ON d.id = td.device_id
-                JOIN tag t ON td.tag_id = t.id
-                WHERE t.name = $1 AND d.archived = false
-                LIMIT $2"#, filter_value, limit)
-        .fetch_all(&state.pg_pool)
-        .await
-        .map_err(|err| {
-          error!("Failed to get devices {err}");
-          StatusCode::INTERNAL_SERVER_ERROR
-        })
-    }
-    ("distro", false) => {
-      sqlx::query_as!(LeanDevice, r#"
-                SELECT d.id, d.serial_number, d.last_ping as last_seen, d.approved,
-                release_id = target_release_id as up_to_date, d.ip_address_id
-                FROM device d
-                LEFT JOIN release r ON r.id = d.release_id
-                LEFT JOIN distribution dist ON r.distribution_id = dist.id
-                WHERE dist.name = $1 AND d.archived = false
-                LIMIT $2"#, filter_value, limit)
-        .fetch_all(&state.pg_pool)
-        .await
-        .map_err(|err| {
-          error!("Failed to get devices {err}");
-          StatusCode::INTERNAL_SERVER_ERROR
-        })
-    }
-    ("distro", true) => {
-      sqlx::query_as!(LeanDevice, r#"
-                SELECT d.id, d.serial_number, d.last_ping as last_seen, d.approved,
-                release_id = target_release_id as up_to_date, d.ip_address_id
-                FROM device d
-                LEFT JOIN release r ON r.id = d.release_id
-                LEFT JOIN distribution dist ON r.distribution_id = dist.id
-                WHERE dist.name != $1 AND d.archived = false
-                ORDER BY d.id DESC
-                LIMIT $2"#, filter_value, limit)
-        .fetch_all(&state.pg_pool)
-        .await
-        .map_err(|err| {
-          error!("Failed to get devices {err}");
-          StatusCode::INTERNAL_SERVER_ERROR
-        })
-    }
-    ("release", false) => {
-      sqlx::query_as!(LeanDevice, r#"
-                SELECT d.id, d.serial_number, d.last_ping as last_seen, d.approved,
-                release_id = target_release_id as up_to_date, d.ip_address_id
-                FROM device d
-                LEFT JOIN release r ON r.id = d.release_id
-                WHERE r.version = $1 AND d.archived = false
-                LIMIT $2"#
-            , filter_value, limit)
-        .fetch_all(&state.pg_pool)
-        .await
-        .map_err(|err| {
-          error!("Failed to get devices {err}");
-          StatusCode::INTERNAL_SERVER_ERROR
-        })
-    }
-    ("release", true) => {
-      sqlx::query_as!(LeanDevice, r#"
-                SELECT d.id, d.serial_number, d.last_ping as last_seen, d.approved,
-                release_id = target_release_id as up_to_date, d.ip_address_id
-                FROM device d
-                LEFT JOIN release r ON r.id = d.release_id
-                WHERE r.version != $1 AND d.archived = false
-                ORDER BY d.id DESC
-                LIMIT $2"#
-            , filter_value, limit)
-        .fetch_all(&state.pg_pool)
-        .await
-        .map_err(|err| {
-          error!("Failed to get devices {err}");
-          StatusCode::INTERNAL_SERVER_ERROR
-        })
-    }
-    ("online", _) => {
-      let value = filter_value.parse::<bool>().unwrap_or(false);
-      let is_online = if reverse { !value } else { value };
-
-      let query = if is_online {
+) -> axum::response::Result<Json<RawDevice>, StatusCode> {
+    let device = sqlx::query_as!(
+        RawDevice,
         r#"
-                SELECT d.id, d.serial_number, d.last_ping as last_seen, d.approved,
-                release_id = target_release_id as up_to_date, d.ip_address_id
-                FROM device d
-                WHERE d.last_ping >= now() - INTERVAL '5 min'
-                AND d.archived = false
-                LIMIT $1"#
-      } else {
-        r#"
-                SELECT d.id, d.serial_number, d.last_ping as last_seen, d.approved,
-                release_id = target_release_id as up_to_date, d.ip_address_id
-                FROM device d
-                WHERE d.last_ping < now() - INTERVAL '5 min'
-                AND d.archived = false
-                LIMIT $1"#
-      };
-
-      sqlx::query_as::<_, LeanDevice>(query)
-        .bind(limit)
-        .fetch_all(&state.pg_pool)
-        .await
-        .map_err(|err| {
-          error!("Failed to get devices {err}");
-          StatusCode::INTERNAL_SERVER_ERROR
-        })
-    }
-    ("updated", _) => {
-      let value = filter_value.parse::<bool>().unwrap_or(false);
-      let is_updated = if reverse { !value } else { value };
-
-      let query = if is_updated {
-        r#"
-                SELECT d.id, d.serial_number, d.last_ping as last_seen, d.approved,
-                release_id = target_release_id as up_to_date, d.ip_address_id
-                FROM device d
-                WHERE release_id = target_release_id
-                AND d.archived = false
-                LIMIT $1"#
-      } else {
-        r#"
-                SELECT d.id, d.serial_number, d.last_ping as last_seen, d.approved,
-                release_id = target_release_id as up_to_date, d.ip_address_id
-                FROM device d
-                WHERE release_id != target_release_id
-                AND d.archived = false
-                LIMIT $1"#
-      };
-
-      sqlx::query_as::<_, LeanDevice>(query)
-        .bind(limit)
-        .fetch_all(&state.pg_pool)
-        .await
-        .map_err(|err| {
-          error!("Failed to get devices {err}");
-          StatusCode::INTERNAL_SERVER_ERROR
-        })
-    }
-    _ => Err(StatusCode::BAD_REQUEST),
-  }?;
-
-    Ok(Json(LeanResponse {
-        limit,
-        reverse,
-        devices,
-    }))
+        SELECT
+            d.*,
+            COALESCE(JSONB_OBJECT_AGG(l.name, dl.value) FILTER (WHERE l.name IS NOT NULL), '{}') as "labels!: SqlxJson<HashMap<String, String>>"
+        FROM device d
+        LEFT JOIN device_label dl ON dl.device_id = d.id
+        LEFT JOIN label l ON l.id = dl.label_id
+        WHERE
+            d.id = $1
+        GROUP BY d.id
+        "#,
+        device.id
+        )
+        .fetch_one(&state.pg_pool).await.map_err(|e| {
+                error!("Failed to get device {e}");
+                StatusCode::INTERNAL_SERVER_ERROR
+            })?;
+    Ok(Json(device))
 }
 
 #[utoipa::path(
