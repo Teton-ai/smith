@@ -430,8 +430,8 @@ pub async fn get_devices(
         filter.online,
         filter.outdated,
         filter.exclude_labels.as_slice(),
-        filter.limit.unwrap_or(100).min(1000),
-        filter.offset.unwrap_or(0),
+        filter.limit.unwrap_or(100).clamp(1, 1000),
+        filter.offset.unwrap_or(0).max(0),
         filter.search
     )
     .fetch_all(&state.pg_pool)
