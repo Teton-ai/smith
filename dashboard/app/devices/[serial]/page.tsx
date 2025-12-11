@@ -13,6 +13,8 @@ import {
   Globe,
   ArrowLeft,
   Tags,
+  GitBranch,
+  Tag,
 } from 'lucide-react';
 import dynamic from 'next/dynamic';
 import PrivateLayout from "@/app/layouts/PrivateLayout";
@@ -235,21 +237,151 @@ const DeviceDetailPage = () => {
             >
               Commands
             </button>
-            <button
-              onClick={() => router.push(`/devices/${serial}/about`)}
-              className="py-2 px-1 border-b-2 border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 font-medium text-sm transition-colors cursor-pointer"
-            >
-              About
-            </button>
           </nav>
         </div>
 
         {/* Overview Content */}
-        <div className="space-y-6">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
 
-          {/* Device Information */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            {/* Network Section */}
+          {/* System Information */}
+          <div className="bg-white rounded-lg border border-gray-200 p-6">
+            <h3 className="text-lg font-semibold text-gray-900 mb-4">System Information</h3>
+
+            {/* Labels */}
+            {device.labels && Object.keys(device.labels).length > 0 && (
+              <>
+                <div className="flex items-center space-x-2 mb-3">
+                  <Tags className="w-4 h-4 text-purple-600" />
+                  <span className="text-gray-700 font-medium">Labels</span>
+                </div>
+                <div className="space-y-2 mb-4">
+                  {Object.entries(device.labels).map(([key, value]) => (
+                    <div key={key} className="flex items-center p-2 hover:bg-gray-50 rounded">
+                      <span className="text-gray-700 font-mono text-sm min-w-fit mr-3">{key}</span>
+                      <div className="flex-1 border-b border-dotted border-gray-300"></div>
+                      <span className="text-gray-900 font-mono text-sm ml-3">{value}</span>
+                    </div>
+                  ))}
+                </div>
+                <hr className="border-gray-200 mb-4" />
+              </>
+            )}
+
+            {/* System Info Details */}
+            <div className="space-y-3">
+              {/* Device Model */}
+              {device.system_info?.device_tree?.model && (
+                <div className="flex justify-between">
+                  <span className="text-gray-700">Model</span>
+                  <span className="text-gray-900">{device.system_info.device_tree.model}</span>
+                </div>
+              )}
+
+              {/* Operating System */}
+              {device.system_info?.os_release?.pretty_name && (
+                <div className="flex justify-between">
+                  <span className="text-gray-700">Operating System</span>
+                  <span className="font-mono text-sm text-gray-900">{device.system_info.os_release.pretty_name}</span>
+                </div>
+              )}
+
+              {/* Kernel Version */}
+              {device.system_info?.proc?.version && (
+                <div className="flex justify-between">
+                  <span className="text-gray-700">Kernel</span>
+                  <span className="font-mono text-sm text-gray-900">{device.system_info.proc.version}</span>
+                </div>
+              )}
+
+              {/* Distribution */}
+              {device.release && (
+                <div className="flex justify-between">
+                  <span className="text-gray-700 flex items-center">
+                    <GitBranch className="w-4 h-4 text-gray-400 mr-2" />
+                    Distribution
+                  </span>
+                  <button
+                    onClick={() => router.push(`/distributions/${device.release?.distribution_id}`)}
+                    className="font-mono text-sm text-blue-600 hover:text-blue-800 hover:underline cursor-pointer transition-colors"
+                  >
+                    {device.release.distribution_name}
+                  </button>
+                </div>
+              )}
+
+              {/* Current Release */}
+              {device.release && (
+                <div className="flex justify-between">
+                  <span className="text-gray-700 flex items-center">
+                    <Tag className="w-4 h-4 text-gray-400 mr-2" />
+                    Current Release
+                  </span>
+                  <button
+                    onClick={() => router.push(`/releases/${device.release?.id}`)}
+                    className="font-mono text-sm text-blue-600 hover:text-blue-800 hover:underline cursor-pointer transition-colors"
+                  >
+                    {device.release.version}
+                  </button>
+                </div>
+              )}
+
+              {/* Target Distribution */}
+              {device.target_release && device.target_release_id !== device.release_id && (
+                <>
+                  <div className="flex justify-between">
+                    <span className="text-gray-700 flex items-center">
+                      <GitBranch className="w-4 h-4 text-purple-400 mr-2" />
+                      Target Distribution
+                    </span>
+                    <span className="font-mono text-sm text-gray-900">
+                      {device.target_release.distribution_name}
+                    </span>
+                  </div>
+
+                  {/* Target Release */}
+                  <div className="flex justify-between">
+                    <span className="text-gray-700 flex items-center">
+                      <Tag className="w-4 h-4 text-purple-400 mr-2" />
+                      Target Release
+                    </span>
+                    <span className="font-mono text-sm text-gray-900">
+                      {device.target_release.version}
+                    </span>
+                  </div>
+                </>
+              )}
+
+              {/* Agent Version */}
+              {device.system_info?.smith?.version && (
+                <div className="flex justify-between">
+                  <span className="text-gray-700">Agent</span>
+                  <span className="font-mono text-sm text-gray-900">{device.system_info.smith.version}</span>
+                </div>
+              )}
+
+              {/* Boot Time */}
+              {device.system_info?.proc?.stat?.btime && (
+                <div className="flex justify-between">
+                  <span className="text-gray-700">Boot Time</span>
+                  <span className="text-sm text-gray-900">
+                    {new Date(device.system_info.proc.stat.btime * 1000).toLocaleString()}
+                  </span>
+                </div>
+              )}
+
+              {/* Registration Date */}
+              {device.created_on && (
+                <div className="flex justify-between">
+                  <span className="text-gray-700">Registration Date</span>
+                  <span className="text-sm text-gray-900">
+                    {new Date(device.created_on).toLocaleString()}
+                  </span>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Network Connections */}
             <div className="bg-white rounded-lg border border-gray-200 p-6">
               <h3 className="text-lg font-semibold text-gray-900 mb-4">Network Connections</h3>
               {device.system_info?.network?.interfaces ? (
@@ -397,114 +529,88 @@ const DeviceDetailPage = () => {
               )}
             </div>
 
-            {/* Location Information Section */}
-            <div className="bg-white rounded-lg border border-gray-200 p-6">
-              <div className="flex items-center space-x-2 mb-4">
-                <MapPin className="w-5 h-5 text-blue-600" />
-                <h3 className="text-lg font-semibold text-gray-900">Location Information</h3>
-              </div>
-
-              {device.ip_address ? (
-                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                    {/* Map */}
-                    <div>
-                      <LocationMap 
-                        countryCode={device.ip_address.country_code}
-                        city={device.ip_address.city}
-                        country={device.ip_address.country}
-                      />
-                    </div>
-
-                    {/* Location Details */}
-                    <div className="space-y-4">
-                      <div className="flex items-center space-x-3">
-                        <Globe className="w-4 h-4 text-gray-500" />
-                        <span className="font-mono text-sm text-gray-900">{device.ip_address.ip_address}</span>
-                        {device.ip_address.country_code && (
-                          <img 
-                            src={getFlagUrl(device.ip_address.country_code)} 
-                            alt={device.ip_address.country || 'Country flag'} 
-                            className="w-6 h-4 rounded-sm border border-gray-200"
-                            onError={(e) => {
-                              (e.target as HTMLImageElement).style.display = 'none';
-                            }}
-                          />
-                        )}
-                      </div>
-                      
-                      <div className="space-y-3">
-                        {device.ip_address.name && (
-                          <div className="flex items-center justify-between">
-                            <span className="text-gray-600">Location Name</span>
-                            <span className="text-gray-900 font-medium">{device.ip_address.name}</span>
-                          </div>
-                        )}
-                        {device.ip_address.country && (
-                          <div className="flex items-center justify-between">
-                            <span className="text-gray-600">Country</span>
-                            <span className="text-gray-900 font-medium">
-                              {device.ip_address.country}
-                              {device.ip_address.country_code && ` (${device.ip_address.country_code})`}
-                            </span>
-                          </div>
-                        )}
-                        {device.ip_address.region && (
-                          <div className="flex items-center justify-between">
-                            <span className="text-gray-600">Region</span>
-                            <span className="text-gray-900 font-medium">{device.ip_address.region}</span>
-                          </div>
-                        )}
-                        {device.ip_address.city && (
-                          <div className="flex items-center justify-between">
-                            <span className="text-gray-600">City</span>
-                            <span className="text-gray-900 font-medium">{device.ip_address.city}</span>
-                          </div>
-                        )}
-                        {device.ip_address.isp && (
-                          <div className="flex items-center justify-between">
-                            <span className="text-gray-600">Internet Provider</span>
-                            <span className="text-gray-900 font-medium">{device.ip_address.isp}</span>
-                          </div>
-                        )}
-                        {device.ip_address.coordinates && (
-                          <div className="flex items-center justify-between">
-                            <span className="text-gray-600">Coordinates</span>
-                            <span className="font-mono text-sm text-gray-900">
-                              {device.ip_address.coordinates[0].toFixed(4)}, {device.ip_address.coordinates[1].toFixed(4)}
-                            </span>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="flex items-center justify-center py-8">
-                    <div className="text-center">
-                      <Globe className="w-12 h-12 text-gray-300 mx-auto mb-4" />
-                      <p className="text-gray-500">No location information available</p>
-                      <p className="text-gray-400 text-sm mt-1">This device has no associated IP address data</p>
-                    </div>
-                  </div>
-                )}
+          {/* Location Information */}
+          <div className="bg-white rounded-lg border border-gray-200 p-6">
+            <div className="flex items-center space-x-2 mb-4">
+              <MapPin className="w-5 h-5 text-blue-600" />
+              <h3 className="text-lg font-semibold text-gray-900">Location Information</h3>
             </div>
-          </div>
 
-          {/* Labels */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            {device.labels && Object.keys(device.labels).length > 0 && (
-              <div className="bg-white rounded-lg border border-gray-200 p-6">
-                <div className="flex items-center space-x-2 mb-4">
-                  <Tags className="w-5 h-5 text-purple-600" />
-                  <h3 className="text-lg font-semibold text-gray-900">Labels</h3>
-                </div>
-                <div className="space-y-2">
-                  {Object.entries(device.labels).map(([key, value]) => (
-                    <div key={key} className="flex items-center p-2 hover:bg-gray-50 rounded">
-                      <span className="text-gray-700 font-mono text-sm min-w-fit mr-3">{key}</span>
-                      <div className="flex-1 border-b border-dotted border-gray-300"></div>
-                      <span className="text-gray-900 font-mono text-sm ml-3">{value}</span>
+            {device.ip_address ? (
+              <div className="space-y-4">
+                {/* Map */}
+                <LocationMap
+                  countryCode={device.ip_address.country_code}
+                  city={device.ip_address.city}
+                  country={device.ip_address.country}
+                />
+
+                {/* Location Details */}
+                <div className="space-y-3">
+                  <div className="flex items-center space-x-3">
+                    <Globe className="w-4 h-4 text-gray-500" />
+                    <span className="font-mono text-sm text-gray-900">{device.ip_address.ip_address}</span>
+                    {device.ip_address.country_code && (
+                      <img
+                        src={getFlagUrl(device.ip_address.country_code)}
+                        alt={device.ip_address.country || 'Country flag'}
+                        className="w-6 h-4 rounded-sm border border-gray-200"
+                        onError={(e) => {
+                          (e.target as HTMLImageElement).style.display = 'none';
+                        }}
+                      />
+                    )}
+                  </div>
+
+                  {device.ip_address.name && (
+                    <div className="flex items-center justify-between">
+                      <span className="text-gray-600">Location Name</span>
+                      <span className="text-gray-900 font-medium">{device.ip_address.name}</span>
                     </div>
-                  ))}
+                  )}
+                  {device.ip_address.country && (
+                    <div className="flex items-center justify-between">
+                      <span className="text-gray-600">Country</span>
+                      <span className="text-gray-900 font-medium">
+                        {device.ip_address.country}
+                        {device.ip_address.country_code && ` (${device.ip_address.country_code})`}
+                      </span>
+                    </div>
+                  )}
+                  {device.ip_address.region && (
+                    <div className="flex items-center justify-between">
+                      <span className="text-gray-600">Region</span>
+                      <span className="text-gray-900 font-medium">{device.ip_address.region}</span>
+                    </div>
+                  )}
+                  {device.ip_address.city && (
+                    <div className="flex items-center justify-between">
+                      <span className="text-gray-600">City</span>
+                      <span className="text-gray-900 font-medium">{device.ip_address.city}</span>
+                    </div>
+                  )}
+                  {device.ip_address.isp && (
+                    <div className="flex items-center justify-between">
+                      <span className="text-gray-600">Internet Provider</span>
+                      <span className="text-gray-900 font-medium">{device.ip_address.isp}</span>
+                    </div>
+                  )}
+                  {device.ip_address.coordinates && (
+                    <div className="flex items-center justify-between">
+                      <span className="text-gray-600">Coordinates</span>
+                      <span className="font-mono text-sm text-gray-900">
+                        {device.ip_address.coordinates[0].toFixed(4)}, {device.ip_address.coordinates[1].toFixed(4)}
+                      </span>
+                    </div>
+                  )}
+                </div>
+              </div>
+            ) : (
+              <div className="flex items-center justify-center py-8">
+                <div className="text-center">
+                  <Globe className="w-12 h-12 text-gray-300 mx-auto mb-4" />
+                  <p className="text-gray-500">No location information available</p>
+                  <p className="text-gray-400 text-sm mt-1">This device has no associated IP address data</p>
                 </div>
               </div>
             )}
