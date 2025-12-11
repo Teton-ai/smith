@@ -15,6 +15,7 @@ import {
   Check,
   X,
 } from 'lucide-react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import PrivateLayout from "@/app/layouts/PrivateLayout";
 import useSmithAPI from "@/app/hooks/smith-api";
 
@@ -83,15 +84,22 @@ const LoadingSkeleton = () => (
 const IpAddressesPage = () => {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { callAPI, loading } = useSmithAPI();
-  const [ipAddresses, setIpAddresses] = useState<IpAddressInfo[]>([]);
-  const [filteredIpAddresses, setFilteredIpAddresses] = useState<IpAddressInfo[]>([]);
+  const { callAPI } = useSmithAPI();
+  const queryClient = useQueryClient();
   const [searchTerm, setSearchTerm] = useState('');
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editingName, setEditingName] = useState('');
   const [saving, setSaving] = useState(false);
-  const [initialLoading, setInitialLoading] = useState(true);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+
+  const { data: ipAddresses = [], isLoading: initialLoading } = useQuery({
+    queryKey: ['ip-addresses'],
+    queryFn: async () => {
+      const response = await callAPI<IpAddressListResponse>('GET', '/ip_addresses');
+      return response?.ip_addresses || [];
+    },
+    refetchInterval: 5000,
+  });
 
   // Initialize search term from URL params
   useEffect(() => {
@@ -99,34 +107,15 @@ const IpAddressesPage = () => {
     setSearchTerm(urlSearch);
   }, [searchParams]);
 
-  useEffect(() => {
-    const fetchIpAddresses = async () => {
-      try {
-        const response = await callAPI<IpAddressListResponse>('GET', '/ip_addresses');
-        if (response?.ip_addresses) {
-          setIpAddresses(response.ip_addresses);
-        }
-      } finally {
-        setInitialLoading(false);
-      }
-    };
-    fetchIpAddresses();
-  }, [callAPI]);
-
-  useEffect(() => {
-    if (searchTerm === '') {
-      setFilteredIpAddresses(ipAddresses);
-    } else {
-      const filtered = ipAddresses.filter(ip => 
+  const filteredIpAddresses = searchTerm === ''
+    ? ipAddresses
+    : ipAddresses.filter(ip =>
         ip.ip_address.toLowerCase().includes(searchTerm.toLowerCase()) ||
         ip.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
         ip.country?.toLowerCase().includes(searchTerm.toLowerCase()) ||
         ip.city?.toLowerCase().includes(searchTerm.toLowerCase()) ||
         ip.isp?.toLowerCase().includes(searchTerm.toLowerCase())
       );
-      setFilteredIpAddresses(filtered);
-    }
-  }, [searchTerm, ipAddresses]);
 
   // Auto-hide toast after 3 seconds
   useEffect(() => {
@@ -195,22 +184,18 @@ const IpAddressesPage = () => {
         name: editingName.trim() || null,
       };
 
-      console.log('Saving IP address:', editingId, requestBody);
-
       const updatedIp = await callAPI<IpAddressInfo>('PUT', `/ip_address/${editingId}`, requestBody);
 
       if (updatedIp) {
-        // Update both arrays
-        setIpAddresses(prev => prev.map(ip => ip.id === editingId ? updatedIp : ip));
-        setFilteredIpAddresses(prev => prev.map(ip => ip.id === editingId ? updatedIp : ip));
-        
+        queryClient.invalidateQueries({ queryKey: ['ip-addresses'] });
+
         // Show success toast
         const name = editingName.trim();
-        setToast({ 
-          message: name 
-            ? `IP address renamed to "${name}"` 
+        setToast({
+          message: name
+            ? `IP address renamed to "${name}"`
             : 'IP address name cleared',
-          type: 'success' 
+          type: 'success'
         });
       }
 
@@ -218,9 +203,9 @@ const IpAddressesPage = () => {
       setEditingName('');
     } catch (error: any) {
       console.error('Failed to update IP address name:', error);
-      setToast({ 
+      setToast({
         message: `Failed to update: ${error?.message || 'Unknown error'}`,
-        type: 'error' 
+        type: 'error'
       });
     } finally {
       setSaving(false);

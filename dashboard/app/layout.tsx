@@ -3,6 +3,7 @@
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import Auth0ProviderWrapper from "./providers/auth0-provider";
+import QueryProvider from "./providers/query-provider";
 import type { Metadata } from 'next';
 
 const geistSans = Geist({
@@ -30,9 +31,11 @@ export default function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
-      <Auth0ProviderWrapper>
-        {children}
-      </Auth0ProviderWrapper>
+      <QueryProvider>
+        <Auth0ProviderWrapper>
+          {children}
+        </Auth0ProviderWrapper>
+      </QueryProvider>
       </body>
     </html>
   );

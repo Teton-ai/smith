@@ -63,6 +63,12 @@ pub struct DeviceFilter {
     /// Exclude devices with these labels. Format: key=value. Used by dashboard.
     #[serde(default)]
     pub exclude_labels: Vec<String>,
+    /// Maximum number of devices to return. Defaults to 100, max 1000.
+    pub limit: Option<i64>,
+    /// Number of devices to skip. Used for pagination.
+    pub offset: Option<i64>,
+    /// Search term to filter devices by serial number, hostname, or model.
+    pub search: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, utoipa::ToSchema, Clone)]
