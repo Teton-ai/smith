@@ -34,6 +34,9 @@ jobs:
       - name: Check formatting
         run: cargo fmt -- --check
 
+      - name: Check linting
+        run: cargo clippy -- -Dwarnings
+
       - name: Check SQLx
         working-directory: api
         run: cargo sqlx prepare --check

@@ -324,6 +324,7 @@ pub async fn get_devices(
     Extension(state): Extension<State>,
     filter: Query<DeviceFilter>,
 ) -> axum::response::Result<Json<Vec<Device>>, StatusCode> {
+    #[allow(deprecated)]
     let devices = sqlx::query!(
         r#"SELECT
             d.id,

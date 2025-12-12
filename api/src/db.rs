@@ -84,19 +84,19 @@ impl DBHandler {
                     .fetch_optional(&mut *tx)
                     .await?;
 
-                    if let Some(network) = network {
-                        if network.network_type == NetworkType::Wifi {
-                            DBHandler::add_commands(
-                                &device.serial_number,
-                                vec![SafeCommandRequest {
-                                    id: -4,
-                                    command: UpdateNetwork { network },
-                                    continue_on_error: false,
-                                }],
-                                pool,
-                            )
-                            .await?;
-                        }
+                    if let Some(network) = network
+                        && network.network_type == NetworkType::Wifi
+                    {
+                        DBHandler::add_commands(
+                            &device.serial_number,
+                            vec![SafeCommandRequest {
+                                id: -4,
+                                command: UpdateNetwork { network },
+                                continue_on_error: false,
+                            }],
+                            pool,
+                        )
+                        .await?;
                     }
                 }
                 SafeCommandRx::UpdateSystemInfo { ref system_info } => {

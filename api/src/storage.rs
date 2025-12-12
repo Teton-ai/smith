@@ -1,11 +1,9 @@
-use std::borrow::Cow;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
-
 use axum::response::Response;
 use cloudfront_sign::{SignedOptions, get_signed_url};
 use s3::creds::Credentials;
 use s3::{Bucket, Region};
-use tracing::info;
+use std::borrow::Cow;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 pub struct Storage;
 
