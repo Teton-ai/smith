@@ -304,6 +304,29 @@ impl SmithAPI {
             .clone())
     }
 
+    pub async fn get_device_commands(
+        &self,
+        device_id: u64,
+        limit: Option<u32>,
+    ) -> Result<Vec<DeviceCommandResponse>> {
+        let client = Client::new();
+
+        let limit = limit.unwrap_or(50);
+        let resp = client
+            .get(format!(
+                "{}/devices/{device_id}/commands?limit={}",
+                self.domain, limit
+            ))
+            .header("Authorization", format!("Bearer {}", &self.bearer_token))
+            .send()
+            .await?
+            .error_for_status()?;
+
+        let commands: CommandsPaginated = resp.json().await?;
+
+        Ok(commands.commands)
+    }
+
     pub async fn test_network(&self, device: String) -> Result<()> {
         let client = Client::new();
 
@@ -386,6 +409,36 @@ impl SmithAPI {
         tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
         // The API returns 201 with empty body, so we need to fetch the last command to get the ID
+        let last_command = self.get_last_command(device_id).await?;
+
+        Ok((device_id, last_command.cmd_id as u64))
+    }
+
+    pub async fn send_service_restart_command(
+        &self,
+        device_id: u64,
+        unit: String,
+    ) -> Result<(u64, u64)> {
+        let client = Client::new();
+
+        let service_command = schema::SafeCommandRequest {
+            id: 0,
+            command: schema::SafeCommandTx::FreeForm {
+                cmd: format!("systemctl restart {}", unit),
+            },
+            continue_on_error: false,
+        };
+
+        let resp = client
+            .post(format!("{}/devices/{device_id}/commands", self.domain))
+            .header("Authorization", format!("Bearer {}", &self.bearer_token))
+            .json(&serde_json::json!([service_command]))
+            .send();
+
+        resp.await?.error_for_status()?;
+
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
         let last_command = self.get_last_command(device_id).await?;
 
         Ok((device_id, last_command.cmd_id as u64))

@@ -1,7 +1,7 @@
 use clap::{Args, Parser, Subcommand, value_parser};
 use clap_complete::Shell;
 
-use crate::commands::{devices::DevicesCommands, releases::ReleasesCommands};
+use crate::commands::releases::ReleasesCommands;
 
 #[derive(Parser)]
 #[command(name = "sm", version, about = "Smith CLI - Fleet management tool", long_about = None)]
@@ -13,6 +13,8 @@ pub struct Cli {
 /// Common device selection arguments
 #[derive(Args, Debug, Clone)]
 pub struct DeviceSelector {
+    /// Device serial numbers or IDs. If omitted, shows all devices.
+    pub ids: Vec<String>,
     /// Filter by labels (format: key=value). Can be used multiple times.
     #[arg(short, long = "label", value_name = "KEY=VALUE")]
     pub labels: Vec<String>,
@@ -22,6 +24,41 @@ pub struct DeviceSelector {
     /// Show only offline devices (last seen >= 5 minutes)
     #[arg(long, conflicts_with = "online")]
     pub offline: bool,
+    /// Use partial matching for device IDs (matches serial number, hostname, or model)
+    #[arg(short, long)]
+    pub search: bool,
+}
+
+#[derive(Subcommand)]
+pub enum StatusResourceType {
+    /// Get smithd status for a device (runs 'smithd status' command)
+    ///
+    /// Shows comprehensive update status including:
+    /// - Update/upgrade status (whether the system is up-to-date)
+    /// - Installed package versions (currently running on the device)
+    /// - Target package versions (versions that should be running)
+    /// - Update status flag (true/false for each package indicating if it's updated)
+    #[command(visible_alias = "devices")]
+    #[command(visible_alias = "d")]
+    Device {
+        #[command(flatten)]
+        selector: DeviceSelector,
+        /// Don't wait for result, just queue the command and return immediately (faster, recommended for agents - use 'sm command <id>' to check results later)
+        #[arg(long, default_value = "false")]
+        nowait: bool,
+    },
+    /// Get systemd service status on a device (runs 'systemctl status <unit>')
+    #[command(visible_alias = "services")]
+    #[command(visible_alias = "svc")]
+    Service {
+        /// Service unit name (e.g., nginx, smithd, docker)
+        unit: String,
+        #[command(flatten)]
+        selector: DeviceSelector,
+        /// Don't wait for result, just queue the command and return immediately (faster, recommended for agents - use 'sm command <id>' to check results later)
+        #[arg(long, default_value = "false")]
+        nowait: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -49,34 +86,30 @@ pub enum DistroCommands {
     Releases,
 }
 
-#[derive(Subcommand, Debug)]
-pub enum ServiceCommands {
-    /// Get status of a systemd service
-    Status {
-        /// Service unit name
-        #[arg(short, long)]
-        unit: String,
-        /// Device serial number
-        serial_number: String,
-        /// Don't wait for result, just queue the command and return immediately (faster, recommended for agents - use 'sm command <id>' to check results later)
-        #[arg(long, default_value = "false")]
-        nowait: bool,
-    },
-}
-
 #[derive(Subcommand)]
 pub enum GetResourceType {
     /// Get device information
     #[command(visible_alias = "devices")]
     #[command(visible_alias = "d")]
     Device {
-        /// Device serial numbers or IDs. If omitted, shows all devices.
-        ids: Vec<String>,
         #[command(flatten)]
         selector: DeviceSelector,
+        #[arg(short, long, default_value = "false")]
+        json: bool,
         /// Output format: wide, json, or custom field (e.g., serial_number, id, ip_address)
         #[arg(short, long)]
         output: Option<String>,
+    },
+    /// Get recent commands for device(s)
+    #[command(visible_alias = "cmds")]
+    Commands {
+        #[command(flatten)]
+        selector: DeviceSelector,
+        /// Number of commands to show per device
+        #[arg(long, default_value = "10")]
+        limit: u32,
+        #[arg(short, long, default_value = "false")]
+        json: bool,
     },
 }
 
@@ -86,8 +119,21 @@ pub enum RestartResourceType {
     #[command(visible_alias = "devices")]
     #[command(visible_alias = "d")]
     Device {
-        /// Device serial numbers or IDs to restart
-        ids: Vec<String>,
+        #[command(flatten)]
+        selector: DeviceSelector,
+        /// Skip confirmation prompt
+        #[arg(short = 'y', long)]
+        yes: bool,
+        /// Don't wait for result, just queue the command and return immediately
+        #[arg(long, default_value = "false")]
+        nowait: bool,
+    },
+    /// Restart a systemd service on device(s) (runs 'systemctl restart <unit>')
+    #[command(visible_alias = "services")]
+    #[command(visible_alias = "svc")]
+    Service {
+        /// Service unit name (e.g., nginx, smithd, docker)
+        unit: String,
         #[command(flatten)]
         selector: DeviceSelector,
         /// Skip confirmation prompt
@@ -123,31 +169,25 @@ pub enum Commands {
         resource: RestartResourceType,
     },
 
-    /// Lists devices and information
-    Devices {
-        #[clap(subcommand)]
-        command: DevicesCommands,
-    },
-
-    /// Service management commands
-    Service {
-        #[clap(subcommand)]
-        command: ServiceCommands,
-    },
-
-    /// Get smithd status for a device (runs 'smithd status' command)
-    ///
-    /// Shows comprehensive update status including:
-    /// - Update/upgrade status (whether the system is up-to-date)
-    /// - Installed package versions (currently running on the device)
-    /// - Target package versions (versions that should be running)
-    /// - Update status flag (true/false for each package indicating if it's updated)
+    /// Get status information for a resource (device or service)
     Status {
-        /// Device serial number
-        serial_number: String,
+        #[clap(subcommand)]
+        resource: StatusResourceType,
+    },
+
+    /// Get logs for a device (runs 'journalctl -r -n 500')
+    Logs {
+        #[command(flatten)]
+        selector: DeviceSelector,
         /// Don't wait for result, just queue the command and return immediately (faster, recommended for agents - use 'sm command <id>' to check results later)
         #[arg(long, default_value = "false")]
         nowait: bool,
+    },
+
+    /// Test network speed for device(s) (downloads 20MB test file)
+    TestNetwork {
+        #[command(flatten)]
+        selector: DeviceSelector,
     },
 
     /// Check command results by ID (format: device_id:command_id)
