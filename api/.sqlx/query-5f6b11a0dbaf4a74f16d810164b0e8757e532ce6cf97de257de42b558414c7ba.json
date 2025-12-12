@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT serial_number, approved FROM device WHERE token IS NOT NULL AND token = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "serial_number",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "approved",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "5f6b11a0dbaf4a74f16d810164b0e8757e532ce6cf97de257de42b558414c7ba"
+}
