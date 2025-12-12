@@ -961,7 +961,7 @@ async fn main() -> anyhow::Result<()> {
                         eprintln!(
                             "  {} {}",
                             "sm restart service nginx".bold(),
-                            "--search web".bright_cyan()
+                            "web-server --search".bright_cyan()
                         );
                         return Err(anyhow::anyhow!("Aborted: No device selector specified"));
                     }
