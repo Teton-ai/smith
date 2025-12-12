@@ -32,19 +32,25 @@ sm get d -l env=production
 
 ## get device
 
-Display information about one or more devices in your fleet. Without any arguments, lists all devices. You can filter by specific device IDs, labels, online status, or use partial matching with the search flag.
+Display information about one or more devices in your fleet. Without any arguments, lists all devices.
 
 ### Usage
 
 ```sh
-sm get device [IDS...] [OPTIONS]
-sm get d [IDS...] [OPTIONS]        # Using alias
+sm get device [DEVICE_SELECTOR] [OPTIONS]
+sm get d [DEVICE_SELECTOR] [OPTIONS]        # Using alias
 ```
+
+**Device Selection:** Specify devices using one or more of the following:
+- **Device IDs**: One or more serial numbers or IDs as positional arguments
+- **Labels**: Filter using `--label` or `-l` (can be used multiple times)
+- **Online/Offline Status**: Filter using `--online` or `--offline`
+- **Partial Matching**: Use `--search` or `-s` to enable partial matching on device IDs
 
 ### Options
 
-- `--json` (`-j`): Output as JSON
 - `--output FORMAT` (`-o`): Output format (wide, json, or field name like serial_number, id, ip_address)
+- `--json` (`-j`): Output as JSON (shorthand for `--output json`)
 - `--label KEY=VALUE` (`-l`): Filter by labels (can be used multiple times)
 - `--online`: Show only online devices (last seen < 5 minutes)
 - `--offline`: Show only offline devices (last seen >= 5 minutes)
@@ -91,10 +97,16 @@ sm get commands [DEVICE_SELECTOR] [OPTIONS]
 sm get cmds [DEVICE_SELECTOR] [OPTIONS]    # Using alias
 ```
 
+**Device Selection:** Specify devices using one or more of the following:
+- **Device IDs**: One or more serial numbers or IDs as positional arguments
+- **Labels**: Filter using `--label` or `-l` (can be used multiple times)
+- **Online/Offline Status**: Filter using `--online` or `--offline`
+- **Partial Matching**: Use `--search` or `-s` to enable partial matching on device IDs
+
 ### Options
 
 - `--limit N`: Number of commands to show per device (default: 10)
-- `--json` (`-j`): Output as JSON
+- `--json` (`-j`): Output as JSON (shorthand for `--output json`)
 - `--label KEY=VALUE` (`-l`): Filter by labels
 - `--online`: Show only online devices
 - `--offline`: Show only offline devices
