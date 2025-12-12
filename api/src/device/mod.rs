@@ -1,17 +1,52 @@
 use crate::config::Config;
 use models::release::Release;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, Serializer};
 use serde_json::{Value, json};
 use smith::utils::schema::{DeviceRegistration, DeviceRegistrationResponse};
 use sqlx::PgPool;
 use sqlx::types::chrono::{DateTime, Utc};
-use sqlx::types::{chrono, ipnetwork};
+use sqlx::types::{Json as SqlxJson, chrono, ipnetwork};
+use std::collections::HashMap;
 use std::net::IpAddr;
 use std::time::Duration;
 use thiserror::Error;
 use tracing::{debug, error, warn};
 
 pub mod route;
+
+// TODO: Change this, this needs to be device and the other is PublicDevice, API type
+#[derive(Debug, Serialize, utoipa::ToSchema, Clone)]
+pub struct RawDevice {
+    pub id: i32,
+    pub serial_number: String,
+    #[schema(value_type = HashMap<String, String>)]
+    pub labels: SqlxJson<HashMap<String, String>>,
+    pub last_ping: Option<DateTime<Utc>>,
+    pub wifi_mac: Option<String>,
+    pub modified_on: DateTime<Utc>,
+    pub created_on: DateTime<Utc>,
+    pub note: Option<String>,
+    pub approved: bool,
+    #[serde(serialize_with = "serialize_token_presence")]
+    pub token: Option<String>,
+    pub release_id: Option<i32>,
+    pub target_release_id: Option<i32>,
+    pub system_info: Option<serde_json::Value>,
+    pub network_id: Option<i32>,
+    pub modem_id: Option<i32>,
+    pub archived: bool,
+    pub ip_address_id: Option<i32>,
+}
+
+fn serialize_token_presence<S>(token: &Option<String>, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+{
+    match token {
+        Some(_) => serializer.serialize_str("[REDACTED]"),
+        None => serializer.serialize_none(),
+    }
+}
 
 #[derive(Deserialize, Debug)]
 struct IpApiResponse {

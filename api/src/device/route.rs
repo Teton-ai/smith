@@ -1,7 +1,7 @@
 use crate::State;
 use crate::device::{
     DeviceHealth, DeviceLedgerItem, DeviceLedgerItemPaginated, DeviceRelease, NewVariable, Note,
-    Tag, UpdateDeviceRelease, UpdateDevicesRelease, Variable,
+    RawDevice, Tag, UpdateDeviceRelease, UpdateDevicesRelease, Variable,
 };
 use crate::event::PublicEvent;
 use crate::handlers::AuthedDevice;
@@ -13,13 +13,12 @@ use axum::extract::Path;
 use axum::http::StatusCode;
 use axum::{Extension, Json};
 use axum_extra::extract::Query;
-use chrono::{DateTime, Utc};
 use models::device::{
     CommandsPaginated, Device, DeviceCommandResponse, DeviceFilter, DeviceNetwork,
 };
 use models::modem::Modem;
 use models::release::Release;
-use serde::{Deserialize, Serialize, Serializer};
+use serde::Deserialize;
 use smith::utils::schema;
 use smith::utils::schema::SafeCommandRequest;
 use sqlx::types::Json as SqlxJson;
@@ -28,40 +27,6 @@ use tracing::{debug, error};
 
 const DEVICE_TAG: &str = "device";
 const DEVICES_TAG: &str = "devices";
-
-// TODO: Change this, this needs to be device and the other is PublicDevice, API type
-#[derive(Debug, Serialize, utoipa::ToSchema, Clone)]
-pub struct RawDevice {
-    pub id: i32,
-    pub serial_number: String,
-    #[schema(value_type = HashMap<String, String>)]
-    pub labels: SqlxJson<HashMap<String, String>>,
-    pub last_ping: Option<DateTime<Utc>>,
-    pub wifi_mac: Option<String>,
-    pub modified_on: DateTime<Utc>,
-    pub created_on: DateTime<Utc>,
-    pub note: Option<String>,
-    pub approved: bool,
-    #[serde(serialize_with = "serialize_token_presence")]
-    pub token: Option<String>,
-    pub release_id: Option<i32>,
-    pub target_release_id: Option<i32>,
-    pub system_info: Option<serde_json::Value>,
-    pub network_id: Option<i32>,
-    pub modem_id: Option<i32>,
-    pub archived: bool,
-    pub ip_address_id: Option<i32>,
-}
-
-fn serialize_token_presence<S>(token: &Option<String>, serializer: S) -> Result<S::Ok, S::Error>
-where
-    S: Serializer,
-{
-    match token {
-        Some(_) => serializer.serialize_str("[REDACTED]"),
-        None => serializer.serialize_none(),
-    }
-}
 
 #[utoipa::path(
     get,
