@@ -68,9 +68,9 @@ pub async fn home(
     Json(payload): Json<HomePost>,
 ) -> (StatusCode, Json<HomePostResponse>) {
     let release_id = payload.release_id;
-    DBHandler::save_responses(&device, payload, &state.pg_pool)
+    let _ = DBHandler::save_responses(&device, payload, &state.pg_pool)
         .await
-        .unwrap_or_else(|err| {
+        .inspect_err(|err| {
             error!("Error saving responses: {:?}", err);
         });
 
@@ -78,20 +78,22 @@ pub async fn home(
         timestamp: SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
             .unwrap_or_default(),
-        commands: DBHandler::get_commands(&device, &state.pg_pool).await,
+        commands: DBHandler::get_commands(&device, &state.pg_pool)
+            .await
+            .unwrap_or(Vec::new()),
         target_release_id: get_target_release(&device, &state.pg_pool).await,
     };
 
     let client_ip = Some(extract_client_ip(&headers, addr));
     tokio::spawn(async move {
-        save_release_id(&device, release_id, &state.pg_pool)
+        let _ = save_release_id(&device, release_id, &state.pg_pool)
             .await
-            .unwrap_or_else(|err| {
+            .inspect_err(|err| {
                 error!("Error saving release_id: {:?}", err);
             });
-        save_last_ping_with_ip(&device, client_ip, &state.pg_pool, state.config)
+        let _ = save_last_ping_with_ip(&device, client_ip, &state.pg_pool, state.config)
             .await
-            .unwrap_or_else(|err| {
+            .inspect_err(|err| {
                 error!("Error saving last ping with IP: {:?}", err);
             });
     });
