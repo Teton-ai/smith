@@ -403,12 +403,14 @@ async fn main() -> anyhow::Result<()> {
                     println!("Changing profile to {}", profile);
                     config.change_profile(profile).await?;
                     println!("new: {}", config);
-                } else {
-                    println!("Current Profile: {}", config);
                 }
             }
             Commands::Get { resource } => match resource {
-                GetResourceType::Device { selector, output } => {
+                GetResourceType::Device {
+                    selector,
+                    json,
+                    output,
+                } => {
                     let secrets = auth::get_secrets(&config)
                         .await
                         .with_context(|| "Error getting token")?
@@ -473,6 +475,11 @@ async fn main() -> anyhow::Result<()> {
                                 return Ok(());
                             }
                         }
+                    }
+
+                    if json {
+                        println!("{}", serde_json::to_string_pretty(&devices)?);
+                        return Ok(());
                     }
 
                     // Display devices in table format if multiple, or detailed view if single
