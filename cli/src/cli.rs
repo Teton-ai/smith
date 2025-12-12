@@ -94,8 +94,6 @@ pub enum GetResourceType {
     Device {
         #[command(flatten)]
         selector: DeviceSelector,
-        #[arg(short, long, default_value = "false")]
-        json: bool,
         /// Output format: wide, json, or custom field (e.g., serial_number, id, ip_address)
         #[arg(short, long)]
         output: Option<String>,

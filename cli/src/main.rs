@@ -408,11 +408,7 @@ async fn main() -> anyhow::Result<()> {
                 }
             }
             Commands::Get { resource } => match resource {
-                GetResourceType::Device {
-                    selector,
-                    json,
-                    output,
-                } => {
+                GetResourceType::Device { selector, output } => {
                     let secrets = auth::get_secrets(&config)
                         .await
                         .with_context(|| "Error getting token")?
