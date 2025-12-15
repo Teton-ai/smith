@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT\n                id,\n                cmd as \"cmd: Json<SafeCommandTx>\",\n                continue_on_error\n            FROM command_queue\n            WHERE device_id = $1 AND fetched = false AND canceled = false",
+  "query": "\n            SELECT\n                id,\n                cmd,\n                continue_on_error\n            FROM command_queue\n            WHERE device_id = $1 AND fetched = false AND canceled = false",
   "describe": {
     "columns": [
       {
@@ -10,7 +10,7 @@
       },
       {
         "ordinal": 1,
-        "name": "cmd: Json<SafeCommandTx>",
+        "name": "cmd",
         "type_info": "Json"
       },
       {
@@ -30,5 +30,5 @@
       false
     ]
   },
-  "hash": "b7d65a348fc190bce601c221c03960bf69fc9297c91a8e39cbba20367560d300"
+  "hash": "63f0c49a4db7b23d31d05cde4c438dd358b80413a20166eae70d4a641b937df9"
 }
