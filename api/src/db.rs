@@ -3,10 +3,13 @@ use anyhow::Result;
 use serde_json::Value;
 use serde_json::json;
 use smith::utils::schema;
+use smith::utils::schema::SafeCommandTx;
 use smith::utils::schema::SafeCommandTx::{UpdateNetwork, UpdateVariables};
 use smith::utils::schema::{HomePost, NetworkType, SafeCommandRequest, SafeCommandRx};
 use sqlx::PgPool;
-use tracing::{debug, error};
+use sqlx::types::Json;
+use tracing::debug;
+use tracing::error;
 
 // TODO: Get rid of this db.rs, legacy design and ugly
 
@@ -186,57 +189,57 @@ impl DBHandler {
         Ok(())
     }
 
-    pub async fn get_commands(device: &DeviceWithToken, pool: &PgPool) -> Vec<SafeCommandRequest> {
-        if let Ok(mut tx) = pool.begin().await {
-            let fetched_commands: Vec<CommandsDB> = sqlx::query_as!(
-                CommandsDB,
-                "SELECT id, cmd, continue_on_error
-                 FROM command_queue
-                 WHERE device_id = $1 AND fetched = false AND canceled = false",
-                device.id
-            )
-            .fetch_all(&mut *tx)
-            .await
-            .unwrap_or_else(|err| {
-                error!("Failed to get commands for device {err}");
-                Vec::new()
-            });
+    pub async fn get_commands(
+        device: &DeviceWithToken,
+        pool: &PgPool,
+    ) -> Result<Vec<SafeCommandRequest>, sqlx::Error> {
+        let mut tx = pool.begin().await?;
 
-            // If commands are fetched successfully, update fetched_at timestamp
-            if !fetched_commands.is_empty() {
-                let ids: Vec<i32> = fetched_commands.iter().map(|cmd| cmd.id).collect();
-                let _update_query = sqlx::query!(
+        let fetched_commands: Vec<CommandsDB> = sqlx::query_as!(
+            CommandsDB,
+            r#"
+            SELECT
+                id,
+                cmd,
+                continue_on_error
+            FROM command_queue
+            WHERE device_id = $1 AND fetched = false AND canceled = false"#,
+            device.id
+        )
+        .fetch_all(&mut *tx)
+        .await?;
+
+        // If commands are fetched successfully, update fetched_at timestamp
+        if !fetched_commands.is_empty() {
+            let ids: Vec<i32> = fetched_commands.iter().map(|cmd| cmd.id).collect();
+            let _ = sqlx::query!(
                     "UPDATE command_queue SET fetched_at = CURRENT_TIMESTAMP, fetched = true WHERE id = ANY($1)",
                     &ids
                 )
                 .execute(&mut *tx)
                 .await;
-            }
-
-            tx.commit().await.unwrap_or_else(|err| {
-                error!("Failed to commit transaction: {err}");
-            });
-
-            fetched_commands
-                .into_iter()
-                .filter_map(|cmd| match serde_json::from_value(cmd.cmd) {
-                    Ok(command) => Some(SafeCommandRequest {
-                        id: cmd.id,
-                        command,
-                        continue_on_error: cmd.continue_on_error,
-                    }),
-                    Err(err) => {
-                        error!(
-                            serial_number = device.serial_number,
-                            "Failed to deserialize command from database: {err}"
-                        );
-                        None
-                    }
-                })
-                .collect()
-        } else {
-            Vec::new()
         }
+
+        tx.commit().await?;
+
+        Ok(fetched_commands
+            .into_iter()
+            .filter_map(|cmd| match serde_json::from_value(cmd.cmd) {
+                Ok(command) => Some(SafeCommandRequest {
+                    id: cmd.id,
+                    command,
+                    continue_on_error: cmd.continue_on_error,
+                }),
+                Err(err) => {
+                    error!(
+                        serial_number = device.serial_number,
+                        cmd_id = cmd.id,
+                        "Failed to deserialize command from database: {err}"
+                    );
+                    None
+                }
+            })
+            .collect())
     }
 
     pub async fn add_commands(
