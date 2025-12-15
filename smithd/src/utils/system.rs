@@ -6,47 +6,47 @@ use serde_json::json;
 use std::collections::HashMap;
 use tracing::{error, info};
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub struct Smith {
     pub version: String,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub struct OsRelease {
     pub pretty_name: String,
     pub version_id: String,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub struct DeviceTree {
     pub serial_number: String,
     pub model: Option<String>,
     pub compatible: Option<Vec<String>>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub struct ProcStat {
     pub btime: u64,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub struct Proc {
     pub version: String,
     pub stat: ProcStat,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub struct NetworkItem {
     pub ips: Vec<String>,
     pub mac_address: String,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub struct Network {
     pub interfaces: HashMap<String, NetworkItem>,
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq, Default)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Default, Clone)]
 pub struct NetworkConfig {
     pub connection_profile_name: String,
     pub connection_profile_uuid: String,
@@ -54,7 +54,7 @@ pub struct NetworkConfig {
     pub device_name: String,
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq, Default)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Default, Clone)]
 pub struct ConnectionStatus {
     pub connection_name: String,
     pub connection_state: String,
@@ -62,7 +62,7 @@ pub struct ConnectionStatus {
     pub device_name: String,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub struct SystemInfo {
     pub smith: Smith,
     pub hostname: String,
