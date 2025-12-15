@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { useRouter, useParams } from 'next/navigation';
+import { useParams } from 'next/navigation';
 import {
   ArrowLeft,
   Rocket,
@@ -16,23 +16,9 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import PrivateLayout from "@/app/layouts/PrivateLayout";
 import useSmithAPI from "@/app/hooks/smith-api";
 import moment from 'moment';
+import Link from 'next/link';
+import { Deployment, Release } from '@/models';
 
-interface Release {
-  id: number;
-  version: string;
-  distribution_id: number;
-  distribution_name: string;
-  distribution_architecture: string;
-  created_at: string;
-}
-
-interface Deployment {
-  id: number;
-  release_id: number;
-  status: 'InProgress' | 'Done' | 'Failed' | 'Canceled';
-  updated_at: string;
-  created_at: string;
-}
 
 interface DeploymentDevice {
   device_id: number;
@@ -44,7 +30,6 @@ interface DeploymentDevice {
 }
 
 const DeploymentStatusPage = () => {
-  const router = useRouter();
   const params = useParams();
   const releaseId = params.id as string;
   const { callAPI } = useSmithAPI();
@@ -75,7 +60,7 @@ const DeploymentStatusPage = () => {
     queryKey: ['deployment-devices', releaseId],
     queryFn: () => callAPI<DeploymentDevice[]>('GET', `/releases/${releaseId}/deployment/devices`),
     enabled: !!releaseId,
-    refetchInterval: (query) => {
+    refetchInterval: () => {
       if (!deployment || deployment.status === 'Done' || deployment.status === 'Failed' || deployment.status === 'Canceled') {
         return false;
       }
@@ -206,13 +191,13 @@ const DeploymentStatusPage = () => {
     <PrivateLayout id="distributions">
       <div className="space-y-6">
         <div className="flex items-center space-x-4">
-          <button
-            onClick={() => router.push(`/releases/${releaseId}`)}
+          <Link
+            href={`/releases/${releaseId}`}
             className="flex items-center space-x-2 text-gray-600 hover:text-gray-900 transition-colors"
           >
             <ArrowLeft className="w-4 h-4" />
             <span className="text-sm font-medium">Back to Release</span>
-          </button>
+          </Link>
         </div>
 
         <div className="bg-white rounded-lg border border-gray-200 p-6">

@@ -1,7 +1,6 @@
 'use client';
 
 import React, { useState } from 'react';
-import { useRouter } from 'next/navigation';
 import {
   Package,
   Layers,
@@ -9,11 +8,6 @@ import {
   HardDrive,
   Cpu,
   ChevronRight,
-  Users,
-  CheckCircle,
-  Clock,
-  Computer,
-  TrendingUp,
   Eye,
   EyeOff,
   Search,
@@ -21,24 +15,11 @@ import {
 import { useQuery } from '@tanstack/react-query';
 import PrivateLayout from "@/app/layouts/PrivateLayout";
 import useSmithAPI from "@/app/hooks/smith-api";
+import Link from 'next/link';
+import { Distribution, Rollout } from '@/models';
 
-interface Distribution {
-  id: number;
-  name: string;
-  description: string | null;
-  architecture: string;
-  num_packages: number | null;
-}
-
-interface Rollout {
-  distribution_id: number;
-  pending_devices: number | null;
-  total_devices: number | null;
-  updated_devices: number | null;
-}
 
 const DistributionsPage = () => {
-  const router = useRouter();
   const { callAPI } = useSmithAPI();
   const [showEmptyDistributions, setShowEmptyDistributions] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
@@ -70,24 +51,6 @@ const DistributionsPage = () => {
 
   const distributions = distributionsData?.distributions || [];
   const rollouts = distributionsData?.rollouts || new Map<number, Rollout>();
-
-  // Calculate overall rollout stats
-  const totalDevicesAcrossAll = Array.from(rollouts.values()).reduce(
-    (sum, rollout) => sum + (rollout.total_devices || 0),
-    0
-  );
-  const updatedDevicesAcrossAll = Array.from(rollouts.values()).reduce(
-    (sum, rollout) => sum + (rollout.updated_devices || 0),
-    0
-  );
-  const pendingDevicesAcrossAll = Array.from(rollouts.values()).reduce(
-    (sum, rollout) => sum + (rollout.pending_devices || 0),
-    0
-  );
-
-  const overallProgress = totalDevicesAcrossAll > 0
-    ? Math.round((updatedDevicesAcrossAll / totalDevicesAcrossAll) * 100)
-    : 0;
 
   // Filter distributions based on device count and search
   const distributionsWithDevices = distributions.filter(dist => {
@@ -211,10 +174,10 @@ const DistributionsPage = () => {
           ) : (
             <div className="divide-y divide-gray-200">
               {displayedDistributions.map((distribution) => (
-                <div 
+                <Link
                   key={distribution.id} 
                   className="px-4 py-3 hover:bg-gray-50 cursor-pointer transition-colors"
-                  onClick={() => router.push(`/distributions/${distribution.id}`)}
+                  href={`/distributions/${distribution.id}`}
                 >
                   <div className="flex items-center justify-between">
                     <div className="flex items-center space-x-3">
@@ -264,7 +227,7 @@ const DistributionsPage = () => {
                       <ChevronRight className="w-3 h-3 text-gray-400" />
                     </div>
                   </div>
-                </div>
+                </Link>
               ))}
             </div>
           )}

@@ -5,24 +5,15 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import {
   Smartphone,
   Search,
-  Wifi,
   Signal,
-  Clock,
-  Edit2,
   Check,
   X,
 } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import PrivateLayout from "@/app/layouts/PrivateLayout";
 import useSmithAPI from "@/app/hooks/smith-api";
+import { Modem } from '@/models';
 
-interface ModemInfo {
-  id: number;
-  imei: string;
-  network_provider: string;
-  created_at: string;
-  updated_at: string;
-}
 
 const ModemSkeleton = () => (
   <div className="px-4 py-3 animate-pulse">
@@ -69,7 +60,7 @@ const ModemsPage = () => {
 
   const { data: modems = [], isLoading: initialLoading } = useQuery({
     queryKey: ['modems'],
-    queryFn: () => callAPI<ModemInfo[]>('GET', '/modems'),
+    queryFn: () => callAPI<Modem[]>('GET', '/modems'),
     refetchInterval: 5000,
     select: (data) => {
       if (!data) return [];

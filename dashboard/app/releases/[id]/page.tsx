@@ -11,8 +11,6 @@ import {
   ArrowLeft,
   Box,
   Cpu,
-  Monitor,
-  HardDrive,
   Plus,
   Trash2,
   Eye,
@@ -29,27 +27,10 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import PrivateLayout from "@/app/layouts/PrivateLayout";
 import useSmithAPI from "@/app/hooks/smith-api";
 import moment from 'moment';
+import Link from 'next/link';
+import { Distribution, Release } from '@/models';
 
-interface Release {
-  id: number;
-  version: string;
-  distribution_id: number;
-  created_at: string;
-  size?: number;
-  download_count?: number;
-  yanked?: boolean;
-  draft?: boolean;
-  user_id?: number;
-  user_email?: string;
-}
 
-interface Distribution {
-  id: number;
-  name: string;
-  description: string | null;
-  architecture: string;
-  num_packages: number | null;
-}
 
 interface ReleasePackage {
   id: number;
@@ -142,22 +123,6 @@ const ReleaseDetailPage = () => {
     }
     const gb = mb / 1024;
     return `${gb.toFixed(1)} GB`;
-  };
-
-  const getArchIcon = (architecture: string) => {
-    switch (architecture.toLowerCase()) {
-      case 'x86_64':
-      case 'amd64':
-        return <Monitor className="w-5 h-5" />;
-      case 'arm64':
-      case 'aarch64':
-        return <Cpu className="w-5 h-5" />;
-      case 'armv7':
-      case 'arm':
-        return <HardDrive className="w-5 h-5" />;
-      default:
-        return <Package className="w-5 h-5" />;
-    }
   };
 
   const getArchColor = (architecture: string) => {
@@ -425,15 +390,15 @@ const ReleaseDetailPage = () => {
       <div className="space-y-6">
         {/* Header with Back Button */}
         <div className="flex items-center space-x-4">
-          <button
-            onClick={() => distribution ? router.push(`/distributions/${distribution.id}`) : router.push('/distributions')}
+          <Link
+            href={distribution ? `/distributions/${distribution.id}` : '/distributions'}
             className="flex items-center space-x-2 text-gray-600 hover:text-gray-900 transition-colors cursor-pointer"
           >
             <ArrowLeft className="w-4 h-4" />
             <span className="text-sm font-medium">
               {distribution ? `Back to ${distribution.name}` : 'Back to Distributions'}
             </span>
-          </button>
+          </Link>
         </div>
 
         {/* Release Header */}
@@ -482,13 +447,13 @@ const ReleaseDetailPage = () => {
                 </div>
               </div>
             </div>
-            <button
-              onClick={() => router.push(`/devices?release_id=${release.id}`)}
+            <Link
+              href={`/devices?release_id=${release.id}`}
               className="flex items-center space-x-2 px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-md hover:bg-gray-200 transition-colors cursor-pointer"
             >
               <Cpu className="w-4 h-4" />
               <span>View Devices</span>
-            </button>
+            </Link>
           </div>
         </div>
 

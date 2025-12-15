@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import NetworkQualityIndicator from '@/app/components/NetworkQualityIndicator';
 import { useConfig } from '@/app/hooks/config';
+import { Device } from '@/models';
 
 const Tooltip = ({ children, content }: { children: React.ReactNode, content: string }) => {
   const [isVisible, setIsVisible] = React.useState(false);
@@ -73,90 +74,6 @@ const Tooltip = ({ children, content }: { children: React.ReactNode, content: st
     </div>
   );
 };
-
-interface DeviceNetwork {
-  network_score?: number;
-  download_speed_mbps?: number;
-  upload_speed_mbps?: number;
-  source?: string;
-  updated_at?: string;
-}
-
-interface Device {
-  id: number;
-  serial_number: string;
-  note?: string;
-  last_seen: string | null;
-  has_token: boolean;
-  release_id?: number;
-  target_release_id?: number;
-  created_on: string;
-  approved: boolean;
-  modem_id?: number;
-  ip_address_id?: number;
-  network?: DeviceNetwork;
-  modem?: {
-    id: number;
-    imei: string;
-    network_provider: string;
-    updated_at: string;
-    created_at: string;
-    on_dongle?: boolean;
-  };
-  release?: {
-    id: number;
-    distribution_id: number;
-    distribution_architecture: string;
-    distribution_name: string;
-    version: string;
-    draft: boolean;
-    yanked: boolean;
-    created_at: string;
-  };
-  target_release?: {
-    id: number;
-    distribution_id: number;
-    distribution_architecture: string;
-    distribution_name: string;
-    version: string;
-    draft: boolean;
-    yanked: boolean;
-    created_at: string;
-  };
-  system_info?: {
-    hostname?: string;
-    device_tree?: {
-      model?: string;
-      serial_number?: string;
-      compatible?: string[];
-    };
-    os_release?: {
-      pretty_name?: string;
-      version_id?: string;
-    };
-    proc?: {
-      version?: string;
-      stat?: {
-        btime?: number;
-      };
-    };
-    smith?: {
-      version?: string;
-    };
-    network?: {
-      interfaces?: Record<string, {
-        ips: string[];
-        mac_address: string;
-      }>;
-    };
-    connection_statuses?: Array<{
-      connection_name: string;
-      connection_state: string;
-      device_name: string;
-      device_type: string;
-    }>;
-  };
-}
 
 interface DeviceHeaderProps {
   device: Device;

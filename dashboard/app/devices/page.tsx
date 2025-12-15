@@ -15,6 +15,8 @@ import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import PrivateLayout from "@/app/layouts/PrivateLayout";
 import useSmithAPI from "@/app/hooks/smith-api";
 import NetworkQualityIndicator from '@/app/components/NetworkQualityIndicator';
+import Link from 'next/link';
+import { Device, Release } from '@/models';
 
 const Tooltip = ({ children, content }: { children: React.ReactNode, content: string }) => {
   const [isVisible, setIsVisible] = useState(false);
@@ -114,89 +116,8 @@ const LoadingSkeleton = () => (
   </div>
 );
 
-interface SystemInfo {
-  device_tree?: {
-    model?: string
-    serial_number?: string
-  }
-  hostname?: string
-  os_release?: {
-    pretty_name?: string
-    version_id?: string
-  }
-  smith?: {
-    version?: string
-  }
-  proc?: {
-    version?: string
-  }
-}
 
-interface DeviceNetwork {
-  network_score?: number
-  download_speed_mbps?: number
-  upload_speed_mbps?: number
-  source?: string
-  updated_at?: string
-}
 
-interface Device {
-  id: number
-  serial_number: string
-  note?: string
-  last_seen: string | null
-  created_on: string
-  approved: boolean
-  has_token: boolean
-  release_id: number | null
-  target_release_id: number | null
-  system_info: SystemInfo | null
-  modem_id: number | null
-  ip_address_id: number | null
-  ip_address: IpAddressInfo | null
-  modem: Modem | null
-  release: Release | null
-  target_release: Release | null
-  network: DeviceNetwork | null
-  labels: Record<string, string>
-}
-
-interface IpAddressInfo {
-  id: number
-  ip_address: string
-  name?: string
-  continent?: string
-  continent_code?: string
-  country_code?: string
-  country?: string
-  region?: string
-  city?: string
-  isp?: string
-  coordinates?: [number, number]
-  proxy?: boolean
-  hosting?: boolean
-  created_at: string
-  updated_at: string
-}
-
-interface Modem {
-  id: number
-  imei: string
-  network_provider: string
-  updated_at: string
-  created_at: string
-}
-
-interface Release {
-  id: number
-  distribution_id: number
-  distribution_architecture: string
-  distribution_name: string
-  version: string
-  draft: boolean
-  yanked: boolean
-  created_at: string
-}
 
 const PAGE_SIZE = 100;
 
@@ -747,10 +668,10 @@ const DevicesPage = () => {
           ) : (
             <div className="divide-y divide-gray-200">
               {filteredDevices.map((device) => (
-              <div 
+              <Link
                 key={device.id} 
                 className="px-4 py-3 hover:bg-gray-50 cursor-pointer transition-colors"
-                onClick={() => router.push(`/devices/${device.serial_number}`)}
+                href={`/devices/${device.serial_number}`}
               >
                 <div className="grid grid-cols-8 gap-4 items-center">
                   <div className="col-span-2">
@@ -880,7 +801,7 @@ const DevicesPage = () => {
                     )}
                   </div>
                 </div>
-              </div>
+              </Link>
               ))}
               {/* Load More Button */}
               {hasNextPage && (

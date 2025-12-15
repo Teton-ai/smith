@@ -1,6 +1,5 @@
 import React from "react";
 import { Cpu, Home, Layers, FileText, Globe, Smartphone } from "lucide-react";
-import { useRouter } from "next/navigation";
 import Image from "next/image";
 import Profile from "@/app/components/profile";
 import Link from "next/link";
@@ -12,7 +11,6 @@ export default function PrivateLayout({
   id: string
   children: React.ReactNode;
 }>) {
-  const router = useRouter();
   const navigationItems = [
     { id: 'dashboard', basePath: "/dashboard", label: 'Dashboard', icon: Home },
     { id: 'devices', basePath: "/devices", label: 'Devices', icon: Cpu },
@@ -30,9 +28,9 @@ export default function PrivateLayout({
             {/* Left side - Logo and Navigation */}
             <div className="flex items-center space-x-8">
               {/* Logo */}
-              <div
+              <Link
                 className="cursor-pointer hover:opacity-80 transition-opacity duration-200"
-                onClick={() => router.push('/dashboard')}
+                href='/dashboard'
               >
                 <Image
                   src="/logo.png"
@@ -41,7 +39,7 @@ export default function PrivateLayout({
                   height={32}
                   className="shrink-0 rounded-md shadow-sm"
                 />
-              </div>
+              </Link>
               
               {/* Navigation Items */}
               <nav className="hidden md:flex space-x-1">

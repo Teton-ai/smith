@@ -1,7 +1,6 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
 import {
   AlertTriangle,
   CheckCircle,
@@ -20,57 +19,8 @@ import useSmithAPI from "@/app/hooks/smith-api";
 import PrivateLayout from "@/app/layouts/PrivateLayout";
 import NetworkQualityIndicator from "@/app/components/NetworkQualityIndicator";
 import { useConfig } from "@/app/hooks/config";
-
-interface IpAddressInfo {
-  id: number;
-  ip_address: string;
-  name?: string;
-  continent?: string;
-  continent_code?: string;
-  country_code?: string;
-  country?: string;
-  region?: string;
-  city?: string;
-  isp?: string;
-  coordinates?: [number, number];
-  proxy?: boolean;
-  hosting?: boolean;
-  created_at: string;
-  updated_at: string;
-}
-
-interface Device {
-  id: number;
-  serial_number: string;
-  hostname?: string;
-  last_seen: string | null;
-  has_token: boolean;
-  release_id?: number;
-  target_release_id?: number;
-  release?: Release;
-  target_release?: Release;
-  network?: {
-    network_score?: number;
-  };
-  ip_address?: IpAddressInfo;
-  system_info?: {
-    hostname?: string;
-    device_tree?: {
-      model?: string;
-    };
-  };
-}
-
-interface Release {
-  id: number;
-  distribution_id: number;
-  distribution_architecture: string;
-  distribution_name: string;
-  version: string;
-  draft: boolean;
-  yanked: boolean;
-  created_at: string;
-}
+import Link from 'next/link';
+import { Device } from '@/models';
 
 interface DashboardData {
   total_count: number,
@@ -82,7 +32,6 @@ interface DashboardData {
 
 
 const AdminPanel = () => {
-  const router = useRouter();
   const { callAPI } = useSmithAPI();
   const { config } = useConfig();
   const queryClient = useQueryClient();
@@ -134,45 +83,6 @@ const AdminPanel = () => {
     }
   }, [toast]);
 
-  const getDeviceStatus = (device: Device) => {
-    if (!device.last_seen) return 'never-seen';
-    
-    const lastSeen = new Date(device.last_seen);
-    const now = new Date();
-    const diffMinutes = (now.getTime() - lastSeen.getTime()) / (1000 * 60);
-    const diffDays = diffMinutes / (60 * 24);
-    const isOnline = diffMinutes <= 3;
-    
-    // Check for stuck update first (takes priority, but only if online)
-    if (isOnline && device.release_id && device.target_release_id && device.release_id !== device.target_release_id) {
-      return 'stuck-update';
-    }
-    
-    if (isOnline) return 'online';
-    if (diffDays <= 1) return 'recently-offline';
-    if (diffDays <= 7) return 'offline-week';
-    if (diffDays <= 30) return 'offline-month';
-    return 'abandoned';
-  };
-
-  const getStatusInfo = (status: string) => {
-    switch (status) {
-      case 'online':
-        return { color: 'text-green-600', bgColor: 'bg-green-50 border-green-200', icon: <CheckCircle className="w-4 h-4 text-green-500" />, label: 'Online' };
-      case 'stuck-update':
-        return { color: 'text-purple-600', bgColor: 'bg-purple-50 border-purple-200', icon: <Package className="w-4 h-4 text-purple-500" />, label: 'Update Failed' };
-      case 'recently-offline':
-        return { color: 'text-yellow-600', bgColor: 'bg-yellow-50 border-yellow-200', icon: <Clock className="w-4 h-4 text-yellow-500" />, label: 'Recently Offline' };
-      case 'offline-week':
-        return { color: 'text-orange-600', bgColor: 'bg-orange-50 border-orange-200', icon: <AlertTriangle className="w-4 h-4 text-orange-500" />, label: 'Offline (1 week)' };
-      case 'offline-month':
-        return { color: 'text-red-600', bgColor: 'bg-red-50 border-red-200', icon: <XCircle className="w-4 h-4 text-red-500" />, label: 'Offline (1 month)' };
-      case 'never-seen':
-        return { color: 'text-gray-600', bgColor: 'bg-gray-50 border-gray-200', icon: <AlertTriangle className="w-4 h-4 text-gray-500" />, label: 'Never Connected' };
-      default:
-        return { color: 'text-gray-600', bgColor: 'bg-gray-50 border-gray-200', icon: <XCircle className="w-4 h-4 text-gray-500" />, label: 'Unknown' };
-    }
-  };
 
   const getDeviceName = (device: Device) => device.serial_number;
 
@@ -423,10 +333,10 @@ const AdminPanel = () => {
                   {stuckUpdates.slice(0, 10).map((device) => {
                     const isOnline = device.last_seen ? (new Date().getTime() - new Date(device.last_seen).getTime()) / (1000 * 60) <= 3 : false;
                     return (
-                      <div
+                      <Link
                         key={device.id}
                         className="px-4 py-3 hover:bg-purple-50 cursor-pointer transition-colors"
-                        onClick={() => router.push(`/devices/${device.serial_number}`)}
+                        href={`/devices/${device.serial_number}`}
                       >
                         <div className="flex items-center justify-between">
                           <div className="flex items-center space-x-3 flex-1">
@@ -462,17 +372,17 @@ const AdminPanel = () => {
                             <ChevronRight className="w-4 h-4 text-gray-400 flex-shrink-0" />
                           </div>
                         </div>
-                      </div>
+                      </Link>
                     );
                   })}
                   {stuckUpdates.length > 10 && (
                     <div className="px-4 py-3 bg-gray-50">
-                      <button
-                        onClick={() => router.push('/devices?outdated=true')}
+                      <Link
+                        href='/devices?outdated=true'
                         className="text-sm text-blue-600 hover:text-blue-800 cursor-pointer"
                       >
                         View all {stuckUpdates.length} devices →
-                      </button>
+                      </Link>
                     </div>
                   )}
                 </div>
@@ -491,10 +401,10 @@ const AdminPanel = () => {
                 <div className="divide-y divide-gray-200">
                   {recentlyOffline.slice(0, 10).map((device) => {
                     return (
-                      <div
+                      <Link
                         key={device.id}
                         className="px-4 py-3 hover:bg-yellow-50 cursor-pointer transition-colors"
-                        onClick={() => router.push(`/devices/${device.serial_number}`)}
+                        href={`/devices/${device.serial_number}`}
                       >
                         <div className="flex items-center justify-between">
                           <div className="flex items-center space-x-3 flex-1">
@@ -519,17 +429,17 @@ const AdminPanel = () => {
                             <ChevronRight className="w-4 h-4 text-gray-400 flex-shrink-0" />
                           </div>
                         </div>
-                      </div>
+                      </Link>
                     );
                   })}
                   {recentlyOffline.length > 10 && (
                     <div className="px-4 py-3 bg-gray-50">
-                      <button
-                        onClick={() => router.push('/devices')}
+                      <Link
+                        href='/devices'
                         className="text-sm text-blue-600 hover:text-blue-800 cursor-pointer"
                       >
                         View all {recentlyOffline.length} devices →
-                      </button>
+                      </Link>
                     </div>
                   )}
                 </div>
@@ -548,10 +458,10 @@ const AdminPanel = () => {
                 <div className="divide-y divide-gray-200">
                   {offlineWeek.slice(0, 10).map((device) => {
                     return (
-                      <div
+                      <Link
                         key={device.id}
                         className="px-4 py-3 hover:bg-orange-50 cursor-pointer transition-colors"
-                        onClick={() => router.push(`/devices/${device.serial_number}`)}
+                        href={`/devices/${device.serial_number}`}
                       >
                         <div className="flex items-center justify-between">
                           <div className="flex items-center space-x-3 flex-1">
@@ -576,17 +486,17 @@ const AdminPanel = () => {
                             <ChevronRight className="w-4 h-4 text-gray-400 flex-shrink-0" />
                           </div>
                         </div>
-                      </div>
+                      </Link>
                     );
                   })}
                   {offlineWeek.length > 10 && (
                     <div className="px-4 py-3 bg-gray-50">
-                      <button
-                        onClick={() => router.push('/devices')}
+                      <Link
+                        href='/devices'
                         className="text-sm text-blue-600 hover:text-blue-800 cursor-pointer"
                       >
                         View all {offlineWeek.length} devices →
-                      </button>
+                      </Link>
                     </div>
                   )}
                 </div>
@@ -605,10 +515,10 @@ const AdminPanel = () => {
                 <div className="divide-y divide-gray-200">
                   {offlineMonth.slice(0, 10).map((device) => {
                     return (
-                      <div
+                      <Link
                         key={device.id}
                         className="px-4 py-3 hover:bg-red-50 cursor-pointer transition-colors"
-                        onClick={() => router.push(`/devices/${device.serial_number}`)}
+                        href={`/devices/${device.serial_number}`}
                       >
                         <div className="flex items-center justify-between">
                           <div className="flex items-center space-x-3 flex-1">
@@ -633,17 +543,17 @@ const AdminPanel = () => {
                             <ChevronRight className="w-4 h-4 text-gray-400 flex-shrink-0" />
                           </div>
                         </div>
-                      </div>
+                      </Link>
                     );
                   })}
                   {offlineMonth.length > 10 && (
                     <div className="px-4 py-3 bg-gray-50">
-                      <button
-                        onClick={() => router.push('/devices')}
+                      <Link
+                        href='/devices'
                         className="text-sm text-blue-600 hover:text-blue-800 cursor-pointer"
                       >
                         View all {offlineMonth.length} devices →
-                      </button>
+                      </Link>
                     </div>
                   )}
                 </div>
@@ -662,10 +572,10 @@ const AdminPanel = () => {
                 <div className="divide-y divide-gray-200">
                   {neverSeen.slice(0, 10).map((device) => {
                     return (
-                      <div
+                      <Link
                         key={device.id}
                         className="px-4 py-3 hover:bg-gray-50 cursor-pointer transition-colors"
-                        onClick={() => router.push(`/devices/${device.serial_number}`)}
+                        href={`/devices/${device.serial_number}`}
                       >
                         <div className="flex items-center justify-between">
                           <div className="flex items-center space-x-3 flex-1">
@@ -688,17 +598,17 @@ const AdminPanel = () => {
                             <ChevronRight className="w-4 h-4 text-gray-400 flex-shrink-0" />
                           </div>
                         </div>
-                      </div>
+                      </Link>
                     );
                   })}
                   {neverSeen.length > 10 && (
                     <div className="px-4 py-3 bg-gray-50">
-                      <button
-                        onClick={() => router.push('/devices')}
+                      <Link
+                        href='/devices'
                         className="text-sm text-blue-600 hover:text-blue-800 cursor-pointer"
                       >
                         View all {neverSeen.length} devices →
-                      </button>
+                      </Link>
                     </div>
                   )}
                 </div>
@@ -713,7 +623,7 @@ const AdminPanel = () => {
               <div>
                 <h3 className="text-lg font-semibold text-green-900">All Systems Operational</h3>
                 <p className="text-sm text-green-700 mt-1">
-                  No devices need attention. All updates are successful and devices are either online or archived (offline >30 days).
+                  No devices need attention. All updates are successful and devices are either online or archived (offline &gt;30 days).
                 </p>
               </div>
             </div>

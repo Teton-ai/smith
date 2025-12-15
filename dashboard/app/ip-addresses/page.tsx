@@ -7,10 +7,6 @@ import {
   Search,
   Shield,
   Wifi,
-  MapPin,
-  Building,
-  Clock,
-  Calendar,
   Edit2,
   Check,
   X,
@@ -18,25 +14,8 @@ import {
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import PrivateLayout from "@/app/layouts/PrivateLayout";
 import useSmithAPI from "@/app/hooks/smith-api";
+import { IpAddressInfo } from '@/models';
 
-interface IpAddressInfo {
-  id: number;
-  ip_address: string;
-  name?: string;
-  continent?: string;
-  continent_code?: string;
-  country_code?: string;
-  country?: string;
-  region?: string;
-  city?: string;
-  isp?: string;
-  coordinates?: [number, number];
-  proxy?: boolean;
-  hosting?: boolean;
-  device_count?: number;
-  created_at: string;
-  updated_at: string;
-}
 
 interface IpAddressListResponse {
   ip_addresses: IpAddressInfo[];

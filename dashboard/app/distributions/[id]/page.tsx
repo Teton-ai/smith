@@ -19,28 +19,8 @@ import { useQuery } from '@tanstack/react-query';
 import PrivateLayout from "@/app/layouts/PrivateLayout";
 import useSmithAPI from "@/app/hooks/smith-api";
 import moment from 'moment';
-
-interface Distribution {
-  id: number;
-  name: string;
-  description: string | null;
-  architecture: string;
-  num_packages: number | null;
-}
-
-
-interface Release {
-  id: number;
-  version: string;
-  distribution_id: number;
-  created_at: string;
-  size?: number;
-  download_count?: number;
-  yanked?: boolean;
-  draft?: boolean;
-  user_id?: number;
-  user_email?: string;
-}
+import Link from 'next/link';
+import { Distribution, Release } from '@/models';
 
 
 const DistributionDetailPage = () => {
@@ -238,13 +218,13 @@ const DistributionDetailPage = () => {
       <div className="space-y-6">
         {/* Header with Back Button */}
         <div className="flex items-center space-x-4">
-          <button
-            onClick={() => router.push('/distributions')}
+          <Link
+            href='/distributions'
             className="flex items-center space-x-2 text-gray-600 hover:text-gray-900 transition-colors cursor-pointer"
           >
             <ArrowLeft className="w-4 h-4" />
             <span className="text-sm font-medium">Back to Distributions</span>
-          </button>
+          </Link>
         </div>
 
         {/* Distribution Header */}
@@ -402,10 +382,10 @@ const DistributionDetailPage = () => {
             ) : (
               <div className="divide-y divide-gray-200">
                 {releases.map((release) => (
-                  <div 
+                  <Link
                     key={release.id} 
                     className="p-4 hover:bg-gray-50 cursor-pointer transition-colors"
-                    onClick={() => router.push(`/releases/${release.id}`)}
+                    href={`/releases/${release.id}`}
                   >
                     <div className="flex items-center justify-between">
                       <div className="flex items-center space-x-3">
@@ -456,7 +436,7 @@ const DistributionDetailPage = () => {
                         <ChevronRight className="w-4 h-4 text-gray-400" />
                       </div>
                     </div>
-                  </div>
+                  </Link>
                 ))}
               </div>
             )}
