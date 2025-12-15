@@ -1141,7 +1141,6 @@ pub async fn update_note_for_device(
     Ok(StatusCode::NO_CONTENT)
 }
 
-#[allow(clippy::collapsible_else_if)]
 #[utoipa::path(
     get,
     path = "/devices/{device_id}/ledger",
@@ -1331,7 +1330,6 @@ pub struct PaginationId {
     ),
     tag = DEVICES_TAG
 )]
-#[allow(clippy::collapsible_else_if)]
 pub async fn get_all_commands_for_device(
     host: Host,
     Path(device_id): Path<String>,
