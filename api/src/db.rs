@@ -1,5 +1,6 @@
 use crate::device::Variable;
 use anyhow::Result;
+use serde_json::Value;
 use serde_json::json;
 use smith::utils::schema;
 use smith::utils::schema::SafeCommandTx;
@@ -8,6 +9,7 @@ use smith::utils::schema::{HomePost, NetworkType, SafeCommandRequest, SafeComman
 use sqlx::PgPool;
 use sqlx::types::Json;
 use tracing::debug;
+use tracing::error;
 
 // TODO: Get rid of this db.rs, legacy design and ugly
 
@@ -19,7 +21,7 @@ pub struct DeviceWithToken {
 
 pub struct CommandsDB {
     id: i32,
-    cmd: Json<SafeCommandTx>,
+    cmd: Value,
     continue_on_error: bool,
 }
 
@@ -198,7 +200,7 @@ impl DBHandler {
             r#"
             SELECT
                 id,
-                cmd as "cmd: Json<SafeCommandTx>",
+                cmd,
                 continue_on_error
             FROM command_queue
             WHERE device_id = $1 AND fetched = false AND canceled = false"#,
@@ -222,10 +224,20 @@ impl DBHandler {
 
         Ok(fetched_commands
             .into_iter()
-            .map(|cmd| SafeCommandRequest {
-                id: cmd.id,
-                command: cmd.cmd.0,
-                continue_on_error: cmd.continue_on_error,
+            .filter_map(|cmd| match serde_json::from_value(cmd.cmd) {
+                Ok(command) => Some(SafeCommandRequest {
+                    id: cmd.id,
+                    command,
+                    continue_on_error: cmd.continue_on_error,
+                }),
+                Err(err) => {
+                    error!(
+                        serial_number = device.serial_number,
+                        cmd_id = cmd.id,
+                        "Failed to deserialize command from database: {err}"
+                    );
+                    None
+                }
             })
             .collect())
     }
