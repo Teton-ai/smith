@@ -35,7 +35,7 @@ jobs:
         run: cargo fmt -- --check
 
       - name: Check linting
-        run: cargo clippy -- -Dwarnings
+        run: cargo clippy --all-features -- -Dwarnings
 
       - name: Check SQLx
         working-directory: api
