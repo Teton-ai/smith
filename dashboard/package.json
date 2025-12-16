@@ -4,7 +4,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "gen-api-client": "orval --config ./orval.config.ts"
   },
   "dependencies": {
     "@auth0/auth0-react": "^2.3.0",
@@ -27,6 +28,7 @@
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "15.3.4",
+    "orval": "^7.17.0",
     "tailwindcss": "^4",
     "typescript": "^5"
   }

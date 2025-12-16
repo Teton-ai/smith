@@ -1,11 +1,11 @@
 use crate::State;
+use crate::package::Package;
 use crate::release::{Release, get_release_by_id};
 use axum::extract::Path;
 use axum::http::StatusCode;
 use axum::{Extension, Json};
 use models::release::UpdateRelease;
 use serde::Deserialize;
-use smith::utils::schema::Package;
 use tracing::error;
 
 const RELEASES_TAG: &str = "releases";
@@ -51,6 +51,9 @@ pub async fn get_releases(
 #[utoipa::path(
     get,
     path = "/releases/{release_id}",
+    params(
+        ("release_id" = i32, Path),
+    ),
     responses(
         (status = StatusCode::OK, description = "Release retrieved successfully", body = Release),
         (status = StatusCode::NOT_FOUND, description = "Release not found"),
@@ -81,6 +84,9 @@ pub async fn get_release(
 #[utoipa::path(
     post,
     path = "/releases/{release_id}",
+    params(
+        ("release_id" = i32, Path),
+    ),
     request_body = UpdateRelease,
     responses(
         (status = StatusCode::NO_CONTENT, description = "Release updated successfully"),
@@ -141,7 +147,10 @@ pub struct ReplacementPackage {
 #[utoipa::path(
     post,
     path = "/releases/{release_id}/packages",
-        request_body = ReplacementPackage,
+    params(
+        ("release_id" = i32, Path),
+    ),
+    request_body = ReplacementPackage,
     responses(
         (status = StatusCode::CREATED, description = "Package added to release successfully"),
         (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to add package to release"),
@@ -191,8 +200,11 @@ pub async fn add_package_to_release(
 #[utoipa::path(
     get,
     path = "/releases/{release_id}/packages",
+    params(
+        ("release_id" = i32, Path),
+    ),
     responses(
-        (status = StatusCode::OK, description = "Release packages retrieved successfully"),
+        (status = StatusCode::OK, description = "Release packages retrieved successfully", body = Vec<Package>),
         (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to retrieve release packages"),
     ),
     security(
@@ -228,6 +240,10 @@ pub async fn get_distribution_release_packages(
 #[utoipa::path(
     put,
     path = "/releases/{release_id}/packages/{package_id}",
+    params(
+        ("release_id" = i32, Path),
+        ("package_id" = i32, Path),
+    ),
     responses(
         (status = StatusCode::OK, description = "Successfully updated release package "),
         (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to update release package"),
@@ -277,6 +293,10 @@ pub async fn update_package_for_release(
 #[utoipa::path(
     delete,
     path = "/releases/{release_id}/packages/{package_id}",
+    params(
+        ("release_id" = i32, Path),
+        ("package_id" = i32, Path),
+    ),
     responses(
         (status = StatusCode::NO_CONTENT, description = "Successfully deleted package from the release"),
         (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to delete the package from the release"),

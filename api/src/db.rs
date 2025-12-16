@@ -3,11 +3,9 @@ use anyhow::Result;
 use serde_json::Value;
 use serde_json::json;
 use smith::utils::schema;
-use smith::utils::schema::SafeCommandTx;
 use smith::utils::schema::SafeCommandTx::{UpdateNetwork, UpdateVariables};
 use smith::utils::schema::{HomePost, NetworkType, SafeCommandRequest, SafeCommandRx};
 use sqlx::PgPool;
-use sqlx::types::Json;
 use tracing::debug;
 use tracing::error;
 

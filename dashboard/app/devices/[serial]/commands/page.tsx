@@ -1,43 +1,27 @@
 'use client';
 
 import React, { useState } from 'react';
-import { useParams, useRouter } from 'next/navigation';
-import { ChevronRight, AlertTriangle, Send, Reply, Copy, Check, ArrowLeft } from 'lucide-react';
-import { useQuery } from '@tanstack/react-query';
+import { useParams } from 'next/navigation';
+import { Send, Reply, Copy, Check, ArrowLeft } from 'lucide-react';
 import moment from 'moment';
 import PrivateLayout from "@/app/layouts/PrivateLayout";
-import useSmithAPI from "@/app/hooks/smith-api";
 import DeviceHeader from '../DeviceHeader';
+import Link from 'next/link';
+import { useGetAllCommandsForDevice, useGetDeviceInfo } from '@/app/api-client';
 
 interface Command {
   [key: string]: any;
 }
 
-interface CommandsResponse {
-  commands: Command[];
-  next: string | null;
-  previous: string | null;
-}
-
 const CommandsPage = () => {
   const params = useParams();
-  const router = useRouter();
-  const { callAPI } = useSmithAPI();
   const [copiedButtons, setCopiedButtons] = useState<Set<string>>(new Set());
 
   const serial = params.serial as string;
 
-  const { data: commandsData, isLoading: commandsLoading } = useQuery({
-    queryKey: ['commands', serial],
-    queryFn: () => callAPI<CommandsResponse>('GET', `/devices/${serial}/commands?limit=500`),
-    refetchInterval: 5000,
-  });
+  const { data: commandsData, isLoading: commandsLoading } = useGetAllCommandsForDevice(serial, {limit: 500});
 
-  const { data: device, isLoading: deviceLoading } = useQuery({
-    queryKey: ['device', serial],
-    queryFn: () => callAPI('GET', `/devices/${serial}`),
-    refetchInterval: 5000,
-  });
+  const { data: device, isLoading: deviceLoading } = useGetDeviceInfo(serial);
 
   const commands = commandsData?.commands || [];
   const loading = commandsLoading || deviceLoading;
@@ -108,27 +92,27 @@ const CommandsPage = () => {
       <div className="space-y-6">
         {/* Header with Back Button */}
         <div className="flex items-center space-x-4">
-          <button
-            onClick={() => router.push('/devices')}
+          <Link
+            href='/devices'
             className="flex items-center space-x-2 text-gray-600 hover:text-gray-900 transition-colors"
           >
             <ArrowLeft className="w-4 h-4" />
             <span className="text-sm font-medium">Back to Devices</span>
-          </button>
+          </Link>
         </div>
 
         {/* Device Header */}
-        <DeviceHeader device={device} serial={serial} />
+        <DeviceHeader device={device!} serial={serial} />
 
         {/* Tabs */}
         <div className="border-b border-gray-200">
           <nav className="-mb-px flex space-x-8">
-            <button
-              onClick={() => router.push(`/devices/${serial}`)}
-              className="py-2 px-1 border-b-2 border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 font-medium text-sm transition-colors cursor-pointer"
+            <Link
+              href={`/devices/${serial}`}
+              className="block py-2 px-1 border-b-2 border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 font-medium text-sm transition-colors cursor-pointer"
             >
               Overview
-            </button>
+            </Link>
             <button
               className="py-2 px-1 border-b-2 border-blue-500 text-blue-600 font-medium text-sm"
             >

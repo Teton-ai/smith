@@ -1,7 +1,6 @@
 'use client';
 
 import React, { useState } from 'react';
-import { useRouter } from 'next/navigation';
 import {
   Package,
   Layers,
@@ -9,85 +8,30 @@ import {
   HardDrive,
   Cpu,
   ChevronRight,
-  Users,
-  CheckCircle,
-  Clock,
-  Computer,
-  TrendingUp,
   Eye,
   EyeOff,
   Search,
 } from 'lucide-react';
-import { useQuery } from '@tanstack/react-query';
 import PrivateLayout from "@/app/layouts/PrivateLayout";
-import useSmithAPI from "@/app/hooks/smith-api";
+import Link from 'next/link';
+import { DistributionRolloutStats, useGetDistributionRollouts, useGetDistributions } from '../api-client';
 
-interface Distribution {
-  id: number;
-  name: string;
-  description: string | null;
-  architecture: string;
-  num_packages: number | null;
-}
-
-interface Rollout {
-  distribution_id: number;
-  pending_devices: number | null;
-  total_devices: number | null;
-  updated_devices: number | null;
-}
 
 const DistributionsPage = () => {
-  const router = useRouter();
-  const { callAPI } = useSmithAPI();
   const [showEmptyDistributions, setShowEmptyDistributions] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
 
-  const { data: distributionsData, isLoading: loading, error } = useQuery({
-    queryKey: ['distributions-with-rollouts'],
-    queryFn: async () => {
-      const data = await callAPI<Distribution[]>('GET', '/distributions');
-      if (!data) return { distributions: [], rollouts: new Map<number, Rollout>() };
-
-      // Fetch rollout data for each distribution
-      const rolloutPromises = data.map(async (dist) => {
-        const rolloutData = await callAPI<Rollout>('GET', `/distributions/${dist.id}/rollout`);
-        return { id: dist.id, rollout: rolloutData };
-      });
-
-      const rolloutResults = await Promise.all(rolloutPromises);
-      const rolloutMap = new Map<number, Rollout>();
-      rolloutResults.forEach(({ id, rollout }) => {
-        if (rollout) {
-          rolloutMap.set(id, rollout);
-        }
-      });
-
-      return { distributions: data, rollouts: rolloutMap };
-    },
-    refetchInterval: 5000,
+  const { data: distributions = [], isLoading: loading } = useGetDistributions();
+  const {data: rollouts = new Map()} = useGetDistributionRollouts({
+    query: {
+      select: (data) => {
+        return data.reduce((prev, curr) => {
+          prev.set(curr.distribution_id, curr);
+          return prev
+        }, new Map() as Map<number, DistributionRolloutStats>)
+      }
+    }
   });
-
-  const distributions = distributionsData?.distributions || [];
-  const rollouts = distributionsData?.rollouts || new Map<number, Rollout>();
-
-  // Calculate overall rollout stats
-  const totalDevicesAcrossAll = Array.from(rollouts.values()).reduce(
-    (sum, rollout) => sum + (rollout.total_devices || 0),
-    0
-  );
-  const updatedDevicesAcrossAll = Array.from(rollouts.values()).reduce(
-    (sum, rollout) => sum + (rollout.updated_devices || 0),
-    0
-  );
-  const pendingDevicesAcrossAll = Array.from(rollouts.values()).reduce(
-    (sum, rollout) => sum + (rollout.pending_devices || 0),
-    0
-  );
-
-  const overallProgress = totalDevicesAcrossAll > 0
-    ? Math.round((updatedDevicesAcrossAll / totalDevicesAcrossAll) * 100)
-    : 0;
 
   // Filter distributions based on device count and search
   const distributionsWithDevices = distributions.filter(dist => {
@@ -155,16 +99,6 @@ const DistributionsPage = () => {
     );
   }
 
-  if (error) {
-    return (
-      <PrivateLayout id="distributions">
-        <div className="flex items-center justify-center h-32">
-          <div className="text-red-500 text-sm">Error: {error.message}</div>
-        </div>
-      </PrivateLayout>
-    );
-  }
-
   return (
     <PrivateLayout id="distributions">
       <div className="space-y-6">
@@ -211,10 +145,10 @@ const DistributionsPage = () => {
           ) : (
             <div className="divide-y divide-gray-200">
               {displayedDistributions.map((distribution) => (
-                <div 
+                <Link
                   key={distribution.id} 
-                  className="px-4 py-3 hover:bg-gray-50 cursor-pointer transition-colors"
-                  onClick={() => router.push(`/distributions/${distribution.id}`)}
+                  className="block px-4 py-3 hover:bg-gray-50 cursor-pointer transition-colors"
+                  href={`/distributions/${distribution.id}`}
                 >
                   <div className="flex items-center justify-between">
                     <div className="flex items-center space-x-3">
@@ -264,7 +198,7 @@ const DistributionsPage = () => {
                       <ChevronRight className="w-3 h-3 text-gray-400" />
                     </div>
                   </div>
-                </div>
+                </Link>
               ))}
             </div>
           )}

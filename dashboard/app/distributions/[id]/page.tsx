@@ -6,7 +6,6 @@ import {
   Monitor,
   HardDrive,
   Cpu,
-  Download,
   Calendar,
   Tag,
   ArrowLeft,
@@ -15,65 +14,29 @@ import {
   User,
   Plus,
 } from 'lucide-react';
-import { useQuery } from '@tanstack/react-query';
 import PrivateLayout from "@/app/layouts/PrivateLayout";
-import useSmithAPI from "@/app/hooks/smith-api";
 import moment from 'moment';
-
-interface Distribution {
-  id: number;
-  name: string;
-  description: string | null;
-  architecture: string;
-  num_packages: number | null;
-}
-
-
-interface Release {
-  id: number;
-  version: string;
-  distribution_id: number;
-  created_at: string;
-  size?: number;
-  download_count?: number;
-  yanked?: boolean;
-  draft?: boolean;
-  user_id?: number;
-  user_email?: string;
-}
+import Link from 'next/link';
+import { useCreateDistributionRelease, useGetDistributionById, useGetDistributionLatestRelease, useGetDistributionReleasePackages, useGetDistributionReleases } from '@/app/api-client';
 
 
 const DistributionDetailPage = () => {
   const router = useRouter();
   const params = useParams();
-  const distributionId = params.id as string;
-  const { callAPI } = useSmithAPI();
+  const distributionId = parseInt(params.id as string);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [selectedVersionOption, setSelectedVersionOption] = useState<string>('');
   const [isReleaseCandidate, setIsReleaseCandidate] = useState(false);
   const [creatingDraft, setCreatingDraft] = useState(false);
 
-  const { data: distribution, isLoading: loading, error } = useQuery({
-    queryKey: ['distribution', distributionId],
-    queryFn: () => callAPI<Distribution>('GET', `/distributions/${distributionId}`),
-    enabled: !!distributionId,
-    refetchInterval: 5000,
-  });
+  const { data: distribution, isLoading: loading } = useGetDistributionById(distributionId);
 
-  const { data: releases = [], isLoading: releasesLoading } = useQuery({
-    queryKey: ['distribution-releases', distributionId],
-    queryFn: () => callAPI<Release[]>('GET', `/distributions/${distributionId}/releases`),
-    enabled: !!distributionId,
-    refetchInterval: 5000,
-    select: (data) => data || [],
-  });
+  const { data: releases = [], isLoading: releasesLoading } = useGetDistributionReleases(distributionId);
 
-  const { data: latestRelease } = useQuery({
-    queryKey: ['distribution-latest-release', distributionId],
-    queryFn: () => callAPI<Release>('GET', `/distributions/${distributionId}/releases/latest`),
-    enabled: !!distributionId,
-    refetchInterval: 5000,
-  });
+  const { data: latestRelease } = useGetDistributionLatestRelease(distributionId);
+  const getDistributionReleasePackages = useGetDistributionReleasePackages(latestRelease?.id as number, {query: {enabled: latestRelease?.id != null}})
+
+  const createDistributionReleaseHook = useCreateDistributionRelease()
 
   const getArchIcon = (architecture: string) => {
     switch (architecture.toLowerCase()) {
@@ -157,25 +120,19 @@ const DistributionDetailPage = () => {
   };
 
   const handleCreateDraft = async () => {
-    const latestRelease = getLatestRelease();
-    if (creatingDraft || !latestRelease || !selectedVersionOption) return;
+    if (creatingDraft || getDistributionReleasePackages.data == null || !selectedVersionOption) return;
 
     setCreatingDraft(true);
     try {
       const finalVersion = isReleaseCandidate ? `${selectedVersionOption}-rc` : selectedVersionOption;
       
-      // Get packages from the latest release
-      const latestReleasePackages = await callAPI<any[]>('GET', `/releases/${latestRelease.id}/packages`);
-      if (!latestReleasePackages) {
-        throw new Error('Failed to get packages from latest release');
-      }
-
-      const requestBody = {
-        version: finalVersion,
-        packages: latestReleasePackages.map((p) => p.id),
-      };
-
-      const newRelease = await callAPI<Release>('POST', `/distributions/${distributionId}/releases`, requestBody);
+      const newRelease = await createDistributionReleaseHook.mutateAsync({
+        distributionId,
+        data: {
+          packages: getDistributionReleasePackages.data.map((p) => p.id),
+          version: finalVersion
+        }
+      });
 
       if (newRelease) {
         router.push(`/releases/${newRelease}`);
@@ -203,16 +160,6 @@ const DistributionDetailPage = () => {
     }
   };
 
-  const formatFileSize = (bytes?: number) => {
-    if (!bytes) return 'Unknown';
-    const mb = bytes / (1024 * 1024);
-    if (mb < 1024) {
-      return `${mb.toFixed(1)} MB`;
-    }
-    const gb = mb / 1024;
-    return `${gb.toFixed(1)} GB`;
-  };
-
   if (loading || !distribution) {
     return (
       <PrivateLayout id="distributions">
@@ -223,28 +170,18 @@ const DistributionDetailPage = () => {
     );
   }
 
-  if (error) {
-    return (
-      <PrivateLayout id="distributions">
-        <div className="flex items-center justify-center h-32">
-          <div className="text-red-500 text-sm">Error: {error.message}</div>
-        </div>
-      </PrivateLayout>
-    );
-  }
-
   return (
     <PrivateLayout id="distributions">
       <div className="space-y-6">
         {/* Header with Back Button */}
         <div className="flex items-center space-x-4">
-          <button
-            onClick={() => router.push('/distributions')}
+          <Link
+            href='/distributions'
             className="flex items-center space-x-2 text-gray-600 hover:text-gray-900 transition-colors cursor-pointer"
           >
             <ArrowLeft className="w-4 h-4" />
             <span className="text-sm font-medium">Back to Distributions</span>
-          </button>
+          </Link>
         </div>
 
         {/* Distribution Header */}
@@ -402,10 +339,10 @@ const DistributionDetailPage = () => {
             ) : (
               <div className="divide-y divide-gray-200">
                 {releases.map((release) => (
-                  <div 
+                  <Link
                     key={release.id} 
-                    className="p-4 hover:bg-gray-50 cursor-pointer transition-colors"
-                    onClick={() => router.push(`/releases/${release.id}`)}
+                    className="block p-4 hover:bg-gray-50 cursor-pointer transition-colors"
+                    href={`/releases/${release.id}`}
                   >
                     <div className="flex items-center justify-between">
                       <div className="flex items-center space-x-3">
@@ -440,23 +377,14 @@ const DistributionDetailPage = () => {
                               <User className="w-3 h-3" />
                               <span>{release.user_email || (release.user_id ? `User #${release.user_id}` : 'Unknown')}</span>
                             </div>
-                            {release.size && (
-                              <span>{formatFileSize(release.size)}</span>
-                            )}
                           </div>
                         </div>
                       </div>
                       <div className="flex items-center space-x-4">
-                        {release.download_count !== undefined && (
-                          <div className="flex items-center space-x-1 text-xs text-gray-500">
-                            <Download className="w-3 h-3" />
-                            <span>{release.download_count} downloads</span>
-                          </div>
-                        )}
                         <ChevronRight className="w-4 h-4 text-gray-400" />
                       </div>
                     </div>
-                  </div>
+                  </Link>
                 ))}
               </div>
             )}

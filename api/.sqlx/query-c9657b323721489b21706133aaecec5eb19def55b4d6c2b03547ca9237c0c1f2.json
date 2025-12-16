@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT * FROM modem",
+  "query": "SELECT * FROM modem ORDER BY updated_at DESC",
   "describe": {
     "columns": [
       {
@@ -40,5 +40,5 @@
       false
     ]
   },
-  "hash": "689bd59be5b66fa08dfc61f4dfd990f5becaa5ef39854fa6de0b19c210622f87"
+  "hash": "c9657b323721489b21706133aaecec5eb19def55b4d6c2b03547ca9237c0c1f2"
 }

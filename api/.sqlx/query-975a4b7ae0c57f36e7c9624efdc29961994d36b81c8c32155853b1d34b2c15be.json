@@ -1,0 +1,38 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT\n                r.distribution_id,\n                COALESCE(COUNT(*), 0) as total_devices,\n                COALESCE(COUNT(*) FILTER (WHERE d.release_id = d.target_release_id), 0) as updated_devices,\n                COALESCE(COUNT(*) FILTER (WHERE d.release_id != d.target_release_id), 0) as pending_devices\n            FROM device d\n            JOIN release r ON d.target_release_id = r.id\n            GROUP BY r.distribution_id\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "distribution_id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "total_devices",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 2,
+        "name": "updated_devices",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 3,
+        "name": "pending_devices",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "975a4b7ae0c57f36e7c9624efdc29961994d36b81c8c32155853b1d34b2c15be"
+}

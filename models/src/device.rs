@@ -1,4 +1,4 @@
-use crate::{ip_address::IpAddressInfo, modem::Modem, release::Release};
+use crate::{ip_address::IpAddressInfo, modem::Modem, release::Release, system::SystemInfo};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sqlx::types::{
@@ -6,7 +6,7 @@ use sqlx::types::{
     chrono::{DateTime, Utc},
 };
 use std::collections::HashMap;
-use utoipa::ToSchema;
+use utoipa::{IntoParams, ToSchema};
 
 #[derive(Debug, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct DeviceNetwork {
@@ -28,6 +28,7 @@ pub struct Device {
     pub has_token: Option<bool>,
     pub release_id: Option<i32>,
     pub target_release_id: Option<i32>,
+    #[schema(value_type = Option<SystemInfo>)]
     pub system_info: Option<Value>,
     pub modem_id: Option<i32>,
     pub ip_address_id: Option<i32>,
@@ -41,7 +42,8 @@ pub struct Device {
 }
 
 /// Query filter for device listing.
-#[derive(Deserialize, Serialize, Debug, Default)]
+#[derive(Deserialize, Serialize, Debug, Default, IntoParams)]
+#[into_params(parameter_in = Query)]
 pub struct DeviceFilter {
     pub serial_number: Option<String>,
     /// Filter by approved status. If None, only approved devices are included by default.
