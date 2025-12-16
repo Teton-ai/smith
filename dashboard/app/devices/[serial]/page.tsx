@@ -114,7 +114,7 @@ const DeviceDetailPage = () => {
             </button>
             <Link
               href={`/devices/${serial}/commands`}
-              className="py-2 px-1 border-b-2 border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 font-medium text-sm transition-colors cursor-pointer"
+              className="block py-2 px-1 border-b-2 border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 font-medium text-sm transition-colors cursor-pointer"
             >
               Commands
             </Link>
@@ -183,7 +183,7 @@ const DeviceDetailPage = () => {
                   </span>
                   <Link
                     href={`/distributions/${device.release?.distribution_id}`}
-                    className="font-mono text-sm text-blue-600 hover:text-blue-800 hover:underline cursor-pointer transition-colors"
+                    className="block font-mono text-sm text-blue-600 hover:text-blue-800 hover:underline cursor-pointer transition-colors"
                   >
                     {device.release.distribution_name}
                   </Link>
@@ -199,7 +199,7 @@ const DeviceDetailPage = () => {
                   </span>
                   <Link
                     href={`/releases/${device.release?.id}`}
-                    className="font-mono text-sm text-blue-600 hover:text-blue-800 hover:underline cursor-pointer transition-colors"
+                    className="block font-mono text-sm text-blue-600 hover:text-blue-800 hover:underline cursor-pointer transition-colors"
                   >
                     {device.release.version}
                   </Link>

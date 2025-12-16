@@ -109,7 +109,7 @@ const CommandsPage = () => {
           <nav className="-mb-px flex space-x-8">
             <Link
               href={`/devices/${serial}`}
-              className="py-2 px-1 border-b-2 border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 font-medium text-sm transition-colors cursor-pointer"
+              className="block py-2 px-1 border-b-2 border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 font-medium text-sm transition-colors cursor-pointer"
             >
               Overview
             </Link>

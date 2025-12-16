@@ -311,7 +311,7 @@ const AdminPanel = () => {
                     return (
                       <Link
                         key={device.id}
-                        className="px-4 py-3 hover:bg-purple-50 cursor-pointer transition-colors"
+                        className="block px-4 py-3 hover:bg-purple-50 cursor-pointer transition-colors"
                         href={`/devices/${device.serial_number}`}
                       >
                         <div className="flex items-center justify-between">
@@ -355,7 +355,7 @@ const AdminPanel = () => {
                     <div className="px-4 py-3 bg-gray-50">
                       <Link
                         href='/devices?outdated=true'
-                        className="text-sm text-blue-600 hover:text-blue-800 cursor-pointer"
+                        className="block text-sm text-blue-600 hover:text-blue-800 cursor-pointer"
                       >
                         View all {stuckUpdates.length} devices →
                       </Link>
@@ -379,7 +379,7 @@ const AdminPanel = () => {
                     return (
                       <Link
                         key={device.id}
-                        className="px-4 py-3 hover:bg-yellow-50 cursor-pointer transition-colors"
+                        className="block px-4 py-3 hover:bg-yellow-50 cursor-pointer transition-colors"
                         href={`/devices/${device.serial_number}`}
                       >
                         <div className="flex items-center justify-between">
@@ -412,7 +412,7 @@ const AdminPanel = () => {
                     <div className="px-4 py-3 bg-gray-50">
                       <Link
                         href='/devices'
-                        className="text-sm text-blue-600 hover:text-blue-800 cursor-pointer"
+                        className="block text-sm text-blue-600 hover:text-blue-800 cursor-pointer"
                       >
                         View all {recentlyOffline.length} devices →
                       </Link>
@@ -436,7 +436,7 @@ const AdminPanel = () => {
                     return (
                       <Link
                         key={device.id}
-                        className="px-4 py-3 hover:bg-orange-50 cursor-pointer transition-colors"
+                        className="block px-4 py-3 hover:bg-orange-50 cursor-pointer transition-colors"
                         href={`/devices/${device.serial_number}`}
                       >
                         <div className="flex items-center justify-between">
@@ -469,7 +469,7 @@ const AdminPanel = () => {
                     <div className="px-4 py-3 bg-gray-50">
                       <Link
                         href='/devices'
-                        className="text-sm text-blue-600 hover:text-blue-800 cursor-pointer"
+                        className="block text-sm text-blue-600 hover:text-blue-800 cursor-pointer"
                       >
                         View all {offlineWeek.length} devices →
                       </Link>
@@ -493,7 +493,7 @@ const AdminPanel = () => {
                     return (
                       <Link
                         key={device.id}
-                        className="px-4 py-3 hover:bg-red-50 cursor-pointer transition-colors"
+                        className="block px-4 py-3 hover:bg-red-50 cursor-pointer transition-colors"
                         href={`/devices/${device.serial_number}`}
                       >
                         <div className="flex items-center justify-between">
@@ -526,7 +526,7 @@ const AdminPanel = () => {
                     <div className="px-4 py-3 bg-gray-50">
                       <Link
                         href='/devices'
-                        className="text-sm text-blue-600 hover:text-blue-800 cursor-pointer"
+                        className="block text-sm text-blue-600 hover:text-blue-800 cursor-pointer"
                       >
                         View all {offlineMonth.length} devices →
                       </Link>
@@ -550,7 +550,7 @@ const AdminPanel = () => {
                     return (
                       <Link
                         key={device.id}
-                        className="px-4 py-3 hover:bg-gray-50 cursor-pointer transition-colors"
+                        className="block px-4 py-3 hover:bg-gray-50 cursor-pointer transition-colors"
                         href={`/devices/${device.serial_number}`}
                       >
                         <div className="flex items-center justify-between">
@@ -581,7 +581,7 @@ const AdminPanel = () => {
                     <div className="px-4 py-3 bg-gray-50">
                       <Link
                         href='/devices'
-                        className="text-sm text-blue-600 hover:text-blue-800 cursor-pointer"
+                        className="block text-sm text-blue-600 hover:text-blue-800 cursor-pointer"
                       >
                         View all {neverSeen.length} devices →
                       </Link>

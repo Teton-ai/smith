@@ -147,7 +147,7 @@ const DistributionsPage = () => {
               {displayedDistributions.map((distribution) => (
                 <Link
                   key={distribution.id} 
-                  className="px-4 py-3 hover:bg-gray-50 cursor-pointer transition-colors"
+                  className="block px-4 py-3 hover:bg-gray-50 cursor-pointer transition-colors"
                   href={`/distributions/${distribution.id}`}
                 >
                   <div className="flex items-center justify-between">

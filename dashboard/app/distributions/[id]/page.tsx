@@ -34,7 +34,7 @@ const DistributionDetailPage = () => {
   const { data: releases = [], isLoading: releasesLoading } = useGetDistributionReleases(distributionId);
 
   const { data: latestRelease } = useGetDistributionLatestRelease(distributionId);
-  const getDistributionReleasePackages = useGetDistributionReleasePackages(latestRelease!.id, {query: {enabled: latestRelease != null}})
+  const getDistributionReleasePackages = useGetDistributionReleasePackages(latestRelease?.id as number, {query: {enabled: latestRelease?.id != null}})
 
   const createDistributionReleaseHook = useCreateDistributionRelease()
 
@@ -120,23 +120,16 @@ const DistributionDetailPage = () => {
   };
 
   const handleCreateDraft = async () => {
-    const latestRelease = getLatestRelease();
-    if (creatingDraft || !latestRelease || !selectedVersionOption) return;
+    if (creatingDraft || getDistributionReleasePackages.data == null || !selectedVersionOption) return;
 
     setCreatingDraft(true);
     try {
       const finalVersion = isReleaseCandidate ? `${selectedVersionOption}-rc` : selectedVersionOption;
       
-      // Get packages from the latest release
-      const latestReleasePackages = await getDistributionReleasePackages.promise
-      if (!latestReleasePackages) {
-        throw new Error('Failed to get packages from latest release');
-      }
-
       const newRelease = await createDistributionReleaseHook.mutateAsync({
         distributionId,
         data: {
-          packages: latestReleasePackages.map((p) => p.id),
+          packages: getDistributionReleasePackages.data.map((p) => p.id),
           version: finalVersion
         }
       });
@@ -348,7 +341,7 @@ const DistributionDetailPage = () => {
                 {releases.map((release) => (
                   <Link
                     key={release.id} 
-                    className="p-4 hover:bg-gray-50 cursor-pointer transition-colors"
+                    className="block p-4 hover:bg-gray-50 cursor-pointer transition-colors"
                     href={`/releases/${release.id}`}
                   >
                     <div className="flex items-center justify-between">

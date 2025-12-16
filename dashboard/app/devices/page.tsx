@@ -630,7 +630,7 @@ const DevicesPage = () => {
               {filteredDevices.map((device) => (
               <Link
                 key={device.id} 
-                className="px-4 py-3 hover:bg-gray-50 cursor-pointer transition-colors"
+                className="block px-4 py-3 hover:bg-gray-50 cursor-pointer transition-colors"
                 href={`/devices/${device.serial_number}`}
               >
                 <div className="grid grid-cols-8 gap-4 items-center">
@@ -765,7 +765,7 @@ const DevicesPage = () => {
               ))}
               {/* Load More Button */}
               {hasNextPage && (
-                <div className="px-4 py-4 border-t border-gray-200">
+                <div className="border-t border-gray-200">
                   <button
                     onClick={() => fetchNextPage()}
                     disabled={isFetchingNextPage}

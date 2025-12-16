@@ -29,7 +29,7 @@ export default function PrivateLayout({
             <div className="flex items-center space-x-8">
               {/* Logo */}
               <Link
-                className="cursor-pointer hover:opacity-80 transition-opacity duration-200"
+                className="block cursor-pointer hover:opacity-80 transition-opacity duration-200"
                 href='/dashboard'
               >
                 <Image
@@ -54,7 +54,7 @@ export default function PrivateLayout({
                         isActive
                           ? 'text-gray-900 bg-gray-100'
                           : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'
-                      } px-3 py-2 rounded-md text-sm font-medium transition-colors duration-200 flex items-center space-x-2 cursor-pointer`}
+                      } block px-3 py-2 rounded-md text-sm font-medium transition-colors duration-200 flex items-center space-x-2 cursor-pointer`}
                     >
                       <Icon className="w-4 h-4" />
                       <span>{item.label}</span>
