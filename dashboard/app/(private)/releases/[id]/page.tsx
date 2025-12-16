@@ -11,7 +11,7 @@ import {
 	ChevronsUpDown,
 	Cpu,
 	Eye,
-	Package,
+	Package as PackageIcon,
 	Plus,
 	Rocket,
 	Search,
@@ -26,6 +26,7 @@ import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import {
+	Package,
 	useAddPackageToRelease,
 	useApiReleaseDeployment,
 	useDeletePackageForRelease,
@@ -36,24 +37,6 @@ import {
 	useUpdateRelease,
 } from "@/app/api-client";
 
-interface ReleasePackage {
-	id: number;
-	name: string;
-	version: string;
-	description?: string;
-	size?: number;
-	checksum?: string;
-}
-
-interface AvailablePackage {
-	id: number;
-	name: string;
-	version: string;
-	architecture: string;
-	file: string;
-	created_at: string;
-}
-
 const ReleaseDetailPage = () => {
 	const router = useRouter();
 	const params = useParams();
@@ -62,7 +45,7 @@ const ReleaseDetailPage = () => {
 	const [showAddPackageModal, setShowAddPackageModal] = useState(false);
 	const [showReplacePackageModal, setShowReplacePackageModal] = useState(false);
 	const [packageToReplace, setPackageToReplace] =
-		useState<ReleasePackage | null>(null);
+		useState<Package | null>(null);
 	const [selectedAvailablePackage, setSelectedAvailablePackage] = useState<
 		number | null
 	>(null);
@@ -184,7 +167,7 @@ const ReleaseDetailPage = () => {
 		setShowAddPackageModal(true);
 	};
 
-	const openReplaceModal = (pkg: ReleasePackage) => {
+	const openReplaceModal = (pkg: Package) => {
 		setPackageToReplace(pkg);
 		setSelectedAvailablePackage(null);
 		setPackageSearchQuery("");
@@ -231,7 +214,7 @@ const ReleaseDetailPage = () => {
 		return 0;
 	};
 
-	const getLatestVersionForPackage = (pkg: ReleasePackage) => {
+	const getLatestVersionForPackage = (pkg: Package) => {
 		if (availablePackages.length === 0) return null;
 
 		// Find the current package's created_at from availablePackages
@@ -260,7 +243,7 @@ const ReleaseDetailPage = () => {
 		return sorted[0];
 	};
 
-	const handleUpgradePackage = async (pkg: ReleasePackage) => {
+	const handleUpgradePackage = async (pkg: Package) => {
 		const latestVersion = getLatestVersionForPackage(pkg);
 		if (!latestVersion) return;
 
@@ -855,7 +838,7 @@ const ReleaseDetailPage = () => {
 												// Group packages by name and get only the latest version of each
 												const packagesByName = new Map<
 													string,
-													AvailablePackage
+													Package
 												>();
 
 												availablePackages
@@ -1069,7 +1052,7 @@ const ReleaseDetailPage = () => {
 										<div className="flex items-center justify-between">
 											<div className="flex items-center space-x-3">
 												<div className="p-2 bg-gray-100 text-gray-600 rounded">
-													<Package className="w-4 h-4" />
+													<PackageIcon className="w-4 h-4" />
 												</div>
 												<div>
 													<div className="flex items-center space-x-2">

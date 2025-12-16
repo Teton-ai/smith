@@ -24,15 +24,6 @@ import {
 	useGetRelease,
 } from "@/app/api-client";
 
-interface DeploymentDevice {
-	device_id: number;
-	serial_number: string;
-	release_id: number | null;
-	target_release_id: number | null;
-	last_ping: string | null;
-	added_at: string;
-}
-
 const DeploymentStatusPage = () => {
 	const params = useParams();
 	const releaseId = parseInt(params.id as string);
@@ -90,7 +81,7 @@ const DeploymentStatusPage = () => {
 	});
 
 	const getDeviceStatus = (
-		device: DeploymentDevice | DeploymentDeviceWithStatus,
+		device: DeploymentDeviceWithStatus,
 	) => {
 		if (device.release_id === device.target_release_id) {
 			return {
