@@ -12,10 +12,12 @@ pub struct DistributionRolloutStats {
     pub pending_devices: Option<i64>,
 }
 
-impl DistributionRolloutStats {
-    pub async fn get(distribution_id: i32, pg_pool: &PgPool) -> anyhow::Result<Self> {
-        let result = match sqlx::query_as!(
-            Self,
+pub async fn get_distribution_rollout_stats(
+    distribution_id: i32,
+    pg_pool: &PgPool,
+) -> anyhow::Result<DistributionRolloutStats> {
+    let result = match sqlx::query_as!(
+            DistributionRolloutStats,
             "
             SELECT
                 r.distribution_id,
@@ -33,13 +35,33 @@ impl DistributionRolloutStats {
           .fetch_optional(pg_pool)
           .await? {
             Some(r) => r,
-            None => Self {
+            None => DistributionRolloutStats {
                 distribution_id,
                 total_devices: Some(0),
                 updated_devices: Some(0),
                 pending_devices: Some(0),
             },
         };
-        Ok(result)
-    }
+    Ok(result)
+}
+
+pub async fn get_distributions_rollout_stats(
+    pg_pool: &PgPool,
+) -> anyhow::Result<Vec<DistributionRolloutStats>> {
+    let result = sqlx::query_as!(
+            DistributionRolloutStats,
+            "
+            SELECT
+                r.distribution_id,
+                COALESCE(COUNT(*), 0) as total_devices,
+                COALESCE(COUNT(*) FILTER (WHERE d.release_id = d.target_release_id), 0) as updated_devices,
+                COALESCE(COUNT(*) FILTER (WHERE d.release_id != d.target_release_id), 0) as pending_devices
+            FROM device d
+            JOIN release r ON d.target_release_id = r.id
+            GROUP BY r.distribution_id
+            "
+        )
+          .fetch_all(pg_pool)
+          .await?;
+    Ok(result)
 }

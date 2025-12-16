@@ -167,11 +167,15 @@ impl Actor {
         }
     }
 
+    #[tracing::instrument(skip(self))]
     async fn update(&mut self) {
         info!("Checking for updates");
         self.status = Status::Updating;
         let res = self.check_for_updates().await.map(|_| time::Instant::now());
-        info!("Check for updates result: {:?}", res);
+        match &res {
+            Ok(res) => info!("Check for updates result: {:?}", res),
+            Err(e) => warn!("Check for updates result: {:?}", e),
+        }
         self.last_update = Some(res);
         self.status = Status::Idle;
     }
@@ -185,6 +189,7 @@ impl Actor {
         self.status = Status::Idle;
     }
 
+    #[tracing::instrument(skip(self))]
     async fn check_for_updates(&self) -> Result<()> {
         // apt update on check for updates with timeout
         info!("Running apt update with 5 minute timeout");

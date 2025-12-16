@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams } from 'next/navigation';
 import {
   ChevronRight,
   Wifi,
@@ -16,129 +16,22 @@ import {
   GitBranch,
   Tag,
 } from 'lucide-react';
-import { useQuery } from '@tanstack/react-query';
 import dynamic from 'next/dynamic';
 import PrivateLayout from "@/app/layouts/PrivateLayout";
-import useSmithAPI from "@/app/hooks/smith-api";
 import DeviceHeader from './DeviceHeader';
+import Link from 'next/link';
+import { useGetDeviceInfo } from '@/app/api-client';
 
 const LocationMap = dynamic(() => import('./LocationMap'), {
   ssr: false,
   loading: () => <div className="h-64 bg-gray-100 rounded-lg flex items-center justify-center">Loading map...</div>
 });
 
-interface DeviceNetwork {
-  network_score?: number;
-  download_speed_mbps?: number;
-  upload_speed_mbps?: number;
-  source?: string;
-  updated_at?: string;
-}
-
-interface Device {
-  id: number;
-  serial_number: string;
-  note?: string;
-  last_seen: string | null;
-  has_token: boolean;
-  release_id?: number;
-  target_release_id?: number;
-  created_on: string;
-  approved: boolean;
-  modem_id?: number;
-  ip_address_id?: number;
-  ip_address?: IpAddressInfo;
-  modem?: Modem;
-  release?: Release;
-  target_release?: Release;
-  network?: DeviceNetwork;
-  labels?: Record<string, string>;
-  system_info?: {
-    hostname?: string;
-    device_tree?: {
-      model?: string;
-      serial_number?: string;
-      compatible?: string[];
-    };
-    os_release?: {
-      pretty_name?: string;
-      version_id?: string;
-    };
-    proc?: {
-      version?: string;
-      stat?: {
-        btime?: number;
-      };
-    };
-    smith?: {
-      version?: string;
-    };
-    network?: {
-      interfaces?: Record<string, {
-        ips: string[];
-        mac_address: string;
-      }>;
-    };
-    connection_statuses?: Array<{
-      connection_name: string;
-      connection_state: string;
-      device_name: string;
-      device_type: string;
-    }>;
-  };
-}
-
-
-interface IpAddressInfo {
-  id: number;
-  ip_address: string;
-  name?: string;
-  continent?: string;
-  continent_code?: string;
-  country_code?: string;
-  country?: string;
-  region?: string;
-  city?: string;
-  isp?: string;
-  coordinates?: [number, number];
-  proxy?: boolean;
-  hosting?: boolean;
-  created_at: string;
-  updated_at: string;
-}
-
-interface Modem {
-  id: number;
-  imei: string;
-  network_provider: string;
-  updated_at: string;
-  created_at: string;
-}
-
-interface Release {
-  id: number;
-  distribution_id: number;
-  distribution_architecture: string;
-  distribution_name: string;
-  version: string;
-  draft: boolean;
-  yanked: boolean;
-  created_at: string;
-}
 
 const DeviceDetailPage = () => {
   const params = useParams();
-  const router = useRouter();
-  const { callAPI } = useSmithAPI();
-
   const serial = params.serial as string;
-
-  const { data: device, isLoading: loading } = useQuery({
-    queryKey: ['device', serial],
-    queryFn: () => callAPI<Device>('GET', `/devices/${serial}`),
-    refetchInterval: 5000,
-  });
-
+  const { data: device, isLoading: loading } = useGetDeviceInfo(serial)
 
   const getFlagUrl = (countryCode: string) => {
     return `https://flagicons.lipis.dev/flags/4x3/${countryCode.toLowerCase()}.svg`;
@@ -199,13 +92,13 @@ const DeviceDetailPage = () => {
       <div className="space-y-6">
         {/* Header with Back Button */}
         <div className="flex items-center space-x-4">
-          <button
-            onClick={() => router.push('/devices')}
+          <Link
+            href='/devices'
             className="flex items-center space-x-2 text-gray-600 hover:text-gray-900 transition-colors"
           >
             <ArrowLeft className="w-4 h-4" />
             <span className="text-sm font-medium">Back to Devices</span>
-          </button>
+          </Link>
         </div>
 
         {/* Device Header */}
@@ -219,12 +112,12 @@ const DeviceDetailPage = () => {
             >
               Overview
             </button>
-            <button
-              onClick={() => router.push(`/devices/${serial}/commands`)}
-              className="py-2 px-1 border-b-2 border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 font-medium text-sm transition-colors cursor-pointer"
+            <Link
+              href={`/devices/${serial}/commands`}
+              className="block py-2 px-1 border-b-2 border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 font-medium text-sm transition-colors cursor-pointer"
             >
               Commands
-            </button>
+            </Link>
           </nav>
         </div>
 
@@ -288,12 +181,12 @@ const DeviceDetailPage = () => {
                     <GitBranch className="w-4 h-4 text-gray-400 mr-2" />
                     Distribution
                   </span>
-                  <button
-                    onClick={() => router.push(`/distributions/${device.release?.distribution_id}`)}
-                    className="font-mono text-sm text-blue-600 hover:text-blue-800 hover:underline cursor-pointer transition-colors"
+                  <Link
+                    href={`/distributions/${device.release?.distribution_id}`}
+                    className="block font-mono text-sm text-blue-600 hover:text-blue-800 hover:underline cursor-pointer transition-colors"
                   >
                     {device.release.distribution_name}
-                  </button>
+                  </Link>
                 </div>
               )}
 
@@ -304,12 +197,12 @@ const DeviceDetailPage = () => {
                     <Tag className="w-4 h-4 text-gray-400 mr-2" />
                     Current Release
                   </span>
-                  <button
-                    onClick={() => router.push(`/releases/${device.release?.id}`)}
-                    className="font-mono text-sm text-blue-600 hover:text-blue-800 hover:underline cursor-pointer transition-colors"
+                  <Link
+                    href={`/releases/${device.release?.id}`}
+                    className="block font-mono text-sm text-blue-600 hover:text-blue-800 hover:underline cursor-pointer transition-colors"
                   >
                     {device.release.version}
-                  </button>
+                  </Link>
                 </div>
               )}
 
@@ -542,7 +435,7 @@ const DeviceDetailPage = () => {
                       <img
                         src={getFlagUrl(device.ip_address.country_code)}
                         alt={device.ip_address.country || 'Country flag'}
-                        className="w-6 h-4 rounded-sm border border-gray-200"
+                        className="w-6 h-4"
                         onError={(e) => {
                           (e.target as HTMLImageElement).style.display = 'none';
                         }}

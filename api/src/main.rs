@@ -35,7 +35,6 @@ mod auth;
 mod command;
 mod config;
 mod dashboard;
-mod db;
 mod deployment;
 mod device;
 mod distribution;
@@ -43,6 +42,7 @@ mod error;
 mod event;
 mod handlers;
 mod health;
+mod home;
 mod ip_address;
 mod metric;
 mod middlewares;
@@ -185,7 +185,6 @@ async fn start_main_server(config: &'static Config, authorization: Authorization
 
     let (device_router, device_api) = OpenApiRouter::with_openapi(ApiDoc::openapi())
         .routes(routes!(device::route::get_device))
-        .route_layer(middleware::from_fn(device::middleware))
         .split_for_parts();
     api_doc.merge(device_api);
 
@@ -197,7 +196,7 @@ async fn start_main_server(config: &'static Config, authorization: Authorization
 
     #[allow(deprecated)]
     let (protected_router, protected_api) = OpenApiRouter::with_openapi(ApiDoc::openapi())
-        .routes(routes!(dashboard::route::api))
+        .routes(routes!(dashboard::route::get_dashboard))
         .routes(routes!(auth::route::verify_token))
         .routes(routes!(
             network::route::get_networks,
@@ -271,11 +270,11 @@ async fn start_main_server(config: &'static Config, authorization: Authorization
             device::route::get_all_commands_for_device
         ))
         .routes(routes!(rollout::route::api_rollout,))
+        .routes(routes!(rollout::route::get_distribution_rollouts))
         .routes(routes!(deployment::route::api_get_deployment_devices))
         .routes(routes!(
             deployment::route::api_release_deployment,
             deployment::route::api_get_release_deployment,
-            deployment::route::api_release_deployment_check_done
         ))
         .routes(routes!(deployment::route::api_confirm_full_rollout))
         .nest_service(

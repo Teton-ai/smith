@@ -7,40 +7,13 @@ import {
   Search,
   Shield,
   Wifi,
-  MapPin,
-  Building,
-  Clock,
-  Calendar,
   Edit2,
   Check,
   X,
 } from 'lucide-react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQueryClient } from '@tanstack/react-query';
 import PrivateLayout from "@/app/layouts/PrivateLayout";
-import useSmithAPI from "@/app/hooks/smith-api";
-
-interface IpAddressInfo {
-  id: number;
-  ip_address: string;
-  name?: string;
-  continent?: string;
-  continent_code?: string;
-  country_code?: string;
-  country?: string;
-  region?: string;
-  city?: string;
-  isp?: string;
-  coordinates?: [number, number];
-  proxy?: boolean;
-  hosting?: boolean;
-  device_count?: number;
-  created_at: string;
-  updated_at: string;
-}
-
-interface IpAddressListResponse {
-  ip_addresses: IpAddressInfo[];
-}
+import { IpAddressInfo, useGetIpAddresses, useUpdateIpAddress } from '../api-client';
 
 const IpAddressSkeleton = () => (
   <div className="px-4 py-3 animate-pulse">
@@ -84,7 +57,6 @@ const LoadingSkeleton = () => (
 const IpAddressesPage = () => {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { callAPI } = useSmithAPI();
   const queryClient = useQueryClient();
   const [searchTerm, setSearchTerm] = useState('');
   const [editingId, setEditingId] = useState<number | null>(null);
@@ -92,14 +64,7 @@ const IpAddressesPage = () => {
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
 
-  const { data: ipAddresses = [], isLoading: initialLoading } = useQuery({
-    queryKey: ['ip-addresses'],
-    queryFn: async () => {
-      const response = await callAPI<IpAddressListResponse>('GET', '/ip_addresses');
-      return response?.ip_addresses || [];
-    },
-    refetchInterval: 5000,
-  });
+  const { data: ipAddresses = [], isLoading: initialLoading, queryKey: ipAddressesQueryKey } = useGetIpAddresses({query: {select: (data) => data.ip_addresses}});
 
   // Initialize search term from URL params
   useEffect(() => {
@@ -175,19 +140,16 @@ const IpAddressesPage = () => {
     setEditingName('');
   };
 
+  const updateIpAddressHook = useUpdateIpAddress()
   const saveEdit = async () => {
     if (editingId === null || saving) return;
 
     setSaving(true);
     try {
-      const requestBody = {
-        name: editingName.trim() || null,
-      };
-
-      const updatedIp = await callAPI<IpAddressInfo>('PUT', `/ip_address/${editingId}`, requestBody);
+      const updatedIp = await updateIpAddressHook.mutateAsync({ipAddressId: editingId, data: {name: editingName.trim()}});
 
       if (updatedIp) {
-        queryClient.invalidateQueries({ queryKey: ['ip-addresses'] });
+        queryClient.invalidateQueries({ queryKey: ipAddressesQueryKey });
 
         // Show success toast
         const name = editingName.trim();

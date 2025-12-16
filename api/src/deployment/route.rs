@@ -12,15 +12,18 @@ use models::deployment::DeploymentRequest;
 const TAG: &str = "deployment";
 
 #[utoipa::path(
-  get,
-  path = "/releases/{release_id}/deployment",
-  responses(
+    get,
+    path = "/releases/{release_id}/deployment",
+    params(
+        ("release_id" = i32, Path),
+    ),
+    responses(
         (status = StatusCode::OK, body = Deployment),
-  ),
-  security(
+    ),
+    security(
       ("auth_token" = [])
-  ),
-  tag = TAG
+    ),
+    tag = TAG
 )]
 pub async fn api_get_release_deployment(
     Path(release_id): Path<i32>,
@@ -38,6 +41,9 @@ pub async fn api_get_release_deployment(
 #[utoipa::path(
   post,
   path = "/releases/{release_id}/deployment",
+    params(
+        ("release_id" = i32, Path),
+    ),
   responses(
         (status = StatusCode::OK, body = Deployment),
   ),
@@ -60,29 +66,11 @@ pub async fn api_release_deployment(
 }
 
 #[utoipa::path(
-  patch,
-  path = "/releases/{release_id}/deployment",
-  responses(
-        (status = StatusCode::OK, body = Deployment),
-  ),
-  security(
-      ("auth_token" = [])
-  ),
-  tag = TAG
-)]
-pub async fn api_release_deployment_check_done(
-    Path(release_id): Path<i32>,
-    Extension(state): Extension<State>,
-) -> Result<(StatusCode, Json<Deployment>), StatusCode> {
-    let release = crate::deployment::check_done(release_id, &state.pg_pool)
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    Ok((StatusCode::OK, Json(release)))
-}
-
-#[utoipa::path(
   get,
   path = "/releases/{release_id}/deployment/devices",
+    params(
+        ("release_id" = i32, Path),
+    ),
   responses(
         (status = StatusCode::OK, body = Vec<DeploymentDeviceWithStatus>),
   ),
@@ -104,6 +92,9 @@ pub async fn api_get_deployment_devices(
 #[utoipa::path(
   post,
   path = "/releases/{release_id}/deployment/confirm",
+    params(
+        ("release_id" = i32, Path),
+    ),
   responses(
         (status = StatusCode::OK, body = Deployment),
         (status = StatusCode::BAD_REQUEST, description = "Canary devices have not completed updating"),
