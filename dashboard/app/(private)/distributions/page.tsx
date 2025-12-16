@@ -125,9 +125,7 @@ const DistributionsPage = () => {
 
 				<div className="mt-4 sm:mt-0 flex items-center space-x-3">
 					<span className="text-sm text-gray-500">
-						{loading
-							? "Loading..."
-							: `${displayedDistributions.length} distribution${displayedDistributions.length !== 1 ? "s" : ""} shown`}
+						{`${displayedDistributions.length} distribution${displayedDistributions.length !== 1 ? "s" : ""} shown`}
 					</span>
 					{distributionsWithoutDevices.length > 0 && (
 						<button
