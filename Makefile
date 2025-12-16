@@ -35,3 +35,6 @@ init:
 	echo "Initializing the repo"
 	test -f .env || cp .env.template .env
 	test -f dashboard/.env || cp dashboard/.env.template dashboard/.env
+
+gen-api-client:
+	cd dashboard && npm run gen-api-client && cd ..

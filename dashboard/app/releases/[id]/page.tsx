@@ -6,13 +6,10 @@ import { useRouter, useParams } from 'next/navigation';
 import {
   Package,
   Tag,
-  Download,
   Calendar,
   ArrowLeft,
   Box,
   Cpu,
-  Monitor,
-  HardDrive,
   Plus,
   Trash2,
   Eye,
@@ -25,31 +22,13 @@ import {
   XCircle,
   AlertTriangle,
 } from 'lucide-react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQueryClient } from '@tanstack/react-query';
 import PrivateLayout from "@/app/layouts/PrivateLayout";
-import useSmithAPI from "@/app/hooks/smith-api";
 import moment from 'moment';
+import Link from 'next/link';
+import { useAddPackageToRelease, useApiReleaseDeployment, useDeletePackageForRelease, useGetDistributionById, useGetDistributionReleasePackages, useGetPackages, useGetRelease, useUpdateRelease } from '@/app/api-client';
 
-interface Release {
-  id: number;
-  version: string;
-  distribution_id: number;
-  created_at: string;
-  size?: number;
-  download_count?: number;
-  yanked?: boolean;
-  draft?: boolean;
-  user_id?: number;
-  user_email?: string;
-}
 
-interface Distribution {
-  id: number;
-  name: string;
-  description: string | null;
-  architecture: string;
-  num_packages: number | null;
-}
 
 interface ReleasePackage {
   id: number;
@@ -72,10 +51,8 @@ interface AvailablePackage {
 const ReleaseDetailPage = () => {
   const router = useRouter();
   const params = useParams();
-  const releaseId = params.id as string;
-  const { callAPI } = useSmithAPI();
+  const releaseId = parseInt(params.id as string);
   const queryClient = useQueryClient();
-  const [publishing, setPublishing] = useState(false);
   const [showAddPackageModal, setShowAddPackageModal] = useState(false);
   const [showReplacePackageModal, setShowReplacePackageModal] = useState(false);
   const [packageToReplace, setPackageToReplace] = useState<ReleasePackage | null>(null);
@@ -90,34 +67,17 @@ const ReleaseDetailPage = () => {
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const [upgradingPackages, setUpgradingPackages] = useState<Set<number>>(new Set());
 
-  const { data: release, isLoading: loading, error } = useQuery({
-    queryKey: ['release', releaseId],
-    queryFn: () => callAPI<Release>('GET', `/releases/${releaseId}`),
-    enabled: !!releaseId,
-    refetchInterval: 5000,
+  const { data: release, isLoading: loading, queryKey: releaseQueryKey } = useGetRelease(releaseId);
+
+  const { data: distribution } = useGetDistributionById(release?.distribution_id as any, {
+    query: {
+      enabled: !!release?.distribution_id,
+    }
   });
 
-  const { data: distribution } = useQuery({
-    queryKey: ['distribution', release?.distribution_id],
-    queryFn: () => callAPI<Distribution>('GET', `/distributions/${release?.distribution_id}`),
-    enabled: !!release?.distribution_id,
-    refetchInterval: 5000,
-  });
+  const { data: packages = [], isLoading: packagesLoading, queryKey: packagesQueryKey } = useGetDistributionReleasePackages(releaseId);
 
-  const { data: packages = [], isLoading: packagesLoading } = useQuery({
-    queryKey: ['release-packages', releaseId],
-    queryFn: () => callAPI<ReleasePackage[]>('GET', `/releases/${releaseId}/packages`),
-    enabled: !!releaseId,
-    refetchInterval: 5000,
-    select: (data) => data || [],
-  });
-
-  const { data: availablePackages = [], isLoading: availablePackagesLoading } = useQuery({
-    queryKey: ['packages'],
-    queryFn: () => callAPI<AvailablePackage[]>('GET', '/packages'),
-    refetchInterval: 5000,
-    select: (data) => data || [],
-  });
+  const { data: availablePackages = [], isLoading: availablePackagesLoading } = useGetPackages();
 
   useEffect(() => {
     setMounted(true);
@@ -132,32 +92,6 @@ const ReleaseDetailPage = () => {
 
   const formatRelativeTime = (dateString: string) => {
     return moment(dateString).fromNow();
-  };
-
-  const formatFileSize = (bytes?: number) => {
-    if (!bytes) return 'Unknown';
-    const mb = bytes / (1024 * 1024);
-    if (mb < 1024) {
-      return `${mb.toFixed(1)} MB`;
-    }
-    const gb = mb / 1024;
-    return `${gb.toFixed(1)} GB`;
-  };
-
-  const getArchIcon = (architecture: string) => {
-    switch (architecture.toLowerCase()) {
-      case 'x86_64':
-      case 'amd64':
-        return <Monitor className="w-5 h-5" />;
-      case 'arm64':
-      case 'aarch64':
-        return <Cpu className="w-5 h-5" />;
-      case 'armv7':
-      case 'arm':
-        return <HardDrive className="w-5 h-5" />;
-      default:
-        return <Package className="w-5 h-5" />;
-    }
   };
 
   const getArchColor = (architecture: string) => {
@@ -176,51 +110,42 @@ const ReleaseDetailPage = () => {
     }
   };
 
-  const handlePublishRelease = async () => {
-    if (!release || !release.draft || publishing) return;
-
-    setPublishing(true);
-    try {
-      await callAPI('POST', `/releases/${releaseId}`, {
-        draft: false
-      });
-
-      queryClient.invalidateQueries({ queryKey: ['release', releaseId] });
-    } catch (error: any) {
-      console.error('Failed to publish release:', error);
-      alert(`Failed to publish release: ${error?.message || 'Unknown error'}`);
-    } finally {
-      setPublishing(false);
+  const updateReleaseHook = useUpdateRelease({mutation: {
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: releaseQueryKey });
+      
     }
+  }});
+  const handlePublishRelease = async () => {
+    updateReleaseHook.mutate({releaseId, data: {draft: false}});
   };
 
-  const handleAddPackage = async () => {
-    if (!selectedAvailablePackage) return;
-
-    try {
-      await callAPI('POST', `/releases/${releaseId}/packages`, {
-        id: selectedAvailablePackage
-      });
-
-      queryClient.invalidateQueries({ queryKey: ['release-packages', releaseId] });
+  const addPackageToReleaseHook = useAddPackageToRelease({
+    mutation: {
+      onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: packagesQueryKey });
       setSelectedAvailablePackage(null);
       setShowAddPackageModal(false);
-    } catch (error: any) {
-      console.error('Failed to add package:', error);
-      alert(`Failed to add package: ${error?.message || 'Unknown error'}`);
+        
+      }
     }
+  })
+  const handleAddPackage = async () => {
+    if (!selectedAvailablePackage) return;
+    addPackageToReleaseHook.mutate({releaseId, data: {id: selectedAvailablePackage}})
   };
 
+  const deletePackageForReleaseHook = useDeletePackageForRelease({
+    mutation: {
+      onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['release-packages', releaseId] });
+        
+      }
+    }
+  });
   const handleDeletePackage = async (packageId: number) => {
     if (!confirm('Are you sure you want to delete this package?')) return;
-
-    try {
-      await callAPI('DELETE', `/releases/${releaseId}/packages/${packageId}`);
-      queryClient.invalidateQueries({ queryKey: ['release-packages', releaseId] });
-    } catch (error: any) {
-      console.error('Failed to delete package:', error);
-      alert(`Failed to delete package: ${error?.message || 'Unknown error'}`);
-    }
+    deletePackageForReleaseHook.mutate({releaseId, packageId})
   };
 
   const openAddModal = () => {
@@ -241,12 +166,9 @@ const ReleaseDetailPage = () => {
 
     try {
       // Delete old package
-      await callAPI('DELETE', `/releases/${releaseId}/packages/${packageToReplace.id}`);
+      await deletePackageForReleaseHook.mutateAsync({releaseId, packageId: packageToReplace.id})
 
-      // Add new package
-      await callAPI('POST', `/releases/${releaseId}/packages`, {
-        id: selectedAvailablePackage
-      });
+      await addPackageToReleaseHook.mutateAsync({releaseId, data: {id: selectedAvailablePackage}})
 
       queryClient.invalidateQueries({ queryKey: ['release-packages', releaseId] });
       setSelectedAvailablePackage(null);
@@ -304,12 +226,9 @@ const ReleaseDetailPage = () => {
 
     try {
       // Delete old package
-      await callAPI('DELETE', `/releases/${releaseId}/packages/${pkg.id}`);
+      await deletePackageForReleaseHook.mutateAsync({releaseId, packageId: pkg.id})
 
-      // Add new package
-      await callAPI('POST', `/releases/${releaseId}/packages`, {
-        id: latestVersion.id
-      });
+      await addPackageToReleaseHook.mutateAsync({releaseId, data: {id: latestVersion.id}})
 
       queryClient.invalidateQueries({ queryKey: ['release-packages', releaseId] });
 
@@ -332,12 +251,14 @@ const ReleaseDetailPage = () => {
     }
   };
 
+  const releaseDeploymentHook = useApiReleaseDeployment()
+
   const handleDeployRelease = async () => {
     if (!release || deploying) return;
 
     setDeploying(true);
     try {
-      await callAPI('POST', `/releases/${releaseId}/deployment`);
+      await releaseDeploymentHook.mutateAsync({releaseId});
       setShowDeployModal(false);
       router.push(`/releases/${releaseId}/deployment`);
     } catch (error: any) {
@@ -361,9 +282,7 @@ const ReleaseDetailPage = () => {
 
     setYanking(true);
     try {
-      await callAPI('POST', `/releases/${releaseId}`, {
-        yanked: true
-      });
+      await updateReleaseHook.mutateAsync({releaseId, data: {yanked: true}})
 
       queryClient.invalidateQueries({ queryKey: ['release', releaseId] });
       setShowYankModal(false);
@@ -393,16 +312,6 @@ const ReleaseDetailPage = () => {
     );
   }
 
-  if (error) {
-    return (
-      <PrivateLayout id="distributions">
-        <div className="flex items-center justify-center h-32">
-          <div className="text-red-500 text-sm">Error: {error.message}</div>
-        </div>
-      </PrivateLayout>
-    );
-  }
-
   return (
     <PrivateLayout id="distributions">
       {/* Toast Notification */}
@@ -425,15 +334,15 @@ const ReleaseDetailPage = () => {
       <div className="space-y-6">
         {/* Header with Back Button */}
         <div className="flex items-center space-x-4">
-          <button
-            onClick={() => distribution ? router.push(`/distributions/${distribution.id}`) : router.push('/distributions')}
+          <Link
+            href={distribution ? `/distributions/${distribution.id}` : '/distributions'}
             className="flex items-center space-x-2 text-gray-600 hover:text-gray-900 transition-colors cursor-pointer"
           >
             <ArrowLeft className="w-4 h-4" />
             <span className="text-sm font-medium">
               {distribution ? `Back to ${distribution.name}` : 'Back to Distributions'}
             </span>
-          </button>
+          </Link>
         </div>
 
         {/* Release Header */}
@@ -470,25 +379,16 @@ const ReleaseDetailPage = () => {
                       </span>
                     </div>
                   )}
-                  {release.size && (
-                    <span>{formatFileSize(release.size)}</span>
-                  )}
-                  {release.download_count !== undefined && (
-                    <div className="flex items-center space-x-1">
-                      <Download className="w-4 h-4" />
-                      <span>{release.download_count} downloads</span>
-                    </div>
-                  )}
                 </div>
               </div>
             </div>
-            <button
-              onClick={() => router.push(`/devices?release_id=${release.id}`)}
+            <Link
+              href={`/devices?release_id=${release.id}`}
               className="flex items-center space-x-2 px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-md hover:bg-gray-200 transition-colors cursor-pointer"
             >
               <Cpu className="w-4 h-4" />
               <span>View Devices</span>
-            </button>
+            </Link>
           </div>
         </div>
 
@@ -922,14 +822,14 @@ const ReleaseDetailPage = () => {
                 <>
                   <button
                     onClick={handlePublishRelease}
-                    disabled={publishing}
+                    disabled={updateReleaseHook.isPending}
                     className={`flex items-center space-x-2 px-4 py-2 text-sm font-medium rounded-md transition-colors ${
-                      publishing
+                      updateReleaseHook.isPending
                         ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
                         : 'bg-green-600 text-white hover:bg-green-700 cursor-pointer'
                     }`}
                   >
-                    {publishing ? (
+                    {updateReleaseHook.isPending ? (
                       <>
                         <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
                         <span>Publishing...</span>
@@ -1030,17 +930,6 @@ const ReleaseDetailPage = () => {
                                 </>
                               );
                             })()}
-                          </div>
-                          {pkg.description && (
-                            <p className="mt-1 text-sm text-gray-600">{pkg.description}</p>
-                          )}
-                          <div className="flex items-center space-x-3 mt-1 text-xs text-gray-500">
-                            {pkg.size && (
-                              <span>{formatFileSize(pkg.size)}</span>
-                            )}
-                            {pkg.checksum && (
-                              <span className="font-mono">{pkg.checksum.substring(0, 16)}...</span>
-                            )}
                           </div>
                         </div>
                       </div>

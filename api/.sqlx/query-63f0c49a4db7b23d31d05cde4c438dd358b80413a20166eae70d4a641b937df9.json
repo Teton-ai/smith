@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id, cmd, continue_on_error\n                 FROM command_queue\n                 WHERE device_id = $1 AND fetched = false AND canceled = false",
+  "query": "\n            SELECT\n                id,\n                cmd,\n                continue_on_error\n            FROM command_queue\n            WHERE device_id = $1 AND fetched = false AND canceled = false",
   "describe": {
     "columns": [
       {
@@ -30,5 +30,5 @@
       false
     ]
   },
-  "hash": "dedfb8823766db70ed9fced68cdfa2919cfec30cc1915efa43a340e945bd64ab"
+  "hash": "63f0c49a4db7b23d31d05cde4c438dd358b80413a20166eae70d4a641b937df9"
 }

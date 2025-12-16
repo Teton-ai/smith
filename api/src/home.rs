@@ -5,16 +5,25 @@ use serde_json::json;
 use smith::utils::schema;
 use smith::utils::schema::SafeCommandTx::{UpdateNetwork, UpdateVariables};
 use smith::utils::schema::{HomePost, NetworkType, SafeCommandRequest, SafeCommandRx};
-use sqlx::Acquire;
-use sqlx::PgConnection;
 use sqlx::PgPool;
-use tracing::{debug, error};
+use tracing::debug;
+use tracing::error;
+
+// TODO: Get rid of this db.rs, legacy design and ugly
+
+#[derive(Debug)]
+pub struct DeviceWithToken {
+    pub id: i32,
+    pub serial_number: String,
+}
 
 pub struct CommandsDB {
     id: i32,
     cmd: Value,
     continue_on_error: bool,
 }
+
+pub struct DBHandler;
 
 pub async fn save_responses(
     device_id: i32,
@@ -46,13 +55,13 @@ pub async fn save_responses(
                         .collect(),
                 };
                 add_commands(
-                    device_serial_number,
+                    &device_serial_number,
                     vec![SafeCommandRequest {
                         id: -1,
                         command: update_variables,
                         continue_on_error: false,
                     }],
-                    &mut tx,
+                    pool,
                 )
                 .await?;
             }
@@ -76,19 +85,19 @@ pub async fn save_responses(
                 .fetch_optional(&mut *tx)
                 .await?;
 
-                if let Some(network) = network
-                    && network.network_type == NetworkType::Wifi
-                {
-                    add_commands(
-                        device_serial_number,
-                        vec![SafeCommandRequest {
-                            id: -4,
-                            command: UpdateNetwork { network },
-                            continue_on_error: false,
-                        }],
-                        &mut tx,
-                    )
-                    .await?;
+                if let Some(network) = network {
+                    if network.network_type == NetworkType::Wifi {
+                        add_commands(
+                            &device_serial_number,
+                            vec![SafeCommandRequest {
+                                id: -4,
+                                command: UpdateNetwork { network },
+                                continue_on_error: false,
+                            }],
+                            pool,
+                        )
+                        .await?;
+                    }
                 }
             }
             SafeCommandRx::UpdateSystemInfo { ref system_info } => {
@@ -97,7 +106,7 @@ pub async fn save_responses(
                     device_id,
                     system_info
                 )
-                .execute(&mut *tx)
+                .execute(pool)
                 .await?;
             }
             SafeCommandRx::TestNetwork {
@@ -150,7 +159,7 @@ pub async fn save_responses(
                             upload_speed_mbps,
                             "speed_test"
                         )
-                        .execute(&mut *tx)
+                        .execute(pool)
                         .await?;
                 }
             }
@@ -182,69 +191,66 @@ pub async fn get_commands(
     device_id: i32,
     device_serial_number: &str,
     pool: &PgPool,
-) -> Vec<SafeCommandRequest> {
-    if let Ok(mut tx) = pool.begin().await {
-        let fetched_commands: Vec<CommandsDB> = sqlx::query_as!(
-            CommandsDB,
-            "SELECT id, cmd, continue_on_error
-                 FROM command_queue
-                 WHERE device_id = $1 AND fetched = false AND canceled = false",
-            device_id
-        )
-        .fetch_all(&mut *tx)
-        .await
-        .unwrap_or_else(|err| {
-            error!("Failed to get commands for device {err}");
-            Vec::new()
-        });
+) -> Result<Vec<SafeCommandRequest>, sqlx::Error> {
+    let mut tx = pool.begin().await?;
 
-        // If commands are fetched successfully, update fetched_at timestamp
-        if !fetched_commands.is_empty() {
-            let ids: Vec<i32> = fetched_commands.iter().map(|cmd| cmd.id).collect();
-            let _update_query = sqlx::query!(
+    let fetched_commands: Vec<CommandsDB> = sqlx::query_as!(
+        CommandsDB,
+        r#"
+            SELECT
+                id,
+                cmd,
+                continue_on_error
+            FROM command_queue
+            WHERE device_id = $1 AND fetched = false AND canceled = false"#,
+        device_id
+    )
+    .fetch_all(&mut *tx)
+    .await?;
+
+    // If commands are fetched successfully, update fetched_at timestamp
+    if !fetched_commands.is_empty() {
+        let ids: Vec<i32> = fetched_commands.iter().map(|cmd| cmd.id).collect();
+        let _ = sqlx::query!(
                     "UPDATE command_queue SET fetched_at = CURRENT_TIMESTAMP, fetched = true WHERE id = ANY($1)",
                     &ids
                 )
                 .execute(&mut *tx)
                 .await;
-        }
-
-        tx.commit().await.unwrap_or_else(|err| {
-            error!("Failed to commit transaction: {err}");
-        });
-
-        fetched_commands
-            .into_iter()
-            .filter_map(|cmd| match serde_json::from_value(cmd.cmd) {
-                Ok(command) => Some(SafeCommandRequest {
-                    id: cmd.id,
-                    command,
-                    continue_on_error: cmd.continue_on_error,
-                }),
-                Err(err) => {
-                    error!(
-                        serial_number = device_serial_number,
-                        "Failed to deserialize command from database: {err}"
-                    );
-                    None
-                }
-            })
-            .collect()
-    } else {
-        Vec::new()
     }
+
+    tx.commit().await?;
+
+    Ok(fetched_commands
+        .into_iter()
+        .filter_map(|cmd| match serde_json::from_value(cmd.cmd) {
+            Ok(command) => Some(SafeCommandRequest {
+                id: cmd.id,
+                command,
+                continue_on_error: cmd.continue_on_error,
+            }),
+            Err(err) => {
+                error!(
+                    serial_number = device_serial_number,
+                    cmd_id = cmd.id,
+                    "Failed to deserialize command from database: {err}"
+                );
+                None
+            }
+        })
+        .collect())
 }
 
-async fn add_commands(
+pub async fn add_commands(
     serial_number: &str,
     commands: Vec<SafeCommandRequest>,
-    conn: &mut PgConnection,
+    pool: &PgPool,
 ) -> Result<Vec<i32>> {
     debug!("Adding commands to device {}", serial_number);
     debug!("Commands: {:?}", commands);
     let mut command_ids = Vec::new();
 
-    let mut tx = conn.begin().await?;
+    let mut tx = pool.begin().await?;
 
     let bundle_id = sqlx::query!(r#"INSERT INTO command_bundles DEFAULT VALUES RETURNING uuid"#)
         .fetch_one(&mut *tx)

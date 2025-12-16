@@ -14,6 +14,9 @@ const IP_ADDRESS_TAG: &str = "ip_address";
 #[utoipa::path(
     get,
     path = "/ip_address/{ip_address_id}",
+    params(
+        ("ip_address_id" = i32, Path),
+    ),
     responses(
         (status = 200, description = "IP address information retrieved successfully", body = IpAddressInfo),
         (status = 403, description = "Forbidden"),
@@ -207,6 +210,9 @@ pub async fn get_ip_addresses(
 #[utoipa::path(
     put,
     path = "/ip_address/{ip_address_id}",
+    params(
+        ("ip_address_id" = i32, Path),
+    ),
     request_body = UpdateIpAddressRequest,
     responses(
         (status = 200, description = "IP address updated successfully", body = IpAddressInfo),
