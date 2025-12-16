@@ -31,6 +31,11 @@ jobs:
       - name: Install SQLx CLI
         run: cargo install sqlx-cli --no-default-features --features native-tls,postgres --locked
 
+      - name: Setup Biome
+        uses: biomejs/setup-biome@v2
+        with:
+          version: 2.3.9
+
       - name: Check formatting
         run: cargo fmt -- --check
 
@@ -43,6 +48,10 @@ jobs:
 
       - name: Run tests
         run: cargo test --workspace
+
+      - name: Dashboard linting
+        working-directory: dashboard
+        run: biome ci .
 
       - name: Report Status
         if: always()
