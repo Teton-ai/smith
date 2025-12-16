@@ -50,7 +50,11 @@ fn parse_watchdog_value(value: &str) -> Option<i32> {
     // Handle common time suffixes
     if let Some(num_str) = value_lower.strip_suffix("ms") {
         // Milliseconds - convert to seconds (minimum 1)
-        return num_str.trim().parse::<i32>().ok().map(|ms| (ms / 1000).max(1));
+        return num_str
+            .trim()
+            .parse::<i32>()
+            .ok()
+            .map(|ms| (ms / 1000).max(1));
     }
 
     if let Some(num_str) = value_lower.strip_suffix("sec") {
@@ -95,10 +99,7 @@ pub fn is_service_file_path(path: &str) -> bool {
     // Remove leading slash or "./" for comparison
     let normalized = path.trim_start_matches('/').trim_start_matches("./");
 
-    service_dirs
-        .iter()
-        .any(|dir| normalized.starts_with(dir))
-        && normalized.ends_with(".service")
+    service_dirs.iter().any(|dir| normalized.starts_with(dir)) && normalized.ends_with(".service")
 }
 
 #[cfg(test)]
@@ -177,7 +178,9 @@ Type=simple
     #[test]
     fn test_is_service_file_path() {
         assert!(is_service_file_path("/lib/systemd/system/myapp.service"));
-        assert!(is_service_file_path("./usr/lib/systemd/system/other.service"));
+        assert!(is_service_file_path(
+            "./usr/lib/systemd/system/other.service"
+        ));
         assert!(is_service_file_path("etc/systemd/system/test.service"));
         assert!(!is_service_file_path("/usr/bin/myapp"));
         assert!(!is_service_file_path("/lib/systemd/system/myapp.socket"));

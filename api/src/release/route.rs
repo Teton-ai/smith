@@ -229,11 +229,17 @@ pub async fn add_package_to_release(
                     }
                 }
                 Err(e) => {
-                    warn!("Failed to extract services from package {}: {}", pkg.file, e);
+                    warn!(
+                        "Failed to extract services from package {}: {}",
+                        pkg.file, e
+                    );
                 }
             },
             Err(e) => {
-                warn!("Failed to download package {} for service extraction: {}", pkg.file, e);
+                warn!(
+                    "Failed to download package {} for service extraction: {}",
+                    pkg.file, e
+                );
             }
         }
     }
@@ -496,7 +502,10 @@ pub async fn create_release_service(
     .map_err(|err| {
         error!("Failed to create release service: {err}");
         // Check if it's a unique constraint violation
-        if err.to_string().contains("release_services_release_id_service_name_key") {
+        if err
+            .to_string()
+            .contains("release_services_release_id_service_name_key")
+        {
             StatusCode::CONFLICT
         } else {
             StatusCode::INTERNAL_SERVER_ERROR
