@@ -168,7 +168,7 @@ const ReleaseDetailPage = () => {
 		mutation: {
 			onSuccess: () => {
 				queryClient.invalidateQueries({
-					queryKey: ["release-packages", releaseId],
+					queryKey: packagesQueryKey,
 				});
 			},
 		},
