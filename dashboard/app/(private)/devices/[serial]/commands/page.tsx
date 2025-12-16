@@ -5,12 +5,8 @@ import moment from "moment";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useState } from "react";
-import { useGetAllCommandsForDevice, useGetDeviceInfo } from "@/app/api-client";
+import { DeviceCommandResponse, useGetAllCommandsForDevice, useGetDeviceInfo } from "@/app/api-client";
 import DeviceHeader from "../DeviceHeader";
-
-interface Command {
-	[key: string]: any;
-}
 
 const CommandsPage = () => {
 	const params = useParams();
@@ -26,32 +22,32 @@ const CommandsPage = () => {
 	const commands = commandsData?.commands || [];
 	const loading = commandsLoading || deviceLoading;
 
-	const getCommandDisplay = (cmd: Command) => {
+	const getCommandDisplay = (cmd: DeviceCommandResponse) => {
 		if (typeof cmd.cmd_data === "string") {
 			return { type: cmd.cmd_data, content: null };
 		}
 		if (typeof cmd.cmd_data === "object" && cmd.cmd_data) {
 			const type = Object.keys(cmd.cmd_data)[0];
-			const content = cmd.cmd_data[type];
+			const content = (cmd.cmd_data as any)[type];
 			return { type, content };
 		}
 		return { type: "Unknown", content: null };
 	};
 
-	const getResponseDisplay = (cmd: Command) => {
-		if (cmd.response === null) return { type: "None", content: null };
+	const getResponseDisplay = (cmd: DeviceCommandResponse) => {
+		if (cmd.response == null) return { type: "None", content: null };
 		if (typeof cmd.response === "string") {
 			return { type: cmd.response, content: null };
 		}
 		if (typeof cmd.response === "object" && cmd.response) {
 			const type = Object.keys(cmd.response)[0];
-			const content = cmd.response[type];
+			const content = (cmd.response as any)[type];
 			return { type, content };
 		}
 		return { type: "Unknown", content: null };
 	};
 
-	const getCommandStatus = (cmd: Command) => {
+	const getCommandStatus = (cmd: DeviceCommandResponse) => {
 		if (cmd.cancelled) return "cancelled";
 		if (!cmd.fetched) return "pending";
 		if (!cmd.response_at) return "executing";

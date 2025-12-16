@@ -216,7 +216,7 @@ const DevicesPage = () => {
 
 	// Get the selected release info for display
 	const selectedRelease = useMemo(() => {
-		if (releaseFilter === null) return null;
+		if (releaseFilter == null) return null;
 		return allReleases.find((r: Release) => r.id === releaseFilter) || null;
 	}, [releaseFilter, allReleases]);
 
@@ -513,7 +513,7 @@ const DevicesPage = () => {
 							<button
 								onClick={() => setShowReleaseDropdown(!showReleaseDropdown)}
 								className={`flex items-center space-x-2 px-3 py-2 text-sm rounded-md transition-colors cursor-pointer ${
-									releaseFilter !== null
+									releaseFilter != null
 										? "bg-purple-600 text-white"
 										: "bg-gray-100 text-gray-700 hover:bg-gray-200"
 								}`}
@@ -547,7 +547,7 @@ const DevicesPage = () => {
 									</div>
 
 									<div className="max-h-64 overflow-y-auto">
-										{releaseFilter !== null && (
+										{releaseFilter != null && (
 											<button
 												onClick={() => handleReleaseFilterChange(undefined)}
 												className="w-full px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 border-b border-gray-200 flex items-center space-x-2 cursor-pointer"

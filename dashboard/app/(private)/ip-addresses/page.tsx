@@ -146,7 +146,7 @@ const IpAddressesPage = () => {
 
 	const updateIpAddressHook = useUpdateIpAddress();
 	const saveEdit = async () => {
-		if (editingId === null || saving) return;
+		if (editingId == null || saving) return;
 
 		setSaving(true);
 		try {
