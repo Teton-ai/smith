@@ -5,24 +5,13 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import {
   Smartphone,
   Search,
-  Wifi,
   Signal,
-  Clock,
-  Edit2,
   Check,
   X,
 } from 'lucide-react';
-import { useQuery } from '@tanstack/react-query';
 import PrivateLayout from "@/app/layouts/PrivateLayout";
-import useSmithAPI from "@/app/hooks/smith-api";
+import { useGetModemList } from '../api-client';
 
-interface ModemInfo {
-  id: number;
-  imei: string;
-  network_provider: string;
-  created_at: string;
-  updated_at: string;
-}
 
 const ModemSkeleton = () => (
   <div className="px-4 py-3 animate-pulse">
@@ -63,21 +52,10 @@ const LoadingSkeleton = () => (
 const ModemsPage = () => {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { callAPI } = useSmithAPI();
   const [searchTerm, setSearchTerm] = useState('');
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
 
-  const { data: modems = [], isLoading: initialLoading } = useQuery({
-    queryKey: ['modems'],
-    queryFn: () => callAPI<ModemInfo[]>('GET', '/modems'),
-    refetchInterval: 5000,
-    select: (data) => {
-      if (!data) return [];
-      return [...data].sort((a, b) =>
-        new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()
-      );
-    },
-  });
+  const { data: modems = [], isLoading: initialLoading } = useGetModemList();
 
   // Initialize search term from URL params
   useEffect(() => {

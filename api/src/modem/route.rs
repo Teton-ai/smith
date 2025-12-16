@@ -21,7 +21,7 @@ const TAG: &str = "modems";
 pub async fn get_modem_list(
     Extension(state): Extension<State>,
 ) -> Result<Json<Vec<Modem>>, StatusCode> {
-    let modems = sqlx::query_as!(Modem, "SELECT * FROM modem")
+    let modems = sqlx::query_as!(Modem, "SELECT * FROM modem ORDER BY updated_at DESC")
         .fetch_all(&state.pg_pool)
         .await
         .map_err(|err| {
@@ -35,6 +35,9 @@ pub async fn get_modem_list(
 #[utoipa::path(
     get,
     path = "/modems/{modem_id}",
+    params(
+        ("modem_id" = i32, Path),
+    ),
     responses(
         (status = StatusCode::OK, description = "Return found modem", body = Modem),
         (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to retrieve modem"),

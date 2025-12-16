@@ -24,6 +24,7 @@ use smith::utils::schema::SafeCommandRequest;
 use sqlx::types::Json as SqlxJson;
 use std::collections::HashMap;
 use tracing::{debug, error};
+use utoipa::IntoParams;
 
 const DEVICE_TAG: &str = "device";
 const DEVICES_TAG: &str = "devices";
@@ -58,6 +59,10 @@ pub async fn get_device(
 #[utoipa::path(
     get,
     path = "/lean/{filter_kind}/{filter_value}",
+    params(
+        ("filter_kind" = String, Path),
+        ("filter_value" = String, Path),
+    ),
     responses(
         (status = 200, description = "Filtered devices", body = LeanResponse),
         (status = 403, description = "Forbidden"),
@@ -311,6 +316,9 @@ pub async fn get_devices_new(
 #[utoipa::path(
     get,
     path = "/devices",
+    params(
+        DeviceFilter
+    ),
     responses(
         (status = StatusCode::OK, description = "List of devices retrieved successfully", body = Vec<Device>),
         (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to retrieve devices"),
@@ -637,6 +645,9 @@ pub async fn get_variables(
 #[utoipa::path(
     get,
     path = "/devices/{device_id}/tags",
+    params(
+        ("device_id" = String, Path),
+    ),
     responses(
         (status = 200, description = "List of tags for device", body = Vec<Tag>),
         (status = 500, description = "Failed to retrieve tags", body = String),
@@ -688,6 +699,9 @@ pub async fn get_tag_for_device(
 #[utoipa::path(
     get,
     path = "/devices/{device_id}/health",
+    params(
+        ("device_id" = String, Path)
+    ),
     responses(
         (status = 200, description = "Device health status", body = Vec<DeviceHealth>),
         (status = 404, description = "Device not found", body = String),
@@ -740,6 +754,10 @@ pub async fn get_health_for_device(
 #[utoipa::path(
     delete,
     path = "/devices/{device_id}/tags/{tag_id}",
+    params(
+        ("device_id" = i32, Path),
+        ("tag_id" = i32, Path)
+    ),
     responses(
         (status = 204, description = "Tag deleted successfully"),
         (status = 500, description = "Failed to delete tag", body = String),
@@ -798,6 +816,10 @@ pub async fn delete_tag_from_device(
 #[utoipa::path(
     put,
     path = "/devices/{device_id}/tags/{tag_id}",
+    params(
+        ("device_id" = i32, Path),
+        ("tag_id" = i32, Path)
+    ),
     responses(
         (status = 201, description = "Tag added successfully"),
         (status = 304, description = "Tag already exists"),
@@ -862,6 +884,10 @@ pub async fn add_tag_to_device(
 #[utoipa::path(
     delete,
     path = "/devices/{device_id}/variables/{variable_id}",
+    params(
+        ("device_id" = i32, Path),
+        ("variable_id" = i32, Path)
+    ),
     responses(
         (status = 204, description = "Variable deleted successfully"),
         (status = 500, description = "Failed to delete variable", body = String),
@@ -916,6 +942,10 @@ pub async fn delete_variable_from_device(
 #[utoipa::path(
     put,
     path = "/devices/{device_id}/variables/{variable_id}",
+    params(
+        ("device_id" = i32, Path),
+        ("variable_id" = i32, Path)
+    ),
     request_body = NewVariable,
     responses(
         (status = 200, description = "Variable updated successfully"),
@@ -981,6 +1011,9 @@ pub async fn update_variable_for_device(
 #[utoipa::path(
     get,
     path = "/devices/{device_id}/variables",
+    params(
+        ("device_id" = i32, Path),
+    ),
     responses(
         (status = 200, description = "List of variables for device", body = Vec<Variable>),
         (status = 500, description = "Failed to retrieve variables", body = String),
@@ -1019,6 +1052,9 @@ pub async fn get_variables_for_device(
 #[utoipa::path(
     post,
     path = "/devices/{device_id}/variables",
+    params(
+        ("device_id" = i32, Path),
+    ),
     request_body = NewVariable,
     responses(
         (status = 201, description = "Variable added successfully"),
@@ -1083,6 +1119,9 @@ pub async fn add_variable_to_device(
 #[utoipa::path(
     put,
     path = "/devices/{device_id}/note",
+    params(
+        ("device_id" = i32, Path),
+    ),
     request_body = Note,
     responses(
         (status = 200, description = "Note updated successfully"),
@@ -1144,6 +1183,9 @@ pub async fn update_note_for_device(
 #[utoipa::path(
     get,
     path = "/devices/{device_id}/ledger",
+    params(
+        ("device_id" = i32, Path),
+    ),
     responses(
         (status = 200, description = "Device ledger entries", body = DeviceLedgerItemPaginated),
         (status = 400, description = "Invalid pagination parameters"),
@@ -1310,7 +1352,8 @@ pub async fn get_ledger_for_device(
     Ok(Json(ledger_paginated))
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, IntoParams)]
+#[into_params(parameter_in = Query)]
 pub struct PaginationId {
     pub starting_after: Option<i32>,
     pub ending_before: Option<i32>,
@@ -1320,8 +1363,12 @@ pub struct PaginationId {
 #[utoipa::path(
     get,
     path = "/devices/{device_id}/commands",
+    params(
+        ("device_id" = String, Path),
+        PaginationId
+    ),
     responses(
-        (status = StatusCode::OK, description = "Command successfully fetch from to the device"),
+        (status = StatusCode::OK, description = "Command successfully fetch from to the device", body = CommandsPaginated),
         (status = StatusCode::NOT_FOUND, description = "Device not found"),
         (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to fetch device commands"),
     ),
@@ -1563,6 +1610,9 @@ pub async fn get_all_commands_for_device(
 #[utoipa::path(
     get,
     path = "/devices/{device_id}/release",
+    params(
+        ("device_id" = i32, Path),
+    ),
     responses(
         (status = 200, description = "Device release information", body = DeviceRelease),
         (status = 500, description = "Failed to retrieve device release", body = String),
@@ -1660,6 +1710,9 @@ pub async fn get_device_release(
 #[utoipa::path(
     post,
     path = "/devices/{device_id}/release",
+    params(
+        ("device_id" = i32, Path),
+    ),
     request_body = UpdateDeviceRelease,
     responses(
         (status = 200, description = "Device target release updated successfully"),
@@ -1762,6 +1815,9 @@ pub async fn update_devices_target_release(
 #[utoipa::path(
     post,
     path = "/devices/{device_id}/commands",
+    params(
+        ("device_id" = String, Path),
+    ),
     responses(
         (status = StatusCode::CREATED, description = "Command successfully issue to device"),
         (status = StatusCode::NOT_FOUND, description = "Device not found"),
@@ -1847,6 +1903,9 @@ pub async fn issue_commands_to_device(
 #[utoipa::path(
     get,
     path = "/devices/{device_id}",
+    params(
+        ("device_id" = String, Path),
+    ),
     responses(
         (status = StatusCode::OK, description = "Return found device", body = Device),
         (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to retrieve device"),
@@ -2064,6 +2123,9 @@ pub async fn get_device_info(
 #[utoipa::path(
     delete,
     path = "/devices/{device_id}",
+    params(
+        ("device_id" = i32, Path),
+    ),
     responses(
         (status = StatusCode::NO_CONTENT, description = "Successfully deleted the device"),
         (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to delete device"),
@@ -2106,6 +2168,9 @@ pub struct UpdateDeviceRequest {
 #[utoipa::path(
     patch,
     path = "/devices/{device_id}",
+    params(
+        ("device_id" = String, Path),
+    ),
     request_body = UpdateDeviceRequest,
     responses(
         (status = StatusCode::OK, description = "Device updated successfully"),
@@ -2227,6 +2292,9 @@ pub async fn update_device(
 #[utoipa::path(
     delete,
     path = "/labels/{key}",
+    params(
+        ("key" = String, Path),
+    ),
     responses(
         (status = StatusCode::NO_CONTENT, description = "Label deleted from all devices"),
         (status = StatusCode::FORBIDDEN, description = "Forbidden"),
@@ -2268,6 +2336,9 @@ pub async fn delete_label(
 #[utoipa::path(
     post,
     path = "/devices/{device_id}/approval",
+    params(
+        ("device_id" = i32, Path),
+    ),
     responses(
         (status = 200, description = "Device approved successfully", body = bool),
         (status = 500, description = "Failed to approve device", body = String),
@@ -2330,8 +2401,11 @@ pub async fn approve_device(
 #[utoipa::path(
     delete,
     path = "/devices/{device_id}/approval",
+    params(
+        ("device_id" = i32, Path),
+    ),
     responses(
-        (status = 200, description = "Device approval revoked successfully"),
+        (status = 200, description = "Device approval revoked successfully", body = bool),
         (status = 500, description = "Failed to revoke device approval", body = String),
     ),
     security(
@@ -2342,7 +2416,7 @@ pub async fn approve_device(
 pub async fn revoke_device(
     Path(device_id): Path<i32>,
     Extension(state): Extension<State>,
-) -> axum::response::Result<Json<()>, StatusCode> {
+) -> axum::response::Result<Json<bool>, StatusCode> {
     let mut tx = state.pg_pool.begin().await.map_err(|err| {
         error!("Failed to start transaction {err}");
         StatusCode::INTERNAL_SERVER_ERROR
@@ -2377,12 +2451,15 @@ pub async fn revoke_device(
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
 
-    Ok(Json(()))
+    Ok(Json(true))
 }
 
 #[utoipa::path(
     delete,
     path = "/devices/{device_id}/token",
+    params(
+        ("device_id" = i32, Path),
+    ),
     responses(
         (status = 200, description = "Device token deleted successfully"),
         (status = 500, description = "Failed to delete device token", body = String),
@@ -2433,6 +2510,9 @@ pub async fn delete_token(
 #[utoipa::path(
     get,
     path = "/devices/{serial_number}/network",
+    params(
+        ("serial_number" = String, Path),
+    ),
     responses(
         (status = StatusCode::OK, description = "Network retrieved successfully"),
         (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to retrieve network"),
@@ -2475,6 +2555,9 @@ pub async fn get_network_for_device(
 #[utoipa::path(
     put,
     path = "/devices/{serial_number}/network",
+    params(
+        ("serial_number" = String, Path),
+    ),
     responses(
         (status = StatusCode::OK, description = "Successfully updated network"),
         (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to update network"),
@@ -2506,7 +2589,10 @@ pub async fn update_device_network(
 
 #[utoipa::path(
     put,
-    path = "/devices/network/{network}",
+    path = "/devices/network/{network_id}",
+    params(
+        ("network_id" = i32, Path),
+    ),
     responses(
         (status = StatusCode::OK, description = "Successfully updated networks"),
         (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to update networks"),

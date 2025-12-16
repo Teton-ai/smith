@@ -24,7 +24,7 @@ const PACKAGES_TAG: &str = "packages";
     get,
     path = "/packages",
     responses(
-        (status = 200, description = "List of registered packages"),
+        (status = 200, description = "List of registered packages", body = Vec<Package>),
         (status = 500, description = "Failure", body = String),
     ),
     security(
