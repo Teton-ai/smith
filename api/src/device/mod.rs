@@ -1,18 +1,11 @@
 use crate::config::Config;
-use crate::db::DeviceWithToken;
-use axum::Extension;
-use axum::extract::Request;
-use axum::http::{StatusCode, header};
-use axum::middleware::Next;
-use axum::response::Response;
 use models::release::Release;
 use serde::{Deserialize, Serialize, Serializer};
 use serde_json::{Value, json};
 use smith::utils::schema::{DeviceRegistration, DeviceRegistrationResponse};
-use sqlx::types::Json;
+use sqlx::PgPool;
 use sqlx::types::chrono::{DateTime, Utc};
-use sqlx::types::{chrono, ipnetwork};
-use sqlx::{PgPool, Pool, Postgres};
+use sqlx::types::{Json as SqlxJson, chrono, ipnetwork};
 use std::collections::HashMap;
 use std::net::IpAddr;
 use std::time::Duration;
@@ -21,16 +14,13 @@ use tracing::{debug, error, warn};
 
 pub mod route;
 
-#[derive(Clone)]
-pub struct AuthDevice(pub RawDevice);
-
 // TODO: Change this, this needs to be device and the other is PublicDevice, API type
 #[derive(Debug, Serialize, utoipa::ToSchema, Clone)]
 pub struct RawDevice {
     pub id: i32,
     pub serial_number: String,
     #[schema(value_type = HashMap<String, String>)]
-    pub labels: Json<HashMap<String, String>>,
+    pub labels: SqlxJson<HashMap<String, String>>,
     pub last_ping: Option<DateTime<Utc>>,
     pub wifi_mac: Option<String>,
     pub modified_on: DateTime<Utc>,
@@ -41,7 +31,7 @@ pub struct RawDevice {
     pub token: Option<String>,
     pub release_id: Option<i32>,
     pub target_release_id: Option<i32>,
-    pub system_info: Option<Value>,
+    pub system_info: Option<serde_json::Value>,
     pub network_id: Option<i32>,
     pub modem_id: Option<i32>,
     pub archived: bool,
@@ -313,8 +303,6 @@ async fn update_ip_geolocation(
     }
 }
 
-const BEARER: &str = "Bearer ";
-
 pub async fn register_device(
     payload: DeviceRegistration,
     pool: &PgPool,
@@ -483,82 +471,8 @@ pub async fn register_device(
     Err(RegistrationError::NotApprovedDevice)
 }
 
-/// Retrieves a device by its authentication token.
-///
-/// # Arguments
-/// * `token` - The authentication token assigned to the device
-/// * `pg_pool` - PostgreSQL connection pool
-///
-/// # Returns
-/// * `Ok(Some(RawDevice))` if a device with the token exists
-/// * `Ok(None)` if no device matches the token
-/// * `Err` if the database query fails
-pub async fn get_device_from_token(
-    token: String,
-    pg_pool: &Pool<Postgres>,
-) -> anyhow::Result<Option<RawDevice>> {
-    Ok(sqlx::query_as!(
-            RawDevice,
-            r#"
-            SELECT
-                d.*,
-                COALESCE(JSONB_OBJECT_AGG(l.name, dl.value) FILTER (WHERE l.name IS NOT NULL), '{}') as "labels!: Json<HashMap<String, String>>"
-            FROM device d
-            LEFT JOIN device_label dl ON dl.device_id = d.id
-            LEFT JOIN label l ON l.id = dl.label_id
-            WHERE
-                token IS NOT NULL AND
-                token = $1
-            GROUP BY d.id
-            "#,
-            token
-        )
-        .fetch_optional(pg_pool)
-        .await?)
-}
-
-/// Axum middleware that authenticates devices using Bearer tokens.
-///
-/// Extracts the Bearer token from the Authorization header, validates it against
-/// the database, and injects the authenticated device into request extensions as `AuthDevice`.
-///
-/// # Arguments
-/// * `state` - Application state containing the PostgreSQL connection pool
-/// * `request` - Incoming HTTP request
-/// * `next` - Next middleware/handler in the chain
-///
-/// # Returns
-/// * `Ok(Response)` if authentication succeeds, with `AuthDevice` in request extensions
-/// * `Err(StatusCode::UNAUTHORIZED)` if the token is missing, invalid, or not found
-pub async fn middleware(
-    Extension(state): Extension<crate::State>,
-    mut request: Request,
-    next: Next,
-) -> Result<Response, StatusCode> {
-    let headers = request.headers();
-
-    let authorization_header = headers
-        .get(header::AUTHORIZATION)
-        .ok_or(StatusCode::UNAUTHORIZED)?;
-    let authorization = authorization_header
-        .to_str()
-        .map_err(|_| StatusCode::UNAUTHORIZED)?;
-    if !authorization.starts_with(BEARER) {
-        return Err(StatusCode::UNAUTHORIZED);
-    }
-    let bearer_token = authorization.trim_start_matches(BEARER);
-    let device = get_device_from_token(bearer_token.to_string(), &state.pg_pool)
-        .await
-        .map_err(|_| StatusCode::UNAUTHORIZED)?
-        .ok_or(StatusCode::UNAUTHORIZED)?;
-
-    request.extensions_mut().insert(AuthDevice(device));
-
-    Ok(next.run(request).await)
-}
-
 pub async fn save_last_ping_with_ip(
-    device: &DeviceWithToken,
+    device_id: i32,
     ip_address: Option<IpAddr>,
     pool: &PgPool,
     config: &Config,
@@ -607,7 +521,7 @@ pub async fn save_last_ping_with_ip(
             // Update device with IP address ID
             sqlx::query!(
                 "UPDATE device SET last_ping = NOW(), ip_address_id = $2 WHERE id = $1",
-                device.id,
+                device_id,
                 ip_id
             )
             .execute(&mut *tx)
@@ -638,7 +552,7 @@ pub async fn save_last_ping_with_ip(
         None => {
             sqlx::query!(
                 "UPDATE device SET last_ping = NOW() WHERE id = $1",
-                device.id
+                device_id
             )
             .execute(&mut *tx)
             .await?;
@@ -648,10 +562,10 @@ pub async fn save_last_ping_with_ip(
     Ok(())
 }
 
-pub async fn get_target_release(device: &DeviceWithToken, pool: &PgPool) -> Option<i32> {
+pub async fn get_target_release(device_id: i32, pool: &PgPool) -> Option<i32> {
     if let Ok(device) = sqlx::query!(
         "SELECT target_release_id FROM device WHERE id = $1",
-        &device.id
+        &device_id
     )
     .fetch_one(pool)
     .await
@@ -662,14 +576,14 @@ pub async fn get_target_release(device: &DeviceWithToken, pool: &PgPool) -> Opti
 }
 
 pub async fn save_release_id(
-    device: &DeviceWithToken,
+    device_id: i32,
     release_id: Option<i32>,
     pool: &PgPool,
 ) -> anyhow::Result<()> {
     if let Some(new_release_id) = release_id {
         let mut tx = pool.begin().await?;
 
-        let current = sqlx::query!("SELECT release_id FROM device WHERE id = $1", device.id)
+        let current = sqlx::query!("SELECT release_id FROM device WHERE id = $1", device_id)
             .fetch_one(&mut *tx)
             .await?;
 
@@ -677,7 +591,7 @@ pub async fn save_release_id(
             sqlx::query!(
                 "UPDATE device SET release_id = $1 WHERE id = $2",
                 new_release_id,
-                device.id,
+                device_id,
             )
             .execute(&mut *tx)
             .await?;
@@ -689,7 +603,7 @@ pub async fn save_release_id(
                         (device_id, previous_release_id, upgraded_release_id)
                         VALUES ($1, $2, $3)
                         ",
-                    device.id,
+                    device_id,
                     previous_release_id,
                     new_release_id
                 )
