@@ -1,10 +1,11 @@
 use crate::State;
 use crate::device::{
-    AuthDevice, DeviceHealth, DeviceLedgerItem, DeviceLedgerItemPaginated, DeviceRelease,
-    LeanDevice, LeanResponse, NewVariable, Note, RawDevice, Tag, UpdateDeviceRelease,
-    UpdateDevicesRelease, Variable,
+    DeviceHealth, DeviceLedgerItem, DeviceLedgerItemPaginated, DeviceRelease, LeanDevice,
+    LeanResponse, NewVariable, Note, RawDevice, Tag, UpdateDeviceRelease, UpdateDevicesRelease,
+    Variable,
 };
 use crate::event::PublicEvent;
+use crate::handlers::AuthedDevice;
 use crate::middlewares::authorization;
 use crate::release::get_release_by_id;
 use crate::user::CurrentUser;
@@ -48,8 +49,28 @@ pub struct LeanDeviceFilter {
     tag = DEVICE_TAG,
 )]
 pub async fn get_device(
-    Extension(AuthDevice(device)): Extension<AuthDevice>,
+    device: AuthedDevice,
+    Extension(state): Extension<State>,
 ) -> axum::response::Result<Json<RawDevice>, StatusCode> {
+    let device = sqlx::query_as!(
+        RawDevice,
+        r#"
+        SELECT
+            d.*,
+            COALESCE(JSONB_OBJECT_AGG(l.name, dl.value) FILTER (WHERE l.name IS NOT NULL), '{}') as "labels!: SqlxJson<HashMap<String, String>>"
+        FROM device d
+        LEFT JOIN device_label dl ON dl.device_id = d.id
+        LEFT JOIN label l ON l.id = dl.label_id
+        WHERE
+            d.id = $1
+        GROUP BY d.id
+        "#,
+        device.id
+        )
+        .fetch_one(&state.pg_pool).await.map_err(|e| {
+                error!("Failed to get device {e}");
+                StatusCode::INTERNAL_SERVER_ERROR
+            })?;
     Ok(Json(device))
 }
 

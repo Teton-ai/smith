@@ -1,5 +1,5 @@
 use crate::State;
-use crate::db::DeviceWithToken;
+use crate::handlers::AuthedDevice;
 use crate::modem::{clear_modem, save_modem};
 use axum::body::{Body, to_bytes};
 use axum::extract::Request;
@@ -73,7 +73,7 @@ pub struct NewModem {
     ),
 )]
 pub async fn modem(
-    device: DeviceWithToken,
+    device: AuthedDevice,
     Extension(state): Extension<State>,
     Json(modem): Json<Option<NewModem>>,
 ) -> Result<StatusCode, StatusCode> {

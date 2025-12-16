@@ -435,7 +435,7 @@ const DeviceDetailPage = () => {
                       <img
                         src={getFlagUrl(device.ip_address.country_code)}
                         alt={device.ip_address.country || 'Country flag'}
-                        className="w-6 h-4 rounded-sm border border-gray-200"
+                        className="w-6 h-4"
                         onError={(e) => {
                           (e.target as HTMLImageElement).style.display = 'none';
                         }}

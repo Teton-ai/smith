@@ -1,5 +1,5 @@
 use crate::dbus::SmithDbusProxy;
-use crate::magic::MagicHandle;
+use crate::magic::{self, MagicHandle};
 use crate::shutdown::ShutdownHandler;
 use anyhow::Result;
 use tracing::info;
@@ -28,7 +28,16 @@ pub async fn status() -> Result<()> {
 
     // check the system version of the packages in the magic file
     for package in magic_packages {
-        let installed_version = package.get_system_version().await?;
+        let installed_version = match package.get_system_version().await {
+            Ok(v) => v,
+            Err(e) => {
+                println!(
+                    "{}: Failed to get system version, magic.toml version is {}. Error: {}",
+                    package.name, package.version, e
+                );
+                continue;
+            }
+        };
         let magic_toml_version = package.version;
 
         println!(
