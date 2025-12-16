@@ -1,5 +1,5 @@
 use crate::State;
-use crate::package::{extract_services_from_deb, Package};
+use crate::package::{Package, extract_services_from_deb};
 use crate::release::{Release, get_release_by_id};
 use crate::storage::Storage;
 use axum::extract::Path;
