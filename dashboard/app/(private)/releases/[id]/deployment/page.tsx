@@ -80,9 +80,7 @@ const DeploymentStatusPage = () => {
 		},
 	});
 
-	const getDeviceStatus = (
-		device: DeploymentDeviceWithStatus,
-	) => {
+	const getDeviceStatus = (device: DeploymentDeviceWithStatus) => {
 		if (device.release_id === device.target_release_id) {
 			return {
 				status: "updated",

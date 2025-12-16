@@ -26,7 +26,7 @@ import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import {
-	Package,
+	type Package,
 	useAddPackageToRelease,
 	useApiReleaseDeployment,
 	useDeletePackageForRelease,
@@ -44,8 +44,9 @@ const ReleaseDetailPage = () => {
 	const queryClient = useQueryClient();
 	const [showAddPackageModal, setShowAddPackageModal] = useState(false);
 	const [showReplacePackageModal, setShowReplacePackageModal] = useState(false);
-	const [packageToReplace, setPackageToReplace] =
-		useState<Package | null>(null);
+	const [packageToReplace, setPackageToReplace] = useState<Package | null>(
+		null,
+	);
 	const [selectedAvailablePackage, setSelectedAvailablePackage] = useState<
 		number | null
 	>(null);
@@ -836,10 +837,7 @@ const ReleaseDetailPage = () => {
 										) : (
 											(() => {
 												// Group packages by name and get only the latest version of each
-												const packagesByName = new Map<
-													string,
-													Package
-												>();
+												const packagesByName = new Map<string, Package>();
 
 												availablePackages
 													.filter(

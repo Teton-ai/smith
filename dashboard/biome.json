@@ -14,8 +14,7 @@
 		"ignoreUnknown": false
 	},
 	"formatter": {
-		"enabled": true,
-		"indentStyle": "tab"
+		"enabled": true
 	},
 	"linter": {
 		"enabled": true,

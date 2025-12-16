@@ -5,7 +5,11 @@ import moment from "moment";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useState } from "react";
-import { DeviceCommandResponse, useGetAllCommandsForDevice, useGetDeviceInfo } from "@/app/api-client";
+import {
+	type DeviceCommandResponse,
+	useGetAllCommandsForDevice,
+	useGetDeviceInfo,
+} from "@/app/api-client";
 import DeviceHeader from "../DeviceHeader";
 
 const CommandsPage = () => {
