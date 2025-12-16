@@ -50,7 +50,7 @@ jobs:
         run: cargo test --workspace
 
       - name: Dashboard linting
-        working-directory: dashboard
+        working-directory: ./dashboard
         run: biome ci .
 
       - name: Report Status
