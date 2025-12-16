@@ -16,7 +16,7 @@ import {
 } from 'lucide-react';
 import NetworkQualityIndicator from '@/app/components/NetworkQualityIndicator';
 import { useConfig } from '@/app/hooks/config';
-import { Device } from '@/models';
+import { Device } from '@/app/api-client';
 
 const Tooltip = ({ children, content }: { children: React.ReactNode, content: string }) => {
   const [isVisible, setIsVisible] = React.useState(false);

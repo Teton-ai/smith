@@ -14,25 +14,14 @@ import {
   Check,
   X,
 } from 'lucide-react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
-import useSmithAPI from "@/app/hooks/smith-api";
+import { useQueryClient } from '@tanstack/react-query';
 import PrivateLayout from "@/app/layouts/PrivateLayout";
 import NetworkQualityIndicator from "@/app/components/NetworkQualityIndicator";
 import { useConfig } from "@/app/hooks/config";
 import Link from 'next/link';
-import { Device } from '@/models';
-
-interface DashboardData {
-  total_count: number,
-  online_count: number,
-  offline_count: number,
-  outdated_count: number,
-  archived_count: number,
-}
-
+import { Device, useApproveDevice, useGetDashboard, useGetDevices, useRevokeDevice } from '../api-client';
 
 const AdminPanel = () => {
-  const { callAPI } = useSmithAPI();
   const { config } = useConfig();
   const queryClient = useQueryClient();
   const [processingDevices, setProcessingDevices] = useState<Set<number>>(new Set());
@@ -43,38 +32,25 @@ const AdminPanel = () => {
     ?.split(',')
     .map(l => l.trim())
     .filter(Boolean) || [];
-  const excludeParams = excludeLabels.length > 0
-    ? '&' + excludeLabels.map(l => `exclude_labels=${encodeURIComponent(l)}`).join('&')
-    : '';
 
-  const { data: dashboardData, isLoading: dashboardLoading } = useQuery({
-    queryKey: ['dashboard'],
-    queryFn: () => callAPI<DashboardData>('GET', '/dashboard'),
-    refetchInterval: 5000,
-  });
+  const dashboardQuery = useGetDashboard({
+  query: {refetchInterval: 5000}});
 
-  const { data: unapprovedDevices = [], isLoading: unapprovedLoading } = useQuery({
-    queryKey: ['devices', 'unapproved'],
-    queryFn: () => callAPI<Device[]>('GET', '/devices?approved=false'),
-    refetchInterval: 5000,
-    select: (data) => data || [],
-  });
+  const unapprovedDevices = useGetDevices({ approved: false }, {query: {refetchInterval: 5000}});
 
-  const { data: outdatedDevices = [], isLoading: outdatedLoading } = useQuery({
-    queryKey: ['devices', 'outdated', excludeParams],
-    queryFn: () => callAPI<Device[]>('GET', `/devices?outdated=true&online=true${excludeParams}`),
-    refetchInterval: 5000,
-    select: (data) => data || [],
-  });
+  const { data: outdatedDevices = [], isLoading: outdatedLoading } = useGetDevices({
+    outdated: true, exclude_labels: excludeLabels
+  }, {query: {refetchInterval: 5000}});
 
-  const { data: offlineDevices = [], isLoading: offlineLoading } = useQuery({
-    queryKey: ['devices', 'offline', excludeParams],
-    queryFn: () => callAPI<Device[]>('GET', `/devices?online=false${excludeParams}`),
-    refetchInterval: 5000,
-    select: (data) => data || [],
-  });
+  const { data: offlineDevices = [], isLoading: offlineLoading } = useGetDevices({
+    online: false,
+    exclude_labels: excludeLabels,
+  }, {query: {refetchInterval: 5000}});
 
-  const loading = dashboardLoading || unapprovedLoading || outdatedLoading || offlineLoading;
+  const approveDeviceHook = useApproveDevice();
+  const revokeDeviceHook = useRevokeDevice();
+
+  const loading = dashboardQuery.isLoading || unapprovedDevices.isLoading || outdatedLoading || offlineLoading;
 
   useEffect(() => {
     if (toast) {
@@ -106,16 +82,16 @@ const AdminPanel = () => {
   const handleApprove = async (deviceId: number, e: React.MouseEvent) => {
     e.stopPropagation();
 
-    const device = unapprovedDevices.find(d => d.id === deviceId);
+    const device = unapprovedDevices.data?.find(d => d.id === deviceId);
     const deviceName = device?.serial_number || 'Device';
 
     setProcessingDevices(prev => new Set(prev).add(deviceId));
 
-    const success = await callAPI('POST', `/devices/${deviceId}/approval`);
+    const success = await approveDeviceHook.mutateAsync({deviceId})
 
     if (success) {
-      queryClient.invalidateQueries({ queryKey: ['devices', 'unapproved'] });
-      queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+      queryClient.invalidateQueries({ queryKey: unapprovedDevices.queryKey });
+      queryClient.invalidateQueries({ queryKey: dashboardQuery.queryKey });
       setToast({
         message: `${deviceName} approved successfully`,
         type: 'success'
@@ -137,7 +113,7 @@ const AdminPanel = () => {
   const handleReject = async (deviceId: number, e: React.MouseEvent) => {
     e.stopPropagation();
 
-    const device = unapprovedDevices.find(d => d.id === deviceId);
+    const device = unapprovedDevices.data?.find(d => d.id === deviceId);
     const deviceName = device?.serial_number || 'Device';
 
     if (!confirm(`Are you sure you want to reject ${deviceName}? This will archive it.`)) {
@@ -146,11 +122,11 @@ const AdminPanel = () => {
 
     setProcessingDevices(prev => new Set(prev).add(deviceId));
 
-    const success = await callAPI('DELETE', `/devices/${deviceId}`);
+    const success = await revokeDeviceHook.mutateAsync({deviceId})
 
     if (success) {
-      queryClient.invalidateQueries({ queryKey: ['devices', 'unapproved'] });
-      queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+      queryClient.invalidateQueries({ queryKey: unapprovedDevices.queryKey });
+      queryClient.invalidateQueries({ queryKey: dashboardQuery.queryKey });
       setToast({
         message: `${deviceName} rejected and archived`,
         type: 'success'
@@ -276,7 +252,7 @@ const AdminPanel = () => {
                   <CheckCircle className="w-8 h-8 text-green-500" />
                   <div className="ml-4">
                     <p className="text-sm font-medium text-gray-600">Online</p>
-                    <p className="text-2xl font-bold text-gray-900">{dashboardData?.online_count || 0}</p>
+                    <p className="text-2xl font-bold text-gray-900">{dashboardQuery.data?.online_count || 0}</p>
                   </div>
                 </div>
               </div>
@@ -286,7 +262,7 @@ const AdminPanel = () => {
                   <Cpu className="w-8 h-8 text-blue-500" />
                   <div className="ml-4">
                     <p className="text-sm font-medium text-gray-600">Total Devices</p>
-                    <p className="text-2xl font-bold text-gray-900">{dashboardData?.total_count || 0}</p>
+                    <p className="text-2xl font-bold text-gray-900">{dashboardQuery.data?.total_count || 0}</p>
                   </div>
                 </div>
               </div>
@@ -637,8 +613,8 @@ const AdminPanel = () => {
             <div className="bg-orange-50 px-4 py-3 border-b border-gray-200">
               <div className="flex items-center justify-between">
                 <h4 className="text-sm font-semibold text-orange-800">Pending Approval</h4>
-                {!loading && unapprovedDevices.length > 0 && (
-                  <span className="text-xs text-orange-600">{unapprovedDevices.length} device{unapprovedDevices.length !== 1 ? 's' : ''}</span>
+                {!loading && (unapprovedDevices.data || []).length > 0 && (
+                  <span className="text-xs text-orange-600">{unapprovedDevices.data?.length || 0} device{unapprovedDevices.data?.length !== 1 ? 's' : ''}</span>
                 )}
               </div>
             </div>
@@ -652,7 +628,7 @@ const AdminPanel = () => {
                     </div>
                   ))}
                 </div>
-              ) : unapprovedDevices.length === 0 ? (
+              ) : unapprovedDevices.data?.length === 0 ? (
                 <div className="p-6 text-center">
                   <CheckCircle className="w-10 h-10 text-green-500 mx-auto mb-2" />
                   <p className="text-sm font-medium text-gray-900 mb-1">All caught up!</p>
@@ -660,7 +636,7 @@ const AdminPanel = () => {
                 </div>
               ) : (
                 <div className="divide-y divide-gray-200">
-                  {unapprovedDevices.map((device) => (
+                  {unapprovedDevices.data?.map((device) => (
                     <div key={device.id} className="p-4 hover:bg-gray-50">
                       <div className="flex items-start justify-between mb-2">
                         <div className="flex items-center space-x-2 min-w-0 flex-1">

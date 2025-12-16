@@ -16,13 +16,11 @@ import {
   GitBranch,
   Tag,
 } from 'lucide-react';
-import { useQuery } from '@tanstack/react-query';
 import dynamic from 'next/dynamic';
 import PrivateLayout from "@/app/layouts/PrivateLayout";
-import useSmithAPI from "@/app/hooks/smith-api";
 import DeviceHeader from './DeviceHeader';
 import Link from 'next/link';
-import { Device } from '@/models';
+import { useGetDeviceInfo } from '@/app/api-client';
 
 const LocationMap = dynamic(() => import('./LocationMap'), {
   ssr: false,
@@ -32,16 +30,8 @@ const LocationMap = dynamic(() => import('./LocationMap'), {
 
 const DeviceDetailPage = () => {
   const params = useParams();
-  const { callAPI } = useSmithAPI();
-
   const serial = params.serial as string;
-
-  const { data: device, isLoading: loading } = useQuery({
-    queryKey: ['device', serial],
-    queryFn: () => callAPI<Device>('GET', `/devices/${serial}`),
-    refetchInterval: 5000,
-  });
-
+  const { data: device, isLoading: loading } = useGetDeviceInfo(serial)
 
   const getFlagUrl = (countryCode: string) => {
     return `https://flagicons.lipis.dev/flags/4x3/${countryCode.toLowerCase()}.svg`;

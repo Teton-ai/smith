@@ -9,10 +9,8 @@ import {
   Check,
   X,
 } from 'lucide-react';
-import { useQuery } from '@tanstack/react-query';
 import PrivateLayout from "@/app/layouts/PrivateLayout";
-import useSmithAPI from "@/app/hooks/smith-api";
-import { Modem } from '@/models';
+import { useGetModemList } from '../api-client';
 
 
 const ModemSkeleton = () => (
@@ -54,21 +52,10 @@ const LoadingSkeleton = () => (
 const ModemsPage = () => {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { callAPI } = useSmithAPI();
   const [searchTerm, setSearchTerm] = useState('');
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
 
-  const { data: modems = [], isLoading: initialLoading } = useQuery({
-    queryKey: ['modems'],
-    queryFn: () => callAPI<Modem[]>('GET', '/modems'),
-    refetchInterval: 5000,
-    select: (data) => {
-      if (!data) return [];
-      return [...data].sort((a, b) =>
-        new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()
-      );
-    },
-  });
+  const { data: modems = [], isLoading: initialLoading } = useGetModemList();
 
   // Initialize search term from URL params
   useEffect(() => {

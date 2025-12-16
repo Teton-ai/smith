@@ -11,12 +11,10 @@ import {
   X,
   ChevronDown,
 } from 'lucide-react';
-import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import PrivateLayout from "@/app/layouts/PrivateLayout";
-import useSmithAPI from "@/app/hooks/smith-api";
 import NetworkQualityIndicator from '@/app/components/NetworkQualityIndicator';
 import Link from 'next/link';
-import { Device, Release } from '@/models';
+import { Device, Release, useGetDevicesInfinite, useGetReleases } from '../api-client';
 
 const Tooltip = ({ children, content }: { children: React.ReactNode, content: string }) => {
   const [isVisible, setIsVisible] = useState(false);
@@ -124,67 +122,33 @@ const PAGE_SIZE = 100;
 const DevicesPage = () => {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { callAPI } = useSmithAPI();
   const [searchTerm, setSearchTerm] = useState('');
   const [debouncedSearchTerm, setDebouncedSearchTerm] = useState('');
   const [showOutdatedOnly, setShowOutdatedOnly] = useState(false);
   const [labelFilters, setLabelFilters] = useState<string[]>([]);
   const [onlineStatusFilter, setOnlineStatusFilter] = useState<'all' | 'online' | 'offline'>('all');
   const [isSearching, setIsSearching] = useState(false);
-  const [releaseFilter, setReleaseFilter] = useState<number | null>(null);
+  const [releaseFilter, setReleaseFilter] = useState<number | undefined>(undefined);
   const [showReleaseDropdown, setShowReleaseDropdown] = useState(false);
   const [releaseSearchQuery, setReleaseSearchQuery] = useState('');
   const releaseDropdownRef = useRef<HTMLDivElement>(null);
 
-  // Build query params for API call
-  const buildQueryParams = (offset?: number) => {
-    const params = new URLSearchParams();
-    if (labelFilters.length > 0) {
-      labelFilters.forEach((filter) => {
-        params.append('labels', filter);
-      });
-    }
-    if (onlineStatusFilter === 'online') {
-      params.set('online', 'true');
-    } else if (onlineStatusFilter === 'offline') {
-      params.set('online', 'false');
-    }
-    if (debouncedSearchTerm) {
-      params.set('search', debouncedSearchTerm);
-    }
-    if (showOutdatedOnly) {
-      params.set('outdated', 'true');
-    }
-    if (releaseFilter !== null) {
-      params.set('release_id', releaseFilter.toString());
-    }
-    params.set('limit', PAGE_SIZE.toString());
-    if (offset !== undefined) {
-      params.set('offset', offset.toString());
-    }
-    return params.toString();
-  };
-
-  const {
-    data: devicesData,
-    isLoading: loading,
-    fetchNextPage,
-    hasNextPage,
-    isFetchingNextPage,
-  } = useInfiniteQuery({
-    queryKey: ['devices', labelFilters, onlineStatusFilter, debouncedSearchTerm, showOutdatedOnly, releaseFilter],
-    queryFn: ({ pageParam = 0 }) => {
-      const queryString = buildQueryParams(pageParam);
-      const endpoint = `/devices?${queryString}`;
-      return callAPI<Device[]>('GET', endpoint);
-    },
-    initialPageParam: 0,
-    getNextPageParam: (lastPage, allPages) => {
-      if (!lastPage || lastPage.length < PAGE_SIZE) return undefined;
-      return allPages.length * PAGE_SIZE;
-    },
-    refetchInterval: 5000,
-  });
+  const {data: devicesData, isLoading: loading,fetchNextPage, hasNextPage, isFetchingNextPage} = useGetDevicesInfinite({
+    labels: labelFilters,
+    online: onlineStatusFilter === "online" ? true : onlineStatusFilter === "offline" ? false : undefined,
+    search: debouncedSearchTerm,
+    outdated: showOutdatedOnly,
+    release_id: releaseFilter,
+    limit: PAGE_SIZE,
+  }, {
+      query: {
+        initialPageParam: 0,
+        getNextPageParam: (lastPage, allPages) => {
+          if (!lastPage || lastPage.length < PAGE_SIZE) return undefined;
+          return allPages.length * PAGE_SIZE;
+        }
+      }
+    })
 
   const filteredDevices = useMemo(() =>
     (devicesData?.pages || [])
@@ -195,11 +159,7 @@ const DevicesPage = () => {
   );
 
   // Fetch all releases
-  const { data: allReleases = [] } = useQuery({
-    queryKey: ['all-releases'],
-    queryFn: () => callAPI<Release[]>('GET', '/releases'),
-    select: (data) => data || [],
-  });
+  const { data: allReleases = [] } = useGetReleases();
 
   // Group releases by distribution for the dropdown
   const releasesByDistribution = useMemo(() => {
@@ -275,11 +235,11 @@ const DevicesPage = () => {
   }, [searchParams]);
 
   // Update URL when filters change
-  const updateURL = (params: Record<string, string | null>) => {
+  const updateURL = (params: Record<string, string | undefined>) => {
     const current = new URLSearchParams(Array.from(searchParams.entries()));
 
     Object.entries(params).forEach(([key, value]) => {
-      if (value === null || value === '') {
+      if (value == null || value === '') {
         current.delete(key);
       } else {
         current.set(key, value);
@@ -367,7 +327,7 @@ const DevicesPage = () => {
   const handleOutdatedToggle = () => {
     const newValue = !showOutdatedOnly;
     setShowOutdatedOnly(newValue);
-    updateURL({ outdated: newValue ? 'true' : null });
+    updateURL({ outdated: newValue ? 'true' : undefined });
   };
 
   const addLabelFilter = (labelInput: string) => {
@@ -391,20 +351,20 @@ const DevicesPage = () => {
     // Update URL
     const labelsString = newFilters.length > 0
       ? newFilters.join(',')
-      : null;
+      : undefined;
     updateURL({ labels: labelsString });
   };
 
   const handleOnlineStatusChange = (status: 'all' | 'online' | 'offline') => {
     setOnlineStatusFilter(status);
-    updateURL({ online: status === 'all' ? null : status });
+    updateURL({ online: status === 'all' ? undefined : status });
   };
 
-  const handleReleaseFilterChange = (releaseId: number | null) => {
+  const handleReleaseFilterChange = (releaseId: number | undefined) => {
     setReleaseFilter(releaseId);
     setShowReleaseDropdown(false);
     setReleaseSearchQuery('');
-    updateURL({ release_id: releaseId !== null ? releaseId.toString() : null });
+    updateURL({ release_id: releaseId?.toString() });
   };
 
   // Close dropdown when clicking outside
@@ -543,7 +503,7 @@ const DevicesPage = () => {
                     <div className="max-h-64 overflow-y-auto">
                       {releaseFilter !== null && (
                         <button
-                          onClick={() => handleReleaseFilterChange(null)}
+                          onClick={() => handleReleaseFilterChange(undefined)}
                           className="w-full px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 border-b border-gray-200 flex items-center space-x-2 cursor-pointer"
                         >
                           <X className="w-4 h-4 text-gray-400" />

@@ -108,6 +108,9 @@ pub async fn create_distribution(
 #[utoipa::path(
     get,
     path = "/distributions/{distribution_id}",
+    params(
+        ("distribution_id" = i32, Path),
+    ),
     responses(
         (status = StatusCode::OK, description = "Return found distribution", body = Distribution),
         (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to retrieve distribution"),
@@ -152,6 +155,9 @@ pub async fn get_distribution_by_id(
 #[utoipa::path(
     get,
     path = "/distributions/{distribution_id}/releases",
+    params(
+        ("distribution_id" = i32, Path),
+    ),
     responses(
         (status = StatusCode::OK, description = "List of releases from given distribution retrieved successfully", body = Vec<Release>),
         (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to distribution releases"),
@@ -192,6 +198,9 @@ pub async fn get_distribution_releases(
 #[utoipa::path(
     get,
     path = "/distributions/{distribution_id}/releases/latest",
+    params(
+        ("distribution_id" = i32, Path),
+    ),
     responses(
         (status = StatusCode::OK, description = "Get the latest published release for the distribution", body = Release),
         (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to latest release"),
@@ -218,6 +227,9 @@ pub async fn get_distribution_latest_release(
 #[utoipa::path(
     post,
     path = "/distributions/{distribution_id}/releases",
+    params(
+        ("distribution_id" = i32, Path),
+    ),
     request_body = NewDistributionRelease,
     responses(
         (status = StatusCode::CREATED, description = "Distribution release created successfully", body = i32),
@@ -295,6 +307,9 @@ pub async fn create_distribution_release(
 #[utoipa::path(
     delete,
     path = "/distributions/{distribution_id}",
+    params(
+        ("distribution_id" = i32, Path),
+    ),
     responses(
         (status = StatusCode::NO_CONTENT, description = "Successfully deleted the distribution"),
         (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to delete distribution"),
@@ -322,6 +337,9 @@ pub async fn delete_distribution_by_id(
 #[utoipa::path(
     get,
     path = "/distributions/{distribution_id}/devices",
+    params(
+        ("distribution_id" = i32, Path),
+    ),
     responses(
         (status = StatusCode::OK, description = "Get devices on this distribution", body = LeanDevice),
         (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to delete distribution"),

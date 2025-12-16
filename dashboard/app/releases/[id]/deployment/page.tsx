@@ -12,12 +12,11 @@ import {
   Activity,
   Monitor,
 } from 'lucide-react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQueryClient } from '@tanstack/react-query';
 import PrivateLayout from "@/app/layouts/PrivateLayout";
-import useSmithAPI from "@/app/hooks/smith-api";
 import moment from 'moment';
 import Link from 'next/link';
-import { Deployment, Release } from '@/models';
+import { Deployment, DeploymentDeviceWithStatus, useApiConfirmFullRollout, useApiGetDeploymentDevices, useApiGetReleaseDeployment, useGetRelease } from '@/app/api-client';
 
 
 interface DeploymentDevice {
@@ -31,46 +30,17 @@ interface DeploymentDevice {
 
 const DeploymentStatusPage = () => {
   const params = useParams();
-  const releaseId = params.id as string;
-  const { callAPI } = useSmithAPI();
+  const releaseId = parseInt(params.id as string);
   const queryClient = useQueryClient();
   const [elapsedTime, setElapsedTime] = useState(0);
-  const [confirming, setConfirming] = useState(false);
 
-  const { data: release, isLoading: releaseLoading, error: releaseError } = useQuery({
-    queryKey: ['release', releaseId],
-    queryFn: () => callAPI<Release>('GET', `/releases/${releaseId}`),
-    enabled: !!releaseId,
-  });
+  const { data: release, isLoading: releaseLoading } = useGetRelease(releaseId);
 
-  const { data: deployment, error: deploymentError } = useQuery({
-    queryKey: ['deployment', releaseId],
-    queryFn: () => callAPI<Deployment>('PATCH', `/releases/${releaseId}/deployment`),
-    enabled: !!releaseId,
-    refetchInterval: (query) => {
-      const data = query.state.data;
-      if (!data || data.status === 'Done' || data.status === 'Failed' || data.status === 'Canceled') {
-        return false;
-      }
-      return 5000;
-    },
-  });
+  const { data: deployment, queryKey: deploymentQueryKey } = useApiGetReleaseDeployment(releaseId);
 
-  const { data: devices = [] } = useQuery({
-    queryKey: ['deployment-devices', releaseId],
-    queryFn: () => callAPI<DeploymentDevice[]>('GET', `/releases/${releaseId}/deployment/devices`),
-    enabled: !!releaseId,
-    refetchInterval: () => {
-      if (!deployment || deployment.status === 'Done' || deployment.status === 'Failed' || deployment.status === 'Canceled') {
-        return false;
-      }
-      return 5000;
-    },
-    select: (data) => data || [],
-  });
+  const { data: devices = [], queryKey: devicesQueryKey } = useApiGetDeploymentDevices(releaseId);
 
   const loading = releaseLoading;
-  const error = releaseError?.message || deploymentError?.message || null;
 
   useEffect(() => {
     if (!deployment) return;
@@ -97,22 +67,18 @@ const DeploymentStatusPage = () => {
     return devices.every(device => device.release_id === device.target_release_id);
   };
 
-  const handleConfirmFullRollout = async () => {
-    if (!isCanaryComplete()) return;
-
-    setConfirming(true);
-    try {
-      await callAPI('POST', `/releases/${releaseId}/deployment/confirm`);
-      queryClient.invalidateQueries({ queryKey: ['deployment', releaseId] });
-      queryClient.invalidateQueries({ queryKey: ['deployment-devices', releaseId] });
-    } catch (err: any) {
-      console.error('Failed to confirm full rollout:', err);
-    } finally {
-      setConfirming(false);
+  const confirmFullRolloutHook = useApiConfirmFullRollout({
+    mutation: {
+      onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: deploymentQueryKey });
+      queryClient.invalidateQueries({ queryKey: devicesQueryKey });
+        
+      }
     }
-  };
+  })
 
-  const getDeviceStatus = (device: DeploymentDevice) => {
+
+  const getDeviceStatus = (device: DeploymentDevice | DeploymentDeviceWithStatus) => {
     if (device.release_id === device.target_release_id) {
       return { status: 'updated', label: 'Updated', color: 'text-green-700 bg-green-100 border-green-200' };
     }
@@ -177,11 +143,11 @@ const DeploymentStatusPage = () => {
     );
   }
 
-  if (error || !release) {
+  if (!release) {
     return (
       <PrivateLayout id="distributions">
         <div className="flex items-center justify-center h-32">
-          <div className="text-red-500 text-sm">Error: {error || 'Release not found'}</div>
+          <div className="text-red-500 text-sm">Error: Release not found</div>
         </div>
       </PrivateLayout>
     );
@@ -291,11 +257,13 @@ const DeploymentStatusPage = () => {
                             <p>All canary devices have been successfully updated!</p>
                             <div className="mt-4">
                               <button
-                                onClick={handleConfirmFullRollout}
-                                disabled={confirming}
+                                onClick={() => {
+                                  confirmFullRolloutHook.mutate({releaseId})
+                                }}
+                                disabled={confirmFullRolloutHook.isPending}
                                 className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center space-x-2 transition-colors"
                               >
-                                {confirming ? (
+                                {confirmFullRolloutHook.isPending ? (
                                   <>
                                     <Loader2 className="w-4 h-4 animate-spin" />
                                     <span>Confirming...</span>

@@ -3,41 +3,25 @@
 import React, { useState } from 'react';
 import { useParams } from 'next/navigation';
 import { Send, Reply, Copy, Check, ArrowLeft } from 'lucide-react';
-import { useQuery } from '@tanstack/react-query';
 import moment from 'moment';
 import PrivateLayout from "@/app/layouts/PrivateLayout";
-import useSmithAPI from "@/app/hooks/smith-api";
 import DeviceHeader from '../DeviceHeader';
 import Link from 'next/link';
+import { useGetAllCommandsForDevice, useGetDeviceInfo } from '@/app/api-client';
 
 interface Command {
   [key: string]: any;
 }
 
-interface CommandsResponse {
-  commands: Command[];
-  next: string | null;
-  previous: string | null;
-}
-
 const CommandsPage = () => {
   const params = useParams();
-  const { callAPI } = useSmithAPI();
   const [copiedButtons, setCopiedButtons] = useState<Set<string>>(new Set());
 
   const serial = params.serial as string;
 
-  const { data: commandsData, isLoading: commandsLoading } = useQuery({
-    queryKey: ['commands', serial],
-    queryFn: () => callAPI<CommandsResponse>('GET', `/devices/${serial}/commands?limit=500`),
-    refetchInterval: 5000,
-  });
+  const { data: commandsData, isLoading: commandsLoading } = useGetAllCommandsForDevice(serial, {limit: 500});
 
-  const { data: device, isLoading: deviceLoading } = useQuery({
-    queryKey: ['device', serial],
-    queryFn: () => callAPI('GET', `/devices/${serial}`),
-    refetchInterval: 5000,
-  });
+  const { data: device, isLoading: deviceLoading } = useGetDeviceInfo(serial);
 
   const commands = commandsData?.commands || [];
   const loading = commandsLoading || deviceLoading;
@@ -118,7 +102,7 @@ const CommandsPage = () => {
         </div>
 
         {/* Device Header */}
-        <DeviceHeader device={device} serial={serial} />
+        <DeviceHeader device={device!} serial={serial} />
 
         {/* Tabs */}
         <div className="border-b border-gray-200">

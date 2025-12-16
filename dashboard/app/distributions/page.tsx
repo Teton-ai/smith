@@ -12,45 +12,26 @@ import {
   EyeOff,
   Search,
 } from 'lucide-react';
-import { useQuery } from '@tanstack/react-query';
 import PrivateLayout from "@/app/layouts/PrivateLayout";
-import useSmithAPI from "@/app/hooks/smith-api";
 import Link from 'next/link';
-import { Distribution, Rollout } from '@/models';
+import { DistributionRolloutStats, useGetDistributionRollouts, useGetDistributions } from '../api-client';
 
 
 const DistributionsPage = () => {
-  const { callAPI } = useSmithAPI();
   const [showEmptyDistributions, setShowEmptyDistributions] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
 
-  const { data: distributionsData, isLoading: loading, error } = useQuery({
-    queryKey: ['distributions-with-rollouts'],
-    queryFn: async () => {
-      const data = await callAPI<Distribution[]>('GET', '/distributions');
-      if (!data) return { distributions: [], rollouts: new Map<number, Rollout>() };
-
-      // Fetch rollout data for each distribution
-      const rolloutPromises = data.map(async (dist) => {
-        const rolloutData = await callAPI<Rollout>('GET', `/distributions/${dist.id}/rollout`);
-        return { id: dist.id, rollout: rolloutData };
-      });
-
-      const rolloutResults = await Promise.all(rolloutPromises);
-      const rolloutMap = new Map<number, Rollout>();
-      rolloutResults.forEach(({ id, rollout }) => {
-        if (rollout) {
-          rolloutMap.set(id, rollout);
-        }
-      });
-
-      return { distributions: data, rollouts: rolloutMap };
-    },
-    refetchInterval: 5000,
+  const { data: distributions = [], isLoading: loading } = useGetDistributions();
+  const {data: rollouts = new Map()} = useGetDistributionRollouts({
+    query: {
+      select: (data) => {
+        return data.reduce((prev, curr) => {
+          prev.set(curr.distribution_id, curr);
+          return prev
+        }, new Map() as Map<number, DistributionRolloutStats>)
+      }
+    }
   });
-
-  const distributions = distributionsData?.distributions || [];
-  const rollouts = distributionsData?.rollouts || new Map<number, Rollout>();
 
   // Filter distributions based on device count and search
   const distributionsWithDevices = distributions.filter(dist => {
@@ -113,16 +94,6 @@ const DistributionsPage = () => {
       <PrivateLayout id="distributions">
         <div className="flex items-center justify-center h-32">
           <div className="text-gray-500 text-sm">Loading...</div>
-        </div>
-      </PrivateLayout>
-    );
-  }
-
-  if (error) {
-    return (
-      <PrivateLayout id="distributions">
-        <div className="flex items-center justify-center h-32">
-          <div className="text-red-500 text-sm">Error: {error.message}</div>
         </div>
       </PrivateLayout>
     );
