@@ -21,17 +21,17 @@ pub(super) async fn execute(id: i32, network: Network) -> SafeCommandResponse {
     // Before adding a connection, delete any existing connections with the same name.
     // This is done in order to cater use cases such as password changes.
     let command = format!(
-        r#"nmcli c up {network_name} || \
-          (nmcli connection delete {network_name}; \
+        r#"nmcli c up '{network_name}' || \
+          (nmcli connection delete '{network_name}'; \
            nmcli connection add \
            type wifi \
-           con-name {network_name} \
-           ssid {network_ssid} \
+           con-name '{network_name}' \
+           ssid '{network_ssid}' \
            autoconnect yes \
            connection.autoconnect-priority 500 \
            save yes \
            {optional_password} && \
-           nmcli c up {network_name})"#
+           nmcli c up '{network_name}')"#
     );
 
     match execute_command(&command).await {
