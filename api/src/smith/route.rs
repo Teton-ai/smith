@@ -230,7 +230,6 @@ pub struct UploadResult {
     pub url: String,
 }
 
-// TODO: Change to streaming, so we are not saving in memory
 #[utoipa::path(
   post,
   path = "/smith/upload",
