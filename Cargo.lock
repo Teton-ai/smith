@@ -330,7 +330,6 @@ dependencies = [
  "axum 0.7.9",
  "axum-extra",
  "axum_typed_multipart",
- "bytes",
  "chrono",
  "cloudfront_sign",
  "debpkg",

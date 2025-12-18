@@ -53,7 +53,6 @@ debpkg = "0.6.0"
 axum_typed_multipart = { version = "0.13.1" }
 tempfile = "3.13.0"
 tokio-stream = { version = "0.1.16", features = ["sync"] }
+tokio-util = { version = "0.7.17", features = ["io"] }
 toml = "0.8.20"
 cloudfront_sign = "0.4.1"
-bytes = "1.11.0"
-tokio-util = { version = "0.7.17", features = ["io"] }
