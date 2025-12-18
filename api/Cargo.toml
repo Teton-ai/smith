@@ -55,3 +55,5 @@ tempfile = "3.13.0"
 tokio-stream = { version = "0.1.16", features = ["sync"] }
 toml = "0.8.20"
 cloudfront_sign = "0.4.1"
+bytes = "1.11.0"
+tokio-util = { version = "0.7.17", features = ["io"] }

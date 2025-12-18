@@ -30,7 +30,6 @@ use utoipa::{Modify, OpenApi};
 use utoipa_axum::{router::OpenApiRouter, routes};
 use utoipa_swagger_ui::SwaggerUi;
 
-mod asset;
 mod auth;
 mod command;
 mod config;
