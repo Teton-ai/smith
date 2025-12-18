@@ -92,6 +92,7 @@ impl Postman {
         const IDLE_THRESHOLD_TICKS: u32 = 60;
 
         let mut keep_alive_interval = time::interval(Duration::from_secs(IDLE_INTERVAL_SECS));
+        keep_alive_interval.set_missed_tick_behavior(time::MissedTickBehavior::Skip); // or ::Delay
         let mut update_interval = time::interval(Duration::from_secs(300));
 
         loop {
