@@ -6,7 +6,6 @@ use crate::ip_address::extract_client_ip;
 use crate::storage::Storage;
 use crate::{State, storage};
 use axum::body::Body;
-use axum::extract::multipart::Field;
 use axum::extract::{ConnectInfo, Multipart, Path, Query};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::Response;
@@ -254,7 +253,7 @@ pub async fn upload_file(
         file_name.push('/');
     }
 
-    let field: Field = multipart
+    let field = multipart
         .next_field()
         .await
         .expect("error: failed to get next multipart field")
