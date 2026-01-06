@@ -100,6 +100,18 @@ impl NetworkClient {
             .with_context(|| "Failed to Parse JSON respone")
     }
 
+    async fn validate_package_file(path: &std::path::Path) -> Result<bool> {
+        // Check if file exists and has content
+        let metadata = match tokio::fs::metadata(path).await {
+            Ok(m) => m,
+            Err(_) => return Ok(false),
+        };
+
+        // Only reject obviously broken 0-byte files
+        // Files without etag may still be valid (downloaded before .part implementation)
+        Ok(metadata.len() > 0)
+    }
+
     pub async fn get_package(
         &self,
         package_name: &str,
@@ -113,14 +125,25 @@ impl NetworkClient {
         let mut local_package_path = local_packages_folder.clone();
         local_package_path.push(package_name);
 
-        let mut local_package_path_tmp = local_package_path.clone();
-        local_package_path_tmp.set_extension("tmp");
-
         if local_package_path.exists() {
-            info!("Package already exists locally, downloader will check for resume");
-        } else {
-            info!("Package does not exist locally, fetching...");
+            // Validate existing file
+            if Self::validate_package_file(&local_package_path).await? {
+                info!("Package already exists and is valid, downloader will check for resume");
+                return Ok(());
+            } else {
+                warn!(
+                    "Package file {} exists but is 0 bytes (broken download), removing for re-download",
+                    package_name
+                );
+                tokio::fs::remove_file(&local_package_path)
+                    .await
+                    .inspect_err(|e| error!("Failed to remove invalid package file: {}", e))?;
+                info!("Removed 0-byte package, proceeding with download");
+            }
         }
+
+        // File doesn't exist or was invalid and removed - proceed with download
+        info!("Fetching package: {}", package_name);
 
         let remote_file = format!("packages/{}", package_name);
         downloader
@@ -129,8 +152,7 @@ impl NetworkClient {
                 local_package_path.to_str().unwrap_or(""),
                 5000.0,
             )
-            .await?; // basically
-        // unlimited rate here
+            .await?;
 
         Ok(())
     }
