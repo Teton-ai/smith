@@ -128,7 +128,7 @@ impl NetworkClient {
         if local_package_path.exists() {
             // Validate existing file
             if Self::validate_package_file(&local_package_path).await? {
-                info!("Package already exists and is valid, downloader will check for resume");
+                info!("Package {} already exists and is valid, using as-is (no download needed)", package_name);
                 return Ok(());
             } else {
                 warn!(
