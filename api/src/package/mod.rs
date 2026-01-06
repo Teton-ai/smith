@@ -1,11 +1,16 @@
 pub mod route;
+pub mod service;
+
+pub use service::ServiceInfo;
 
 use crate::config::Config;
 use crate::storage::Storage;
 use serde::Serialize;
+use service::{extract_service_name, is_service_file_path, parse_service_file};
 use sqlx::PgPool;
 use sqlx::types::chrono;
-use tracing::error;
+use std::io::{Cursor, Read};
+use tracing::{debug, error};
 
 #[derive(Debug, Serialize, utoipa::ToSchema)]
 pub struct Package {
@@ -15,6 +20,57 @@ pub struct Package {
     pub architecture: String,
     pub file: String,
     pub created_at: chrono::DateTime<chrono::Utc>,
+}
+
+/// Extracts all .service files from a deb package's data tar.
+/// Returns a list of ServiceInfo with service name and optional WatchdogSec.
+pub fn extract_services_from_deb(data: &[u8]) -> anyhow::Result<Vec<ServiceInfo>> {
+    let mut cursor = Cursor::new(data);
+    let mut pkg = debpkg::DebPkg::parse(&mut cursor)?;
+    let mut data_tar = pkg.data()?;
+
+    let mut services = Vec::new();
+
+    for entry_result in data_tar.entries()? {
+        let mut entry = match entry_result {
+            Ok(e) => e,
+            Err(e) => {
+                debug!("Failed to read tar entry: {:?}", e);
+                continue;
+            }
+        };
+
+        let path = match entry.path() {
+            Ok(p) => p.to_string_lossy().to_string(),
+            Err(e) => {
+                debug!("Failed to get entry path: {:?}", e);
+                continue;
+            }
+        };
+
+        if is_service_file_path(&path) {
+            if let Some(service_name) = extract_service_name(&path) {
+                // Read the service file content to parse WatchdogSec
+                let mut content = Vec::new();
+                let watchdog_sec = if entry.read_to_end(&mut content).is_ok() {
+                    parse_service_file(Cursor::new(&content))
+                } else {
+                    None
+                };
+
+                debug!(
+                    "Found service: {} (watchdog: {:?})",
+                    service_name, watchdog_sec
+                );
+                services.push(ServiceInfo {
+                    name: service_name,
+                    watchdog_sec,
+                });
+            }
+        }
+    }
+
+    Ok(services)
 }
 
 impl Package {

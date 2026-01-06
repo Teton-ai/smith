@@ -21,6 +21,8 @@ import {
   CheckCircle,
   XCircle,
   AlertTriangle,
+  Cog,
+  Clock,
 } from 'lucide-react';
 import { useQueryClient } from '@tanstack/react-query';
 import PrivateLayout from "@/app/layouts/PrivateLayout";
@@ -45,6 +47,15 @@ interface AvailablePackage {
   version: string;
   architecture: string;
   file: string;
+  created_at: string;
+}
+
+interface ReleaseService {
+  id: number;
+  release_id: number;
+  package_id: number | null;
+  service_name: string;
+  watchdog_sec: number | null;
   created_at: string;
 }
 
@@ -78,6 +89,14 @@ const ReleaseDetailPage = () => {
   const { data: packages = [], isLoading: packagesLoading, queryKey: packagesQueryKey } = useGetDistributionReleasePackages(releaseId);
 
   const { data: availablePackages = [], isLoading: availablePackagesLoading } = useGetPackages();
+
+  const { data: services = [], isLoading: servicesLoading } = useQuery({
+    queryKey: ['release-services', releaseId],
+    queryFn: () => callAPI<ReleaseService[]>('GET', `/releases/${releaseId}/services`),
+    enabled: !!releaseId,
+    refetchInterval: 5000,
+    select: (data) => data || [],
+  });
 
   useEffect(() => {
     setMounted(true);
@@ -300,6 +319,12 @@ const ReleaseDetailPage = () => {
     } finally {
       setYanking(false);
     }
+  };
+
+  const getPackageNameForService = (packageId: number | null): string | null => {
+    if (packageId === null) return null;
+    const pkg = packages.find(p => p.id === packageId);
+    return pkg ? `${pkg.name} v${pkg.version}` : null;
   };
 
   if (loading || !release) {
@@ -945,6 +970,60 @@ const ReleaseDetailPage = () => {
                     </div>
                   </div>
                 ))}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Services Section */}
+        <div className="space-y-4">
+          <div className="flex items-center space-x-2">
+            <Cog className="w-5 h-5 text-gray-600" />
+            <h2 className="text-lg font-semibold text-gray-900">Services</h2>
+            <span className="text-sm text-gray-500">({services.length})</span>
+          </div>
+
+          <div className="bg-white rounded border border-gray-200 overflow-hidden">
+            {servicesLoading ? (
+              <div className="p-6 text-center">
+                <div className="text-gray-500 text-sm">Loading services...</div>
+              </div>
+            ) : services.length === 0 ? (
+              <div className="p-6 text-center">
+                <Cog className="w-8 h-8 text-gray-400 mx-auto mb-2" />
+                <p className="text-sm text-gray-500">No services found for this release</p>
+                <p className="text-xs text-gray-400 mt-1">Services are automatically extracted from .deb packages</p>
+              </div>
+            ) : (
+              <div className="divide-y divide-gray-200">
+                {services.map((service) => {
+                  const packageName = getPackageNameForService(service.package_id);
+                  return (
+                    <div key={service.id} className="p-4 hover:bg-gray-50 transition-colors">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center space-x-3">
+                          <div className="p-2 bg-purple-100 text-purple-600 rounded">
+                            <Cog className="w-4 h-4" />
+                          </div>
+                          <div>
+                            <div className="flex items-center space-x-2">
+                              <h4 className="font-medium text-gray-900">{service.service_name}</h4>
+                              {service.watchdog_sec && (
+                                <span className="flex items-center space-x-1 px-2 py-0.5 text-xs font-medium bg-blue-100 text-blue-700 rounded-full">
+                                  <Clock className="w-3 h-3" />
+                                  <span>{service.watchdog_sec}s</span>
+                                </span>
+                              )}
+                            </div>
+                            <p className="text-xs text-gray-500 mt-1">
+                              {packageName ? `From: ${packageName}` : 'Manually registered'}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             )}
           </div>
