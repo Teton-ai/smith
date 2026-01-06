@@ -3,7 +3,7 @@ use anyhow::{Context, Result};
 use flate2::{Compression, write::GzEncoder};
 use reqwest::{Response, StatusCode};
 use std::{env, io::Write, time::Duration};
-use tracing::info;
+use tracing::{error, info, warn};
 
 pub struct NetworkClient {
     hostname: String,
