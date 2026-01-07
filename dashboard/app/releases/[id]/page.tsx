@@ -24,11 +24,12 @@ import {
   Cog,
   Clock,
 } from 'lucide-react';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import PrivateLayout from "@/app/layouts/PrivateLayout";
 import moment from 'moment';
 import Link from 'next/link';
 import { useAddPackageToRelease, useApiReleaseDeployment, useDeletePackageForRelease, useGetDistributionById, useGetDistributionReleasePackages, useGetPackages, useGetRelease, useUpdateRelease } from '@/app/api-client';
+import { useClientMutator } from '@/app/api-client-mutator';
 
 
 
@@ -90,9 +91,10 @@ const ReleaseDetailPage = () => {
 
   const { data: availablePackages = [], isLoading: availablePackagesLoading } = useGetPackages();
 
+  const fetchServices = useClientMutator<ReleaseService[]>();
   const { data: services = [], isLoading: servicesLoading } = useQuery({
     queryKey: ['release-services', releaseId],
-    queryFn: () => callAPI<ReleaseService[]>('GET', `/releases/${releaseId}/services`),
+    queryFn: () => fetchServices({ url: `/releases/${releaseId}/services`, method: 'GET' }),
     enabled: !!releaseId,
     refetchInterval: 5000,
     select: (data) => data || [],
@@ -407,13 +409,57 @@ const ReleaseDetailPage = () => {
                 </div>
               </div>
             </div>
-            <Link
-              href={`/devices?release_id=${release.id}`}
-              className="flex items-center space-x-2 px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-md hover:bg-gray-200 transition-colors cursor-pointer"
-            >
-              <Cpu className="w-4 h-4" />
-              <span>View Devices</span>
-            </Link>
+            <div className="flex items-center space-x-3">
+              <Link
+                href={`/devices?release_id=${release.id}`}
+                className="flex items-center space-x-2 px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-md hover:bg-gray-200 transition-colors cursor-pointer"
+              >
+                <Cpu className="w-4 h-4" />
+                <span>View Devices</span>
+              </Link>
+              {release?.draft ? (
+                <>
+                  <button
+                    onClick={handlePublishRelease}
+                    disabled={updateReleaseHook.isPending}
+                    className={`flex items-center space-x-2 px-4 py-2 text-sm font-medium rounded-md transition-colors ${
+                      updateReleaseHook.isPending
+                        ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                        : 'bg-green-600 text-white hover:bg-green-700 cursor-pointer'
+                    }`}
+                  >
+                    {updateReleaseHook.isPending ? (
+                      <>
+                        <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                        <span>Publishing...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Eye className="w-4 h-4" />
+                        <span>Publish</span>
+                      </>
+                    )}
+                  </button>
+                </>
+              ) : !release?.yanked && (
+                <>
+                  <button
+                    onClick={() => setShowYankModal(true)}
+                    className="flex items-center space-x-2 px-4 py-2 bg-red-600 text-white text-sm font-medium rounded-md hover:bg-red-700 transition-colors cursor-pointer"
+                  >
+                    <AlertTriangle className="w-4 h-4" />
+                    <span>Yank</span>
+                  </button>
+                  <button
+                    onClick={() => setShowDeployModal(true)}
+                    className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700 transition-colors cursor-pointer"
+                  >
+                    <Rocket className="w-4 h-4" />
+                    <span>Deploy</span>
+                  </button>
+                </>
+              )}
+            </div>
           </div>
         </div>
 
@@ -834,198 +880,154 @@ const ReleaseDetailPage = () => {
         )}
 
 
-        {/* Packages Section */}
-        <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-2">
-              <Box className="w-5 h-5 text-gray-600" />
-              <h2 className="text-lg font-semibold text-gray-900">Packages</h2>
-              <span className="text-sm text-gray-500">({packages.length})</span>
+        {/* Packages and Services Grid */}
+        <div className="grid grid-cols-2 gap-6">
+          {/* Packages Section */}
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-2">
+                <Box className="w-5 h-5 text-gray-600" />
+                <h2 className="text-lg font-semibold text-gray-900">Packages</h2>
+                <span className="text-sm text-gray-500">({packages.length})</span>
+              </div>
+              {release?.draft && (
+                <button
+                  onClick={openAddModal}
+                  className="flex items-center space-x-2 px-3 py-1.5 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700 transition-colors cursor-pointer"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>Add</span>
+                </button>
+              )}
             </div>
-            <div className="flex items-center space-x-3">
-              {release?.draft ? (
-                <>
-                  <button
-                    onClick={handlePublishRelease}
-                    disabled={updateReleaseHook.isPending}
-                    className={`flex items-center space-x-2 px-4 py-2 text-sm font-medium rounded-md transition-colors ${
-                      updateReleaseHook.isPending
-                        ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
-                        : 'bg-green-600 text-white hover:bg-green-700 cursor-pointer'
-                    }`}
-                  >
-                    {updateReleaseHook.isPending ? (
-                      <>
-                        <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                        <span>Publishing...</span>
-                      </>
-                    ) : (
-                      <>
-                        <Eye className="w-4 h-4" />
-                        <span>Publish Release</span>
-                      </>
-                    )}
-                  </button>
-                  <button
-                    onClick={openAddModal}
-                    className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700 transition-colors cursor-pointer"
-                  >
-                    <Plus className="w-4 h-4" />
-                    <span>Add Package</span>
-                  </button>
-                </>
-              ) : !release?.yanked && (
-                <>
-                  <button
-                    onClick={() => setShowYankModal(true)}
-                    className="flex items-center space-x-2 px-4 py-2 bg-red-600 text-white text-sm font-medium rounded-md hover:bg-red-700 transition-colors cursor-pointer"
-                  >
-                    <AlertTriangle className="w-4 h-4" />
-                    <span>Yank Release</span>
-                  </button>
-                  <button
-                    onClick={() => setShowDeployModal(true)}
-                    className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700 transition-colors cursor-pointer"
-                  >
-                    <Rocket className="w-4 h-4" />
-                    <span>Deploy Release</span>
-                  </button>
-                </>
+
+            <div className="bg-white rounded border border-gray-200 overflow-hidden">
+              {packagesLoading ? (
+                <div className="p-6 text-center">
+                  <div className="text-gray-500 text-sm">Loading packages...</div>
+                </div>
+              ) : packages.length === 0 ? (
+                <div className="p-6 text-center">
+                  <Box className="w-8 h-8 text-gray-400 mx-auto mb-2" />
+                  <p className="text-sm text-gray-500">No packages found</p>
+                </div>
+              ) : (
+                <div className="divide-y divide-gray-200">
+                  {packages.map((pkg) => {
+                    const latestVersion = getLatestVersionForPackage(pkg);
+                    const isUpgrading = upgradingPackages.has(pkg.id);
+                    return (
+                      <div key={pkg.id} className="p-4 hover:bg-gray-50 transition-colors">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center space-x-3 min-w-0">
+                            <div className="p-2 bg-gray-100 text-gray-600 rounded flex-shrink-0">
+                              <Package className="w-4 h-4" />
+                            </div>
+                            <div className="min-w-0">
+                              <div className="flex items-center space-x-2">
+                                <span className="font-medium text-gray-900 truncate">{pkg.name}</span>
+                                <span className="text-xs text-gray-500 flex-shrink-0">v{pkg.version}</span>
+                                {release?.draft && latestVersion && (
+                                  <button
+                                    onClick={() => handleUpgradePackage(pkg)}
+                                    disabled={isUpgrading}
+                                    className={`flex items-center space-x-0.5 px-1.5 py-0.5 text-[10px] font-medium rounded-md transition-all ${
+                                      isUpgrading
+                                        ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                                        : 'bg-green-100 text-green-700 hover:bg-green-200 cursor-pointer'
+                                    }`}
+                                    title={`Upgrade to v${latestVersion.version}`}
+                                  >
+                                    {isUpgrading ? (
+                                      <div className="w-2.5 h-2.5 border-2 border-gray-400 border-t-transparent rounded-full animate-spin"></div>
+                                    ) : (
+                                      <>
+                                        <ArrowUp className="w-2.5 h-2.5" />
+                                        <span>v{latestVersion.version}</span>
+                                      </>
+                                    )}
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                          {release?.draft && (
+                            <div className="flex items-center space-x-1 flex-shrink-0">
+                              <button
+                                onClick={() => openReplaceModal(pkg)}
+                                className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-md transition-colors cursor-pointer"
+                                title="Select different version"
+                              >
+                                <ChevronsUpDown className="w-4 h-4" />
+                              </button>
+                              <button
+                                onClick={() => handleDeletePackage(pkg.id)}
+                                className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors cursor-pointer"
+                                title="Remove package"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
               )}
             </div>
           </div>
-          
-          <div className="bg-white rounded border border-gray-200 overflow-hidden">
-            {packagesLoading ? (
-              <div className="p-6 text-center">
-                <div className="text-gray-500 text-sm">Loading packages...</div>
-              </div>
-            ) : packages.length === 0 ? (
-              <div className="p-6 text-center">
-                <Box className="w-8 h-8 text-gray-400 mx-auto mb-2" />
-                <p className="text-sm text-gray-500">No packages found for this release</p>
-              </div>
-            ) : (
-              <div className="divide-y divide-gray-200">
-                {packages.map((pkg) => (
-                  <div key={pkg.id} className="p-4 hover:bg-gray-50 transition-colors">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center space-x-3">
-                        <div className="p-2 bg-gray-100 text-gray-600 rounded">
-                          <Package className="w-4 h-4" />
-                        </div>
-                        <div>
-                          <div className="flex items-center space-x-2">
-                            <h4 className="font-medium text-gray-900">{pkg.name}</h4>
-                            <span className="text-xs text-gray-500">v{pkg.version}</span>
-                            {release?.draft && (() => {
-                              const latestVersion = getLatestVersionForPackage(pkg);
-                              const isUpgrading = upgradingPackages.has(pkg.id);
-                              return (
-                                <>
-                                  {latestVersion && (
-                                    <button
-                                      onClick={() => handleUpgradePackage(pkg)}
-                                      disabled={isUpgrading}
-                                      className={`flex items-center space-x-0.5 px-1.5 py-0.5 text-[10px] font-medium rounded-md transition-all duration-200 ${
-                                        isUpgrading
-                                          ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
-                                          : 'bg-green-500/20 text-green-700 border border-green-300/30 shadow-sm backdrop-blur-sm hover:bg-green-500/30 hover:border-green-400/40 hover:shadow cursor-pointer'
-                                      }`}
-                                      style={isUpgrading ? {} : { backdropFilter: 'blur(8px)' }}
-                                      title={`Upgrade to v${latestVersion.version}`}
-                                    >
-                                      {isUpgrading ? (
-                                        <div className="w-2.5 h-2.5 border-2 border-gray-400 border-t-transparent rounded-full animate-spin"></div>
-                                      ) : (
-                                        <>
-                                          <ArrowUp className="w-2.5 h-2.5" />
-                                          <span>v{latestVersion.version}</span>
-                                        </>
-                                      )}
-                                    </button>
-                                  )}
-                                  <button
-                                    onClick={() => openReplaceModal(pkg)}
-                                    className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-md transition-colors cursor-pointer"
-                                    title="Select different version"
-                                  >
-                                    <ChevronsUpDown className="w-4 h-4" />
-                                  </button>
-                                </>
-                              );
-                            })()}
-                          </div>
-                        </div>
-                      </div>
-                      {release?.draft && (
-                        <button
-                          onClick={() => handleDeletePackage(pkg.id)}
-                          className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors cursor-pointer"
-                          title="Remove package from release"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
 
-        {/* Services Section */}
-        <div className="space-y-4">
-          <div className="flex items-center space-x-2">
-            <Cog className="w-5 h-5 text-gray-600" />
-            <h2 className="text-lg font-semibold text-gray-900">Services</h2>
-            <span className="text-sm text-gray-500">({services.length})</span>
-          </div>
+          {/* Services Section */}
+          <div className="space-y-4">
+            <div className="flex items-center space-x-2">
+              <Cog className="w-5 h-5 text-gray-600" />
+              <h2 className="text-lg font-semibold text-gray-900">Services</h2>
+              <span className="text-sm text-gray-500">({services.length})</span>
+            </div>
 
-          <div className="bg-white rounded border border-gray-200 overflow-hidden">
-            {servicesLoading ? (
-              <div className="p-6 text-center">
-                <div className="text-gray-500 text-sm">Loading services...</div>
-              </div>
-            ) : services.length === 0 ? (
-              <div className="p-6 text-center">
-                <Cog className="w-8 h-8 text-gray-400 mx-auto mb-2" />
-                <p className="text-sm text-gray-500">No services found for this release</p>
-                <p className="text-xs text-gray-400 mt-1">Services are automatically extracted from .deb packages</p>
-              </div>
-            ) : (
-              <div className="divide-y divide-gray-200">
-                {services.map((service) => {
-                  const packageName = getPackageNameForService(service.package_id);
-                  return (
-                    <div key={service.id} className="p-4 hover:bg-gray-50 transition-colors">
-                      <div className="flex items-center justify-between">
+            <div className="bg-white rounded border border-gray-200 overflow-hidden">
+              {servicesLoading ? (
+                <div className="p-6 text-center">
+                  <div className="text-gray-500 text-sm">Loading services...</div>
+                </div>
+              ) : services.length === 0 ? (
+                <div className="p-6 text-center">
+                  <Cog className="w-8 h-8 text-gray-400 mx-auto mb-2" />
+                  <p className="text-sm text-gray-500">No services found</p>
+                  <p className="text-xs text-gray-400 mt-1">Extracted from .deb packages</p>
+                </div>
+              ) : (
+                <div className="divide-y divide-gray-200">
+                  {services.map((service) => {
+                    const packageName = getPackageNameForService(service.package_id);
+                    return (
+                      <div key={service.id} className="p-4 hover:bg-gray-50 transition-colors">
                         <div className="flex items-center space-x-3">
-                          <div className="p-2 bg-purple-100 text-purple-600 rounded">
+                          <div className="p-2 bg-purple-100 text-purple-600 rounded flex-shrink-0">
                             <Cog className="w-4 h-4" />
                           </div>
-                          <div>
+                          <div className="min-w-0">
                             <div className="flex items-center space-x-2">
-                              <h4 className="font-medium text-gray-900">{service.service_name}</h4>
+                              <span className="font-medium text-gray-900 truncate">{service.service_name}</span>
                               {service.watchdog_sec && (
-                                <span className="flex items-center space-x-1 px-2 py-0.5 text-xs font-medium bg-blue-100 text-blue-700 rounded-full">
+                                <span className="flex items-center space-x-1 px-2 py-0.5 text-xs font-medium bg-blue-100 text-blue-700 rounded-full flex-shrink-0">
                                   <Clock className="w-3 h-3" />
                                   <span>{service.watchdog_sec}s</span>
                                 </span>
                               )}
                             </div>
-                            <p className="text-xs text-gray-500 mt-1">
-                              {packageName ? `From: ${packageName}` : 'Manually registered'}
-                            </p>
+                            {packageName && (
+                              <p className="text-xs text-gray-500 mt-1">From: {packageName}</p>
+                            )}
                           </div>
                         </div>
                       </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
+                    );
+                  })}
+                </div>
+              )}
+            </div>
           </div>
         </div>
       </div>

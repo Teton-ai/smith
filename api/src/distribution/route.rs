@@ -304,56 +304,73 @@ pub async fn create_distribution_release(
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
 
-    // Extract services from packages after transaction commits (non-fatal)
-    let packages = sqlx::query_as!(
-        Package,
-        "SELECT * FROM package WHERE id = ANY($1)",
-        &distribution_release.packages as &[i32]
-    )
-    .fetch_all(&state.pg_pool)
-    .await;
+    // Extract services from packages in background (non-blocking)
+    let release_id = release.id;
+    let package_ids = distribution_release.packages.clone();
+    let pg_pool = state.pg_pool.clone();
+    let bucket_name = state.config.packages_bucket_name.clone();
 
-    if let Ok(packages) = packages {
+    tokio::spawn(async move {
+        let packages = match sqlx::query_as!(
+            Package,
+            "SELECT * FROM package WHERE id = ANY($1)",
+            &package_ids as &[i32]
+        )
+        .fetch_all(&pg_pool)
+        .await
+        {
+            Ok(p) => p,
+            Err(e) => {
+                warn!("Failed to fetch packages for service extraction: {}", e);
+                return;
+            }
+        };
+
         for pkg in packages {
-            if pkg.file.ends_with(".deb") {
-                match Storage::download_from_s3(&state.config.packages_bucket_name, &pkg.file).await
+            if !pkg.file.ends_with(".deb") {
+                continue;
+            }
+
+            let data = match Storage::download_from_s3(&bucket_name, &pkg.file).await {
+                Ok(d) => d,
+                Err(e) => {
+                    warn!(
+                        "Failed to download package {} for service extraction: {}",
+                        pkg.file, e
+                    );
+                    continue;
+                }
+            };
+
+            let services = match extract_services_from_deb(&data) {
+                Ok(s) => s,
+                Err(e) => {
+                    warn!(
+                        "Failed to extract services from package {}: {}",
+                        pkg.file, e
+                    );
+                    continue;
+                }
+            };
+
+            for service in services {
+                if let Err(e) = sqlx::query!(
+                    "INSERT INTO release_services (release_id, package_id, service_name, watchdog_sec)
+                     VALUES ($1, $2, $3, $4)
+                     ON CONFLICT (release_id, service_name) DO NOTHING",
+                    release_id,
+                    pkg.id,
+                    service.name,
+                    service.watchdog_sec
+                )
+                .execute(&pg_pool)
+                .await
                 {
-                    Ok(data) => match extract_services_from_deb(&data) {
-                        Ok(services) => {
-                            for service in services {
-                                if let Err(e) = sqlx::query!(
-                                    "INSERT INTO release_services (release_id, package_id, service_name, watchdog_sec)
-                                     VALUES ($1, $2, $3, $4)
-                                     ON CONFLICT (release_id, service_name) DO NOTHING",
-                                    release.id,
-                                    pkg.id,
-                                    service.name,
-                                    service.watchdog_sec
-                                )
-                                .execute(&state.pg_pool)
-                                .await
-                                {
-                                    warn!("Failed to insert service {}: {}", service.name, e);
-                                }
-                            }
-                        }
-                        Err(e) => {
-                            warn!(
-                                "Failed to extract services from package {}: {}",
-                                pkg.file, e
-                            );
-                        }
-                    },
-                    Err(e) => {
-                        warn!(
-                            "Failed to download package {} for service extraction: {}",
-                            pkg.file, e
-                        );
-                    }
+                    warn!("Failed to insert service {}: {}", service.name, e);
                 }
             }
         }
-    }
+    });
 
     Ok(Json(release.id))
 }
