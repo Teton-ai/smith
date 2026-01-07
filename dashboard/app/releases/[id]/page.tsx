@@ -28,7 +28,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import PrivateLayout from "@/app/layouts/PrivateLayout";
 import moment from 'moment';
 import Link from 'next/link';
-import { useAddPackageToRelease, useApiReleaseDeployment, useDeletePackageForRelease, useGetDistributionById, useGetDistributionReleasePackages, useGetPackages, useGetRelease, useUpdateRelease } from '@/app/api-client';
+import { useAddPackageToRelease, useApiReleaseDeployment, useDeletePackageForRelease, useGetDistributionById, useGetDistributionReleasePackages, useGetPackages, useGetRelease, usePatchRelease } from '@/app/api-client';
 import { useClientMutator } from '@/app/api-client-mutator';
 
 
@@ -131,7 +131,7 @@ const ReleaseDetailPage = () => {
     }
   };
 
-  const updateReleaseHook = useUpdateRelease({mutation: {
+  const updateReleaseHook = usePatchRelease({mutation: {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: releaseQueryKey });
       
