@@ -86,6 +86,7 @@ pub async fn get_release(
 #[utoipa::path(
     post,
     path = "/releases/{release_id}",
+    operation_id = "patchRelease",
     params(
         ("release_id" = i32, Path),
     ),
