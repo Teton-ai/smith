@@ -1,6 +1,8 @@
 use crate::State;
 use crate::device::{LeanDevice, LeanResponse};
+use crate::package::extract_services_from_deb;
 use crate::release::get_latest_distribution_release;
+use crate::storage::Storage;
 use crate::user::CurrentUser;
 use axum::extract::Path;
 use axum::http::StatusCode;
@@ -8,7 +10,8 @@ use axum::{Extension, Json};
 use models::distribution::{Distribution, NewDistributionRelease};
 use models::release::Release;
 use serde::Deserialize;
-use tracing::error;
+use smith::utils::schema::Package;
+use tracing::{error, warn};
 
 const DISTRIBUTIONS_TAG: &str = "distributions";
 
@@ -300,6 +303,74 @@ pub async fn create_distribution_release(
         error!("Failed to commit transaction: {err}");
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
+
+    // Extract services from packages in background (non-blocking)
+    let release_id = release.id;
+    let package_ids = distribution_release.packages.clone();
+    let pg_pool = state.pg_pool.clone();
+    let bucket_name = state.config.packages_bucket_name.clone();
+
+    tokio::spawn(async move {
+        let packages = match sqlx::query_as!(
+            Package,
+            "SELECT * FROM package WHERE id = ANY($1)",
+            &package_ids as &[i32]
+        )
+        .fetch_all(&pg_pool)
+        .await
+        {
+            Ok(p) => p,
+            Err(e) => {
+                warn!("Failed to fetch packages for service extraction: {}", e);
+                return;
+            }
+        };
+
+        for pkg in packages {
+            if !pkg.file.ends_with(".deb") {
+                continue;
+            }
+
+            let data = match Storage::download_from_s3(&bucket_name, &pkg.file).await {
+                Ok(d) => d,
+                Err(e) => {
+                    warn!(
+                        "Failed to download package {} for service extraction: {}",
+                        pkg.file, e
+                    );
+                    continue;
+                }
+            };
+
+            let services = match extract_services_from_deb(&data) {
+                Ok(s) => s,
+                Err(e) => {
+                    warn!(
+                        "Failed to extract services from package {}: {}",
+                        pkg.file, e
+                    );
+                    continue;
+                }
+            };
+
+            for service in services {
+                if let Err(e) = sqlx::query!(
+                    "INSERT INTO release_services (release_id, package_id, service_name, watchdog_sec)
+                     VALUES ($1, $2, $3, $4)
+                     ON CONFLICT (release_id, service_name) DO NOTHING",
+                    release_id,
+                    pkg.id,
+                    service.name,
+                    service.watchdog_sec
+                )
+                .execute(&pg_pool)
+                .await
+                {
+                    warn!("Failed to insert service {}: {}", service.name, e);
+                }
+            }
+        }
+    });
 
     Ok(Json(release.id))
 }
