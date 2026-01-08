@@ -35,6 +35,14 @@ impl Storage {
         Ok(())
     }
 
+    pub async fn download_from_s3(bucket_name: &str, file_name: &str) -> anyhow::Result<Vec<u8>> {
+        let region = Region::from_default_env()?;
+        let credentials = Credentials::default()?;
+        let bucket = Bucket::new(bucket_name, region, credentials)?;
+        let response = bucket.get_object(file_name).await?;
+        Ok(response.to_vec())
+    }
+
     pub async fn download_package_from_cdn(
         bucket_name: &str,
         path: Option<&str>,
