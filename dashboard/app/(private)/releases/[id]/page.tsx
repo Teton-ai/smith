@@ -163,7 +163,7 @@ const ReleaseDetailPage = () => {
 		mutation: {
 			onSuccess: () => {
 				queryClient.invalidateQueries({
-					queryKey: ["release-packages", releaseId],
+					queryKey: packagesQueryKey,
 				});
 			},
 		},
@@ -202,7 +202,7 @@ const ReleaseDetailPage = () => {
 			});
 
 			queryClient.invalidateQueries({
-				queryKey: ["release-packages", releaseId],
+				queryKey: packagesQueryKey,
 			});
 			setSelectedAvailablePackage(null);
 			setPackageToReplace(null);
@@ -274,7 +274,7 @@ const ReleaseDetailPage = () => {
 			});
 
 			queryClient.invalidateQueries({
-				queryKey: ["release-packages", releaseId],
+				queryKey: packagesQueryKey,
 			});
 
 			setToast({
@@ -332,7 +332,7 @@ const ReleaseDetailPage = () => {
 				data: { yanked: true },
 			});
 
-			queryClient.invalidateQueries({ queryKey: ["release", releaseId] });
+			queryClient.invalidateQueries({ queryKey: releaseQueryKey });
 			setShowYankModal(false);
 			setYankReason("");
 			setToast({
