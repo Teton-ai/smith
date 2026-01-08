@@ -215,7 +215,12 @@ const DeviceDetailPage = () => {
                       Target Distribution
                     </span>
                     <span className="font-mono text-sm text-gray-900">
-                      {device.target_release.distribution_name}
+                    <Link
+                      href={`/distributions/${device.target_release.distribution_id}`}
+                      className="block font-mono text-sm text-blue-600 hover:text-blue-800 hover:underline cursor-pointer transition-colors"
+                    >
+                        {device.target_release.distribution_name}
+                    </Link>
                     </span>
                   </div>
 
@@ -226,7 +231,12 @@ const DeviceDetailPage = () => {
                       Target Release
                     </span>
                     <span className="font-mono text-sm text-gray-900">
+                      <Link
+                        href={`/releases/${device.target_release?.id}`}
+                        className="block font-mono text-sm text-blue-600 hover:text-blue-800 hover:underline cursor-pointer transition-colors"
+                      >
                       {device.target_release.version}
+                      </Link>
                     </span>
                   </div>
                 </>
