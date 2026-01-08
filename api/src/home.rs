@@ -9,21 +9,11 @@ use sqlx::PgPool;
 use tracing::debug;
 use tracing::error;
 
-// TODO: Get rid of this db.rs, legacy design and ugly
-
-#[derive(Debug)]
-pub struct DeviceWithToken {
-    pub id: i32,
-    pub serial_number: String,
-}
-
 pub struct CommandsDB {
     id: i32,
     cmd: Value,
     continue_on_error: bool,
 }
-
-pub struct DBHandler;
 
 pub async fn save_responses(
     device_id: i32,
@@ -55,7 +45,7 @@ pub async fn save_responses(
                         .collect(),
                 };
                 add_commands(
-                    &device_serial_number,
+                    device_serial_number,
                     vec![SafeCommandRequest {
                         id: -1,
                         command: update_variables,
@@ -85,19 +75,19 @@ pub async fn save_responses(
                 .fetch_optional(&mut *tx)
                 .await?;
 
-                if let Some(network) = network {
-                    if network.network_type == NetworkType::Wifi {
-                        add_commands(
-                            &device_serial_number,
-                            vec![SafeCommandRequest {
-                                id: -4,
-                                command: UpdateNetwork { network },
-                                continue_on_error: false,
-                            }],
-                            pool,
-                        )
-                        .await?;
-                    }
+                if let Some(network) = network
+                    && network.network_type == NetworkType::Wifi
+                {
+                    add_commands(
+                        device_serial_number,
+                        vec![SafeCommandRequest {
+                            id: -4,
+                            command: UpdateNetwork { network },
+                            continue_on_error: false,
+                        }],
+                        pool,
+                    )
+                    .await?;
                 }
             }
             SafeCommandRx::UpdateSystemInfo { ref system_info } => {

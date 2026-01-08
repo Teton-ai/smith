@@ -67,10 +67,8 @@ impl Bouncer {
 
                 if !all_ok && self.problems.is_none() {
                     self.problems = self.police.report_problem_starting().await;
-                } else if all_ok {
-                    if let Some(problems) = self.problems.take() {
-                        self.police.report_problem_solved(problems).await;
-                    }
+                } else if all_ok && let Some(problems) = self.problems.take() {
+                    self.police.report_problem_solved(problems).await;
                 }
             }
         }

@@ -20,7 +20,7 @@ pub async fn ensure_ssh_dir(login: &str) -> Result<(PathBuf, u32, u32)> {
         let uid = entry.uid.as_raw();
         let gid = entry.gid.as_raw();
 
-        let ssh = PathBuf::from(entry.dir).join(".ssh");
+        let ssh = entry.dir.join(".ssh");
 
         let canonical_home = ssh
             .parent()
@@ -64,6 +64,7 @@ pub async fn add_key(user: &str, pubkey: &str, tag: String) -> Result<()> {
 
         let lock = OpenOptions::new()
             .create(true)
+            .truncate(false)
             .write(true)
             .open(lock_file)?;
         lock.lock_exclusive()?; // blocks only worker thread
@@ -113,6 +114,7 @@ pub async fn remove_key(user: &str, tag: &str) -> Result<()> {
 
         let lock = OpenOptions::new()
             .create(true)
+            .truncate(false)
             .write(true)
             .open(lock_file)?;
         lock.lock_exclusive()?;
@@ -125,10 +127,9 @@ pub async fn remove_key(user: &str, tag: &str) -> Result<()> {
         let mut lines = Vec::<String>::new();
         for l in BufReader::new(file).lines() {
             let l = l?;
-            if !l
-                .split_whitespace()
+            if l.split_whitespace()
                 .last()
-                .map_or(false, |last_part| last_part == tag)
+                .is_none_or(|last_part| last_part != tag)
             {
                 lines.push(l);
             }

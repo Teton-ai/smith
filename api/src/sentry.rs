@@ -1,7 +1,7 @@
 use crate::config::Config;
 use axum::{extract::Request, http::StatusCode, middleware::Next, response::Response};
 use sentry::ClientInitGuard;
-use tracing::{info, warn};
+use tracing::warn;
 
 pub struct Sentry;
 

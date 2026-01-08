@@ -27,10 +27,8 @@ pub fn parse_service_file<R: Read>(reader: R) -> Option<i32> {
         }
 
         // Only look for WatchdogSec in [Service] section
-        if in_service_section {
-            if let Some(value) = trimmed.strip_prefix("WatchdogSec=") {
-                return parse_watchdog_value(value.trim());
-            }
+        if in_service_section && let Some(value) = trimmed.strip_prefix("WatchdogSec=") {
+            return parse_watchdog_value(value.trim());
         }
     }
 

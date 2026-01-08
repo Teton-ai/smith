@@ -104,15 +104,14 @@ pub async fn check(
     let user_id = match existing_user {
         Some((user_id, has_email)) => {
             // User exists, update email if missing and we have it
-            if !has_email {
-                if let Some(ref info) = userinfo {
-                    if let Some(ref email) = info.email {
-                        info!("Updating email for user_id={}", user_id);
-                        CurrentUser::update_email(&pool, user_id, email)
-                            .await
-                            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-                    }
-                }
+            if !has_email
+                && let Some(ref info) = userinfo
+                && let Some(ref email) = info.email
+            {
+                info!("Updating email for user_id={}", user_id);
+                CurrentUser::update_email(&pool, user_id, email)
+                    .await
+                    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
             }
             user_id
         }
