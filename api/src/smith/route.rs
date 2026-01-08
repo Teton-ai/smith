@@ -1,21 +1,23 @@
-use crate::asset::Asset;
 use crate::device::{
     RegistrationError, get_target_release, save_last_ping_with_ip, save_release_id,
 };
 use crate::handlers::AuthedDevice;
 use crate::ip_address::extract_client_ip;
+use crate::storage::Storage;
 use crate::{State, storage};
 use axum::body::Body;
 use axum::extract::{ConnectInfo, Multipart, Path, Query};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::Response;
 use axum::{Extension, Json};
+use futures::TryStreamExt;
 use serde::{Deserialize, Serialize};
 use smith::utils::schema::{
     DeviceRegistration, DeviceRegistrationResponse, HomePost, HomePostResponse, Package,
 };
 use std::net::SocketAddr;
 use std::time::SystemTime;
+use tokio_util::io::StreamReader;
 use tracing::{debug, error, info};
 use utoipa::{IntoParams, ToSchema};
 
@@ -227,7 +229,6 @@ pub struct UploadResult {
     pub url: String,
 }
 
-// TODO: Change to streaming, so we are not saving in memory
 #[utoipa::path(
   post,
   path = "/smith/upload",
@@ -252,31 +253,33 @@ pub async fn upload_file(
         file_name.push('/');
     }
 
-    let mut file_data = Vec::new();
-    while let Some(field) = multipart
+    let field = multipart
         .next_field()
         .await
         .expect("error: failed to get next multipart field")
-    {
-        if let Some(local_file_name) = field.file_name().map(|s| s.to_string()) {
-            file_name.push_str(&local_file_name);
-        }
-        match field.bytes().await {
-            Ok(bytes) => file_data.extend(bytes.clone()),
-            _ => return Err(StatusCode::BAD_REQUEST),
-        };
-    }
+        .ok_or(StatusCode::BAD_REQUEST)?;
+    let Some(local_file_name) = field.file_name() else {
+        return Err(StatusCode::BAD_REQUEST);
+    };
+    file_name.push_str(local_file_name);
 
     if file_name.is_empty() {
         return Err(StatusCode::BAD_REQUEST);
     }
 
-    Asset::new(&file_name, &file_data, state.config)
-        .await
-        .map_err(|err| {
-            error!("{:?}", err);
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?;
+    let mut reader = StreamReader::new(field.map_err(std::io::Error::other));
+
+    Storage::stream_to_s3(
+        &state.config.assets_bucket_name,
+        None,
+        &file_name,
+        &mut reader,
+    )
+    .await
+    .map_err(|err| {
+        error!("{:?}", err);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
 
     Ok(Json(UploadResult {
         url: format!("s3://{}/{}", &state.config.assets_bucket_name, &file_name),
