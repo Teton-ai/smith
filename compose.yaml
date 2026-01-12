@@ -30,6 +30,19 @@ services:
     volumes:
       - ./volumes/${COMPOSE_PROJECT_NAME}-postgres:/var/lib/postgresql/data
 
+  device:
+    build:
+      context: .
+      dockerfile: device.Dockerfile
+    container_name: smith-device
+    privileged: true
+    volumes:
+      - /sys/fs/cgroup:/sys/fs/cgroup:rw
+      - device-data:/etc/smith
+    environment:
+      - RUST_LOG=INFO
+
 volumes:
   smith-cargo-data:
   smith-rustup-data:
+  device-data:

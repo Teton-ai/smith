@@ -3,7 +3,9 @@ use pnet::datalink::NetworkInterface;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use serde_json::json;
+use std::cell::OnceCell;
 use std::collections::HashMap;
+use std::sync::OnceLock;
 use tracing::{error, info};
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
@@ -170,11 +172,28 @@ async fn get_last_boot_time() -> u64 {
     boot_time
 }
 
+static DUMMY_SERIAL_NUMBER: OnceLock<String> = OnceLock::new();
+
+fn get_dummy_serial_number() -> String {
+    #[cfg(debug_assertions)]
+    {
+        use uuid::Uuid;
+        DUMMY_SERIAL_NUMBER
+            .get_or_init(||
+                // This needs to be at least 11 characters long because of the sql query in `/devices/{device_id}`
+                Uuid::new_v4().to_string())
+            .to_string()
+    }
+
+    #[cfg(not(debug_assertions))]
+    {
+        panic!("The device should have a serial number")
+    }
+}
+
 pub fn get_serial_number() -> String {
     get_raw_serial_number()
-        .unwrap_or_else(||
-            // This needs to be at least 11 characters long because of the sql query in `/devices/{device_id}`
-            "1234567890123".to_owned())
+        .unwrap_or_else(get_dummy_serial_number)
         .trim()
         .trim_matches(char::is_whitespace)
         .trim_matches(char::from(0))

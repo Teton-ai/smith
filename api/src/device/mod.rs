@@ -408,13 +408,7 @@ pub async fn register_device(
                     .fetch_one(&mut *tx)
                     .await?;
 
-                #[derive(sqlx::FromRow)]
-                struct VariablesPresetRow {
-                    variables: Value,
-                }
-
-                let result_vars = sqlx::query_as!(
-                    VariablesPresetRow,
+                let result_vars: Value = sqlx::query_scalar!(
                     "SELECT variables FROM variable_preset WHERE title = 'DEFAULT'"
                 )
                 .fetch_one(&mut *tx)
@@ -425,7 +419,6 @@ pub async fn register_device(
                 })?;
 
                 for (name, value) in result_vars
-                    .variables
                     .as_array()
                     .expect("error: failed to get variable as array")
                     .iter()
