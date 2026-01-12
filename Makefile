@@ -7,24 +7,18 @@ up:
 	docker compose up
 
 migrate:
-	cd api
-	DATABASE_URL="postgres://postgres:postgres@localhost:5432/postgres"
-	cargo sqlx migrate run
+	cd api && DATABASE_URL="postgres://postgres:postgres@localhost:5432/postgres" cargo sqlx migrate run
 
 prepare:
-	cd api
-	DATABASE_URL="postgres://postgres:postgres@localhost:5432/postgres"
-	cargo sqlx prepare --workspace
+	cd api && DATABASE_URL="postgres://postgres:postgres@localhost:5432/postgres" cargo sqlx prepare
 
 dev.docs:
-	cd docs
-	mdbook serve --open
+	cd docs && mdbook serve --open
 
 lint:
-	docker exec -it smith-smithd cargo fmt
-	docker exec -it smith-smithd cargo clippy --release --all-targets --all-features -- -D clippy::all
-	cd dashboard
-	npm run lint
+	cargo fmt
+	cargo clippy --release --all-targets --all-features -- -D clippy::all
+	cd dashboard && npm run lint
 
 fix:
 	cargo fix --allow-dirty --allow-staged
@@ -38,8 +32,7 @@ init:
 	test -f dashboard/.env || cp dashboard/.env.template dashboard/.env
 
 gen-api-client:
-	cd dashboard
-	npm run gen-api-client
+	cd dashboard && npm run gen-api-client
 
 seed:
 	psql postgres://postgres:postgres@localhost:5432/postgres -f seed.sql
