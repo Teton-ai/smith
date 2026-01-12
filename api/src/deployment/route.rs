@@ -137,8 +137,13 @@ pub async fn api_confirm_full_rollout(
     .flatten()
     .flatten();
 
-    let deployment = confirm_full_rollout(release_id, &state.pg_pool, state.config, user_email.as_deref())
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let deployment = confirm_full_rollout(
+        release_id,
+        &state.pg_pool,
+        state.config,
+        user_email.as_deref(),
+    )
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     Ok((StatusCode::OK, Json(deployment)))
 }

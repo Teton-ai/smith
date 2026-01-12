@@ -10,7 +10,6 @@ use crate::middlewares::authorization;
 use crate::release::get_release_by_id;
 use crate::slack::send_slack_notification;
 use crate::user::CurrentUser;
-use serde_json::json;
 use axum::extract::Host;
 use axum::extract::Path;
 use axum::http::StatusCode;
@@ -22,6 +21,7 @@ use models::device::{
 use models::modem::Modem;
 use models::release::Release;
 use serde::Deserialize;
+use serde_json::json;
 use smith::utils::schema;
 use smith::utils::schema::SafeCommandRequest;
 use sqlx::types::Json as SqlxJson;
