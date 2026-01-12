@@ -160,14 +160,12 @@ async fn get_last_boot_time() -> u64 {
         .await
         .unwrap_or_default();
 
-    let boot_time = content
+    content
         .lines()
         .find(|line| line.starts_with("btime"))
         .and_then(|line| line.split_whitespace().nth(1))
         .and_then(|s| s.parse().ok())
-        .unwrap_or(0);
-
-    boot_time
+        .unwrap_or(0)
 }
 
 pub fn get_serial_number() -> String {
@@ -190,13 +188,11 @@ pub fn get_raw_serial_number() -> Option<String> {
     }
 
     // Check if we're on the overview screen LENOVOS and if so, use the product serial
-    if let Ok(overview_board_vendor) = std::fs::read_to_string("/sys/class/dmi/id/board_vendor") {
-        if overview_board_vendor.trim() == "LENOVO" {
-            if let Ok(product_serial) = std::fs::read_to_string("/sys/class/dmi/id/product_serial")
-            {
-                return Some(product_serial);
-            }
-        }
+    if let Ok(overview_board_vendor) = std::fs::read_to_string("/sys/class/dmi/id/board_vendor")
+        && overview_board_vendor.trim() == "LENOVO"
+        && let Ok(product_serial) = std::fs::read_to_string("/sys/class/dmi/id/product_serial")
+    {
+        return Some(product_serial);
     }
 
     // We must be on the GPU server, use the board serial

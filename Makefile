@@ -21,6 +21,7 @@ dev.docs:
 lint:
 	docker exec -it smith-smithd cargo fmt
 	docker exec -it smith-smithd cargo clippy --release --all-targets --all-features -- -D clippy::all
+	cd dashboard && npm run lint && cd ..
 
 fix:
 	docker exec -it smith-smithd cargo fix --allow-dirty --allow-staged

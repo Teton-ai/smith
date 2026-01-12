@@ -12,7 +12,6 @@ pub fn extract_client_ip(headers: &HeaderMap, fallback_addr: SocketAddr) -> IpAd
     {
         return ip;
     }
-
     // Check X-Real-IP header (alternative proxy header)
     if let Some(real_ip) = headers.get("x-real-ip")
         && let Ok(real_ip_str) = real_ip.to_str()

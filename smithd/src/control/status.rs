@@ -1,5 +1,5 @@
 use crate::dbus::SmithDbusProxy;
-use crate::magic::{self, MagicHandle};
+use crate::magic::MagicHandle;
 use crate::shutdown::ShutdownHandler;
 use anyhow::Result;
 use tracing::info;
