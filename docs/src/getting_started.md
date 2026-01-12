@@ -12,10 +12,9 @@ First, you will need the following stuff installed/setup:
 Then run `make init`. This will initialize the repo with all the stuff you need. At the time of writing this will
 - Create .env files (.env and dashboard/.env) for you. Please fill in the missing values
 
-## Starting the api
+## Starting the platform
 
-Run `make up`, then `make migrate`
-and finally `make dev` to start the api.
+Run `make up`, this should start the api, a local replica of smithd running on a device, and a bore server.
 
 Try running
 
@@ -40,17 +39,13 @@ npm run dev
 
 The dashboard should now be running on localhost:3000
 
-## Starting smithd
-
-Just run `make run`, which will start smithd and create a magic.toml for you.
-
 You can now open the dashboard, and see a device in the "Pending Approval" box. Press approve, and you should be golden.
 
 ## Starting the CLI
 
 Run
 ```sh
-cargo run --bin sm
+cargo run --bin sm -- <your command>
 ```
 You probably need to run it some times initially since it needs to create some defaults.
 If it shows a list of commands, you are golden.
