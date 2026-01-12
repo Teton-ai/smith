@@ -6,21 +6,44 @@ use std::collections::HashMap;
 use std::time;
 use std::time::Duration;
 
+// Service to monitor (sent from API to device)
+#[derive(Serialize, Deserialize, Default, Debug, Clone, PartialEq)]
+pub struct ServiceToMonitor {
+    pub name: String,
+    pub watchdog_sec: i32,
+}
+
+// Service status (sent from device to API)
+#[derive(Serialize, Deserialize, Default, Debug, Clone)]
+pub struct ServiceStatus {
+    pub name: String,
+    pub active: bool,
+    pub uptime_sec: Option<u64>,
+    pub healthy: bool,
+}
+
 // POST That the device does
 #[derive(Serialize, Deserialize, Default, Debug)]
 pub struct HomePost {
     pub timestamp: Duration,
     pub responses: Vec<SafeCommandResponse>,
     pub release_id: Option<i32>,
+    #[serde(default)]
+    pub services_status: Option<Vec<ServiceStatus>>,
 }
 
 impl HomePost {
-    pub fn new(responses: Vec<SafeCommandResponse>, release_id: Option<i32>) -> Self {
+    pub fn new(
+        responses: Vec<SafeCommandResponse>,
+        release_id: Option<i32>,
+        services_status: Option<Vec<ServiceStatus>>,
+    ) -> Self {
         let timestamp = time::Instant::now().elapsed();
         Self {
             timestamp,
             responses,
             release_id,
+            services_status,
         }
     }
 }
@@ -136,6 +159,8 @@ pub struct HomePostResponse {
     pub timestamp: Duration,
     pub commands: Vec<SafeCommandRequest>,
     pub target_release_id: Option<i32>,
+    #[serde(default)]
+    pub services_to_monitor: Option<Vec<ServiceToMonitor>>,
 }
 
 #[derive(Serialize, Deserialize, Default, Debug)]

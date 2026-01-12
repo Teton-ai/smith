@@ -4,7 +4,7 @@ use serde_json::Value;
 use serde_json::json;
 use smith::utils::schema;
 use smith::utils::schema::SafeCommandTx::{UpdateNetwork, UpdateVariables};
-use smith::utils::schema::{HomePost, NetworkType, SafeCommandRequest, SafeCommandRx};
+use smith::utils::schema::{HomePost, NetworkType, SafeCommandRequest, SafeCommandRx, ServiceStatus};
 use sqlx::PgPool;
 use tracing::debug;
 use tracing::error;
@@ -183,6 +183,11 @@ pub async fn save_responses(
         .await?;
     }
 
+    // Save services status to device.system_info if present
+    if let Some(ref services_status) = payload.services_status {
+        save_services_status(device_id, services_status, pool).await?;
+    }
+
     tx.commit().await?;
     Ok(())
 }
@@ -280,4 +285,30 @@ pub async fn add_commands(
 
     tx.commit().await?;
     Ok(command_ids)
+}
+
+/// Save services status to device.system_info JSONB field
+pub async fn save_services_status(
+    device_id: i32,
+    services_status: &[ServiceStatus],
+    pool: &PgPool,
+) -> Result<()> {
+    let services_json = json!(services_status);
+
+    // Update system_info by merging the services_status field
+    // If system_info is null, create a new object with just services_status
+    sqlx::query!(
+        r#"
+        UPDATE device
+        SET system_info = COALESCE(system_info, '{}'::jsonb) || jsonb_build_object('services_status', $2::jsonb)
+        WHERE id = $1
+        "#,
+        device_id,
+        services_json
+    )
+    .execute(pool)
+    .await?;
+
+    debug!("Saved services status for device {}: {:?}", device_id, services_status);
+    Ok(())
 }

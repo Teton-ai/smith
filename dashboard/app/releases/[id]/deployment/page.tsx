@@ -11,6 +11,8 @@ import {
   Loader2,
   Activity,
   Monitor,
+  Heart,
+  HeartOff,
 } from 'lucide-react';
 import { useQueryClient } from '@tanstack/react-query';
 import PrivateLayout from "@/app/layouts/PrivateLayout";
@@ -26,6 +28,13 @@ interface DeploymentDevice {
   target_release_id: number | null;
   last_ping: string | null;
   added_at: string;
+  services_healthy?: boolean | null;
+  services_status?: Array<{
+    name: string;
+    active: boolean;
+    uptime_sec: number | null;
+    healthy: boolean;
+  }> | null;
 }
 
 const DeploymentStatusPage = () => {
@@ -64,8 +73,19 @@ const DeploymentStatusPage = () => {
     if (!deployment || deployment.status !== 'InProgress' || devices.length === 0) {
       return false;
     }
+    // Only check if release update is complete, services health is informational only
     return devices.every(device => device.release_id === device.target_release_id);
   };
+
+  // Check if any device has services to monitor
+  const hasServicesToMonitor = devices.some(device => device.services_healthy !== null && device.services_healthy !== undefined);
+
+  // Check if all services are healthy (for warning display)
+  const allServicesHealthy = !hasServicesToMonitor || devices.every(device =>
+    device.services_healthy === null || device.services_healthy === true
+  );
+
+  const [showUnhealthyWarning, setShowUnhealthyWarning] = useState(false);
 
   const confirmFullRolloutHook = useApiConfirmFullRollout({
     mutation: {
@@ -255,10 +275,25 @@ const DeploymentStatusPage = () => {
                         {isCanaryComplete() ? (
                           <>
                             <p>All canary devices have been successfully updated!</p>
-                            <div className="mt-4">
+                            {hasServicesToMonitor && !allServicesHealthy && (
+                              <div className="mt-2 p-3 bg-amber-50 border border-amber-200 rounded-lg">
+                                <div className="flex items-center space-x-2 text-amber-800">
+                                  <HeartOff className="w-4 h-4" />
+                                  <span className="text-sm font-medium">Some services are not yet healthy</span>
+                                </div>
+                                <p className="text-sm text-amber-700 mt-1">
+                                  You can still proceed with the rollout, but some services may need more time to stabilize.
+                                </p>
+                              </div>
+                            )}
+                            <div className="mt-4 flex items-center space-x-3">
                               <button
                                 onClick={() => {
-                                  confirmFullRolloutHook.mutate({releaseId})
+                                  if (!allServicesHealthy && hasServicesToMonitor) {
+                                    setShowUnhealthyWarning(true);
+                                  } else {
+                                    confirmFullRolloutHook.mutate({releaseId});
+                                  }
                                 }}
                                 disabled={confirmFullRolloutHook.isPending}
                                 className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center space-x-2 transition-colors"
@@ -285,6 +320,41 @@ const DeploymentStatusPage = () => {
                               <span>Waiting for devices to update...</span>
                             </div>
                           </>
+                        )}
+
+                        {/* Warning modal for unhealthy services */}
+                        {showUnhealthyWarning && (
+                          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+                            <div className="bg-white rounded-lg p-6 max-w-md mx-4 shadow-xl">
+                              <div className="flex items-center space-x-3 mb-4">
+                                <div className="p-2 bg-amber-100 rounded-full">
+                                  <HeartOff className="w-6 h-6 text-amber-600" />
+                                </div>
+                                <h3 className="text-lg font-semibold text-gray-900">Services Not Healthy</h3>
+                              </div>
+                              <p className="text-gray-600 mb-6">
+                                Some services on canary devices have not reported as healthy yet.
+                                Are you sure you want to proceed with the full rollout?
+                              </p>
+                              <div className="flex justify-end space-x-3">
+                                <button
+                                  onClick={() => setShowUnhealthyWarning(false)}
+                                  className="px-4 py-2 text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors"
+                                >
+                                  Cancel
+                                </button>
+                                <button
+                                  onClick={() => {
+                                    setShowUnhealthyWarning(false);
+                                    confirmFullRolloutHook.mutate({releaseId});
+                                  }}
+                                  className="px-4 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700 transition-colors"
+                                >
+                                  Proceed Anyway
+                                </button>
+                              </div>
+                            </div>
+                          </div>
                         )}
                       </div>
                     )}
@@ -340,6 +410,11 @@ const DeploymentStatusPage = () => {
                           <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                             Status
                           </th>
+                          {hasServicesToMonitor && (
+                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                              Services
+                            </th>
+                          )}
                           <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                             Last Ping
                           </th>
@@ -351,6 +426,7 @@ const DeploymentStatusPage = () => {
                       <tbody className="bg-white divide-y divide-gray-200">
                         {devices.map((device) => {
                           const deviceStatus = getDeviceStatus(device);
+                          const servicesHealthy = device.services_healthy;
                           return (
                             <tr key={device.device_id} className="hover:bg-gray-50">
                               <td className="px-4 py-3 text-sm font-mono text-gray-900">
@@ -364,6 +440,23 @@ const DeploymentStatusPage = () => {
                                   {deviceStatus.label}
                                 </span>
                               </td>
+                              {hasServicesToMonitor && (
+                                <td className="px-4 py-3 text-sm">
+                                  {servicesHealthy === null || servicesHealthy === undefined ? (
+                                    <span className="text-gray-400">-</span>
+                                  ) : servicesHealthy ? (
+                                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border text-green-700 bg-green-100 border-green-200">
+                                      <Heart className="w-3 h-3 mr-1" />
+                                      Healthy
+                                    </span>
+                                  ) : (
+                                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border text-amber-700 bg-amber-100 border-amber-200" title={device.services_status?.map(s => `${s.name}: ${s.healthy ? 'healthy' : 'unhealthy'}`).join(', ')}>
+                                      <HeartOff className="w-3 h-3 mr-1" />
+                                      Not Ready
+                                    </span>
+                                  )}
+                                </td>
+                              )}
                               <td className="px-4 py-3 text-sm text-gray-600">
                                 {device.last_ping ? moment(device.last_ping).fromNow() : 'Never'}
                               </td>

@@ -2,6 +2,7 @@ use models::deployment::Deployment;
 use models::deployment::DeploymentRequest;
 use models::deployment::DeploymentStatus;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use sqlx::PgPool;
 use sqlx::types::chrono;
 use utoipa::ToSchema;
@@ -11,6 +12,14 @@ use crate::error::ApiError;
 pub mod route;
 
 #[derive(Serialize, Deserialize, Debug, Clone, ToSchema)]
+pub struct ServiceStatusInfo {
+    pub name: String,
+    pub active: bool,
+    pub uptime_sec: Option<u64>,
+    pub healthy: bool,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, ToSchema)]
 pub struct DeploymentDeviceWithStatus {
     pub device_id: i32,
     pub serial_number: String,
@@ -18,6 +27,9 @@ pub struct DeploymentDeviceWithStatus {
     pub target_release_id: Option<i32>,
     pub last_ping: Option<chrono::DateTime<chrono::Utc>>,
     pub added_at: chrono::DateTime<chrono::Utc>,
+    pub services_healthy: Option<bool>,
+    #[schema(value_type = Option<Vec<ServiceStatusInfo>>)]
+    pub services_status: Option<Value>,
 }
 
 pub async fn get_deployment(
@@ -183,6 +195,8 @@ pub async fn confirm_full_rollout(release_id: i32, pg_pool: &PgPool) -> anyhow::
         anyhow::bail!("No canary devices found in deployment");
     }
 
+    // Check: All devices must have release_id == target_release_id
+    // Service health is informational only - doesn't block rollout
     let mismatched_devices_count = sqlx::query_scalar!(
         "SELECT COUNT(*)
              FROM device
@@ -248,8 +262,27 @@ pub async fn get_devices_in_deployment(
         return Ok(Vec::new());
     };
 
-    let devices = sqlx::query_as!(
-        DeploymentDeviceWithStatus,
+    // Get services that need monitoring for this release
+    let required_services: Vec<String> = sqlx::query_scalar!(
+        "SELECT service_name FROM release_services WHERE release_id = $1 AND watchdog_sec IS NOT NULL",
+        release_id
+    )
+    .fetch_all(pg_pool)
+    .await?;
+
+    // Raw query result struct
+    struct DeviceRow {
+        device_id: i32,
+        serial_number: String,
+        release_id: Option<i32>,
+        target_release_id: Option<i32>,
+        last_ping: Option<chrono::DateTime<chrono::Utc>>,
+        added_at: chrono::DateTime<chrono::Utc>,
+        services_status: Option<Value>,
+    }
+
+    let rows = sqlx::query_as!(
+        DeviceRow,
         r#"
             SELECT
                 d.id AS device_id,
@@ -257,7 +290,8 @@ pub async fn get_devices_in_deployment(
                 d.release_id,
                 d.target_release_id,
                 d.last_ping,
-                dd.created_at AS added_at
+                dd.created_at AS added_at,
+                d.system_info->'services_status' AS services_status
             FROM deployment_devices dd
             JOIN device d ON dd.device_id = d.id
             WHERE dd.deployment_id = $1
@@ -268,5 +302,68 @@ pub async fn get_devices_in_deployment(
     .fetch_all(pg_pool)
     .await?;
 
+    let devices = rows
+        .into_iter()
+        .map(|row| {
+            let services_healthy = compute_services_healthy(&row.services_status, &required_services);
+            DeploymentDeviceWithStatus {
+                device_id: row.device_id,
+                serial_number: row.serial_number,
+                release_id: row.release_id,
+                target_release_id: row.target_release_id,
+                last_ping: row.last_ping,
+                added_at: row.added_at,
+                services_healthy,
+                services_status: row.services_status,
+            }
+        })
+        .collect();
+
     Ok(devices)
+}
+
+/// Check if all required services are healthy based on the device's services_status
+fn compute_services_healthy(
+    services_status: &Option<Value>,
+    required_services: &[String],
+) -> Option<bool> {
+    // If no services to monitor, return None (not applicable)
+    if required_services.is_empty() {
+        return None;
+    }
+
+    // If we have required services but no status, they're not healthy
+    let Some(status_value) = services_status else {
+        return Some(false);
+    };
+
+    // Parse the services status array
+    let Some(status_array) = status_value.as_array() else {
+        return Some(false);
+    };
+
+    // Check each required service
+    for required_service in required_services {
+        let service_status = status_array.iter().find(|s| {
+            s.get("name")
+                .and_then(|n| n.as_str())
+                .map(|n| n == required_service)
+                .unwrap_or(false)
+        });
+
+        match service_status {
+            Some(status) => {
+                let healthy = status.get("healthy").and_then(|h| h.as_bool()).unwrap_or(false);
+                if !healthy {
+                    return Some(false);
+                }
+            }
+            None => {
+                // Required service not found in status
+                return Some(false);
+            }
+        }
+    }
+
+    Some(true)
 }

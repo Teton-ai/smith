@@ -5,15 +5,16 @@ use crate::shutdown::ShutdownSignals;
 use crate::utils::network::NetworkClient;
 use crate::utils::schema::{
     DeviceRegistration, DeviceRegistrationResponse, HomePost, HomePostResponse,
-    SafeCommandResponse, SafeCommandRx,
+    SafeCommandResponse, SafeCommandRx, ServiceToMonitor,
 };
 use crate::utils::system::SystemInfo;
+use crate::utils::systemd;
 use anyhow::{Result, anyhow};
 use reqwest::{Response, StatusCode};
 use std::fmt::Write;
 use std::time::Duration;
 use tokio::{sync::mpsc, time};
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 
 struct Postman {
     shutdown: ShutdownSignals,
@@ -25,6 +26,7 @@ struct Postman {
     hostname: String,
     token: Option<String>,
     problems: Option<u32>,
+    services_to_monitor: Vec<ServiceToMonitor>,
 }
 
 #[derive(Debug)]
@@ -50,6 +52,7 @@ impl Postman {
             token: None,
             hostname: "".to_owned(),
             problems: None,
+            services_to_monitor: Vec::new(),
         }
     }
 
@@ -103,11 +106,28 @@ impl Postman {
                     let responses = self.commander.get_results().await;
                     let release_id = self.magic.get_release_id().await;
 
-                    let ping_home_body = HomePost::new(responses, release_id);
+                    // Check service health status if we have services to monitor
+                    let services_status = if !self.services_to_monitor.is_empty() {
+                        let statuses = systemd::check_services(&self.services_to_monitor);
+                        debug!("Service status check: {:?}", statuses);
+                        Some(statuses)
+                    } else {
+                        None
+                    };
+
+                    let ping_home_body = HomePost::new(responses, release_id, services_status);
 
                     let response = self.ping_home(ping_home_body).await;
                     let target_release_id = response.target_release_id;
                     self.magic.set_target_release_id(target_release_id).await;
+
+                    // Store services to monitor for next heartbeat
+                    if let Some(services) = response.services_to_monitor {
+                        if services != self.services_to_monitor {
+                            debug!("Updated services to monitor: {:?}", services);
+                            self.services_to_monitor = services;
+                        }
+                    }
 
                     self.commander.execute_api_batch(response.commands).await;
                 }

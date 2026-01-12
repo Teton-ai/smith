@@ -13,6 +13,7 @@ use axum::{Extension, Json};
 use serde::{Deserialize, Serialize};
 use smith::utils::schema::{
     DeviceRegistration, DeviceRegistrationResponse, HomePost, HomePostResponse, Package,
+    ServiceToMonitor,
 };
 use std::net::SocketAddr;
 use std::time::SystemTime;
@@ -74,6 +75,15 @@ pub async fn home(
             error!("Error saving responses: {:?}", err);
         });
 
+    let target_release_id = get_target_release(device.id, &state.pg_pool).await;
+
+    // Get services to monitor for the target release (only those with watchdog_sec)
+    let services_to_monitor = if let Some(release_id) = target_release_id {
+        get_services_to_monitor(release_id, &state.pg_pool).await
+    } else {
+        None
+    };
+
     let response = HomePostResponse {
         timestamp: SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
@@ -81,7 +91,8 @@ pub async fn home(
         commands: crate::home::get_commands(device.id, &device.serial_number, &state.pg_pool)
             .await
             .unwrap_or(Vec::new()),
-        target_release_id: get_target_release(device.id, &state.pg_pool).await,
+        target_release_id,
+        services_to_monitor,
     };
 
     let client_ip = Some(extract_client_ip(&headers, addr));
@@ -99,6 +110,40 @@ pub async fn home(
     });
 
     (StatusCode::OK, Json(response))
+}
+
+/// Get services to monitor for a release (only those with watchdog_sec configured)
+async fn get_services_to_monitor(
+    release_id: i32,
+    pool: &sqlx::PgPool,
+) -> Option<Vec<ServiceToMonitor>> {
+    let services = sqlx::query!(
+        r#"
+        SELECT service_name, watchdog_sec
+        FROM release_services
+        WHERE release_id = $1 AND watchdog_sec IS NOT NULL
+        "#,
+        release_id
+    )
+    .fetch_all(pool)
+    .await
+    .ok()?;
+
+    if services.is_empty() {
+        return None;
+    }
+
+    Some(
+        services
+            .into_iter()
+            .filter_map(|s| {
+                s.watchdog_sec.map(|watchdog_sec| ServiceToMonitor {
+                    name: s.service_name,
+                    watchdog_sec,
+                })
+            })
+            .collect(),
+    )
 }
 
 #[derive(Deserialize, Debug, IntoParams)]
