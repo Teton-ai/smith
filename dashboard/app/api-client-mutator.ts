@@ -14,6 +14,9 @@ export const useClientMutator = <T>() => {
 		const token = await getAccessTokenSilently();
 		const res = await axios({
 			...req,
+			paramsSerializer: {
+				indexes: null,
+			},
 			baseURL: config?.API_BASE_URL || "http://127.0.0.1:8080",
 			headers: {
 				...req?.headers,
