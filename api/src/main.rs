@@ -51,6 +51,7 @@ mod package;
 mod release;
 mod rollout;
 mod sentry;
+pub mod slack;
 mod smith;
 mod storage;
 mod telemetry;
