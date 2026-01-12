@@ -36,5 +36,3 @@ gen-api-client:
 
 seed:
 	psql postgres://postgres:postgres@localhost:5432/postgres -f seed.sql
-	# Add dummy package
-	curl -X PUT 'http://localhost:8080/packages' -F file=@dummy-package_1.0.0_amd64.AppImage
