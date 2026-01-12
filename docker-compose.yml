@@ -1,0 +1,44 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: api.Dockerfile
+    container_name: smith-api-dev
+    ports:
+      - "3000:3000"
+    volumes:
+      # Mount source code for hot reloading
+      - ./api:/app/api
+      - ./models:/app/models
+      - ./smithd:/app/smithd
+      # Cache cargo registry and build artifacts for faster rebuilds
+      - cargo-registry:/usr/local/cargo/registry
+      - cargo-git:/usr/local/cargo/git
+      - target-cache:/app/target
+    environment:
+      - RUST_LOG=debug
+      - RUST_BACKTRACE=1
+      # Add your database URL and other env vars here
+      # - DATABASE_URL=postgresql://user:password@db:5432/smith
+    # Uncomment if you need a database
+    # depends_on:
+    #   - db
+
+  # Uncomment to add a PostgreSQL database
+  # db:
+  #   image: postgres:16
+  #   container_name: smith-db
+  #   ports:
+  #     - "5432:5432"
+  #   environment:
+  #     - POSTGRES_USER=smith
+  #     - POSTGRES_PASSWORD=smith
+  #     - POSTGRES_DB=smith
+  #   volumes:
+  #     - postgres-data:/var/lib/postgresql/data
+
+volumes:
+  cargo-registry:
+  cargo-git:
+  target-cache:
+  # postgres-data:

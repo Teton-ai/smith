@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE variable SET name = $1, value = $2 WHERE device = $3 AND id = $4",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Int4",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "12186599093ffc1ed25b2de99b0f194401f83bfca6a155d2fd904515a0e6acf2"
+}

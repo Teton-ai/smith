@@ -113,7 +113,10 @@ impl MagicFile {
                     target_release_id: None,
                     token: None,
                 },
-                tunnel: None,
+                tunnel: Some(ConfigTunnel {
+                    server: "host.docker.internal".to_string(),
+                    secret: "".to_string(),
+                }),
                 scheduler: None,
                 checks: None,
                 metrics: None,

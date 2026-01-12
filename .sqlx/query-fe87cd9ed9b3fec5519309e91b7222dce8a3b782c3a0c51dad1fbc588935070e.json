@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select exists(\n                select 1 from ledger\n                where\n                    device_id = $1\n                    and id < $2\n                order by timestamp desc\n                limit 1\n            )",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "exists",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Int4"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "fe87cd9ed9b3fec5519309e91b7222dce8a3b782c3a0c51dad1fbc588935070e"
+}

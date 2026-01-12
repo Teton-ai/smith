@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO release_services (release_id, package_id, service_name, watchdog_sec)\n                     VALUES ($1, $2, $3, $4)\n                     ON CONFLICT (release_id, service_name) DO NOTHING",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Int4",
+        "Text",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "f731b5c24a37866430e652ddff95967de101726f757a4552ef96c961b4e99cc3"
+}

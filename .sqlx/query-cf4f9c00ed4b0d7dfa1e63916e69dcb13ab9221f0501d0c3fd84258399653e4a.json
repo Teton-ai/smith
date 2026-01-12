@@ -1,0 +1,90 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT\n                cq.device_id as device,\n                d.serial_number,\n                cq.id as cmd_id,\n                cq.created_at as issued_at,\n                cq.cmd as cmd_data,\n                cq.canceled as cancelled,\n                cq.fetched,\n                cq.fetched_at,\n                cr.id as \"response_id?\",\n                cr.created_at as \"response_at?\",\n                cr.response as \"response?\",\n                cr.status as \"status?\"\n            FROM command_queue cq\n            LEFT JOIN command_response cr ON cq.id = cr.command_id\n            LEFT JOIN device d ON cq.device_id = d.id\n            WHERE cq.device_id = $1\n                AND cq.id > $2\n            ORDER BY cq.created_at ASC\n            LIMIT $3::int",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "device",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "serial_number",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "cmd_id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 3,
+        "name": "issued_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 4,
+        "name": "cmd_data",
+        "type_info": "Json"
+      },
+      {
+        "ordinal": 5,
+        "name": "cancelled",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 6,
+        "name": "fetched",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 7,
+        "name": "fetched_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 8,
+        "name": "response_id?",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 9,
+        "name": "response_at?",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 10,
+        "name": "response?",
+        "type_info": "Json"
+      },
+      {
+        "ordinal": 11,
+        "name": "status?",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Int4",
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "cf4f9c00ed4b0d7dfa1e63916e69dcb13ab9221f0501d0c3fd84258399653e4a"
+}

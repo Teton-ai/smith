@@ -6,28 +6,28 @@ export DOCKER_CLI_HINTS=false
 up:
 	docker compose up
 
-dev:
-	docker exec -it smith-smithd cargo run --bin api
-
 migrate:
-	docker exec -it smith-smithd sh -c "cd api && cargo sqlx migrate run"
+	cd api
+	DATABASE_URL="postgres://postgres:postgres@localhost:5432/postgres"
+	cargo sqlx migrate run
 
 prepare:
-	docker exec -it smith-smithd  sh -c "cd api && cargo sqlx prepare"
+	cd api
+	DATABASE_URL="postgres://postgres:postgres@localhost:5432/postgres"
+	cargo sqlx prepare --workspace
 
 dev.docs:
-	cd docs && mdbook serve --open
+	cd docs
+	mdbook serve --open
 
 lint:
 	docker exec -it smith-smithd cargo fmt
 	docker exec -it smith-smithd cargo clippy --release --all-targets --all-features -- -D clippy::all
-	cd dashboard && npm run lint && cd ..
+	cd dashboard
+	npm run lint
 
 fix:
-	docker exec -it smith-smithd cargo fix --allow-dirty --allow-staged
-
-run:
-	docker exec -it smith-smithd cargo run --bin smithd
+	cargo fix --allow-dirty --allow-staged
 
 schema:
 	docker exec smith-postgres pg_dump --schema-only -n public -U $(POSTGRES_USER) postgres > schema.sql
@@ -38,7 +38,8 @@ init:
 	test -f dashboard/.env || cp dashboard/.env.template dashboard/.env
 
 gen-api-client:
-	cd dashboard && npm run gen-api-client && cd ..
+	cd dashboard
+	npm run gen-api-client
 
 seed:
 	psql postgres://postgres:postgres@localhost:5432/postgres -f seed.sql

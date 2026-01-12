@@ -3,7 +3,6 @@ use pnet::datalink::NetworkInterface;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use serde_json::json;
-use std::cell::OnceCell;
 use std::collections::HashMap;
 use std::sync::OnceLock;
 use tracing::{error, info};

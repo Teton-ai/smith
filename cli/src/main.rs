@@ -1357,11 +1357,13 @@ async fn main() -> anyhow::Result<()> {
 
                 // Wait for server-side setup to complete
                 tokio::time::sleep(Duration::from_secs(10)).await;
+
+                let tunnel_server = config.current_tunnel_server();
                 let mut ssh = Session::connect(
                     config.get_identity_file(),
                     username,
                     None,
-                    ("bore.teton.ai", port),
+                    (tunnel_server, port),
                 )
                 .await?;
                 println!("Connected");

@@ -1,0 +1,113 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE ip_address\n        SET name = $1, updated_at = NOW()\n        WHERE id = $2\n        RETURNING\n            id,\n            ip_address,\n            name,\n            continent,\n            continent_code,\n            country_code,\n            country,\n            region,\n            city,\n            isp,\n            coordinates[0] as longitude,\n            coordinates[1] as latitude,\n            proxy,\n            hosting,\n            created_at,\n            updated_at\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "ip_address",
+        "type_info": "Inet"
+      },
+      {
+        "ordinal": 2,
+        "name": "name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "continent",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "continent_code",
+        "type_info": "Bpchar"
+      },
+      {
+        "ordinal": 5,
+        "name": "country_code",
+        "type_info": "Bpchar"
+      },
+      {
+        "ordinal": 6,
+        "name": "country",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "region",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "city",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 9,
+        "name": "isp",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 10,
+        "name": "longitude",
+        "type_info": "Float8"
+      },
+      {
+        "ordinal": 11,
+        "name": "latitude",
+        "type_info": "Float8"
+      },
+      {
+        "ordinal": 12,
+        "name": "proxy",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 13,
+        "name": "hosting",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 14,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 15,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      null,
+      null,
+      true,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "1512182a432147adfd7ea4f29471ed77ba94f16b07e13545d748ccda3d7fba51"
+}

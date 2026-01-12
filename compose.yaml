@@ -1,26 +1,28 @@
 name: smith
 services:
-  smithd:
-    container_name: ${COMPOSE_PROJECT_NAME}-smithd
+  api:
     build:
       context: .
-      dockerfile: smithd.Dockerfile
+      dockerfile: api.Dockerfile
+    container_name: smith-api
     env_file:
       - .env
     ports:
       - "8080:8080"
     volumes:
-      - smith-cargo-data:/root/.cargo
-      - smith-rustup-data:/root/.rustup
-      - ./:/workspace
-      - ./target:/workspace/target
-      - /var/run/docker.sock:/var/run/docker.sock
-      - ~/.ssh/id_ed25519.pub:/root/.ssh/authorized_keys
-    environment:
-      - SHELL=/bin/bash
-    command: ["/bin/bash", "./entrypoint.sh"]
+      # Mount source code for hot reloading
+      - ./api:/app/api
+      - ./models:/app/models
+      - ./smithd:/app/smithd
+      # Cache cargo registry and build artifacts for faster rebuilds
+      - cargo-registry:/usr/local/cargo/registry
+      - cargo-git:/usr/local/cargo/git
+      - target-cache:/app/target
+    depends_on:
+      - postgres
+
   postgres:
-    container_name: ${COMPOSE_PROJECT_NAME}-postgres
+    container_name: smith-postgres
     build:
       dockerfile: postgres.Dockerfile
     env_file:
@@ -29,6 +31,14 @@ services:
       - "5432:5432"
     volumes:
       - ./volumes/${COMPOSE_PROJECT_NAME}-postgres:/var/lib/postgresql/data
+
+  bore:
+    image: ekzhang/bore
+    container_name: smith-bore
+    command: server --min-port 30000 --max-port 30100
+    ports:
+      - "7835:7835"
+      - "30000-30100:30000-30100"
 
   device:
     build:
@@ -41,8 +51,12 @@ services:
       - device-data:/etc/smith
     environment:
       - RUST_LOG=INFO
+    depends_on:
+      - api
+      - bore
 
 volumes:
-  smith-cargo-data:
-  smith-rustup-data:
   device-data:
+  cargo-registry:
+  cargo-git:
+  target-cache:
