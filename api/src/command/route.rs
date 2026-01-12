@@ -131,7 +131,6 @@ pub struct PaginationUuid {
     ),
     tag = COMMANDS_TAG
 )]
-#[allow(clippy::collapsible_else_if)]
 pub async fn get_bundle_commands(
     host: Host,
     Extension(state): Extension<State>,

@@ -48,25 +48,25 @@ pub fn extract_services_from_deb(data: &[u8]) -> anyhow::Result<Vec<ServiceInfo>
             }
         };
 
-        if is_service_file_path(&path) {
-            if let Some(service_name) = extract_service_name(&path) {
-                // Read the service file content to parse WatchdogSec
-                let mut content = Vec::new();
-                let watchdog_sec = if entry.read_to_end(&mut content).is_ok() {
-                    parse_service_file(Cursor::new(&content))
-                } else {
-                    None
-                };
+        if is_service_file_path(&path)
+            && let Some(service_name) = extract_service_name(&path)
+        {
+            // Read the service file content to parse WatchdogSec
+            let mut content = Vec::new();
+            let watchdog_sec = if entry.read_to_end(&mut content).is_ok() {
+                parse_service_file(Cursor::new(&content))
+            } else {
+                None
+            };
 
-                debug!(
-                    "Found service: {} (watchdog: {:?})",
-                    service_name, watchdog_sec
-                );
-                services.push(ServiceInfo {
-                    name: service_name,
-                    watchdog_sec,
-                });
-            }
+            debug!(
+                "Found service: {} (watchdog: {:?})",
+                service_name, watchdog_sec
+            );
+            services.push(ServiceInfo {
+                name: service_name,
+                watchdog_sec,
+            });
         }
     }
 

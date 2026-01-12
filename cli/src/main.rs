@@ -575,10 +575,10 @@ async fn main() -> anyhow::Result<()> {
                         }
 
                         // Note
-                        if let Some(note) = &device.note {
-                            if !note.is_empty() {
-                                println!("  {} {}", "note:".dimmed(), note);
-                            }
+                        if let Some(note) = &device.note
+                            && !note.is_empty()
+                        {
+                            println!("  {} {}", "note:".dimmed(), note);
                         }
 
                         // Labels
