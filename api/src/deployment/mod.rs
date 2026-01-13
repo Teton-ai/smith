@@ -155,7 +155,6 @@ pub async fn new_deployment(
         if let Ok(Some(info)) = release_info {
             let triggered_by = user_email.unwrap_or("Unknown");
             let message = json!({
-                "text": format!("Deployment triggered for {} v{}", info.distribution_name, info.version),
                 "blocks": [
                     {
                         "type": "section",
@@ -293,7 +292,6 @@ pub async fn confirm_full_rollout(
         if let Ok(Some(info)) = release_info {
             let confirmed_by = user_email.unwrap_or("Unknown");
             let message = json!({
-                "text": format!("Full rollout confirmed for {} v{}", info.distribution_name, info.version),
                 "blocks": [
                     {
                         "type": "section",

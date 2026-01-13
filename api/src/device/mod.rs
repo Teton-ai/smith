@@ -366,7 +366,6 @@ pub async fn register_device(
 
         if let Some(slack_hook_url) = &config.slack_hook_url {
             let message = json!({
-                "text": format!("Device {} registered via API", result.serial_number),
                 "blocks": [
                     {
                         "type": "section",
