@@ -4,8 +4,9 @@ export DOCKER_CLI_HINTS=false
 .DEFAULT_GOAL := up
 
 # Starts the platform locally
+# To start multiple devices, run `docker compose --scale device=3 up -d`
 up:
-	docker compose --profile api up -d
+	docker compose up -d
 
 migrate:
 	cd api && DATABASE_URL="postgres://postgres:postgres@localhost:5432/postgres" cargo sqlx migrate run

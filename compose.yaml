@@ -43,6 +43,7 @@ services:
       context: .
       dockerfile: device.Dockerfile
     privileged: true
+    extra_hosts: ["host.docker.internal:host-gateway"]
     volumes:
       - /sys/fs/cgroup:/sys/fs/cgroup:rw
     environment:
