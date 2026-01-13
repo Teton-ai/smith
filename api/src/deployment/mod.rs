@@ -2,11 +2,14 @@ use models::deployment::Deployment;
 use models::deployment::DeploymentRequest;
 use models::deployment::DeploymentStatus;
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 use sqlx::PgPool;
 use sqlx::types::chrono;
 use utoipa::ToSchema;
 
+use crate::config::Config;
 use crate::error::ApiError;
+use crate::slack::send_slack_notification;
 
 pub mod route;
 
@@ -40,6 +43,8 @@ pub async fn new_deployment(
     release_id: i32,
     request: Option<DeploymentRequest>,
     pg_pool: &PgPool,
+    config: &Config,
+    user_email: Option<&str>,
 ) -> Result<Deployment, ApiError> {
     let mut tx = pg_pool.begin().await?;
     // Get the distribution_id for this release
@@ -79,7 +84,7 @@ pub async fn new_deployment(
             )
             INSERT INTO deployment_devices (deployment_id, device_id)
             SELECT $2, id FROM selected_devices
-            
+
             "#,
             release.distribution_id,
             deployment.id,
@@ -111,7 +116,8 @@ pub async fn new_deployment(
         .execute(&mut *tx)
         .await?
     };
-    if res.rows_affected() == 0 {
+    let canary_count = res.rows_affected();
+    if canary_count == 0 {
         tx.rollback().await?;
         return Err(ApiError::bad_request(
             "Canary release contains no devices, aborting.",
@@ -134,10 +140,51 @@ pub async fn new_deployment(
 
     tx.commit().await?;
 
+    // Send Slack notification
+    if let Some(slack_hook_url) = &config.slack_hook_url {
+        let release_info = sqlx::query!(
+            "SELECT r.version, d.name as distribution_name
+             FROM release r
+             JOIN distribution d ON r.distribution_id = d.id
+             WHERE r.id = $1",
+            release_id
+        )
+        .fetch_optional(pg_pool)
+        .await;
+
+        if let Ok(Some(info)) = release_info {
+            let triggered_by = user_email.unwrap_or("Unknown");
+            let message = json!({
+                "text": format!("Deployment triggered for {} v{}", info.distribution_name, info.version),
+                "blocks": [
+                    {
+                        "type": "section",
+                        "text": {
+                            "type": "mrkdwn",
+                            "text": format!(
+                                ":rocket: *Deployment Started*\n\n*Distribution:* {}\n*Version:* {}\n*Canary devices:* {}\n*Triggered by:* {}",
+                                info.distribution_name,
+                                info.version,
+                                canary_count,
+                                triggered_by
+                            )
+                        }
+                    }
+                ]
+            });
+            send_slack_notification(slack_hook_url, message).await;
+        }
+    }
+
     Ok(deployment)
 }
 
-pub async fn confirm_full_rollout(release_id: i32, pg_pool: &PgPool) -> anyhow::Result<Deployment> {
+pub async fn confirm_full_rollout(
+    release_id: i32,
+    pg_pool: &PgPool,
+    config: &Config,
+    user_email: Option<&str>,
+) -> anyhow::Result<Deployment> {
     let mut tx = pg_pool.begin().await?;
 
     let deployment = sqlx::query!(
@@ -206,7 +253,7 @@ pub async fn confirm_full_rollout(release_id: i32, pg_pool: &PgPool) -> anyhow::
         .fetch_one(&mut *tx)
         .await?;
 
-    sqlx::query_scalar!(
+    let device_count = sqlx::query_scalar!(
         "SELECT COUNT(*)
              FROM device
              WHERE device.release_id IN (
@@ -230,6 +277,43 @@ pub async fn confirm_full_rollout(release_id: i32, pg_pool: &PgPool) -> anyhow::
     .await?;
 
     tx.commit().await?;
+
+    // Send Slack notification
+    if let Some(slack_hook_url) = &config.slack_hook_url {
+        let release_info = sqlx::query!(
+            "SELECT r.version, d.name as distribution_name
+             FROM release r
+             JOIN distribution d ON r.distribution_id = d.id
+             WHERE r.id = $1",
+            release_id
+        )
+        .fetch_optional(pg_pool)
+        .await;
+
+        if let Ok(Some(info)) = release_info {
+            let confirmed_by = user_email.unwrap_or("Unknown");
+            let message = json!({
+                "text": format!("Full rollout confirmed for {} v{}", info.distribution_name, info.version),
+                "blocks": [
+                    {
+                        "type": "section",
+                        "text": {
+                            "type": "mrkdwn",
+                            "text": format!(
+                                ":white_check_mark: *Full Rollout Confirmed*\n\n*Distribution:* {}\n*Version:* {}\n*Devices updated:* {}\n*Confirmed by:* {}",
+                                info.distribution_name,
+                                info.version,
+                                device_count.unwrap_or(0),
+                                confirmed_by
+                            )
+                        }
+                    }
+                ]
+            });
+            send_slack_notification(slack_hook_url, message).await;
+        }
+    }
+
     Ok(updated_deployment)
 }
 

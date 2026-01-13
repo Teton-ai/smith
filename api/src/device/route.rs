@@ -8,6 +8,7 @@ use crate::event::PublicEvent;
 use crate::handlers::AuthedDevice;
 use crate::middlewares::authorization;
 use crate::release::get_release_by_id;
+use crate::slack::send_slack_notification;
 use crate::user::CurrentUser;
 use axum::extract::Host;
 use axum::extract::Path;
@@ -20,6 +21,7 @@ use models::device::{
 use models::modem::Modem;
 use models::release::Release;
 use serde::Deserialize;
+use serde_json::json;
 use smith::utils::schema;
 use smith::utils::schema::SafeCommandRequest;
 use sqlx::types::Json as SqlxJson;
@@ -1748,6 +1750,7 @@ pub async fn get_device_release(
 pub async fn update_device_target_release(
     Path(device_id): Path<i32>,
     Extension(state): Extension<State>,
+    Extension(current_user): Extension<CurrentUser>,
     Json(device_release): Json<UpdateDeviceRelease>,
 ) -> axum::response::Result<StatusCode, StatusCode> {
     let target_release_id = device_release.target_release_id;
@@ -1779,6 +1782,54 @@ pub async fn update_device_target_release(
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
 
+    // Send Slack alert for direct device deployment
+    if let Some(slack_hook_url) = &state.config.slack_hook_url {
+        let user_email = sqlx::query_scalar!(
+            "SELECT email FROM auth.users WHERE id = $1",
+            current_user.user_id
+        )
+        .fetch_optional(&state.pg_pool)
+        .await
+        .ok()
+        .flatten()
+        .flatten();
+
+        let release_info = sqlx::query!(
+            "SELECT r.version, d.name as distribution_name, dev.serial_number
+             FROM release r
+             JOIN distribution d ON r.distribution_id = d.id
+             JOIN device dev ON dev.id = $2
+             WHERE r.id = $1",
+            target_release_id,
+            device_id
+        )
+        .fetch_optional(&state.pg_pool)
+        .await;
+
+        if let Ok(Some(info)) = release_info {
+            let triggered_by = user_email.as_deref().unwrap_or("Unknown");
+            let message = json!({
+                "text": format!("Direct deployment to device {} outside normal flow", info.serial_number),
+                "blocks": [
+                    {
+                        "type": "section",
+                        "text": {
+                            "type": "mrkdwn",
+                            "text": format!(
+                                ":warning: *Direct Device Deployment - Risk of Drift*\n\n*Device:* {}\n*Target Version:* {} v{}\n*Triggered by:* {}\n\n_This deployment bypasses the canary rollout process._",
+                                info.serial_number,
+                                info.distribution_name,
+                                info.version,
+                                triggered_by
+                            )
+                        }
+                    }
+                ]
+            });
+            send_slack_notification(slack_hook_url, message).await;
+        }
+    }
+
     Ok(StatusCode::OK)
 }
 
@@ -1798,6 +1849,7 @@ pub async fn update_device_target_release(
 )]
 pub async fn update_devices_target_release(
     Extension(state): Extension<State>,
+    Extension(current_user): Extension<CurrentUser>,
     Json(devices_release): Json<UpdateDevicesRelease>,
 ) -> axum::response::Result<StatusCode, StatusCode> {
     let target_release_id = devices_release.target_release_id;
@@ -1829,6 +1881,41 @@ pub async fn update_devices_target_release(
         error!("Failed to update target release id for devices; {err}");
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
+
+    // Send Slack alert for direct bulk device deployment
+    if let Some(slack_hook_url) = &state.config.slack_hook_url {
+        let user_email = sqlx::query_scalar!(
+            "SELECT email FROM auth.users WHERE id = $1",
+            current_user.user_id
+        )
+        .fetch_optional(&state.pg_pool)
+        .await
+        .ok()
+        .flatten()
+        .flatten();
+
+        let device_count = devices_release.devices.len();
+        let triggered_by = user_email.as_deref().unwrap_or("Unknown");
+        let message = json!({
+            "text": format!("Direct bulk deployment to {} devices outside normal flow", device_count),
+            "blocks": [
+                {
+                    "type": "section",
+                    "text": {
+                        "type": "mrkdwn",
+                        "text": format!(
+                            ":warning: *Direct Bulk Deployment - Risk of Drift*\n\n*Devices affected:* {}\n*Target Version:* {} v{}\n*Triggered by:* {}\n\n_This deployment bypasses the canary rollout process._",
+                            device_count,
+                            target_release.distribution_name,
+                            target_release.version,
+                            triggered_by
+                        )
+                    }
+                }
+            ]
+        });
+        send_slack_notification(slack_hook_url, message).await;
+    }
 
     Ok(StatusCode::OK)
 }

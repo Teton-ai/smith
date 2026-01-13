@@ -1,4 +1,5 @@
 use crate::config::Config;
+use crate::slack::send_slack_notification;
 use models::release::Release;
 use serde::{Deserialize, Serialize, Serializer};
 use serde_json::{Value, json};
@@ -379,13 +380,7 @@ pub async fn register_device(
                     },
                 ]
             });
-            let client = reqwest::Client::new();
-            let _res = client
-                .post(slack_hook_url)
-                .header("Content-Type", "application/json")
-                .json(&message)
-                .send()
-                .await;
+            send_slack_notification(slack_hook_url, message).await;
         }
     }
 
