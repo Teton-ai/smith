@@ -1,9 +1,11 @@
-# Multi-stage build for smithd and smith-updater
-# This emulates an Ubuntu IoT device running both services
+# This tries to emulate an Ubuntu device as we would see in the real world.
+# It runs smithd and smith-updater with systemd, sets up ssh and such
 
-FROM ubuntu:22.04 AS builder
+# This needs to be run in privileged mode
+# docker run -d --privileged device
 
-# Redeclare ARG to make it available in this stage
+FROM nvcr.io/nvidia/l4t-base:r36.2.0 AS builder
+
 ARG RUST_VERSION=1.91.0
 
 WORKDIR /build
@@ -29,8 +31,8 @@ COPY . .
 RUN cargo build --package smith --bin smithd
 RUN cargo build --package smith-updater
 
-# Runtime stage - Ubuntu to emulate real devices
-FROM ubuntu:22.04
+# Runtime stage - Linux for tegra to emulate real devices
+FROM nvcr.io/nvidia/l4t-base:r36.2.0
 
 # Install runtime dependencies and systemd
 RUN apt-get update && apt-get install -y \
@@ -43,12 +45,9 @@ RUN apt-get update && apt-get install -y \
     openssh-server \
     && rm -rf /var/lib/apt/lists/*
 
-# Create the /etc/smith working directory
 RUN mkdir -p /etc/smith
 RUN mkdir -p /etc/ssh
-# Ensure target directory exists and has right permissions
 RUN mkdir -p /workspace/target
-
 RUN mkdir -p /var/run/dbus
 
 # Create nightingale user for SSH tunneling

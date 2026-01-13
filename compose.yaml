@@ -29,8 +29,6 @@ services:
       - .env
     ports:
       - "5432:5432"
-    volumes:
-      - ./volumes/${COMPOSE_PROJECT_NAME}-postgres:/var/lib/postgresql/data
 
   bore:
     image: ekzhang/bore
