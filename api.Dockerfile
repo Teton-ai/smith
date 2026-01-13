@@ -36,9 +36,8 @@ RUN SQLX_OFFLINE=true cargo build --package api
 # Set environment variables
 ENV ROLES_PATH=./api/roles.toml
 
-# Expose API port (adjust if needed)
 EXPOSE 8080
 
 # Use cargo-watch to rebuild and restart on file changes
-# The -x run will execute cargo run, -w watches for changes, -c clears screen
+# The -x run will execute cargo run, -w watches for changes
 CMD ["cargo", "watch", "-x", "run --package api", "-w", "api", "-w", "models", "-w", "smithd"]
