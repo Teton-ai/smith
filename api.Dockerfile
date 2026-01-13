@@ -9,12 +9,14 @@ WORKDIR /app
 
 # Install cargo-watch for hot reloading
 RUN cargo install cargo-watch
+RUN rustup component add rustfmt clippy
 
 # Install build dependencies
 RUN apt-get update && apt-get install -y \
     build-essential \
     libssl-dev \
     pkg-config \
+    libdbus-1-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy workspace configuration files first for better caching

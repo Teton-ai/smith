@@ -3,8 +3,9 @@ export DOCKER_CLI_HINTS=false
 
 .DEFAULT_GOAL := up
 
+# Starts the platform locally
 up:
-	docker compose up
+	docker compose --profile api up -d
 
 migrate:
 	cd api && DATABASE_URL="postgres://postgres:postgres@localhost:5432/postgres" cargo sqlx migrate run
@@ -16,8 +17,8 @@ dev.docs:
 	cd docs && mdbook serve --open
 
 lint:
-	cargo fmt
-	cargo clippy --release --all-targets --all-features -- -D clippy::all
+	docker exec -it smith-api cargo fmt
+	docker exec -it smith-api cargo clippy --release --all-targets --all-features -- -D clippy::all
 	cd dashboard && npm run lint
 
 fix:
