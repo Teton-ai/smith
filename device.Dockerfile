@@ -74,9 +74,6 @@ COPY --from=builder /build/target/debug/smith-updater /usr/bin/smith-updater
 COPY smithd/debian/smithd.service /etc/systemd/system/smithd.service
 COPY updater/debian/smith-updater.service /etc/systemd/system/smith-updater.service
 
-# Copy D-Bus configuration if it exists
-COPY smithd/src/dbus/smithd.conf /etc/dbus-1/system.d/smithd.conf
-
 # Make binaries executable
 RUN chmod +x /usr/bin/smithd /usr/bin/smith-updater
 

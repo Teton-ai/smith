@@ -42,11 +42,9 @@ services:
     build:
       context: .
       dockerfile: device.Dockerfile
-    container_name: smith-device
     privileged: true
     volumes:
       - /sys/fs/cgroup:/sys/fs/cgroup:rw
-      - device-data:/etc/smith
     environment:
       - RUST_LOG=INFO
     depends_on:
@@ -54,7 +52,6 @@ services:
       - bore
 
 volumes:
-  device-data:
   cargo-registry:
   cargo-git:
   target-cache:
