@@ -52,6 +52,7 @@ RUN mkdir -p /var/run/dbus
 
 # Create nightingale user for SSH tunneling
 RUN useradd -m -s /bin/bash nightingale
+RUN usermod -aG systemd-journal,adm nightingale
 RUN mkdir -p /home/nightingale/.ssh
 RUN chown -R nightingale:nightingale /home/nightingale/.ssh
 RUN chmod 700 /home/nightingale/.ssh

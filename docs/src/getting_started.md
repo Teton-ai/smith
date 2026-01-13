@@ -41,6 +41,8 @@ The dashboard should now be running on localhost:3000
 
 You can now open the dashboard, and see a device in the "Pending Approval" box. Press approve, and you should be golden.
 
+You will probably need to `make seed` here, or preferrably earlier, so the approval will work.
+
 ## Starting the CLI
 
 Run
