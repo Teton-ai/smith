@@ -2,24 +2,27 @@
 
 import {
 	AlertTriangle,
+	Calendar,
 	ChevronDown,
 	Cpu,
 	GitBranch,
 	Loader2,
 	Search,
 	Tag,
+	User,
 	X,
 } from "lucide-react";
-import { createPortal } from "react-dom";
+import moment from "moment";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import NetworkQualityIndicator from "@/app/components/NetworkQualityIndicator";
 import {
 	type Device,
 	type Release,
-	useUpdateDevicesTargetRelease,
 	useGetDevicesInfinite,
 	useGetReleases,
+	useUpdateDevicesTargetRelease,
 } from "../../api-client";
 
 const Tooltip = ({
@@ -151,7 +154,12 @@ const DevicesPage = () => {
 	const [selectedReleaseId, setSelectedReleaseId] = useState<
 		number | undefined
 	>(undefined);
+	const [bulkDeployReleaseSearch, setBulkDeployReleaseSearch] = useState("");
 	const [mounted, setMounted] = useState(false);
+
+	const formatRelativeTime = (dateString: string) => {
+		return moment(dateString).fromNow();
+	};
 
 	useEffect(() => {
 		setMounted(true);
@@ -742,24 +750,49 @@ const DevicesPage = () => {
 			<div className="border border-gray-200 rounded-lg overflow-hidden bg-white">
 				<div className="bg-gray-50 px-4 py-3 border-b border-gray-200">
 					<div className="grid grid-cols-[auto_2fr_2fr_2fr_1fr_1fr] gap-4 text-xs font-medium text-gray-500 uppercase tracking-wide items-center">
-						<div className="w-6">
-							<input
-								type="checkbox"
-								checked={
-									selectedDeviceIds.size > 0 &&
-									selectedDeviceIds.size === filteredDevices.length
-								}
-								onChange={(e) => {
-									if (e.target.checked) {
+						<div className="w-6 flex items-center justify-center">
+							<button
+								onClick={() => {
+									if (
+										selectedDeviceIds.size > 0 &&
+										selectedDeviceIds.size === filteredDevices.length
+									) {
+										setSelectedDeviceIds(new Set());
+									} else {
 										setSelectedDeviceIds(
 											new Set(filteredDevices.map((d) => d.id)),
 										);
-									} else {
-										setSelectedDeviceIds(new Set());
 									}
 								}}
-								className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
-							/>
+								className={`w-5 h-5 rounded-full flex items-center justify-center transition-colors cursor-pointer ${
+									selectedDeviceIds.size > 0 &&
+									selectedDeviceIds.size === filteredDevices.length
+										? "bg-blue-600"
+										: selectedDeviceIds.size > 0
+											? "bg-blue-400"
+											: "border-2 border-gray-300 hover:border-gray-400"
+								}`}
+							>
+								{selectedDeviceIds.size > 0 && (
+									<svg
+										className="w-3 h-3 text-white"
+										fill="none"
+										viewBox="0 0 24 24"
+										stroke="currentColor"
+									>
+										<path
+											strokeLinecap="round"
+											strokeLinejoin="round"
+											strokeWidth={2}
+											d={
+												selectedDeviceIds.size === filteredDevices.length
+													? "M5 13l4 4L19 7"
+													: "M20 12H4"
+											}
+										/>
+									</svg>
+								)}
+							</button>
 						</div>
 						<div>Device</div>
 						<div>Labels</div>
@@ -780,23 +813,40 @@ const DevicesPage = () => {
 								onClick={() => router.push(`/devices/${device.serial_number}`)}
 							>
 								<div className="grid grid-cols-[auto_2fr_2fr_2fr_1fr_1fr] gap-4 items-center">
-									<div className="w-6">
-										<input
-											type="checkbox"
-											checked={selectedDeviceIds.has(device.id)}
-											onChange={(e) => {
+									<div className="w-6 flex items-center justify-center">
+										<button
+											onClick={(e) => {
 												e.stopPropagation();
 												const newSet = new Set(selectedDeviceIds);
-												if (e.target.checked) {
-													newSet.add(device.id);
-												} else {
+												if (selectedDeviceIds.has(device.id)) {
 													newSet.delete(device.id);
+												} else {
+													newSet.add(device.id);
 												}
 												setSelectedDeviceIds(newSet);
 											}}
-											onClick={(e) => e.stopPropagation()}
-											className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
-										/>
+											className={`w-5 h-5 rounded-full flex items-center justify-center transition-colors cursor-pointer ${
+												selectedDeviceIds.has(device.id)
+													? "bg-blue-600"
+													: "border-2 border-gray-300 hover:border-gray-400"
+											}`}
+										>
+											{selectedDeviceIds.has(device.id) && (
+												<svg
+													className="w-3 h-3 text-white"
+													fill="none"
+													viewBox="0 0 24 24"
+													stroke="currentColor"
+												>
+													<path
+														strokeLinecap="round"
+														strokeLinejoin="round"
+														strokeWidth={2}
+														d="M5 13l4 4L19 7"
+													/>
+												</svg>
+											)}
+										</button>
 									</div>
 									<div>
 										<div className="flex items-center space-x-3">
@@ -996,6 +1046,7 @@ const DevicesPage = () => {
 									onClick={() => {
 										setShowBulkDeployModal(false);
 										setSelectedReleaseId(undefined);
+										setBulkDeployReleaseSearch("");
 									}}
 									className="text-gray-400 hover:text-gray-600 cursor-pointer"
 								>
@@ -1046,23 +1097,138 @@ const DevicesPage = () => {
 								<label className="block text-sm font-medium text-gray-700 mb-2">
 									Target Release
 								</label>
-								<select
-									value={selectedReleaseId || ""}
-									onChange={(e) =>
-										setSelectedReleaseId(
-											e.target.value ? Number(e.target.value) : undefined,
-										)
-									}
-									className="w-full border border-gray-300 rounded-md px-3 py-2 text-gray-900 focus:ring-2 focus:ring-amber-500 focus:border-amber-500"
-									disabled={hasMixedDistributions || distributionIds.size === 0}
-								>
-									<option value="">Select a release...</option>
-									{availableReleasesForBulkDeploy.map((release: Release) => (
-										<option key={release.id} value={release.id}>
-											{release.distribution_name} v{release.version}
-										</option>
-									))}
-								</select>
+								{hasMixedDistributions || distributionIds.size === 0 ? (
+									<div className="text-center py-4 text-gray-500 text-sm border border-gray-200 rounded-md">
+										{hasMixedDistributions
+											? "Cannot select release for mixed distributions"
+											: "No releases available"}
+									</div>
+								) : availableReleasesForBulkDeploy.length === 0 ? (
+									<div className="text-center py-4 text-gray-500 text-sm border border-gray-200 rounded-md">
+										No releases available for this distribution
+									</div>
+								) : (
+									<div className="space-y-3">
+										{/* Search Input */}
+										<div className="relative">
+											<Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+											<input
+												type="text"
+												placeholder="Search releases..."
+												value={bulkDeployReleaseSearch}
+												onChange={(e) =>
+													setBulkDeployReleaseSearch(e.target.value)
+												}
+												className="w-full pl-10 pr-3 py-2 bg-white text-gray-900 border border-gray-300 rounded-md focus:ring-amber-500 focus:border-amber-500 placeholder:text-gray-400"
+											/>
+										</div>
+
+										{/* Release List */}
+										<div className="border border-gray-200 rounded-md max-h-[280px] overflow-y-auto">
+											{(() => {
+												const filteredReleases = availableReleasesForBulkDeploy
+													.filter(
+														(release: Release) =>
+															bulkDeployReleaseSearch === "" ||
+															release.version
+																.toLowerCase()
+																.includes(
+																	bulkDeployReleaseSearch.toLowerCase(),
+																) ||
+															release.distribution_name
+																?.toLowerCase()
+																.includes(
+																	bulkDeployReleaseSearch.toLowerCase(),
+																),
+													)
+													.sort(
+														(a: Release, b: Release) =>
+															new Date(b.created_at).getTime() -
+															new Date(a.created_at).getTime(),
+													);
+
+												if (filteredReleases.length === 0) {
+													return (
+														<div className="text-center py-4 text-gray-500 text-sm">
+															No releases match your search
+														</div>
+													);
+												}
+
+												return filteredReleases.map((release: Release) => (
+													<button
+														key={release.id}
+														onClick={() => setSelectedReleaseId(release.id)}
+														className={`w-full text-left p-3 border-b border-gray-200 last:border-b-0 hover:bg-gray-50 transition-colors cursor-pointer ${
+															selectedReleaseId === release.id
+																? "bg-amber-50 hover:bg-amber-50"
+																: ""
+														}`}
+													>
+														<div className="flex items-start justify-between">
+															<div className="flex-1 min-w-0">
+																<div className="flex items-center space-x-2">
+																	<div className="p-1.5 bg-gray-100 text-gray-600 rounded">
+																		<Tag className="w-3 h-3" />
+																	</div>
+																	<span className="font-medium text-gray-900">
+																		{release.version}
+																	</span>
+																	{release.draft && (
+																		<span className="px-2 py-0.5 text-xs font-medium bg-yellow-100 text-yellow-800 rounded-full">
+																			Draft
+																		</span>
+																	)}
+																	{release.yanked && (
+																		<span className="px-2 py-0.5 text-xs font-medium bg-red-100 text-red-800 rounded-full">
+																			Yanked
+																		</span>
+																	)}
+																</div>
+																<div className="flex items-center space-x-3 mt-1.5 text-xs text-gray-500">
+																	<div className="flex items-center space-x-1">
+																		<Calendar className="w-3 h-3" />
+																		<span>
+																			{formatRelativeTime(release.created_at)}
+																		</span>
+																	</div>
+																	<div className="flex items-center space-x-1">
+																		<User className="w-3 h-3" />
+																		<span>
+																			{release.user_email ||
+																				(release.user_id
+																					? `User #${release.user_id}`
+																					: "Unknown")}
+																		</span>
+																	</div>
+																</div>
+															</div>
+															{selectedReleaseId === release.id && (
+																<div className="flex-shrink-0 ml-2">
+																	<div className="w-5 h-5 bg-amber-600 rounded-full flex items-center justify-center">
+																		<svg
+																			className="w-3 h-3 text-white"
+																			fill="none"
+																			viewBox="0 0 24 24"
+																			stroke="currentColor"
+																		>
+																			<path
+																				strokeLinecap="round"
+																				strokeLinejoin="round"
+																				strokeWidth={2}
+																				d="M5 13l4 4L19 7"
+																			/>
+																		</svg>
+																	</div>
+																</div>
+															)}
+														</div>
+													</button>
+												));
+											})()}
+										</div>
+									</div>
+								)}
 							</div>
 
 							{/* Action Buttons */}
@@ -1071,6 +1237,7 @@ const DevicesPage = () => {
 									onClick={() => {
 										setShowBulkDeployModal(false);
 										setSelectedReleaseId(undefined);
+										setBulkDeployReleaseSearch("");
 									}}
 									className="px-4 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 cursor-pointer"
 								>
