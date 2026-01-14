@@ -28,6 +28,20 @@ impl Storage {
         Ok(())
     }
 
+    pub async fn get_presigned_upload_url(
+        bucket_name: &str,
+        object_key: &str,
+    ) -> anyhow::Result<String> {
+        let region = Region::from_default_env()?;
+        let credentials = Credentials::default()?;
+        let bucket = Bucket::new(bucket_name, region, credentials)?;
+
+        // 30 minutes expiry
+        let url = bucket.presign_put(object_key, 60 * 30, None, None).await?;
+
+        Ok(url)
+    }
+
     pub async fn stream_to_s3<R>(
         bucket_name: &str,
         path: Option<&str>,

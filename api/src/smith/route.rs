@@ -286,6 +286,42 @@ pub async fn upload_file(
     }))
 }
 
+#[derive(Deserialize)]
+pub struct GetPresignedUrlQuery {
+    filename: String,
+}
+
+#[utoipa::path(
+    get,
+    path = "/smith/upload/presign",
+    params(
+        ("filename" = String, Query, description = "Name of the file to upload")
+    ),
+    responses(
+        (status = 200, description = "Successfully sent a presigned url to use for uploading", body = String),
+        (status = 400, description = "Bad request - missing filename"),
+        (status = 500, description = "Internal server error"),
+    ),
+    security(
+        ("device_token" = [])
+    )
+)]
+pub async fn get_presigned_url_for_file_upload(
+    _device: AuthedDevice,
+    Query(params): Query<GetPresignedUrlQuery>,
+    Extension(state): Extension<State>,
+) -> Result<Json<String>, StatusCode> {
+    let presigned_url =
+        Storage::get_presigned_upload_url(&state.config.assets_bucket_name, &params.filename)
+            .await
+            .map_err(|err| {
+                error!("{:?}", err);
+                StatusCode::INTERNAL_SERVER_ERROR
+            })?;
+
+    Ok(Json(presigned_url))
+}
+
 #[utoipa::path(
   get,
   path = "/smith/releases/{release_id}/packages",
