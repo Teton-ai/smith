@@ -1809,7 +1809,6 @@ pub async fn update_device_target_release(
         if let Ok(Some(info)) = release_info {
             let triggered_by = user_email.as_deref().unwrap_or("Unknown");
             let message = json!({
-                "text": format!("Direct deployment to device {} outside normal flow", info.serial_number),
                 "blocks": [
                     {
                         "type": "section",
@@ -1897,7 +1896,6 @@ pub async fn update_devices_target_release(
         let device_count = devices_release.devices.len();
         let triggered_by = user_email.as_deref().unwrap_or("Unknown");
         let message = json!({
-            "text": format!("Direct bulk deployment to {} devices outside normal flow", device_count),
             "blocks": [
                 {
                     "type": "section",
