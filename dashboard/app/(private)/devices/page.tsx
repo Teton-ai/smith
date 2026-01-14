@@ -1,23 +1,28 @@
 "use client";
 
 import {
+	AlertTriangle,
+	Calendar,
 	ChevronDown,
 	Cpu,
 	GitBranch,
 	Loader2,
 	Search,
 	Tag,
+	User,
 	X,
 } from "lucide-react";
-import Link from "next/link";
+import moment from "moment";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import NetworkQualityIndicator from "@/app/components/NetworkQualityIndicator";
 import {
 	type Device,
 	type Release,
 	useGetDevicesInfinite,
 	useGetReleases,
+	useUpdateDevicesTargetRelease,
 } from "../../api-client";
 
 const Tooltip = ({
@@ -141,6 +146,25 @@ const DevicesPage = () => {
 	const [releaseSearchQuery, setReleaseSearchQuery] = useState("");
 	const releaseDropdownRef = useRef<HTMLDivElement>(null);
 
+	// Bulk deploy state
+	const [selectedDeviceIds, setSelectedDeviceIds] = useState<Set<number>>(
+		new Set(),
+	);
+	const [showBulkDeployModal, setShowBulkDeployModal] = useState(false);
+	const [selectedReleaseId, setSelectedReleaseId] = useState<
+		number | undefined
+	>(undefined);
+	const [bulkDeployReleaseSearch, setBulkDeployReleaseSearch] = useState("");
+	const [mounted, setMounted] = useState(false);
+
+	const formatRelativeTime = (dateString: string) => {
+		return moment(dateString).fromNow();
+	};
+
+	useEffect(() => {
+		setMounted(true);
+	}, []);
+
 	const {
 		data: devicesData,
 		isLoading: loading,
@@ -219,6 +243,54 @@ const DevicesPage = () => {
 		if (releaseFilter == null) return null;
 		return allReleases.find((r: Release) => r.id === releaseFilter) || null;
 	}, [releaseFilter, allReleases]);
+
+	// Bulk deploy: Get selected devices and validate distribution
+	const selectedDevices = useMemo(() => {
+		return filteredDevices.filter((d) => selectedDeviceIds.has(d.id));
+	}, [filteredDevices, selectedDeviceIds]);
+
+	const distributionIds = useMemo(() => {
+		return new Set(
+			selectedDevices
+				.map((d) => d.release?.distribution_id)
+				.filter((id): id is number => id != null),
+		);
+	}, [selectedDevices]);
+
+	const hasMixedDistributions = distributionIds.size > 1;
+
+	const availableReleasesForBulkDeploy = useMemo(() => {
+		if (hasMixedDistributions || distributionIds.size === 0) return [];
+		const distId = Array.from(distributionIds)[0];
+		return allReleases.filter(
+			(r: Release) => r.distribution_id === distId && !r.draft && !r.yanked,
+		);
+	}, [allReleases, distributionIds, hasMixedDistributions]);
+
+	// Bulk deploy mutation
+	const { mutate: updateDevicesRelease, isPending: isDeploying } =
+		useUpdateDevicesTargetRelease({
+			mutation: {
+				onSuccess: () => {
+					setShowBulkDeployModal(false);
+					setSelectedDeviceIds(new Set());
+					setSelectedReleaseId(undefined);
+				},
+				onError: (error) => {
+					console.error("Failed to deploy:", error);
+				},
+			},
+		});
+
+	const handleBulkDeploy = () => {
+		if (!selectedReleaseId) return;
+		updateDevicesRelease({
+			data: {
+				target_release_id: selectedReleaseId,
+				devices: Array.from(selectedDeviceIds),
+			},
+		});
+	};
 
 	// Debounce search term
 	useEffect(() => {
@@ -677,12 +749,56 @@ const DevicesPage = () => {
 			{/* Device List */}
 			<div className="border border-gray-200 rounded-lg overflow-hidden bg-white">
 				<div className="bg-gray-50 px-4 py-3 border-b border-gray-200">
-					<div className="grid grid-cols-8 gap-4 text-xs font-medium text-gray-500 uppercase tracking-wide">
-						<div className="col-span-2">Device</div>
-						<div className="col-span-2">Labels</div>
-						<div className="col-span-2">Location</div>
-						<div className="col-span-1">OS</div>
-						<div className="col-span-1">Release</div>
+					<div className="grid grid-cols-[auto_2fr_2fr_2fr_1fr_1fr] gap-4 text-xs font-medium text-gray-500 uppercase tracking-wide items-center">
+						<div className="w-6 flex items-center justify-center">
+							<button
+								onClick={() => {
+									if (
+										selectedDeviceIds.size > 0 &&
+										selectedDeviceIds.size === filteredDevices.length
+									) {
+										setSelectedDeviceIds(new Set());
+									} else {
+										setSelectedDeviceIds(
+											new Set(filteredDevices.map((d) => d.id)),
+										);
+									}
+								}}
+								className={`w-5 h-5 rounded-full flex items-center justify-center transition-colors cursor-pointer ${
+									selectedDeviceIds.size > 0 &&
+									selectedDeviceIds.size === filteredDevices.length
+										? "bg-blue-600"
+										: selectedDeviceIds.size > 0
+											? "bg-blue-400"
+											: "border-2 border-gray-300 hover:border-gray-400"
+								}`}
+							>
+								{selectedDeviceIds.size > 0 && (
+									<svg
+										className="w-3 h-3 text-white"
+										fill="none"
+										viewBox="0 0 24 24"
+										stroke="currentColor"
+									>
+										<path
+											strokeLinecap="round"
+											strokeLinejoin="round"
+											strokeWidth={2}
+											d={
+												selectedDeviceIds.size === filteredDevices.length
+													? "M5 13l4 4L19 7"
+													: "M20 12H4"
+											}
+										/>
+									</svg>
+								)}
+							</button>
+						</div>
+						<div>Device</div>
+						<div>Labels</div>
+						<div>Location</div>
+						<div>OS</div>
+						<div>Release</div>
 					</div>
 				</div>
 
@@ -691,13 +807,48 @@ const DevicesPage = () => {
 				) : (
 					<div className="divide-y divide-gray-200">
 						{filteredDevices.map((device) => (
-							<Link
+							<div
 								key={device.id}
 								className="block px-4 py-3 hover:bg-gray-50 cursor-pointer transition-colors"
-								href={`/devices/${device.serial_number}`}
+								onClick={() => router.push(`/devices/${device.serial_number}`)}
 							>
-								<div className="grid grid-cols-8 gap-4 items-center">
-									<div className="col-span-2">
+								<div className="grid grid-cols-[auto_2fr_2fr_2fr_1fr_1fr] gap-4 items-center">
+									<div className="w-6 flex items-center justify-center">
+										<button
+											onClick={(e) => {
+												e.stopPropagation();
+												const newSet = new Set(selectedDeviceIds);
+												if (selectedDeviceIds.has(device.id)) {
+													newSet.delete(device.id);
+												} else {
+													newSet.add(device.id);
+												}
+												setSelectedDeviceIds(newSet);
+											}}
+											className={`w-5 h-5 rounded-full flex items-center justify-center transition-colors cursor-pointer ${
+												selectedDeviceIds.has(device.id)
+													? "bg-blue-600"
+													: "border-2 border-gray-300 hover:border-gray-400"
+											}`}
+										>
+											{selectedDeviceIds.has(device.id) && (
+												<svg
+													className="w-3 h-3 text-white"
+													fill="none"
+													viewBox="0 0 24 24"
+													stroke="currentColor"
+												>
+													<path
+														strokeLinecap="round"
+														strokeLinejoin="round"
+														strokeWidth={2}
+														d="M5 13l4 4L19 7"
+													/>
+												</svg>
+											)}
+										</button>
+									</div>
+									<div>
 										<div className="flex items-center space-x-3">
 											<Cpu className="w-4 h-4 text-gray-400 flex-shrink-0" />
 											<div className="min-w-0 flex-1">
@@ -729,7 +880,7 @@ const DevicesPage = () => {
 										</div>
 									</div>
 
-									<div className="col-span-2">
+									<div>
 										{device.labels && Object.keys(device.labels).length > 0 ? (
 											<div className="flex flex-wrap gap-1">
 												{Object.entries(device.labels).map(([key, value]) => {
@@ -765,7 +916,7 @@ const DevicesPage = () => {
 										)}
 									</div>
 
-									<div className="col-span-2">
+									<div>
 										{(() => {
 											const ipInfo = getIpLocationInfo(device);
 											if (!ipInfo) {
@@ -802,11 +953,11 @@ const DevicesPage = () => {
 										})()}
 									</div>
 
-									<div className="col-span-1 text-sm text-gray-600">
+									<div className="text-sm text-gray-600">
 										{getOSVersion(device)}
 									</div>
 
-									<div className="col-span-1">
+									<div>
 										{getReleaseInfo(device) ? (
 											<div className="flex flex-col space-y-1">
 												<div className="flex items-center space-x-1">
@@ -832,7 +983,7 @@ const DevicesPage = () => {
 										)}
 									</div>
 								</div>
-							</Link>
+							</div>
 						))}
 						{/* Load More Button */}
 						{hasNextPage && (
@@ -856,6 +1007,266 @@ const DevicesPage = () => {
 					</div>
 				)}
 			</div>
+
+			{/* Bulk Action Bar */}
+			{selectedDeviceIds.size > 0 && (
+				<div className="fixed bottom-0 left-0 right-0 bg-white border-t shadow-lg p-4 flex items-center justify-between z-40">
+					<span className="text-gray-700">
+						{selectedDeviceIds.size} device
+						{selectedDeviceIds.size > 1 ? "s" : ""} selected
+					</span>
+					<div className="flex gap-2">
+						<button
+							onClick={() => setSelectedDeviceIds(new Set())}
+							className="px-4 py-2 bg-gray-100 text-gray-700 rounded hover:bg-gray-200 cursor-pointer"
+						>
+							Clear Selection
+						</button>
+						<button
+							onClick={() => setShowBulkDeployModal(true)}
+							className="px-4 py-2 bg-amber-600 text-white rounded hover:bg-amber-700 cursor-pointer"
+						>
+							Deploy to Selected
+						</button>
+					</div>
+				</div>
+			)}
+
+			{/* Bulk Deploy Modal */}
+			{mounted &&
+				showBulkDeployModal &&
+				createPortal(
+					<div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 animate-in fade-in duration-200">
+						<div className="bg-white rounded-lg shadow-xl p-6 w-[520px] animate-in zoom-in-95 duration-200">
+							<div className="flex justify-between items-center mb-4">
+								<h2 className="text-xl font-semibold text-gray-900">
+									Deploy to Selected Devices
+								</h2>
+								<button
+									onClick={() => {
+										setShowBulkDeployModal(false);
+										setSelectedReleaseId(undefined);
+										setBulkDeployReleaseSearch("");
+									}}
+									className="text-gray-400 hover:text-gray-600 cursor-pointer"
+								>
+									<X className="w-5 h-5" />
+								</button>
+							</div>
+
+							{/* Warning Banner */}
+							<div className="bg-amber-50 border border-amber-200 rounded-lg p-4 mb-4">
+								<div className="flex gap-3">
+									<AlertTriangle className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
+									<div>
+										<p className="text-amber-800 font-medium">
+											Direct Deployment - Bypasses Canary
+										</p>
+										<p className="text-amber-700 text-sm mt-1">
+											This will deploy directly to {selectedDeviceIds.size}{" "}
+											device
+											{selectedDeviceIds.size > 1 ? "s" : ""} without the
+											standard canary rollout process. Use with caution.
+										</p>
+									</div>
+								</div>
+							</div>
+
+							{/* Distribution Mismatch Error */}
+							{hasMixedDistributions && (
+								<div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-4">
+									<p className="text-red-800 text-sm">
+										Selected devices belong to different distributions. Please
+										select devices from a single distribution.
+									</p>
+								</div>
+							)}
+
+							{/* No Distribution Warning */}
+							{!hasMixedDistributions && distributionIds.size === 0 && (
+								<div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-4">
+									<p className="text-yellow-800 text-sm">
+										Selected devices have no release assigned. Please select
+										devices that have a release.
+									</p>
+								</div>
+							)}
+
+							{/* Release Selector */}
+							<div className="mb-6">
+								<label className="block text-sm font-medium text-gray-700 mb-2">
+									Target Release
+								</label>
+								{hasMixedDistributions || distributionIds.size === 0 ? (
+									<div className="text-center py-4 text-gray-500 text-sm border border-gray-200 rounded-md">
+										{hasMixedDistributions
+											? "Cannot select release for mixed distributions"
+											: "No releases available"}
+									</div>
+								) : availableReleasesForBulkDeploy.length === 0 ? (
+									<div className="text-center py-4 text-gray-500 text-sm border border-gray-200 rounded-md">
+										No releases available for this distribution
+									</div>
+								) : (
+									<div className="space-y-3">
+										{/* Search Input */}
+										<div className="relative">
+											<Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+											<input
+												type="text"
+												placeholder="Search releases..."
+												value={bulkDeployReleaseSearch}
+												onChange={(e) =>
+													setBulkDeployReleaseSearch(e.target.value)
+												}
+												className="w-full pl-10 pr-3 py-2 bg-white text-gray-900 border border-gray-300 rounded-md focus:ring-amber-500 focus:border-amber-500 placeholder:text-gray-400"
+											/>
+										</div>
+
+										{/* Release List */}
+										<div className="border border-gray-200 rounded-md max-h-[280px] overflow-y-auto">
+											{(() => {
+												const filteredReleases = availableReleasesForBulkDeploy
+													.filter(
+														(release: Release) =>
+															bulkDeployReleaseSearch === "" ||
+															release.version
+																.toLowerCase()
+																.includes(
+																	bulkDeployReleaseSearch.toLowerCase(),
+																) ||
+															release.distribution_name
+																?.toLowerCase()
+																.includes(
+																	bulkDeployReleaseSearch.toLowerCase(),
+																),
+													)
+													.sort(
+														(a: Release, b: Release) =>
+															new Date(b.created_at).getTime() -
+															new Date(a.created_at).getTime(),
+													);
+
+												if (filteredReleases.length === 0) {
+													return (
+														<div className="text-center py-4 text-gray-500 text-sm">
+															No releases match your search
+														</div>
+													);
+												}
+
+												return filteredReleases.map((release: Release) => (
+													<button
+														key={release.id}
+														onClick={() => setSelectedReleaseId(release.id)}
+														className={`w-full text-left p-3 border-b border-gray-200 last:border-b-0 hover:bg-gray-50 transition-colors cursor-pointer ${
+															selectedReleaseId === release.id
+																? "bg-amber-50 hover:bg-amber-50"
+																: ""
+														}`}
+													>
+														<div className="flex items-start justify-between">
+															<div className="flex-1 min-w-0">
+																<div className="flex items-center space-x-2">
+																	<div className="p-1.5 bg-gray-100 text-gray-600 rounded">
+																		<Tag className="w-3 h-3" />
+																	</div>
+																	<span className="font-medium text-gray-900">
+																		{release.version}
+																	</span>
+																	{release.draft && (
+																		<span className="px-2 py-0.5 text-xs font-medium bg-yellow-100 text-yellow-800 rounded-full">
+																			Draft
+																		</span>
+																	)}
+																	{release.yanked && (
+																		<span className="px-2 py-0.5 text-xs font-medium bg-red-100 text-red-800 rounded-full">
+																			Yanked
+																		</span>
+																	)}
+																</div>
+																<div className="flex items-center space-x-3 mt-1.5 text-xs text-gray-500">
+																	<div className="flex items-center space-x-1">
+																		<Calendar className="w-3 h-3" />
+																		<span>
+																			{formatRelativeTime(release.created_at)}
+																		</span>
+																	</div>
+																	<div className="flex items-center space-x-1">
+																		<User className="w-3 h-3" />
+																		<span>
+																			{release.user_email ||
+																				(release.user_id
+																					? `User #${release.user_id}`
+																					: "Unknown")}
+																		</span>
+																	</div>
+																</div>
+															</div>
+															{selectedReleaseId === release.id && (
+																<div className="flex-shrink-0 ml-2">
+																	<div className="w-5 h-5 bg-amber-600 rounded-full flex items-center justify-center">
+																		<svg
+																			className="w-3 h-3 text-white"
+																			fill="none"
+																			viewBox="0 0 24 24"
+																			stroke="currentColor"
+																		>
+																			<path
+																				strokeLinecap="round"
+																				strokeLinejoin="round"
+																				strokeWidth={2}
+																				d="M5 13l4 4L19 7"
+																			/>
+																		</svg>
+																	</div>
+																</div>
+															)}
+														</div>
+													</button>
+												));
+											})()}
+										</div>
+									</div>
+								)}
+							</div>
+
+							{/* Action Buttons */}
+							<div className="flex justify-end gap-3">
+								<button
+									onClick={() => {
+										setShowBulkDeployModal(false);
+										setSelectedReleaseId(undefined);
+										setBulkDeployReleaseSearch("");
+									}}
+									className="px-4 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 cursor-pointer"
+								>
+									Cancel
+								</button>
+								<button
+									onClick={handleBulkDeploy}
+									disabled={
+										!selectedReleaseId ||
+										hasMixedDistributions ||
+										distributionIds.size === 0 ||
+										isDeploying
+									}
+									className="px-4 py-2 bg-amber-600 text-white rounded-md hover:bg-amber-700 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+								>
+									{isDeploying ? (
+										<span className="flex items-center gap-2">
+											<Loader2 className="w-4 h-4 animate-spin" />
+											Deploying...
+										</span>
+									) : (
+										"Deploy"
+									)}
+								</button>
+							</div>
+						</div>
+					</div>,
+					document.body,
+				)}
 		</div>
 	);
 };
