@@ -1783,7 +1783,7 @@ pub async fn update_device_target_release(
     })?;
 
     // Send Slack alert for direct device deployment
-    if let Some(slack_hook_url) = &state.config.slack_hook_url {
+    if let Some(deployment_slack_hook_url) = &state.config.deployment_slack_hook_url {
         let user_email = sqlx::query_scalar!(
             "SELECT email FROM auth.users WHERE id = $1",
             current_user.user_id
@@ -1826,7 +1826,7 @@ pub async fn update_device_target_release(
                     }
                 ]
             });
-            send_slack_notification(slack_hook_url, message).await;
+            send_slack_notification(deployment_slack_hook_url, message).await;
         }
     }
 
@@ -1883,7 +1883,7 @@ pub async fn update_devices_target_release(
     })?;
 
     // Send Slack alert for direct bulk device deployment
-    if let Some(slack_hook_url) = &state.config.slack_hook_url {
+    if let Some(deployment_slack_hook_url) = &state.config.deployment_slack_hook_url {
         let user_email = sqlx::query_scalar!(
             "SELECT email FROM auth.users WHERE id = $1",
             current_user.user_id
@@ -1914,7 +1914,7 @@ pub async fn update_devices_target_release(
                 }
             ]
         });
-        send_slack_notification(slack_hook_url, message).await;
+        send_slack_notification(deployment_slack_hook_url, message).await;
     }
 
     Ok(StatusCode::OK)
