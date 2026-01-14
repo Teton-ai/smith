@@ -141,7 +141,7 @@ pub async fn new_deployment(
     tx.commit().await?;
 
     // Send Slack notification
-    if let Some(slack_hook_url) = &config.slack_hook_url {
+    if let Some(deployment_slack_hook_url) = &config.deployment_slack_hook_url {
         let release_info = sqlx::query!(
             "SELECT r.version, d.name as distribution_name
              FROM release r
@@ -155,7 +155,6 @@ pub async fn new_deployment(
         if let Ok(Some(info)) = release_info {
             let triggered_by = user_email.unwrap_or("Unknown");
             let message = json!({
-                "text": format!("Deployment triggered for {} v{}", info.distribution_name, info.version),
                 "blocks": [
                     {
                         "type": "section",
@@ -172,7 +171,7 @@ pub async fn new_deployment(
                     }
                 ]
             });
-            send_slack_notification(slack_hook_url, message).await;
+            send_slack_notification(deployment_slack_hook_url, message).await;
         }
     }
 
@@ -279,7 +278,7 @@ pub async fn confirm_full_rollout(
     tx.commit().await?;
 
     // Send Slack notification
-    if let Some(slack_hook_url) = &config.slack_hook_url {
+    if let Some(deployment_slack_hook_url) = &config.deployment_slack_hook_url {
         let release_info = sqlx::query!(
             "SELECT r.version, d.name as distribution_name
              FROM release r
@@ -293,7 +292,6 @@ pub async fn confirm_full_rollout(
         if let Ok(Some(info)) = release_info {
             let confirmed_by = user_email.unwrap_or("Unknown");
             let message = json!({
-                "text": format!("Full rollout confirmed for {} v{}", info.distribution_name, info.version),
                 "blocks": [
                     {
                         "type": "section",
@@ -310,7 +308,7 @@ pub async fn confirm_full_rollout(
                     }
                 ]
             });
-            send_slack_notification(slack_hook_url, message).await;
+            send_slack_notification(deployment_slack_hook_url, message).await;
         }
     }
 
