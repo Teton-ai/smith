@@ -252,20 +252,17 @@ pub async fn upload_file(
         file_name.push('/');
     }
 
-    let mut file_data = Vec::new();
-    while let Some(field) = multipart
+    let field = multipart
         .next_field()
         .await
         .expect("error: failed to get next multipart field")
-    {
-        if let Some(local_file_name) = field.file_name().map(|s| s.to_string()) {
-            file_name.push_str(&local_file_name);
-        }
-        match field.bytes().await {
-            Ok(bytes) => file_data.extend(bytes.clone()),
-            _ => return Err(StatusCode::BAD_REQUEST),
-        };
-    }
+        .ok_or(StatusCode::BAD_REQUEST)?;
+    let Some(local_file_name) = field.file_name() else {
+        return Err(StatusCode::BAD_REQUEST);
+    };
+    file_name.push_str(local_file_name);
+
+    let file_data = field.bytes().await.map_err(|_| StatusCode::BAD_REQUEST)?;
 
     if file_name.is_empty() {
         return Err(StatusCode::BAD_REQUEST);
