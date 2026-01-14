@@ -10,14 +10,12 @@ use axum::extract::{ConnectInfo, Multipart, Path, Query};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::Response;
 use axum::{Extension, Json};
-use futures::TryStreamExt;
 use serde::{Deserialize, Serialize};
 use smith::utils::schema::{
     DeviceRegistration, DeviceRegistrationResponse, HomePost, HomePostResponse, Package,
 };
 use std::net::SocketAddr;
 use std::time::SystemTime;
-use tokio_util::io::StreamReader;
 use tracing::{debug, error, info};
 use utoipa::{IntoParams, ToSchema};
 
@@ -229,6 +227,7 @@ pub struct UploadResult {
     pub url: String,
 }
 
+// TODO: Change to streaming, so we are not saving in memory
 #[utoipa::path(
   post,
   path = "/smith/upload",
@@ -263,17 +262,17 @@ pub async fn upload_file(
     };
     file_name.push_str(local_file_name);
 
+    let file_data = field.bytes().await.map_err(|_| StatusCode::BAD_REQUEST)?;
+
     if file_name.is_empty() {
         return Err(StatusCode::BAD_REQUEST);
     }
 
-    let mut reader = StreamReader::new(field.map_err(std::io::Error::other));
-
-    Storage::stream_to_s3(
+    Storage::save_to_s3(
         &state.config.assets_bucket_name,
         None,
         &file_name,
-        &mut reader,
+        &file_data,
     )
     .await
     .map_err(|err| {

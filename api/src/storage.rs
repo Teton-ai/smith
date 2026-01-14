@@ -4,7 +4,6 @@ use s3::creds::Credentials;
 use s3::{Bucket, Region};
 use std::borrow::Cow;
 use std::time::{SystemTime, UNIX_EPOCH};
-use tokio::io::AsyncRead;
 
 pub struct Storage;
 
@@ -25,28 +24,6 @@ impl Storage {
         };
 
         bucket.put_object(&object_key, data).await?;
-        Ok(())
-    }
-
-    pub async fn stream_to_s3<R>(
-        bucket_name: &str,
-        path: Option<&str>,
-        file_name: &str,
-        reader: &mut R,
-    ) -> anyhow::Result<()>
-    where
-        R: AsyncRead + Unpin + ?Sized,
-    {
-        let region = Region::from_default_env()?;
-        let credentials = Credentials::default()?;
-        let bucket = Bucket::new(bucket_name, region, credentials)?;
-
-        let object_key = match path {
-            Some(p) => format!("{}/{}", p, file_name),
-            None => file_name.to_string(),
-        };
-
-        bucket.put_object_stream(reader, &object_key).await?;
         Ok(())
     }
 
