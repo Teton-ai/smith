@@ -113,7 +113,12 @@ impl Actor {
                 let secret = secret.to_owned();
                 let (tx, rx) = oneshot::channel();
                 let handle = tokio::spawn(async move {
-                    let client = Client::new("localhost", local, &server, 0, Some(&secret)).await;
+                    let secret_opt = if secret.is_empty() {
+                        None
+                    } else {
+                        Some(secret.as_str())
+                    };
+                    let client = Client::new("localhost", local, &server, 0, secret_opt).await;
 
                     match client {
                         Ok(client) => {

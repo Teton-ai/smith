@@ -143,6 +143,10 @@ impl Config {
         self.profile[&self.current_profile].tunnel_username.clone()
     }
 
+    pub fn current_tunnel_server(&self) -> String {
+        self.profile[&self.current_profile].tunnel_server.clone()
+    }
+
     pub async fn get_identity_pub_key(&self) -> anyhow::Result<String> {
         let config_file = dirs::home_dir()
             .unwrap()
