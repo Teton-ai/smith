@@ -108,13 +108,13 @@ impl MagicFile {
             let string = toml::to_string_pretty(&Self {
                 meta: ConfigMeta {
                     magic_version: 2,
-                    server: "http://host.docker.internal:8080/smith".to_string(),
+                    server: "http://api:8080/smith".to_string(),
                     release_id: None,
                     target_release_id: None,
                     token: None,
                 },
                 tunnel: Some(ConfigTunnel {
-                    server: "host.docker.internal".to_string(),
+                    server: "bore".to_string(),
                     secret: "".to_string(),
                 }),
                 scheduler: None,
