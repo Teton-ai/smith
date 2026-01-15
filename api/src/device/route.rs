@@ -43,7 +43,7 @@ pub struct LeanDeviceFilter {
     path = "/device",
     responses(
         (status = StatusCode::OK, description = "Return Device Information", body = RawDevice),
-
+        (status = StatusCode::NOT_FOUND, description = "Device not found"),
     ),
     security(
         ("device_token" = [])
@@ -70,8 +70,13 @@ pub async fn get_device(
         device.id
         )
         .fetch_one(&state.pg_pool).await.map_err(|e| {
-                error!("Failed to get device {e}");
-                StatusCode::INTERNAL_SERVER_ERROR
+                match e {
+                    sqlx::Error::RowNotFound => StatusCode::NOT_FOUND,
+                    _ => {
+                        error!("Failed to get device {e}");
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    }
+                }
             })?;
     Ok(Json(device))
 }
@@ -444,10 +449,10 @@ pub async fn get_devices(
               WHERE edl.device_id = d.id
               AND el.name || '=' || edl.value = ANY($8)
           ))
-          AND ($11::text IS NULL OR (
-              d.serial_number ILIKE '%' || $11 || '%' OR
-              d.system_info->>'hostname' ILIKE '%' || $11 || '%' OR
-              d.system_info->'device_tree'->>'model' ILIKE '%' || $11 || '%'
+          AND ($11::text IS NULL OR $11 = '' OR (
+              POSITION(LOWER($11) IN LOWER(d.serial_number)) > 0 OR
+              POSITION(LOWER($11) IN LOWER(COALESCE(d.system_info->>'hostname', ''))) > 0 OR
+              POSITION(LOWER($11) IN LOWER(COALESCE(d.system_info->'device_tree'->>'model', ''))) > 0
           ))
           AND ($12::int IS NULL OR d.release_id = $12)
         GROUP BY d.id, ip.id, m.id, r.id, rd.id, tr.id, trd.id, dn.device_id
@@ -2014,6 +2019,7 @@ pub async fn issue_commands_to_device(
     ),
     responses(
         (status = StatusCode::OK, description = "Return found device", body = Device),
+        (status = StatusCode::NOT_FOUND, description = "Device not found"),
         (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to retrieve device"),
     ),
     security(
@@ -2108,12 +2114,15 @@ pub async fn get_device_info(
     )
     .fetch_one(&state.pg_pool)
     .await
-    .map_err(|err| {
-        error!(
-            serial_number = device_id,
-            "Failed to fetch device info {err}"
-        );
-        StatusCode::INTERNAL_SERVER_ERROR
+    .map_err(|err| match err {
+        sqlx::Error::RowNotFound => StatusCode::NOT_FOUND,
+        _ => {
+            error!(
+                serial_number = device_id,
+                "Failed to fetch device info {err}"
+            );
+            StatusCode::INTERNAL_SERVER_ERROR
+        }
     })?;
 
     let ip_address = if device_row.ip_id.is_some() {
