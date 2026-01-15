@@ -32,7 +32,7 @@ where
         let TypedHeader(Authorization(bearer)) =
             TypedHeader::<Authorization<Bearer>>::from_request_parts(parts, state)
                 .await
-                .map_err(|_| (StatusCode::UNAUTHORIZED,).into_response())?;
+                .map_err(|_| StatusCode::UNAUTHORIZED.into_response())?;
 
         use axum::RequestPartsExt;
         let Extension(state) = parts
@@ -56,9 +56,9 @@ where
         .await
         .map_err(|err| {
             error!("Database error: {:?}", err);
-            (StatusCode::INTERNAL_SERVER_ERROR,).into_response()
+            StatusCode::INTERNAL_SERVER_ERROR.into_response()
         })?
-        .ok_or_else(|| (StatusCode::UNAUTHORIZED,).into_response())?;
+        .ok_or_else(|| StatusCode::UNAUTHORIZED.into_response())?;
 
         Ok(AuthedDevice {
             id: device.id,
