@@ -173,15 +173,15 @@ const DevicesPage = () => {
 		isFetchingNextPage,
 	} = useGetDevicesInfinite(
 		{
-			labels: labelFilters,
+			labels: labelFilters.length > 0 ? labelFilters : undefined,
 			online:
 				onlineStatusFilter === "online"
 					? true
 					: onlineStatusFilter === "offline"
 						? false
 						: undefined,
-			search: debouncedSearchTerm,
-			outdated: showOutdatedOnly,
+			search: debouncedSearchTerm.trim() || undefined,
+			outdated: showOutdatedOnly || undefined,
 			release_id: releaseFilter,
 			limit: PAGE_SIZE,
 		},
