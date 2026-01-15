@@ -4,7 +4,7 @@ export DOCKER_CLI_HINTS=false
 .DEFAULT_GOAL := up
 
 # Starts the platform locally
-# To start multiple devices, run `docker compose --scale device=3 up -d`
+# To start multiple devices, run `docker compose up --scale device=3 -d`
 up:
 	docker compose up -d
 

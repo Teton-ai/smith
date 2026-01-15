@@ -32,6 +32,8 @@ services:
       - .env
     ports:
       - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
     networks:
       - backend
 
@@ -74,3 +76,4 @@ volumes:
   cargo-registry:
   cargo-git:
   target-cache:
+  postgres-data:
