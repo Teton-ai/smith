@@ -4,7 +4,11 @@
 # This needs to be run in privileged mode
 # docker run -d --privileged device
 
-FROM nvcr.io/nvidia/l4t-base:r36.2.0 AS builder
+# Base image can be overridden for local development on x86_64 machines:
+#   docker build --build-arg BASE_IMAGE=ubuntu:22.04 -f device.Dockerfile .
+ARG BASE_IMAGE=nvcr.io/nvidia/l4t-base:r36.2.0
+
+FROM ${BASE_IMAGE} AS builder
 
 ARG RUST_VERSION=1.91.0
 
@@ -32,7 +36,8 @@ RUN cargo build --package smith --bin smithd
 RUN cargo build --package smith-updater
 
 # Runtime stage - Linux for tegra to emulate real devices
-FROM nvcr.io/nvidia/l4t-base:r36.2.0
+ARG BASE_IMAGE
+FROM ${BASE_IMAGE}
 
 # Install runtime dependencies and systemd
 RUN apt-get update && apt-get install -y \

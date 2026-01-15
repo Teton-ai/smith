@@ -42,6 +42,9 @@ services:
     build:
       context: .
       dockerfile: device.Dockerfile
+      args:
+        # Override with ubuntu:22.04 for x86_64 Linux development
+        BASE_IMAGE: ${DEVICE_BASE_IMAGE:-nvcr.io/nvidia/l4t-base:r36.2.0}
     privileged: true
     extra_hosts: ["host.docker.internal:host-gateway"]
     volumes:
