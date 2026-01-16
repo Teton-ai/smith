@@ -212,7 +212,10 @@ async fn start_main_server(config: &'static Config, authorization: Authorization
             device::route::delete_device,
             device::route::update_device
         ))
-        .routes(routes!(device::route::delete_label))
+        .routes(routes!(
+            device::route::get_labels,
+            device::route::delete_label
+        ))
         .routes(routes!(device::route::get_health_for_device))
         .routes(routes!(
             package::route::get_packages,

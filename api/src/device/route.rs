@@ -1,8 +1,8 @@
 use crate::State;
 use crate::device::{
-    DeviceHealth, DeviceLedgerItem, DeviceLedgerItemPaginated, DeviceRelease, LeanDevice,
-    LeanResponse, NewVariable, Note, RawDevice, Tag, UpdateDeviceRelease, UpdateDevicesRelease,
-    Variable,
+    DeviceHealth, DeviceLedgerItem, DeviceLedgerItemPaginated, DeviceRelease, LabelWithValues,
+    LeanDevice, LeanResponse, NewVariable, Note, RawDevice, Tag, UpdateDeviceRelease,
+    UpdateDevicesRelease, Variable,
 };
 use crate::event::PublicEvent;
 use crate::handlers::AuthedDevice;
@@ -2743,4 +2743,46 @@ pub async fn update_devices_network(
         })?;
 
     Ok(StatusCode::OK)
+}
+
+#[utoipa::path(
+    get,
+    path = "/labels",
+    responses(
+        (status = StatusCode::OK, description = "List of all labels with their values", body = Vec<LabelWithValues>),
+        (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to retrieve labels"),
+    ),
+    security(
+        ("auth_token" = [])
+    ),
+    tag = DEVICES_TAG
+)]
+pub async fn get_labels(
+    Extension(state): Extension<State>,
+) -> axum::response::Result<Json<Vec<LabelWithValues>>, StatusCode> {
+    let rows = sqlx::query!(
+        r#"
+        SELECT l.name as key, ARRAY_AGG(DISTINCT dl.value ORDER BY dl.value) as "values!"
+        FROM label l
+        INNER JOIN device_label dl ON dl.label_id = l.id
+        GROUP BY l.name
+        ORDER BY l.name
+        "#
+    )
+    .fetch_all(&state.pg_pool)
+    .await
+    .map_err(|err| {
+        error!("Failed to fetch labels: {err}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    let labels: Vec<LabelWithValues> = rows
+        .into_iter()
+        .map(|row| LabelWithValues {
+            key: row.key,
+            values: row.values,
+        })
+        .collect();
+
+    Ok(Json(labels))
 }

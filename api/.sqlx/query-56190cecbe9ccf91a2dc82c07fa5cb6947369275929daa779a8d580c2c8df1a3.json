@@ -1,0 +1,26 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT l.name as key, ARRAY_AGG(DISTINCT dl.value ORDER BY dl.value) as \"values!\"\n        FROM label l\n        INNER JOIN device_label dl ON dl.label_id = l.id\n        GROUP BY l.name\n        ORDER BY l.name\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "key",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 1,
+        "name": "values!",
+        "type_info": "VarcharArray"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      null
+    ]
+  },
+  "hash": "56190cecbe9ccf91a2dc82c07fa5cb6947369275929daa779a8d580c2c8df1a3"
+}
