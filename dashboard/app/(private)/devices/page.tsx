@@ -16,6 +16,7 @@ import moment from "moment";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import LabelAutocomplete from "@/app/components/LabelAutocomplete";
 import NetworkQualityIndicator from "@/app/components/NetworkQualityIndicator";
 import {
 	type Device,
@@ -713,17 +714,9 @@ const DevicesPage = () => {
 						</div>
 
 						{/* Label Filter Input */}
-						<input
-							type="text"
-							placeholder="Filter by label(e.g., department=slug)"
-							className="w-64 px-3 py-2 text-sm border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-gray-900 placeholder-gray-400"
-							onKeyDown={(e) => {
-								if (e.key === "Enter") {
-									const input = e.currentTarget;
-									addLabelFilter(input.value);
-									input.value = "";
-								}
-							}}
+						<LabelAutocomplete
+							onSelect={addLabelFilter}
+							existingFilters={labelFilters}
 						/>
 
 						{/* Active Label Filters - inline */}

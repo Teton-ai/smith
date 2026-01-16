@@ -152,6 +152,12 @@ pub struct DeviceHealth {
     pub is_healthy: Option<bool>,
 }
 
+#[derive(Debug, Serialize, utoipa::ToSchema)]
+pub struct LabelWithValues {
+    pub key: String,
+    pub values: Vec<String>,
+}
+
 async fn update_ip_geolocation(
     ip_address: IpAddr,
     ip_id: i32,
