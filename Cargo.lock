@@ -324,7 +324,7 @@ dependencies = [
 
 [[package]]
 name = "api"
-version = "0.2.106"
+version = "0.2.107"
 dependencies = [
  "anyhow",
  "axum 0.7.9",
@@ -1160,7 +1160,7 @@ checksum = "c3e64b0cc0439b12df2fa678eae89a1c56a529fd067a9115f7827f1fffd22b32"
 
 [[package]]
 name = "cli"
-version = "0.2.106"
+version = "0.2.107"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3306,7 +3306,7 @@ dependencies = [
 
 [[package]]
 name = "models"
-version = "0.2.106"
+version = "0.2.107"
 dependencies = [
  "axum 0.7.9",
  "chrono",
@@ -4840,9 +4840,9 @@ dependencies = [
 
 [[package]]
 name = "rustc-demangle"
-version = "0.1.26"
+version = "0.1.27"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "56f7d92ca342cea22a06f2121d944b4fd82af56988c270852495420f961d4ace"
+checksum = "b50b8869d9fc858ce7266cce0194bd74df58b9d0e3f6df3a9fc8eb470d95c09d"
 
 [[package]]
 name = "rustc-hash"
@@ -4909,9 +4909,9 @@ dependencies = [
 
 [[package]]
 name = "rustls-pki-types"
-version = "1.13.2"
+version = "1.13.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "21e6f2ab2928ca4291b86736a8bd920a277a399bba1589409d72154ff87c1282"
+checksum = "4910321ebe4151be888e35fe062169554e74aad01beafed60410131420ceffbc"
 dependencies = [
  "web-time",
  "zeroize",
@@ -5457,7 +5457,7 @@ checksum = "b7c388c1b5e93756d0c740965c41e8822f866621d41acbdf6336a6a168f8840c"
 
 [[package]]
 name = "smith"
-version = "0.2.106"
+version = "0.2.107"
 dependencies = [
  "anyhow",
  "bore-cli",
@@ -5491,7 +5491,7 @@ dependencies = [
 
 [[package]]
 name = "smith-updater"
-version = "0.2.106"
+version = "0.2.107"
 dependencies = [
  "clap",
  "smith",
@@ -6718,9 +6718,9 @@ checksum = "ccf3ec651a847eb01de73ccad15eb7d99f80485de043efb2f370cd654f4ea44b"
 
 [[package]]
 name = "wasip2"
-version = "1.0.1+wasi-0.2.4"
+version = "1.0.2+wasi-0.2.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0562428422c63773dad2c345a1882263bbf4d65cf3f42e90921f787ef5ad58e7"
+checksum = "9517f9239f02c069db75e65f174b3da828fe5f5b945c4dd26bd25d89c03ebcf5"
 dependencies = [
  "wit-bindgen",
 ]
@@ -7275,9 +7275,9 @@ dependencies = [
 
 [[package]]
 name = "wit-bindgen"
-version = "0.46.0"
+version = "0.51.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f17a85883d4e6d00e8a97c586de764dabcc06133f7f1d55dce5cdc070ad7fe59"
+checksum = "d7249219f66ced02969388cf2bb044a09756a083d0fab1e566056b04d9fbcaa5"
 
 [[package]]
 name = "writeable"
