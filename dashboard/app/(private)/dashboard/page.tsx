@@ -57,6 +57,7 @@ const AdminPanel = () => {
 		useGetDevices(
 			{
 				outdated: true,
+				outdated_minutes: 30,
 				exclude_labels: excludeLabels,
 			},
 			{ query: { refetchInterval: 5000 } },
@@ -188,7 +189,22 @@ const AdminPanel = () => {
 		return new Date(b.last_seen).getTime() - new Date(a.last_seen).getTime();
 	};
 
-	// Outdated devices (pending update) - sorted by last_seen
+	// Outdated devices (pending update) - backend filters by outdated_minutes=30
+	const getOutdatedDuration = (device: Device) => {
+		if (!device.target_release_id_set_at) return "";
+		const setAt = new Date(device.target_release_id_set_at);
+		const now = new Date();
+		const diffMinutes = Math.floor(
+			(now.getTime() - setAt.getTime()) / (1000 * 60),
+		);
+		const diffHours = Math.floor(diffMinutes / 60);
+		const diffDays = Math.floor(diffHours / 24);
+
+		if (diffDays > 0) return `${diffDays}d`;
+		if (diffHours > 0) return `${diffHours}h`;
+		return `${diffMinutes}m`;
+	};
+
 	const stuckUpdates = [...outdatedDevices].sort(sortByLastSeen);
 
 	// Offline devices categorized by how long they've been offline
@@ -407,6 +423,11 @@ const AdminPanel = () => {
 																{device.target_release?.version ||
 																	device.target_release_id}
 															</span>
+															{getOutdatedDuration(device) && (
+																<span className="text-orange-600 text-xs font-medium">
+																	{getOutdatedDuration(device)}
+																</span>
+															)}
 															<ChevronRight className="w-4 h-4 text-gray-400 flex-shrink-0" />
 														</div>
 													</div>

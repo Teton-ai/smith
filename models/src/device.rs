@@ -28,6 +28,7 @@ pub struct Device {
     pub has_token: Option<bool>,
     pub release_id: Option<i32>,
     pub target_release_id: Option<i32>,
+    pub target_release_id_set_at: Option<DateTime<Utc>>,
     #[schema(value_type = Option<SystemInfo>)]
     pub system_info: Option<Value>,
     pub modem_id: Option<i32>,
@@ -62,6 +63,8 @@ pub struct DeviceFilter {
     pub online: Option<bool>,
     /// Filter by outdated status. If true, only devices where release_id != target_release_id.
     pub outdated: Option<bool>,
+    /// Filter by minimum minutes since target_release_id was set. Only applies when outdated=true.
+    pub outdated_minutes: Option<i64>,
     /// Exclude devices with these labels. Format: key=value. Used by dashboard.
     #[serde(default)]
     pub exclude_labels: Vec<String>,

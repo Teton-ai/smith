@@ -127,6 +127,7 @@ export interface Device {
 	system_info?: SystemInfo;
 	target_release?: Release;
 	target_release_id?: number;
+	target_release_id_set_at?: string;
 }
 
 export interface DeviceAuthResponse {
@@ -333,6 +334,7 @@ export interface RawDevice {
 	serial_number: string;
 	system_info?: unknown;
 	target_release_id?: number;
+	target_release_id_set_at?: string;
 	token?: string;
 	wifi_mac?: string;
 }
@@ -441,6 +443,10 @@ export type GetDevicesParams = {
 	 * Filter by outdated status. If true, only devices where release_id != target_release_id.
 	 */
 	outdated?: boolean;
+	/**
+	 * Filter by minimum minutes since target_release_id was set. Only applies when outdated=true.
+	 */
+	outdated_minutes?: number;
 	/**
 	 * Exclude devices with these labels. Format: key=value. Used by dashboard.
 	 */
