@@ -1,5 +1,6 @@
 [workspace]
 members = ["api", "cli", "models", "smithd", "updater"]
+exclude = ["test-packages/test-package"]
 resolver = "2"
 
 [workspace.package]

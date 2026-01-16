@@ -1,0 +1,13 @@
+[package]
+name = "test-package"
+description = "Package used for testing"
+version = "0.0.1"
+edition = "2024"
+license = "Apache-2.0"
+
+[dependencies]
+
+[package.metadata.deb]
+maintainer = "Teton team"
+
+
