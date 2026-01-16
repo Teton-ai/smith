@@ -372,6 +372,7 @@ pub async fn get_devices(
             d.token IS NOT NULL as has_token,
             d.release_id,
             d.target_release_id,
+            d.target_release_id_set_at,
             d.system_info,
             d.modem_id,
             d.ip_address_id,
@@ -443,6 +444,8 @@ pub async fn get_devices(
           AND ($7::boolean IS NULL OR
                ($7 = true AND d.release_id != d.target_release_id) OR
                ($7 = false AND d.release_id = d.target_release_id))
+          AND ($13::bigint IS NULL OR
+               d.target_release_id_set_at <= now() - make_interval(mins => $13::int))
           AND (CARDINALITY($8::text[]) = 0 OR NOT EXISTS (
               SELECT 1 FROM device_label edl
               JOIN label el ON el.id = edl.label_id
@@ -471,7 +474,8 @@ pub async fn get_devices(
         filter.limit.unwrap_or(100).clamp(1, 1000),
         filter.offset.unwrap_or(0).max(0),
         filter.search,
-        filter.release_id
+        filter.release_id,
+        filter.outdated_minutes
     )
     .fetch_all(&state.pg_pool)
     .await
@@ -581,6 +585,7 @@ pub async fn get_devices(
                 has_token: row.has_token,
                 release_id: row.release_id,
                 target_release_id: row.target_release_id,
+                target_release_id_set_at: row.target_release_id_set_at,
                 system_info: row.system_info,
                 modem_id: row.modem_id,
                 ip_address_id: row.ip_address_id,
@@ -1776,7 +1781,7 @@ pub async fn update_device_target_release(
     }
 
     sqlx::query!(
-        "UPDATE device SET target_release_id = $1 WHERE id = $2",
+        "UPDATE device SET target_release_id = $1, target_release_id_set_at = NOW() WHERE id = $2",
         target_release_id,
         device_id
     )
@@ -1875,7 +1880,7 @@ pub async fn update_devices_target_release(
     }
 
     sqlx::query!(
-        "UPDATE device SET target_release_id = $1 WHERE id = ANY($2)",
+        "UPDATE device SET target_release_id = $1, target_release_id_set_at = NOW() WHERE id = ANY($2)",
         target_release_id,
         &devices_release.devices
     )
@@ -2043,6 +2048,7 @@ pub async fn get_device_info(
         d.token IS NOT NULL as has_token,
         d.release_id,
         d.target_release_id,
+        d.target_release_id_set_at,
         d.system_info,
         d.modem_id,
         d.ip_address_id,
@@ -2221,6 +2227,7 @@ pub async fn get_device_info(
         has_token: device_row.has_token,
         release_id: device_row.release_id,
         target_release_id: device_row.target_release_id,
+        target_release_id_set_at: device_row.target_release_id_set_at,
         system_info: device_row.system_info,
         modem_id: device_row.modem_id,
         ip_address_id: device_row.ip_address_id,

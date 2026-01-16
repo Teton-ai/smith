@@ -262,6 +262,38 @@ const DeviceHeader: React.FC<DeviceHeaderProps> = ({ device, serial }) => {
 		);
 	};
 
+	const getUpdateStatus = (): {
+		status: "updating" | "outdated";
+		duration: string;
+	} | null => {
+		if (!hasUpdatePending()) return null;
+
+		if (!device?.target_release_id_set_at)
+			return { status: "outdated", duration: "" }; // No timestamp = legacy
+
+		const setAt = new Date(device.target_release_id_set_at);
+		const now = new Date();
+		const diffMinutes = Math.floor(
+			(now.getTime() - setAt.getTime()) / (1000 * 60),
+		);
+		const diffHours = Math.floor(diffMinutes / 60);
+		const diffDays = Math.floor(diffHours / 24);
+
+		let duration: string;
+		if (diffDays > 0) {
+			duration = `${diffDays}d`;
+		} else if (diffHours > 0) {
+			duration = `${diffHours}h`;
+		} else {
+			duration = `${diffMinutes}m`;
+		}
+
+		return {
+			status: diffMinutes < 30 ? "updating" : "outdated",
+			duration,
+		};
+	};
+
 	const getNetworkQualityTooltip = () => {
 		const status = getDeviceStatus();
 		const networkScore = device?.network?.network_score;
@@ -390,12 +422,21 @@ const DeviceHeader: React.FC<DeviceHeaderProps> = ({ device, serial }) => {
 								/>
 							</div>
 						</Tooltip>
-						{hasUpdatePending() && (
+						{getUpdateStatus()?.status === "updating" && (
 							<Tooltip
-								content={`Update pending: ${device.release?.distribution_name}@${device.release?.version || device.release_id} → ${device.target_release?.distribution_name}@${device.target_release?.version || device.target_release_id}`}
+								content={`Updating for ${getUpdateStatus()?.duration}: ${device.release?.distribution_name}@${device.release?.version || device.release_id} → ${device.target_release?.distribution_name}@${device.target_release?.version || device.target_release_id}`}
+							>
+								<span className="px-2 py-1 text-xs font-medium bg-blue-100 text-blue-800 rounded-full cursor-help">
+									Updating {getUpdateStatus()?.duration}
+								</span>
+							</Tooltip>
+						)}
+						{getUpdateStatus()?.status === "outdated" && (
+							<Tooltip
+								content={`Update failed after ${getUpdateStatus()?.duration}: ${device.release?.distribution_name}@${device.release?.version || device.release_id} → ${device.target_release?.distribution_name}@${device.target_release?.version || device.target_release_id}`}
 							>
 								<span className="px-2 py-1 text-xs font-medium bg-orange-100 text-orange-800 rounded-full cursor-help">
-									Outdated
+									Update Failed {getUpdateStatus()?.duration}
 								</span>
 							</Tooltip>
 						)}
