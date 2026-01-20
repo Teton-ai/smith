@@ -414,6 +414,7 @@ pub async fn get_devices(
               POSITION(LOWER($10) IN LOWER(COALESCE(d.system_info->'device_tree'->>'model', ''))) > 0
           ))
           AND ($11::int IS NULL OR d.release_id = $11)
+          AND ($13::int IS NULL OR rd.id = $13)
         GROUP BY d.id, ip.id, m.id, r.id, rd.id, tr.id, trd.id, dn.device_id
         ORDER BY d.last_ping DESC NULLS LAST, d.serial_number
         LIMIT $8
@@ -430,7 +431,8 @@ pub async fn get_devices(
         filter.offset.unwrap_or(0).max(0),
         filter.search,
         filter.release_id,
-        filter.outdated_minutes
+        filter.outdated_minutes,
+        filter.distribution_id
     )
     .fetch_all(&state.pg_pool)
     .await

@@ -71,6 +71,8 @@ pub struct DeviceFilter {
     pub search: Option<String>,
     /// Filter by release ID. Only devices with this release_id are included.
     pub release_id: Option<i32>,
+    /// Filter by distribution ID. Only devices with a release from this distribution are included.
+    pub distribution_id: Option<i32>,
 }
 
 #[derive(Debug, Serialize, Deserialize, utoipa::ToSchema, Clone)]

@@ -455,6 +455,10 @@ export type GetDevicesParams = {
 	 * Filter by release ID. Only devices with this release_id are included.
 	 */
 	release_id?: number;
+	/**
+	 * Filter by distribution ID. Only devices with a release from this distribution are included.
+	 */
+	distribution_id?: number;
 };
 
 export type GetAllCommandsForDeviceParams = {

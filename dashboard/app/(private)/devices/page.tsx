@@ -20,8 +20,10 @@ import LabelAutocomplete from "@/app/components/LabelAutocomplete";
 import NetworkQualityIndicator from "@/app/components/NetworkQualityIndicator";
 import {
 	type Device,
+	type DistributionRolloutStats,
 	type Release,
 	useGetDevicesInfinite,
+	useGetDistributionRollouts,
 	useGetReleases,
 	useUpdateDevicesTargetRelease,
 } from "../../api-client";
@@ -143,6 +145,9 @@ const DevicesPage = () => {
 	const [releaseFilter, setReleaseFilter] = useState<number | undefined>(
 		undefined,
 	);
+	const [distributionFilter, setDistributionFilter] = useState<
+		number | undefined
+	>(undefined);
 	const [showReleaseDropdown, setShowReleaseDropdown] = useState(false);
 	const [releaseSearchQuery, setReleaseSearchQuery] = useState("");
 	const releaseDropdownRef = useRef<HTMLDivElement>(null);
@@ -184,6 +189,7 @@ const DevicesPage = () => {
 			search: debouncedSearchTerm.trim() || undefined,
 			outdated: showOutdatedOnly || undefined,
 			release_id: releaseFilter,
+			distribution_id: distributionFilter,
 			limit: PAGE_SIZE,
 		},
 		{
@@ -211,39 +217,89 @@ const DevicesPage = () => {
 	// Fetch all releases
 	const { data: allReleases = [] } = useGetReleases();
 
+	// Fetch distribution rollouts to filter out empty distributions
+	const {
+		data: distributionRollouts = new Map<number, DistributionRolloutStats>(),
+	} = useGetDistributionRollouts({
+		query: {
+			select: (data) => {
+				return data.reduce((prev, curr) => {
+					prev.set(curr.distribution_id, curr);
+					return prev;
+				}, new Map<number, DistributionRolloutStats>());
+			},
+		},
+	});
+
 	// Group releases by distribution for the dropdown
 	const releasesByDistribution = useMemo(() => {
-		const grouped: Record<string, Release[]> = {};
+		const grouped: Record<string, { id: number; releases: Release[] }> = {};
 		allReleases.forEach((release: Release) => {
 			const distName = release.distribution_name || "Unknown";
 			if (!grouped[distName]) {
-				grouped[distName] = [];
+				grouped[distName] = { id: release.distribution_id, releases: [] };
 			}
-			grouped[distName].push(release);
+			grouped[distName].releases.push(release);
 		});
 		// Sort releases within each distribution by version (newest first)
 		Object.keys(grouped).forEach((distName) => {
-			grouped[distName].sort(
+			grouped[distName].releases.sort(
 				(a, b) =>
 					new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
 			);
 		});
 		// Filter out distributions that only have draft releases (no published releases)
-		const filteredGrouped: Record<string, Release[]> = {};
-		Object.entries(grouped).forEach(([distName, releases]) => {
-			const hasPublishedRelease = releases.some((r) => !r.draft);
-			if (hasPublishedRelease) {
-				filteredGrouped[distName] = releases;
+		// AND filter out distributions with 0 devices
+		const filteredGrouped: Record<string, { id: number; releases: Release[] }> =
+			{};
+		Object.entries(grouped).forEach(([distName, data]) => {
+			const hasPublishedRelease = data.releases.some((r) => !r.draft);
+			const rollout = distributionRollouts.get(data.id);
+			const hasDevices = rollout && (rollout.total_devices || 0) > 0;
+			if (hasPublishedRelease && hasDevices) {
+				filteredGrouped[distName] = data;
 			}
 		});
 		return filteredGrouped;
-	}, [allReleases]);
+	}, [allReleases, distributionRollouts]);
 
 	// Get the selected release info for display
 	const selectedRelease = useMemo(() => {
 		if (releaseFilter == null) return null;
 		return allReleases.find((r: Release) => r.id === releaseFilter) || null;
 	}, [releaseFilter, allReleases]);
+
+	// Get the selected distribution name for display
+	const selectedDistributionName = useMemo(() => {
+		if (distributionFilter == null) return null;
+		for (const [distName, data] of Object.entries(releasesByDistribution)) {
+			if (data.id === distributionFilter) {
+				return distName;
+			}
+		}
+		return null;
+	}, [distributionFilter, releasesByDistribution]);
+
+	// Sort distributions by latest release date (newest first)
+	const sortedDistributions = useMemo(() => {
+		return Object.entries(releasesByDistribution)
+			.map(([distName, data]) => ({
+				name: distName,
+				id: data.id,
+				releases: data.releases,
+				latestReleaseDate: data.releases[0]?.created_at || "",
+			}))
+			.sort(
+				(a, b) =>
+					new Date(b.latestReleaseDate).getTime() -
+					new Date(a.latestReleaseDate).getTime(),
+			);
+	}, [releasesByDistribution]);
+
+	// State for expanded distributions in the dropdown
+	const [expandedDistributions, setExpandedDistributions] = useState<
+		Set<number>
+	>(new Set());
 
 	// Bulk deploy: Get selected devices and validate distribution
 	const selectedDevices = useMemo(() => {
@@ -313,6 +369,7 @@ const DevicesPage = () => {
 		const online = searchParams.get("online");
 		const labelsParam = searchParams.get("labels");
 		const releaseIdParam = searchParams.get("release_id");
+		const distributionIdParam = searchParams.get("distribution_id");
 
 		if (outdated === "true") {
 			setShowOutdatedOnly(true);
@@ -331,6 +388,13 @@ const DevicesPage = () => {
 			const parsedReleaseId = parseInt(releaseIdParam, 10);
 			if (!Number.isNaN(parsedReleaseId)) {
 				setReleaseFilter(parsedReleaseId);
+			}
+		}
+
+		if (distributionIdParam) {
+			const parsedDistributionId = parseInt(distributionIdParam, 10);
+			if (!Number.isNaN(parsedDistributionId)) {
+				setDistributionFilter(parsedDistributionId);
 			}
 		}
 	}, [searchParams]);
@@ -477,9 +541,26 @@ const DevicesPage = () => {
 
 	const handleReleaseFilterChange = (releaseId: number | undefined) => {
 		setReleaseFilter(releaseId);
+		setDistributionFilter(undefined); // Clear distribution filter when selecting a release
 		setShowReleaseDropdown(false);
 		setReleaseSearchQuery("");
-		updateURL({ release_id: releaseId?.toString() });
+		updateURL({
+			release_id: releaseId?.toString(),
+			distribution_id: undefined,
+		});
+	};
+
+	const handleDistributionFilterChange = (
+		distributionId: number | undefined,
+	) => {
+		setDistributionFilter(distributionId);
+		setReleaseFilter(undefined); // Clear release filter when selecting a distribution
+		setShowReleaseDropdown(false);
+		setReleaseSearchQuery("");
+		updateURL({
+			distribution_id: distributionId?.toString(),
+			release_id: undefined,
+		});
 	};
 
 	// Close dropdown when clicking outside
@@ -586,7 +667,7 @@ const DevicesPage = () => {
 							<button
 								onClick={() => setShowReleaseDropdown(!showReleaseDropdown)}
 								className={`flex items-center space-x-2 px-3 py-2 text-sm rounded-md transition-colors cursor-pointer ${
-									releaseFilter != null
+									releaseFilter != null || distributionFilter != null
 										? "bg-purple-600 text-white"
 										: "bg-gray-100 text-gray-700 hover:bg-gray-200"
 								}`}
@@ -595,7 +676,9 @@ const DevicesPage = () => {
 								<span>
 									{selectedRelease
 										? `${selectedRelease.distribution_name} ${selectedRelease.version}`
-										: "Release"}
+										: selectedDistributionName
+											? `${selectedDistributionName} (all)`
+											: "Release"}
 								</span>
 								<ChevronDown
 									className={`w-4 h-4 transition-transform ${showReleaseDropdown ? "rotate-180" : ""}`}
@@ -620,93 +703,132 @@ const DevicesPage = () => {
 									</div>
 
 									<div className="max-h-64 overflow-y-auto">
-										{releaseFilter != null && (
+										{(releaseFilter != null || distributionFilter != null) && (
 											<button
-												onClick={() => handleReleaseFilterChange(undefined)}
+												onClick={() => {
+													setReleaseFilter(undefined);
+													setDistributionFilter(undefined);
+													setShowReleaseDropdown(false);
+													setReleaseSearchQuery("");
+													updateURL({
+														release_id: undefined,
+														distribution_id: undefined,
+													});
+												}}
 												className="w-full px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 border-b border-gray-200 flex items-center space-x-2 cursor-pointer"
 											>
 												<X className="w-4 h-4 text-gray-400" />
 												<span>Clear filter</span>
 											</button>
 										)}
-										{Object.keys(releasesByDistribution).length === 0 ? (
+										{sortedDistributions.length === 0 ? (
 											<div className="px-3 py-4 text-sm text-gray-500 text-center">
 												No releases available
 											</div>
 										) : (
-											Object.entries(releasesByDistribution).map(
-												([distName, releases]) => {
-													// Filter releases by search query
-													const filteredReleases = releases.filter(
-														(release) =>
-															releaseSearchQuery === "" ||
-															release.version
-																.toLowerCase()
-																.includes(releaseSearchQuery.toLowerCase()) ||
-															distName
-																.toLowerCase()
-																.includes(releaseSearchQuery.toLowerCase()),
-													);
+											sortedDistributions.map((dist) => {
+												const filteredReleases = dist.releases.filter(
+													(release) =>
+														releaseSearchQuery === "" ||
+														release.version
+															.toLowerCase()
+															.includes(releaseSearchQuery.toLowerCase()) ||
+														dist.name
+															.toLowerCase()
+															.includes(releaseSearchQuery.toLowerCase()),
+												);
 
-													// If no search query, show only first 5 releases per distribution
-													const displayReleases =
-														releaseSearchQuery === ""
-															? filteredReleases.slice(0, 5)
-															: filteredReleases;
+												const distMatchesSearch =
+													releaseSearchQuery === "" ||
+													dist.name
+														.toLowerCase()
+														.includes(releaseSearchQuery.toLowerCase());
 
-													if (displayReleases.length === 0) return null;
+												if (filteredReleases.length === 0 && !distMatchesSearch)
+													return null;
 
-													const hasMore =
-														releaseSearchQuery === "" &&
-														filteredReleases.length > 5;
+												const isExpanded =
+													expandedDistributions.has(dist.id) ||
+													releaseSearchQuery !== "";
 
-													return (
-														<div key={distName}>
-															<div className="px-3 py-2 text-xs font-semibold text-gray-500 bg-gray-50 uppercase tracking-wide sticky top-0">
-																{distName}
-															</div>
-															{displayReleases.map((release) => (
-																<button
-																	key={release.id}
-																	onClick={() =>
-																		handleReleaseFilterChange(release.id)
-																	}
-																	className={`w-full px-3 py-2 text-left text-sm hover:bg-gray-50 flex items-center justify-between cursor-pointer ${
-																		releaseFilter === release.id
-																			? "bg-purple-50 text-purple-700"
-																			: "text-gray-700"
-																	}`}
-																>
-																	<div className="flex items-center space-x-2">
-																		<Tag className="w-3 h-3 text-gray-400" />
-																		<span className="font-mono">
-																			{release.version}
-																		</span>
-																	</div>
-																	<div className="flex items-center space-x-2">
-																		{release.draft && (
-																			<span className="px-1.5 py-0.5 text-xs bg-yellow-100 text-yellow-700 rounded">
-																				Draft
-																			</span>
-																		)}
-																		{release.yanked && (
-																			<span className="px-1.5 py-0.5 text-xs bg-red-100 text-red-700 rounded">
-																				Yanked
-																			</span>
-																		)}
-																	</div>
-																</button>
-															))}
-															{hasMore && (
-																<div className="px-3 py-1.5 text-xs text-gray-400 italic">
-																	+{filteredReleases.length - 5} more (type to
-																	search)
-																</div>
-															)}
+												return (
+													<div key={dist.name}>
+														<div className="flex items-center">
+															<button
+																onClick={(e) => {
+																	e.stopPropagation();
+																	setExpandedDistributions((prev) => {
+																		const next = new Set(prev);
+																		if (next.has(dist.id)) {
+																			next.delete(dist.id);
+																		} else {
+																			next.add(dist.id);
+																		}
+																		return next;
+																	});
+																}}
+																className="px-2 py-2 text-gray-400 hover:text-gray-600 cursor-pointer"
+															>
+																<ChevronDown
+																	className={`w-4 h-4 transition-transform ${isExpanded ? "rotate-0" : "-rotate-90"}`}
+																/>
+															</button>
+															<button
+																onClick={() =>
+																	handleDistributionFilterChange(dist.id)
+																}
+																className={`flex-1 px-2 py-2 text-left text-sm font-medium flex items-center justify-between cursor-pointer transition-colors ${
+																	distributionFilter === dist.id
+																		? "bg-purple-50 text-purple-700"
+																		: "text-gray-700 hover:bg-gray-50"
+																}`}
+															>
+																<span>{dist.name}</span>
+																<span className="text-xs text-gray-400">
+																	{dist.releases.length} release
+																	{dist.releases.length !== 1 ? "s" : ""}
+																</span>
+															</button>
 														</div>
-													);
-												},
-											)
+														{isExpanded && (
+															<div className="border-l-2 border-gray-100 ml-4">
+																{filteredReleases.map((release) => (
+																	<button
+																		key={release.id}
+																		onClick={() =>
+																			handleReleaseFilterChange(release.id)
+																		}
+																		className={`w-full px-3 py-2 text-left text-sm hover:bg-gray-50 flex items-center justify-between cursor-pointer ${
+																			releaseFilter === release.id
+																				? "bg-purple-50 text-purple-700"
+																				: "text-gray-700"
+																		}`}
+																	>
+																		<div className="flex items-center space-x-2">
+																			<Tag className="w-3 h-3 text-gray-400" />
+																			<span className="font-mono">
+																				{release.version}
+																			</span>
+																		</div>
+																		<div className="flex items-center space-x-2">
+																			{release.draft && (
+																				<span className="px-1.5 py-0.5 text-xs bg-yellow-100 text-yellow-700 rounded">
+																					Draft
+																				</span>
+																			)}
+																			{release.yanked && (
+																				<span className="px-1.5 py-0.5 text-xs bg-red-100 text-red-700 rounded">
+																					Yanked
+																				</span>
+																			)}
+																		</div>
+																	</button>
+																))}
+															</div>
+														)}
+													</div>
+												);
+											})
 										)}
 									</div>
 								</div>
