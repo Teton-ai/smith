@@ -1,5 +1,4 @@
 pub mod packages;
-pub mod tags;
 
 use crate::State;
 use axum::{

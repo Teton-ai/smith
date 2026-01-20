@@ -286,11 +286,6 @@ async fn start_main_server(config: &'static Config, authorization: Authorization
                 .delete(handlers::packages::delete_package_by_id),
         )
         .routes(routes!(package::route::download_package))
-        .routes(routes!(device::route::get_tag_for_device))
-        .routes(routes!(
-            device::route::delete_tag_from_device,
-            device::route::add_tag_to_device
-        ))
         .routes(routes!(
             device::route::get_variables_for_device,
             device::route::add_variable_to_device
@@ -310,13 +305,8 @@ async fn start_main_server(config: &'static Config, authorization: Authorization
             device::route::revoke_device
         ))
         .routes(routes!(device::route::delete_token))
-        .routes(routes!(device::route::get_tags))
         .routes(routes!(device::route::update_devices_target_release))
         .routes(routes!(device::route::get_variables))
-        .routes(routes!(
-            handlers::tags::get_tags,
-            handlers::tags::create_tag
-        ))
         .routes(routes!(
             command::route::get_bundle_commands,
             command::route::issue_commands_to_devices

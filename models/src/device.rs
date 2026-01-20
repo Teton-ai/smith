@@ -50,11 +50,6 @@ pub struct DeviceFilter {
     pub approved: Option<bool>,
     /// Filter by archived status. If None, archived devices are excluded by default.
     pub archived: Option<bool>,
-    #[deprecated(
-        since = "0.2.64",
-        note = "Since labels have been released, tags concept be in version 0.74"
-    )]
-    pub tag: Option<String>,
     /// Filter by labels. Format: key=value. Multiple labels can be provided.
     #[serde(default)]
     pub labels: Vec<String>,
