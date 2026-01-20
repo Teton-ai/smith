@@ -85,6 +85,11 @@
       },
       {
         "ordinal": 16,
+        "name": "target_release_id_set_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 17,
         "name": "labels!: SqlxJson<HashMap<String, String>>",
         "type_info": "Jsonb"
       }
@@ -110,6 +115,7 @@
       true,
       true,
       false,
+      true,
       true,
       null
     ]

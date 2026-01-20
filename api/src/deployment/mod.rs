@@ -127,7 +127,7 @@ pub async fn new_deployment(
     sqlx::query!(
         "
         UPDATE device
-        SET target_release_id = $1
+        SET target_release_id = $1, target_release_id_set_at = NOW()
         WHERE id IN (
             SELECT device_id FROM deployment_devices WHERE deployment_id = $2
         )
@@ -265,7 +265,7 @@ pub async fn confirm_full_rollout(
 
     sqlx::query!(
         "UPDATE device
-             SET target_release_id = $1
+             SET target_release_id = $1, target_release_id_set_at = NOW()
              WHERE device.release_id IN (
                 SELECT id FROM release WHERE distribution_id = $2
              )",

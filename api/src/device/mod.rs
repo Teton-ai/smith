@@ -32,6 +32,7 @@ pub struct RawDevice {
     pub token: Option<String>,
     pub release_id: Option<i32>,
     pub target_release_id: Option<i32>,
+    pub target_release_id_set_at: Option<DateTime<Utc>>,
     pub system_info: Option<serde_json::Value>,
     pub network_id: Option<i32>,
     pub modem_id: Option<i32>,
