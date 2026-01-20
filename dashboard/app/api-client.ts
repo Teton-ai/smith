@@ -278,11 +278,6 @@ export interface NewDistributionRelease {
 	version: string;
 }
 
-export interface NewTag {
-	color?: string;
-	name: string;
-}
-
 export interface NewVariable {
 	name: string;
 	value: string;
@@ -383,12 +378,6 @@ export interface SystemInfo {
 	smith: Smith;
 }
 
-export interface Tag {
-	color?: string;
-	id: number;
-	name: string;
-}
-
 export interface UpdateDeviceRelease {
 	target_release_id: number;
 }
@@ -430,7 +419,6 @@ export type GetDevicesParams = {
 	 * Filter by archived status. If None, archived devices are excluded by default.
 	 */
 	archived?: boolean;
-	tag?: string;
 	/**
 	 * Filter by labels. Format: key=value. Multiple labels can be provided.
 	 */

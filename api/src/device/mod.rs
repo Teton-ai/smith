@@ -97,14 +97,6 @@ pub struct UpdateDevicesRelease {
 }
 
 #[derive(Debug, Serialize, utoipa::ToSchema)]
-pub struct Tag {
-    pub id: i32,
-    pub device: i32,
-    pub name: String,
-    pub color: Option<String>,
-}
-
-#[derive(Debug, Serialize, utoipa::ToSchema)]
 pub struct Variable {
     pub id: i32,
     pub device: i32,

@@ -1,7 +1,7 @@
 use crate::State;
 use crate::device::{
     DeviceHealth, DeviceLedgerItem, DeviceLedgerItemPaginated, DeviceRelease, LabelWithValues,
-    LeanDevice, LeanResponse, NewVariable, Note, RawDevice, Tag, UpdateDeviceRelease,
+    LeanDevice, LeanResponse, NewVariable, Note, RawDevice, UpdateDeviceRelease,
     UpdateDevicesRelease, Variable,
 };
 use crate::event::PublicEvent;
@@ -155,47 +155,6 @@ pub async fn get_devices_new(
     ("approved", false) => {
       let value = filter_value.parse().unwrap_or(false);
       sqlx::query_as!(LeanDevice, "SELECT id, serial_number, last_ping as last_seen, approved, release_id = target_release_id as up_to_date, ip_address_id FROM device WHERE approved = $1 AND archived = false LIMIT $2", value, limit)
-        .fetch_all(&state.pg_pool)
-        .await
-        .map_err(|err| {
-          error!("Failed to get devices {err}");
-          StatusCode::INTERNAL_SERVER_ERROR
-        })
-    }
-    ("tag", true) => {
-      sqlx::query_as!(LeanDevice, r#"SELECT
-                            d.id,
-                            d.serial_number,
-                            d.last_ping as last_seen,
-                            d.approved,
-                            release_id = target_release_id as up_to_date,
-                            d.ip_address_id
-                        FROM device d
-                        JOIN tag_device td ON d.id = td.device_id
-                        JOIN tag t ON td.tag_id = t.id
-                        WHERE t.name != $1 AND d.archived = false
-                        LIMIT $2
-                "#, filter_value, limit)
-        .fetch_all(&state.pg_pool)
-        .await
-        .map_err(|err| {
-          error!("Failed to get devices {err}");
-          StatusCode::INTERNAL_SERVER_ERROR
-        })
-    }
-    ("tag", false) => {
-      sqlx::query_as!(LeanDevice, r#"SELECT
-                d.id,
-                d.serial_number,
-                d.last_ping as last_seen,
-                d.approved,
-                release_id = target_release_id as up_to_date,
-                d.ip_address_id
-                FROM device d
-                JOIN tag_device td ON d.id = td.device_id
-                JOIN tag t ON td.tag_id = t.id
-                WHERE t.name = $1 AND d.archived = false
-                LIMIT $2"#, filter_value, limit)
         .fetch_all(&state.pg_pool)
         .await
         .map_err(|err| {
@@ -422,8 +381,6 @@ pub async fn get_devices(
             dn.updated_at as "network_updated_at?",
             COALESCE(JSONB_OBJECT_AGG(l.name, dl.value) FILTER (WHERE l.name IS NOT NULL), '{}') as "labels!: SqlxJson<HashMap<String, String>>"
         FROM device d
-        LEFT JOIN tag_device td ON d.id = td.device_id AND $4::text IS NOT NULL
-        LEFT JOIN tag t ON td.tag_id = t.id AND t.name = $4
         LEFT JOIN ip_address ip ON d.ip_address_id = ip.id
         LEFT JOIN modem m ON d.modem_id = m.id
         LEFT JOIN release r ON d.release_id = r.id
@@ -436,37 +393,35 @@ pub async fn get_devices(
         WHERE ($1::text IS NULL OR d.serial_number = $1)
           AND ($2::boolean IS NULL OR d.approved = $2)
           AND (COALESCE($3, false) = true OR d.archived = false)
-          AND ($4::text IS NULL OR t.name IS NOT NULL)
-          AND (CARDINALITY($5::text[]) = 0 OR l.name || '=' || dl.value = ANY($5))
+          AND (CARDINALITY($4::text[]) = 0 OR l.name || '=' || dl.value = ANY($4))
+          AND ($5::boolean IS NULL OR
+               ($5 = true AND d.last_ping >= now() - INTERVAL '5 minutes') OR
+               ($5 = false AND d.last_ping < now() - INTERVAL '5 minutes'))
           AND ($6::boolean IS NULL OR
-               ($6 = true AND d.last_ping >= now() - INTERVAL '5 minutes') OR
-               ($6 = false AND d.last_ping < now() - INTERVAL '5 minutes'))
-          AND ($7::boolean IS NULL OR
-               ($7 = true AND d.release_id != d.target_release_id) OR
-               ($7 = false AND d.release_id = d.target_release_id))
-          AND ($13::bigint IS NULL OR
-               d.target_release_id_set_at <= now() - make_interval(mins => $13::int))
-          AND (CARDINALITY($8::text[]) = 0 OR NOT EXISTS (
+               ($6 = true AND d.release_id != d.target_release_id) OR
+               ($6 = false AND d.release_id = d.target_release_id))
+          AND ($12::bigint IS NULL OR
+               d.target_release_id_set_at <= now() - make_interval(mins => $12::int))
+          AND (CARDINALITY($7::text[]) = 0 OR NOT EXISTS (
               SELECT 1 FROM device_label edl
               JOIN label el ON el.id = edl.label_id
               WHERE edl.device_id = d.id
-              AND el.name || '=' || edl.value = ANY($8)
+              AND el.name || '=' || edl.value = ANY($7)
           ))
-          AND ($11::text IS NULL OR $11 = '' OR (
-              POSITION(LOWER($11) IN LOWER(d.serial_number)) > 0 OR
-              POSITION(LOWER($11) IN LOWER(COALESCE(d.system_info->>'hostname', ''))) > 0 OR
-              POSITION(LOWER($11) IN LOWER(COALESCE(d.system_info->'device_tree'->>'model', ''))) > 0
+          AND ($10::text IS NULL OR $10 = '' OR (
+              POSITION(LOWER($10) IN LOWER(d.serial_number)) > 0 OR
+              POSITION(LOWER($10) IN LOWER(COALESCE(d.system_info->>'hostname', ''))) > 0 OR
+              POSITION(LOWER($10) IN LOWER(COALESCE(d.system_info->'device_tree'->>'model', ''))) > 0
           ))
-          AND ($12::int IS NULL OR d.release_id = $12)
+          AND ($11::int IS NULL OR d.release_id = $11)
         GROUP BY d.id, ip.id, m.id, r.id, rd.id, tr.id, trd.id, dn.device_id
         ORDER BY d.last_ping DESC NULLS LAST, d.serial_number
-        LIMIT $9
-        OFFSET $10
+        LIMIT $8
+        OFFSET $9
         "#,
         filter.serial_number,
         filter.approved,
         filter.archived,
-        filter.tag,
         filter.labels.as_slice(),
         filter.online,
         filter.outdated,
@@ -604,44 +559,6 @@ pub async fn get_devices(
 
 #[utoipa::path(
     get,
-    path = "/devices/tags",
-    responses(
-        (status = 200, description = "List of all device tags", body = Vec<Tag>),
-        (status = 500, description = "Failed to retrieve tags", body = String),
-    ),
-    security(
-        ("auth_token" = [])
-    ),
-    tag = DEVICES_TAG
-)]
-#[deprecated(
-    since = "0.2.64",
-    note = "Since labels have been released, tags concept be in version 0.74"
-)]
-pub async fn get_tags(Extension(state): Extension<State>) -> Result<Json<Vec<Tag>>, StatusCode> {
-    let tags = sqlx::query_as!(
-        Tag,
-        r#"SELECT
-            t.id,
-            td.device_id as device,
-            t.name,
-            t.color
-        FROM tag t
-        JOIN tag_device td ON t.id = td.tag_id
-        ORDER BY t.id"#
-    )
-    .fetch_all(&state.pg_pool)
-    .await
-    .map_err(|err| {
-        error!("Failed to get tags {err}");
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
-
-    Ok(Json(tags))
-}
-
-#[utoipa::path(
-    get,
     path = "/devices/variables",
     responses(
         (status = 200, description = "List of all device variables", body = Vec<Variable>),
@@ -673,60 +590,6 @@ pub async fn get_variables(
     })?;
 
     Ok(Json(variables))
-}
-
-#[utoipa::path(
-    get,
-    path = "/devices/{device_id}/tags",
-    params(
-        ("device_id" = String, Path),
-    ),
-    responses(
-        (status = 200, description = "List of tags for device", body = Vec<Tag>),
-        (status = 500, description = "Failed to retrieve tags", body = String),
-    ),
-    security(
-        ("auth_token" = [])
-    ),
-    tag = DEVICES_TAG
-)]
-#[deprecated(
-    since = "0.2.64",
-    note = "Since labels have been released, tags concept be in version 0.74"
-)]
-pub async fn get_tag_for_device(
-    Path(device_id): Path<String>,
-    Extension(state): Extension<State>,
-) -> Result<Json<Vec<Tag>>, StatusCode> {
-    debug!("Getting tags for device {}", device_id);
-    let tags = sqlx::query_as!(
-        Tag,
-        r#"SELECT
-            t.id,
-            td.device_id as device,
-            t.name,
-            t.color
-        FROM tag t
-        JOIN tag_device td ON t.id = td.tag_id
-        JOIN device d ON td.device_id = d.id
-        WHERE
-            CASE
-                WHEN $1 ~ '^[0-9]+$' AND length($1) <= 10 THEN
-                    d.id = $1::int4
-                ELSE
-                    d.serial_number = $1
-            END
-        ORDER BY t.id"#,
-        device_id
-    )
-    .fetch_all(&state.pg_pool)
-    .await
-    .map_err(|err| {
-        error!("Failed to get tags for device {err}");
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
-
-    Ok(Json(tags))
 }
 
 #[utoipa::path(
@@ -782,136 +645,6 @@ pub async fn get_health_for_device(
     let device_health = device_health.ok_or(StatusCode::NOT_FOUND)?;
 
     Ok(Json(device_health))
-}
-
-#[utoipa::path(
-    delete,
-    path = "/devices/{device_id}/tags/{tag_id}",
-    params(
-        ("device_id" = i32, Path),
-        ("tag_id" = i32, Path)
-    ),
-    responses(
-        (status = 204, description = "Tag deleted successfully"),
-        (status = 500, description = "Failed to delete tag", body = String),
-    ),
-    security(
-        ("auth_token" = [])
-    ),
-    tag = DEVICES_TAG
-)]
-#[deprecated(
-    since = "0.2.64",
-    note = "Since labels have been released, tags concept be in version 0.74"
-)]
-pub async fn delete_tag_from_device(
-    Path((device_id, tag_id)): Path<(i32, i32)>,
-    Extension(state): Extension<State>,
-) -> Result<StatusCode, StatusCode> {
-    let mut tx = state.pg_pool.begin().await.map_err(|err| {
-        error!("Failed to start transaction {err}");
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
-
-    sqlx::query!(
-        r#"DELETE FROM tag_device WHERE device_id = $1 AND tag_id = $2"#,
-        device_id,
-        tag_id
-    )
-    .execute(&mut *tx)
-    .await
-    .map_err(|err| {
-        error!("Failed to delete tag for device {err}");
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
-
-    sqlx::query!(
-        r#"INSERT INTO ledger (device_id, "class", "text") VALUES ($1, $2, $3)"#,
-        device_id,
-        "tag",
-        format!("Deleted tag from device.")
-    )
-    .execute(&mut *tx)
-    .await
-    .map_err(|err| {
-        error!("Failed to insert ledger entry for device {err}");
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
-
-    tx.commit().await.map_err(|err| {
-        error!("Failed to commit transaction {err}");
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
-
-    Ok(StatusCode::NO_CONTENT)
-}
-
-#[utoipa::path(
-    put,
-    path = "/devices/{device_id}/tags/{tag_id}",
-    params(
-        ("device_id" = i32, Path),
-        ("tag_id" = i32, Path)
-    ),
-    responses(
-        (status = 201, description = "Tag added successfully"),
-        (status = 304, description = "Tag already exists"),
-        (status = 500, description = "Failed to add tag", body = String),
-    ),
-    security(
-        ("auth_token" = [])
-    ),
-    tag = DEVICES_TAG
-)]
-#[deprecated(
-    since = "0.2.64",
-    note = "Since labels have been released, tags concept be in version 0.74"
-)]
-pub async fn add_tag_to_device(
-    Path((device_id, tag_id)): Path<(i32, i32)>,
-    Extension(state): Extension<State>,
-) -> Result<StatusCode, StatusCode> {
-    let mut tx = state.pg_pool.begin().await.map_err(|err| {
-        error!("Failed to start transaction {err}");
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
-
-    let result = sqlx::query!(
-        r#"INSERT INTO tag_device (device_id, tag_id) VALUES ($1, $2)
-        ON CONFLICT (device_id, tag_id) DO NOTHING"#,
-        device_id,
-        tag_id
-    )
-    .execute(&mut *tx)
-    .await
-    .map_err(|err| {
-        error!("Failed to add tag to device {err}");
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
-
-    if result.rows_affected() == 0 {
-        return Ok(StatusCode::NOT_MODIFIED);
-    }
-
-    sqlx::query!(
-        r#"INSERT INTO ledger (device_id, "class", "text") VALUES ($1, $2, $3)"#,
-        device_id,
-        "tag",
-        format!("Added tag to device.")
-    )
-    .execute(&mut *tx)
-    .await
-    .map_err(|err| {
-        error!("Failed to insert ledger entry for device {err}");
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
-
-    tx.commit().await.map_err(|err| {
-        error!("Failed to commit transaction {err}");
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
-
-    Ok(StatusCode::CREATED)
 }
 
 #[utoipa::path(
@@ -2648,7 +2381,7 @@ pub async fn get_network_for_device(
     Path(serial_number): Path<String>,
     Extension(state): Extension<State>,
 ) -> axum::response::Result<Json<schema::Network>, StatusCode> {
-    let tags = sqlx::query_as!(
+    let network = sqlx::query_as!(
         schema::Network,
         r#"
         SELECT
@@ -2671,7 +2404,7 @@ pub async fn get_network_for_device(
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
 
-    Ok(Json(tags))
+    Ok(Json(network))
 }
 
 #[utoipa::path(
