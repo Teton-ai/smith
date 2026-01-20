@@ -20,8 +20,10 @@ import LabelAutocomplete from "@/app/components/LabelAutocomplete";
 import NetworkQualityIndicator from "@/app/components/NetworkQualityIndicator";
 import {
 	type Device,
+	type DistributionRolloutStats,
 	type Release,
 	useGetDevicesInfinite,
+	useGetDistributionRollouts,
 	useGetReleases,
 	useUpdateDevicesTargetRelease,
 } from "../../api-client";
@@ -143,6 +145,9 @@ const DevicesPage = () => {
 	const [releaseFilter, setReleaseFilter] = useState<number | undefined>(
 		undefined,
 	);
+	const [distributionFilter, setDistributionFilter] = useState<
+		number | undefined
+	>(undefined);
 	const [showReleaseDropdown, setShowReleaseDropdown] = useState(false);
 	const [releaseSearchQuery, setReleaseSearchQuery] = useState("");
 	const releaseDropdownRef = useRef<HTMLDivElement>(null);
@@ -184,6 +189,7 @@ const DevicesPage = () => {
 			search: debouncedSearchTerm.trim() || undefined,
 			outdated: showOutdatedOnly || undefined,
 			release_id: releaseFilter,
+			distribution_id: distributionFilter,
 			limit: PAGE_SIZE,
 		},
 		{
@@ -211,39 +217,66 @@ const DevicesPage = () => {
 	// Fetch all releases
 	const { data: allReleases = [] } = useGetReleases();
 
+	// Fetch distribution rollouts to filter out empty distributions
+	const { data: distributionRollouts = new Map<number, DistributionRolloutStats>() } =
+		useGetDistributionRollouts({
+			query: {
+				select: (data) => {
+					return data.reduce((prev, curr) => {
+						prev.set(curr.distribution_id, curr);
+						return prev;
+					}, new Map<number, DistributionRolloutStats>());
+				},
+			},
+		});
+
 	// Group releases by distribution for the dropdown
 	const releasesByDistribution = useMemo(() => {
-		const grouped: Record<string, Release[]> = {};
+		const grouped: Record<string, { id: number; releases: Release[] }> = {};
 		allReleases.forEach((release: Release) => {
 			const distName = release.distribution_name || "Unknown";
 			if (!grouped[distName]) {
-				grouped[distName] = [];
+				grouped[distName] = { id: release.distribution_id, releases: [] };
 			}
-			grouped[distName].push(release);
+			grouped[distName].releases.push(release);
 		});
 		// Sort releases within each distribution by version (newest first)
 		Object.keys(grouped).forEach((distName) => {
-			grouped[distName].sort(
+			grouped[distName].releases.sort(
 				(a, b) =>
 					new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
 			);
 		});
 		// Filter out distributions that only have draft releases (no published releases)
-		const filteredGrouped: Record<string, Release[]> = {};
-		Object.entries(grouped).forEach(([distName, releases]) => {
-			const hasPublishedRelease = releases.some((r) => !r.draft);
-			if (hasPublishedRelease) {
-				filteredGrouped[distName] = releases;
+		// AND filter out distributions with 0 devices
+		const filteredGrouped: Record<string, { id: number; releases: Release[] }> = {};
+		Object.entries(grouped).forEach(([distName, data]) => {
+			const hasPublishedRelease = data.releases.some((r) => !r.draft);
+			const rollout = distributionRollouts.get(data.id);
+			const hasDevices = rollout && (rollout.total_devices || 0) > 0;
+			if (hasPublishedRelease && hasDevices) {
+				filteredGrouped[distName] = data;
 			}
 		});
 		return filteredGrouped;
-	}, [allReleases]);
+	}, [allReleases, distributionRollouts]);
 
 	// Get the selected release info for display
 	const selectedRelease = useMemo(() => {
 		if (releaseFilter == null) return null;
 		return allReleases.find((r: Release) => r.id === releaseFilter) || null;
 	}, [releaseFilter, allReleases]);
+
+	// Get the selected distribution name for display
+	const selectedDistributionName = useMemo(() => {
+		if (distributionFilter == null) return null;
+		for (const [distName, data] of Object.entries(releasesByDistribution)) {
+			if (data.id === distributionFilter) {
+				return distName;
+			}
+		}
+		return null;
+	}, [distributionFilter, releasesByDistribution]);
 
 	// Bulk deploy: Get selected devices and validate distribution
 	const selectedDevices = useMemo(() => {
@@ -313,6 +346,7 @@ const DevicesPage = () => {
 		const online = searchParams.get("online");
 		const labelsParam = searchParams.get("labels");
 		const releaseIdParam = searchParams.get("release_id");
+		const distributionIdParam = searchParams.get("distribution_id");
 
 		if (outdated === "true") {
 			setShowOutdatedOnly(true);
@@ -331,6 +365,13 @@ const DevicesPage = () => {
 			const parsedReleaseId = parseInt(releaseIdParam, 10);
 			if (!Number.isNaN(parsedReleaseId)) {
 				setReleaseFilter(parsedReleaseId);
+			}
+		}
+
+		if (distributionIdParam) {
+			const parsedDistributionId = parseInt(distributionIdParam, 10);
+			if (!Number.isNaN(parsedDistributionId)) {
+				setDistributionFilter(parsedDistributionId);
 			}
 		}
 	}, [searchParams]);
@@ -477,9 +518,18 @@ const DevicesPage = () => {
 
 	const handleReleaseFilterChange = (releaseId: number | undefined) => {
 		setReleaseFilter(releaseId);
+		setDistributionFilter(undefined); // Clear distribution filter when selecting a release
 		setShowReleaseDropdown(false);
 		setReleaseSearchQuery("");
-		updateURL({ release_id: releaseId?.toString() });
+		updateURL({ release_id: releaseId?.toString(), distribution_id: undefined });
+	};
+
+	const handleDistributionFilterChange = (distributionId: number | undefined) => {
+		setDistributionFilter(distributionId);
+		setReleaseFilter(undefined); // Clear release filter when selecting a distribution
+		setShowReleaseDropdown(false);
+		setReleaseSearchQuery("");
+		updateURL({ distribution_id: distributionId?.toString(), release_id: undefined });
 	};
 
 	// Close dropdown when clicking outside
@@ -586,7 +636,7 @@ const DevicesPage = () => {
 							<button
 								onClick={() => setShowReleaseDropdown(!showReleaseDropdown)}
 								className={`flex items-center space-x-2 px-3 py-2 text-sm rounded-md transition-colors cursor-pointer ${
-									releaseFilter != null
+									releaseFilter != null || distributionFilter != null
 										? "bg-purple-600 text-white"
 										: "bg-gray-100 text-gray-700 hover:bg-gray-200"
 								}`}
@@ -595,7 +645,9 @@ const DevicesPage = () => {
 								<span>
 									{selectedRelease
 										? `${selectedRelease.distribution_name} ${selectedRelease.version}`
-										: "Release"}
+										: selectedDistributionName
+											? `${selectedDistributionName} (all)`
+											: "Release"}
 								</span>
 								<ChevronDown
 									className={`w-4 h-4 transition-transform ${showReleaseDropdown ? "rotate-180" : ""}`}
@@ -620,9 +672,15 @@ const DevicesPage = () => {
 									</div>
 
 									<div className="max-h-64 overflow-y-auto">
-										{releaseFilter != null && (
+										{(releaseFilter != null || distributionFilter != null) && (
 											<button
-												onClick={() => handleReleaseFilterChange(undefined)}
+												onClick={() => {
+													setReleaseFilter(undefined);
+													setDistributionFilter(undefined);
+													setShowReleaseDropdown(false);
+													setReleaseSearchQuery("");
+													updateURL({ release_id: undefined, distribution_id: undefined });
+												}}
 												className="w-full px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 border-b border-gray-200 flex items-center space-x-2 cursor-pointer"
 											>
 												<X className="w-4 h-4 text-gray-400" />
@@ -635,9 +693,9 @@ const DevicesPage = () => {
 											</div>
 										) : (
 											Object.entries(releasesByDistribution).map(
-												([distName, releases]) => {
+												([distName, data]) => {
 													// Filter releases by search query
-													const filteredReleases = releases.filter(
+													const filteredReleases = data.releases.filter(
 														(release) =>
 															releaseSearchQuery === "" ||
 															release.version
@@ -662,9 +720,19 @@ const DevicesPage = () => {
 
 													return (
 														<div key={distName}>
-															<div className="px-3 py-2 text-xs font-semibold text-gray-500 bg-gray-50 uppercase tracking-wide sticky top-0">
-																{distName}
-															</div>
+															<button
+															onClick={() => handleDistributionFilterChange(data.id)}
+															className={`w-full px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide sticky top-0 flex items-center justify-between cursor-pointer transition-colors ${
+																distributionFilter === data.id
+																	? "bg-purple-100 text-purple-700"
+																	: "text-gray-500 bg-gray-50 hover:bg-gray-100"
+															}`}
+														>
+															<span>{distName}</span>
+															<span className="text-xs font-normal normal-case">
+																All releases
+															</span>
+														</button>
 															{displayReleases.map((release) => (
 																<button
 																	key={release.id}
