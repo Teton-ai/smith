@@ -1,5 +1,4 @@
 use crate::State;
-use crate::device::{LeanDevice, LeanResponse};
 use crate::package::extract_services_from_deb;
 use crate::release::get_latest_distribution_release;
 use crate::storage::Storage;
@@ -403,45 +402,4 @@ pub async fn delete_distribution_by_id(
         })?;
 
     Ok(StatusCode::NO_CONTENT)
-}
-
-#[utoipa::path(
-    get,
-    path = "/distributions/{distribution_id}/devices",
-    params(
-        ("distribution_id" = i32, Path),
-    ),
-    responses(
-        (status = StatusCode::OK, description = "Get devices on this distribution", body = LeanDevice),
-        (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to delete distribution"),
-    ),
-    security(
-        ("auth_token" = [])
-    ),
-    tag = DISTRIBUTIONS_TAG
-)]
-#[deprecated(note = "We are moving to `/devices` endpoint and use release param as filter")]
-pub async fn get_distribution_devices(
-    Path(distribution_id): Path<i32>,
-    Extension(state): Extension<State>,
-) -> axum::response::Result<Json<LeanResponse>, StatusCode> {
-    let devices = sqlx::query_as!(
-        LeanDevice,
-        r#"
-        SELECT device.id, serial_number, last_ping as last_seen, approved, release_id = target_release_id as up_to_date, ip_address_id FROM device LEFT JOIN release on release_id = release.id where release.distribution_id = $1
-        "#,
-        distribution_id
-    )
-    .fetch_all(&state.pg_pool)
-    .await
-    .map_err(|err| {
-      error!("Failed to fetch devices for distribution {err}");
-      StatusCode::INTERNAL_SERVER_ERROR
-    })?;
-
-    Ok(Json(LeanResponse {
-        limit: 0,
-        reverse: false,
-        devices,
-    }))
 }

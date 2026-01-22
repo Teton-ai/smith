@@ -68,23 +68,6 @@ struct IpApiResponse {
     continent_code: Option<String>,
 }
 
-#[derive(Debug, Serialize, utoipa::ToSchema, sqlx::FromRow)]
-pub struct LeanResponse {
-    pub limit: i64,
-    pub reverse: bool,
-    pub devices: Vec<LeanDevice>,
-}
-
-#[derive(Debug, Serialize, utoipa::ToSchema, sqlx::FromRow)]
-pub struct LeanDevice {
-    pub id: i32,
-    pub serial_number: String,
-    pub last_seen: Option<DateTime<Utc>>,
-    pub approved: bool,
-    pub up_to_date: Option<bool>,
-    pub ip_address_id: Option<i32>,
-}
-
 #[derive(Debug, Deserialize, Serialize, utoipa::ToSchema)]
 pub struct UpdateDeviceRelease {
     pub target_release_id: i32,

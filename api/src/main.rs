@@ -236,7 +236,6 @@ async fn start_main_server(config: &'static Config, authorization: Authorization
             distribution::route::get_distribution_releases,
             distribution::route::create_distribution_release,
         ))
-        .routes(routes!(distribution::route::get_distribution_devices))
         .routes(routes!(
             distribution::route::get_distribution_latest_release
         ))
@@ -311,7 +310,6 @@ async fn start_main_server(config: &'static Config, authorization: Authorization
             command::route::get_bundle_commands,
             command::route::issue_commands_to_devices
         ))
-        .routes(routes!(device::route::get_devices_new))
         .routes(routes!(event::route::sse_handler))
         .route_layer(middleware::from_fn(middlewares::authentication::check))
         // TODO: Check why we have this, not good for all routes
