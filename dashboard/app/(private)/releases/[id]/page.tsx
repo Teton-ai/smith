@@ -13,6 +13,7 @@ import {
 	Cog,
 	Cpu,
 	Eye,
+	Loader2,
 	Package as PackageIcon,
 	Plus,
 	Rocket,
@@ -30,6 +31,7 @@ import { createPortal } from "react-dom";
 import {
 	type Package,
 	useAddPackageToRelease,
+	useApiGetReleaseDeployment,
 	useApiReleaseDeployment,
 	useDeletePackageForRelease,
 	useGetDistributionById,
@@ -99,6 +101,13 @@ const ReleaseDetailPage = () => {
 				refetchInterval: 5000,
 			},
 		});
+
+	const { data: existingDeployment } = useApiGetReleaseDeployment(releaseId, {
+		query: {
+			enabled: !!releaseId && !release?.draft && !release?.yanked,
+			retry: false,
+		},
+	});
 
 	useEffect(() => {
 		setMounted(true);
@@ -431,6 +440,12 @@ const ReleaseDetailPage = () => {
 											Yanked
 										</span>
 									)}
+									{existingDeployment?.status === "InProgress" && (
+										<span className="px-2 py-1 text-xs font-medium bg-blue-100 text-blue-800 rounded-full flex items-center">
+											<Loader2 className="w-3 h-3 mr-1 animate-spin" />
+											Deploying
+										</span>
+									)}
 								</div>
 								<div className="flex items-center space-x-4 mt-1 text-sm text-gray-600">
 									<div className="flex items-center space-x-1">
@@ -492,13 +507,23 @@ const ReleaseDetailPage = () => {
 											<AlertTriangle className="w-4 h-4" />
 											<span>Yank</span>
 										</button>
-										<button
-											onClick={() => setShowDeployModal(true)}
-											className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700 transition-colors cursor-pointer"
-										>
-											<Rocket className="w-4 h-4" />
-											<span>Deploy</span>
-										</button>
+										{existingDeployment?.status === "InProgress" ? (
+											<Link
+												href={`/releases/${releaseId}/deployment`}
+												className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700 transition-colors cursor-pointer"
+											>
+												<Loader2 className="w-4 h-4 animate-spin" />
+												<span>View Deployment</span>
+											</Link>
+										) : (
+											<button
+												onClick={() => setShowDeployModal(true)}
+												className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700 transition-colors cursor-pointer"
+											>
+												<Rocket className="w-4 h-4" />
+												<span>Deploy</span>
+											</button>
+										)}
 									</>
 								)
 							)}
