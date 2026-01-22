@@ -6,6 +6,7 @@ import {
 	ChevronRight,
 	Cpu,
 	HardDrive,
+	Loader2,
 	Monitor,
 	Package,
 	Plus,
@@ -17,6 +18,7 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useState } from "react";
 import {
+	useApiGetReleaseDeployment,
 	useCreateDistributionRelease,
 	useGetDistributionById,
 	useGetDistributionLatestRelease,
@@ -45,6 +47,16 @@ const DistributionDetailPage = () => {
 	const getDistributionReleasePackages = useGetDistributionReleasePackages(
 		latestRelease?.id as number,
 		{ query: { enabled: latestRelease?.id != null } },
+	);
+
+	const { data: latestReleaseDeployment } = useApiGetReleaseDeployment(
+		latestRelease?.id as number,
+		{
+			query: {
+				enabled: latestRelease?.id != null && !latestRelease?.draft,
+				retry: false,
+			},
+		},
 	);
 
 	const createDistributionReleaseHook = useCreateDistributionRelease();
@@ -412,6 +424,13 @@ const DistributionDetailPage = () => {
 															Yanked
 														</span>
 													)}
+													{latestReleaseDeployment?.status === "InProgress" &&
+														latestRelease?.id === release.id && (
+															<span className="px-2 py-1 text-xs font-medium bg-blue-100 text-blue-800 rounded-full flex items-center">
+																<Loader2 className="w-3 h-3 mr-1 animate-spin" />
+																Deploying
+															</span>
+														)}
 												</div>
 												<div className="flex items-center space-x-3 mt-1 text-xs text-gray-500">
 													<div className="flex items-center space-x-1">
