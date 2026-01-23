@@ -34,7 +34,7 @@ COPY cli ./cli
 RUN SQLX_OFFLINE=true cargo build --package api
 
 # Set environment variables
-ENV ROLES_PATH=./api/roles.toml
+ENV ROLES_PATH=/app/api/roles.toml
 
 EXPOSE 8080
 

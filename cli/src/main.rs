@@ -1641,6 +1641,257 @@ async fn main() -> anyhow::Result<()> {
 
                 println!("\n{}", "Done!".bright_green());
             }
+            Commands::Approve { selector, yes } => {
+                let secrets = auth::get_secrets(&config)
+                    .await
+                    .with_context(|| "Error getting token")?
+                    .with_context(|| "No Token found, please Login")?;
+
+                let api = SmithAPI::new(secrets, &config);
+
+                // Check if no filters are specified
+                let has_filters = !selector.ids.is_empty()
+                    || !selector.labels.is_empty()
+                    || selector.online
+                    || selector.offline;
+
+                if !has_filters {
+                    eprintln!(
+                        "{}",
+                        "Error: No device IDs or filters specified.".red().bold()
+                    );
+                    eprintln!(
+                        "\n{}\n",
+                        "You must specify which devices to approve.".yellow()
+                    );
+                    eprintln!("Examples:");
+                    eprintln!(
+                        "  {} {}",
+                        "sm approve".bold(),
+                        "<device-serial>...".bright_cyan()
+                    );
+                    eprintln!(
+                        "  {} {}",
+                        "sm approve".bold(),
+                        "ABC DEF --search".bright_cyan()
+                    );
+                    eprintln!("  {} {}", "sm approve".bold(), "-l key=value".bright_cyan());
+                    return Err(anyhow::anyhow!("Aborted: No device selector specified"));
+                }
+
+                // Get target devices
+                let target_devices = resolve_devices_from_selector(&api, &selector).await?;
+
+                // Deduplicate devices
+                let mut seen_ids = HashSet::new();
+                let target_devices: Vec<_> = target_devices
+                    .into_iter()
+                    .filter(|device| seen_ids.insert(device.id))
+                    .collect();
+
+                if target_devices.is_empty() {
+                    println!("No devices found matching the specified filters.");
+                    return Ok(());
+                }
+
+                // Filter to only unapproved devices
+                let unapproved_devices: Vec<_> = target_devices
+                    .into_iter()
+                    .filter(|device| !device.approved)
+                    .collect();
+
+                if unapproved_devices.is_empty() {
+                    println!(
+                        "{}",
+                        "All matching devices are already approved.".bright_green()
+                    );
+                    return Ok(());
+                }
+
+                // Show devices preview and confirm
+                let total_count = unapproved_devices.len();
+                let preview_count = 10.min(total_count);
+
+                println!("{} {} device(s):", "Approving".bold(), total_count);
+
+                for device in unapproved_devices.iter().take(preview_count) {
+                    println!("  - {}", device.serial_number);
+                }
+
+                if total_count > preview_count {
+                    println!(
+                        "  {} ({} more devices...)",
+                        "...".dimmed(),
+                        total_count - preview_count
+                    );
+                }
+
+                if !yes {
+                    print!("\n{} [y/N]: ", "Proceed?".bold());
+                    io::Write::flush(&mut io::stdout())?;
+
+                    let mut input = String::new();
+                    io::stdin().read_line(&mut input)?;
+
+                    if input.trim().to_lowercase() != "y" {
+                        println!("Cancelled.");
+                        return Ok(());
+                    }
+                }
+
+                println!("\n{} devices...", "Approving".bold());
+
+                for device in &unapproved_devices {
+                    let device_id = device.id;
+                    let serial_number = &device.serial_number;
+
+                    match api.approve_device(device_id as u64).await {
+                        Ok(()) => {
+                            println!(
+                                "  {} [{}] - Approved",
+                                serial_number.bright_green(),
+                                device_id
+                            );
+                        }
+                        Err(e) => {
+                            println!("  {} [{}] - Failed: {}", serial_number.red(), device_id, e);
+                        }
+                    }
+                }
+
+                println!("\n{}", "Done!".bright_green());
+            }
+            Commands::Revoke { selector, yes } => {
+                let secrets = auth::get_secrets(&config)
+                    .await
+                    .with_context(|| "Error getting token")?
+                    .with_context(|| "No Token found, please Login")?;
+
+                let api = SmithAPI::new(secrets, &config);
+
+                // Check if no filters are specified
+                let has_filters = !selector.ids.is_empty()
+                    || !selector.labels.is_empty()
+                    || selector.online
+                    || selector.offline;
+
+                if !has_filters {
+                    eprintln!(
+                        "{}",
+                        "Error: No device IDs or filters specified.".red().bold()
+                    );
+                    eprintln!(
+                        "\n{}\n",
+                        "You must specify which devices to revoke.".yellow()
+                    );
+                    eprintln!("Examples:");
+                    eprintln!(
+                        "  {} {}",
+                        "sm revoke".bold(),
+                        "<device-serial>...".bright_cyan()
+                    );
+                    eprintln!(
+                        "  {} {}",
+                        "sm revoke".bold(),
+                        "ABC DEF --search".bright_cyan()
+                    );
+                    eprintln!("  {} {}", "sm revoke".bold(), "-l key=value".bright_cyan());
+                    return Err(anyhow::anyhow!("Aborted: No device selector specified"));
+                }
+
+                // Get target devices
+                let target_devices = resolve_devices_from_selector(&api, &selector).await?;
+
+                // Deduplicate devices
+                let mut seen_ids = HashSet::new();
+                let target_devices: Vec<_> = target_devices
+                    .into_iter()
+                    .filter(|device| seen_ids.insert(device.id))
+                    .collect();
+
+                if target_devices.is_empty() {
+                    println!("No devices found matching the specified filters.");
+                    return Ok(());
+                }
+
+                // Filter to only approved devices
+                let approved_devices: Vec<_> = target_devices
+                    .into_iter()
+                    .filter(|device| device.approved)
+                    .collect();
+
+                if approved_devices.is_empty() {
+                    println!(
+                        "{}",
+                        "All matching devices are already unapproved.".yellow()
+                    );
+                    return Ok(());
+                }
+
+                // Show devices preview and confirm
+                let total_count = approved_devices.len();
+                let preview_count = 10.min(total_count);
+
+                println!(
+                    "{} {} device(s):",
+                    "Revoking approval for".bold().red(),
+                    total_count
+                );
+
+                for device in approved_devices.iter().take(preview_count) {
+                    println!("  - {}", device.serial_number);
+                }
+
+                if total_count > preview_count {
+                    println!(
+                        "  {} ({} more devices...)",
+                        "...".dimmed(),
+                        total_count - preview_count
+                    );
+                }
+
+                println!(
+                    "\n{}",
+                    "Warning: Revoked devices will not receive commands or updates."
+                        .yellow()
+                        .bold()
+                );
+
+                if !yes {
+                    print!("\n{} [y/N]: ", "Proceed?".bold());
+                    io::Write::flush(&mut io::stdout())?;
+
+                    let mut input = String::new();
+                    io::stdin().read_line(&mut input)?;
+
+                    if input.trim().to_lowercase() != "y" {
+                        println!("Cancelled.");
+                        return Ok(());
+                    }
+                }
+
+                println!("\n{} device approvals...", "Revoking".bold());
+
+                for device in &approved_devices {
+                    let device_id = device.id;
+                    let serial_number = &device.serial_number;
+
+                    match api.revoke_device(device_id as u64).await {
+                        Ok(()) => {
+                            println!(
+                                "  {} [{}] - Approval revoked",
+                                serial_number.yellow(),
+                                device_id
+                            );
+                        }
+                        Err(e) => {
+                            println!("  {} [{}] - Failed: {}", serial_number.red(), device_id, e);
+                        }
+                    }
+                }
+
+                println!("\n{}", "Done!".bright_green());
+            }
         },
         None => {
             Cli::command().print_help()?;
