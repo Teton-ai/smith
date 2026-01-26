@@ -1,0 +1,74 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT release.*,\n        distribution.name AS distribution_name,\n        distribution.architecture AS distribution_architecture,\n        auth.users.email AS user_email\n        FROM release\n        JOIN distribution ON release.distribution_id = distribution.id\n        LEFT JOIN auth.users ON release.user_id = auth.users.id\n        ORDER BY release.id\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "distribution_id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 2,
+        "name": "version",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 4,
+        "name": "draft",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 5,
+        "name": "yanked",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 6,
+        "name": "user_id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 7,
+        "name": "distribution_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "distribution_architecture",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 9,
+        "name": "user_email",
+        "type_info": "Varchar"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "6315cdb801c14396224edf7488a52b94f9bf2819b7cd3bb350a6a11b54515149"
+}

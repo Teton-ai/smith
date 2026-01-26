@@ -14,6 +14,9 @@ Monorepo for an open-source fleet management system:
 - Write comments only to explain *why*, not *what*.
 - Do not add speculative features or “creative” additions unless explicitly requested.
 
+## Database
+- The `schema.sql` file is the source of truth for the current database schema, not the migrations folder.
+
 ## Rust (smithd, updater, api, cli)
 - Do not use panicking calls (`unwrap`, `expect`, unchecked indexing).
 - Use `?` to propagate errors.

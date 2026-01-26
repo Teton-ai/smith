@@ -1,6 +1,7 @@
 use clap::Parser;
 use smith::magic::MagicHandle;
 use smith::shutdown::ShutdownHandler;
+use std::io::Write;
 use tokio::time;
 use tracing::{error, info};
 
@@ -84,6 +85,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             info!("Smith installed! Restarting");
         } else {
             error!("Failed to install smith");
+            info!("Output of install command:");
+            let _ = std::io::stderr()
+                .write_all(&status.stderr)
+                .inspect_err(|e| error!("Failed to write output of installation to stderr. {e}"));
         }
     } else {
         info!("Package already installed");

@@ -1,11 +1,12 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 mod download;
+use crate::downloader::download::DownloadStats;
 use crate::magic::MagicHandle;
 use crate::shutdown::ShutdownSignals;
 use crate::utils::network::NetworkClient;
-use anyhow;
-use download::download_package;
+use anyhow::{self, Context};
+use download::download_file_mb;
 use tokio::{
     sync::{mpsc, oneshot},
     time,
@@ -18,6 +19,7 @@ enum DownloaderMessage {
         remote_file: String,
         local_file: String,
         rate: f64,
+        rpc: Option<oneshot::Sender<anyhow::Result<DownloadStats>>>,
     },
     CheckStatus {
         rpc: oneshot::Sender<anyhow::Result<DownloadingStatus>>,
@@ -72,6 +74,7 @@ impl Downloader {
                 remote_file,
                 local_file,
                 rate,
+                rpc,
             } => {
                 self.is_downloading.fetch_add(1, Ordering::SeqCst);
 
@@ -83,7 +86,7 @@ impl Downloader {
                 tokio::spawn(async move {
                     // Do the download
                     let result =
-                        download_package(magic, remote_file, local_file, rate, force_stop).await;
+                        download_file_mb(magic, remote_file, local_file, rate, force_stop).await;
 
                     if result.is_ok() {
                         last_download_status.store(true, Ordering::SeqCst);
@@ -93,6 +96,10 @@ impl Downloader {
 
                     // Reset status
                     is_downloading.fetch_sub(1, Ordering::SeqCst);
+
+                    if let Some(rpc) = rpc {
+                        let _ = rpc.send(result);
+                    }
                 });
             }
             DownloaderMessage::CheckStatus { rpc } => {
@@ -170,18 +177,60 @@ impl DownloaderHandle {
         remote_file: &str,
         local_file: &str,
         rate: f64,
-    ) -> anyhow::Result<String> {
+    ) -> anyhow::Result<()> {
         // unwrap because if this fails then we are in a bad state
         self.sender
             .send(DownloaderMessage::Download {
                 remote_file: remote_file.to_string(),
                 local_file: local_file.to_string(),
                 rate,
+                rpc: None,
             })
             .await
             .unwrap();
 
-        Ok("Download started, not waiting for result".to_string())
+        Ok(())
+    }
+
+    pub async fn download_blocking(
+        &self,
+        remote_file: &str,
+        local_file: &str,
+        rate: f64,
+    ) -> anyhow::Result<()> {
+        let (rpc, receiver) = oneshot::channel::<anyhow::Result<DownloadStats>>();
+
+        self.sender
+            .send(DownloaderMessage::Download {
+                remote_file: remote_file.to_string(),
+                local_file: local_file.to_string(),
+                rate,
+                rpc: Some(rpc),
+            })
+            .await
+            .unwrap();
+
+        // Get the stats
+        let stats = receiver.await.context("Download task died")??;
+
+        // Check if download was actually successful
+        if !stats.success {
+            return Err(anyhow::anyhow!(
+                "Download failed: {}",
+                stats
+                    .error_message
+                    .unwrap_or_else(|| "Unknown error".to_string())
+            ));
+        }
+
+        // Log success info
+        // TODO: check if this is actually going to log
+        info!(
+            "Downloaded {} bytes in {:.2}s at {:.2} MB/s",
+            stats.bytes_downloaded, stats.elapsed_seconds, stats.average_speed_mbps
+        );
+
+        Ok(())
     }
 
     pub async fn check_download_status(&self) -> anyhow::Result<DownloadingStatus> {

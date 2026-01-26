@@ -1,10 +1,10 @@
 use crate::State;
-use crate::ip_address::IpAddressInfo;
 use crate::middlewares::authorization;
 use crate::user::CurrentUser;
 use axum::extract::Path;
 use axum::http::StatusCode;
 use axum::{Extension, Json};
+use models::ip_address::IpAddressInfo;
 use serde::{Deserialize, Serialize};
 use tracing::{debug, error};
 use utoipa::ToSchema;
@@ -14,6 +14,9 @@ const IP_ADDRESS_TAG: &str = "ip_address";
 #[utoipa::path(
     get,
     path = "/ip_address/{ip_address_id}",
+    params(
+        ("ip_address_id" = i32, Path),
+    ),
     responses(
         (status = 200, description = "IP address information retrieved successfully", body = IpAddressInfo),
         (status = 403, description = "Forbidden"),
@@ -207,6 +210,9 @@ pub async fn get_ip_addresses(
 #[utoipa::path(
     put,
     path = "/ip_address/{ip_address_id}",
+    params(
+        ("ip_address_id" = i32, Path),
+    ),
     request_body = UpdateIpAddressRequest,
     responses(
         (status = 200, description = "IP address updated successfully", body = IpAddressInfo),

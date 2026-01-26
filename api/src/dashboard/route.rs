@@ -11,9 +11,9 @@ use axum::{Extension, Json};
         (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to retrieve dashboard content"),
   )
 )]
-pub async fn api(
+pub async fn get_dashboard(
     Extension(state): Extension<State>,
 ) -> axum::response::Result<Json<Dashboard>, StatusCode> {
-    let dashboard = Dashboard::new(&state.pg_pool).await;
+    let dashboard = Dashboard::new(&state.pg_pool, &state.config.dashboard_excluded_labels).await;
     Ok(Json(dashboard))
 }

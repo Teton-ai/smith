@@ -96,10 +96,9 @@ impl Config {
     }
 
     pub async fn save(&self) -> anyhow::Result<()> {
-        let config_file = dirs::home_dir()
-            .unwrap()
-            .join(".smith")
-            .join("config.toml.save");
+        let config_dir = dirs::home_dir().unwrap().join(".smith");
+        std::fs::create_dir_all(&config_dir)?;
+        let config_file = config_dir.join("config.toml.save");
         let config_str = toml::to_string(&self)?;
         tokio::fs::write(&config_file, config_str).await?;
         tokio::fs::rename(
@@ -142,6 +141,10 @@ impl Config {
 
     pub fn current_tunnel_username(&self) -> String {
         self.profile[&self.current_profile].tunnel_username.clone()
+    }
+
+    pub fn current_tunnel_server(&self) -> String {
+        self.profile[&self.current_profile].tunnel_server.clone()
     }
 
     pub async fn get_identity_pub_key(&self) -> anyhow::Result<String> {

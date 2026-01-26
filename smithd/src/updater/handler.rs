@@ -1,5 +1,6 @@
 use super::actor::Actor;
 use super::actor::ActorMessage;
+use crate::downloader::DownloaderHandle;
 use crate::magic::MagicHandle;
 use crate::shutdown::ShutdownSignals;
 use tokio::sync::{mpsc, oneshot};
@@ -12,9 +13,13 @@ pub struct Handler {
 }
 
 impl Handler {
-    pub fn new(shutdown: ShutdownSignals, magic: MagicHandle) -> Self {
+    pub fn new(
+        shutdown: ShutdownSignals,
+        magic: MagicHandle,
+        downloader: DownloaderHandle,
+    ) -> Self {
         let (sender, receiver) = mpsc::channel(8);
-        let mut actor = Actor::new(shutdown, receiver, magic);
+        let mut actor = Actor::new(shutdown, receiver, magic, downloader);
         tokio::spawn(async move { actor.run().await });
 
         Self { sender }

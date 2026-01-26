@@ -4,49 +4,50 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use serde_json::json;
 use std::collections::HashMap;
+use std::sync::OnceLock;
 use tracing::{error, info};
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub struct Smith {
     pub version: String,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub struct OsRelease {
     pub pretty_name: String,
     pub version_id: String,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub struct DeviceTree {
     pub serial_number: String,
     pub model: Option<String>,
     pub compatible: Option<Vec<String>>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub struct ProcStat {
     pub btime: u64,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub struct Proc {
     pub version: String,
     pub stat: ProcStat,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub struct NetworkItem {
     pub ips: Vec<String>,
     pub mac_address: String,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub struct Network {
     pub interfaces: HashMap<String, NetworkItem>,
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq, Default)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Default, Clone)]
 pub struct NetworkConfig {
     pub connection_profile_name: String,
     pub connection_profile_uuid: String,
@@ -54,7 +55,7 @@ pub struct NetworkConfig {
     pub device_name: String,
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq, Default)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Default, Clone)]
 pub struct ConnectionStatus {
     pub connection_name: String,
     pub connection_state: String,
@@ -62,7 +63,7 @@ pub struct ConnectionStatus {
     pub device_name: String,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub struct SystemInfo {
     pub smith: Smith,
     pub hostname: String,
@@ -160,19 +161,36 @@ async fn get_last_boot_time() -> u64 {
         .await
         .unwrap_or_default();
 
-    let boot_time = content
+    content
         .lines()
         .find(|line| line.starts_with("btime"))
         .and_then(|line| line.split_whitespace().nth(1))
         .and_then(|s| s.parse().ok())
-        .unwrap_or(0);
+        .unwrap_or(0)
+}
 
-    boot_time
+static DUMMY_SERIAL_NUMBER: OnceLock<String> = OnceLock::new();
+
+fn get_dummy_serial_number() -> String {
+    #[cfg(debug_assertions)]
+    {
+        use uuid::Uuid;
+        DUMMY_SERIAL_NUMBER
+            .get_or_init(||
+                // This needs to be at least 11 characters long because of the sql query in `/devices/{device_id}`
+                Uuid::new_v4().to_string())
+            .to_string()
+    }
+
+    #[cfg(not(debug_assertions))]
+    {
+        panic!("The device should have a serial number")
+    }
 }
 
 pub fn get_serial_number() -> String {
     get_raw_serial_number()
-        .unwrap_or_else(|| "1234".to_owned())
+        .unwrap_or_else(get_dummy_serial_number)
         .trim()
         .trim_matches(char::is_whitespace)
         .trim_matches(char::from(0))
@@ -188,13 +206,11 @@ pub fn get_raw_serial_number() -> Option<String> {
     }
 
     // Check if we're on the overview screen LENOVOS and if so, use the product serial
-    if let Ok(overview_board_vendor) = std::fs::read_to_string("/sys/class/dmi/id/board_vendor") {
-        if overview_board_vendor.trim() == "LENOVO" {
-            if let Ok(product_serial) = std::fs::read_to_string("/sys/class/dmi/id/product_serial")
-            {
-                return Some(product_serial);
-            }
-        }
+    if let Ok(overview_board_vendor) = std::fs::read_to_string("/sys/class/dmi/id/board_vendor")
+        && overview_board_vendor.trim() == "LENOVO"
+        && let Ok(product_serial) = std::fs::read_to_string("/sys/class/dmi/id/product_serial")
+    {
+        return Some(product_serial);
     }
 
     // We must be on the GPU server, use the board serial

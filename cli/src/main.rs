@@ -1,21 +1,25 @@
 mod api;
 mod auth;
 mod cli;
+mod commands;
 mod config;
 mod print;
-mod schema;
 mod tunnel;
 
-use crate::cli::{Cli, Commands, DevicesCommands, DistroCommands, ServiceCommands};
+use crate::cli::{
+    Cli, Commands, DistroCommands, GetResourceType, RestartResourceType, StatusResourceType,
+};
+use crate::commands::devices::get_online_colored;
 use crate::print::TablePrint;
-use anyhow::Context;
+use anyhow::{Context, bail};
 use api::SmithAPI;
+use chrono_humanize::HumanTime;
 use clap::{CommandFactory, Parser};
 use clap_complete::generate;
 use colored::Colorize;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
-use serde_json::Value;
-use std::{io, thread, time::Duration};
+use models::device::{Device, DeviceFilter};
+use std::{collections::HashSet, io, thread, time::Duration};
 use termion::raw::IntoRawMode;
 use tokio::sync::oneshot;
 use tunnel::Session;
@@ -177,13 +181,13 @@ fn check_and_update_if_needed() -> Result<(), anyhow::Error> {
             .current_version(current_version)
             .build()?;
 
-        if let Ok(status) = updater.get_latest_release() {
-            if status.version != current_version {
-                println!(
-                    "A new version {} is available! Run 'sm update' to update.",
-                    status.version
-                );
-            }
+        if let Ok(status) = updater.get_latest_release()
+            && status.version != current_version
+        {
+            println!(
+                "A new version {} is available! Run 'sm update' to update.",
+                status.version
+            );
         }
 
         let now = chrono::Utc::now().timestamp();
@@ -191,6 +195,168 @@ fn check_and_update_if_needed() -> Result<(), anyhow::Error> {
     }
 
     Ok(())
+}
+
+fn parse_label_filters(
+    labels: Vec<String>,
+) -> anyhow::Result<Option<std::collections::HashMap<String, String>>> {
+    if labels.is_empty() {
+        return Ok(None);
+    }
+
+    let mut map = std::collections::HashMap::new();
+    for label_str in labels {
+        let parts: Vec<&str> = label_str.splitn(2, '=').collect();
+        if parts.len() == 2 {
+            map.insert(parts[0].to_string(), parts[1].to_string());
+        } else {
+            return Err(anyhow::anyhow!(
+                "Invalid label format: '{}'. Expected 'key=value'",
+                label_str
+            ));
+        }
+    }
+    Ok(Some(map))
+}
+
+/// Resolves devices from a DeviceSelector
+/// Returns a Vec of all matching devices (may contain duplicates if multiple search terms match the same device)
+async fn resolve_devices_from_selector(
+    api: &SmithAPI,
+    selector: &cli::DeviceSelector,
+) -> anyhow::Result<Vec<Device>> {
+    let online_filter = if selector.online {
+        Some(true)
+    } else if selector.offline {
+        Some(false)
+    } else {
+        None
+    };
+
+    if selector.ids.is_empty() {
+        // No IDs specified, apply filters only
+        api.get_devices(DeviceFilter {
+            labels: selector.labels.clone(),
+            online: online_filter,
+            ..Default::default()
+        })
+        .await
+    } else if selector.search {
+        // Use search filter for partial matching on multiple IDs
+        let mut all_devices = Vec::new();
+
+        for search_term in &selector.ids {
+            let devices = api
+                .get_devices(DeviceFilter {
+                    labels: selector.labels.clone(),
+                    online: online_filter,
+                    search: Some(search_term.clone()),
+                    ..Default::default()
+                })
+                .await
+                .with_context(|| format!("Failed to search for device '{}'", search_term))?;
+
+            if devices.is_empty() {
+                eprintln!(
+                    "{}: No devices found matching: '{}'",
+                    "Warning".yellow(),
+                    search_term
+                );
+            }
+            all_devices.extend(devices);
+        }
+        Ok(all_devices)
+    } else {
+        // Get specific devices by exact serial number
+        let mut all_devices = Vec::new();
+
+        for id in &selector.ids {
+            let devices = api
+                .get_devices(DeviceFilter {
+                    serial_number: Some(id.clone()),
+                    ..Default::default()
+                })
+                .await
+                .with_context(|| format!("Failed to fetch device '{}'", id))?;
+
+            if devices.is_empty() {
+                eprintln!("{}: Device not found: '{}'", "Warning".yellow(), id);
+            }
+            all_devices.extend(devices);
+        }
+        Ok(all_devices)
+    }
+}
+
+/// Resolves exactly one device from a DeviceSelector
+/// Returns an error if zero or multiple devices are found
+async fn resolve_single_device_from_selector(
+    api: &SmithAPI,
+    selector: &cli::DeviceSelector,
+    command_name: &str,
+) -> anyhow::Result<Device> {
+    // Validate single device for search mode
+    if selector.search && selector.ids.len() != 1 {
+        bail!(
+            "{} command only supports a single device. Please specify exactly one device ID or search term.",
+            command_name
+        );
+    }
+
+    // Validate single device for exact mode
+    if !selector.search && selector.ids.len() > 1 {
+        bail!(
+            "{} command only supports a single device. Please specify exactly one device.",
+            command_name
+        );
+    }
+
+    let devices = resolve_devices_from_selector(api, selector).await?;
+
+    if devices.is_empty() {
+        bail!("No device found matching the selector");
+    }
+
+    if devices.len() > 1 {
+        eprintln!(
+            "Error: Multiple devices matched ({} devices)",
+            devices.len()
+        );
+        eprintln!("Matched devices:");
+        for device in devices.iter().take(10) {
+            eprintln!("  - {}", device.serial_number);
+        }
+        if devices.len() > 10 {
+            eprintln!("  ... and {} more", devices.len() - 10);
+        }
+        bail!(
+            "{} command only supports a single device. Please refine your selector.",
+            command_name
+        );
+    }
+
+    Ok(devices.into_iter().next().unwrap())
+}
+
+/// Legacy helper for commands that have separate device_filters + selector parameters
+/// Combines them into a DeviceSelector and delegates to resolve_devices_from_selector
+async fn resolve_target_devices(
+    api: &SmithAPI,
+    device_filters: Vec<String>,
+    labels: Vec<String>,
+    online: bool,
+    offline: bool,
+    search: bool,
+) -> anyhow::Result<Vec<Device>> {
+    let selector = cli::DeviceSelector {
+        ids: device_filters,
+        labels,
+        online,
+        offline,
+        search,
+    };
+
+    resolve_devices_from_selector(api, &selector).await
 }
 
 #[tokio::main(flavor = "current_thread")]
@@ -225,8 +391,6 @@ async fn main() -> anyhow::Result<()> {
         }
     };
 
-    println!("{}", config);
-
     match cli.command {
         Some(command) => match command {
             Commands::Update { check } => {
@@ -241,6 +405,665 @@ async fn main() -> anyhow::Result<()> {
                     println!("new: {}", config);
                 }
             }
+            Commands::Get { resource } => match resource {
+                GetResourceType::Device {
+                    selector,
+                    json,
+                    output,
+                } => {
+                    let secrets = auth::get_secrets(&config)
+                        .await
+                        .with_context(|| "Error getting token")?
+                        .with_context(|| "No Token found, please Login")?;
+
+                    let api = SmithAPI::new(secrets, &config);
+
+                    let devices = resolve_devices_from_selector(&api, &selector).await?;
+
+                    if devices.is_empty() {
+                        println!("No devices found");
+                        return Ok(());
+                    }
+
+                    // Handle output format
+                    if let Some(output_format) = output {
+                        match output_format.as_str() {
+                            "json" => {
+                                println!("{}", serde_json::to_string_pretty(&devices)?);
+                                return Ok(());
+                            }
+                            "wide" => {
+                                // Wide format - will show more columns in table
+                            }
+                            // Custom field selection
+                            field => {
+                                for device in &devices {
+                                    let value = match field {
+                                        "serial_number" => device.serial_number.clone(),
+                                        "id" => device.id.to_string(),
+                                        "ip_address" | "ip" => device
+                                            .ip_address
+                                            .as_ref()
+                                            .map(|ip| ip.ip_address.to_string())
+                                            .unwrap_or_default(),
+                                        "version" => device
+                                            .system_info
+                                            .as_ref()
+                                            .and_then(|info| info["smith"]["version"].as_str())
+                                            .unwrap_or("")
+                                            .to_string(),
+                                        "release" => device
+                                            .release
+                                            .as_ref()
+                                            .map(|r| r.id.to_string())
+                                            .unwrap_or_default(),
+                                        "target_release" => device
+                                            .target_release
+                                            .as_ref()
+                                            .map(|r| r.id.to_string())
+                                            .unwrap_or_default(),
+                                        _ => {
+                                            eprintln!(
+                                                "Unknown field: '{}'. Available fields: serial_number, id, ip_address, version, release, target_release",
+                                                field
+                                            );
+                                            return Err(anyhow::anyhow!("Invalid output field"));
+                                        }
+                                    };
+                                    println!("{}", value);
+                                }
+                                return Ok(());
+                            }
+                        }
+                    }
+
+                    if json {
+                        println!("{}", serde_json::to_string_pretty(&devices)?);
+                        return Ok(());
+                    }
+
+                    // Display devices in table format if multiple, or detailed view if single
+                    if devices.len() == 1 {
+                        let device = &devices[0];
+
+                        // Status line
+                        let status_str = if let Some(last_seen) = &device.last_seen {
+                            use chrono_humanize::HumanTime;
+                            let now = chrono::Utc::now();
+                            let duration =
+                                now.signed_duration_since(last_seen.with_timezone(&chrono::Utc));
+                            if duration.num_minutes() < 5 {
+                                format!("● {}", "online".bright_green())
+                            } else {
+                                let human_time =
+                                    HumanTime::from(last_seen.with_timezone(&chrono::Utc));
+                                format!("○ {} ({})", "offline".red(), human_time)
+                            }
+                        } else {
+                            format!("○ {}", "unknown".yellow())
+                        };
+
+                        // Main info line
+                        let version = device
+                            .system_info
+                            .as_ref()
+                            .and_then(|info| info["smith"]["version"].as_str())
+                            .unwrap_or("unknown");
+
+                        let os_info = device
+                            .system_info
+                            .as_ref()
+                            .and_then(|info| {
+                                let os_name = info.get("os")?.get("name")?.as_str()?;
+                                let arch = info.get("architecture")?.as_str()?;
+                                Some(format!("{}/{}", os_name, arch))
+                            })
+                            .unwrap_or_else(|| "unknown".to_string());
+
+                        println!(
+                            "{} {} {}",
+                            device.serial_number.bold(),
+                            status_str,
+                            format!("(id: {})", device.id).dimmed()
+                        );
+                        println!("  {} {}", "smith:".dimmed(), version);
+                        println!("  {} {}", "os:".dimmed(), os_info);
+
+                        // Release information
+                        if let Some(release) = &device.release {
+                            let target_str = if let Some(target_release) = &device.target_release {
+                                if release.id != target_release.id {
+                                    format!(
+                                        " → {} {}",
+                                        target_release.id,
+                                        "(update available)".yellow()
+                                    )
+                                } else {
+                                    String::new()
+                                }
+                            } else {
+                                String::new()
+                            };
+                            println!("  {} {}{}", "release:".dimmed(), release.id, target_str);
+                        }
+
+                        // IP Address
+                        if let Some(ip_info) = &device.ip_address {
+                            println!("  {} {}", "ip:".dimmed(), ip_info.ip_address);
+                        }
+
+                        // Modem
+                        if let Some(modem) = &device.modem {
+                            println!("  {} {}", "modem:".dimmed(), &modem.network_provider);
+                        }
+
+                        // Network info
+                        if let Some(network) = &device.network {
+                            let mut network_parts = Vec::new();
+                            if let Some(download) = network.download_speed_mbps {
+                                network_parts.push(format!("↓{:.1}Mbps", download));
+                            }
+                            if let Some(upload) = network.upload_speed_mbps {
+                                network_parts.push(format!("↑{:.1}Mbps", upload));
+                            }
+                            if let Some(score) = network.network_score {
+                                network_parts.push(format!("score:{}", score));
+                            }
+                            if !network_parts.is_empty() {
+                                println!("  {} {}", "network:".dimmed(), network_parts.join(" "));
+                            }
+                        }
+
+                        // Note
+                        if let Some(note) = &device.note
+                            && !note.is_empty()
+                        {
+                            println!("  {} {}", "note:".dimmed(), note);
+                        }
+
+                        // Labels
+                        if !device.labels.is_empty() {
+                            let labels_str = device
+                                .labels
+                                .iter()
+                                .map(|(k, v)| format!("{}={}", k, v))
+                                .collect::<Vec<String>>()
+                                .join(", ");
+                            println!("  {} {}", "labels:".dimmed(), labels_str.cyan());
+                        }
+                    } else {
+                        // Multiple devices - show table format
+                        let mut table = TablePrint::new_with_headers(vec![
+                            "Device", "Version", "OS/Arch", "Release", "IP", "Labels",
+                        ]);
+                        for d in devices {
+                            let version = d
+                                .system_info
+                                .as_ref()
+                                .and_then(|info| info["smith"]["version"].as_str())
+                                .unwrap_or("unknown")
+                                .to_string();
+
+                            let os_arch = d
+                                .system_info
+                                .as_ref()
+                                .and_then(|info| {
+                                    let os_name = info.get("os")?.get("name")?.as_str()?;
+                                    let arch = info.get("architecture")?.as_str()?;
+                                    Some(format!("{}/{}", os_name, arch))
+                                })
+                                .unwrap_or_else(|| "unknown".to_string());
+
+                            let release_str = if let Some(release) = &d.release {
+                                if let Some(target) = &d.target_release {
+                                    if release.id != target.id {
+                                        format!("{} → {}", release.id, target.id)
+                                    } else {
+                                        release.id.to_string()
+                                    }
+                                } else {
+                                    release.id.to_string()
+                                }
+                            } else {
+                                "-".to_string()
+                            };
+
+                            let ip_str = d
+                                .ip_address
+                                .as_ref()
+                                .map(|ip| ip.ip_address.to_string())
+                                .unwrap_or_else(|| "-".to_string());
+
+                            let labels_str = if d.labels.is_empty() {
+                                "-".to_string()
+                            } else {
+                                d.labels
+                                    .iter()
+                                    .map(|(k, v)| format!("{}={}", k, v))
+                                    .collect::<Vec<String>>()
+                                    .join(", ")
+                            };
+
+                            table.add_row(vec![
+                                get_online_colored(&d.serial_number, &d.last_seen),
+                                version,
+                                os_arch,
+                                release_str,
+                                ip_str,
+                                labels_str,
+                            ]);
+                        }
+                        table.print();
+                    }
+                }
+                GetResourceType::Commands {
+                    selector,
+                    limit,
+                    json,
+                } => {
+                    let secrets = auth::get_secrets(&config)
+                        .await
+                        .with_context(|| "Error getting token")?
+                        .with_context(|| "No Token found, please Login")?;
+
+                    let api = SmithAPI::new(secrets, &config);
+
+                    let devices = resolve_devices_from_selector(&api, &selector).await?;
+
+                    if devices.is_empty() {
+                        println!("No devices found");
+                        return Ok(());
+                    }
+
+                    if json {
+                        let mut all_commands = std::collections::HashMap::new();
+                        for device in &devices {
+                            let commands = api
+                                .get_device_commands(device.id as u64, Some(limit))
+                                .await?;
+                            all_commands.insert(&device.serial_number, commands);
+                        }
+                        println!("{}", serde_json::to_string_pretty(&all_commands)?);
+                        return Ok(());
+                    }
+
+                    for (idx, device) in devices.iter().enumerate() {
+                        if idx > 0 {
+                            println!();
+                        }
+
+                        println!(
+                            "{} {} ({})",
+                            "Device:".bold(),
+                            device.serial_number.bright_cyan(),
+                            device.id
+                        );
+
+                        let commands = api
+                            .get_device_commands(device.id as u64, Some(limit))
+                            .await?;
+
+                        if commands.is_empty() {
+                            println!("  {}", "No commands found".dimmed());
+                            continue;
+                        }
+
+                        let mut table = TablePrint::new_with_headers(vec![
+                            "ID",
+                            "Issued At",
+                            "Command",
+                            "Status",
+                        ]);
+
+                        for cmd in commands {
+                            let issued_at = cmd
+                                .issued_at
+                                .with_timezone(&chrono::Local)
+                                .format("%Y-%m-%d %H:%M:%S")
+                                .to_string();
+
+                            let cmd_type = if let Some(cmd_str) = cmd.cmd_data.as_str() {
+                                // Simple string command like "Restart", "Ping", etc.
+                                cmd_str.to_string()
+                            } else if let Some(cmd_obj) = cmd.cmd_data.as_object() {
+                                // Object command - check for different command types
+                                if cmd_obj.contains_key("Ping") {
+                                    "Ping".to_string()
+                                } else if cmd_obj.contains_key("Upgrade") {
+                                    "Upgrade".to_string()
+                                } else if cmd_obj.contains_key("Restart") {
+                                    "Restart".to_string()
+                                } else if let Some(freeform) = cmd_obj.get("FreeForm") {
+                                    if let Some(cmd_text) = freeform.get("cmd") {
+                                        cmd_text.as_str().unwrap_or("FreeForm").to_string()
+                                    } else {
+                                        "FreeForm".to_string()
+                                    }
+                                } else if cmd_obj.contains_key("TestNetwork") {
+                                    "TestNetwork".to_string()
+                                } else if cmd_obj.contains_key("OpenTunnel") {
+                                    "OpenTunnel".to_string()
+                                } else if cmd_obj.contains_key("CloseTunnel") {
+                                    "CloseTunnel".to_string()
+                                } else if cmd_obj.contains_key("UpdateNetwork") {
+                                    "UpdateNetwork".to_string()
+                                } else if cmd_obj.contains_key("UpdateVariables") {
+                                    "UpdateVariables".to_string()
+                                } else if cmd_obj.contains_key("DownloadOTA") {
+                                    "DownloadOTA".to_string()
+                                } else {
+                                    cmd_obj
+                                        .keys()
+                                        .next()
+                                        .map(|s| s.to_string())
+                                        .unwrap_or_else(|| "Unknown".to_string())
+                                }
+                            } else {
+                                "Unknown".to_string()
+                            };
+
+                            let status = if cmd.response.is_some() {
+                                "Completed".green().to_string()
+                            } else if cmd.fetched {
+                                "Fetched".blue().to_string()
+                            } else if cmd.cancelled {
+                                "Cancelled".red().to_string()
+                            } else {
+                                "Pending".yellow().to_string()
+                            };
+
+                            table.add_row(vec![
+                                cmd.cmd_id.to_string(),
+                                issued_at,
+                                cmd_type,
+                                status,
+                            ]);
+                        }
+
+                        table.print();
+                    }
+                }
+            },
+            Commands::Restart { resource } => match resource {
+                RestartResourceType::Device {
+                    selector,
+                    yes,
+                    nowait,
+                } => {
+                    let secrets = auth::get_secrets(&config)
+                        .await
+                        .with_context(|| "Error getting token")?
+                        .with_context(|| "No Token found, please Login")?;
+
+                    let api = SmithAPI::new(secrets, &config);
+
+                    // Check if no filters are specified - this should NEVER be allowed
+                    let has_filters = !selector.ids.is_empty()
+                        || !selector.labels.is_empty()
+                        || selector.online
+                        || selector.offline;
+
+                    if !has_filters {
+                        eprintln!(
+                            "{}",
+                            "Error: No device IDs or filters specified.".red().bold()
+                        );
+                        eprintln!(
+                            "\n{}\n",
+                            "You must specify which devices to restart.".yellow()
+                        );
+                        eprintln!("Examples:");
+                        eprintln!(
+                            "  {} {}",
+                            "sm restart device".bold(),
+                            "<device-id>...".bright_cyan()
+                        );
+                        eprintln!(
+                            "  {} {}",
+                            "sm restart device".bold(),
+                            "ABC DEF --search".bright_cyan()
+                        );
+                        eprintln!(
+                            "  {} {}",
+                            "sm restart device".bold(),
+                            "-l key=value".bright_cyan()
+                        );
+                        eprintln!(
+                            "  {} {}",
+                            "sm restart device".bold(),
+                            "--online".bright_cyan()
+                        );
+                        return Err(anyhow::anyhow!("Aborted: No device selector specified"));
+                    }
+
+                    // Get target devices
+                    let target_devices = resolve_devices_from_selector(&api, &selector).await?;
+
+                    // Deduplicate devices
+                    let mut seen_ids = HashSet::new();
+                    let target_devices: Vec<_> = target_devices
+                        .into_iter()
+                        .filter(|device| seen_ids.insert(device.id))
+                        .collect();
+
+                    if target_devices.is_empty() {
+                        println!("No devices found matching the specified filters.");
+                        return Ok(());
+                    }
+
+                    // Show devices preview and confirm
+                    let total_count = target_devices.len();
+                    let preview_count = 10.min(total_count);
+
+                    println!("{} {} device(s):", "Restarting".bold(), total_count);
+
+                    for device in target_devices.iter().take(preview_count) {
+                        println!("  - {}", device.serial_number);
+                    }
+
+                    if total_count > preview_count {
+                        println!(
+                            "  {} ({} more devices...)",
+                            "...".dimmed(),
+                            total_count - preview_count
+                        );
+                    }
+
+                    if !yes {
+                        print!("\n{} [y/N]: ", "Proceed?".bold());
+                        io::Write::flush(&mut io::stdout())?;
+
+                        let mut input = String::new();
+                        io::stdin().read_line(&mut input)?;
+
+                        if input.trim().to_lowercase() != "y" {
+                            println!("Cancelled.");
+                            return Ok(());
+                        }
+                    }
+
+                    println!("\n{} restart commands...", "Sending".bold());
+
+                    let mut command_ids = Vec::new();
+                    for device in &target_devices {
+                        let device_id = device.id;
+                        let serial_number = &device.serial_number;
+
+                        match api.send_restart_command(device_id as u64).await {
+                            Ok((dev_id, cmd_id)) => {
+                                command_ids.push((dev_id, cmd_id, serial_number.to_string()));
+                                println!(
+                                    "  {} [{}] - Restart queued: {}:{}",
+                                    serial_number.bright_green(),
+                                    dev_id,
+                                    dev_id,
+                                    cmd_id
+                                );
+                            }
+                            Err(e) => {
+                                println!(
+                                    "  {} [{}] - Failed: {}",
+                                    serial_number.red(),
+                                    device_id,
+                                    e
+                                );
+                            }
+                        }
+                    }
+
+                    if nowait {
+                        println!(
+                            "\n{} Restart commands sent. Devices will reboot shortly.",
+                            "Done!".bright_green()
+                        );
+                        return Ok(());
+                    }
+
+                    println!(
+                        "\n{}",
+                        "Note: Devices will go offline during restart. This is expected.".dimmed()
+                    );
+                }
+                RestartResourceType::Service {
+                    unit,
+                    selector,
+                    yes,
+                    nowait,
+                } => {
+                    let secrets = auth::get_secrets(&config)
+                        .await
+                        .with_context(|| "Error getting token")?
+                        .with_context(|| "No Token found, please Login")?;
+
+                    let api = SmithAPI::new(secrets, &config);
+
+                    // Check if no filters are specified
+                    let has_filters = !selector.ids.is_empty()
+                        || !selector.labels.is_empty()
+                        || selector.online
+                        || selector.offline;
+
+                    if !has_filters {
+                        eprintln!(
+                            "{}",
+                            "Error: No device IDs or filters specified.".red().bold()
+                        );
+                        eprintln!(
+                            "\n{}\n",
+                            "You must specify which devices to restart the service on.".yellow()
+                        );
+                        eprintln!("Examples:");
+                        eprintln!(
+                            "  {} {}",
+                            "sm restart service nginx".bold(),
+                            "<device-id>...".bright_cyan()
+                        );
+                        eprintln!(
+                            "  {} {}",
+                            "sm restart service nginx".bold(),
+                            "web-server --search".bright_cyan()
+                        );
+                        return Err(anyhow::anyhow!("Aborted: No device selector specified"));
+                    }
+
+                    // Get target devices
+                    let target_devices = resolve_devices_from_selector(&api, &selector).await?;
+
+                    // Deduplicate devices
+                    let mut seen_ids = HashSet::new();
+                    let target_devices: Vec<_> = target_devices
+                        .into_iter()
+                        .filter(|device| seen_ids.insert(device.id))
+                        .collect();
+
+                    if target_devices.is_empty() {
+                        println!("No devices found matching the specified filters.");
+                        return Ok(());
+                    }
+
+                    // Show devices preview and confirm
+                    let total_count = target_devices.len();
+                    let preview_count = 10.min(total_count);
+
+                    println!(
+                        "{} {} on {} device(s):",
+                        "Restarting service".bold(),
+                        unit.cyan(),
+                        total_count
+                    );
+
+                    for device in target_devices.iter().take(preview_count) {
+                        println!("  - {}", device.serial_number);
+                    }
+
+                    if total_count > preview_count {
+                        println!(
+                            "  {} ({} more devices...)",
+                            "...".dimmed(),
+                            total_count - preview_count
+                        );
+                    }
+
+                    if !yes {
+                        print!("\n{} [y/N]: ", "Proceed?".bold());
+                        io::Write::flush(&mut io::stdout())?;
+
+                        let mut input = String::new();
+                        io::stdin().read_line(&mut input)?;
+
+                        if input.trim().to_lowercase() != "y" {
+                            println!("Cancelled.");
+                            return Ok(());
+                        }
+                    }
+
+                    println!("\n{} service restart commands...", "Sending".bold());
+
+                    let mut command_ids = Vec::new();
+                    for device in &target_devices {
+                        let device_id = device.id;
+                        let serial_number = &device.serial_number;
+                        let unit_clone = unit.clone();
+
+                        match api
+                            .send_service_restart_command(device_id as u64, unit_clone)
+                            .await
+                        {
+                            Ok((dev_id, cmd_id)) => {
+                                command_ids.push((dev_id, cmd_id, serial_number.to_string()));
+                                println!(
+                                    "  {} [{}] - Restart queued: {}:{}",
+                                    serial_number.bright_green(),
+                                    dev_id,
+                                    dev_id,
+                                    cmd_id
+                                );
+                            }
+                            Err(e) => {
+                                println!(
+                                    "  {} [{}] - Failed: {}",
+                                    serial_number.red(),
+                                    device_id,
+                                    e
+                                );
+                            }
+                        }
+                    }
+
+                    if nowait {
+                        println!(
+                            "\n{} Service restart commands sent.",
+                            "Done!".bright_green()
+                        );
+                        return Ok(());
+                    }
+
+                    println!(
+                        "\n{} Use 'sm command <device_id>:<command_id>' to check results.",
+                        "Note:".dimmed()
+                    );
+                }
+            },
             Commands::Auth { command } => match command {
                 cli::AuthCommands::Login { no_open } => {
                     auth::login(&config, !no_open).await?;
@@ -252,13 +1075,8 @@ async fn main() -> anyhow::Result<()> {
                     auth::show(&config).await?;
                 }
             },
-            Commands::Devices { command } => match command {
-                DevicesCommands::Ls {
-                    json,
-                    labels,
-                    online,
-                    offline,
-                } => {
+            Commands::Status { resource } => match resource {
+                StatusResourceType::Device { selector, nowait } => {
                     let secrets = auth::get_secrets(&config)
                         .await
                         .with_context(|| "Error getting token")?
@@ -266,124 +1084,27 @@ async fn main() -> anyhow::Result<()> {
 
                     let api = SmithAPI::new(secrets, &config);
 
-                    let labels_map = if !labels.is_empty() {
-                        let mut map = std::collections::HashMap::new();
-                        for label_str in labels {
-                            let parts: Vec<&str> = label_str.splitn(2, '=').collect();
-                            if parts.len() == 2 {
-                                map.insert(parts[0].to_string(), parts[1].to_string());
-                            } else {
-                                return Err(anyhow::anyhow!(
-                                    "Invalid label format: '{}'. Expected 'key=value'",
-                                    label_str
-                                ));
-                            }
-                        }
-                        Some(map)
-                    } else {
-                        None
-                    };
+                    let device =
+                        resolve_single_device_from_selector(&api, &selector, "status device")
+                            .await?;
+                    let serial_number = device.serial_number.clone();
 
-                    let online_filter = if online {
-                        Some(true)
-                    } else if offline {
-                        Some(false)
-                    } else {
-                        None
-                    };
-
-                    let devices = api.get_devices(None, labels_map, online_filter).await?;
-                    if json {
-                        println!("{}", devices);
-                        return Ok(());
-                    }
-                    let parsed_devices: Vec<Value> = serde_json::from_str(&devices)
-                        .with_context(|| "Failed to parse devices JSON")?;
-                    let rows: Vec<Vec<String>> = parsed_devices
-                        .iter()
-                        .map(|d| {
-                            let labels_str = if let Some(labels_obj) = d["labels"].as_object() {
-                                labels_obj
-                                    .iter()
-                                    .map(|(k, v)| format!("{}={}", k, v.as_str().unwrap_or("")))
-                                    .collect::<Vec<String>>()
-                                    .join(", ")
-                            } else {
-                                String::new()
-                            };
-
-                            vec![
-                                get_online_colored(
-                                    d["serial_number"].as_str().unwrap_or(""),
-                                    d["last_seen"].as_str().unwrap_or(""),
-                                ),
-                                labels_str,
-                                d["system_info"]["smith"]["version"]
-                                    .as_str()
-                                    .unwrap_or("")
-                                    .parse()
-                                    .unwrap(),
-                            ]
-                        })
-                        .collect();
-                    TablePrint {
-                        headers: vec![
-                            "Device".to_string(),
-                            "Labels".to_string(),
-                            "Version".to_string(),
-                        ],
-                        rows,
-                    }
-                    .print();
-                }
-                DevicesCommands::TestNetwork { device } => {
-                    let secrets = auth::get_secrets(&config)
-                        .await
-                        .with_context(|| "Error getting token")?
-                        .with_context(|| "No Token found, please Login")?;
-
-                    let api = SmithAPI::new(secrets, &config);
-
-                    println!("Sending network test command to device: {}", device.bold());
-                    api.test_network(device).await?;
-                    println!(
-                        "{}",
-                        "Network test command sent successfully!".bright_green()
-                    );
-                    println!(
-                        "The device will download a 20MB test file and report back the results."
-                    );
-                    println!("Check the dashboard to see the results.");
-                }
-                DevicesCommands::Logs {
-                    serial_number,
-                    nowait,
-                } => {
-                    let secrets = auth::get_secrets(&config)
-                        .await
-                        .with_context(|| "Error getting token")?
-                        .with_context(|| "No Token found, please Login")?;
-
-                    let api = SmithAPI::new(secrets, &config);
-
-                    let logs = execute_device_command(
+                    let status = execute_device_command(
                         &api,
                         serial_number,
-                        "Fetching logs",
+                        "Fetching smithd status",
                         nowait,
-                        |id| api.send_logs_command(id),
+                        |id| api.send_smithd_status_command(id),
                     )
                     .await?;
 
-                    if !logs.is_empty() {
-                        println!("{}", logs);
+                    if !status.is_empty() {
+                        println!("{}", status);
                     }
                 }
-            },
-            Commands::Service { command } => match command {
-                ServiceCommands::Status {
+                StatusResourceType::Service {
                     unit,
-                    serial_number,
+                    selector,
                     nowait,
                 } => {
                     let secrets = auth::get_secrets(&config)
@@ -392,6 +1113,11 @@ async fn main() -> anyhow::Result<()> {
                         .with_context(|| "No Token found, please Login")?;
 
                     let api = SmithAPI::new(secrets, &config);
+
+                    let device =
+                        resolve_single_device_from_selector(&api, &selector, "status service")
+                            .await?;
+                    let serial_number = device.serial_number.clone();
 
                     let unit_clone = unit.clone();
                     let status = execute_device_command(
@@ -408,10 +1134,7 @@ async fn main() -> anyhow::Result<()> {
                     }
                 }
             },
-            Commands::Status {
-                serial_number,
-                nowait,
-            } => {
+            Commands::Logs { selector, nowait } => {
                 let secrets = auth::get_secrets(&config)
                     .await
                     .with_context(|| "Error getting token")?
@@ -419,18 +1142,63 @@ async fn main() -> anyhow::Result<()> {
 
                 let api = SmithAPI::new(secrets, &config);
 
-                let status = execute_device_command(
-                    &api,
-                    serial_number,
-                    "Fetching smithd status",
-                    nowait,
-                    |id| api.send_smithd_status_command(id),
-                )
-                .await?;
+                let device = resolve_single_device_from_selector(&api, &selector, "logs").await?;
+                let serial_number = device.serial_number.clone();
 
-                if !status.is_empty() {
-                    println!("{}", status);
+                let logs =
+                    execute_device_command(&api, serial_number, "Fetching logs", nowait, |id| {
+                        api.send_logs_command(id)
+                    })
+                    .await?;
+
+                if !logs.is_empty() {
+                    println!("{}", logs);
                 }
+            }
+            Commands::TestNetwork { selector } => {
+                let secrets = auth::get_secrets(&config)
+                    .await
+                    .with_context(|| "Error getting token")?
+                    .with_context(|| "No Token found, please Login")?;
+
+                let api = SmithAPI::new(secrets, &config);
+
+                let devices = resolve_devices_from_selector(&api, &selector).await?;
+
+                if devices.is_empty() {
+                    println!("No devices found matching the selector");
+                    return Ok(());
+                }
+
+                // Deduplicate devices
+                let mut seen_ids = HashSet::new();
+                let devices: Vec<_> = devices
+                    .into_iter()
+                    .filter(|device| seen_ids.insert(device.id))
+                    .collect();
+
+                println!(
+                    "Sending network test command to {} device(s):",
+                    devices.len()
+                );
+
+                for device in &devices {
+                    match api.test_network(device.serial_number.clone()).await {
+                        Ok(_) => {
+                            println!("  {} {}", "✓".bright_green(), device.serial_number);
+                        }
+                        Err(e) => {
+                            println!("  {} {} - Failed: {}", "✗".red(), device.serial_number, e);
+                        }
+                    }
+                }
+
+                println!(
+                    "\n{}",
+                    "Network test commands sent successfully!".bright_green()
+                );
+                println!("Each device will download a 20MB test file and report back the results.");
+                println!("Check the dashboard to see the results.");
             }
             Commands::Command { ids } => {
                 let secrets = auth::get_secrets(&config)
@@ -460,10 +1228,10 @@ async fn main() -> anyhow::Result<()> {
                     let command = api.get_device_command(device_id, command_id).await?;
 
                     println!("Command ID: {}", id_str);
-                    println!("Fetched: {}", command["fetched"].as_bool().unwrap_or(false));
+                    println!("Fetched: {}", command.fetched);
 
-                    if command["response"].is_object() {
-                        if let Some(stdout) = command["response"]["FreeForm"]["stdout"].as_str() {
+                    if let Some(response) = command.response {
+                        if let Some(stdout) = response["FreeForm"]["stdout"].as_str() {
                             println!("Output:\n{}", stdout);
                         } else {
                             println!("Status: Completed (no output)");
@@ -488,29 +1256,18 @@ async fn main() -> anyhow::Result<()> {
 
                     let distros = api.get_distributions().await?;
                     if json {
-                        println!("{}", distros);
+                        println!("{}", serde_json::to_string_pretty(&distros)?);
                         return Ok(());
                     }
-                    let parsed_distros: Vec<Value> = serde_json::from_str(&distros)
-                        .with_context(|| "Failed to parse distributions JSON")?;
-                    let rows: Vec<Vec<String>> = parsed_distros
-                        .iter()
-                        .map(|d| {
-                            vec![
-                                format!(
-                                    "{} ({})",
-                                    d["name"].as_str().unwrap_or(""),
-                                    get_colored_arch(d["architecture"].as_str().unwrap_or(""))
-                                ),
-                                d["description"].as_str().unwrap_or("").to_string(),
-                            ]
-                        })
-                        .collect();
-                    TablePrint {
-                        headers: vec!["Name (arch)".to_string(), "Description".to_string()],
-                        rows,
+                    let mut table =
+                        TablePrint::new_with_headers(vec!["Name (arch)", "Description"]);
+                    for d in distros {
+                        table.add_row(vec![
+                            format!("{} ({})", d.name, get_colored_arch(&d.architecture)),
+                            d.description.to_owned().unwrap_or_default(),
+                        ]);
                     }
-                    .print();
+                    table.print();
                 }
                 DistroCommands::Releases => {}
             },
@@ -527,17 +1284,24 @@ async fn main() -> anyhow::Result<()> {
 
                 let api = SmithAPI::new(secrets, &config);
 
-                let devices = api
-                    .get_devices(Some(serial_number.clone()), None, None)
-                    .await?;
-
-                let parsed: Value = serde_json::from_str(&devices)?;
-
-                let id = parsed[0]["id"].as_u64().unwrap();
+                let device = api.get_device(serial_number.clone()).await?;
+                if device.last_seen.is_none_or(|last_seen| {
+                    chrono::Utc::now()
+                        .signed_duration_since(last_seen)
+                        .num_minutes()
+                        >= 5
+                }) {
+                    let mut last_ping = "never".to_string();
+                    if let Some(last_seen) = device.last_seen {
+                        last_ping =
+                            HumanTime::from(last_seen.with_timezone(&chrono::Utc)).to_string();
+                    }
+                    bail!("This device is offline. Last ping was {}", last_ping);
+                }
 
                 println!(
                     "Creating tunnel for device [{}] {} {:?}",
-                    id,
+                    device.id,
                     &serial_number.bold(),
                     overview_debug
                 );
@@ -556,23 +1320,21 @@ async fn main() -> anyhow::Result<()> {
                 let username = config.current_tunnel_username();
                 let username_clone = username.clone();
                 let tunnel_openning_handler = tokio::spawn(async move {
-                    api.open_tunnel(id, pub_key, username_clone).await.unwrap();
+                    api.open_tunnel(device.id as u64, pub_key, username_clone)
+                        .await
+                        .unwrap();
                     pb2.set_message("Request sent to smith 💻");
 
                     let port;
                     loop {
-                        let response = api.get_last_command(id).await.unwrap();
+                        let response = api.get_last_command(device.id as u64).await.unwrap();
 
-                        if response["fetched"].is_boolean()
-                            && response["fetched"].as_bool().unwrap()
-                        {
+                        if response.fetched {
                             pb2.set_message("Command fetched by device 👍");
                         }
 
-                        if response["response"].is_object() {
-                            port = response["response"]["OpenTunnel"]["port_server"]
-                                .as_u64()
-                                .unwrap();
+                        if let Some(response) = response.response {
+                            port = response["OpenTunnel"]["port_server"].as_u64().unwrap();
 
                             tx.send(port).unwrap();
                             break;
@@ -595,86 +1357,27 @@ async fn main() -> anyhow::Result<()> {
 
                 // Wait for server-side setup to complete
                 tokio::time::sleep(Duration::from_secs(10)).await;
+
+                let tunnel_server = config.current_tunnel_server();
                 let mut ssh = Session::connect(
                     config.get_identity_file(),
                     username,
                     None,
-                    ("bore.teton.ai", port),
+                    (tunnel_server, port),
                 )
                 .await?;
                 println!("Connected");
-                let code = {
-                    // We're using `termion` to put the terminal into raw mode, so that we can
-                    // display the output of interactive applications correctly
-                    let _raw_term = io::stdout().into_raw_mode()?;
-                    ssh.call().await.with_context(|| "skill issues")?;
-                };
+                // We're using `termion` to put the terminal into raw mode, so that we can
+                // display the output of interactive applications correctly
+                let _raw_term = io::stdout().into_raw_mode()?;
+                ssh.call().await.with_context(|| "skill issues")?;
 
-                println!("Exitcode: {:?}", code);
+                println!("Exitcode: {:?}", ());
                 ssh.close().await?;
                 return Ok(());
             }
-            Commands::Release {
-                release_number,
-                deploy,
-            } => {
-                let secrets = auth::get_secrets(&config)
-                    .await
-                    .with_context(|| "Error getting token")?
-                    .with_context(|| "No Token found, please Login")?;
-
-                let api = SmithAPI::new(secrets, &config);
-                if deploy {
-                    // Start the deployment
-                    api.deploy_release(release_number.clone()).await?;
-
-                    // Set up polling parameters
-                    let start_time = std::time::Instant::now();
-                    let timeout = std::time::Duration::from_secs(5 * 60); // 5 minutes
-                    let check_interval = std::time::Duration::from_secs(5); // Check every 5 seconds
-
-                    println!("Checking for deployment completion...");
-
-                    // Start polling loop
-                    loop {
-                        // Check if we've exceeded the timeout
-                        if start_time.elapsed() > timeout {
-                            println!("Deployment timed out after 5 minutes");
-                            return Err(anyhow::anyhow!("Deployment timed out after 5 minutes"));
-                        }
-
-                        // Check deployment status
-                        let deployment = api
-                            .deploy_release_check_done(release_number.clone())
-                            .await?;
-
-                        // Check if the deployment is done
-                        if let Some(status) = deployment.get("status").and_then(|s| s.as_str()) {
-                            println!("Current status: {}", status);
-
-                            if status == "Done" {
-                                println!("Deployment completed successfully!");
-                                return Ok(());
-                            }
-
-                            // If status is "failed" or any other terminal state, we can exit early
-                            if status == "Failed" {
-                                return Err(anyhow::anyhow!("Deployment failed"));
-                            }
-                        }
-
-                        // Wait before the next check
-                        println!(
-                            "Waiting for devices to update... (elapsed: {:?})",
-                            start_time.elapsed()
-                        );
-                        tokio::time::sleep(check_interval).await;
-                    }
-                } else {
-                    let value = api.get_release_info(release_number).await?;
-                    println!("{}", value);
-                    return Ok(());
-                }
+            Commands::Releases { command } => {
+                command.handle(config).await?;
             }
             Commands::Completion { shell } => {
                 let mut cmd = Cli::command();
@@ -685,6 +1388,258 @@ async fn main() -> anyhow::Result<()> {
             Commands::AgentHelp => {
                 print_markdown_help();
                 return Ok(());
+            }
+            Commands::Run {
+                selector,
+                devices: device_filters,
+                wait,
+                command,
+            } => {
+                let secrets = auth::get_secrets(&config)
+                    .await
+                    .with_context(|| "Error getting token")?
+                    .with_context(|| "No Token found, please Login")?;
+
+                let api = SmithAPI::new(secrets, &config);
+
+                let cmd_string = command.join(" ");
+
+                let target_devices = resolve_target_devices(
+                    &api,
+                    device_filters,
+                    selector.labels,
+                    selector.online,
+                    selector.offline,
+                    selector.search,
+                )
+                .await?;
+
+                // Deduplicate devices by ID to prevent duplicate command execution
+                let mut seen_ids = HashSet::new();
+                let target_devices: Vec<_> = target_devices
+                    .into_iter()
+                    .filter(|device| seen_ids.insert(device.id))
+                    .collect();
+
+                if target_devices.is_empty() {
+                    println!("No devices found matching the specified filters.");
+                    return Ok(());
+                }
+
+                println!(
+                    "Running command '{}' on {} device(s):",
+                    cmd_string.bold(),
+                    target_devices.len()
+                );
+
+                let mut command_ids = Vec::new();
+
+                for device in &target_devices {
+                    let device_id = device.id;
+                    let serial_number = &device.serial_number;
+
+                    match api
+                        .send_custom_command(device_id as u64, cmd_string.clone())
+                        .await
+                    {
+                        Ok((dev_id, cmd_id)) => {
+                            command_ids.push((dev_id, cmd_id, serial_number.to_string()));
+                            println!(
+                                "  {} [{}] - Command queued: {}:{}",
+                                serial_number.bright_green(),
+                                dev_id,
+                                dev_id,
+                                cmd_id
+                            );
+                        }
+                        Err(e) => {
+                            println!("  {} [{}] - Failed: {}", serial_number.red(), device_id, e);
+                        }
+                    }
+                }
+
+                if !wait {
+                    println!(
+                        "\n{} Commands sent. Use 'sm command <device_id>:<command_id>' to check status.",
+                        "Note:".bold()
+                    );
+                    return Ok(());
+                }
+
+                println!("\n{} for results...", "Waiting".bold());
+
+                let m = MultiProgress::new();
+                let mut progress_bars = Vec::new();
+
+                for (device_id, command_id, serial_number) in &command_ids {
+                    let pb = m.add(ProgressBar::new_spinner());
+                    pb.enable_steady_tick(Duration::from_millis(50));
+                    pb.set_style(
+                        ProgressStyle::with_template("{spinner:.blue} {msg}")
+                            .unwrap()
+                            .tick_strings(&["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]),
+                    );
+                    pb.set_message(format!(
+                        "{} [{}:{}] Waiting...",
+                        serial_number, device_id, command_id
+                    ));
+                    progress_bars.push((pb, *device_id, *command_id, serial_number.clone()));
+                }
+
+                let mut completed = vec![false; command_ids.len()];
+                let mut results: Vec<(String, String)> =
+                    vec![(String::new(), String::new()); command_ids.len()];
+
+                while !completed.iter().all(|&c| c) {
+                    for (idx, (pb, device_id, command_id, serial_number)) in
+                        progress_bars.iter().enumerate()
+                    {
+                        if completed[idx] {
+                            continue;
+                        }
+
+                        match api.get_device_command(*device_id, *command_id).await {
+                            Ok(response) => {
+                                if response.fetched && !completed[idx] {
+                                    pb.set_message(format!(
+                                        "{} [{}:{}] Fetched by device",
+                                        serial_number, device_id, command_id
+                                    ));
+                                }
+
+                                if let Some(response) = response.response {
+                                    let output = if let Some(stdout) =
+                                        response["FreeForm"]["stdout"].as_str()
+                                    {
+                                        stdout.to_string()
+                                    } else {
+                                        String::from("(no output)")
+                                    };
+                                    results[idx] = (serial_number.clone(), output);
+                                    pb.finish_with_message(format!(
+                                        "{} [{}:{}] Completed ✓",
+                                        serial_number.bright_green(),
+                                        device_id,
+                                        command_id
+                                    ));
+                                    completed[idx] = true;
+                                }
+                            }
+                            Err(e) => {
+                                results[idx] = (serial_number.clone(), format!("Error: {}", e));
+                                pb.finish_with_message(format!(
+                                    "{} [{}:{}] Failed ✗",
+                                    serial_number.red(),
+                                    device_id,
+                                    command_id
+                                ));
+                                completed[idx] = true;
+                            }
+                        }
+                    }
+
+                    if !completed.iter().all(|&c| c) {
+                        thread::sleep(Duration::from_secs(1));
+                    }
+                }
+
+                println!("\n{}", "Results:".bold());
+                for (serial_number, output) in results {
+                    println!("\n{} {}:", "Device:".bold(), serial_number.bright_cyan());
+                    println!("{}", output);
+                    println!("{}", "---".dimmed());
+                }
+            }
+            Commands::Label {
+                selector,
+                devices: device_filters,
+                set_labels,
+            } => {
+                let secrets = auth::get_secrets(&config)
+                    .await
+                    .with_context(|| "Error getting token")?
+                    .with_context(|| "No Token found, please Login")?;
+
+                let api = SmithAPI::new(secrets, &config);
+
+                let target_devices = resolve_target_devices(
+                    &api,
+                    device_filters,
+                    selector.labels,
+                    selector.online,
+                    selector.offline,
+                    selector.search,
+                )
+                .await?;
+
+                // Deduplicate devices by ID to prevent duplicate label operations
+                let mut seen_ids = HashSet::new();
+                let target_devices: Vec<_> = target_devices
+                    .into_iter()
+                    .filter(|device| seen_ids.insert(device.id))
+                    .collect();
+
+                if target_devices.is_empty() {
+                    println!("No devices found matching the specified filters.");
+                    return Ok(());
+                }
+
+                let new_labels_map = parse_label_filters(set_labels)?.unwrap_or_default();
+
+                println!("Setting labels on {} device(s):", target_devices.len());
+                for device in &target_devices {
+                    println!("  - {}", device.serial_number);
+                }
+                println!("\nLabels to set:");
+                for (key, value) in &new_labels_map {
+                    println!("  {}={}", key, value);
+                }
+
+                print!("\nProceed? [y/N]: ");
+                io::Write::flush(&mut io::stdout())?;
+
+                let mut input = String::new();
+                io::stdin().read_line(&mut input)?;
+
+                if input.trim().to_lowercase() != "y" {
+                    println!("Cancelled.");
+                    return Ok(());
+                }
+
+                println!("\n{} labels to devices...", "Applying".bold());
+
+                for device in &target_devices {
+                    let device_id = device.id;
+                    let serial_number = &device.serial_number;
+
+                    let mut device_labels = device
+                        .labels
+                        .iter()
+                        .map(|(k, v)| (k.clone(), v.to_string()))
+                        .collect::<std::collections::HashMap<String, String>>();
+
+                    for (key, value) in &new_labels_map {
+                        device_labels.insert(key.clone(), value.clone());
+                    }
+
+                    match api
+                        .update_device_labels(device_id as u64, device_labels)
+                        .await
+                    {
+                        Ok(()) => {
+                            println!(
+                                "  {} [{}] - Labels updated",
+                                serial_number.bright_green(),
+                                device_id
+                            );
+                        }
+                        Err(e) => {
+                            println!("  {} [{}] - Failed: {}", serial_number.red(), device_id, e);
+                        }
+                    }
+                }
+
+                println!("\n{}", "Done!".bright_green());
             }
         },
         None => {
@@ -707,12 +1662,15 @@ where
     Fut: std::future::Future<Output = anyhow::Result<(u64, u64)>>,
 {
     let devices = api
-        .get_devices(Some(serial_number.clone()), None, None)
+        .get_devices(DeviceFilter {
+            serial_number: Some(serial_number.clone()),
+            ..Default::default()
+        })
         .await?;
-    let parsed: Value = serde_json::from_str(&devices)?;
-    let id = parsed[0]["id"]
-        .as_u64()
-        .with_context(|| "Device not found")?;
+    let id = devices
+        .first()
+        .ok_or_else(|| anyhow::anyhow!("Device not found"))?
+        .id;
 
     println!(
         "{} for device [{}] {}",
@@ -730,7 +1688,7 @@ where
     );
     pb.set_message("Sending request to device");
 
-    let (device_id, command_id) = send_command(id).await?;
+    let (device_id, command_id) = send_command(id as u64).await?;
 
     if nowait {
         pb.finish_and_clear();
@@ -746,14 +1704,14 @@ where
 
     let result;
     loop {
-        let response = api.get_last_command(id).await?;
+        let response = api.get_last_command(id as u64).await?;
 
-        if response["fetched"].is_boolean() && response["fetched"].as_bool().unwrap_or(false) {
+        if response.fetched {
             pb.set_message("Command fetched by device");
         }
 
-        if response["response"].is_object() {
-            result = response["response"]["FreeForm"]["stdout"]
+        if let Some(response) = response.response {
+            result = response["FreeForm"]["stdout"]
                 .as_str()
                 .with_context(|| "Failed to get output from response")?
                 .to_string();
@@ -780,26 +1738,5 @@ fn get_colored_arch(arch: &str) -> String {
         "s390x" => arch.red().to_string(),
         "riscv64" => arch.bright_purple().to_string(),
         _ => arch.white().to_string(),
-    }
-}
-
-fn get_online_colored(serial_number: &str, last_seen: &str) -> String {
-    use chrono_humanize::HumanTime;
-    let now = chrono::Utc::now();
-
-    match chrono::DateTime::parse_from_rfc3339(last_seen) {
-        Ok(parsed_time) => {
-            let duration = now.signed_duration_since(parsed_time.with_timezone(&chrono::Utc));
-
-            if duration.num_minutes() < 5 {
-                serial_number.bright_green().to_string()
-            } else {
-                let human_time = HumanTime::from(parsed_time.with_timezone(&chrono::Utc));
-                format!("{} ({})", serial_number, human_time)
-                    .red()
-                    .to_string()
-            }
-        }
-        Err(_) => format!("{} (Unknown)", serial_number).yellow().to_string(),
     }
 }

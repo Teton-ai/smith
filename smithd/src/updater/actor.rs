@@ -1,5 +1,6 @@
+use crate::downloader::DownloaderHandle;
 use crate::magic::MagicHandle;
-use crate::shutdown::{ShutdownHandler, ShutdownSignals};
+use crate::shutdown::ShutdownSignals;
 use crate::utils::network::NetworkClient;
 use anyhow::Context;
 use anyhow::Result;
@@ -43,6 +44,7 @@ pub struct Actor {
     network: NetworkClient,
     last_update: Option<Result<time::Instant>>,
     last_upgrade: Option<Result<time::Instant>>,
+    downloader: DownloaderHandle,
 }
 
 impl Actor {
@@ -50,6 +52,7 @@ impl Actor {
         shutdown: ShutdownSignals,
         receiver: mpsc::Receiver<ActorMessage>,
         magic: MagicHandle,
+        downloader: DownloaderHandle,
     ) -> Self {
         let network = NetworkClient::new();
         Self {
@@ -60,6 +63,7 @@ impl Actor {
             status: Status::Idle,
             last_update: None,
             last_upgrade: None,
+            downloader,
         }
     }
 
@@ -163,11 +167,15 @@ impl Actor {
         }
     }
 
+    #[tracing::instrument(skip(self))]
     async fn update(&mut self) {
         info!("Checking for updates");
         self.status = Status::Updating;
         let res = self.check_for_updates().await.map(|_| time::Instant::now());
-        info!("Check for updates result: {:?}", res);
+        match &res {
+            Ok(res) => info!("Check for updates result: {:?}", res),
+            Err(e) => warn!("Check for updates result: {:?}", e),
+        }
         self.last_update = Some(res);
         self.status = Status::Idle;
     }
@@ -181,6 +189,7 @@ impl Actor {
         self.status = Status::Idle;
     }
 
+    #[tracing::instrument(skip(self))]
     async fn check_for_updates(&self) -> Result<()> {
         // apt update on check for updates with timeout
         info!("Running apt update with 5 minute timeout");
@@ -258,7 +267,7 @@ impl Actor {
                 up_to_date = false;
                 // we need to install the package
                 self.network
-                    .get_package(&target_package.file, &token)
+                    .get_package(&target_package.file, &self.downloader)
                     .await?;
             }
         }
@@ -435,9 +444,7 @@ impl Actor {
     ///
     /// Returns `Ok` if all packages are, `Err` otherwise.
     async fn are_packages_up_to_date(&self) -> Result<()> {
-        let shutdown = ShutdownHandler::new();
-        let configuration = MagicHandle::new(shutdown.signals());
-        configuration.load(None).await;
+        let configuration = self.magic.clone();
 
         let magic_packages = configuration.get_packages().await;
 

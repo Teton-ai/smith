@@ -1,9 +1,6 @@
 pub mod packages;
-pub mod tags;
 
 use crate::State;
-use crate::db::DeviceWithToken;
-use crate::device::Device;
 use axum::{
     async_trait,
     extract::{Extension, FromRequestParts},
@@ -16,11 +13,14 @@ use axum_extra::{
 };
 use tracing::error;
 
-// TODO: DEPRECATED: This FromRequestParts implementation is deprecated.
-// Use middleware::from_fn(device::Device::middleware) instead for device authentication.
-// https://docs.rs/axum/latest/axum/extract/index.html#accessing-other-extractors-in-fromrequest-or-fromrequestparts-implementations
+#[derive(Debug)]
+pub struct AuthedDevice {
+    pub id: i32,
+    pub serial_number: String,
+}
+
 #[async_trait]
-impl<S> FromRequestParts<S> for DeviceWithToken
+impl<S> FromRequestParts<S> for AuthedDevice
 where
     S: Send + Sync,
 {
@@ -31,7 +31,7 @@ where
         let TypedHeader(Authorization(bearer)) =
             TypedHeader::<Authorization<Bearer>>::from_request_parts(parts, state)
                 .await
-                .map_err(|_| (StatusCode::UNAUTHORIZED,).into_response())?;
+                .map_err(|_| StatusCode::UNAUTHORIZED.into_response())?;
 
         use axum::RequestPartsExt;
         let Extension(state) = parts
@@ -39,15 +39,27 @@ where
             .await
             .map_err(|err| err.into_response())?;
 
-        let device = Device::get_device_from_token(bearer.token().to_string(), &state.pg_pool)
-            .await
-            .map_err(|err| {
-                error!("Database error: {:?}", err);
-                (StatusCode::INTERNAL_SERVER_ERROR,).into_response()
-            })?
-            .ok_or_else(|| (StatusCode::UNAUTHORIZED,).into_response())?;
+        let device = sqlx::query!(
+            r#"
+            SELECT
+                id,
+                serial_number
+            FROM device
+            WHERE
+                token IS NOT NULL AND
+                token = $1
+            "#,
+            bearer.token()
+        )
+        .fetch_optional(&state.pg_pool)
+        .await
+        .map_err(|err| {
+            error!("Database error: {:?}", err);
+            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+        })?
+        .ok_or_else(|| StatusCode::UNAUTHORIZED.into_response())?;
 
-        Ok(DeviceWithToken {
+        Ok(AuthedDevice {
             id: device.id,
             serial_number: device.serial_number,
         })
