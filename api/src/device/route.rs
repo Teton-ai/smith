@@ -1778,9 +1778,9 @@ pub async fn delete_device(
     // TODO:: delete release_id and targer_release_id references, as well as system_info
     sqlx::query!(
         "UPDATE device 
-        SET archived = true
+        SET archived = true,
             release_id = NULL,
-            target_release_id = NULL,
+            target_release_id = NULL
         WHERE id = $1",
         device_id
     )
@@ -2062,7 +2062,11 @@ pub async fn revoke_device(
     })?;
 
     sqlx::query!(
-        r#"UPDATE device SET approved = false WHERE id = $1"#,
+        r#"UPDATE device 
+        SET approved = false,
+            release_id = NULL,
+            target_release_id = NULL
+        WHERE id = $1"#,
         device_id
     )
     .execute(&mut *tx)
