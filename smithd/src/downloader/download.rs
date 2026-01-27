@@ -163,27 +163,24 @@ async fn download_file(
     };
 
     // Check if final file already exists and is complete
-    if let Ok(final_metadata) = tokio::fs::metadata(local_path).await {
-        if final_metadata.len() == content_length {
-            if let Ok(Some(stored)) = xattr::get(local_path, "user.etag") {
+    if let Ok(final_metadata) = tokio::fs::metadata(local_path).await
+        && final_metadata.len() == content_length
+            && let Ok(Some(stored)) = xattr::get(local_path, "user.etag") {
                 let stored_etag = String::from_utf8_lossy(&stored);
-                if let Some(current_etag) = etag {
-                    if stored_etag.as_ref() == current_etag {
+                if let Some(current_etag) = etag
+                    && stored_etag.as_ref() == current_etag {
                         info!("File already fully downloaded at {}", local_path);
                         stats.success = true;
                         stats.bytes_downloaded = content_length;
                         return Ok(stats);
                     }
-                }
             }
-        }
-    }
 
     // Build get based on if some of the file has already been downloaded
     let mut request = client.get(presigned_url);
 
-    if downloaded > 0 {
-        if let Some(stored) = xattr::get(part_path_str, "user.etag")? {
+    if downloaded > 0
+        && let Some(stored) = xattr::get(part_path_str, "user.etag")? {
             let stored_etag = String::from_utf8_lossy(&stored);
 
             match etag {
@@ -235,7 +232,6 @@ async fn download_file(
                 }
             }
         }
-    }
 
     // Send the request to download the file
     let mut response = request.send().await?;
