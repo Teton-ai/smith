@@ -1775,13 +1775,18 @@ pub async fn delete_device(
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
 
-    sqlx::query!("UPDATE device SET archived = true WHERE id = $1", device_id)
-        .execute(&mut *tx)
-        .await
-        .map_err(|err| {
-            error!("Failed to archive device {err}");
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?;
+    sqlx::query!(
+        "UPDATE device 
+        SET archived = true
+        WHERE id = $1",
+        device_id
+    )
+    .execute(&mut *tx)
+    .await
+    .map_err(|err| {
+        error!("Failed to archive device {err}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
 
     tx.commit().await.map_err(|err| {
         error!("Failed to commit transaction {err}");
@@ -2054,7 +2059,11 @@ pub async fn revoke_device(
     })?;
 
     sqlx::query!(
-        r#"UPDATE device SET approved = false WHERE id = $1"#,
+        r#"UPDATE device 
+        SET approved = false,
+            release_id = NULL,
+            target_release_id = NULL
+        WHERE id = $1"#,
         device_id
     )
     .execute(&mut *tx)
