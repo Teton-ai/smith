@@ -13,6 +13,7 @@ use crate::utils::system::SystemInfo;
 use tracing::info;
 
 pub async fn run() {
+    info!("8================D");
     SystemInfo::new().await.print();
 
     let shutdown = ShutdownHandler::new();
