@@ -1775,7 +1775,6 @@ pub async fn delete_device(
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
 
-    // TODO:: delete release_id and targer_release_id references, as well as system_info
     sqlx::query!(
         "UPDATE device 
         SET archived = true,
