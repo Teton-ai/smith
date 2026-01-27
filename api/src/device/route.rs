@@ -1777,9 +1777,7 @@ pub async fn delete_device(
 
     sqlx::query!(
         "UPDATE device 
-        SET archived = true,
-            release_id = NULL,
-            target_release_id = NULL
+        SET archived = true
         WHERE id = $1",
         device_id
     )
