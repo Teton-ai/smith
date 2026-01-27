@@ -150,11 +150,8 @@ impl NetworkClient {
 
         let remote_file = format!("packages/{}", package_name);
         downloader
-            .download_blocking(
-                &remote_file,
-                local_package_path.to_str().unwrap_or(""),
-                5000.0,
-            )
+            // steady download at 2MB/s lets play nice in these networks
+            .download_blocking(&remote_file, local_package_path.to_str().unwrap_or(""), 2.0)
             .await?;
 
         Ok(())
