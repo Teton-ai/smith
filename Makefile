@@ -41,4 +41,4 @@ seed:
 
 debug.smithd:
 	cargo build --release -p smith
-    	sudo ln -sf $(CURDIR)/target/release/smithd /usr/bin/smithd
+    sudo ln -sf $(CURDIR)/target/release/smithd /usr/bin/smithd
