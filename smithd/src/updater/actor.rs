@@ -40,12 +40,10 @@ fn classify_install_failure(stderr: &str) -> InstallFailureKind {
     let stderr_lower = stderr.to_lowercase();
 
     let corrupt_patterns = [
-        "dpkg-deb: error",
         "is not a debian format archive",
         "archive is corrupt",
         "unexpected end of file",
-        "short read",
-        "bad archive",
+        "could not read meta data",
     ];
 
     for pattern in &corrupt_patterns {
