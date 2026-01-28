@@ -5,6 +5,7 @@ pub mod daemon;
 pub mod dbus;
 pub mod downloader;
 pub mod filemanager;
+pub mod logstream;
 pub mod magic;
 pub mod police;
 pub mod postman;

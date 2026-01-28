@@ -4,15632 +4,8305 @@
  * API
  * OpenAPI spec version: 0.2.105
  */
-
+import {
+  useInfiniteQuery,
+  useMutation,
+  useQuery
+} from '@tanstack/react-query';
 import type {
-	DataTag,
-	DefinedInitialDataOptions,
-	DefinedUseInfiniteQueryResult,
-	DefinedUseQueryResult,
-	InfiniteData,
-	MutationFunction,
-	QueryClient,
-	QueryFunction,
-	QueryKey,
-	UndefinedInitialDataOptions,
-	UseInfiniteQueryOptions,
-	UseInfiniteQueryResult,
-	UseMutationOptions,
-	UseMutationResult,
-	UseQueryOptions,
-	UseQueryResult,
-} from "@tanstack/react-query";
-import { useInfiniteQuery, useMutation, useQuery } from "@tanstack/react-query";
+  DataTag,
+  DefinedInitialDataOptions,
+  DefinedUseInfiniteQueryResult,
+  DefinedUseQueryResult,
+  InfiniteData,
+  MutationFunction,
+  QueryClient,
+  QueryFunction,
+  QueryKey,
+  UndefinedInitialDataOptions,
+  UseInfiniteQueryOptions,
+  UseInfiniteQueryResult,
+  UseMutationOptions,
+  UseMutationResult,
+  UseQueryOptions,
+  UseQueryResult
+} from '@tanstack/react-query';
 
-import { useCallback } from "react";
+import {
+  useCallback
+} from 'react';
 
-import { useClientMutator } from "./api-client-mutator";
+import { useClientMutator } from './api-client-mutator';
 export type BundleCommandsCommandsItem = { [key: string]: unknown };
 
 export interface BundleCommands {
-	commands: BundleCommandsCommandsItem[];
-	devices: number[];
+  commands: BundleCommandsCommandsItem[];
+  devices: number[];
 }
 
 export interface BundleWithCommands {
-	created_on: string;
-	responses: DeviceCommandResponse[];
-	uuid: string;
+  created_on: string;
+  responses: DeviceCommandResponse[];
+  uuid: string;
 }
 
 export interface BundleWithCommandsPaginated {
-	bundles: BundleWithCommands[];
-	next?: string;
-	previous?: string;
+  bundles: BundleWithCommands[];
+  next?: string;
+  previous?: string;
 }
 
 export interface CommandsPaginated {
-	commands: DeviceCommandResponse[];
-	next?: string;
-	previous?: string;
+  commands: DeviceCommandResponse[];
+  next?: string;
+  previous?: string;
 }
 
 export interface ConnectionStatus {
-	connection_name: string;
-	connection_state: string;
-	device_name: string;
-	device_type: string;
+  connection_name: string;
+  connection_state: string;
+  device_name: string;
+  device_type: string;
 }
 
 export interface CreateReleaseService {
-	service_name: string;
-	watchdog_sec?: number;
+  service_name: string;
+  watchdog_sec?: number;
 }
 
 export interface Dashboard {
-	/** @minimum 0 */
-	archived_count: number;
-	/** @minimum 0 */
-	offline_count: number;
-	/** @minimum 0 */
-	online_count: number;
-	/** @minimum 0 */
-	outdated_count: number;
-	/** @minimum 0 */
-	total_count: number;
+  /** @minimum 0 */
+  archived_count: number;
+  /** @minimum 0 */
+  offline_count: number;
+  /** @minimum 0 */
+  online_count: number;
+  /** @minimum 0 */
+  outdated_count: number;
+  /** @minimum 0 */
+  total_count: number;
 }
 
 export interface Deployment {
-	created_at: string;
-	id: number;
-	release_id: number;
-	status: DeploymentStatus;
-	updated_at: string;
+  created_at: string;
+  id: number;
+  release_id: number;
+  status: DeploymentStatus;
+  updated_at: string;
 }
 
 export interface DeploymentDeviceWithStatus {
-	added_at: string;
-	device_id: number;
-	last_ping?: string;
-	release_id?: number;
-	serial_number: string;
-	target_release_id?: number;
+  added_at: string;
+  device_id: number;
+  last_ping?: string;
+  release_id?: number;
+  serial_number: string;
+  target_release_id?: number;
 }
 
-export type DeploymentStatus =
-	(typeof DeploymentStatus)[keyof typeof DeploymentStatus];
+export type DeploymentStatus = typeof DeploymentStatus[keyof typeof DeploymentStatus];
+
 
 // eslint-disable-next-line @typescript-eslint/no-redeclare
 export const DeploymentStatus = {
-	InProgress: "InProgress",
-	Failed: "Failed",
-	Canceled: "Canceled",
-	Done: "Done",
+  InProgress: 'InProgress',
+  Failed: 'Failed',
+  Canceled: 'Canceled',
+  Done: 'Done',
 } as const;
 
-export type DeviceLabels = { [key: string]: string };
+export type DeviceLabels = {[key: string]: string};
 
 export interface Device {
-	approved: boolean;
-	created_on: string;
-	has_token?: boolean;
-	id: number;
-	ip_address?: IpAddressInfo;
-	ip_address_id?: number;
-	labels: DeviceLabels;
-	last_seen?: string;
-	modem?: Modem;
-	modem_id?: number;
-	network?: DeviceNetwork;
-	note?: string;
-	release?: Release;
-	release_id?: number;
-	serial_number: string;
-	system_info?: SystemInfo;
-	target_release?: Release;
-	target_release_id?: number;
-	target_release_id_set_at?: string;
+  approved: boolean;
+  created_on: string;
+  has_token?: boolean;
+  id: number;
+  ip_address?: IpAddressInfo;
+  ip_address_id?: number;
+  labels: DeviceLabels;
+  last_seen?: string;
+  modem?: Modem;
+  modem_id?: number;
+  network?: DeviceNetwork;
+  note?: string;
+  release?: Release;
+  release_id?: number;
+  serial_number: string;
+  system_info?: SystemInfo;
+  target_release?: Release;
+  target_release_id?: number;
+  target_release_id_set_at?: string;
 }
 
 export interface DeviceAuthResponse {
-	authorized: boolean;
-	serial_number: string;
+  authorized: boolean;
+  serial_number: string;
 }
 
 export interface DeviceCommandResponse {
-	cancelled: boolean;
-	cmd_data: unknown;
-	cmd_id: number;
-	device: number;
-	fetched: boolean;
-	fetched_at?: string;
-	issued_at: string;
-	response?: unknown;
-	response_at?: string;
-	response_id?: number;
-	serial_number: string;
-	status?: number;
+  cancelled: boolean;
+  cmd_data: unknown;
+  cmd_id: number;
+  device: number;
+  fetched: boolean;
+  fetched_at?: string;
+  issued_at: string;
+  response?: unknown;
+  response_at?: string;
+  response_id?: number;
+  serial_number: string;
+  status?: number;
 }
 
 export interface DeviceHealth {
-	id: number;
-	is_healthy?: boolean;
-	last_ping?: string;
-	serial_number: string;
+  id: number;
+  is_healthy?: boolean;
+  last_ping?: string;
+  serial_number: string;
 }
 
 export interface DeviceLedgerItem {
-	class?: string;
-	id: number;
-	text?: string;
-	timestamp?: string;
+  class?: string;
+  id: number;
+  text?: string;
+  timestamp?: string;
 }
 
 export interface DeviceLedgerItemPaginated {
-	ledger: DeviceLedgerItem[];
-	next?: string;
-	previous?: string;
+  ledger: DeviceLedgerItem[];
+  next?: string;
+  previous?: string;
 }
 
 export interface DeviceNetwork {
-	download_speed_mbps?: number;
-	network_score?: number;
-	source?: string;
-	updated_at?: string;
-	upload_speed_mbps?: number;
+  download_speed_mbps?: number;
+  network_score?: number;
+  source?: string;
+  updated_at?: string;
+  upload_speed_mbps?: number;
 }
 
 export interface DeviceRelease {
-	previous_release?: Release;
-	release?: Release;
-	target_release?: Release;
+  previous_release?: Release;
+  release?: Release;
+  target_release?: Release;
+}
+
+export interface DeviceService {
+  created_at: string;
+  id: number;
+  package_id?: number;
+  release_id: number;
+  service_name: string;
+  watchdog_sec?: number;
 }
 
 export interface DeviceTree {
-	compatible?: string[];
-	model?: string;
-	serial_number: string;
+  compatible?: string[];
+  model?: string;
+  serial_number: string;
 }
 
 export interface Distribution {
-	architecture: string;
-	description?: string;
-	id: number;
-	name: string;
-	num_packages?: number;
+  architecture: string;
+  description?: string;
+  id: number;
+  name: string;
+  num_packages?: number;
 }
 
 export interface DistributionRolloutStats {
-	distribution_id: number;
-	pending_devices?: number;
-	total_devices?: number;
-	updated_devices?: number;
+  distribution_id: number;
+  pending_devices?: number;
+  total_devices?: number;
+  updated_devices?: number;
 }
 
 export interface IpAddressInfo {
-	city?: string;
-	continent?: string;
-	continent_code?: string;
-	coordinates?: [number, number];
-	country?: string;
-	country_code?: string;
-	created_at: string;
-	device_count?: number;
-	hosting?: boolean;
-	id: number;
-	ip_address: string;
-	isp?: string;
-	name?: string;
-	proxy?: boolean;
-	region?: string;
-	updated_at: string;
+  city?: string;
+  continent?: string;
+  continent_code?: string;
+  coordinates?: [number, number];
+  country?: string;
+  country_code?: string;
+  created_at: string;
+  device_count?: number;
+  hosting?: boolean;
+  id: number;
+  ip_address: string;
+  isp?: string;
+  name?: string;
+  proxy?: boolean;
+  region?: string;
+  updated_at: string;
 }
 
 export interface IpAddressListResponse {
-	ip_addresses: IpAddressInfo[];
+  ip_addresses: IpAddressInfo[];
 }
 
 export interface LabelWithValues {
-	key: string;
-	values: string[];
+  key: string;
+  values: string[];
 }
 
 export interface Modem {
-	created_at: string;
-	id: number;
-	imei: string;
-	network_provider: string;
-	updated_at: string;
+  created_at: string;
+  id: number;
+  imei: string;
+  network_provider: string;
+  updated_at: string;
 }
 
-export type NetworkInterfaces = { [key: string]: NetworkItem };
+export type NetworkInterfaces = {[key: string]: NetworkItem};
 
 export interface Network {
-	interfaces: NetworkInterfaces;
+  interfaces: NetworkInterfaces;
 }
 
 export interface NetworkItem {
-	ips: string[];
-	mac_address: string;
+  ips: string[];
+  mac_address: string;
 }
 
 export interface NewDistribution {
-	architecture: string;
-	description?: string;
-	name: string;
+  architecture: string;
+  description?: string;
+  name: string;
 }
 
 export interface NewDistributionRelease {
-	packages: number[];
-	version: string;
+  packages: number[];
+  version: string;
 }
 
 export interface NewVariable {
-	name: string;
-	value: string;
+  name: string;
+  value: string;
 }
 
 export interface Note {
-	note?: string;
+  note?: string;
 }
 
 export interface OsRelease {
-	pretty_name: string;
-	version_id: string;
+  pretty_name: string;
+  version_id: string;
 }
 
 export interface Package {
-	architecture: string;
-	created_at: string;
-	file: string;
-	id: number;
-	name: string;
-	version: string;
+  architecture: string;
+  created_at: string;
+  file: string;
+  id: number;
+  name: string;
+  version: string;
 }
 
 export interface Proc {
-	stat: ProcStat;
-	version: string;
+  stat: ProcStat;
+  version: string;
 }
 
 export interface ProcStat {
-	/** @minimum 0 */
-	btime: number;
+  /** @minimum 0 */
+  btime: number;
 }
 
-export type RawDeviceLabels = { [key: string]: string };
+export type RawDeviceLabels = {[key: string]: string};
 
 export interface RawDevice {
-	approved: boolean;
-	archived: boolean;
-	created_on: string;
-	id: number;
-	ip_address_id?: number;
-	labels: RawDeviceLabels;
-	last_ping?: string;
-	modem_id?: number;
-	modified_on: string;
-	network_id?: number;
-	note?: string;
-	release_id?: number;
-	serial_number: string;
-	system_info?: unknown;
-	target_release_id?: number;
-	target_release_id_set_at?: string;
-	token?: string;
-	wifi_mac?: string;
+  approved: boolean;
+  archived: boolean;
+  created_on: string;
+  id: number;
+  ip_address_id?: number;
+  labels: RawDeviceLabels;
+  last_ping?: string;
+  modem_id?: number;
+  modified_on: string;
+  network_id?: number;
+  note?: string;
+  release_id?: number;
+  serial_number: string;
+  system_info?: unknown;
+  target_release_id?: number;
+  target_release_id_set_at?: string;
+  token?: string;
+  wifi_mac?: string;
 }
 
 export interface Release {
-	created_at: string;
-	distribution_architecture: string;
-	distribution_id: number;
-	distribution_name: string;
-	draft: boolean;
-	id: number;
-	user_email?: string;
-	user_id?: number;
-	version: string;
-	yanked: boolean;
+  created_at: string;
+  distribution_architecture: string;
+  distribution_id: number;
+  distribution_name: string;
+  draft: boolean;
+  id: number;
+  user_email?: string;
+  user_id?: number;
+  version: string;
+  yanked: boolean;
 }
 
 export interface ReleasePackageRequest {
-	file: Blob;
+  file: Blob;
 }
 
 export interface ReleaseService {
-	created_at: string;
-	id: number;
-	package_id?: number;
-	release_id: number;
-	service_name: string;
-	watchdog_sec?: number;
+  created_at: string;
+  id: number;
+  package_id?: number;
+  release_id: number;
+  service_name: string;
+  watchdog_sec?: number;
 }
 
 export interface ReplacementPackage {
-	id: number;
+  id: number;
 }
 
 export interface Smith {
-	version: string;
+  version: string;
 }
 
 export interface SystemInfo {
-	connection_statuses?: ConnectionStatus[];
-	device_tree: DeviceTree;
-	hostname: string;
-	network: Network;
-	os_release: OsRelease;
-	proc: Proc;
-	smith: Smith;
+  connection_statuses?: ConnectionStatus[];
+  device_tree: DeviceTree;
+  hostname: string;
+  network: Network;
+  os_release: OsRelease;
+  proc: Proc;
+  smith: Smith;
 }
 
 export interface UpdateDeviceRelease {
-	target_release_id: number;
+  target_release_id: number;
 }
 
-export type UpdateDeviceRequestLabels = { [key: string]: string };
+export type UpdateDeviceRequestLabels = {[key: string]: string};
 
 export interface UpdateDeviceRequest {
-	labels?: UpdateDeviceRequestLabels;
+  labels?: UpdateDeviceRequestLabels;
 }
 
 export interface UpdateDevicesRelease {
-	devices: number[];
-	target_release_id: number;
+  devices: number[];
+  target_release_id: number;
 }
 
 export interface UpdateIpAddressRequest {
-	name?: string;
+  name?: string;
 }
 
 export interface UpdateRelease {
-	draft?: boolean;
-	yanked?: boolean;
+  draft?: boolean;
+  yanked?: boolean;
 }
 
 export interface Variable {
-	device: number;
-	id: number;
-	name: string;
-	value: string;
+  device: number;
+  id: number;
+  name: string;
+  value: string;
 }
 
 export type GetDevicesParams = {
-	serial_number?: string;
-	/**
-	 * Filter by approved status. If None, only approved devices are included by default.
-	 */
-	approved?: boolean;
-	/**
-	 * Filter by archived status. If None, archived devices are excluded by default.
-	 */
-	archived?: boolean;
-	/**
-	 * Filter by labels. Format: key=value. Multiple labels can be provided.
-	 */
-	labels?: string[];
-	/**
-	 * Filter by online status. If true, only devices online in the last 5 minutes.
-	 */
-	online?: boolean;
-	/**
-	 * Filter by outdated status. If true, only devices where release_id != target_release_id.
-	 */
-	outdated?: boolean;
-	/**
-	 * Filter by minimum minutes since target_release_id was set. Only applies when outdated=true.
-	 */
-	outdated_minutes?: number;
-	/**
-	 * Exclude devices with these labels. Format: key=value. Used by dashboard.
-	 */
-	exclude_labels?: string[];
-	/**
-	 * Maximum number of devices to return. Defaults to 100, max 1000.
-	 */
-	limit?: number;
-	/**
-	 * Number of devices to skip. Used for pagination.
-	 */
-	offset?: number;
-	/**
-	 * Search term to filter devices by serial number, hostname, or model.
-	 */
-	search?: string;
-	/**
-	 * Filter by release ID. Only devices with this release_id are included.
-	 */
-	release_id?: number;
-	/**
-	 * Filter by distribution ID. Only devices with a release from this distribution are included.
-	 */
-	distribution_id?: number;
+serial_number?: string;
+/**
+ * Filter by approved status. If None, only approved devices are included by default.
+ */
+approved?: boolean;
+/**
+ * Filter by archived status. If None, archived devices are excluded by default.
+ */
+archived?: boolean;
+/**
+ * Filter by labels. Format: key=value. Multiple labels can be provided.
+ */
+labels?: string[];
+/**
+ * Filter by online status. If true, only devices online in the last 5 minutes.
+ */
+online?: boolean;
+/**
+ * Filter by outdated status. If true, only devices where release_id != target_release_id.
+ */
+outdated?: boolean;
+/**
+ * Filter by minimum minutes since target_release_id was set. Only applies when outdated=true.
+ */
+outdated_minutes?: number;
+/**
+ * Exclude devices with these labels. Format: key=value. Used by dashboard.
+ */
+exclude_labels?: string[];
+/**
+ * Maximum number of devices to return. Defaults to 100, max 1000.
+ */
+limit?: number;
+/**
+ * Number of devices to skip. Used for pagination.
+ */
+offset?: number;
+/**
+ * Search term to filter devices by serial number, hostname, or model.
+ */
+search?: string;
+/**
+ * Filter by release ID. Only devices with this release_id are included.
+ */
+release_id?: number;
+/**
+ * Filter by distribution ID. Only devices with a release from this distribution are included.
+ */
+distribution_id?: number;
 };
 
 export type GetAllCommandsForDeviceParams = {
-	starting_after?: number;
-	ending_before?: number;
-	limit?: number;
+starting_after?: number;
+ending_before?: number;
+limit?: number;
 };
 
 export type GetNetworksParams = {
-	/**
-	 * Optional list of device serial numbers to filter networks. If not provided, returns all networks
-	 */
-	serial_numbers?: string;
+/**
+ * Optional list of device serial numbers to filter networks. If not provided, returns all networks
+ */
+serial_numbers?: string;
 };
 
 export type DownloadPackageParams = {
-	/**
-	 * File name of the package to download
-	 */
-	name: string;
+/**
+ * File name of the package to download
+ */
+name: string;
 };
 
 /**
  * @deprecated
  */
 export const useVerifyTokenHook = () => {
-	const verifyToken = useClientMutator<DeviceAuthResponse>();
+        const verifyToken = useClientMutator<DeviceAuthResponse>();
 
-	return useCallback(
-		(signal?: AbortSignal) => {
-			return verifyToken({ url: `/auth/token`, method: "POST", signal });
-		},
-		[verifyToken],
-	);
-};
+        return useCallback((
+    
+ signal?: AbortSignal
+) => {
+        return verifyToken(
+          {url: `/auth/token`, method: 'POST', signal
+    },
+          );
+        }, [verifyToken])
+      }
+    
 
-export const useVerifyTokenMutationOptions = <
-	TError = void,
-	TContext = unknown,
->(options?: {
-	mutation?: UseMutationOptions<
-		Awaited<ReturnType<ReturnType<typeof useVerifyTokenHook>>>,
-		TError,
-		void,
-		TContext
-	>;
-}): UseMutationOptions<
-	Awaited<ReturnType<ReturnType<typeof useVerifyTokenHook>>>,
-	TError,
-	void,
-	TContext
-> => {
-	const mutationKey = ["verifyToken"];
-	const { mutation: mutationOptions } = options
-		? options.mutation &&
-			"mutationKey" in options.mutation &&
-			options.mutation.mutationKey
-			? options
-			: { ...options, mutation: { ...options.mutation, mutationKey } }
-		: { mutation: { mutationKey } };
 
-	const verifyToken = useVerifyTokenHook();
+export const useVerifyTokenMutationOptions = <TError = void,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<ReturnType<typeof useVerifyTokenHook>>>, TError,void, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<ReturnType<typeof useVerifyTokenHook>>>, TError,void, TContext> => {
 
-	const mutationFn: MutationFunction<
-		Awaited<ReturnType<ReturnType<typeof useVerifyTokenHook>>>,
-		void
-	> = () => {
-		return verifyToken();
-	};
+const mutationKey = ['verifyToken'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
 
-	return { mutationFn, ...mutationOptions };
-};
+      const verifyToken =  useVerifyTokenHook()
 
-export type VerifyTokenMutationResult = NonNullable<
-	Awaited<ReturnType<ReturnType<typeof useVerifyTokenHook>>>
->;
 
-export type VerifyTokenMutationError = void;
+      const mutationFn: MutationFunction<Awaited<ReturnType<ReturnType<typeof useVerifyTokenHook>>>, void> = () => {
+          
 
-/**
+          return  verifyToken()
+        }
+
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type VerifyTokenMutationResult = NonNullable<Awaited<ReturnType<ReturnType<typeof useVerifyTokenHook>>>>
+    
+    export type VerifyTokenMutationError = void
+
+    /**
  * @deprecated
  */
-export const useVerifyToken = <TError = void, TContext = unknown>(
-	options?: {
-		mutation?: UseMutationOptions<
-			Awaited<ReturnType<ReturnType<typeof useVerifyTokenHook>>>,
-			TError,
-			void,
-			TContext
-		>;
-	},
-	queryClient?: QueryClient,
-): UseMutationResult<
-	Awaited<ReturnType<ReturnType<typeof useVerifyTokenHook>>>,
-	TError,
-	void,
-	TContext
-> => {
-	const mutationOptions = useVerifyTokenMutationOptions(options);
+export const useVerifyToken = <TError = void,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<ReturnType<typeof useVerifyTokenHook>>>, TError,void, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<ReturnType<typeof useVerifyTokenHook>>>,
+        TError,
+        void,
+        TContext
+      > => {
 
-	return useMutation(mutationOptions, queryClient);
-};
+      const mutationOptions = useVerifyTokenMutationOptions(options);
 
+      return useMutation(mutationOptions, queryClient);
+    }
+    
 export const useAvailableCommandsHook = () => {
-	const availableCommands = useClientMutator<void>();
+        const availableCommands = useClientMutator<void>();
 
-	return useCallback(
-		(signal?: AbortSignal) => {
-			return availableCommands({ url: `/commands`, method: "GET", signal });
-		},
-		[availableCommands],
-	);
-};
+        return useCallback((
+    
+ signal?: AbortSignal
+) => {
+        return availableCommands(
+          {url: `/commands`, method: 'GET', signal
+    },
+          );
+        }, [availableCommands])
+      }
+    
+
+
 
 export const getAvailableCommandsInfiniteQueryKey = () => {
-	return ["infinite", `/commands`] as const;
-};
+    return [
+    'infinite', `/commands`
+    ] as const;
+    }
 
 export const getAvailableCommandsQueryKey = () => {
-	return [`/commands`] as const;
-};
+    return [
+    `/commands`
+    ] as const;
+    }
 
-export const useAvailableCommandsInfiniteQueryOptions = <
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useAvailableCommandsHook>>>
-	>,
-	TError = unknown,
->(options?: {
-	query?: Partial<
-		UseInfiniteQueryOptions<
-			Awaited<ReturnType<ReturnType<typeof useAvailableCommandsHook>>>,
-			TError,
-			TData
-		>
-	>;
-}) => {
-	const { query: queryOptions } = options ?? {};
+    
+export const useAvailableCommandsInfiniteQueryOptions = <TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useAvailableCommandsHook>>>>, TError = unknown>( options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useAvailableCommandsHook>>>, TError, TData>>, }
+) => {
 
-	const queryKey =
-		queryOptions?.queryKey ?? getAvailableCommandsInfiniteQueryKey();
+const {query: queryOptions} = options ?? {};
 
-	const availableCommands = useAvailableCommandsHook();
+  const queryKey =  queryOptions?.queryKey ?? getAvailableCommandsInfiniteQueryKey();
 
-	const queryFn: QueryFunction<
-		Awaited<ReturnType<ReturnType<typeof useAvailableCommandsHook>>>
-	> = ({ signal }) => availableCommands(signal);
+  const availableCommands =  useAvailableCommandsHook();
 
-	return { queryKey, queryFn, ...queryOptions } as UseInfiniteQueryOptions<
-		Awaited<ReturnType<ReturnType<typeof useAvailableCommandsHook>>>,
-		TError,
-		TData
-	> & { queryKey: DataTag<QueryKey, TData, TError> };
-};
+    const queryFn: QueryFunction<Awaited<ReturnType<ReturnType<typeof useAvailableCommandsHook>>>> = ({ signal }) => availableCommands(signal);
 
-export type AvailableCommandsInfiniteQueryResult = NonNullable<
-	Awaited<ReturnType<ReturnType<typeof useAvailableCommandsHook>>>
->;
-export type AvailableCommandsInfiniteQueryError = unknown;
+      
 
-export function useAvailableCommandsInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useAvailableCommandsHook>>>
-	>,
-	TError = unknown,
->(
-	options: {
-		query: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useAvailableCommandsHook>>>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				DefinedInitialDataOptions<
-					Awaited<ReturnType<ReturnType<typeof useAvailableCommandsHook>>>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useAvailableCommandsHook>>>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): DefinedUseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useAvailableCommandsInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useAvailableCommandsHook>>>
-	>,
-	TError = unknown,
->(
-	options?: {
-		query?: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useAvailableCommandsHook>>>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				UndefinedInitialDataOptions<
-					Awaited<ReturnType<ReturnType<typeof useAvailableCommandsHook>>>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useAvailableCommandsHook>>>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): UseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useAvailableCommandsInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useAvailableCommandsHook>>>
-	>,
-	TError = unknown,
->(
-	options?: {
-		query?: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useAvailableCommandsHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
+      
 
-export function useAvailableCommandsInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useAvailableCommandsHook>>>
-	>,
-	TError = unknown,
->(
-	options?: {
-		query?: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useAvailableCommandsHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-} {
-	const queryOptions = useAvailableCommandsInfiniteQueryOptions(options);
-
-	const query = useInfiniteQuery(
-		queryOptions,
-		queryClient,
-	) as UseInfiniteQueryResult<TData, TError> & {
-		queryKey: DataTag<QueryKey, TData, TError>;
-	};
-
-	query.queryKey = queryOptions.queryKey;
-
-	return query;
+   return  { queryKey, queryFn, ...queryOptions} as UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useAvailableCommandsHook>>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
 }
 
-export const useAvailableCommandsQueryOptions = <
-	TData = Awaited<ReturnType<ReturnType<typeof useAvailableCommandsHook>>>,
-	TError = unknown,
->(options?: {
-	query?: Partial<
-		UseQueryOptions<
-			Awaited<ReturnType<ReturnType<typeof useAvailableCommandsHook>>>,
-			TError,
-			TData
-		>
-	>;
-}) => {
-	const { query: queryOptions } = options ?? {};
+export type AvailableCommandsInfiniteQueryResult = NonNullable<Awaited<ReturnType<ReturnType<typeof useAvailableCommandsHook>>>>
+export type AvailableCommandsInfiniteQueryError = unknown
 
-	const queryKey = queryOptions?.queryKey ?? getAvailableCommandsQueryKey();
 
-	const availableCommands = useAvailableCommandsHook();
+export function useAvailableCommandsInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useAvailableCommandsHook>>>>, TError = unknown>(
+  options: { query:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useAvailableCommandsHook>>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useAvailableCommandsHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useAvailableCommandsHook>>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useAvailableCommandsInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useAvailableCommandsHook>>>>, TError = unknown>(
+  options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useAvailableCommandsHook>>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useAvailableCommandsHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useAvailableCommandsHook>>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useAvailableCommandsInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useAvailableCommandsHook>>>>, TError = unknown>(
+  options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useAvailableCommandsHook>>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 
-	const queryFn: QueryFunction<
-		Awaited<ReturnType<ReturnType<typeof useAvailableCommandsHook>>>
-	> = ({ signal }) => availableCommands(signal);
+export function useAvailableCommandsInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useAvailableCommandsHook>>>>, TError = unknown>(
+  options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useAvailableCommandsHook>>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
-	return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
-		Awaited<ReturnType<ReturnType<typeof useAvailableCommandsHook>>>,
-		TError,
-		TData
-	> & { queryKey: DataTag<QueryKey, TData, TError> };
-};
+  const queryOptions = useAvailableCommandsInfiniteQueryOptions(options)
 
-export type AvailableCommandsQueryResult = NonNullable<
-	Awaited<ReturnType<ReturnType<typeof useAvailableCommandsHook>>>
->;
-export type AvailableCommandsQueryError = unknown;
+  const query = useInfiniteQuery(queryOptions, queryClient) as  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 
-export function useAvailableCommands<
-	TData = Awaited<ReturnType<ReturnType<typeof useAvailableCommandsHook>>>,
-	TError = unknown,
->(
-	options: {
-		query: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useAvailableCommandsHook>>>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				DefinedInitialDataOptions<
-					Awaited<ReturnType<ReturnType<typeof useAvailableCommandsHook>>>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useAvailableCommandsHook>>>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): DefinedUseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useAvailableCommands<
-	TData = Awaited<ReturnType<ReturnType<typeof useAvailableCommandsHook>>>,
-	TError = unknown,
->(
-	options?: {
-		query?: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useAvailableCommandsHook>>>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				UndefinedInitialDataOptions<
-					Awaited<ReturnType<ReturnType<typeof useAvailableCommandsHook>>>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useAvailableCommandsHook>>>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useAvailableCommands<
-	TData = Awaited<ReturnType<ReturnType<typeof useAvailableCommandsHook>>>,
-	TError = unknown,
->(
-	options?: {
-		query?: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useAvailableCommandsHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
+  query.queryKey = queryOptions.queryKey ;
 
-export function useAvailableCommands<
-	TData = Awaited<ReturnType<ReturnType<typeof useAvailableCommandsHook>>>,
-	TError = unknown,
->(
-	options?: {
-		query?: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useAvailableCommandsHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-} {
-	const queryOptions = useAvailableCommandsQueryOptions(options);
-
-	const query = useQuery(queryOptions, queryClient) as UseQueryResult<
-		TData,
-		TError
-	> & { queryKey: DataTag<QueryKey, TData, TError> };
-
-	query.queryKey = queryOptions.queryKey;
-
-	return query;
+  return query;
 }
+
+
+
+
+export const useAvailableCommandsQueryOptions = <TData = Awaited<ReturnType<ReturnType<typeof useAvailableCommandsHook>>>, TError = unknown>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useAvailableCommandsHook>>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getAvailableCommandsQueryKey();
+
+  const availableCommands =  useAvailableCommandsHook();
+
+    const queryFn: QueryFunction<Awaited<ReturnType<ReturnType<typeof useAvailableCommandsHook>>>> = ({ signal }) => availableCommands(signal);
+
+      
+
+      
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useAvailableCommandsHook>>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type AvailableCommandsQueryResult = NonNullable<Awaited<ReturnType<ReturnType<typeof useAvailableCommandsHook>>>>
+export type AvailableCommandsQueryError = unknown
+
+
+export function useAvailableCommands<TData = Awaited<ReturnType<ReturnType<typeof useAvailableCommandsHook>>>, TError = unknown>(
+  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useAvailableCommandsHook>>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useAvailableCommandsHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useAvailableCommandsHook>>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useAvailableCommands<TData = Awaited<ReturnType<ReturnType<typeof useAvailableCommandsHook>>>, TError = unknown>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useAvailableCommandsHook>>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useAvailableCommandsHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useAvailableCommandsHook>>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useAvailableCommands<TData = Awaited<ReturnType<ReturnType<typeof useAvailableCommandsHook>>>, TError = unknown>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useAvailableCommandsHook>>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+
+export function useAvailableCommands<TData = Awaited<ReturnType<ReturnType<typeof useAvailableCommandsHook>>>, TError = unknown>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useAvailableCommandsHook>>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = useAvailableCommandsQueryOptions(options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  query.queryKey = queryOptions.queryKey ;
+
+  return query;
+}
+
+
+
+
 
 export const useGetBundleCommandsHook = () => {
-	const getBundleCommands = useClientMutator<BundleWithCommandsPaginated>();
+        const getBundleCommands = useClientMutator<BundleWithCommandsPaginated>();
 
-	return useCallback(
-		(signal?: AbortSignal) => {
-			return getBundleCommands({
-				url: `/commands/bundles`,
-				method: "GET",
-				signal,
-			});
-		},
-		[getBundleCommands],
-	);
-};
+        return useCallback((
+    
+ signal?: AbortSignal
+) => {
+        return getBundleCommands(
+          {url: `/commands/bundles`, method: 'GET', signal
+    },
+          );
+        }, [getBundleCommands])
+      }
+    
+
+
 
 export const getGetBundleCommandsInfiniteQueryKey = () => {
-	return ["infinite", `/commands/bundles`] as const;
-};
+    return [
+    'infinite', `/commands/bundles`
+    ] as const;
+    }
 
 export const getGetBundleCommandsQueryKey = () => {
-	return [`/commands/bundles`] as const;
-};
+    return [
+    `/commands/bundles`
+    ] as const;
+    }
 
-export const useGetBundleCommandsInfiniteQueryOptions = <
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetBundleCommandsHook>>>
-	>,
-	TError = void | string,
->(options?: {
-	query?: Partial<
-		UseInfiniteQueryOptions<
-			Awaited<ReturnType<ReturnType<typeof useGetBundleCommandsHook>>>,
-			TError,
-			TData
-		>
-	>;
-}) => {
-	const { query: queryOptions } = options ?? {};
+    
+export const useGetBundleCommandsInfiniteQueryOptions = <TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetBundleCommandsHook>>>>, TError = void | string>( options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetBundleCommandsHook>>>, TError, TData>>, }
+) => {
 
-	const queryKey =
-		queryOptions?.queryKey ?? getGetBundleCommandsInfiniteQueryKey();
+const {query: queryOptions} = options ?? {};
 
-	const getBundleCommands = useGetBundleCommandsHook();
+  const queryKey =  queryOptions?.queryKey ?? getGetBundleCommandsInfiniteQueryKey();
 
-	const queryFn: QueryFunction<
-		Awaited<ReturnType<ReturnType<typeof useGetBundleCommandsHook>>>
-	> = ({ signal }) => getBundleCommands(signal);
+  const getBundleCommands =  useGetBundleCommandsHook();
 
-	return { queryKey, queryFn, ...queryOptions } as UseInfiniteQueryOptions<
-		Awaited<ReturnType<ReturnType<typeof useGetBundleCommandsHook>>>,
-		TError,
-		TData
-	> & { queryKey: DataTag<QueryKey, TData, TError> };
-};
+    const queryFn: QueryFunction<Awaited<ReturnType<ReturnType<typeof useGetBundleCommandsHook>>>> = ({ signal }) => getBundleCommands(signal);
 
-export type GetBundleCommandsInfiniteQueryResult = NonNullable<
-	Awaited<ReturnType<ReturnType<typeof useGetBundleCommandsHook>>>
->;
-export type GetBundleCommandsInfiniteQueryError = void | string;
+      
 
-export function useGetBundleCommandsInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetBundleCommandsHook>>>
-	>,
-	TError = void | string,
->(
-	options: {
-		query: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetBundleCommandsHook>>>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				DefinedInitialDataOptions<
-					Awaited<ReturnType<ReturnType<typeof useGetBundleCommandsHook>>>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useGetBundleCommandsHook>>>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): DefinedUseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useGetBundleCommandsInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetBundleCommandsHook>>>
-	>,
-	TError = void | string,
->(
-	options?: {
-		query?: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetBundleCommandsHook>>>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				UndefinedInitialDataOptions<
-					Awaited<ReturnType<ReturnType<typeof useGetBundleCommandsHook>>>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useGetBundleCommandsHook>>>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): UseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useGetBundleCommandsInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetBundleCommandsHook>>>
-	>,
-	TError = void | string,
->(
-	options?: {
-		query?: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetBundleCommandsHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
+      
 
-export function useGetBundleCommandsInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetBundleCommandsHook>>>
-	>,
-	TError = void | string,
->(
-	options?: {
-		query?: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetBundleCommandsHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-} {
-	const queryOptions = useGetBundleCommandsInfiniteQueryOptions(options);
-
-	const query = useInfiniteQuery(
-		queryOptions,
-		queryClient,
-	) as UseInfiniteQueryResult<TData, TError> & {
-		queryKey: DataTag<QueryKey, TData, TError>;
-	};
-
-	query.queryKey = queryOptions.queryKey;
-
-	return query;
+   return  { queryKey, queryFn, ...queryOptions} as UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetBundleCommandsHook>>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
 }
 
-export const useGetBundleCommandsQueryOptions = <
-	TData = Awaited<ReturnType<ReturnType<typeof useGetBundleCommandsHook>>>,
-	TError = void | string,
->(options?: {
-	query?: Partial<
-		UseQueryOptions<
-			Awaited<ReturnType<ReturnType<typeof useGetBundleCommandsHook>>>,
-			TError,
-			TData
-		>
-	>;
-}) => {
-	const { query: queryOptions } = options ?? {};
+export type GetBundleCommandsInfiniteQueryResult = NonNullable<Awaited<ReturnType<ReturnType<typeof useGetBundleCommandsHook>>>>
+export type GetBundleCommandsInfiniteQueryError = void | string
 
-	const queryKey = queryOptions?.queryKey ?? getGetBundleCommandsQueryKey();
 
-	const getBundleCommands = useGetBundleCommandsHook();
+export function useGetBundleCommandsInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetBundleCommandsHook>>>>, TError = void | string>(
+  options: { query:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetBundleCommandsHook>>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useGetBundleCommandsHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useGetBundleCommandsHook>>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetBundleCommandsInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetBundleCommandsHook>>>>, TError = void | string>(
+  options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetBundleCommandsHook>>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useGetBundleCommandsHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useGetBundleCommandsHook>>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetBundleCommandsInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetBundleCommandsHook>>>>, TError = void | string>(
+  options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetBundleCommandsHook>>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 
-	const queryFn: QueryFunction<
-		Awaited<ReturnType<ReturnType<typeof useGetBundleCommandsHook>>>
-	> = ({ signal }) => getBundleCommands(signal);
+export function useGetBundleCommandsInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetBundleCommandsHook>>>>, TError = void | string>(
+  options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetBundleCommandsHook>>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
-	return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
-		Awaited<ReturnType<ReturnType<typeof useGetBundleCommandsHook>>>,
-		TError,
-		TData
-	> & { queryKey: DataTag<QueryKey, TData, TError> };
-};
+  const queryOptions = useGetBundleCommandsInfiniteQueryOptions(options)
 
-export type GetBundleCommandsQueryResult = NonNullable<
-	Awaited<ReturnType<ReturnType<typeof useGetBundleCommandsHook>>>
->;
-export type GetBundleCommandsQueryError = void | string;
+  const query = useInfiniteQuery(queryOptions, queryClient) as  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 
-export function useGetBundleCommands<
-	TData = Awaited<ReturnType<ReturnType<typeof useGetBundleCommandsHook>>>,
-	TError = void | string,
->(
-	options: {
-		query: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetBundleCommandsHook>>>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				DefinedInitialDataOptions<
-					Awaited<ReturnType<ReturnType<typeof useGetBundleCommandsHook>>>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useGetBundleCommandsHook>>>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): DefinedUseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useGetBundleCommands<
-	TData = Awaited<ReturnType<ReturnType<typeof useGetBundleCommandsHook>>>,
-	TError = void | string,
->(
-	options?: {
-		query?: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetBundleCommandsHook>>>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				UndefinedInitialDataOptions<
-					Awaited<ReturnType<ReturnType<typeof useGetBundleCommandsHook>>>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useGetBundleCommandsHook>>>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useGetBundleCommands<
-	TData = Awaited<ReturnType<ReturnType<typeof useGetBundleCommandsHook>>>,
-	TError = void | string,
->(
-	options?: {
-		query?: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetBundleCommandsHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
+  query.queryKey = queryOptions.queryKey ;
 
-export function useGetBundleCommands<
-	TData = Awaited<ReturnType<ReturnType<typeof useGetBundleCommandsHook>>>,
-	TError = void | string,
->(
-	options?: {
-		query?: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetBundleCommandsHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-} {
-	const queryOptions = useGetBundleCommandsQueryOptions(options);
-
-	const query = useQuery(queryOptions, queryClient) as UseQueryResult<
-		TData,
-		TError
-	> & { queryKey: DataTag<QueryKey, TData, TError> };
-
-	query.queryKey = queryOptions.queryKey;
-
-	return query;
+  return query;
 }
+
+
+
+
+export const useGetBundleCommandsQueryOptions = <TData = Awaited<ReturnType<ReturnType<typeof useGetBundleCommandsHook>>>, TError = void | string>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetBundleCommandsHook>>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetBundleCommandsQueryKey();
+
+  const getBundleCommands =  useGetBundleCommandsHook();
+
+    const queryFn: QueryFunction<Awaited<ReturnType<ReturnType<typeof useGetBundleCommandsHook>>>> = ({ signal }) => getBundleCommands(signal);
+
+      
+
+      
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetBundleCommandsHook>>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetBundleCommandsQueryResult = NonNullable<Awaited<ReturnType<ReturnType<typeof useGetBundleCommandsHook>>>>
+export type GetBundleCommandsQueryError = void | string
+
+
+export function useGetBundleCommands<TData = Awaited<ReturnType<ReturnType<typeof useGetBundleCommandsHook>>>, TError = void | string>(
+  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetBundleCommandsHook>>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useGetBundleCommandsHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useGetBundleCommandsHook>>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetBundleCommands<TData = Awaited<ReturnType<ReturnType<typeof useGetBundleCommandsHook>>>, TError = void | string>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetBundleCommandsHook>>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useGetBundleCommandsHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useGetBundleCommandsHook>>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetBundleCommands<TData = Awaited<ReturnType<ReturnType<typeof useGetBundleCommandsHook>>>, TError = void | string>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetBundleCommandsHook>>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+
+export function useGetBundleCommands<TData = Awaited<ReturnType<ReturnType<typeof useGetBundleCommandsHook>>>, TError = void | string>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetBundleCommandsHook>>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = useGetBundleCommandsQueryOptions(options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  query.queryKey = queryOptions.queryKey ;
+
+  return query;
+}
+
+
+
+
 
 export const useIssueCommandsToDevicesHook = () => {
-	const issueCommandsToDevices = useClientMutator<void>();
+        const issueCommandsToDevices = useClientMutator<void>();
 
-	return useCallback(
-		(bundleCommands: BundleCommands, signal?: AbortSignal) => {
-			return issueCommandsToDevices({
-				url: `/commands/bundles`,
-				method: "POST",
-				headers: { "Content-Type": "application/json" },
-				data: bundleCommands,
-				signal,
-			});
-		},
-		[issueCommandsToDevices],
-	);
-};
+        return useCallback((
+    bundleCommands: BundleCommands,
+ signal?: AbortSignal
+) => {
+        return issueCommandsToDevices(
+          {url: `/commands/bundles`, method: 'POST',
+      headers: {'Content-Type': 'application/json', },
+      data: bundleCommands, signal
+    },
+          );
+        }, [issueCommandsToDevices])
+      }
+    
 
-export const useIssueCommandsToDevicesMutationOptions = <
-	TError = string,
-	TContext = unknown,
->(options?: {
-	mutation?: UseMutationOptions<
-		Awaited<ReturnType<ReturnType<typeof useIssueCommandsToDevicesHook>>>,
-		TError,
-		{ data: BundleCommands },
-		TContext
-	>;
-}): UseMutationOptions<
-	Awaited<ReturnType<ReturnType<typeof useIssueCommandsToDevicesHook>>>,
-	TError,
-	{ data: BundleCommands },
-	TContext
-> => {
-	const mutationKey = ["issueCommandsToDevices"];
-	const { mutation: mutationOptions } = options
-		? options.mutation &&
-			"mutationKey" in options.mutation &&
-			options.mutation.mutationKey
-			? options
-			: { ...options, mutation: { ...options.mutation, mutationKey } }
-		: { mutation: { mutationKey } };
 
-	const issueCommandsToDevices = useIssueCommandsToDevicesHook();
+export const useIssueCommandsToDevicesMutationOptions = <TError = string,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<ReturnType<typeof useIssueCommandsToDevicesHook>>>, TError,{data: BundleCommands}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<ReturnType<typeof useIssueCommandsToDevicesHook>>>, TError,{data: BundleCommands}, TContext> => {
 
-	const mutationFn: MutationFunction<
-		Awaited<ReturnType<ReturnType<typeof useIssueCommandsToDevicesHook>>>,
-		{ data: BundleCommands }
-	> = (props) => {
-		const { data } = props ?? {};
+const mutationKey = ['issueCommandsToDevices'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
 
-		return issueCommandsToDevices(data);
-	};
+      const issueCommandsToDevices =  useIssueCommandsToDevicesHook()
 
-	return { mutationFn, ...mutationOptions };
-};
 
-export type IssueCommandsToDevicesMutationResult = NonNullable<
-	Awaited<ReturnType<ReturnType<typeof useIssueCommandsToDevicesHook>>>
->;
-export type IssueCommandsToDevicesMutationBody = BundleCommands;
-export type IssueCommandsToDevicesMutationError = string;
+      const mutationFn: MutationFunction<Awaited<ReturnType<ReturnType<typeof useIssueCommandsToDevicesHook>>>, {data: BundleCommands}> = (props) => {
+          const {data} = props ?? {};
 
-export const useIssueCommandsToDevices = <TError = string, TContext = unknown>(
-	options?: {
-		mutation?: UseMutationOptions<
-			Awaited<ReturnType<ReturnType<typeof useIssueCommandsToDevicesHook>>>,
-			TError,
-			{ data: BundleCommands },
-			TContext
-		>;
-	},
-	queryClient?: QueryClient,
-): UseMutationResult<
-	Awaited<ReturnType<ReturnType<typeof useIssueCommandsToDevicesHook>>>,
-	TError,
-	{ data: BundleCommands },
-	TContext
-> => {
-	const mutationOptions = useIssueCommandsToDevicesMutationOptions(options);
+          return  issueCommandsToDevices(data,)
+        }
 
-	return useMutation(mutationOptions, queryClient);
-};
+        
 
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type IssueCommandsToDevicesMutationResult = NonNullable<Awaited<ReturnType<ReturnType<typeof useIssueCommandsToDevicesHook>>>>
+    export type IssueCommandsToDevicesMutationBody = BundleCommands
+    export type IssueCommandsToDevicesMutationError = string
+
+    export const useIssueCommandsToDevices = <TError = string,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<ReturnType<typeof useIssueCommandsToDevicesHook>>>, TError,{data: BundleCommands}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<ReturnType<typeof useIssueCommandsToDevicesHook>>>,
+        TError,
+        {data: BundleCommands},
+        TContext
+      > => {
+
+      const mutationOptions = useIssueCommandsToDevicesMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    
 export const useGetDashboardHook = () => {
-	const getDashboard = useClientMutator<Dashboard>();
+        const getDashboard = useClientMutator<Dashboard>();
 
-	return useCallback(
-		(signal?: AbortSignal) => {
-			return getDashboard({ url: `/dashboard`, method: "GET", signal });
-		},
-		[getDashboard],
-	);
-};
+        return useCallback((
+    
+ signal?: AbortSignal
+) => {
+        return getDashboard(
+          {url: `/dashboard`, method: 'GET', signal
+    },
+          );
+        }, [getDashboard])
+      }
+    
+
+
 
 export const getGetDashboardInfiniteQueryKey = () => {
-	return ["infinite", `/dashboard`] as const;
-};
+    return [
+    'infinite', `/dashboard`
+    ] as const;
+    }
 
 export const getGetDashboardQueryKey = () => {
-	return [`/dashboard`] as const;
-};
+    return [
+    `/dashboard`
+    ] as const;
+    }
 
-export const useGetDashboardInfiniteQueryOptions = <
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetDashboardHook>>>
-	>,
-	TError = void,
->(options?: {
-	query?: Partial<
-		UseInfiniteQueryOptions<
-			Awaited<ReturnType<ReturnType<typeof useGetDashboardHook>>>,
-			TError,
-			TData
-		>
-	>;
-}) => {
-	const { query: queryOptions } = options ?? {};
+    
+export const useGetDashboardInfiniteQueryOptions = <TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetDashboardHook>>>>, TError = void>( options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetDashboardHook>>>, TError, TData>>, }
+) => {
 
-	const queryKey = queryOptions?.queryKey ?? getGetDashboardInfiniteQueryKey();
+const {query: queryOptions} = options ?? {};
 
-	const getDashboard = useGetDashboardHook();
+  const queryKey =  queryOptions?.queryKey ?? getGetDashboardInfiniteQueryKey();
 
-	const queryFn: QueryFunction<
-		Awaited<ReturnType<ReturnType<typeof useGetDashboardHook>>>
-	> = ({ signal }) => getDashboard(signal);
+  const getDashboard =  useGetDashboardHook();
 
-	return { queryKey, queryFn, ...queryOptions } as UseInfiniteQueryOptions<
-		Awaited<ReturnType<ReturnType<typeof useGetDashboardHook>>>,
-		TError,
-		TData
-	> & { queryKey: DataTag<QueryKey, TData, TError> };
-};
+    const queryFn: QueryFunction<Awaited<ReturnType<ReturnType<typeof useGetDashboardHook>>>> = ({ signal }) => getDashboard(signal);
 
-export type GetDashboardInfiniteQueryResult = NonNullable<
-	Awaited<ReturnType<ReturnType<typeof useGetDashboardHook>>>
->;
-export type GetDashboardInfiniteQueryError = void;
+      
 
-export function useGetDashboardInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetDashboardHook>>>
-	>,
-	TError = void,
->(
-	options: {
-		query: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetDashboardHook>>>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				DefinedInitialDataOptions<
-					Awaited<ReturnType<ReturnType<typeof useGetDashboardHook>>>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useGetDashboardHook>>>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): DefinedUseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useGetDashboardInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetDashboardHook>>>
-	>,
-	TError = void,
->(
-	options?: {
-		query?: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetDashboardHook>>>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				UndefinedInitialDataOptions<
-					Awaited<ReturnType<ReturnType<typeof useGetDashboardHook>>>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useGetDashboardHook>>>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): UseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useGetDashboardInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetDashboardHook>>>
-	>,
-	TError = void,
->(
-	options?: {
-		query?: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetDashboardHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
+      
 
-export function useGetDashboardInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetDashboardHook>>>
-	>,
-	TError = void,
->(
-	options?: {
-		query?: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetDashboardHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-} {
-	const queryOptions = useGetDashboardInfiniteQueryOptions(options);
-
-	const query = useInfiniteQuery(
-		queryOptions,
-		queryClient,
-	) as UseInfiniteQueryResult<TData, TError> & {
-		queryKey: DataTag<QueryKey, TData, TError>;
-	};
-
-	query.queryKey = queryOptions.queryKey;
-
-	return query;
+   return  { queryKey, queryFn, ...queryOptions} as UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetDashboardHook>>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
 }
 
-export const useGetDashboardQueryOptions = <
-	TData = Awaited<ReturnType<ReturnType<typeof useGetDashboardHook>>>,
-	TError = void,
->(options?: {
-	query?: Partial<
-		UseQueryOptions<
-			Awaited<ReturnType<ReturnType<typeof useGetDashboardHook>>>,
-			TError,
-			TData
-		>
-	>;
-}) => {
-	const { query: queryOptions } = options ?? {};
+export type GetDashboardInfiniteQueryResult = NonNullable<Awaited<ReturnType<ReturnType<typeof useGetDashboardHook>>>>
+export type GetDashboardInfiniteQueryError = void
 
-	const queryKey = queryOptions?.queryKey ?? getGetDashboardQueryKey();
 
-	const getDashboard = useGetDashboardHook();
+export function useGetDashboardInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetDashboardHook>>>>, TError = void>(
+  options: { query:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetDashboardHook>>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useGetDashboardHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useGetDashboardHook>>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetDashboardInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetDashboardHook>>>>, TError = void>(
+  options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetDashboardHook>>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useGetDashboardHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useGetDashboardHook>>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetDashboardInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetDashboardHook>>>>, TError = void>(
+  options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetDashboardHook>>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 
-	const queryFn: QueryFunction<
-		Awaited<ReturnType<ReturnType<typeof useGetDashboardHook>>>
-	> = ({ signal }) => getDashboard(signal);
+export function useGetDashboardInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetDashboardHook>>>>, TError = void>(
+  options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetDashboardHook>>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
-	return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
-		Awaited<ReturnType<ReturnType<typeof useGetDashboardHook>>>,
-		TError,
-		TData
-	> & { queryKey: DataTag<QueryKey, TData, TError> };
-};
+  const queryOptions = useGetDashboardInfiniteQueryOptions(options)
 
-export type GetDashboardQueryResult = NonNullable<
-	Awaited<ReturnType<ReturnType<typeof useGetDashboardHook>>>
->;
-export type GetDashboardQueryError = void;
+  const query = useInfiniteQuery(queryOptions, queryClient) as  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 
-export function useGetDashboard<
-	TData = Awaited<ReturnType<ReturnType<typeof useGetDashboardHook>>>,
-	TError = void,
->(
-	options: {
-		query: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetDashboardHook>>>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				DefinedInitialDataOptions<
-					Awaited<ReturnType<ReturnType<typeof useGetDashboardHook>>>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useGetDashboardHook>>>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): DefinedUseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useGetDashboard<
-	TData = Awaited<ReturnType<ReturnType<typeof useGetDashboardHook>>>,
-	TError = void,
->(
-	options?: {
-		query?: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetDashboardHook>>>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				UndefinedInitialDataOptions<
-					Awaited<ReturnType<ReturnType<typeof useGetDashboardHook>>>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useGetDashboardHook>>>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useGetDashboard<
-	TData = Awaited<ReturnType<ReturnType<typeof useGetDashboardHook>>>,
-	TError = void,
->(
-	options?: {
-		query?: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetDashboardHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
+  query.queryKey = queryOptions.queryKey ;
 
-export function useGetDashboard<
-	TData = Awaited<ReturnType<ReturnType<typeof useGetDashboardHook>>>,
-	TError = void,
->(
-	options?: {
-		query?: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetDashboardHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-} {
-	const queryOptions = useGetDashboardQueryOptions(options);
-
-	const query = useQuery(queryOptions, queryClient) as UseQueryResult<
-		TData,
-		TError
-	> & { queryKey: DataTag<QueryKey, TData, TError> };
-
-	query.queryKey = queryOptions.queryKey;
-
-	return query;
+  return query;
 }
+
+
+
+
+export const useGetDashboardQueryOptions = <TData = Awaited<ReturnType<ReturnType<typeof useGetDashboardHook>>>, TError = void>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetDashboardHook>>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetDashboardQueryKey();
+
+  const getDashboard =  useGetDashboardHook();
+
+    const queryFn: QueryFunction<Awaited<ReturnType<ReturnType<typeof useGetDashboardHook>>>> = ({ signal }) => getDashboard(signal);
+
+      
+
+      
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetDashboardHook>>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetDashboardQueryResult = NonNullable<Awaited<ReturnType<ReturnType<typeof useGetDashboardHook>>>>
+export type GetDashboardQueryError = void
+
+
+export function useGetDashboard<TData = Awaited<ReturnType<ReturnType<typeof useGetDashboardHook>>>, TError = void>(
+  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetDashboardHook>>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useGetDashboardHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useGetDashboardHook>>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetDashboard<TData = Awaited<ReturnType<ReturnType<typeof useGetDashboardHook>>>, TError = void>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetDashboardHook>>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useGetDashboardHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useGetDashboardHook>>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetDashboard<TData = Awaited<ReturnType<ReturnType<typeof useGetDashboardHook>>>, TError = void>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetDashboardHook>>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+
+export function useGetDashboard<TData = Awaited<ReturnType<ReturnType<typeof useGetDashboardHook>>>, TError = void>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetDashboardHook>>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = useGetDashboardQueryOptions(options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  query.queryKey = queryOptions.queryKey ;
+
+  return query;
+}
+
+
+
+
 
 export const useGetDeviceHook = () => {
-	const getDevice = useClientMutator<RawDevice>();
+        const getDevice = useClientMutator<RawDevice>();
 
-	return useCallback(
-		(signal?: AbortSignal) => {
-			return getDevice({ url: `/device`, method: "GET", signal });
-		},
-		[getDevice],
-	);
-};
+        return useCallback((
+    
+ signal?: AbortSignal
+) => {
+        return getDevice(
+          {url: `/device`, method: 'GET', signal
+    },
+          );
+        }, [getDevice])
+      }
+    
+
+
 
 export const getGetDeviceInfiniteQueryKey = () => {
-	return ["infinite", `/device`] as const;
-};
+    return [
+    'infinite', `/device`
+    ] as const;
+    }
 
 export const getGetDeviceQueryKey = () => {
-	return [`/device`] as const;
-};
+    return [
+    `/device`
+    ] as const;
+    }
 
-export const useGetDeviceInfiniteQueryOptions = <
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetDeviceHook>>>
-	>,
-	TError = void,
->(options?: {
-	query?: Partial<
-		UseInfiniteQueryOptions<
-			Awaited<ReturnType<ReturnType<typeof useGetDeviceHook>>>,
-			TError,
-			TData
-		>
-	>;
-}) => {
-	const { query: queryOptions } = options ?? {};
+    
+export const useGetDeviceInfiniteQueryOptions = <TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetDeviceHook>>>>, TError = void>( options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetDeviceHook>>>, TError, TData>>, }
+) => {
 
-	const queryKey = queryOptions?.queryKey ?? getGetDeviceInfiniteQueryKey();
+const {query: queryOptions} = options ?? {};
 
-	const getDevice = useGetDeviceHook();
+  const queryKey =  queryOptions?.queryKey ?? getGetDeviceInfiniteQueryKey();
 
-	const queryFn: QueryFunction<
-		Awaited<ReturnType<ReturnType<typeof useGetDeviceHook>>>
-	> = ({ signal }) => getDevice(signal);
+  const getDevice =  useGetDeviceHook();
 
-	return { queryKey, queryFn, ...queryOptions } as UseInfiniteQueryOptions<
-		Awaited<ReturnType<ReturnType<typeof useGetDeviceHook>>>,
-		TError,
-		TData
-	> & { queryKey: DataTag<QueryKey, TData, TError> };
-};
+    const queryFn: QueryFunction<Awaited<ReturnType<ReturnType<typeof useGetDeviceHook>>>> = ({ signal }) => getDevice(signal);
 
-export type GetDeviceInfiniteQueryResult = NonNullable<
-	Awaited<ReturnType<ReturnType<typeof useGetDeviceHook>>>
->;
-export type GetDeviceInfiniteQueryError = void;
+      
 
-export function useGetDeviceInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetDeviceHook>>>
-	>,
-	TError = void,
->(
-	options: {
-		query: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetDeviceHook>>>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				DefinedInitialDataOptions<
-					Awaited<ReturnType<ReturnType<typeof useGetDeviceHook>>>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useGetDeviceHook>>>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): DefinedUseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useGetDeviceInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetDeviceHook>>>
-	>,
-	TError = void,
->(
-	options?: {
-		query?: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetDeviceHook>>>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				UndefinedInitialDataOptions<
-					Awaited<ReturnType<ReturnType<typeof useGetDeviceHook>>>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useGetDeviceHook>>>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): UseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useGetDeviceInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetDeviceHook>>>
-	>,
-	TError = void,
->(
-	options?: {
-		query?: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetDeviceHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
+      
 
-export function useGetDeviceInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetDeviceHook>>>
-	>,
-	TError = void,
->(
-	options?: {
-		query?: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetDeviceHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-} {
-	const queryOptions = useGetDeviceInfiniteQueryOptions(options);
-
-	const query = useInfiniteQuery(
-		queryOptions,
-		queryClient,
-	) as UseInfiniteQueryResult<TData, TError> & {
-		queryKey: DataTag<QueryKey, TData, TError>;
-	};
-
-	query.queryKey = queryOptions.queryKey;
-
-	return query;
+   return  { queryKey, queryFn, ...queryOptions} as UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetDeviceHook>>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
 }
 
-export const useGetDeviceQueryOptions = <
-	TData = Awaited<ReturnType<ReturnType<typeof useGetDeviceHook>>>,
-	TError = void,
->(options?: {
-	query?: Partial<
-		UseQueryOptions<
-			Awaited<ReturnType<ReturnType<typeof useGetDeviceHook>>>,
-			TError,
-			TData
-		>
-	>;
-}) => {
-	const { query: queryOptions } = options ?? {};
+export type GetDeviceInfiniteQueryResult = NonNullable<Awaited<ReturnType<ReturnType<typeof useGetDeviceHook>>>>
+export type GetDeviceInfiniteQueryError = void
 
-	const queryKey = queryOptions?.queryKey ?? getGetDeviceQueryKey();
 
-	const getDevice = useGetDeviceHook();
+export function useGetDeviceInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetDeviceHook>>>>, TError = void>(
+  options: { query:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetDeviceHook>>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useGetDeviceHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useGetDeviceHook>>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetDeviceInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetDeviceHook>>>>, TError = void>(
+  options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetDeviceHook>>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useGetDeviceHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useGetDeviceHook>>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetDeviceInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetDeviceHook>>>>, TError = void>(
+  options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetDeviceHook>>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 
-	const queryFn: QueryFunction<
-		Awaited<ReturnType<ReturnType<typeof useGetDeviceHook>>>
-	> = ({ signal }) => getDevice(signal);
+export function useGetDeviceInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetDeviceHook>>>>, TError = void>(
+  options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetDeviceHook>>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
-	return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
-		Awaited<ReturnType<ReturnType<typeof useGetDeviceHook>>>,
-		TError,
-		TData
-	> & { queryKey: DataTag<QueryKey, TData, TError> };
-};
+  const queryOptions = useGetDeviceInfiniteQueryOptions(options)
 
-export type GetDeviceQueryResult = NonNullable<
-	Awaited<ReturnType<ReturnType<typeof useGetDeviceHook>>>
->;
-export type GetDeviceQueryError = void;
+  const query = useInfiniteQuery(queryOptions, queryClient) as  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 
-export function useGetDevice<
-	TData = Awaited<ReturnType<ReturnType<typeof useGetDeviceHook>>>,
-	TError = void,
->(
-	options: {
-		query: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetDeviceHook>>>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				DefinedInitialDataOptions<
-					Awaited<ReturnType<ReturnType<typeof useGetDeviceHook>>>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useGetDeviceHook>>>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): DefinedUseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useGetDevice<
-	TData = Awaited<ReturnType<ReturnType<typeof useGetDeviceHook>>>,
-	TError = void,
->(
-	options?: {
-		query?: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetDeviceHook>>>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				UndefinedInitialDataOptions<
-					Awaited<ReturnType<ReturnType<typeof useGetDeviceHook>>>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useGetDeviceHook>>>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useGetDevice<
-	TData = Awaited<ReturnType<ReturnType<typeof useGetDeviceHook>>>,
-	TError = void,
->(
-	options?: {
-		query?: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetDeviceHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
+  query.queryKey = queryOptions.queryKey ;
 
-export function useGetDevice<
-	TData = Awaited<ReturnType<ReturnType<typeof useGetDeviceHook>>>,
-	TError = void,
->(
-	options?: {
-		query?: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetDeviceHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-} {
-	const queryOptions = useGetDeviceQueryOptions(options);
-
-	const query = useQuery(queryOptions, queryClient) as UseQueryResult<
-		TData,
-		TError
-	> & { queryKey: DataTag<QueryKey, TData, TError> };
-
-	query.queryKey = queryOptions.queryKey;
-
-	return query;
+  return query;
 }
+
+
+
+
+export const useGetDeviceQueryOptions = <TData = Awaited<ReturnType<ReturnType<typeof useGetDeviceHook>>>, TError = void>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetDeviceHook>>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetDeviceQueryKey();
+
+  const getDevice =  useGetDeviceHook();
+
+    const queryFn: QueryFunction<Awaited<ReturnType<ReturnType<typeof useGetDeviceHook>>>> = ({ signal }) => getDevice(signal);
+
+      
+
+      
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetDeviceHook>>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetDeviceQueryResult = NonNullable<Awaited<ReturnType<ReturnType<typeof useGetDeviceHook>>>>
+export type GetDeviceQueryError = void
+
+
+export function useGetDevice<TData = Awaited<ReturnType<ReturnType<typeof useGetDeviceHook>>>, TError = void>(
+  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetDeviceHook>>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useGetDeviceHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useGetDeviceHook>>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetDevice<TData = Awaited<ReturnType<ReturnType<typeof useGetDeviceHook>>>, TError = void>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetDeviceHook>>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useGetDeviceHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useGetDeviceHook>>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetDevice<TData = Awaited<ReturnType<ReturnType<typeof useGetDeviceHook>>>, TError = void>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetDeviceHook>>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+
+export function useGetDevice<TData = Awaited<ReturnType<ReturnType<typeof useGetDeviceHook>>>, TError = void>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetDeviceHook>>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = useGetDeviceQueryOptions(options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  query.queryKey = queryOptions.queryKey ;
+
+  return query;
+}
+
+
+
+
 
 export const useGetDevicesHook = () => {
-	const getDevices = useClientMutator<Device[]>();
+        const getDevices = useClientMutator<Device[]>();
 
-	return useCallback(
-		(params?: GetDevicesParams, signal?: AbortSignal) => {
-			return getDevices({ url: `/devices`, method: "GET", params, signal });
-		},
-		[getDevices],
-	);
-};
-
-export const getGetDevicesInfiniteQueryKey = (params?: GetDevicesParams) => {
-	return ["infinite", `/devices`, ...(params ? [params] : [])] as const;
-};
-
-export const getGetDevicesQueryKey = (params?: GetDevicesParams) => {
-	return [`/devices`, ...(params ? [params] : [])] as const;
-};
-
-export const useGetDevicesInfiniteQueryOptions = <
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetDevicesHook>>>,
-		GetDevicesParams["offset"]
-	>,
-	TError = void,
->(
-	params?: GetDevicesParams,
-	options?: {
-		query?: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetDevicesHook>>>,
-				TError,
-				TData,
-				QueryKey,
-				GetDevicesParams["offset"]
-			>
-		>;
-	},
+        return useCallback((
+    params?: GetDevicesParams,
+ signal?: AbortSignal
 ) => {
-	const { query: queryOptions } = options ?? {};
+        return getDevices(
+          {url: `/devices`, method: 'GET',
+        params, signal
+    },
+          );
+        }, [getDevices])
+      }
+    
 
-	const queryKey =
-		queryOptions?.queryKey ?? getGetDevicesInfiniteQueryKey(params);
 
-	const getDevices = useGetDevicesHook();
 
-	const queryFn: QueryFunction<
-		Awaited<ReturnType<ReturnType<typeof useGetDevicesHook>>>,
-		QueryKey,
-		GetDevicesParams["offset"]
-	> = ({ signal, pageParam }) =>
-		getDevices({ ...params, offset: pageParam || params?.["offset"] }, signal);
+export const getGetDevicesInfiniteQueryKey = (params?: GetDevicesParams,) => {
+    return [
+    'infinite', `/devices`, ...(params ? [params]: [])
+    ] as const;
+    }
 
-	return { queryKey, queryFn, ...queryOptions } as UseInfiniteQueryOptions<
-		Awaited<ReturnType<ReturnType<typeof useGetDevicesHook>>>,
-		TError,
-		TData,
-		QueryKey,
-		GetDevicesParams["offset"]
-	> & { queryKey: DataTag<QueryKey, TData, TError> };
-};
+export const getGetDevicesQueryKey = (params?: GetDevicesParams,) => {
+    return [
+    `/devices`, ...(params ? [params]: [])
+    ] as const;
+    }
 
-export type GetDevicesInfiniteQueryResult = NonNullable<
-	Awaited<ReturnType<ReturnType<typeof useGetDevicesHook>>>
->;
-export type GetDevicesInfiniteQueryError = void;
+    
+export const useGetDevicesInfiniteQueryOptions = <TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetDevicesHook>>>, GetDevicesParams['offset']>, TError = void>(params?: GetDevicesParams, options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetDevicesHook>>>, TError, TData, QueryKey, GetDevicesParams['offset']>>, }
+) => {
 
-export function useGetDevicesInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetDevicesHook>>>,
-		GetDevicesParams["offset"]
-	>,
-	TError = void,
->(
-	params: undefined | GetDevicesParams,
-	options: {
-		query: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetDevicesHook>>>,
-				TError,
-				TData,
-				QueryKey,
-				GetDevicesParams["offset"]
-			>
-		> &
-			Pick<
-				DefinedInitialDataOptions<
-					Awaited<ReturnType<ReturnType<typeof useGetDevicesHook>>>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useGetDevicesHook>>>,
-					QueryKey
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): DefinedUseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useGetDevicesInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetDevicesHook>>>,
-		GetDevicesParams["offset"]
-	>,
-	TError = void,
->(
-	params?: GetDevicesParams,
-	options?: {
-		query?: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetDevicesHook>>>,
-				TError,
-				TData,
-				QueryKey,
-				GetDevicesParams["offset"]
-			>
-		> &
-			Pick<
-				UndefinedInitialDataOptions<
-					Awaited<ReturnType<ReturnType<typeof useGetDevicesHook>>>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useGetDevicesHook>>>,
-					QueryKey
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): UseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useGetDevicesInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetDevicesHook>>>,
-		GetDevicesParams["offset"]
-	>,
-	TError = void,
->(
-	params?: GetDevicesParams,
-	options?: {
-		query?: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetDevicesHook>>>,
-				TError,
-				TData,
-				QueryKey,
-				GetDevicesParams["offset"]
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
+const {query: queryOptions} = options ?? {};
 
-export function useGetDevicesInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetDevicesHook>>>,
-		GetDevicesParams["offset"]
-	>,
-	TError = void,
->(
-	params?: GetDevicesParams,
-	options?: {
-		query?: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetDevicesHook>>>,
-				TError,
-				TData,
-				QueryKey,
-				GetDevicesParams["offset"]
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-} {
-	const queryOptions = useGetDevicesInfiniteQueryOptions(params, options);
+  const queryKey =  queryOptions?.queryKey ?? getGetDevicesInfiniteQueryKey(params);
 
-	const query = useInfiniteQuery(
-		queryOptions,
-		queryClient,
-	) as UseInfiniteQueryResult<TData, TError> & {
-		queryKey: DataTag<QueryKey, TData, TError>;
-	};
+  const getDevices =  useGetDevicesHook();
 
-	query.queryKey = queryOptions.queryKey;
+    const queryFn: QueryFunction<Awaited<ReturnType<ReturnType<typeof useGetDevicesHook>>>, QueryKey, GetDevicesParams['offset']> = ({ signal, pageParam }) => getDevices({...params, 'offset': pageParam || params?.['offset']}, signal);
 
-	return query;
+      
+
+      
+
+   return  { queryKey, queryFn, ...queryOptions} as UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetDevicesHook>>>, TError, TData, QueryKey, GetDevicesParams['offset']> & { queryKey: DataTag<QueryKey, TData, TError> }
 }
 
-export const useGetDevicesQueryOptions = <
-	TData = Awaited<ReturnType<ReturnType<typeof useGetDevicesHook>>>,
-	TError = void,
->(
-	params?: GetDevicesParams,
-	options?: {
-		query?: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetDevicesHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-) => {
-	const { query: queryOptions } = options ?? {};
+export type GetDevicesInfiniteQueryResult = NonNullable<Awaited<ReturnType<ReturnType<typeof useGetDevicesHook>>>>
+export type GetDevicesInfiniteQueryError = void
 
-	const queryKey = queryOptions?.queryKey ?? getGetDevicesQueryKey(params);
 
-	const getDevices = useGetDevicesHook();
+export function useGetDevicesInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetDevicesHook>>>, GetDevicesParams['offset']>, TError = void>(
+ params: undefined |  GetDevicesParams, options: { query:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetDevicesHook>>>, TError, TData, QueryKey, GetDevicesParams['offset']>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useGetDevicesHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useGetDevicesHook>>>, QueryKey
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetDevicesInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetDevicesHook>>>, GetDevicesParams['offset']>, TError = void>(
+ params?: GetDevicesParams, options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetDevicesHook>>>, TError, TData, QueryKey, GetDevicesParams['offset']>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useGetDevicesHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useGetDevicesHook>>>, QueryKey
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetDevicesInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetDevicesHook>>>, GetDevicesParams['offset']>, TError = void>(
+ params?: GetDevicesParams, options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetDevicesHook>>>, TError, TData, QueryKey, GetDevicesParams['offset']>>, }
+ , queryClient?: QueryClient
+  ):  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 
-	const queryFn: QueryFunction<
-		Awaited<ReturnType<ReturnType<typeof useGetDevicesHook>>>
-	> = ({ signal }) => getDevices(params, signal);
+export function useGetDevicesInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetDevicesHook>>>, GetDevicesParams['offset']>, TError = void>(
+ params?: GetDevicesParams, options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetDevicesHook>>>, TError, TData, QueryKey, GetDevicesParams['offset']>>, }
+ , queryClient?: QueryClient 
+ ):  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
-	return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
-		Awaited<ReturnType<ReturnType<typeof useGetDevicesHook>>>,
-		TError,
-		TData
-	> & { queryKey: DataTag<QueryKey, TData, TError> };
-};
+  const queryOptions = useGetDevicesInfiniteQueryOptions(params,options)
 
-export type GetDevicesQueryResult = NonNullable<
-	Awaited<ReturnType<ReturnType<typeof useGetDevicesHook>>>
->;
-export type GetDevicesQueryError = void;
+  const query = useInfiniteQuery(queryOptions, queryClient) as  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 
-export function useGetDevices<
-	TData = Awaited<ReturnType<ReturnType<typeof useGetDevicesHook>>>,
-	TError = void,
->(
-	params: undefined | GetDevicesParams,
-	options: {
-		query: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetDevicesHook>>>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				DefinedInitialDataOptions<
-					Awaited<ReturnType<ReturnType<typeof useGetDevicesHook>>>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useGetDevicesHook>>>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): DefinedUseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useGetDevices<
-	TData = Awaited<ReturnType<ReturnType<typeof useGetDevicesHook>>>,
-	TError = void,
->(
-	params?: GetDevicesParams,
-	options?: {
-		query?: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetDevicesHook>>>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				UndefinedInitialDataOptions<
-					Awaited<ReturnType<ReturnType<typeof useGetDevicesHook>>>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useGetDevicesHook>>>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useGetDevices<
-	TData = Awaited<ReturnType<ReturnType<typeof useGetDevicesHook>>>,
-	TError = void,
->(
-	params?: GetDevicesParams,
-	options?: {
-		query?: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetDevicesHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
+  query.queryKey = queryOptions.queryKey ;
 
-export function useGetDevices<
-	TData = Awaited<ReturnType<ReturnType<typeof useGetDevicesHook>>>,
-	TError = void,
->(
-	params?: GetDevicesParams,
-	options?: {
-		query?: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetDevicesHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-} {
-	const queryOptions = useGetDevicesQueryOptions(params, options);
-
-	const query = useQuery(queryOptions, queryClient) as UseQueryResult<
-		TData,
-		TError
-	> & { queryKey: DataTag<QueryKey, TData, TError> };
-
-	query.queryKey = queryOptions.queryKey;
-
-	return query;
+  return query;
 }
+
+
+
+
+export const useGetDevicesQueryOptions = <TData = Awaited<ReturnType<ReturnType<typeof useGetDevicesHook>>>, TError = void>(params?: GetDevicesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetDevicesHook>>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetDevicesQueryKey(params);
+
+  const getDevices =  useGetDevicesHook();
+
+    const queryFn: QueryFunction<Awaited<ReturnType<ReturnType<typeof useGetDevicesHook>>>> = ({ signal }) => getDevices(params, signal);
+
+      
+
+      
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetDevicesHook>>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetDevicesQueryResult = NonNullable<Awaited<ReturnType<ReturnType<typeof useGetDevicesHook>>>>
+export type GetDevicesQueryError = void
+
+
+export function useGetDevices<TData = Awaited<ReturnType<ReturnType<typeof useGetDevicesHook>>>, TError = void>(
+ params: undefined |  GetDevicesParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetDevicesHook>>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useGetDevicesHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useGetDevicesHook>>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetDevices<TData = Awaited<ReturnType<ReturnType<typeof useGetDevicesHook>>>, TError = void>(
+ params?: GetDevicesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetDevicesHook>>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useGetDevicesHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useGetDevicesHook>>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetDevices<TData = Awaited<ReturnType<ReturnType<typeof useGetDevicesHook>>>, TError = void>(
+ params?: GetDevicesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetDevicesHook>>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+
+export function useGetDevices<TData = Awaited<ReturnType<ReturnType<typeof useGetDevicesHook>>>, TError = void>(
+ params?: GetDevicesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetDevicesHook>>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = useGetDevicesQueryOptions(params,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  query.queryKey = queryOptions.queryKey ;
+
+  return query;
+}
+
+
+
+
 
 /**
  * @summary Batch updates the `network_id` for a list of `serial_number`s.
  */
 export const useUpdateDevicesNetworkHook = () => {
-	const updateDevicesNetwork = useClientMutator<void>();
+        const updateDevicesNetwork = useClientMutator<void>();
 
-	return useCallback(
-		(networkId: number) => {
-			return updateDevicesNetwork({
-				url: `/devices/network/${networkId}`,
-				method: "PUT",
-			});
-		},
-		[updateDevicesNetwork],
-	);
-};
+        return useCallback((
+    networkId: number,
+ ) => {
+        return updateDevicesNetwork(
+          {url: `/devices/network/${networkId}`, method: 'PUT'
+    },
+          );
+        }, [updateDevicesNetwork])
+      }
+    
 
-export const useUpdateDevicesNetworkMutationOptions = <
-	TError = void,
-	TContext = unknown,
->(options?: {
-	mutation?: UseMutationOptions<
-		Awaited<ReturnType<ReturnType<typeof useUpdateDevicesNetworkHook>>>,
-		TError,
-		{ networkId: number },
-		TContext
-	>;
-}): UseMutationOptions<
-	Awaited<ReturnType<ReturnType<typeof useUpdateDevicesNetworkHook>>>,
-	TError,
-	{ networkId: number },
-	TContext
-> => {
-	const mutationKey = ["updateDevicesNetwork"];
-	const { mutation: mutationOptions } = options
-		? options.mutation &&
-			"mutationKey" in options.mutation &&
-			options.mutation.mutationKey
-			? options
-			: { ...options, mutation: { ...options.mutation, mutationKey } }
-		: { mutation: { mutationKey } };
 
-	const updateDevicesNetwork = useUpdateDevicesNetworkHook();
+export const useUpdateDevicesNetworkMutationOptions = <TError = void,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<ReturnType<typeof useUpdateDevicesNetworkHook>>>, TError,{networkId: number}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<ReturnType<typeof useUpdateDevicesNetworkHook>>>, TError,{networkId: number}, TContext> => {
 
-	const mutationFn: MutationFunction<
-		Awaited<ReturnType<ReturnType<typeof useUpdateDevicesNetworkHook>>>,
-		{ networkId: number }
-	> = (props) => {
-		const { networkId } = props ?? {};
+const mutationKey = ['updateDevicesNetwork'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
 
-		return updateDevicesNetwork(networkId);
-	};
+      const updateDevicesNetwork =  useUpdateDevicesNetworkHook()
 
-	return { mutationFn, ...mutationOptions };
-};
 
-export type UpdateDevicesNetworkMutationResult = NonNullable<
-	Awaited<ReturnType<ReturnType<typeof useUpdateDevicesNetworkHook>>>
->;
+      const mutationFn: MutationFunction<Awaited<ReturnType<ReturnType<typeof useUpdateDevicesNetworkHook>>>, {networkId: number}> = (props) => {
+          const {networkId} = props ?? {};
 
-export type UpdateDevicesNetworkMutationError = void;
+          return  updateDevicesNetwork(networkId,)
+        }
 
-/**
+        
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdateDevicesNetworkMutationResult = NonNullable<Awaited<ReturnType<ReturnType<typeof useUpdateDevicesNetworkHook>>>>
+    
+    export type UpdateDevicesNetworkMutationError = void
+
+    /**
  * @summary Batch updates the `network_id` for a list of `serial_number`s.
  */
-export const useUpdateDevicesNetwork = <TError = void, TContext = unknown>(
-	options?: {
-		mutation?: UseMutationOptions<
-			Awaited<ReturnType<ReturnType<typeof useUpdateDevicesNetworkHook>>>,
-			TError,
-			{ networkId: number },
-			TContext
-		>;
-	},
-	queryClient?: QueryClient,
-): UseMutationResult<
-	Awaited<ReturnType<ReturnType<typeof useUpdateDevicesNetworkHook>>>,
-	TError,
-	{ networkId: number },
-	TContext
-> => {
-	const mutationOptions = useUpdateDevicesNetworkMutationOptions(options);
+export const useUpdateDevicesNetwork = <TError = void,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<ReturnType<typeof useUpdateDevicesNetworkHook>>>, TError,{networkId: number}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<ReturnType<typeof useUpdateDevicesNetworkHook>>>,
+        TError,
+        {networkId: number},
+        TContext
+      > => {
 
-	return useMutation(mutationOptions, queryClient);
-};
+      const mutationOptions = useUpdateDevicesNetworkMutationOptions(options);
 
+      return useMutation(mutationOptions, queryClient);
+    }
+    
 export const useUpdateDevicesTargetReleaseHook = () => {
-	const updateDevicesTargetRelease = useClientMutator<void>();
+        const updateDevicesTargetRelease = useClientMutator<void>();
 
-	return useCallback(
-		(updateDevicesRelease: UpdateDevicesRelease) => {
-			return updateDevicesTargetRelease({
-				url: `/devices/release`,
-				method: "PUT",
-				headers: { "Content-Type": "application/json" },
-				data: updateDevicesRelease,
-			});
-		},
-		[updateDevicesTargetRelease],
-	);
-};
+        return useCallback((
+    updateDevicesRelease: UpdateDevicesRelease,
+ ) => {
+        return updateDevicesTargetRelease(
+          {url: `/devices/release`, method: 'PUT',
+      headers: {'Content-Type': 'application/json', },
+      data: updateDevicesRelease
+    },
+          );
+        }, [updateDevicesTargetRelease])
+      }
+    
 
-export const useUpdateDevicesTargetReleaseMutationOptions = <
-	TError = void | string,
-	TContext = unknown,
->(options?: {
-	mutation?: UseMutationOptions<
-		Awaited<ReturnType<ReturnType<typeof useUpdateDevicesTargetReleaseHook>>>,
-		TError,
-		{ data: UpdateDevicesRelease },
-		TContext
-	>;
-}): UseMutationOptions<
-	Awaited<ReturnType<ReturnType<typeof useUpdateDevicesTargetReleaseHook>>>,
-	TError,
-	{ data: UpdateDevicesRelease },
-	TContext
-> => {
-	const mutationKey = ["updateDevicesTargetRelease"];
-	const { mutation: mutationOptions } = options
-		? options.mutation &&
-			"mutationKey" in options.mutation &&
-			options.mutation.mutationKey
-			? options
-			: { ...options, mutation: { ...options.mutation, mutationKey } }
-		: { mutation: { mutationKey } };
 
-	const updateDevicesTargetRelease = useUpdateDevicesTargetReleaseHook();
+export const useUpdateDevicesTargetReleaseMutationOptions = <TError = void | string,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<ReturnType<typeof useUpdateDevicesTargetReleaseHook>>>, TError,{data: UpdateDevicesRelease}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<ReturnType<typeof useUpdateDevicesTargetReleaseHook>>>, TError,{data: UpdateDevicesRelease}, TContext> => {
 
-	const mutationFn: MutationFunction<
-		Awaited<ReturnType<ReturnType<typeof useUpdateDevicesTargetReleaseHook>>>,
-		{ data: UpdateDevicesRelease }
-	> = (props) => {
-		const { data } = props ?? {};
+const mutationKey = ['updateDevicesTargetRelease'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
 
-		return updateDevicesTargetRelease(data);
-	};
+      const updateDevicesTargetRelease =  useUpdateDevicesTargetReleaseHook()
 
-	return { mutationFn, ...mutationOptions };
-};
 
-export type UpdateDevicesTargetReleaseMutationResult = NonNullable<
-	Awaited<ReturnType<ReturnType<typeof useUpdateDevicesTargetReleaseHook>>>
->;
-export type UpdateDevicesTargetReleaseMutationBody = UpdateDevicesRelease;
-export type UpdateDevicesTargetReleaseMutationError = void | string;
+      const mutationFn: MutationFunction<Awaited<ReturnType<ReturnType<typeof useUpdateDevicesTargetReleaseHook>>>, {data: UpdateDevicesRelease}> = (props) => {
+          const {data} = props ?? {};
 
-export const useUpdateDevicesTargetRelease = <
-	TError = void | string,
-	TContext = unknown,
->(
-	options?: {
-		mutation?: UseMutationOptions<
-			Awaited<ReturnType<ReturnType<typeof useUpdateDevicesTargetReleaseHook>>>,
-			TError,
-			{ data: UpdateDevicesRelease },
-			TContext
-		>;
-	},
-	queryClient?: QueryClient,
-): UseMutationResult<
-	Awaited<ReturnType<ReturnType<typeof useUpdateDevicesTargetReleaseHook>>>,
-	TError,
-	{ data: UpdateDevicesRelease },
-	TContext
-> => {
-	const mutationOptions = useUpdateDevicesTargetReleaseMutationOptions(options);
+          return  updateDevicesTargetRelease(data,)
+        }
 
-	return useMutation(mutationOptions, queryClient);
-};
+        
 
-/**
- * @deprecated
- */
-export const useGetTagsHook = () => {
-	const getTags = useClientMutator<Tag[]>();
 
-	return useCallback(
-		(signal?: AbortSignal) => {
-			return getTags({ url: `/tags`, method: "GET", signal });
-		},
-		[getTags],
-	);
-};
+  return  { mutationFn, ...mutationOptions }}
 
-export const getGetTagsInfiniteQueryKey = () => {
-	return ["infinite", `/tags`] as const;
-};
+    export type UpdateDevicesTargetReleaseMutationResult = NonNullable<Awaited<ReturnType<ReturnType<typeof useUpdateDevicesTargetReleaseHook>>>>
+    export type UpdateDevicesTargetReleaseMutationBody = UpdateDevicesRelease
+    export type UpdateDevicesTargetReleaseMutationError = void | string
 
-export const getGetTagsQueryKey = () => {
-	return [`/tags`] as const;
-};
+    export const useUpdateDevicesTargetRelease = <TError = void | string,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<ReturnType<typeof useUpdateDevicesTargetReleaseHook>>>, TError,{data: UpdateDevicesRelease}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<ReturnType<typeof useUpdateDevicesTargetReleaseHook>>>,
+        TError,
+        {data: UpdateDevicesRelease},
+        TContext
+      > => {
 
-export const useGetTagsInfiniteQueryOptions = <
-	TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetTagsHook>>>>,
-	TError = string,
->(options?: {
-	query?: Partial<
-		UseInfiniteQueryOptions<
-			Awaited<ReturnType<ReturnType<typeof useGetTagsHook>>>,
-			TError,
-			TData
-		>
-	>;
-}) => {
-	const { query: queryOptions } = options ?? {};
+      const mutationOptions = useUpdateDevicesTargetReleaseMutationOptions(options);
 
-	const queryKey = queryOptions?.queryKey ?? getGetTagsInfiniteQueryKey();
-
-	const getTags = useGetTagsHook();
-
-	const queryFn: QueryFunction<
-		Awaited<ReturnType<ReturnType<typeof useGetTagsHook>>>
-	> = ({ signal }) => getTags(signal);
-
-	return { queryKey, queryFn, ...queryOptions } as UseInfiniteQueryOptions<
-		Awaited<ReturnType<ReturnType<typeof useGetTagsHook>>>,
-		TError,
-		TData
-	> & { queryKey: DataTag<QueryKey, TData, TError> };
-};
-
-export type GetTagsInfiniteQueryResult = NonNullable<
-	Awaited<ReturnType<ReturnType<typeof useGetTagsHook>>>
->;
-export type GetTagsInfiniteQueryError = string;
-
-export function useGetTagsInfinite<
-	TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetTagsHook>>>>,
-	TError = string,
->(
-	options: {
-		query: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetTagsHook>>>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				DefinedInitialDataOptions<
-					Awaited<ReturnType<ReturnType<typeof useGetTagsHook>>>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useGetTagsHook>>>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): DefinedUseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useGetTagsInfinite<
-	TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetTagsHook>>>>,
-	TError = string,
->(
-	options?: {
-		query?: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetTagsHook>>>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				UndefinedInitialDataOptions<
-					Awaited<ReturnType<ReturnType<typeof useGetTagsHook>>>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useGetTagsHook>>>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): UseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useGetTagsInfinite<
-	TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetTagsHook>>>>,
-	TError = string,
->(
-	options?: {
-		query?: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetTagsHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-/**
- * @deprecated
- */
-
-export function useGetTagsInfinite<
-	TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetTagsHook>>>>,
-	TError = string,
->(
-	options?: {
-		query?: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetTagsHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-} {
-	const queryOptions = useGetTagsInfiniteQueryOptions(options);
-
-	const query = useInfiniteQuery(
-		queryOptions,
-		queryClient,
-	) as UseInfiniteQueryResult<TData, TError> & {
-		queryKey: DataTag<QueryKey, TData, TError>;
-	};
-
-	query.queryKey = queryOptions.queryKey;
-
-	return query;
-}
-
-export const useGetTagsQueryOptions = <
-	TData = Awaited<ReturnType<ReturnType<typeof useGetTagsHook>>>,
-	TError = string,
->(options?: {
-	query?: Partial<
-		UseQueryOptions<
-			Awaited<ReturnType<ReturnType<typeof useGetTagsHook>>>,
-			TError,
-			TData
-		>
-	>;
-}) => {
-	const { query: queryOptions } = options ?? {};
-
-	const queryKey = queryOptions?.queryKey ?? getGetTagsQueryKey();
-
-	const getTags = useGetTagsHook();
-
-	const queryFn: QueryFunction<
-		Awaited<ReturnType<ReturnType<typeof useGetTagsHook>>>
-	> = ({ signal }) => getTags(signal);
-
-	return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
-		Awaited<ReturnType<ReturnType<typeof useGetTagsHook>>>,
-		TError,
-		TData
-	> & { queryKey: DataTag<QueryKey, TData, TError> };
-};
-
-export type GetTagsQueryResult = NonNullable<
-	Awaited<ReturnType<ReturnType<typeof useGetTagsHook>>>
->;
-export type GetTagsQueryError = string;
-
-export function useGetTags<
-	TData = Awaited<ReturnType<ReturnType<typeof useGetTagsHook>>>,
-	TError = string,
->(
-	options: {
-		query: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetTagsHook>>>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				DefinedInitialDataOptions<
-					Awaited<ReturnType<ReturnType<typeof useGetTagsHook>>>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useGetTagsHook>>>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): DefinedUseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useGetTags<
-	TData = Awaited<ReturnType<ReturnType<typeof useGetTagsHook>>>,
-	TError = string,
->(
-	options?: {
-		query?: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetTagsHook>>>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				UndefinedInitialDataOptions<
-					Awaited<ReturnType<ReturnType<typeof useGetTagsHook>>>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useGetTagsHook>>>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useGetTags<
-	TData = Awaited<ReturnType<ReturnType<typeof useGetTagsHook>>>,
-	TError = string,
->(
-	options?: {
-		query?: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetTagsHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-/**
- * @deprecated
- */
-
-export function useGetTags<
-	TData = Awaited<ReturnType<ReturnType<typeof useGetTagsHook>>>,
-	TError = string,
->(
-	options?: {
-		query?: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetTagsHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-} {
-	const queryOptions = useGetTagsQueryOptions(options);
-
-	const query = useQuery(queryOptions, queryClient) as UseQueryResult<
-		TData,
-		TError
-	> & { queryKey: DataTag<QueryKey, TData, TError> };
-
-	query.queryKey = queryOptions.queryKey;
-
-	return query;
-}
-
+      return useMutation(mutationOptions, queryClient);
+    }
+    
 export const useGetVariablesHook = () => {
-	const getVariables = useClientMutator<Variable[]>();
+        const getVariables = useClientMutator<Variable[]>();
 
-	return useCallback(
-		(signal?: AbortSignal) => {
-			return getVariables({ url: `/devices/variables`, method: "GET", signal });
-		},
-		[getVariables],
-	);
-};
+        return useCallback((
+    
+ signal?: AbortSignal
+) => {
+        return getVariables(
+          {url: `/devices/variables`, method: 'GET', signal
+    },
+          );
+        }, [getVariables])
+      }
+    
+
+
 
 export const getGetVariablesInfiniteQueryKey = () => {
-	return ["infinite", `/devices/variables`] as const;
-};
+    return [
+    'infinite', `/devices/variables`
+    ] as const;
+    }
 
 export const getGetVariablesQueryKey = () => {
-	return [`/devices/variables`] as const;
-};
+    return [
+    `/devices/variables`
+    ] as const;
+    }
 
-export const useGetVariablesInfiniteQueryOptions = <
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetVariablesHook>>>
-	>,
-	TError = string,
->(options?: {
-	query?: Partial<
-		UseInfiniteQueryOptions<
-			Awaited<ReturnType<ReturnType<typeof useGetVariablesHook>>>,
-			TError,
-			TData
-		>
-	>;
-}) => {
-	const { query: queryOptions } = options ?? {};
+    
+export const useGetVariablesInfiniteQueryOptions = <TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetVariablesHook>>>>, TError = string>( options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetVariablesHook>>>, TError, TData>>, }
+) => {
 
-	const queryKey = queryOptions?.queryKey ?? getGetVariablesInfiniteQueryKey();
+const {query: queryOptions} = options ?? {};
 
-	const getVariables = useGetVariablesHook();
+  const queryKey =  queryOptions?.queryKey ?? getGetVariablesInfiniteQueryKey();
 
-	const queryFn: QueryFunction<
-		Awaited<ReturnType<ReturnType<typeof useGetVariablesHook>>>
-	> = ({ signal }) => getVariables(signal);
+  const getVariables =  useGetVariablesHook();
 
-	return { queryKey, queryFn, ...queryOptions } as UseInfiniteQueryOptions<
-		Awaited<ReturnType<ReturnType<typeof useGetVariablesHook>>>,
-		TError,
-		TData
-	> & { queryKey: DataTag<QueryKey, TData, TError> };
-};
+    const queryFn: QueryFunction<Awaited<ReturnType<ReturnType<typeof useGetVariablesHook>>>> = ({ signal }) => getVariables(signal);
 
-export type GetVariablesInfiniteQueryResult = NonNullable<
-	Awaited<ReturnType<ReturnType<typeof useGetVariablesHook>>>
->;
-export type GetVariablesInfiniteQueryError = string;
+      
 
-export function useGetVariablesInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetVariablesHook>>>
-	>,
-	TError = string,
->(
-	options: {
-		query: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetVariablesHook>>>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				DefinedInitialDataOptions<
-					Awaited<ReturnType<ReturnType<typeof useGetVariablesHook>>>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useGetVariablesHook>>>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): DefinedUseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useGetVariablesInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetVariablesHook>>>
-	>,
-	TError = string,
->(
-	options?: {
-		query?: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetVariablesHook>>>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				UndefinedInitialDataOptions<
-					Awaited<ReturnType<ReturnType<typeof useGetVariablesHook>>>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useGetVariablesHook>>>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): UseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useGetVariablesInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetVariablesHook>>>
-	>,
-	TError = string,
->(
-	options?: {
-		query?: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetVariablesHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
+      
 
-export function useGetVariablesInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetVariablesHook>>>
-	>,
-	TError = string,
->(
-	options?: {
-		query?: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetVariablesHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-} {
-	const queryOptions = useGetVariablesInfiniteQueryOptions(options);
-
-	const query = useInfiniteQuery(
-		queryOptions,
-		queryClient,
-	) as UseInfiniteQueryResult<TData, TError> & {
-		queryKey: DataTag<QueryKey, TData, TError>;
-	};
-
-	query.queryKey = queryOptions.queryKey;
-
-	return query;
+   return  { queryKey, queryFn, ...queryOptions} as UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetVariablesHook>>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
 }
 
-export const useGetVariablesQueryOptions = <
-	TData = Awaited<ReturnType<ReturnType<typeof useGetVariablesHook>>>,
-	TError = string,
->(options?: {
-	query?: Partial<
-		UseQueryOptions<
-			Awaited<ReturnType<ReturnType<typeof useGetVariablesHook>>>,
-			TError,
-			TData
-		>
-	>;
-}) => {
-	const { query: queryOptions } = options ?? {};
+export type GetVariablesInfiniteQueryResult = NonNullable<Awaited<ReturnType<ReturnType<typeof useGetVariablesHook>>>>
+export type GetVariablesInfiniteQueryError = string
 
-	const queryKey = queryOptions?.queryKey ?? getGetVariablesQueryKey();
 
-	const getVariables = useGetVariablesHook();
+export function useGetVariablesInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetVariablesHook>>>>, TError = string>(
+  options: { query:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetVariablesHook>>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useGetVariablesHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useGetVariablesHook>>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetVariablesInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetVariablesHook>>>>, TError = string>(
+  options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetVariablesHook>>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useGetVariablesHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useGetVariablesHook>>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetVariablesInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetVariablesHook>>>>, TError = string>(
+  options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetVariablesHook>>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 
-	const queryFn: QueryFunction<
-		Awaited<ReturnType<ReturnType<typeof useGetVariablesHook>>>
-	> = ({ signal }) => getVariables(signal);
+export function useGetVariablesInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetVariablesHook>>>>, TError = string>(
+  options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetVariablesHook>>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
-	return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
-		Awaited<ReturnType<ReturnType<typeof useGetVariablesHook>>>,
-		TError,
-		TData
-	> & { queryKey: DataTag<QueryKey, TData, TError> };
-};
+  const queryOptions = useGetVariablesInfiniteQueryOptions(options)
 
-export type GetVariablesQueryResult = NonNullable<
-	Awaited<ReturnType<ReturnType<typeof useGetVariablesHook>>>
->;
-export type GetVariablesQueryError = string;
+  const query = useInfiniteQuery(queryOptions, queryClient) as  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 
-export function useGetVariables<
-	TData = Awaited<ReturnType<ReturnType<typeof useGetVariablesHook>>>,
-	TError = string,
->(
-	options: {
-		query: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetVariablesHook>>>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				DefinedInitialDataOptions<
-					Awaited<ReturnType<ReturnType<typeof useGetVariablesHook>>>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useGetVariablesHook>>>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): DefinedUseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useGetVariables<
-	TData = Awaited<ReturnType<ReturnType<typeof useGetVariablesHook>>>,
-	TError = string,
->(
-	options?: {
-		query?: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetVariablesHook>>>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				UndefinedInitialDataOptions<
-					Awaited<ReturnType<ReturnType<typeof useGetVariablesHook>>>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useGetVariablesHook>>>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useGetVariables<
-	TData = Awaited<ReturnType<ReturnType<typeof useGetVariablesHook>>>,
-	TError = string,
->(
-	options?: {
-		query?: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetVariablesHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
+  query.queryKey = queryOptions.queryKey ;
 
-export function useGetVariables<
-	TData = Awaited<ReturnType<ReturnType<typeof useGetVariablesHook>>>,
-	TError = string,
->(
-	options?: {
-		query?: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetVariablesHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-} {
-	const queryOptions = useGetVariablesQueryOptions(options);
-
-	const query = useQuery(queryOptions, queryClient) as UseQueryResult<
-		TData,
-		TError
-	> & { queryKey: DataTag<QueryKey, TData, TError> };
-
-	query.queryKey = queryOptions.queryKey;
-
-	return query;
+  return query;
 }
+
+
+
+
+export const useGetVariablesQueryOptions = <TData = Awaited<ReturnType<ReturnType<typeof useGetVariablesHook>>>, TError = string>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetVariablesHook>>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetVariablesQueryKey();
+
+  const getVariables =  useGetVariablesHook();
+
+    const queryFn: QueryFunction<Awaited<ReturnType<ReturnType<typeof useGetVariablesHook>>>> = ({ signal }) => getVariables(signal);
+
+      
+
+      
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetVariablesHook>>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetVariablesQueryResult = NonNullable<Awaited<ReturnType<ReturnType<typeof useGetVariablesHook>>>>
+export type GetVariablesQueryError = string
+
+
+export function useGetVariables<TData = Awaited<ReturnType<ReturnType<typeof useGetVariablesHook>>>, TError = string>(
+  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetVariablesHook>>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useGetVariablesHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useGetVariablesHook>>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetVariables<TData = Awaited<ReturnType<ReturnType<typeof useGetVariablesHook>>>, TError = string>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetVariablesHook>>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useGetVariablesHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useGetVariablesHook>>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetVariables<TData = Awaited<ReturnType<ReturnType<typeof useGetVariablesHook>>>, TError = string>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetVariablesHook>>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+
+export function useGetVariables<TData = Awaited<ReturnType<ReturnType<typeof useGetVariablesHook>>>, TError = string>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetVariablesHook>>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = useGetVariablesQueryOptions(options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  query.queryKey = queryOptions.queryKey ;
+
+  return query;
+}
+
+
+
+
 
 export const useGetDeviceInfoHook = () => {
-	const getDeviceInfo = useClientMutator<Device>();
+        const getDeviceInfo = useClientMutator<Device>();
 
-	return useCallback(
-		(deviceId: string, signal?: AbortSignal) => {
-			return getDeviceInfo({
-				url: `/devices/${deviceId}`,
-				method: "GET",
-				signal,
-			});
-		},
-		[getDeviceInfo],
-	);
-};
-
-export const getGetDeviceInfoInfiniteQueryKey = (deviceId?: string) => {
-	return ["infinite", `/devices/${deviceId}`] as const;
-};
-
-export const getGetDeviceInfoQueryKey = (deviceId?: string) => {
-	return [`/devices/${deviceId}`] as const;
-};
-
-export const useGetDeviceInfoInfiniteQueryOptions = <
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetDeviceInfoHook>>>
-	>,
-	TError = void,
->(
-	deviceId: string,
-	options?: {
-		query?: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetDeviceInfoHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
+        return useCallback((
+    deviceId: string,
+ signal?: AbortSignal
 ) => {
-	const { query: queryOptions } = options ?? {};
+        return getDeviceInfo(
+          {url: `/devices/${deviceId}`, method: 'GET', signal
+    },
+          );
+        }, [getDeviceInfo])
+      }
+    
 
-	const queryKey =
-		queryOptions?.queryKey ?? getGetDeviceInfoInfiniteQueryKey(deviceId);
 
-	const getDeviceInfo = useGetDeviceInfoHook();
 
-	const queryFn: QueryFunction<
-		Awaited<ReturnType<ReturnType<typeof useGetDeviceInfoHook>>>
-	> = ({ signal }) => getDeviceInfo(deviceId, signal);
+export const getGetDeviceInfoInfiniteQueryKey = (deviceId?: string,) => {
+    return [
+    'infinite', `/devices/${deviceId}`
+    ] as const;
+    }
 
-	return {
-		queryKey,
-		queryFn,
-		enabled: !!deviceId,
-		...queryOptions,
-	} as UseInfiniteQueryOptions<
-		Awaited<ReturnType<ReturnType<typeof useGetDeviceInfoHook>>>,
-		TError,
-		TData
-	> & { queryKey: DataTag<QueryKey, TData, TError> };
-};
+export const getGetDeviceInfoQueryKey = (deviceId?: string,) => {
+    return [
+    `/devices/${deviceId}`
+    ] as const;
+    }
 
-export type GetDeviceInfoInfiniteQueryResult = NonNullable<
-	Awaited<ReturnType<ReturnType<typeof useGetDeviceInfoHook>>>
->;
-export type GetDeviceInfoInfiniteQueryError = void;
+    
+export const useGetDeviceInfoInfiniteQueryOptions = <TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetDeviceInfoHook>>>>, TError = void>(deviceId: string, options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetDeviceInfoHook>>>, TError, TData>>, }
+) => {
 
-export function useGetDeviceInfoInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetDeviceInfoHook>>>
-	>,
-	TError = void,
->(
-	deviceId: string,
-	options: {
-		query: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetDeviceInfoHook>>>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				DefinedInitialDataOptions<
-					Awaited<ReturnType<ReturnType<typeof useGetDeviceInfoHook>>>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useGetDeviceInfoHook>>>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): DefinedUseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useGetDeviceInfoInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetDeviceInfoHook>>>
-	>,
-	TError = void,
->(
-	deviceId: string,
-	options?: {
-		query?: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetDeviceInfoHook>>>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				UndefinedInitialDataOptions<
-					Awaited<ReturnType<ReturnType<typeof useGetDeviceInfoHook>>>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useGetDeviceInfoHook>>>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): UseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useGetDeviceInfoInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetDeviceInfoHook>>>
-	>,
-	TError = void,
->(
-	deviceId: string,
-	options?: {
-		query?: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetDeviceInfoHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
+const {query: queryOptions} = options ?? {};
 
-export function useGetDeviceInfoInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetDeviceInfoHook>>>
-	>,
-	TError = void,
->(
-	deviceId: string,
-	options?: {
-		query?: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetDeviceInfoHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-} {
-	const queryOptions = useGetDeviceInfoInfiniteQueryOptions(deviceId, options);
+  const queryKey =  queryOptions?.queryKey ?? getGetDeviceInfoInfiniteQueryKey(deviceId);
 
-	const query = useInfiniteQuery(
-		queryOptions,
-		queryClient,
-	) as UseInfiniteQueryResult<TData, TError> & {
-		queryKey: DataTag<QueryKey, TData, TError>;
-	};
+  const getDeviceInfo =  useGetDeviceInfoHook();
 
-	query.queryKey = queryOptions.queryKey;
+    const queryFn: QueryFunction<Awaited<ReturnType<ReturnType<typeof useGetDeviceInfoHook>>>> = ({ signal }) => getDeviceInfo(deviceId, signal);
 
-	return query;
+      
+
+      
+
+   return  { queryKey, queryFn, enabled: !!(deviceId), ...queryOptions} as UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetDeviceInfoHook>>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
 }
 
-export const useGetDeviceInfoQueryOptions = <
-	TData = Awaited<ReturnType<ReturnType<typeof useGetDeviceInfoHook>>>,
-	TError = void,
->(
-	deviceId: string,
-	options?: {
-		query?: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetDeviceInfoHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-) => {
-	const { query: queryOptions } = options ?? {};
+export type GetDeviceInfoInfiniteQueryResult = NonNullable<Awaited<ReturnType<ReturnType<typeof useGetDeviceInfoHook>>>>
+export type GetDeviceInfoInfiniteQueryError = void
 
-	const queryKey = queryOptions?.queryKey ?? getGetDeviceInfoQueryKey(deviceId);
 
-	const getDeviceInfo = useGetDeviceInfoHook();
+export function useGetDeviceInfoInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetDeviceInfoHook>>>>, TError = void>(
+ deviceId: string, options: { query:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetDeviceInfoHook>>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useGetDeviceInfoHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useGetDeviceInfoHook>>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetDeviceInfoInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetDeviceInfoHook>>>>, TError = void>(
+ deviceId: string, options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetDeviceInfoHook>>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useGetDeviceInfoHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useGetDeviceInfoHook>>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetDeviceInfoInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetDeviceInfoHook>>>>, TError = void>(
+ deviceId: string, options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetDeviceInfoHook>>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 
-	const queryFn: QueryFunction<
-		Awaited<ReturnType<ReturnType<typeof useGetDeviceInfoHook>>>
-	> = ({ signal }) => getDeviceInfo(deviceId, signal);
+export function useGetDeviceInfoInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetDeviceInfoHook>>>>, TError = void>(
+ deviceId: string, options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetDeviceInfoHook>>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
-	return {
-		queryKey,
-		queryFn,
-		enabled: !!deviceId,
-		...queryOptions,
-	} as UseQueryOptions<
-		Awaited<ReturnType<ReturnType<typeof useGetDeviceInfoHook>>>,
-		TError,
-		TData
-	> & { queryKey: DataTag<QueryKey, TData, TError> };
-};
+  const queryOptions = useGetDeviceInfoInfiniteQueryOptions(deviceId,options)
 
-export type GetDeviceInfoQueryResult = NonNullable<
-	Awaited<ReturnType<ReturnType<typeof useGetDeviceInfoHook>>>
->;
-export type GetDeviceInfoQueryError = void;
+  const query = useInfiniteQuery(queryOptions, queryClient) as  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 
-export function useGetDeviceInfo<
-	TData = Awaited<ReturnType<ReturnType<typeof useGetDeviceInfoHook>>>,
-	TError = void,
->(
-	deviceId: string,
-	options: {
-		query: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetDeviceInfoHook>>>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				DefinedInitialDataOptions<
-					Awaited<ReturnType<ReturnType<typeof useGetDeviceInfoHook>>>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useGetDeviceInfoHook>>>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): DefinedUseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useGetDeviceInfo<
-	TData = Awaited<ReturnType<ReturnType<typeof useGetDeviceInfoHook>>>,
-	TError = void,
->(
-	deviceId: string,
-	options?: {
-		query?: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetDeviceInfoHook>>>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				UndefinedInitialDataOptions<
-					Awaited<ReturnType<ReturnType<typeof useGetDeviceInfoHook>>>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useGetDeviceInfoHook>>>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useGetDeviceInfo<
-	TData = Awaited<ReturnType<ReturnType<typeof useGetDeviceInfoHook>>>,
-	TError = void,
->(
-	deviceId: string,
-	options?: {
-		query?: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetDeviceInfoHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
+  query.queryKey = queryOptions.queryKey ;
 
-export function useGetDeviceInfo<
-	TData = Awaited<ReturnType<ReturnType<typeof useGetDeviceInfoHook>>>,
-	TError = void,
->(
-	deviceId: string,
-	options?: {
-		query?: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetDeviceInfoHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-} {
-	const queryOptions = useGetDeviceInfoQueryOptions(deviceId, options);
-
-	const query = useQuery(queryOptions, queryClient) as UseQueryResult<
-		TData,
-		TError
-	> & { queryKey: DataTag<QueryKey, TData, TError> };
-
-	query.queryKey = queryOptions.queryKey;
-
-	return query;
+  return query;
 }
+
+
+
+
+export const useGetDeviceInfoQueryOptions = <TData = Awaited<ReturnType<ReturnType<typeof useGetDeviceInfoHook>>>, TError = void>(deviceId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetDeviceInfoHook>>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetDeviceInfoQueryKey(deviceId);
+
+  const getDeviceInfo =  useGetDeviceInfoHook();
+
+    const queryFn: QueryFunction<Awaited<ReturnType<ReturnType<typeof useGetDeviceInfoHook>>>> = ({ signal }) => getDeviceInfo(deviceId, signal);
+
+      
+
+      
+
+   return  { queryKey, queryFn, enabled: !!(deviceId), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetDeviceInfoHook>>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetDeviceInfoQueryResult = NonNullable<Awaited<ReturnType<ReturnType<typeof useGetDeviceInfoHook>>>>
+export type GetDeviceInfoQueryError = void
+
+
+export function useGetDeviceInfo<TData = Awaited<ReturnType<ReturnType<typeof useGetDeviceInfoHook>>>, TError = void>(
+ deviceId: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetDeviceInfoHook>>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useGetDeviceInfoHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useGetDeviceInfoHook>>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetDeviceInfo<TData = Awaited<ReturnType<ReturnType<typeof useGetDeviceInfoHook>>>, TError = void>(
+ deviceId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetDeviceInfoHook>>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useGetDeviceInfoHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useGetDeviceInfoHook>>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetDeviceInfo<TData = Awaited<ReturnType<ReturnType<typeof useGetDeviceInfoHook>>>, TError = void>(
+ deviceId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetDeviceInfoHook>>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+
+export function useGetDeviceInfo<TData = Awaited<ReturnType<ReturnType<typeof useGetDeviceInfoHook>>>, TError = void>(
+ deviceId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetDeviceInfoHook>>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = useGetDeviceInfoQueryOptions(deviceId,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  query.queryKey = queryOptions.queryKey ;
+
+  return query;
+}
+
+
+
+
 
 export const useDeleteDeviceHook = () => {
-	const deleteDevice = useClientMutator<void>();
+        const deleteDevice = useClientMutator<void>();
 
-	return useCallback(
-		(deviceId: number) => {
-			return deleteDevice({ url: `/devices/${deviceId}`, method: "DELETE" });
-		},
-		[deleteDevice],
-	);
-};
+        return useCallback((
+    deviceId: number,
+ ) => {
+        return deleteDevice(
+          {url: `/devices/${deviceId}`, method: 'DELETE'
+    },
+          );
+        }, [deleteDevice])
+      }
+    
 
-export const useDeleteDeviceMutationOptions = <
-	TError = void,
-	TContext = unknown,
->(options?: {
-	mutation?: UseMutationOptions<
-		Awaited<ReturnType<ReturnType<typeof useDeleteDeviceHook>>>,
-		TError,
-		{ deviceId: number },
-		TContext
-	>;
-}): UseMutationOptions<
-	Awaited<ReturnType<ReturnType<typeof useDeleteDeviceHook>>>,
-	TError,
-	{ deviceId: number },
-	TContext
-> => {
-	const mutationKey = ["deleteDevice"];
-	const { mutation: mutationOptions } = options
-		? options.mutation &&
-			"mutationKey" in options.mutation &&
-			options.mutation.mutationKey
-			? options
-			: { ...options, mutation: { ...options.mutation, mutationKey } }
-		: { mutation: { mutationKey } };
 
-	const deleteDevice = useDeleteDeviceHook();
+export const useDeleteDeviceMutationOptions = <TError = void,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<ReturnType<typeof useDeleteDeviceHook>>>, TError,{deviceId: number}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<ReturnType<typeof useDeleteDeviceHook>>>, TError,{deviceId: number}, TContext> => {
 
-	const mutationFn: MutationFunction<
-		Awaited<ReturnType<ReturnType<typeof useDeleteDeviceHook>>>,
-		{ deviceId: number }
-	> = (props) => {
-		const { deviceId } = props ?? {};
+const mutationKey = ['deleteDevice'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
 
-		return deleteDevice(deviceId);
-	};
+      const deleteDevice =  useDeleteDeviceHook()
 
-	return { mutationFn, ...mutationOptions };
-};
 
-export type DeleteDeviceMutationResult = NonNullable<
-	Awaited<ReturnType<ReturnType<typeof useDeleteDeviceHook>>>
->;
+      const mutationFn: MutationFunction<Awaited<ReturnType<ReturnType<typeof useDeleteDeviceHook>>>, {deviceId: number}> = (props) => {
+          const {deviceId} = props ?? {};
 
-export type DeleteDeviceMutationError = void;
+          return  deleteDevice(deviceId,)
+        }
 
-export const useDeleteDevice = <TError = void, TContext = unknown>(
-	options?: {
-		mutation?: UseMutationOptions<
-			Awaited<ReturnType<ReturnType<typeof useDeleteDeviceHook>>>,
-			TError,
-			{ deviceId: number },
-			TContext
-		>;
-	},
-	queryClient?: QueryClient,
-): UseMutationResult<
-	Awaited<ReturnType<ReturnType<typeof useDeleteDeviceHook>>>,
-	TError,
-	{ deviceId: number },
-	TContext
-> => {
-	const mutationOptions = useDeleteDeviceMutationOptions(options);
+        
 
-	return useMutation(mutationOptions, queryClient);
-};
 
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DeleteDeviceMutationResult = NonNullable<Awaited<ReturnType<ReturnType<typeof useDeleteDeviceHook>>>>
+    
+    export type DeleteDeviceMutationError = void
+
+    export const useDeleteDevice = <TError = void,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<ReturnType<typeof useDeleteDeviceHook>>>, TError,{deviceId: number}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<ReturnType<typeof useDeleteDeviceHook>>>,
+        TError,
+        {deviceId: number},
+        TContext
+      > => {
+
+      const mutationOptions = useDeleteDeviceMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    
 export const useUpdateDeviceHook = () => {
-	const updateDevice = useClientMutator<void>();
+        const updateDevice = useClientMutator<void>();
 
-	return useCallback(
-		(deviceId: string, updateDeviceRequest: UpdateDeviceRequest) => {
-			return updateDevice({
-				url: `/devices/${deviceId}`,
-				method: "PATCH",
-				headers: { "Content-Type": "application/json" },
-				data: updateDeviceRequest,
-			});
-		},
-		[updateDevice],
-	);
-};
+        return useCallback((
+    deviceId: string,
+    updateDeviceRequest: UpdateDeviceRequest,
+ ) => {
+        return updateDevice(
+          {url: `/devices/${deviceId}`, method: 'PATCH',
+      headers: {'Content-Type': 'application/json', },
+      data: updateDeviceRequest
+    },
+          );
+        }, [updateDevice])
+      }
+    
 
-export const useUpdateDeviceMutationOptions = <
-	TError = void,
-	TContext = unknown,
->(options?: {
-	mutation?: UseMutationOptions<
-		Awaited<ReturnType<ReturnType<typeof useUpdateDeviceHook>>>,
-		TError,
-		{ deviceId: string; data: UpdateDeviceRequest },
-		TContext
-	>;
-}): UseMutationOptions<
-	Awaited<ReturnType<ReturnType<typeof useUpdateDeviceHook>>>,
-	TError,
-	{ deviceId: string; data: UpdateDeviceRequest },
-	TContext
-> => {
-	const mutationKey = ["updateDevice"];
-	const { mutation: mutationOptions } = options
-		? options.mutation &&
-			"mutationKey" in options.mutation &&
-			options.mutation.mutationKey
-			? options
-			: { ...options, mutation: { ...options.mutation, mutationKey } }
-		: { mutation: { mutationKey } };
 
-	const updateDevice = useUpdateDeviceHook();
+export const useUpdateDeviceMutationOptions = <TError = void,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<ReturnType<typeof useUpdateDeviceHook>>>, TError,{deviceId: string;data: UpdateDeviceRequest}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<ReturnType<typeof useUpdateDeviceHook>>>, TError,{deviceId: string;data: UpdateDeviceRequest}, TContext> => {
 
-	const mutationFn: MutationFunction<
-		Awaited<ReturnType<ReturnType<typeof useUpdateDeviceHook>>>,
-		{ deviceId: string; data: UpdateDeviceRequest }
-	> = (props) => {
-		const { deviceId, data } = props ?? {};
+const mutationKey = ['updateDevice'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
 
-		return updateDevice(deviceId, data);
-	};
+      const updateDevice =  useUpdateDeviceHook()
 
-	return { mutationFn, ...mutationOptions };
-};
 
-export type UpdateDeviceMutationResult = NonNullable<
-	Awaited<ReturnType<ReturnType<typeof useUpdateDeviceHook>>>
->;
-export type UpdateDeviceMutationBody = UpdateDeviceRequest;
-export type UpdateDeviceMutationError = void;
+      const mutationFn: MutationFunction<Awaited<ReturnType<ReturnType<typeof useUpdateDeviceHook>>>, {deviceId: string;data: UpdateDeviceRequest}> = (props) => {
+          const {deviceId,data} = props ?? {};
 
-export const useUpdateDevice = <TError = void, TContext = unknown>(
-	options?: {
-		mutation?: UseMutationOptions<
-			Awaited<ReturnType<ReturnType<typeof useUpdateDeviceHook>>>,
-			TError,
-			{ deviceId: string; data: UpdateDeviceRequest },
-			TContext
-		>;
-	},
-	queryClient?: QueryClient,
-): UseMutationResult<
-	Awaited<ReturnType<ReturnType<typeof useUpdateDeviceHook>>>,
-	TError,
-	{ deviceId: string; data: UpdateDeviceRequest },
-	TContext
-> => {
-	const mutationOptions = useUpdateDeviceMutationOptions(options);
+          return  updateDevice(deviceId,data,)
+        }
 
-	return useMutation(mutationOptions, queryClient);
-};
+        
 
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdateDeviceMutationResult = NonNullable<Awaited<ReturnType<ReturnType<typeof useUpdateDeviceHook>>>>
+    export type UpdateDeviceMutationBody = UpdateDeviceRequest
+    export type UpdateDeviceMutationError = void
+
+    export const useUpdateDevice = <TError = void,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<ReturnType<typeof useUpdateDeviceHook>>>, TError,{deviceId: string;data: UpdateDeviceRequest}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<ReturnType<typeof useUpdateDeviceHook>>>,
+        TError,
+        {deviceId: string;data: UpdateDeviceRequest},
+        TContext
+      > => {
+
+      const mutationOptions = useUpdateDeviceMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    
 export const useApproveDeviceHook = () => {
-	const approveDevice = useClientMutator<boolean>();
+        const approveDevice = useClientMutator<boolean>();
 
-	return useCallback(
-		(deviceId: number, signal?: AbortSignal) => {
-			return approveDevice({
-				url: `/devices/${deviceId}/approval`,
-				method: "POST",
-				signal,
-			});
-		},
-		[approveDevice],
-	);
-};
+        return useCallback((
+    deviceId: number,
+ signal?: AbortSignal
+) => {
+        return approveDevice(
+          {url: `/devices/${deviceId}/approval`, method: 'POST', signal
+    },
+          );
+        }, [approveDevice])
+      }
+    
 
-export const useApproveDeviceMutationOptions = <
-	TError = string,
-	TContext = unknown,
->(options?: {
-	mutation?: UseMutationOptions<
-		Awaited<ReturnType<ReturnType<typeof useApproveDeviceHook>>>,
-		TError,
-		{ deviceId: number },
-		TContext
-	>;
-}): UseMutationOptions<
-	Awaited<ReturnType<ReturnType<typeof useApproveDeviceHook>>>,
-	TError,
-	{ deviceId: number },
-	TContext
-> => {
-	const mutationKey = ["approveDevice"];
-	const { mutation: mutationOptions } = options
-		? options.mutation &&
-			"mutationKey" in options.mutation &&
-			options.mutation.mutationKey
-			? options
-			: { ...options, mutation: { ...options.mutation, mutationKey } }
-		: { mutation: { mutationKey } };
 
-	const approveDevice = useApproveDeviceHook();
+export const useApproveDeviceMutationOptions = <TError = string,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<ReturnType<typeof useApproveDeviceHook>>>, TError,{deviceId: number}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<ReturnType<typeof useApproveDeviceHook>>>, TError,{deviceId: number}, TContext> => {
 
-	const mutationFn: MutationFunction<
-		Awaited<ReturnType<ReturnType<typeof useApproveDeviceHook>>>,
-		{ deviceId: number }
-	> = (props) => {
-		const { deviceId } = props ?? {};
+const mutationKey = ['approveDevice'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
 
-		return approveDevice(deviceId);
-	};
+      const approveDevice =  useApproveDeviceHook()
 
-	return { mutationFn, ...mutationOptions };
-};
 
-export type ApproveDeviceMutationResult = NonNullable<
-	Awaited<ReturnType<ReturnType<typeof useApproveDeviceHook>>>
->;
+      const mutationFn: MutationFunction<Awaited<ReturnType<ReturnType<typeof useApproveDeviceHook>>>, {deviceId: number}> = (props) => {
+          const {deviceId} = props ?? {};
 
-export type ApproveDeviceMutationError = string;
+          return  approveDevice(deviceId,)
+        }
 
-export const useApproveDevice = <TError = string, TContext = unknown>(
-	options?: {
-		mutation?: UseMutationOptions<
-			Awaited<ReturnType<ReturnType<typeof useApproveDeviceHook>>>,
-			TError,
-			{ deviceId: number },
-			TContext
-		>;
-	},
-	queryClient?: QueryClient,
-): UseMutationResult<
-	Awaited<ReturnType<ReturnType<typeof useApproveDeviceHook>>>,
-	TError,
-	{ deviceId: number },
-	TContext
-> => {
-	const mutationOptions = useApproveDeviceMutationOptions(options);
+        
 
-	return useMutation(mutationOptions, queryClient);
-};
 
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ApproveDeviceMutationResult = NonNullable<Awaited<ReturnType<ReturnType<typeof useApproveDeviceHook>>>>
+    
+    export type ApproveDeviceMutationError = string
+
+    export const useApproveDevice = <TError = string,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<ReturnType<typeof useApproveDeviceHook>>>, TError,{deviceId: number}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<ReturnType<typeof useApproveDeviceHook>>>,
+        TError,
+        {deviceId: number},
+        TContext
+      > => {
+
+      const mutationOptions = useApproveDeviceMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    
 export const useRevokeDeviceHook = () => {
-	const revokeDevice = useClientMutator<boolean>();
+        const revokeDevice = useClientMutator<boolean>();
 
-	return useCallback(
-		(deviceId: number) => {
-			return revokeDevice({
-				url: `/devices/${deviceId}/approval`,
-				method: "DELETE",
-			});
-		},
-		[revokeDevice],
-	);
-};
+        return useCallback((
+    deviceId: number,
+ ) => {
+        return revokeDevice(
+          {url: `/devices/${deviceId}/approval`, method: 'DELETE'
+    },
+          );
+        }, [revokeDevice])
+      }
+    
 
-export const useRevokeDeviceMutationOptions = <
-	TError = string,
-	TContext = unknown,
->(options?: {
-	mutation?: UseMutationOptions<
-		Awaited<ReturnType<ReturnType<typeof useRevokeDeviceHook>>>,
-		TError,
-		{ deviceId: number },
-		TContext
-	>;
-}): UseMutationOptions<
-	Awaited<ReturnType<ReturnType<typeof useRevokeDeviceHook>>>,
-	TError,
-	{ deviceId: number },
-	TContext
-> => {
-	const mutationKey = ["revokeDevice"];
-	const { mutation: mutationOptions } = options
-		? options.mutation &&
-			"mutationKey" in options.mutation &&
-			options.mutation.mutationKey
-			? options
-			: { ...options, mutation: { ...options.mutation, mutationKey } }
-		: { mutation: { mutationKey } };
 
-	const revokeDevice = useRevokeDeviceHook();
+export const useRevokeDeviceMutationOptions = <TError = string,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<ReturnType<typeof useRevokeDeviceHook>>>, TError,{deviceId: number}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<ReturnType<typeof useRevokeDeviceHook>>>, TError,{deviceId: number}, TContext> => {
 
-	const mutationFn: MutationFunction<
-		Awaited<ReturnType<ReturnType<typeof useRevokeDeviceHook>>>,
-		{ deviceId: number }
-	> = (props) => {
-		const { deviceId } = props ?? {};
+const mutationKey = ['revokeDevice'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
 
-		return revokeDevice(deviceId);
-	};
+      const revokeDevice =  useRevokeDeviceHook()
 
-	return { mutationFn, ...mutationOptions };
-};
 
-export type RevokeDeviceMutationResult = NonNullable<
-	Awaited<ReturnType<ReturnType<typeof useRevokeDeviceHook>>>
->;
+      const mutationFn: MutationFunction<Awaited<ReturnType<ReturnType<typeof useRevokeDeviceHook>>>, {deviceId: number}> = (props) => {
+          const {deviceId} = props ?? {};
 
-export type RevokeDeviceMutationError = string;
+          return  revokeDevice(deviceId,)
+        }
 
-export const useRevokeDevice = <TError = string, TContext = unknown>(
-	options?: {
-		mutation?: UseMutationOptions<
-			Awaited<ReturnType<ReturnType<typeof useRevokeDeviceHook>>>,
-			TError,
-			{ deviceId: number },
-			TContext
-		>;
-	},
-	queryClient?: QueryClient,
-): UseMutationResult<
-	Awaited<ReturnType<ReturnType<typeof useRevokeDeviceHook>>>,
-	TError,
-	{ deviceId: number },
-	TContext
-> => {
-	const mutationOptions = useRevokeDeviceMutationOptions(options);
+        
 
-	return useMutation(mutationOptions, queryClient);
-};
 
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RevokeDeviceMutationResult = NonNullable<Awaited<ReturnType<ReturnType<typeof useRevokeDeviceHook>>>>
+    
+    export type RevokeDeviceMutationError = string
+
+    export const useRevokeDevice = <TError = string,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<ReturnType<typeof useRevokeDeviceHook>>>, TError,{deviceId: number}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<ReturnType<typeof useRevokeDeviceHook>>>,
+        TError,
+        {deviceId: number},
+        TContext
+      > => {
+
+      const mutationOptions = useRevokeDeviceMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    
 export const useGetAllCommandsForDeviceHook = () => {
-	const getAllCommandsForDevice = useClientMutator<CommandsPaginated>();
+        const getAllCommandsForDevice = useClientMutator<CommandsPaginated>();
 
-	return useCallback(
-		(
-			deviceId: string,
-			params?: GetAllCommandsForDeviceParams,
-			signal?: AbortSignal,
-		) => {
-			return getAllCommandsForDevice({
-				url: `/devices/${deviceId}/commands`,
-				method: "GET",
-				params,
-				signal,
-			});
-		},
-		[getAllCommandsForDevice],
-	);
-};
-
-export const getGetAllCommandsForDeviceInfiniteQueryKey = (
-	deviceId?: string,
-	params?: GetAllCommandsForDeviceParams,
+        return useCallback((
+    deviceId: string,
+    params?: GetAllCommandsForDeviceParams,
+ signal?: AbortSignal
 ) => {
-	return [
-		"infinite",
-		`/devices/${deviceId}/commands`,
-		...(params ? [params] : []),
-	] as const;
-};
+        return getAllCommandsForDevice(
+          {url: `/devices/${deviceId}/commands`, method: 'GET',
+        params, signal
+    },
+          );
+        }, [getAllCommandsForDevice])
+      }
+    
 
-export const getGetAllCommandsForDeviceQueryKey = (
-	deviceId?: string,
-	params?: GetAllCommandsForDeviceParams,
+
+
+export const getGetAllCommandsForDeviceInfiniteQueryKey = (deviceId?: string,
+    params?: GetAllCommandsForDeviceParams,) => {
+    return [
+    'infinite', `/devices/${deviceId}/commands`, ...(params ? [params]: [])
+    ] as const;
+    }
+
+export const getGetAllCommandsForDeviceQueryKey = (deviceId?: string,
+    params?: GetAllCommandsForDeviceParams,) => {
+    return [
+    `/devices/${deviceId}/commands`, ...(params ? [params]: [])
+    ] as const;
+    }
+
+    
+export const useGetAllCommandsForDeviceInfiniteQueryOptions = <TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetAllCommandsForDeviceHook>>>, GetAllCommandsForDeviceParams['offset']>, TError = void>(deviceId: string,
+    params?: GetAllCommandsForDeviceParams, options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetAllCommandsForDeviceHook>>>, TError, TData, QueryKey, GetAllCommandsForDeviceParams['offset']>>, }
 ) => {
-	return [
-		`/devices/${deviceId}/commands`,
-		...(params ? [params] : []),
-	] as const;
-};
 
-export const useGetAllCommandsForDeviceInfiniteQueryOptions = <
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetAllCommandsForDeviceHook>>>,
-		GetAllCommandsForDeviceParams["offset"]
-	>,
-	TError = void,
->(
-	deviceId: string,
-	params?: GetAllCommandsForDeviceParams,
-	options?: {
-		query?: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetAllCommandsForDeviceHook>>>,
-				TError,
-				TData,
-				QueryKey,
-				GetAllCommandsForDeviceParams["offset"]
-			>
-		>;
-	},
-) => {
-	const { query: queryOptions } = options ?? {};
+const {query: queryOptions} = options ?? {};
 
-	const queryKey =
-		queryOptions?.queryKey ??
-		getGetAllCommandsForDeviceInfiniteQueryKey(deviceId, params);
+  const queryKey =  queryOptions?.queryKey ?? getGetAllCommandsForDeviceInfiniteQueryKey(deviceId,params);
 
-	const getAllCommandsForDevice = useGetAllCommandsForDeviceHook();
+  const getAllCommandsForDevice =  useGetAllCommandsForDeviceHook();
 
-	const queryFn: QueryFunction<
-		Awaited<ReturnType<ReturnType<typeof useGetAllCommandsForDeviceHook>>>,
-		QueryKey,
-		GetAllCommandsForDeviceParams["offset"]
-	> = ({ signal, pageParam }) =>
-		getAllCommandsForDevice(
-			deviceId,
-			{ ...params, offset: pageParam || params?.["offset"] },
-			signal,
-		);
+    const queryFn: QueryFunction<Awaited<ReturnType<ReturnType<typeof useGetAllCommandsForDeviceHook>>>, QueryKey, GetAllCommandsForDeviceParams['offset']> = ({ signal, pageParam }) => getAllCommandsForDevice(deviceId,{...params, 'offset': pageParam || params?.['offset']}, signal);
 
-	return {
-		queryKey,
-		queryFn,
-		enabled: !!deviceId,
-		...queryOptions,
-	} as UseInfiniteQueryOptions<
-		Awaited<ReturnType<ReturnType<typeof useGetAllCommandsForDeviceHook>>>,
-		TError,
-		TData,
-		QueryKey,
-		GetAllCommandsForDeviceParams["offset"]
-	> & { queryKey: DataTag<QueryKey, TData, TError> };
-};
+      
 
-export type GetAllCommandsForDeviceInfiniteQueryResult = NonNullable<
-	Awaited<ReturnType<ReturnType<typeof useGetAllCommandsForDeviceHook>>>
->;
-export type GetAllCommandsForDeviceInfiniteQueryError = void;
+      
 
-export function useGetAllCommandsForDeviceInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetAllCommandsForDeviceHook>>>,
-		GetAllCommandsForDeviceParams["offset"]
-	>,
-	TError = void,
->(
-	deviceId: string,
-	params: undefined | GetAllCommandsForDeviceParams,
-	options: {
-		query: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetAllCommandsForDeviceHook>>>,
-				TError,
-				TData,
-				QueryKey,
-				GetAllCommandsForDeviceParams["offset"]
-			>
-		> &
-			Pick<
-				DefinedInitialDataOptions<
-					Awaited<
-						ReturnType<ReturnType<typeof useGetAllCommandsForDeviceHook>>
-					>,
-					TError,
-					Awaited<
-						ReturnType<ReturnType<typeof useGetAllCommandsForDeviceHook>>
-					>,
-					QueryKey
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): DefinedUseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useGetAllCommandsForDeviceInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetAllCommandsForDeviceHook>>>,
-		GetAllCommandsForDeviceParams["offset"]
-	>,
-	TError = void,
->(
-	deviceId: string,
-	params?: GetAllCommandsForDeviceParams,
-	options?: {
-		query?: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetAllCommandsForDeviceHook>>>,
-				TError,
-				TData,
-				QueryKey,
-				GetAllCommandsForDeviceParams["offset"]
-			>
-		> &
-			Pick<
-				UndefinedInitialDataOptions<
-					Awaited<
-						ReturnType<ReturnType<typeof useGetAllCommandsForDeviceHook>>
-					>,
-					TError,
-					Awaited<
-						ReturnType<ReturnType<typeof useGetAllCommandsForDeviceHook>>
-					>,
-					QueryKey
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): UseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useGetAllCommandsForDeviceInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetAllCommandsForDeviceHook>>>,
-		GetAllCommandsForDeviceParams["offset"]
-	>,
-	TError = void,
->(
-	deviceId: string,
-	params?: GetAllCommandsForDeviceParams,
-	options?: {
-		query?: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetAllCommandsForDeviceHook>>>,
-				TError,
-				TData,
-				QueryKey,
-				GetAllCommandsForDeviceParams["offset"]
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-
-export function useGetAllCommandsForDeviceInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetAllCommandsForDeviceHook>>>,
-		GetAllCommandsForDeviceParams["offset"]
-	>,
-	TError = void,
->(
-	deviceId: string,
-	params?: GetAllCommandsForDeviceParams,
-	options?: {
-		query?: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetAllCommandsForDeviceHook>>>,
-				TError,
-				TData,
-				QueryKey,
-				GetAllCommandsForDeviceParams["offset"]
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-} {
-	const queryOptions = useGetAllCommandsForDeviceInfiniteQueryOptions(
-		deviceId,
-		params,
-		options,
-	);
-
-	const query = useInfiniteQuery(
-		queryOptions,
-		queryClient,
-	) as UseInfiniteQueryResult<TData, TError> & {
-		queryKey: DataTag<QueryKey, TData, TError>;
-	};
-
-	query.queryKey = queryOptions.queryKey;
-
-	return query;
+   return  { queryKey, queryFn, enabled: !!(deviceId), ...queryOptions} as UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetAllCommandsForDeviceHook>>>, TError, TData, QueryKey, GetAllCommandsForDeviceParams['offset']> & { queryKey: DataTag<QueryKey, TData, TError> }
 }
 
-export const useGetAllCommandsForDeviceQueryOptions = <
-	TData = Awaited<
-		ReturnType<ReturnType<typeof useGetAllCommandsForDeviceHook>>
-	>,
-	TError = void,
->(
-	deviceId: string,
-	params?: GetAllCommandsForDeviceParams,
-	options?: {
-		query?: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetAllCommandsForDeviceHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-) => {
-	const { query: queryOptions } = options ?? {};
+export type GetAllCommandsForDeviceInfiniteQueryResult = NonNullable<Awaited<ReturnType<ReturnType<typeof useGetAllCommandsForDeviceHook>>>>
+export type GetAllCommandsForDeviceInfiniteQueryError = void
 
-	const queryKey =
-		queryOptions?.queryKey ??
-		getGetAllCommandsForDeviceQueryKey(deviceId, params);
 
-	const getAllCommandsForDevice = useGetAllCommandsForDeviceHook();
+export function useGetAllCommandsForDeviceInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetAllCommandsForDeviceHook>>>, GetAllCommandsForDeviceParams['offset']>, TError = void>(
+ deviceId: string,
+    params: undefined |  GetAllCommandsForDeviceParams, options: { query:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetAllCommandsForDeviceHook>>>, TError, TData, QueryKey, GetAllCommandsForDeviceParams['offset']>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useGetAllCommandsForDeviceHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useGetAllCommandsForDeviceHook>>>, QueryKey
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetAllCommandsForDeviceInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetAllCommandsForDeviceHook>>>, GetAllCommandsForDeviceParams['offset']>, TError = void>(
+ deviceId: string,
+    params?: GetAllCommandsForDeviceParams, options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetAllCommandsForDeviceHook>>>, TError, TData, QueryKey, GetAllCommandsForDeviceParams['offset']>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useGetAllCommandsForDeviceHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useGetAllCommandsForDeviceHook>>>, QueryKey
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetAllCommandsForDeviceInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetAllCommandsForDeviceHook>>>, GetAllCommandsForDeviceParams['offset']>, TError = void>(
+ deviceId: string,
+    params?: GetAllCommandsForDeviceParams, options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetAllCommandsForDeviceHook>>>, TError, TData, QueryKey, GetAllCommandsForDeviceParams['offset']>>, }
+ , queryClient?: QueryClient
+  ):  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 
-	const queryFn: QueryFunction<
-		Awaited<ReturnType<ReturnType<typeof useGetAllCommandsForDeviceHook>>>
-	> = ({ signal }) => getAllCommandsForDevice(deviceId, params, signal);
+export function useGetAllCommandsForDeviceInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetAllCommandsForDeviceHook>>>, GetAllCommandsForDeviceParams['offset']>, TError = void>(
+ deviceId: string,
+    params?: GetAllCommandsForDeviceParams, options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetAllCommandsForDeviceHook>>>, TError, TData, QueryKey, GetAllCommandsForDeviceParams['offset']>>, }
+ , queryClient?: QueryClient 
+ ):  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
-	return {
-		queryKey,
-		queryFn,
-		enabled: !!deviceId,
-		...queryOptions,
-	} as UseQueryOptions<
-		Awaited<ReturnType<ReturnType<typeof useGetAllCommandsForDeviceHook>>>,
-		TError,
-		TData
-	> & { queryKey: DataTag<QueryKey, TData, TError> };
-};
+  const queryOptions = useGetAllCommandsForDeviceInfiniteQueryOptions(deviceId,params,options)
 
-export type GetAllCommandsForDeviceQueryResult = NonNullable<
-	Awaited<ReturnType<ReturnType<typeof useGetAllCommandsForDeviceHook>>>
->;
-export type GetAllCommandsForDeviceQueryError = void;
+  const query = useInfiniteQuery(queryOptions, queryClient) as  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 
-export function useGetAllCommandsForDevice<
-	TData = Awaited<
-		ReturnType<ReturnType<typeof useGetAllCommandsForDeviceHook>>
-	>,
-	TError = void,
->(
-	deviceId: string,
-	params: undefined | GetAllCommandsForDeviceParams,
-	options: {
-		query: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetAllCommandsForDeviceHook>>>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				DefinedInitialDataOptions<
-					Awaited<
-						ReturnType<ReturnType<typeof useGetAllCommandsForDeviceHook>>
-					>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useGetAllCommandsForDeviceHook>>>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): DefinedUseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useGetAllCommandsForDevice<
-	TData = Awaited<
-		ReturnType<ReturnType<typeof useGetAllCommandsForDeviceHook>>
-	>,
-	TError = void,
->(
-	deviceId: string,
-	params?: GetAllCommandsForDeviceParams,
-	options?: {
-		query?: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetAllCommandsForDeviceHook>>>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				UndefinedInitialDataOptions<
-					Awaited<
-						ReturnType<ReturnType<typeof useGetAllCommandsForDeviceHook>>
-					>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useGetAllCommandsForDeviceHook>>>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useGetAllCommandsForDevice<
-	TData = Awaited<
-		ReturnType<ReturnType<typeof useGetAllCommandsForDeviceHook>>
-	>,
-	TError = void,
->(
-	deviceId: string,
-	params?: GetAllCommandsForDeviceParams,
-	options?: {
-		query?: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetAllCommandsForDeviceHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
+  query.queryKey = queryOptions.queryKey ;
 
-export function useGetAllCommandsForDevice<
-	TData = Awaited<
-		ReturnType<ReturnType<typeof useGetAllCommandsForDeviceHook>>
-	>,
-	TError = void,
->(
-	deviceId: string,
-	params?: GetAllCommandsForDeviceParams,
-	options?: {
-		query?: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetAllCommandsForDeviceHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-} {
-	const queryOptions = useGetAllCommandsForDeviceQueryOptions(
-		deviceId,
-		params,
-		options,
-	);
-
-	const query = useQuery(queryOptions, queryClient) as UseQueryResult<
-		TData,
-		TError
-	> & { queryKey: DataTag<QueryKey, TData, TError> };
-
-	query.queryKey = queryOptions.queryKey;
-
-	return query;
+  return query;
 }
+
+
+
+
+export const useGetAllCommandsForDeviceQueryOptions = <TData = Awaited<ReturnType<ReturnType<typeof useGetAllCommandsForDeviceHook>>>, TError = void>(deviceId: string,
+    params?: GetAllCommandsForDeviceParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetAllCommandsForDeviceHook>>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetAllCommandsForDeviceQueryKey(deviceId,params);
+
+  const getAllCommandsForDevice =  useGetAllCommandsForDeviceHook();
+
+    const queryFn: QueryFunction<Awaited<ReturnType<ReturnType<typeof useGetAllCommandsForDeviceHook>>>> = ({ signal }) => getAllCommandsForDevice(deviceId,params, signal);
+
+      
+
+      
+
+   return  { queryKey, queryFn, enabled: !!(deviceId), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetAllCommandsForDeviceHook>>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetAllCommandsForDeviceQueryResult = NonNullable<Awaited<ReturnType<ReturnType<typeof useGetAllCommandsForDeviceHook>>>>
+export type GetAllCommandsForDeviceQueryError = void
+
+
+export function useGetAllCommandsForDevice<TData = Awaited<ReturnType<ReturnType<typeof useGetAllCommandsForDeviceHook>>>, TError = void>(
+ deviceId: string,
+    params: undefined |  GetAllCommandsForDeviceParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetAllCommandsForDeviceHook>>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useGetAllCommandsForDeviceHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useGetAllCommandsForDeviceHook>>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetAllCommandsForDevice<TData = Awaited<ReturnType<ReturnType<typeof useGetAllCommandsForDeviceHook>>>, TError = void>(
+ deviceId: string,
+    params?: GetAllCommandsForDeviceParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetAllCommandsForDeviceHook>>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useGetAllCommandsForDeviceHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useGetAllCommandsForDeviceHook>>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetAllCommandsForDevice<TData = Awaited<ReturnType<ReturnType<typeof useGetAllCommandsForDeviceHook>>>, TError = void>(
+ deviceId: string,
+    params?: GetAllCommandsForDeviceParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetAllCommandsForDeviceHook>>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+
+export function useGetAllCommandsForDevice<TData = Awaited<ReturnType<ReturnType<typeof useGetAllCommandsForDeviceHook>>>, TError = void>(
+ deviceId: string,
+    params?: GetAllCommandsForDeviceParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetAllCommandsForDeviceHook>>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = useGetAllCommandsForDeviceQueryOptions(deviceId,params,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  query.queryKey = queryOptions.queryKey ;
+
+  return query;
+}
+
+
+
+
 
 export const useIssueCommandsToDeviceHook = () => {
-	const issueCommandsToDevice = useClientMutator<void>();
+        const issueCommandsToDevice = useClientMutator<void>();
 
-	return useCallback(
-		(deviceId: string, signal?: AbortSignal) => {
-			return issueCommandsToDevice({
-				url: `/devices/${deviceId}/commands`,
-				method: "POST",
-				signal,
-			});
-		},
-		[issueCommandsToDevice],
-	);
-};
+        return useCallback((
+    deviceId: string,
+ signal?: AbortSignal
+) => {
+        return issueCommandsToDevice(
+          {url: `/devices/${deviceId}/commands`, method: 'POST', signal
+    },
+          );
+        }, [issueCommandsToDevice])
+      }
+    
 
-export const useIssueCommandsToDeviceMutationOptions = <
-	TError = void,
-	TContext = unknown,
->(options?: {
-	mutation?: UseMutationOptions<
-		Awaited<ReturnType<ReturnType<typeof useIssueCommandsToDeviceHook>>>,
-		TError,
-		{ deviceId: string },
-		TContext
-	>;
-}): UseMutationOptions<
-	Awaited<ReturnType<ReturnType<typeof useIssueCommandsToDeviceHook>>>,
-	TError,
-	{ deviceId: string },
-	TContext
-> => {
-	const mutationKey = ["issueCommandsToDevice"];
-	const { mutation: mutationOptions } = options
-		? options.mutation &&
-			"mutationKey" in options.mutation &&
-			options.mutation.mutationKey
-			? options
-			: { ...options, mutation: { ...options.mutation, mutationKey } }
-		: { mutation: { mutationKey } };
 
-	const issueCommandsToDevice = useIssueCommandsToDeviceHook();
+export const useIssueCommandsToDeviceMutationOptions = <TError = void,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<ReturnType<typeof useIssueCommandsToDeviceHook>>>, TError,{deviceId: string}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<ReturnType<typeof useIssueCommandsToDeviceHook>>>, TError,{deviceId: string}, TContext> => {
 
-	const mutationFn: MutationFunction<
-		Awaited<ReturnType<ReturnType<typeof useIssueCommandsToDeviceHook>>>,
-		{ deviceId: string }
-	> = (props) => {
-		const { deviceId } = props ?? {};
+const mutationKey = ['issueCommandsToDevice'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
 
-		return issueCommandsToDevice(deviceId);
-	};
+      const issueCommandsToDevice =  useIssueCommandsToDeviceHook()
 
-	return { mutationFn, ...mutationOptions };
-};
 
-export type IssueCommandsToDeviceMutationResult = NonNullable<
-	Awaited<ReturnType<ReturnType<typeof useIssueCommandsToDeviceHook>>>
->;
+      const mutationFn: MutationFunction<Awaited<ReturnType<ReturnType<typeof useIssueCommandsToDeviceHook>>>, {deviceId: string}> = (props) => {
+          const {deviceId} = props ?? {};
 
-export type IssueCommandsToDeviceMutationError = void;
+          return  issueCommandsToDevice(deviceId,)
+        }
 
-export const useIssueCommandsToDevice = <TError = void, TContext = unknown>(
-	options?: {
-		mutation?: UseMutationOptions<
-			Awaited<ReturnType<ReturnType<typeof useIssueCommandsToDeviceHook>>>,
-			TError,
-			{ deviceId: string },
-			TContext
-		>;
-	},
-	queryClient?: QueryClient,
-): UseMutationResult<
-	Awaited<ReturnType<ReturnType<typeof useIssueCommandsToDeviceHook>>>,
-	TError,
-	{ deviceId: string },
-	TContext
-> => {
-	const mutationOptions = useIssueCommandsToDeviceMutationOptions(options);
+        
 
-	return useMutation(mutationOptions, queryClient);
-};
 
+  return  { mutationFn, ...mutationOptions }}
+
+    export type IssueCommandsToDeviceMutationResult = NonNullable<Awaited<ReturnType<ReturnType<typeof useIssueCommandsToDeviceHook>>>>
+    
+    export type IssueCommandsToDeviceMutationError = void
+
+    export const useIssueCommandsToDevice = <TError = void,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<ReturnType<typeof useIssueCommandsToDeviceHook>>>, TError,{deviceId: string}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<ReturnType<typeof useIssueCommandsToDeviceHook>>>,
+        TError,
+        {deviceId: string},
+        TContext
+      > => {
+
+      const mutationOptions = useIssueCommandsToDeviceMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    
 export const useGetHealthForDeviceHook = () => {
-	const getHealthForDevice = useClientMutator<DeviceHealth[]>();
+        const getHealthForDevice = useClientMutator<DeviceHealth[]>();
 
-	return useCallback(
-		(deviceId: string, signal?: AbortSignal) => {
-			return getHealthForDevice({
-				url: `/devices/${deviceId}/health`,
-				method: "GET",
-				signal,
-			});
-		},
-		[getHealthForDevice],
-	);
-};
-
-export const getGetHealthForDeviceInfiniteQueryKey = (deviceId?: string) => {
-	return ["infinite", `/devices/${deviceId}/health`] as const;
-};
-
-export const getGetHealthForDeviceQueryKey = (deviceId?: string) => {
-	return [`/devices/${deviceId}/health`] as const;
-};
-
-export const useGetHealthForDeviceInfiniteQueryOptions = <
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetHealthForDeviceHook>>>
-	>,
-	TError = string,
->(
-	deviceId: string,
-	options?: {
-		query?: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetHealthForDeviceHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
+        return useCallback((
+    deviceId: string,
+ signal?: AbortSignal
 ) => {
-	const { query: queryOptions } = options ?? {};
+        return getHealthForDevice(
+          {url: `/devices/${deviceId}/health`, method: 'GET', signal
+    },
+          );
+        }, [getHealthForDevice])
+      }
+    
 
-	const queryKey =
-		queryOptions?.queryKey ?? getGetHealthForDeviceInfiniteQueryKey(deviceId);
 
-	const getHealthForDevice = useGetHealthForDeviceHook();
 
-	const queryFn: QueryFunction<
-		Awaited<ReturnType<ReturnType<typeof useGetHealthForDeviceHook>>>
-	> = ({ signal }) => getHealthForDevice(deviceId, signal);
+export const getGetHealthForDeviceInfiniteQueryKey = (deviceId?: string,) => {
+    return [
+    'infinite', `/devices/${deviceId}/health`
+    ] as const;
+    }
 
-	return {
-		queryKey,
-		queryFn,
-		enabled: !!deviceId,
-		...queryOptions,
-	} as UseInfiniteQueryOptions<
-		Awaited<ReturnType<ReturnType<typeof useGetHealthForDeviceHook>>>,
-		TError,
-		TData
-	> & { queryKey: DataTag<QueryKey, TData, TError> };
-};
+export const getGetHealthForDeviceQueryKey = (deviceId?: string,) => {
+    return [
+    `/devices/${deviceId}/health`
+    ] as const;
+    }
 
-export type GetHealthForDeviceInfiniteQueryResult = NonNullable<
-	Awaited<ReturnType<ReturnType<typeof useGetHealthForDeviceHook>>>
->;
-export type GetHealthForDeviceInfiniteQueryError = string;
+    
+export const useGetHealthForDeviceInfiniteQueryOptions = <TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetHealthForDeviceHook>>>>, TError = string>(deviceId: string, options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetHealthForDeviceHook>>>, TError, TData>>, }
+) => {
 
-export function useGetHealthForDeviceInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetHealthForDeviceHook>>>
-	>,
-	TError = string,
->(
-	deviceId: string,
-	options: {
-		query: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetHealthForDeviceHook>>>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				DefinedInitialDataOptions<
-					Awaited<ReturnType<ReturnType<typeof useGetHealthForDeviceHook>>>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useGetHealthForDeviceHook>>>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): DefinedUseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useGetHealthForDeviceInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetHealthForDeviceHook>>>
-	>,
-	TError = string,
->(
-	deviceId: string,
-	options?: {
-		query?: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetHealthForDeviceHook>>>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				UndefinedInitialDataOptions<
-					Awaited<ReturnType<ReturnType<typeof useGetHealthForDeviceHook>>>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useGetHealthForDeviceHook>>>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): UseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useGetHealthForDeviceInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetHealthForDeviceHook>>>
-	>,
-	TError = string,
->(
-	deviceId: string,
-	options?: {
-		query?: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetHealthForDeviceHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
+const {query: queryOptions} = options ?? {};
 
-export function useGetHealthForDeviceInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetHealthForDeviceHook>>>
-	>,
-	TError = string,
->(
-	deviceId: string,
-	options?: {
-		query?: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetHealthForDeviceHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-} {
-	const queryOptions = useGetHealthForDeviceInfiniteQueryOptions(
-		deviceId,
-		options,
-	);
+  const queryKey =  queryOptions?.queryKey ?? getGetHealthForDeviceInfiniteQueryKey(deviceId);
 
-	const query = useInfiniteQuery(
-		queryOptions,
-		queryClient,
-	) as UseInfiniteQueryResult<TData, TError> & {
-		queryKey: DataTag<QueryKey, TData, TError>;
-	};
+  const getHealthForDevice =  useGetHealthForDeviceHook();
 
-	query.queryKey = queryOptions.queryKey;
+    const queryFn: QueryFunction<Awaited<ReturnType<ReturnType<typeof useGetHealthForDeviceHook>>>> = ({ signal }) => getHealthForDevice(deviceId, signal);
 
-	return query;
+      
+
+      
+
+   return  { queryKey, queryFn, enabled: !!(deviceId), ...queryOptions} as UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetHealthForDeviceHook>>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
 }
 
-export const useGetHealthForDeviceQueryOptions = <
-	TData = Awaited<ReturnType<ReturnType<typeof useGetHealthForDeviceHook>>>,
-	TError = string,
->(
-	deviceId: string,
-	options?: {
-		query?: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetHealthForDeviceHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-) => {
-	const { query: queryOptions } = options ?? {};
+export type GetHealthForDeviceInfiniteQueryResult = NonNullable<Awaited<ReturnType<ReturnType<typeof useGetHealthForDeviceHook>>>>
+export type GetHealthForDeviceInfiniteQueryError = string
 
-	const queryKey =
-		queryOptions?.queryKey ?? getGetHealthForDeviceQueryKey(deviceId);
 
-	const getHealthForDevice = useGetHealthForDeviceHook();
+export function useGetHealthForDeviceInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetHealthForDeviceHook>>>>, TError = string>(
+ deviceId: string, options: { query:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetHealthForDeviceHook>>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useGetHealthForDeviceHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useGetHealthForDeviceHook>>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetHealthForDeviceInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetHealthForDeviceHook>>>>, TError = string>(
+ deviceId: string, options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetHealthForDeviceHook>>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useGetHealthForDeviceHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useGetHealthForDeviceHook>>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetHealthForDeviceInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetHealthForDeviceHook>>>>, TError = string>(
+ deviceId: string, options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetHealthForDeviceHook>>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 
-	const queryFn: QueryFunction<
-		Awaited<ReturnType<ReturnType<typeof useGetHealthForDeviceHook>>>
-	> = ({ signal }) => getHealthForDevice(deviceId, signal);
+export function useGetHealthForDeviceInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetHealthForDeviceHook>>>>, TError = string>(
+ deviceId: string, options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetHealthForDeviceHook>>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
-	return {
-		queryKey,
-		queryFn,
-		enabled: !!deviceId,
-		...queryOptions,
-	} as UseQueryOptions<
-		Awaited<ReturnType<ReturnType<typeof useGetHealthForDeviceHook>>>,
-		TError,
-		TData
-	> & { queryKey: DataTag<QueryKey, TData, TError> };
-};
+  const queryOptions = useGetHealthForDeviceInfiniteQueryOptions(deviceId,options)
 
-export type GetHealthForDeviceQueryResult = NonNullable<
-	Awaited<ReturnType<ReturnType<typeof useGetHealthForDeviceHook>>>
->;
-export type GetHealthForDeviceQueryError = string;
+  const query = useInfiniteQuery(queryOptions, queryClient) as  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 
-export function useGetHealthForDevice<
-	TData = Awaited<ReturnType<ReturnType<typeof useGetHealthForDeviceHook>>>,
-	TError = string,
->(
-	deviceId: string,
-	options: {
-		query: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetHealthForDeviceHook>>>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				DefinedInitialDataOptions<
-					Awaited<ReturnType<ReturnType<typeof useGetHealthForDeviceHook>>>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useGetHealthForDeviceHook>>>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): DefinedUseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useGetHealthForDevice<
-	TData = Awaited<ReturnType<ReturnType<typeof useGetHealthForDeviceHook>>>,
-	TError = string,
->(
-	deviceId: string,
-	options?: {
-		query?: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetHealthForDeviceHook>>>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				UndefinedInitialDataOptions<
-					Awaited<ReturnType<ReturnType<typeof useGetHealthForDeviceHook>>>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useGetHealthForDeviceHook>>>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useGetHealthForDevice<
-	TData = Awaited<ReturnType<ReturnType<typeof useGetHealthForDeviceHook>>>,
-	TError = string,
->(
-	deviceId: string,
-	options?: {
-		query?: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetHealthForDeviceHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
+  query.queryKey = queryOptions.queryKey ;
 
-export function useGetHealthForDevice<
-	TData = Awaited<ReturnType<ReturnType<typeof useGetHealthForDeviceHook>>>,
-	TError = string,
->(
-	deviceId: string,
-	options?: {
-		query?: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetHealthForDeviceHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-} {
-	const queryOptions = useGetHealthForDeviceQueryOptions(deviceId, options);
-
-	const query = useQuery(queryOptions, queryClient) as UseQueryResult<
-		TData,
-		TError
-	> & { queryKey: DataTag<QueryKey, TData, TError> };
-
-	query.queryKey = queryOptions.queryKey;
-
-	return query;
+  return query;
 }
+
+
+
+
+export const useGetHealthForDeviceQueryOptions = <TData = Awaited<ReturnType<ReturnType<typeof useGetHealthForDeviceHook>>>, TError = string>(deviceId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetHealthForDeviceHook>>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetHealthForDeviceQueryKey(deviceId);
+
+  const getHealthForDevice =  useGetHealthForDeviceHook();
+
+    const queryFn: QueryFunction<Awaited<ReturnType<ReturnType<typeof useGetHealthForDeviceHook>>>> = ({ signal }) => getHealthForDevice(deviceId, signal);
+
+      
+
+      
+
+   return  { queryKey, queryFn, enabled: !!(deviceId), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetHealthForDeviceHook>>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetHealthForDeviceQueryResult = NonNullable<Awaited<ReturnType<ReturnType<typeof useGetHealthForDeviceHook>>>>
+export type GetHealthForDeviceQueryError = string
+
+
+export function useGetHealthForDevice<TData = Awaited<ReturnType<ReturnType<typeof useGetHealthForDeviceHook>>>, TError = string>(
+ deviceId: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetHealthForDeviceHook>>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useGetHealthForDeviceHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useGetHealthForDeviceHook>>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetHealthForDevice<TData = Awaited<ReturnType<ReturnType<typeof useGetHealthForDeviceHook>>>, TError = string>(
+ deviceId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetHealthForDeviceHook>>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useGetHealthForDeviceHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useGetHealthForDeviceHook>>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetHealthForDevice<TData = Awaited<ReturnType<ReturnType<typeof useGetHealthForDeviceHook>>>, TError = string>(
+ deviceId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetHealthForDeviceHook>>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+
+export function useGetHealthForDevice<TData = Awaited<ReturnType<ReturnType<typeof useGetHealthForDeviceHook>>>, TError = string>(
+ deviceId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetHealthForDeviceHook>>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = useGetHealthForDeviceQueryOptions(deviceId,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  query.queryKey = queryOptions.queryKey ;
+
+  return query;
+}
+
+
+
+
 
 export const useGetLedgerForDeviceHook = () => {
-	const getLedgerForDevice = useClientMutator<DeviceLedgerItemPaginated>();
+        const getLedgerForDevice = useClientMutator<DeviceLedgerItemPaginated>();
 
-	return useCallback(
-		(deviceId: number, signal?: AbortSignal) => {
-			return getLedgerForDevice({
-				url: `/devices/${deviceId}/ledger`,
-				method: "GET",
-				signal,
-			});
-		},
-		[getLedgerForDevice],
-	);
-};
-
-export const getGetLedgerForDeviceInfiniteQueryKey = (deviceId?: number) => {
-	return ["infinite", `/devices/${deviceId}/ledger`] as const;
-};
-
-export const getGetLedgerForDeviceQueryKey = (deviceId?: number) => {
-	return [`/devices/${deviceId}/ledger`] as const;
-};
-
-export const useGetLedgerForDeviceInfiniteQueryOptions = <
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetLedgerForDeviceHook>>>
-	>,
-	TError = void | string,
->(
-	deviceId: number,
-	options?: {
-		query?: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetLedgerForDeviceHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
+        return useCallback((
+    deviceId: number,
+ signal?: AbortSignal
 ) => {
-	const { query: queryOptions } = options ?? {};
+        return getLedgerForDevice(
+          {url: `/devices/${deviceId}/ledger`, method: 'GET', signal
+    },
+          );
+        }, [getLedgerForDevice])
+      }
+    
 
-	const queryKey =
-		queryOptions?.queryKey ?? getGetLedgerForDeviceInfiniteQueryKey(deviceId);
 
-	const getLedgerForDevice = useGetLedgerForDeviceHook();
 
-	const queryFn: QueryFunction<
-		Awaited<ReturnType<ReturnType<typeof useGetLedgerForDeviceHook>>>
-	> = ({ signal }) => getLedgerForDevice(deviceId, signal);
+export const getGetLedgerForDeviceInfiniteQueryKey = (deviceId?: number,) => {
+    return [
+    'infinite', `/devices/${deviceId}/ledger`
+    ] as const;
+    }
 
-	return {
-		queryKey,
-		queryFn,
-		enabled: !!deviceId,
-		...queryOptions,
-	} as UseInfiniteQueryOptions<
-		Awaited<ReturnType<ReturnType<typeof useGetLedgerForDeviceHook>>>,
-		TError,
-		TData
-	> & { queryKey: DataTag<QueryKey, TData, TError> };
-};
+export const getGetLedgerForDeviceQueryKey = (deviceId?: number,) => {
+    return [
+    `/devices/${deviceId}/ledger`
+    ] as const;
+    }
 
-export type GetLedgerForDeviceInfiniteQueryResult = NonNullable<
-	Awaited<ReturnType<ReturnType<typeof useGetLedgerForDeviceHook>>>
->;
-export type GetLedgerForDeviceInfiniteQueryError = void | string;
+    
+export const useGetLedgerForDeviceInfiniteQueryOptions = <TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetLedgerForDeviceHook>>>>, TError = void | string>(deviceId: number, options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetLedgerForDeviceHook>>>, TError, TData>>, }
+) => {
 
-export function useGetLedgerForDeviceInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetLedgerForDeviceHook>>>
-	>,
-	TError = void | string,
->(
-	deviceId: number,
-	options: {
-		query: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetLedgerForDeviceHook>>>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				DefinedInitialDataOptions<
-					Awaited<ReturnType<ReturnType<typeof useGetLedgerForDeviceHook>>>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useGetLedgerForDeviceHook>>>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): DefinedUseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useGetLedgerForDeviceInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetLedgerForDeviceHook>>>
-	>,
-	TError = void | string,
->(
-	deviceId: number,
-	options?: {
-		query?: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetLedgerForDeviceHook>>>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				UndefinedInitialDataOptions<
-					Awaited<ReturnType<ReturnType<typeof useGetLedgerForDeviceHook>>>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useGetLedgerForDeviceHook>>>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): UseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useGetLedgerForDeviceInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetLedgerForDeviceHook>>>
-	>,
-	TError = void | string,
->(
-	deviceId: number,
-	options?: {
-		query?: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetLedgerForDeviceHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
+const {query: queryOptions} = options ?? {};
 
-export function useGetLedgerForDeviceInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetLedgerForDeviceHook>>>
-	>,
-	TError = void | string,
->(
-	deviceId: number,
-	options?: {
-		query?: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetLedgerForDeviceHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-} {
-	const queryOptions = useGetLedgerForDeviceInfiniteQueryOptions(
-		deviceId,
-		options,
-	);
+  const queryKey =  queryOptions?.queryKey ?? getGetLedgerForDeviceInfiniteQueryKey(deviceId);
 
-	const query = useInfiniteQuery(
-		queryOptions,
-		queryClient,
-	) as UseInfiniteQueryResult<TData, TError> & {
-		queryKey: DataTag<QueryKey, TData, TError>;
-	};
+  const getLedgerForDevice =  useGetLedgerForDeviceHook();
 
-	query.queryKey = queryOptions.queryKey;
+    const queryFn: QueryFunction<Awaited<ReturnType<ReturnType<typeof useGetLedgerForDeviceHook>>>> = ({ signal }) => getLedgerForDevice(deviceId, signal);
 
-	return query;
+      
+
+      
+
+   return  { queryKey, queryFn, enabled: !!(deviceId), ...queryOptions} as UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetLedgerForDeviceHook>>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
 }
 
-export const useGetLedgerForDeviceQueryOptions = <
-	TData = Awaited<ReturnType<ReturnType<typeof useGetLedgerForDeviceHook>>>,
-	TError = void | string,
->(
-	deviceId: number,
-	options?: {
-		query?: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetLedgerForDeviceHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-) => {
-	const { query: queryOptions } = options ?? {};
+export type GetLedgerForDeviceInfiniteQueryResult = NonNullable<Awaited<ReturnType<ReturnType<typeof useGetLedgerForDeviceHook>>>>
+export type GetLedgerForDeviceInfiniteQueryError = void | string
 
-	const queryKey =
-		queryOptions?.queryKey ?? getGetLedgerForDeviceQueryKey(deviceId);
 
-	const getLedgerForDevice = useGetLedgerForDeviceHook();
+export function useGetLedgerForDeviceInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetLedgerForDeviceHook>>>>, TError = void | string>(
+ deviceId: number, options: { query:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetLedgerForDeviceHook>>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useGetLedgerForDeviceHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useGetLedgerForDeviceHook>>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetLedgerForDeviceInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetLedgerForDeviceHook>>>>, TError = void | string>(
+ deviceId: number, options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetLedgerForDeviceHook>>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useGetLedgerForDeviceHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useGetLedgerForDeviceHook>>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetLedgerForDeviceInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetLedgerForDeviceHook>>>>, TError = void | string>(
+ deviceId: number, options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetLedgerForDeviceHook>>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 
-	const queryFn: QueryFunction<
-		Awaited<ReturnType<ReturnType<typeof useGetLedgerForDeviceHook>>>
-	> = ({ signal }) => getLedgerForDevice(deviceId, signal);
+export function useGetLedgerForDeviceInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetLedgerForDeviceHook>>>>, TError = void | string>(
+ deviceId: number, options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetLedgerForDeviceHook>>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
-	return {
-		queryKey,
-		queryFn,
-		enabled: !!deviceId,
-		...queryOptions,
-	} as UseQueryOptions<
-		Awaited<ReturnType<ReturnType<typeof useGetLedgerForDeviceHook>>>,
-		TError,
-		TData
-	> & { queryKey: DataTag<QueryKey, TData, TError> };
-};
+  const queryOptions = useGetLedgerForDeviceInfiniteQueryOptions(deviceId,options)
 
-export type GetLedgerForDeviceQueryResult = NonNullable<
-	Awaited<ReturnType<ReturnType<typeof useGetLedgerForDeviceHook>>>
->;
-export type GetLedgerForDeviceQueryError = void | string;
+  const query = useInfiniteQuery(queryOptions, queryClient) as  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 
-export function useGetLedgerForDevice<
-	TData = Awaited<ReturnType<ReturnType<typeof useGetLedgerForDeviceHook>>>,
-	TError = void | string,
->(
-	deviceId: number,
-	options: {
-		query: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetLedgerForDeviceHook>>>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				DefinedInitialDataOptions<
-					Awaited<ReturnType<ReturnType<typeof useGetLedgerForDeviceHook>>>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useGetLedgerForDeviceHook>>>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): DefinedUseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useGetLedgerForDevice<
-	TData = Awaited<ReturnType<ReturnType<typeof useGetLedgerForDeviceHook>>>,
-	TError = void | string,
->(
-	deviceId: number,
-	options?: {
-		query?: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetLedgerForDeviceHook>>>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				UndefinedInitialDataOptions<
-					Awaited<ReturnType<ReturnType<typeof useGetLedgerForDeviceHook>>>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useGetLedgerForDeviceHook>>>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useGetLedgerForDevice<
-	TData = Awaited<ReturnType<ReturnType<typeof useGetLedgerForDeviceHook>>>,
-	TError = void | string,
->(
-	deviceId: number,
-	options?: {
-		query?: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetLedgerForDeviceHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
+  query.queryKey = queryOptions.queryKey ;
 
-export function useGetLedgerForDevice<
-	TData = Awaited<ReturnType<ReturnType<typeof useGetLedgerForDeviceHook>>>,
-	TError = void | string,
->(
-	deviceId: number,
-	options?: {
-		query?: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetLedgerForDeviceHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-} {
-	const queryOptions = useGetLedgerForDeviceQueryOptions(deviceId, options);
-
-	const query = useQuery(queryOptions, queryClient) as UseQueryResult<
-		TData,
-		TError
-	> & { queryKey: DataTag<QueryKey, TData, TError> };
-
-	query.queryKey = queryOptions.queryKey;
-
-	return query;
+  return query;
 }
+
+
+
+
+export const useGetLedgerForDeviceQueryOptions = <TData = Awaited<ReturnType<ReturnType<typeof useGetLedgerForDeviceHook>>>, TError = void | string>(deviceId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetLedgerForDeviceHook>>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetLedgerForDeviceQueryKey(deviceId);
+
+  const getLedgerForDevice =  useGetLedgerForDeviceHook();
+
+    const queryFn: QueryFunction<Awaited<ReturnType<ReturnType<typeof useGetLedgerForDeviceHook>>>> = ({ signal }) => getLedgerForDevice(deviceId, signal);
+
+      
+
+      
+
+   return  { queryKey, queryFn, enabled: !!(deviceId), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetLedgerForDeviceHook>>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetLedgerForDeviceQueryResult = NonNullable<Awaited<ReturnType<ReturnType<typeof useGetLedgerForDeviceHook>>>>
+export type GetLedgerForDeviceQueryError = void | string
+
+
+export function useGetLedgerForDevice<TData = Awaited<ReturnType<ReturnType<typeof useGetLedgerForDeviceHook>>>, TError = void | string>(
+ deviceId: number, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetLedgerForDeviceHook>>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useGetLedgerForDeviceHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useGetLedgerForDeviceHook>>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetLedgerForDevice<TData = Awaited<ReturnType<ReturnType<typeof useGetLedgerForDeviceHook>>>, TError = void | string>(
+ deviceId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetLedgerForDeviceHook>>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useGetLedgerForDeviceHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useGetLedgerForDeviceHook>>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetLedgerForDevice<TData = Awaited<ReturnType<ReturnType<typeof useGetLedgerForDeviceHook>>>, TError = void | string>(
+ deviceId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetLedgerForDeviceHook>>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+
+export function useGetLedgerForDevice<TData = Awaited<ReturnType<ReturnType<typeof useGetLedgerForDeviceHook>>>, TError = void | string>(
+ deviceId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetLedgerForDeviceHook>>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = useGetLedgerForDeviceQueryOptions(deviceId,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  query.queryKey = queryOptions.queryKey ;
+
+  return query;
+}
+
+
+
+
 
 export const useUpdateNoteForDeviceHook = () => {
-	const updateNoteForDevice = useClientMutator<void>();
+        const updateNoteForDevice = useClientMutator<void>();
 
-	return useCallback(
-		(deviceId: number, note: Note) => {
-			return updateNoteForDevice({
-				url: `/devices/${deviceId}/note`,
-				method: "PUT",
-				headers: { "Content-Type": "application/json" },
-				data: note,
-			});
-		},
-		[updateNoteForDevice],
-	);
-};
+        return useCallback((
+    deviceId: number,
+    note: Note,
+ ) => {
+        return updateNoteForDevice(
+          {url: `/devices/${deviceId}/note`, method: 'PUT',
+      headers: {'Content-Type': 'application/json', },
+      data: note
+    },
+          );
+        }, [updateNoteForDevice])
+      }
+    
 
-export const useUpdateNoteForDeviceMutationOptions = <
-	TError = void | string,
-	TContext = unknown,
->(options?: {
-	mutation?: UseMutationOptions<
-		Awaited<ReturnType<ReturnType<typeof useUpdateNoteForDeviceHook>>>,
-		TError,
-		{ deviceId: number; data: Note },
-		TContext
-	>;
-}): UseMutationOptions<
-	Awaited<ReturnType<ReturnType<typeof useUpdateNoteForDeviceHook>>>,
-	TError,
-	{ deviceId: number; data: Note },
-	TContext
-> => {
-	const mutationKey = ["updateNoteForDevice"];
-	const { mutation: mutationOptions } = options
-		? options.mutation &&
-			"mutationKey" in options.mutation &&
-			options.mutation.mutationKey
-			? options
-			: { ...options, mutation: { ...options.mutation, mutationKey } }
-		: { mutation: { mutationKey } };
 
-	const updateNoteForDevice = useUpdateNoteForDeviceHook();
+export const useUpdateNoteForDeviceMutationOptions = <TError = void | string,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<ReturnType<typeof useUpdateNoteForDeviceHook>>>, TError,{deviceId: number;data: Note}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<ReturnType<typeof useUpdateNoteForDeviceHook>>>, TError,{deviceId: number;data: Note}, TContext> => {
 
-	const mutationFn: MutationFunction<
-		Awaited<ReturnType<ReturnType<typeof useUpdateNoteForDeviceHook>>>,
-		{ deviceId: number; data: Note }
-	> = (props) => {
-		const { deviceId, data } = props ?? {};
+const mutationKey = ['updateNoteForDevice'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
 
-		return updateNoteForDevice(deviceId, data);
-	};
+      const updateNoteForDevice =  useUpdateNoteForDeviceHook()
 
-	return { mutationFn, ...mutationOptions };
-};
 
-export type UpdateNoteForDeviceMutationResult = NonNullable<
-	Awaited<ReturnType<ReturnType<typeof useUpdateNoteForDeviceHook>>>
->;
-export type UpdateNoteForDeviceMutationBody = Note;
-export type UpdateNoteForDeviceMutationError = void | string;
+      const mutationFn: MutationFunction<Awaited<ReturnType<ReturnType<typeof useUpdateNoteForDeviceHook>>>, {deviceId: number;data: Note}> = (props) => {
+          const {deviceId,data} = props ?? {};
 
-export const useUpdateNoteForDevice = <
-	TError = void | string,
-	TContext = unknown,
->(
-	options?: {
-		mutation?: UseMutationOptions<
-			Awaited<ReturnType<ReturnType<typeof useUpdateNoteForDeviceHook>>>,
-			TError,
-			{ deviceId: number; data: Note },
-			TContext
-		>;
-	},
-	queryClient?: QueryClient,
-): UseMutationResult<
-	Awaited<ReturnType<ReturnType<typeof useUpdateNoteForDeviceHook>>>,
-	TError,
-	{ deviceId: number; data: Note },
-	TContext
-> => {
-	const mutationOptions = useUpdateNoteForDeviceMutationOptions(options);
+          return  updateNoteForDevice(deviceId,data,)
+        }
 
-	return useMutation(mutationOptions, queryClient);
-};
+        
 
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdateNoteForDeviceMutationResult = NonNullable<Awaited<ReturnType<ReturnType<typeof useUpdateNoteForDeviceHook>>>>
+    export type UpdateNoteForDeviceMutationBody = Note
+    export type UpdateNoteForDeviceMutationError = void | string
+
+    export const useUpdateNoteForDevice = <TError = void | string,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<ReturnType<typeof useUpdateNoteForDeviceHook>>>, TError,{deviceId: number;data: Note}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<ReturnType<typeof useUpdateNoteForDeviceHook>>>,
+        TError,
+        {deviceId: number;data: Note},
+        TContext
+      > => {
+
+      const mutationOptions = useUpdateNoteForDeviceMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    
 export const useGetDeviceReleaseHook = () => {
-	const getDeviceRelease = useClientMutator<DeviceRelease>();
+        const getDeviceRelease = useClientMutator<DeviceRelease>();
 
-	return useCallback(
-		(deviceId: number, signal?: AbortSignal) => {
-			return getDeviceRelease({
-				url: `/devices/${deviceId}/release`,
-				method: "GET",
-				signal,
-			});
-		},
-		[getDeviceRelease],
-	);
-};
-
-export const getGetDeviceReleaseInfiniteQueryKey = (deviceId?: number) => {
-	return ["infinite", `/devices/${deviceId}/release`] as const;
-};
-
-export const getGetDeviceReleaseQueryKey = (deviceId?: number) => {
-	return [`/devices/${deviceId}/release`] as const;
-};
-
-export const useGetDeviceReleaseInfiniteQueryOptions = <
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetDeviceReleaseHook>>>
-	>,
-	TError = string,
->(
-	deviceId: number,
-	options?: {
-		query?: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetDeviceReleaseHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
+        return useCallback((
+    deviceId: number,
+ signal?: AbortSignal
 ) => {
-	const { query: queryOptions } = options ?? {};
+        return getDeviceRelease(
+          {url: `/devices/${deviceId}/release`, method: 'GET', signal
+    },
+          );
+        }, [getDeviceRelease])
+      }
+    
 
-	const queryKey =
-		queryOptions?.queryKey ?? getGetDeviceReleaseInfiniteQueryKey(deviceId);
 
-	const getDeviceRelease = useGetDeviceReleaseHook();
 
-	const queryFn: QueryFunction<
-		Awaited<ReturnType<ReturnType<typeof useGetDeviceReleaseHook>>>
-	> = ({ signal }) => getDeviceRelease(deviceId, signal);
+export const getGetDeviceReleaseInfiniteQueryKey = (deviceId?: number,) => {
+    return [
+    'infinite', `/devices/${deviceId}/release`
+    ] as const;
+    }
 
-	return {
-		queryKey,
-		queryFn,
-		enabled: !!deviceId,
-		...queryOptions,
-	} as UseInfiniteQueryOptions<
-		Awaited<ReturnType<ReturnType<typeof useGetDeviceReleaseHook>>>,
-		TError,
-		TData
-	> & { queryKey: DataTag<QueryKey, TData, TError> };
-};
+export const getGetDeviceReleaseQueryKey = (deviceId?: number,) => {
+    return [
+    `/devices/${deviceId}/release`
+    ] as const;
+    }
 
-export type GetDeviceReleaseInfiniteQueryResult = NonNullable<
-	Awaited<ReturnType<ReturnType<typeof useGetDeviceReleaseHook>>>
->;
-export type GetDeviceReleaseInfiniteQueryError = string;
+    
+export const useGetDeviceReleaseInfiniteQueryOptions = <TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetDeviceReleaseHook>>>>, TError = string>(deviceId: number, options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetDeviceReleaseHook>>>, TError, TData>>, }
+) => {
 
-export function useGetDeviceReleaseInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetDeviceReleaseHook>>>
-	>,
-	TError = string,
->(
-	deviceId: number,
-	options: {
-		query: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetDeviceReleaseHook>>>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				DefinedInitialDataOptions<
-					Awaited<ReturnType<ReturnType<typeof useGetDeviceReleaseHook>>>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useGetDeviceReleaseHook>>>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): DefinedUseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useGetDeviceReleaseInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetDeviceReleaseHook>>>
-	>,
-	TError = string,
->(
-	deviceId: number,
-	options?: {
-		query?: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetDeviceReleaseHook>>>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				UndefinedInitialDataOptions<
-					Awaited<ReturnType<ReturnType<typeof useGetDeviceReleaseHook>>>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useGetDeviceReleaseHook>>>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): UseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useGetDeviceReleaseInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetDeviceReleaseHook>>>
-	>,
-	TError = string,
->(
-	deviceId: number,
-	options?: {
-		query?: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetDeviceReleaseHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
+const {query: queryOptions} = options ?? {};
 
-export function useGetDeviceReleaseInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetDeviceReleaseHook>>>
-	>,
-	TError = string,
->(
-	deviceId: number,
-	options?: {
-		query?: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetDeviceReleaseHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-} {
-	const queryOptions = useGetDeviceReleaseInfiniteQueryOptions(
-		deviceId,
-		options,
-	);
+  const queryKey =  queryOptions?.queryKey ?? getGetDeviceReleaseInfiniteQueryKey(deviceId);
 
-	const query = useInfiniteQuery(
-		queryOptions,
-		queryClient,
-	) as UseInfiniteQueryResult<TData, TError> & {
-		queryKey: DataTag<QueryKey, TData, TError>;
-	};
+  const getDeviceRelease =  useGetDeviceReleaseHook();
 
-	query.queryKey = queryOptions.queryKey;
+    const queryFn: QueryFunction<Awaited<ReturnType<ReturnType<typeof useGetDeviceReleaseHook>>>> = ({ signal }) => getDeviceRelease(deviceId, signal);
 
-	return query;
+      
+
+      
+
+   return  { queryKey, queryFn, enabled: !!(deviceId), ...queryOptions} as UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetDeviceReleaseHook>>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
 }
 
-export const useGetDeviceReleaseQueryOptions = <
-	TData = Awaited<ReturnType<ReturnType<typeof useGetDeviceReleaseHook>>>,
-	TError = string,
->(
-	deviceId: number,
-	options?: {
-		query?: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetDeviceReleaseHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-) => {
-	const { query: queryOptions } = options ?? {};
+export type GetDeviceReleaseInfiniteQueryResult = NonNullable<Awaited<ReturnType<ReturnType<typeof useGetDeviceReleaseHook>>>>
+export type GetDeviceReleaseInfiniteQueryError = string
 
-	const queryKey =
-		queryOptions?.queryKey ?? getGetDeviceReleaseQueryKey(deviceId);
 
-	const getDeviceRelease = useGetDeviceReleaseHook();
+export function useGetDeviceReleaseInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetDeviceReleaseHook>>>>, TError = string>(
+ deviceId: number, options: { query:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetDeviceReleaseHook>>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useGetDeviceReleaseHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useGetDeviceReleaseHook>>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetDeviceReleaseInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetDeviceReleaseHook>>>>, TError = string>(
+ deviceId: number, options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetDeviceReleaseHook>>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useGetDeviceReleaseHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useGetDeviceReleaseHook>>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetDeviceReleaseInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetDeviceReleaseHook>>>>, TError = string>(
+ deviceId: number, options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetDeviceReleaseHook>>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 
-	const queryFn: QueryFunction<
-		Awaited<ReturnType<ReturnType<typeof useGetDeviceReleaseHook>>>
-	> = ({ signal }) => getDeviceRelease(deviceId, signal);
+export function useGetDeviceReleaseInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetDeviceReleaseHook>>>>, TError = string>(
+ deviceId: number, options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetDeviceReleaseHook>>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
-	return {
-		queryKey,
-		queryFn,
-		enabled: !!deviceId,
-		...queryOptions,
-	} as UseQueryOptions<
-		Awaited<ReturnType<ReturnType<typeof useGetDeviceReleaseHook>>>,
-		TError,
-		TData
-	> & { queryKey: DataTag<QueryKey, TData, TError> };
-};
+  const queryOptions = useGetDeviceReleaseInfiniteQueryOptions(deviceId,options)
 
-export type GetDeviceReleaseQueryResult = NonNullable<
-	Awaited<ReturnType<ReturnType<typeof useGetDeviceReleaseHook>>>
->;
-export type GetDeviceReleaseQueryError = string;
+  const query = useInfiniteQuery(queryOptions, queryClient) as  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 
-export function useGetDeviceRelease<
-	TData = Awaited<ReturnType<ReturnType<typeof useGetDeviceReleaseHook>>>,
-	TError = string,
->(
-	deviceId: number,
-	options: {
-		query: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetDeviceReleaseHook>>>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				DefinedInitialDataOptions<
-					Awaited<ReturnType<ReturnType<typeof useGetDeviceReleaseHook>>>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useGetDeviceReleaseHook>>>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): DefinedUseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useGetDeviceRelease<
-	TData = Awaited<ReturnType<ReturnType<typeof useGetDeviceReleaseHook>>>,
-	TError = string,
->(
-	deviceId: number,
-	options?: {
-		query?: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetDeviceReleaseHook>>>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				UndefinedInitialDataOptions<
-					Awaited<ReturnType<ReturnType<typeof useGetDeviceReleaseHook>>>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useGetDeviceReleaseHook>>>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useGetDeviceRelease<
-	TData = Awaited<ReturnType<ReturnType<typeof useGetDeviceReleaseHook>>>,
-	TError = string,
->(
-	deviceId: number,
-	options?: {
-		query?: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetDeviceReleaseHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
+  query.queryKey = queryOptions.queryKey ;
 
-export function useGetDeviceRelease<
-	TData = Awaited<ReturnType<ReturnType<typeof useGetDeviceReleaseHook>>>,
-	TError = string,
->(
-	deviceId: number,
-	options?: {
-		query?: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetDeviceReleaseHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-} {
-	const queryOptions = useGetDeviceReleaseQueryOptions(deviceId, options);
-
-	const query = useQuery(queryOptions, queryClient) as UseQueryResult<
-		TData,
-		TError
-	> & { queryKey: DataTag<QueryKey, TData, TError> };
-
-	query.queryKey = queryOptions.queryKey;
-
-	return query;
+  return query;
 }
+
+
+
+
+export const useGetDeviceReleaseQueryOptions = <TData = Awaited<ReturnType<ReturnType<typeof useGetDeviceReleaseHook>>>, TError = string>(deviceId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetDeviceReleaseHook>>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetDeviceReleaseQueryKey(deviceId);
+
+  const getDeviceRelease =  useGetDeviceReleaseHook();
+
+    const queryFn: QueryFunction<Awaited<ReturnType<ReturnType<typeof useGetDeviceReleaseHook>>>> = ({ signal }) => getDeviceRelease(deviceId, signal);
+
+      
+
+      
+
+   return  { queryKey, queryFn, enabled: !!(deviceId), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetDeviceReleaseHook>>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetDeviceReleaseQueryResult = NonNullable<Awaited<ReturnType<ReturnType<typeof useGetDeviceReleaseHook>>>>
+export type GetDeviceReleaseQueryError = string
+
+
+export function useGetDeviceRelease<TData = Awaited<ReturnType<ReturnType<typeof useGetDeviceReleaseHook>>>, TError = string>(
+ deviceId: number, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetDeviceReleaseHook>>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useGetDeviceReleaseHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useGetDeviceReleaseHook>>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetDeviceRelease<TData = Awaited<ReturnType<ReturnType<typeof useGetDeviceReleaseHook>>>, TError = string>(
+ deviceId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetDeviceReleaseHook>>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useGetDeviceReleaseHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useGetDeviceReleaseHook>>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetDeviceRelease<TData = Awaited<ReturnType<ReturnType<typeof useGetDeviceReleaseHook>>>, TError = string>(
+ deviceId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetDeviceReleaseHook>>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+
+export function useGetDeviceRelease<TData = Awaited<ReturnType<ReturnType<typeof useGetDeviceReleaseHook>>>, TError = string>(
+ deviceId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetDeviceReleaseHook>>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = useGetDeviceReleaseQueryOptions(deviceId,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  query.queryKey = queryOptions.queryKey ;
+
+  return query;
+}
+
+
+
+
 
 export const useUpdateDeviceTargetReleaseHook = () => {
-	const updateDeviceTargetRelease = useClientMutator<void>();
+        const updateDeviceTargetRelease = useClientMutator<void>();
 
-	return useCallback(
-		(
-			deviceId: number,
-			updateDeviceRelease: UpdateDeviceRelease,
-			signal?: AbortSignal,
-		) => {
-			return updateDeviceTargetRelease({
-				url: `/devices/${deviceId}/release`,
-				method: "POST",
-				headers: { "Content-Type": "application/json" },
-				data: updateDeviceRelease,
-				signal,
-			});
-		},
-		[updateDeviceTargetRelease],
-	);
-};
-
-export const useUpdateDeviceTargetReleaseMutationOptions = <
-	TError = void | string,
-	TContext = unknown,
->(options?: {
-	mutation?: UseMutationOptions<
-		Awaited<ReturnType<ReturnType<typeof useUpdateDeviceTargetReleaseHook>>>,
-		TError,
-		{ deviceId: number; data: UpdateDeviceRelease },
-		TContext
-	>;
-}): UseMutationOptions<
-	Awaited<ReturnType<ReturnType<typeof useUpdateDeviceTargetReleaseHook>>>,
-	TError,
-	{ deviceId: number; data: UpdateDeviceRelease },
-	TContext
-> => {
-	const mutationKey = ["updateDeviceTargetRelease"];
-	const { mutation: mutationOptions } = options
-		? options.mutation &&
-			"mutationKey" in options.mutation &&
-			options.mutation.mutationKey
-			? options
-			: { ...options, mutation: { ...options.mutation, mutationKey } }
-		: { mutation: { mutationKey } };
-
-	const updateDeviceTargetRelease = useUpdateDeviceTargetReleaseHook();
-
-	const mutationFn: MutationFunction<
-		Awaited<ReturnType<ReturnType<typeof useUpdateDeviceTargetReleaseHook>>>,
-		{ deviceId: number; data: UpdateDeviceRelease }
-	> = (props) => {
-		const { deviceId, data } = props ?? {};
-
-		return updateDeviceTargetRelease(deviceId, data);
-	};
-
-	return { mutationFn, ...mutationOptions };
-};
-
-export type UpdateDeviceTargetReleaseMutationResult = NonNullable<
-	Awaited<ReturnType<ReturnType<typeof useUpdateDeviceTargetReleaseHook>>>
->;
-export type UpdateDeviceTargetReleaseMutationBody = UpdateDeviceRelease;
-export type UpdateDeviceTargetReleaseMutationError = void | string;
-
-export const useUpdateDeviceTargetRelease = <
-	TError = void | string,
-	TContext = unknown,
->(
-	options?: {
-		mutation?: UseMutationOptions<
-			Awaited<ReturnType<ReturnType<typeof useUpdateDeviceTargetReleaseHook>>>,
-			TError,
-			{ deviceId: number; data: UpdateDeviceRelease },
-			TContext
-		>;
-	},
-	queryClient?: QueryClient,
-): UseMutationResult<
-	Awaited<ReturnType<ReturnType<typeof useUpdateDeviceTargetReleaseHook>>>,
-	TError,
-	{ deviceId: number; data: UpdateDeviceRelease },
-	TContext
-> => {
-	const mutationOptions = useUpdateDeviceTargetReleaseMutationOptions(options);
-
-	return useMutation(mutationOptions, queryClient);
-};
-
-/**
- * @deprecated
- */
-export const useGetTagForDeviceHook = () => {
-	const getTagForDevice = useClientMutator<Tag[]>();
-
-	return useCallback(
-		(deviceId: string, signal?: AbortSignal) => {
-			return getTagForDevice({
-				url: `/devices/${deviceId}/tags`,
-				method: "GET",
-				signal,
-			});
-		},
-		[getTagForDevice],
-	);
-};
-
-export const getGetTagForDeviceInfiniteQueryKey = (deviceId?: string) => {
-	return ["infinite", `/devices/${deviceId}/tags`] as const;
-};
-
-export const getGetTagForDeviceQueryKey = (deviceId?: string) => {
-	return [`/devices/${deviceId}/tags`] as const;
-};
-
-export const useGetTagForDeviceInfiniteQueryOptions = <
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetTagForDeviceHook>>>
-	>,
-	TError = string,
->(
-	deviceId: string,
-	options?: {
-		query?: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetTagForDeviceHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
+        return useCallback((
+    deviceId: number,
+    updateDeviceRelease: UpdateDeviceRelease,
+ signal?: AbortSignal
 ) => {
-	const { query: queryOptions } = options ?? {};
+        return updateDeviceTargetRelease(
+          {url: `/devices/${deviceId}/release`, method: 'POST',
+      headers: {'Content-Type': 'application/json', },
+      data: updateDeviceRelease, signal
+    },
+          );
+        }, [updateDeviceTargetRelease])
+      }
+    
 
-	const queryKey =
-		queryOptions?.queryKey ?? getGetTagForDeviceInfiniteQueryKey(deviceId);
 
-	const getTagForDevice = useGetTagForDeviceHook();
+export const useUpdateDeviceTargetReleaseMutationOptions = <TError = void | string,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<ReturnType<typeof useUpdateDeviceTargetReleaseHook>>>, TError,{deviceId: number;data: UpdateDeviceRelease}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<ReturnType<typeof useUpdateDeviceTargetReleaseHook>>>, TError,{deviceId: number;data: UpdateDeviceRelease}, TContext> => {
 
-	const queryFn: QueryFunction<
-		Awaited<ReturnType<ReturnType<typeof useGetTagForDeviceHook>>>
-	> = ({ signal }) => getTagForDevice(deviceId, signal);
+const mutationKey = ['updateDeviceTargetRelease'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
 
-	return {
-		queryKey,
-		queryFn,
-		enabled: !!deviceId,
-		...queryOptions,
-	} as UseInfiniteQueryOptions<
-		Awaited<ReturnType<ReturnType<typeof useGetTagForDeviceHook>>>,
-		TError,
-		TData
-	> & { queryKey: DataTag<QueryKey, TData, TError> };
-};
+      const updateDeviceTargetRelease =  useUpdateDeviceTargetReleaseHook()
 
-export type GetTagForDeviceInfiniteQueryResult = NonNullable<
-	Awaited<ReturnType<ReturnType<typeof useGetTagForDeviceHook>>>
->;
-export type GetTagForDeviceInfiniteQueryError = string;
 
-export function useGetTagForDeviceInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetTagForDeviceHook>>>
-	>,
-	TError = string,
->(
-	deviceId: string,
-	options: {
-		query: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetTagForDeviceHook>>>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				DefinedInitialDataOptions<
-					Awaited<ReturnType<ReturnType<typeof useGetTagForDeviceHook>>>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useGetTagForDeviceHook>>>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): DefinedUseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useGetTagForDeviceInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetTagForDeviceHook>>>
-	>,
-	TError = string,
->(
-	deviceId: string,
-	options?: {
-		query?: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetTagForDeviceHook>>>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				UndefinedInitialDataOptions<
-					Awaited<ReturnType<ReturnType<typeof useGetTagForDeviceHook>>>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useGetTagForDeviceHook>>>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): UseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useGetTagForDeviceInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetTagForDeviceHook>>>
-	>,
-	TError = string,
->(
-	deviceId: string,
-	options?: {
-		query?: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetTagForDeviceHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-/**
- * @deprecated
- */
+      const mutationFn: MutationFunction<Awaited<ReturnType<ReturnType<typeof useUpdateDeviceTargetReleaseHook>>>, {deviceId: number;data: UpdateDeviceRelease}> = (props) => {
+          const {deviceId,data} = props ?? {};
 
-export function useGetTagForDeviceInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetTagForDeviceHook>>>
-	>,
-	TError = string,
->(
-	deviceId: string,
-	options?: {
-		query?: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetTagForDeviceHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-} {
-	const queryOptions = useGetTagForDeviceInfiniteQueryOptions(
-		deviceId,
-		options,
-	);
+          return  updateDeviceTargetRelease(deviceId,data,)
+        }
 
-	const query = useInfiniteQuery(
-		queryOptions,
-		queryClient,
-	) as UseInfiniteQueryResult<TData, TError> & {
-		queryKey: DataTag<QueryKey, TData, TError>;
-	};
+        
 
-	query.queryKey = queryOptions.queryKey;
 
-	return query;
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdateDeviceTargetReleaseMutationResult = NonNullable<Awaited<ReturnType<ReturnType<typeof useUpdateDeviceTargetReleaseHook>>>>
+    export type UpdateDeviceTargetReleaseMutationBody = UpdateDeviceRelease
+    export type UpdateDeviceTargetReleaseMutationError = void | string
+
+    export const useUpdateDeviceTargetRelease = <TError = void | string,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<ReturnType<typeof useUpdateDeviceTargetReleaseHook>>>, TError,{deviceId: number;data: UpdateDeviceRelease}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<ReturnType<typeof useUpdateDeviceTargetReleaseHook>>>,
+        TError,
+        {deviceId: number;data: UpdateDeviceRelease},
+        TContext
+      > => {
+
+      const mutationOptions = useUpdateDeviceTargetReleaseMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    
+export const useGetServicesForDeviceHook = () => {
+        const getServicesForDevice = useClientMutator<DeviceService[]>();
+
+        return useCallback((
+    deviceId: string,
+ signal?: AbortSignal
+) => {
+        return getServicesForDevice(
+          {url: `/devices/${deviceId}/services`, method: 'GET', signal
+    },
+          );
+        }, [getServicesForDevice])
+      }
+    
+
+
+
+export const getGetServicesForDeviceInfiniteQueryKey = (deviceId?: string,) => {
+    return [
+    'infinite', `/devices/${deviceId}/services`
+    ] as const;
+    }
+
+export const getGetServicesForDeviceQueryKey = (deviceId?: string,) => {
+    return [
+    `/devices/${deviceId}/services`
+    ] as const;
+    }
+
+    
+export const useGetServicesForDeviceInfiniteQueryOptions = <TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetServicesForDeviceHook>>>>, TError = void>(deviceId: string, options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetServicesForDeviceHook>>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetServicesForDeviceInfiniteQueryKey(deviceId);
+
+  const getServicesForDevice =  useGetServicesForDeviceHook();
+
+    const queryFn: QueryFunction<Awaited<ReturnType<ReturnType<typeof useGetServicesForDeviceHook>>>> = ({ signal }) => getServicesForDevice(deviceId, signal);
+
+      
+
+      
+
+   return  { queryKey, queryFn, enabled: !!(deviceId), ...queryOptions} as UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetServicesForDeviceHook>>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
 }
 
-export const useGetTagForDeviceQueryOptions = <
-	TData = Awaited<ReturnType<ReturnType<typeof useGetTagForDeviceHook>>>,
-	TError = string,
->(
-	deviceId: string,
-	options?: {
-		query?: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetTagForDeviceHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-) => {
-	const { query: queryOptions } = options ?? {};
+export type GetServicesForDeviceInfiniteQueryResult = NonNullable<Awaited<ReturnType<ReturnType<typeof useGetServicesForDeviceHook>>>>
+export type GetServicesForDeviceInfiniteQueryError = void
 
-	const queryKey =
-		queryOptions?.queryKey ?? getGetTagForDeviceQueryKey(deviceId);
 
-	const getTagForDevice = useGetTagForDeviceHook();
+export function useGetServicesForDeviceInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetServicesForDeviceHook>>>>, TError = void>(
+ deviceId: string, options: { query:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetServicesForDeviceHook>>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useGetServicesForDeviceHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useGetServicesForDeviceHook>>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetServicesForDeviceInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetServicesForDeviceHook>>>>, TError = void>(
+ deviceId: string, options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetServicesForDeviceHook>>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useGetServicesForDeviceHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useGetServicesForDeviceHook>>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetServicesForDeviceInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetServicesForDeviceHook>>>>, TError = void>(
+ deviceId: string, options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetServicesForDeviceHook>>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 
-	const queryFn: QueryFunction<
-		Awaited<ReturnType<ReturnType<typeof useGetTagForDeviceHook>>>
-	> = ({ signal }) => getTagForDevice(deviceId, signal);
+export function useGetServicesForDeviceInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetServicesForDeviceHook>>>>, TError = void>(
+ deviceId: string, options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetServicesForDeviceHook>>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
-	return {
-		queryKey,
-		queryFn,
-		enabled: !!deviceId,
-		...queryOptions,
-	} as UseQueryOptions<
-		Awaited<ReturnType<ReturnType<typeof useGetTagForDeviceHook>>>,
-		TError,
-		TData
-	> & { queryKey: DataTag<QueryKey, TData, TError> };
-};
+  const queryOptions = useGetServicesForDeviceInfiniteQueryOptions(deviceId,options)
 
-export type GetTagForDeviceQueryResult = NonNullable<
-	Awaited<ReturnType<ReturnType<typeof useGetTagForDeviceHook>>>
->;
-export type GetTagForDeviceQueryError = string;
+  const query = useInfiniteQuery(queryOptions, queryClient) as  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 
-export function useGetTagForDevice<
-	TData = Awaited<ReturnType<ReturnType<typeof useGetTagForDeviceHook>>>,
-	TError = string,
->(
-	deviceId: string,
-	options: {
-		query: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetTagForDeviceHook>>>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				DefinedInitialDataOptions<
-					Awaited<ReturnType<ReturnType<typeof useGetTagForDeviceHook>>>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useGetTagForDeviceHook>>>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): DefinedUseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useGetTagForDevice<
-	TData = Awaited<ReturnType<ReturnType<typeof useGetTagForDeviceHook>>>,
-	TError = string,
->(
-	deviceId: string,
-	options?: {
-		query?: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetTagForDeviceHook>>>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				UndefinedInitialDataOptions<
-					Awaited<ReturnType<ReturnType<typeof useGetTagForDeviceHook>>>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useGetTagForDeviceHook>>>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useGetTagForDevice<
-	TData = Awaited<ReturnType<ReturnType<typeof useGetTagForDeviceHook>>>,
-	TError = string,
->(
-	deviceId: string,
-	options?: {
-		query?: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetTagForDeviceHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-/**
- * @deprecated
- */
+  query.queryKey = queryOptions.queryKey ;
 
-export function useGetTagForDevice<
-	TData = Awaited<ReturnType<ReturnType<typeof useGetTagForDeviceHook>>>,
-	TError = string,
->(
-	deviceId: string,
-	options?: {
-		query?: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetTagForDeviceHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-} {
-	const queryOptions = useGetTagForDeviceQueryOptions(deviceId, options);
-
-	const query = useQuery(queryOptions, queryClient) as UseQueryResult<
-		TData,
-		TError
-	> & { queryKey: DataTag<QueryKey, TData, TError> };
-
-	query.queryKey = queryOptions.queryKey;
-
-	return query;
+  return query;
 }
 
-/**
- * @deprecated
- */
-export const useAddTagToDeviceHook = () => {
-	const addTagToDevice = useClientMutator<void>();
 
-	return useCallback(
-		(deviceId: number, tagId: number) => {
-			return addTagToDevice({
-				url: `/devices/${deviceId}/tags/${tagId}`,
-				method: "PUT",
-			});
-		},
-		[addTagToDevice],
-	);
-};
 
-export const useAddTagToDeviceMutationOptions = <
-	TError = void | string,
-	TContext = unknown,
->(options?: {
-	mutation?: UseMutationOptions<
-		Awaited<ReturnType<ReturnType<typeof useAddTagToDeviceHook>>>,
-		TError,
-		{ deviceId: number; tagId: number },
-		TContext
-	>;
-}): UseMutationOptions<
-	Awaited<ReturnType<ReturnType<typeof useAddTagToDeviceHook>>>,
-	TError,
-	{ deviceId: number; tagId: number },
-	TContext
-> => {
-	const mutationKey = ["addTagToDevice"];
-	const { mutation: mutationOptions } = options
-		? options.mutation &&
-			"mutationKey" in options.mutation &&
-			options.mutation.mutationKey
-			? options
-			: { ...options, mutation: { ...options.mutation, mutationKey } }
-		: { mutation: { mutationKey } };
 
-	const addTagToDevice = useAddTagToDeviceHook();
+export const useGetServicesForDeviceQueryOptions = <TData = Awaited<ReturnType<ReturnType<typeof useGetServicesForDeviceHook>>>, TError = void>(deviceId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetServicesForDeviceHook>>>, TError, TData>>, }
+) => {
 
-	const mutationFn: MutationFunction<
-		Awaited<ReturnType<ReturnType<typeof useAddTagToDeviceHook>>>,
-		{ deviceId: number; tagId: number }
-	> = (props) => {
-		const { deviceId, tagId } = props ?? {};
+const {query: queryOptions} = options ?? {};
 
-		return addTagToDevice(deviceId, tagId);
-	};
+  const queryKey =  queryOptions?.queryKey ?? getGetServicesForDeviceQueryKey(deviceId);
 
-	return { mutationFn, ...mutationOptions };
-};
+  const getServicesForDevice =  useGetServicesForDeviceHook();
 
-export type AddTagToDeviceMutationResult = NonNullable<
-	Awaited<ReturnType<ReturnType<typeof useAddTagToDeviceHook>>>
->;
+    const queryFn: QueryFunction<Awaited<ReturnType<ReturnType<typeof useGetServicesForDeviceHook>>>> = ({ signal }) => getServicesForDevice(deviceId, signal);
 
-export type AddTagToDeviceMutationError = void | string;
+      
 
-/**
- * @deprecated
- */
-export const useAddTagToDevice = <TError = void | string, TContext = unknown>(
-	options?: {
-		mutation?: UseMutationOptions<
-			Awaited<ReturnType<ReturnType<typeof useAddTagToDeviceHook>>>,
-			TError,
-			{ deviceId: number; tagId: number },
-			TContext
-		>;
-	},
-	queryClient?: QueryClient,
-): UseMutationResult<
-	Awaited<ReturnType<ReturnType<typeof useAddTagToDeviceHook>>>,
-	TError,
-	{ deviceId: number; tagId: number },
-	TContext
-> => {
-	const mutationOptions = useAddTagToDeviceMutationOptions(options);
+      
 
-	return useMutation(mutationOptions, queryClient);
-};
+   return  { queryKey, queryFn, enabled: !!(deviceId), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetServicesForDeviceHook>>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
 
-/**
- * @deprecated
- */
-export const useDeleteTagFromDeviceHook = () => {
-	const deleteTagFromDevice = useClientMutator<void>();
+export type GetServicesForDeviceQueryResult = NonNullable<Awaited<ReturnType<ReturnType<typeof useGetServicesForDeviceHook>>>>
+export type GetServicesForDeviceQueryError = void
 
-	return useCallback(
-		(deviceId: number, tagId: number) => {
-			return deleteTagFromDevice({
-				url: `/devices/${deviceId}/tags/${tagId}`,
-				method: "DELETE",
-			});
-		},
-		[deleteTagFromDevice],
-	);
-};
 
-export const useDeleteTagFromDeviceMutationOptions = <
-	TError = string,
-	TContext = unknown,
->(options?: {
-	mutation?: UseMutationOptions<
-		Awaited<ReturnType<ReturnType<typeof useDeleteTagFromDeviceHook>>>,
-		TError,
-		{ deviceId: number; tagId: number },
-		TContext
-	>;
-}): UseMutationOptions<
-	Awaited<ReturnType<ReturnType<typeof useDeleteTagFromDeviceHook>>>,
-	TError,
-	{ deviceId: number; tagId: number },
-	TContext
-> => {
-	const mutationKey = ["deleteTagFromDevice"];
-	const { mutation: mutationOptions } = options
-		? options.mutation &&
-			"mutationKey" in options.mutation &&
-			options.mutation.mutationKey
-			? options
-			: { ...options, mutation: { ...options.mutation, mutationKey } }
-		: { mutation: { mutationKey } };
+export function useGetServicesForDevice<TData = Awaited<ReturnType<ReturnType<typeof useGetServicesForDeviceHook>>>, TError = void>(
+ deviceId: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetServicesForDeviceHook>>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useGetServicesForDeviceHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useGetServicesForDeviceHook>>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetServicesForDevice<TData = Awaited<ReturnType<ReturnType<typeof useGetServicesForDeviceHook>>>, TError = void>(
+ deviceId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetServicesForDeviceHook>>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useGetServicesForDeviceHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useGetServicesForDeviceHook>>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetServicesForDevice<TData = Awaited<ReturnType<ReturnType<typeof useGetServicesForDeviceHook>>>, TError = void>(
+ deviceId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetServicesForDeviceHook>>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 
-	const deleteTagFromDevice = useDeleteTagFromDeviceHook();
+export function useGetServicesForDevice<TData = Awaited<ReturnType<ReturnType<typeof useGetServicesForDeviceHook>>>, TError = void>(
+ deviceId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetServicesForDeviceHook>>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
-	const mutationFn: MutationFunction<
-		Awaited<ReturnType<ReturnType<typeof useDeleteTagFromDeviceHook>>>,
-		{ deviceId: number; tagId: number }
-	> = (props) => {
-		const { deviceId, tagId } = props ?? {};
+  const queryOptions = useGetServicesForDeviceQueryOptions(deviceId,options)
 
-		return deleteTagFromDevice(deviceId, tagId);
-	};
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 
-	return { mutationFn, ...mutationOptions };
-};
+  query.queryKey = queryOptions.queryKey ;
 
-export type DeleteTagFromDeviceMutationResult = NonNullable<
-	Awaited<ReturnType<ReturnType<typeof useDeleteTagFromDeviceHook>>>
->;
+  return query;
+}
 
-export type DeleteTagFromDeviceMutationError = string;
 
-/**
- * @deprecated
- */
-export const useDeleteTagFromDevice = <TError = string, TContext = unknown>(
-	options?: {
-		mutation?: UseMutationOptions<
-			Awaited<ReturnType<ReturnType<typeof useDeleteTagFromDeviceHook>>>,
-			TError,
-			{ deviceId: number; tagId: number },
-			TContext
-		>;
-	},
-	queryClient?: QueryClient,
-): UseMutationResult<
-	Awaited<ReturnType<ReturnType<typeof useDeleteTagFromDeviceHook>>>,
-	TError,
-	{ deviceId: number; tagId: number },
-	TContext
-> => {
-	const mutationOptions = useDeleteTagFromDeviceMutationOptions(options);
 
-	return useMutation(mutationOptions, queryClient);
-};
+
 
 export const useDeleteTokenHook = () => {
-	const deleteToken = useClientMutator<void>();
+        const deleteToken = useClientMutator<void>();
 
-	return useCallback(
-		(deviceId: number) => {
-			return deleteToken({
-				url: `/devices/${deviceId}/token`,
-				method: "DELETE",
-			});
-		},
-		[deleteToken],
-	);
-};
+        return useCallback((
+    deviceId: number,
+ ) => {
+        return deleteToken(
+          {url: `/devices/${deviceId}/token`, method: 'DELETE'
+    },
+          );
+        }, [deleteToken])
+      }
+    
 
-export const useDeleteTokenMutationOptions = <
-	TError = string,
-	TContext = unknown,
->(options?: {
-	mutation?: UseMutationOptions<
-		Awaited<ReturnType<ReturnType<typeof useDeleteTokenHook>>>,
-		TError,
-		{ deviceId: number },
-		TContext
-	>;
-}): UseMutationOptions<
-	Awaited<ReturnType<ReturnType<typeof useDeleteTokenHook>>>,
-	TError,
-	{ deviceId: number },
-	TContext
-> => {
-	const mutationKey = ["deleteToken"];
-	const { mutation: mutationOptions } = options
-		? options.mutation &&
-			"mutationKey" in options.mutation &&
-			options.mutation.mutationKey
-			? options
-			: { ...options, mutation: { ...options.mutation, mutationKey } }
-		: { mutation: { mutationKey } };
 
-	const deleteToken = useDeleteTokenHook();
+export const useDeleteTokenMutationOptions = <TError = string,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<ReturnType<typeof useDeleteTokenHook>>>, TError,{deviceId: number}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<ReturnType<typeof useDeleteTokenHook>>>, TError,{deviceId: number}, TContext> => {
 
-	const mutationFn: MutationFunction<
-		Awaited<ReturnType<ReturnType<typeof useDeleteTokenHook>>>,
-		{ deviceId: number }
-	> = (props) => {
-		const { deviceId } = props ?? {};
+const mutationKey = ['deleteToken'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
 
-		return deleteToken(deviceId);
-	};
+      const deleteToken =  useDeleteTokenHook()
 
-	return { mutationFn, ...mutationOptions };
-};
 
-export type DeleteTokenMutationResult = NonNullable<
-	Awaited<ReturnType<ReturnType<typeof useDeleteTokenHook>>>
->;
+      const mutationFn: MutationFunction<Awaited<ReturnType<ReturnType<typeof useDeleteTokenHook>>>, {deviceId: number}> = (props) => {
+          const {deviceId} = props ?? {};
 
-export type DeleteTokenMutationError = string;
+          return  deleteToken(deviceId,)
+        }
 
-export const useDeleteToken = <TError = string, TContext = unknown>(
-	options?: {
-		mutation?: UseMutationOptions<
-			Awaited<ReturnType<ReturnType<typeof useDeleteTokenHook>>>,
-			TError,
-			{ deviceId: number },
-			TContext
-		>;
-	},
-	queryClient?: QueryClient,
-): UseMutationResult<
-	Awaited<ReturnType<ReturnType<typeof useDeleteTokenHook>>>,
-	TError,
-	{ deviceId: number },
-	TContext
-> => {
-	const mutationOptions = useDeleteTokenMutationOptions(options);
+        
 
-	return useMutation(mutationOptions, queryClient);
-};
 
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DeleteTokenMutationResult = NonNullable<Awaited<ReturnType<ReturnType<typeof useDeleteTokenHook>>>>
+    
+    export type DeleteTokenMutationError = string
+
+    export const useDeleteToken = <TError = string,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<ReturnType<typeof useDeleteTokenHook>>>, TError,{deviceId: number}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<ReturnType<typeof useDeleteTokenHook>>>,
+        TError,
+        {deviceId: number},
+        TContext
+      > => {
+
+      const mutationOptions = useDeleteTokenMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    
 export const useGetVariablesForDeviceHook = () => {
-	const getVariablesForDevice = useClientMutator<Variable[]>();
+        const getVariablesForDevice = useClientMutator<Variable[]>();
 
-	return useCallback(
-		(deviceId: number, signal?: AbortSignal) => {
-			return getVariablesForDevice({
-				url: `/devices/${deviceId}/variables`,
-				method: "GET",
-				signal,
-			});
-		},
-		[getVariablesForDevice],
-	);
-};
-
-export const getGetVariablesForDeviceInfiniteQueryKey = (deviceId?: number) => {
-	return ["infinite", `/devices/${deviceId}/variables`] as const;
-};
-
-export const getGetVariablesForDeviceQueryKey = (deviceId?: number) => {
-	return [`/devices/${deviceId}/variables`] as const;
-};
-
-export const useGetVariablesForDeviceInfiniteQueryOptions = <
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetVariablesForDeviceHook>>>
-	>,
-	TError = string,
->(
-	deviceId: number,
-	options?: {
-		query?: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetVariablesForDeviceHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
+        return useCallback((
+    deviceId: number,
+ signal?: AbortSignal
 ) => {
-	const { query: queryOptions } = options ?? {};
+        return getVariablesForDevice(
+          {url: `/devices/${deviceId}/variables`, method: 'GET', signal
+    },
+          );
+        }, [getVariablesForDevice])
+      }
+    
 
-	const queryKey =
-		queryOptions?.queryKey ??
-		getGetVariablesForDeviceInfiniteQueryKey(deviceId);
 
-	const getVariablesForDevice = useGetVariablesForDeviceHook();
 
-	const queryFn: QueryFunction<
-		Awaited<ReturnType<ReturnType<typeof useGetVariablesForDeviceHook>>>
-	> = ({ signal }) => getVariablesForDevice(deviceId, signal);
+export const getGetVariablesForDeviceInfiniteQueryKey = (deviceId?: number,) => {
+    return [
+    'infinite', `/devices/${deviceId}/variables`
+    ] as const;
+    }
 
-	return {
-		queryKey,
-		queryFn,
-		enabled: !!deviceId,
-		...queryOptions,
-	} as UseInfiniteQueryOptions<
-		Awaited<ReturnType<ReturnType<typeof useGetVariablesForDeviceHook>>>,
-		TError,
-		TData
-	> & { queryKey: DataTag<QueryKey, TData, TError> };
-};
+export const getGetVariablesForDeviceQueryKey = (deviceId?: number,) => {
+    return [
+    `/devices/${deviceId}/variables`
+    ] as const;
+    }
 
-export type GetVariablesForDeviceInfiniteQueryResult = NonNullable<
-	Awaited<ReturnType<ReturnType<typeof useGetVariablesForDeviceHook>>>
->;
-export type GetVariablesForDeviceInfiniteQueryError = string;
+    
+export const useGetVariablesForDeviceInfiniteQueryOptions = <TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetVariablesForDeviceHook>>>>, TError = string>(deviceId: number, options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetVariablesForDeviceHook>>>, TError, TData>>, }
+) => {
 
-export function useGetVariablesForDeviceInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetVariablesForDeviceHook>>>
-	>,
-	TError = string,
->(
-	deviceId: number,
-	options: {
-		query: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetVariablesForDeviceHook>>>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				DefinedInitialDataOptions<
-					Awaited<ReturnType<ReturnType<typeof useGetVariablesForDeviceHook>>>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useGetVariablesForDeviceHook>>>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): DefinedUseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useGetVariablesForDeviceInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetVariablesForDeviceHook>>>
-	>,
-	TError = string,
->(
-	deviceId: number,
-	options?: {
-		query?: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetVariablesForDeviceHook>>>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				UndefinedInitialDataOptions<
-					Awaited<ReturnType<ReturnType<typeof useGetVariablesForDeviceHook>>>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useGetVariablesForDeviceHook>>>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): UseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useGetVariablesForDeviceInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetVariablesForDeviceHook>>>
-	>,
-	TError = string,
->(
-	deviceId: number,
-	options?: {
-		query?: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetVariablesForDeviceHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
+const {query: queryOptions} = options ?? {};
 
-export function useGetVariablesForDeviceInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetVariablesForDeviceHook>>>
-	>,
-	TError = string,
->(
-	deviceId: number,
-	options?: {
-		query?: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetVariablesForDeviceHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-} {
-	const queryOptions = useGetVariablesForDeviceInfiniteQueryOptions(
-		deviceId,
-		options,
-	);
+  const queryKey =  queryOptions?.queryKey ?? getGetVariablesForDeviceInfiniteQueryKey(deviceId);
 
-	const query = useInfiniteQuery(
-		queryOptions,
-		queryClient,
-	) as UseInfiniteQueryResult<TData, TError> & {
-		queryKey: DataTag<QueryKey, TData, TError>;
-	};
+  const getVariablesForDevice =  useGetVariablesForDeviceHook();
 
-	query.queryKey = queryOptions.queryKey;
+    const queryFn: QueryFunction<Awaited<ReturnType<ReturnType<typeof useGetVariablesForDeviceHook>>>> = ({ signal }) => getVariablesForDevice(deviceId, signal);
 
-	return query;
+      
+
+      
+
+   return  { queryKey, queryFn, enabled: !!(deviceId), ...queryOptions} as UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetVariablesForDeviceHook>>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
 }
 
-export const useGetVariablesForDeviceQueryOptions = <
-	TData = Awaited<ReturnType<ReturnType<typeof useGetVariablesForDeviceHook>>>,
-	TError = string,
->(
-	deviceId: number,
-	options?: {
-		query?: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetVariablesForDeviceHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-) => {
-	const { query: queryOptions } = options ?? {};
+export type GetVariablesForDeviceInfiniteQueryResult = NonNullable<Awaited<ReturnType<ReturnType<typeof useGetVariablesForDeviceHook>>>>
+export type GetVariablesForDeviceInfiniteQueryError = string
 
-	const queryKey =
-		queryOptions?.queryKey ?? getGetVariablesForDeviceQueryKey(deviceId);
 
-	const getVariablesForDevice = useGetVariablesForDeviceHook();
+export function useGetVariablesForDeviceInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetVariablesForDeviceHook>>>>, TError = string>(
+ deviceId: number, options: { query:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetVariablesForDeviceHook>>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useGetVariablesForDeviceHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useGetVariablesForDeviceHook>>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetVariablesForDeviceInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetVariablesForDeviceHook>>>>, TError = string>(
+ deviceId: number, options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetVariablesForDeviceHook>>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useGetVariablesForDeviceHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useGetVariablesForDeviceHook>>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetVariablesForDeviceInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetVariablesForDeviceHook>>>>, TError = string>(
+ deviceId: number, options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetVariablesForDeviceHook>>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 
-	const queryFn: QueryFunction<
-		Awaited<ReturnType<ReturnType<typeof useGetVariablesForDeviceHook>>>
-	> = ({ signal }) => getVariablesForDevice(deviceId, signal);
+export function useGetVariablesForDeviceInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetVariablesForDeviceHook>>>>, TError = string>(
+ deviceId: number, options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetVariablesForDeviceHook>>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
-	return {
-		queryKey,
-		queryFn,
-		enabled: !!deviceId,
-		...queryOptions,
-	} as UseQueryOptions<
-		Awaited<ReturnType<ReturnType<typeof useGetVariablesForDeviceHook>>>,
-		TError,
-		TData
-	> & { queryKey: DataTag<QueryKey, TData, TError> };
-};
+  const queryOptions = useGetVariablesForDeviceInfiniteQueryOptions(deviceId,options)
 
-export type GetVariablesForDeviceQueryResult = NonNullable<
-	Awaited<ReturnType<ReturnType<typeof useGetVariablesForDeviceHook>>>
->;
-export type GetVariablesForDeviceQueryError = string;
+  const query = useInfiniteQuery(queryOptions, queryClient) as  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 
-export function useGetVariablesForDevice<
-	TData = Awaited<ReturnType<ReturnType<typeof useGetVariablesForDeviceHook>>>,
-	TError = string,
->(
-	deviceId: number,
-	options: {
-		query: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetVariablesForDeviceHook>>>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				DefinedInitialDataOptions<
-					Awaited<ReturnType<ReturnType<typeof useGetVariablesForDeviceHook>>>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useGetVariablesForDeviceHook>>>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): DefinedUseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useGetVariablesForDevice<
-	TData = Awaited<ReturnType<ReturnType<typeof useGetVariablesForDeviceHook>>>,
-	TError = string,
->(
-	deviceId: number,
-	options?: {
-		query?: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetVariablesForDeviceHook>>>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				UndefinedInitialDataOptions<
-					Awaited<ReturnType<ReturnType<typeof useGetVariablesForDeviceHook>>>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useGetVariablesForDeviceHook>>>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useGetVariablesForDevice<
-	TData = Awaited<ReturnType<ReturnType<typeof useGetVariablesForDeviceHook>>>,
-	TError = string,
->(
-	deviceId: number,
-	options?: {
-		query?: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetVariablesForDeviceHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
+  query.queryKey = queryOptions.queryKey ;
 
-export function useGetVariablesForDevice<
-	TData = Awaited<ReturnType<ReturnType<typeof useGetVariablesForDeviceHook>>>,
-	TError = string,
->(
-	deviceId: number,
-	options?: {
-		query?: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetVariablesForDeviceHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-} {
-	const queryOptions = useGetVariablesForDeviceQueryOptions(deviceId, options);
-
-	const query = useQuery(queryOptions, queryClient) as UseQueryResult<
-		TData,
-		TError
-	> & { queryKey: DataTag<QueryKey, TData, TError> };
-
-	query.queryKey = queryOptions.queryKey;
-
-	return query;
+  return query;
 }
+
+
+
+
+export const useGetVariablesForDeviceQueryOptions = <TData = Awaited<ReturnType<ReturnType<typeof useGetVariablesForDeviceHook>>>, TError = string>(deviceId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetVariablesForDeviceHook>>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetVariablesForDeviceQueryKey(deviceId);
+
+  const getVariablesForDevice =  useGetVariablesForDeviceHook();
+
+    const queryFn: QueryFunction<Awaited<ReturnType<ReturnType<typeof useGetVariablesForDeviceHook>>>> = ({ signal }) => getVariablesForDevice(deviceId, signal);
+
+      
+
+      
+
+   return  { queryKey, queryFn, enabled: !!(deviceId), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetVariablesForDeviceHook>>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetVariablesForDeviceQueryResult = NonNullable<Awaited<ReturnType<ReturnType<typeof useGetVariablesForDeviceHook>>>>
+export type GetVariablesForDeviceQueryError = string
+
+
+export function useGetVariablesForDevice<TData = Awaited<ReturnType<ReturnType<typeof useGetVariablesForDeviceHook>>>, TError = string>(
+ deviceId: number, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetVariablesForDeviceHook>>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useGetVariablesForDeviceHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useGetVariablesForDeviceHook>>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetVariablesForDevice<TData = Awaited<ReturnType<ReturnType<typeof useGetVariablesForDeviceHook>>>, TError = string>(
+ deviceId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetVariablesForDeviceHook>>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useGetVariablesForDeviceHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useGetVariablesForDeviceHook>>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetVariablesForDevice<TData = Awaited<ReturnType<ReturnType<typeof useGetVariablesForDeviceHook>>>, TError = string>(
+ deviceId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetVariablesForDeviceHook>>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+
+export function useGetVariablesForDevice<TData = Awaited<ReturnType<ReturnType<typeof useGetVariablesForDeviceHook>>>, TError = string>(
+ deviceId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetVariablesForDeviceHook>>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = useGetVariablesForDeviceQueryOptions(deviceId,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  query.queryKey = queryOptions.queryKey ;
+
+  return query;
+}
+
+
+
+
 
 export const useAddVariableToDeviceHook = () => {
-	const addVariableToDevice = useClientMutator<void>();
+        const addVariableToDevice = useClientMutator<void>();
 
-	return useCallback(
-		(deviceId: number, newVariable: NewVariable, signal?: AbortSignal) => {
-			return addVariableToDevice({
-				url: `/devices/${deviceId}/variables`,
-				method: "POST",
-				headers: { "Content-Type": "application/json" },
-				data: newVariable,
-				signal,
-			});
-		},
-		[addVariableToDevice],
-	);
-};
+        return useCallback((
+    deviceId: number,
+    newVariable: NewVariable,
+ signal?: AbortSignal
+) => {
+        return addVariableToDevice(
+          {url: `/devices/${deviceId}/variables`, method: 'POST',
+      headers: {'Content-Type': 'application/json', },
+      data: newVariable, signal
+    },
+          );
+        }, [addVariableToDevice])
+      }
+    
 
-export const useAddVariableToDeviceMutationOptions = <
-	TError = string,
-	TContext = unknown,
->(options?: {
-	mutation?: UseMutationOptions<
-		Awaited<ReturnType<ReturnType<typeof useAddVariableToDeviceHook>>>,
-		TError,
-		{ deviceId: number; data: NewVariable },
-		TContext
-	>;
-}): UseMutationOptions<
-	Awaited<ReturnType<ReturnType<typeof useAddVariableToDeviceHook>>>,
-	TError,
-	{ deviceId: number; data: NewVariable },
-	TContext
-> => {
-	const mutationKey = ["addVariableToDevice"];
-	const { mutation: mutationOptions } = options
-		? options.mutation &&
-			"mutationKey" in options.mutation &&
-			options.mutation.mutationKey
-			? options
-			: { ...options, mutation: { ...options.mutation, mutationKey } }
-		: { mutation: { mutationKey } };
 
-	const addVariableToDevice = useAddVariableToDeviceHook();
+export const useAddVariableToDeviceMutationOptions = <TError = string,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<ReturnType<typeof useAddVariableToDeviceHook>>>, TError,{deviceId: number;data: NewVariable}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<ReturnType<typeof useAddVariableToDeviceHook>>>, TError,{deviceId: number;data: NewVariable}, TContext> => {
 
-	const mutationFn: MutationFunction<
-		Awaited<ReturnType<ReturnType<typeof useAddVariableToDeviceHook>>>,
-		{ deviceId: number; data: NewVariable }
-	> = (props) => {
-		const { deviceId, data } = props ?? {};
+const mutationKey = ['addVariableToDevice'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
 
-		return addVariableToDevice(deviceId, data);
-	};
+      const addVariableToDevice =  useAddVariableToDeviceHook()
 
-	return { mutationFn, ...mutationOptions };
-};
 
-export type AddVariableToDeviceMutationResult = NonNullable<
-	Awaited<ReturnType<ReturnType<typeof useAddVariableToDeviceHook>>>
->;
-export type AddVariableToDeviceMutationBody = NewVariable;
-export type AddVariableToDeviceMutationError = string;
+      const mutationFn: MutationFunction<Awaited<ReturnType<ReturnType<typeof useAddVariableToDeviceHook>>>, {deviceId: number;data: NewVariable}> = (props) => {
+          const {deviceId,data} = props ?? {};
 
-export const useAddVariableToDevice = <TError = string, TContext = unknown>(
-	options?: {
-		mutation?: UseMutationOptions<
-			Awaited<ReturnType<ReturnType<typeof useAddVariableToDeviceHook>>>,
-			TError,
-			{ deviceId: number; data: NewVariable },
-			TContext
-		>;
-	},
-	queryClient?: QueryClient,
-): UseMutationResult<
-	Awaited<ReturnType<ReturnType<typeof useAddVariableToDeviceHook>>>,
-	TError,
-	{ deviceId: number; data: NewVariable },
-	TContext
-> => {
-	const mutationOptions = useAddVariableToDeviceMutationOptions(options);
+          return  addVariableToDevice(deviceId,data,)
+        }
 
-	return useMutation(mutationOptions, queryClient);
-};
+        
 
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type AddVariableToDeviceMutationResult = NonNullable<Awaited<ReturnType<ReturnType<typeof useAddVariableToDeviceHook>>>>
+    export type AddVariableToDeviceMutationBody = NewVariable
+    export type AddVariableToDeviceMutationError = string
+
+    export const useAddVariableToDevice = <TError = string,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<ReturnType<typeof useAddVariableToDeviceHook>>>, TError,{deviceId: number;data: NewVariable}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<ReturnType<typeof useAddVariableToDeviceHook>>>,
+        TError,
+        {deviceId: number;data: NewVariable},
+        TContext
+      > => {
+
+      const mutationOptions = useAddVariableToDeviceMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    
 export const useUpdateVariableForDeviceHook = () => {
-	const updateVariableForDevice = useClientMutator<void>();
+        const updateVariableForDevice = useClientMutator<void>();
 
-	return useCallback(
-		(deviceId: number, variableId: number, newVariable: NewVariable) => {
-			return updateVariableForDevice({
-				url: `/devices/${deviceId}/variables/${variableId}`,
-				method: "PUT",
-				headers: { "Content-Type": "application/json" },
-				data: newVariable,
-			});
-		},
-		[updateVariableForDevice],
-	);
-};
+        return useCallback((
+    deviceId: number,
+    variableId: number,
+    newVariable: NewVariable,
+ ) => {
+        return updateVariableForDevice(
+          {url: `/devices/${deviceId}/variables/${variableId}`, method: 'PUT',
+      headers: {'Content-Type': 'application/json', },
+      data: newVariable
+    },
+          );
+        }, [updateVariableForDevice])
+      }
+    
 
-export const useUpdateVariableForDeviceMutationOptions = <
-	TError = string,
-	TContext = unknown,
->(options?: {
-	mutation?: UseMutationOptions<
-		Awaited<ReturnType<ReturnType<typeof useUpdateVariableForDeviceHook>>>,
-		TError,
-		{ deviceId: number; variableId: number; data: NewVariable },
-		TContext
-	>;
-}): UseMutationOptions<
-	Awaited<ReturnType<ReturnType<typeof useUpdateVariableForDeviceHook>>>,
-	TError,
-	{ deviceId: number; variableId: number; data: NewVariable },
-	TContext
-> => {
-	const mutationKey = ["updateVariableForDevice"];
-	const { mutation: mutationOptions } = options
-		? options.mutation &&
-			"mutationKey" in options.mutation &&
-			options.mutation.mutationKey
-			? options
-			: { ...options, mutation: { ...options.mutation, mutationKey } }
-		: { mutation: { mutationKey } };
 
-	const updateVariableForDevice = useUpdateVariableForDeviceHook();
+export const useUpdateVariableForDeviceMutationOptions = <TError = string,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<ReturnType<typeof useUpdateVariableForDeviceHook>>>, TError,{deviceId: number;variableId: number;data: NewVariable}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<ReturnType<typeof useUpdateVariableForDeviceHook>>>, TError,{deviceId: number;variableId: number;data: NewVariable}, TContext> => {
 
-	const mutationFn: MutationFunction<
-		Awaited<ReturnType<ReturnType<typeof useUpdateVariableForDeviceHook>>>,
-		{ deviceId: number; variableId: number; data: NewVariable }
-	> = (props) => {
-		const { deviceId, variableId, data } = props ?? {};
+const mutationKey = ['updateVariableForDevice'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
 
-		return updateVariableForDevice(deviceId, variableId, data);
-	};
+      const updateVariableForDevice =  useUpdateVariableForDeviceHook()
 
-	return { mutationFn, ...mutationOptions };
-};
 
-export type UpdateVariableForDeviceMutationResult = NonNullable<
-	Awaited<ReturnType<ReturnType<typeof useUpdateVariableForDeviceHook>>>
->;
-export type UpdateVariableForDeviceMutationBody = NewVariable;
-export type UpdateVariableForDeviceMutationError = string;
+      const mutationFn: MutationFunction<Awaited<ReturnType<ReturnType<typeof useUpdateVariableForDeviceHook>>>, {deviceId: number;variableId: number;data: NewVariable}> = (props) => {
+          const {deviceId,variableId,data} = props ?? {};
 
-export const useUpdateVariableForDevice = <TError = string, TContext = unknown>(
-	options?: {
-		mutation?: UseMutationOptions<
-			Awaited<ReturnType<ReturnType<typeof useUpdateVariableForDeviceHook>>>,
-			TError,
-			{ deviceId: number; variableId: number; data: NewVariable },
-			TContext
-		>;
-	},
-	queryClient?: QueryClient,
-): UseMutationResult<
-	Awaited<ReturnType<ReturnType<typeof useUpdateVariableForDeviceHook>>>,
-	TError,
-	{ deviceId: number; variableId: number; data: NewVariable },
-	TContext
-> => {
-	const mutationOptions = useUpdateVariableForDeviceMutationOptions(options);
+          return  updateVariableForDevice(deviceId,variableId,data,)
+        }
 
-	return useMutation(mutationOptions, queryClient);
-};
+        
 
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdateVariableForDeviceMutationResult = NonNullable<Awaited<ReturnType<ReturnType<typeof useUpdateVariableForDeviceHook>>>>
+    export type UpdateVariableForDeviceMutationBody = NewVariable
+    export type UpdateVariableForDeviceMutationError = string
+
+    export const useUpdateVariableForDevice = <TError = string,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<ReturnType<typeof useUpdateVariableForDeviceHook>>>, TError,{deviceId: number;variableId: number;data: NewVariable}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<ReturnType<typeof useUpdateVariableForDeviceHook>>>,
+        TError,
+        {deviceId: number;variableId: number;data: NewVariable},
+        TContext
+      > => {
+
+      const mutationOptions = useUpdateVariableForDeviceMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    
 export const useDeleteVariableFromDeviceHook = () => {
-	const deleteVariableFromDevice = useClientMutator<void>();
+        const deleteVariableFromDevice = useClientMutator<void>();
 
-	return useCallback(
-		(deviceId: number, variableId: number) => {
-			return deleteVariableFromDevice({
-				url: `/devices/${deviceId}/variables/${variableId}`,
-				method: "DELETE",
-			});
-		},
-		[deleteVariableFromDevice],
-	);
-};
+        return useCallback((
+    deviceId: number,
+    variableId: number,
+ ) => {
+        return deleteVariableFromDevice(
+          {url: `/devices/${deviceId}/variables/${variableId}`, method: 'DELETE'
+    },
+          );
+        }, [deleteVariableFromDevice])
+      }
+    
 
-export const useDeleteVariableFromDeviceMutationOptions = <
-	TError = string,
-	TContext = unknown,
->(options?: {
-	mutation?: UseMutationOptions<
-		Awaited<ReturnType<ReturnType<typeof useDeleteVariableFromDeviceHook>>>,
-		TError,
-		{ deviceId: number; variableId: number },
-		TContext
-	>;
-}): UseMutationOptions<
-	Awaited<ReturnType<ReturnType<typeof useDeleteVariableFromDeviceHook>>>,
-	TError,
-	{ deviceId: number; variableId: number },
-	TContext
-> => {
-	const mutationKey = ["deleteVariableFromDevice"];
-	const { mutation: mutationOptions } = options
-		? options.mutation &&
-			"mutationKey" in options.mutation &&
-			options.mutation.mutationKey
-			? options
-			: { ...options, mutation: { ...options.mutation, mutationKey } }
-		: { mutation: { mutationKey } };
 
-	const deleteVariableFromDevice = useDeleteVariableFromDeviceHook();
+export const useDeleteVariableFromDeviceMutationOptions = <TError = string,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<ReturnType<typeof useDeleteVariableFromDeviceHook>>>, TError,{deviceId: number;variableId: number}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<ReturnType<typeof useDeleteVariableFromDeviceHook>>>, TError,{deviceId: number;variableId: number}, TContext> => {
 
-	const mutationFn: MutationFunction<
-		Awaited<ReturnType<ReturnType<typeof useDeleteVariableFromDeviceHook>>>,
-		{ deviceId: number; variableId: number }
-	> = (props) => {
-		const { deviceId, variableId } = props ?? {};
+const mutationKey = ['deleteVariableFromDevice'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
 
-		return deleteVariableFromDevice(deviceId, variableId);
-	};
+      const deleteVariableFromDevice =  useDeleteVariableFromDeviceHook()
 
-	return { mutationFn, ...mutationOptions };
-};
 
-export type DeleteVariableFromDeviceMutationResult = NonNullable<
-	Awaited<ReturnType<ReturnType<typeof useDeleteVariableFromDeviceHook>>>
->;
+      const mutationFn: MutationFunction<Awaited<ReturnType<ReturnType<typeof useDeleteVariableFromDeviceHook>>>, {deviceId: number;variableId: number}> = (props) => {
+          const {deviceId,variableId} = props ?? {};
 
-export type DeleteVariableFromDeviceMutationError = string;
+          return  deleteVariableFromDevice(deviceId,variableId,)
+        }
 
-export const useDeleteVariableFromDevice = <
-	TError = string,
-	TContext = unknown,
->(
-	options?: {
-		mutation?: UseMutationOptions<
-			Awaited<ReturnType<ReturnType<typeof useDeleteVariableFromDeviceHook>>>,
-			TError,
-			{ deviceId: number; variableId: number },
-			TContext
-		>;
-	},
-	queryClient?: QueryClient,
-): UseMutationResult<
-	Awaited<ReturnType<ReturnType<typeof useDeleteVariableFromDeviceHook>>>,
-	TError,
-	{ deviceId: number; variableId: number },
-	TContext
-> => {
-	const mutationOptions = useDeleteVariableFromDeviceMutationOptions(options);
+        
 
-	return useMutation(mutationOptions, queryClient);
-};
 
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DeleteVariableFromDeviceMutationResult = NonNullable<Awaited<ReturnType<ReturnType<typeof useDeleteVariableFromDeviceHook>>>>
+    
+    export type DeleteVariableFromDeviceMutationError = string
+
+    export const useDeleteVariableFromDevice = <TError = string,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<ReturnType<typeof useDeleteVariableFromDeviceHook>>>, TError,{deviceId: number;variableId: number}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<ReturnType<typeof useDeleteVariableFromDeviceHook>>>,
+        TError,
+        {deviceId: number;variableId: number},
+        TContext
+      > => {
+
+      const mutationOptions = useDeleteVariableFromDeviceMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    
 export const useGetNetworkForDeviceHook = () => {
-	const getNetworkForDevice = useClientMutator<void>();
+        const getNetworkForDevice = useClientMutator<void>();
 
-	return useCallback(
-		(serialNumber: string, signal?: AbortSignal) => {
-			return getNetworkForDevice({
-				url: `/devices/${serialNumber}/network`,
-				method: "GET",
-				signal,
-			});
-		},
-		[getNetworkForDevice],
-	);
-};
-
-export const getGetNetworkForDeviceInfiniteQueryKey = (
-	serialNumber?: string,
+        return useCallback((
+    serialNumber: string,
+ signal?: AbortSignal
 ) => {
-	return ["infinite", `/devices/${serialNumber}/network`] as const;
-};
+        return getNetworkForDevice(
+          {url: `/devices/${serialNumber}/network`, method: 'GET', signal
+    },
+          );
+        }, [getNetworkForDevice])
+      }
+    
 
-export const getGetNetworkForDeviceQueryKey = (serialNumber?: string) => {
-	return [`/devices/${serialNumber}/network`] as const;
-};
 
-export const useGetNetworkForDeviceInfiniteQueryOptions = <
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetNetworkForDeviceHook>>>
-	>,
-	TError = void,
->(
-	serialNumber: string,
-	options?: {
-		query?: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetNetworkForDeviceHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
+
+export const getGetNetworkForDeviceInfiniteQueryKey = (serialNumber?: string,) => {
+    return [
+    'infinite', `/devices/${serialNumber}/network`
+    ] as const;
+    }
+
+export const getGetNetworkForDeviceQueryKey = (serialNumber?: string,) => {
+    return [
+    `/devices/${serialNumber}/network`
+    ] as const;
+    }
+
+    
+export const useGetNetworkForDeviceInfiniteQueryOptions = <TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetNetworkForDeviceHook>>>>, TError = void>(serialNumber: string, options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetNetworkForDeviceHook>>>, TError, TData>>, }
 ) => {
-	const { query: queryOptions } = options ?? {};
 
-	const queryKey =
-		queryOptions?.queryKey ??
-		getGetNetworkForDeviceInfiniteQueryKey(serialNumber);
+const {query: queryOptions} = options ?? {};
 
-	const getNetworkForDevice = useGetNetworkForDeviceHook();
+  const queryKey =  queryOptions?.queryKey ?? getGetNetworkForDeviceInfiniteQueryKey(serialNumber);
 
-	const queryFn: QueryFunction<
-		Awaited<ReturnType<ReturnType<typeof useGetNetworkForDeviceHook>>>
-	> = ({ signal }) => getNetworkForDevice(serialNumber, signal);
+  const getNetworkForDevice =  useGetNetworkForDeviceHook();
 
-	return {
-		queryKey,
-		queryFn,
-		enabled: !!serialNumber,
-		...queryOptions,
-	} as UseInfiniteQueryOptions<
-		Awaited<ReturnType<ReturnType<typeof useGetNetworkForDeviceHook>>>,
-		TError,
-		TData
-	> & { queryKey: DataTag<QueryKey, TData, TError> };
-};
+    const queryFn: QueryFunction<Awaited<ReturnType<ReturnType<typeof useGetNetworkForDeviceHook>>>> = ({ signal }) => getNetworkForDevice(serialNumber, signal);
 
-export type GetNetworkForDeviceInfiniteQueryResult = NonNullable<
-	Awaited<ReturnType<ReturnType<typeof useGetNetworkForDeviceHook>>>
->;
-export type GetNetworkForDeviceInfiniteQueryError = void;
+      
 
-export function useGetNetworkForDeviceInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetNetworkForDeviceHook>>>
-	>,
-	TError = void,
->(
-	serialNumber: string,
-	options: {
-		query: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetNetworkForDeviceHook>>>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				DefinedInitialDataOptions<
-					Awaited<ReturnType<ReturnType<typeof useGetNetworkForDeviceHook>>>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useGetNetworkForDeviceHook>>>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): DefinedUseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useGetNetworkForDeviceInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetNetworkForDeviceHook>>>
-	>,
-	TError = void,
->(
-	serialNumber: string,
-	options?: {
-		query?: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetNetworkForDeviceHook>>>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				UndefinedInitialDataOptions<
-					Awaited<ReturnType<ReturnType<typeof useGetNetworkForDeviceHook>>>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useGetNetworkForDeviceHook>>>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): UseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useGetNetworkForDeviceInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetNetworkForDeviceHook>>>
-	>,
-	TError = void,
->(
-	serialNumber: string,
-	options?: {
-		query?: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetNetworkForDeviceHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
+      
 
-export function useGetNetworkForDeviceInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetNetworkForDeviceHook>>>
-	>,
-	TError = void,
->(
-	serialNumber: string,
-	options?: {
-		query?: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetNetworkForDeviceHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-} {
-	const queryOptions = useGetNetworkForDeviceInfiniteQueryOptions(
-		serialNumber,
-		options,
-	);
-
-	const query = useInfiniteQuery(
-		queryOptions,
-		queryClient,
-	) as UseInfiniteQueryResult<TData, TError> & {
-		queryKey: DataTag<QueryKey, TData, TError>;
-	};
-
-	query.queryKey = queryOptions.queryKey;
-
-	return query;
+   return  { queryKey, queryFn, enabled: !!(serialNumber), ...queryOptions} as UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetNetworkForDeviceHook>>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
 }
 
-export const useGetNetworkForDeviceQueryOptions = <
-	TData = Awaited<ReturnType<ReturnType<typeof useGetNetworkForDeviceHook>>>,
-	TError = void,
->(
-	serialNumber: string,
-	options?: {
-		query?: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetNetworkForDeviceHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-) => {
-	const { query: queryOptions } = options ?? {};
+export type GetNetworkForDeviceInfiniteQueryResult = NonNullable<Awaited<ReturnType<ReturnType<typeof useGetNetworkForDeviceHook>>>>
+export type GetNetworkForDeviceInfiniteQueryError = void
 
-	const queryKey =
-		queryOptions?.queryKey ?? getGetNetworkForDeviceQueryKey(serialNumber);
 
-	const getNetworkForDevice = useGetNetworkForDeviceHook();
+export function useGetNetworkForDeviceInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetNetworkForDeviceHook>>>>, TError = void>(
+ serialNumber: string, options: { query:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetNetworkForDeviceHook>>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useGetNetworkForDeviceHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useGetNetworkForDeviceHook>>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetNetworkForDeviceInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetNetworkForDeviceHook>>>>, TError = void>(
+ serialNumber: string, options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetNetworkForDeviceHook>>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useGetNetworkForDeviceHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useGetNetworkForDeviceHook>>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetNetworkForDeviceInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetNetworkForDeviceHook>>>>, TError = void>(
+ serialNumber: string, options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetNetworkForDeviceHook>>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 
-	const queryFn: QueryFunction<
-		Awaited<ReturnType<ReturnType<typeof useGetNetworkForDeviceHook>>>
-	> = ({ signal }) => getNetworkForDevice(serialNumber, signal);
+export function useGetNetworkForDeviceInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetNetworkForDeviceHook>>>>, TError = void>(
+ serialNumber: string, options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetNetworkForDeviceHook>>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
-	return {
-		queryKey,
-		queryFn,
-		enabled: !!serialNumber,
-		...queryOptions,
-	} as UseQueryOptions<
-		Awaited<ReturnType<ReturnType<typeof useGetNetworkForDeviceHook>>>,
-		TError,
-		TData
-	> & { queryKey: DataTag<QueryKey, TData, TError> };
-};
+  const queryOptions = useGetNetworkForDeviceInfiniteQueryOptions(serialNumber,options)
 
-export type GetNetworkForDeviceQueryResult = NonNullable<
-	Awaited<ReturnType<ReturnType<typeof useGetNetworkForDeviceHook>>>
->;
-export type GetNetworkForDeviceQueryError = void;
+  const query = useInfiniteQuery(queryOptions, queryClient) as  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 
-export function useGetNetworkForDevice<
-	TData = Awaited<ReturnType<ReturnType<typeof useGetNetworkForDeviceHook>>>,
-	TError = void,
->(
-	serialNumber: string,
-	options: {
-		query: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetNetworkForDeviceHook>>>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				DefinedInitialDataOptions<
-					Awaited<ReturnType<ReturnType<typeof useGetNetworkForDeviceHook>>>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useGetNetworkForDeviceHook>>>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): DefinedUseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useGetNetworkForDevice<
-	TData = Awaited<ReturnType<ReturnType<typeof useGetNetworkForDeviceHook>>>,
-	TError = void,
->(
-	serialNumber: string,
-	options?: {
-		query?: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetNetworkForDeviceHook>>>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				UndefinedInitialDataOptions<
-					Awaited<ReturnType<ReturnType<typeof useGetNetworkForDeviceHook>>>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useGetNetworkForDeviceHook>>>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useGetNetworkForDevice<
-	TData = Awaited<ReturnType<ReturnType<typeof useGetNetworkForDeviceHook>>>,
-	TError = void,
->(
-	serialNumber: string,
-	options?: {
-		query?: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetNetworkForDeviceHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
+  query.queryKey = queryOptions.queryKey ;
 
-export function useGetNetworkForDevice<
-	TData = Awaited<ReturnType<ReturnType<typeof useGetNetworkForDeviceHook>>>,
-	TError = void,
->(
-	serialNumber: string,
-	options?: {
-		query?: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetNetworkForDeviceHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-} {
-	const queryOptions = useGetNetworkForDeviceQueryOptions(
-		serialNumber,
-		options,
-	);
-
-	const query = useQuery(queryOptions, queryClient) as UseQueryResult<
-		TData,
-		TError
-	> & { queryKey: DataTag<QueryKey, TData, TError> };
-
-	query.queryKey = queryOptions.queryKey;
-
-	return query;
+  return query;
 }
+
+
+
+
+export const useGetNetworkForDeviceQueryOptions = <TData = Awaited<ReturnType<ReturnType<typeof useGetNetworkForDeviceHook>>>, TError = void>(serialNumber: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetNetworkForDeviceHook>>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetNetworkForDeviceQueryKey(serialNumber);
+
+  const getNetworkForDevice =  useGetNetworkForDeviceHook();
+
+    const queryFn: QueryFunction<Awaited<ReturnType<ReturnType<typeof useGetNetworkForDeviceHook>>>> = ({ signal }) => getNetworkForDevice(serialNumber, signal);
+
+      
+
+      
+
+   return  { queryKey, queryFn, enabled: !!(serialNumber), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetNetworkForDeviceHook>>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetNetworkForDeviceQueryResult = NonNullable<Awaited<ReturnType<ReturnType<typeof useGetNetworkForDeviceHook>>>>
+export type GetNetworkForDeviceQueryError = void
+
+
+export function useGetNetworkForDevice<TData = Awaited<ReturnType<ReturnType<typeof useGetNetworkForDeviceHook>>>, TError = void>(
+ serialNumber: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetNetworkForDeviceHook>>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useGetNetworkForDeviceHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useGetNetworkForDeviceHook>>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetNetworkForDevice<TData = Awaited<ReturnType<ReturnType<typeof useGetNetworkForDeviceHook>>>, TError = void>(
+ serialNumber: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetNetworkForDeviceHook>>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useGetNetworkForDeviceHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useGetNetworkForDeviceHook>>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetNetworkForDevice<TData = Awaited<ReturnType<ReturnType<typeof useGetNetworkForDeviceHook>>>, TError = void>(
+ serialNumber: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetNetworkForDeviceHook>>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+
+export function useGetNetworkForDevice<TData = Awaited<ReturnType<ReturnType<typeof useGetNetworkForDeviceHook>>>, TError = void>(
+ serialNumber: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetNetworkForDeviceHook>>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = useGetNetworkForDeviceQueryOptions(serialNumber,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  query.queryKey = queryOptions.queryKey ;
+
+  return query;
+}
+
+
+
+
 
 export const useUpdateDeviceNetworkHook = () => {
-	const updateDeviceNetwork = useClientMutator<void>();
+        const updateDeviceNetwork = useClientMutator<void>();
 
-	return useCallback(
-		(serialNumber: string) => {
-			return updateDeviceNetwork({
-				url: `/devices/${serialNumber}/network`,
-				method: "PUT",
-			});
-		},
-		[updateDeviceNetwork],
-	);
-};
+        return useCallback((
+    serialNumber: string,
+ ) => {
+        return updateDeviceNetwork(
+          {url: `/devices/${serialNumber}/network`, method: 'PUT'
+    },
+          );
+        }, [updateDeviceNetwork])
+      }
+    
 
-export const useUpdateDeviceNetworkMutationOptions = <
-	TError = void,
-	TContext = unknown,
->(options?: {
-	mutation?: UseMutationOptions<
-		Awaited<ReturnType<ReturnType<typeof useUpdateDeviceNetworkHook>>>,
-		TError,
-		{ serialNumber: string },
-		TContext
-	>;
-}): UseMutationOptions<
-	Awaited<ReturnType<ReturnType<typeof useUpdateDeviceNetworkHook>>>,
-	TError,
-	{ serialNumber: string },
-	TContext
-> => {
-	const mutationKey = ["updateDeviceNetwork"];
-	const { mutation: mutationOptions } = options
-		? options.mutation &&
-			"mutationKey" in options.mutation &&
-			options.mutation.mutationKey
-			? options
-			: { ...options, mutation: { ...options.mutation, mutationKey } }
-		: { mutation: { mutationKey } };
 
-	const updateDeviceNetwork = useUpdateDeviceNetworkHook();
+export const useUpdateDeviceNetworkMutationOptions = <TError = void,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<ReturnType<typeof useUpdateDeviceNetworkHook>>>, TError,{serialNumber: string}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<ReturnType<typeof useUpdateDeviceNetworkHook>>>, TError,{serialNumber: string}, TContext> => {
 
-	const mutationFn: MutationFunction<
-		Awaited<ReturnType<ReturnType<typeof useUpdateDeviceNetworkHook>>>,
-		{ serialNumber: string }
-	> = (props) => {
-		const { serialNumber } = props ?? {};
+const mutationKey = ['updateDeviceNetwork'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
 
-		return updateDeviceNetwork(serialNumber);
-	};
+      const updateDeviceNetwork =  useUpdateDeviceNetworkHook()
 
-	return { mutationFn, ...mutationOptions };
-};
 
-export type UpdateDeviceNetworkMutationResult = NonNullable<
-	Awaited<ReturnType<ReturnType<typeof useUpdateDeviceNetworkHook>>>
->;
+      const mutationFn: MutationFunction<Awaited<ReturnType<ReturnType<typeof useUpdateDeviceNetworkHook>>>, {serialNumber: string}> = (props) => {
+          const {serialNumber} = props ?? {};
 
-export type UpdateDeviceNetworkMutationError = void;
+          return  updateDeviceNetwork(serialNumber,)
+        }
 
-export const useUpdateDeviceNetwork = <TError = void, TContext = unknown>(
-	options?: {
-		mutation?: UseMutationOptions<
-			Awaited<ReturnType<ReturnType<typeof useUpdateDeviceNetworkHook>>>,
-			TError,
-			{ serialNumber: string },
-			TContext
-		>;
-	},
-	queryClient?: QueryClient,
-): UseMutationResult<
-	Awaited<ReturnType<ReturnType<typeof useUpdateDeviceNetworkHook>>>,
-	TError,
-	{ serialNumber: string },
-	TContext
-> => {
-	const mutationOptions = useUpdateDeviceNetworkMutationOptions(options);
+        
 
-	return useMutation(mutationOptions, queryClient);
-};
 
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdateDeviceNetworkMutationResult = NonNullable<Awaited<ReturnType<ReturnType<typeof useUpdateDeviceNetworkHook>>>>
+    
+    export type UpdateDeviceNetworkMutationError = void
+
+    export const useUpdateDeviceNetwork = <TError = void,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<ReturnType<typeof useUpdateDeviceNetworkHook>>>, TError,{serialNumber: string}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<ReturnType<typeof useUpdateDeviceNetworkHook>>>,
+        TError,
+        {serialNumber: string},
+        TContext
+      > => {
+
+      const mutationOptions = useUpdateDeviceNetworkMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    
 export const useGetDistributionsHook = () => {
-	const getDistributions = useClientMutator<Distribution[]>();
+        const getDistributions = useClientMutator<Distribution[]>();
 
-	return useCallback(
-		(signal?: AbortSignal) => {
-			return getDistributions({ url: `/distributions`, method: "GET", signal });
-		},
-		[getDistributions],
-	);
-};
+        return useCallback((
+    
+ signal?: AbortSignal
+) => {
+        return getDistributions(
+          {url: `/distributions`, method: 'GET', signal
+    },
+          );
+        }, [getDistributions])
+      }
+    
+
+
 
 export const getGetDistributionsInfiniteQueryKey = () => {
-	return ["infinite", `/distributions`] as const;
-};
+    return [
+    'infinite', `/distributions`
+    ] as const;
+    }
 
 export const getGetDistributionsQueryKey = () => {
-	return [`/distributions`] as const;
-};
+    return [
+    `/distributions`
+    ] as const;
+    }
 
-export const useGetDistributionsInfiniteQueryOptions = <
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetDistributionsHook>>>
-	>,
-	TError = void,
->(options?: {
-	query?: Partial<
-		UseInfiniteQueryOptions<
-			Awaited<ReturnType<ReturnType<typeof useGetDistributionsHook>>>,
-			TError,
-			TData
-		>
-	>;
-}) => {
-	const { query: queryOptions } = options ?? {};
+    
+export const useGetDistributionsInfiniteQueryOptions = <TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetDistributionsHook>>>>, TError = void>( options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetDistributionsHook>>>, TError, TData>>, }
+) => {
 
-	const queryKey =
-		queryOptions?.queryKey ?? getGetDistributionsInfiniteQueryKey();
+const {query: queryOptions} = options ?? {};
 
-	const getDistributions = useGetDistributionsHook();
+  const queryKey =  queryOptions?.queryKey ?? getGetDistributionsInfiniteQueryKey();
 
-	const queryFn: QueryFunction<
-		Awaited<ReturnType<ReturnType<typeof useGetDistributionsHook>>>
-	> = ({ signal }) => getDistributions(signal);
+  const getDistributions =  useGetDistributionsHook();
 
-	return { queryKey, queryFn, ...queryOptions } as UseInfiniteQueryOptions<
-		Awaited<ReturnType<ReturnType<typeof useGetDistributionsHook>>>,
-		TError,
-		TData
-	> & { queryKey: DataTag<QueryKey, TData, TError> };
-};
+    const queryFn: QueryFunction<Awaited<ReturnType<ReturnType<typeof useGetDistributionsHook>>>> = ({ signal }) => getDistributions(signal);
 
-export type GetDistributionsInfiniteQueryResult = NonNullable<
-	Awaited<ReturnType<ReturnType<typeof useGetDistributionsHook>>>
->;
-export type GetDistributionsInfiniteQueryError = void;
+      
 
-export function useGetDistributionsInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetDistributionsHook>>>
-	>,
-	TError = void,
->(
-	options: {
-		query: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetDistributionsHook>>>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				DefinedInitialDataOptions<
-					Awaited<ReturnType<ReturnType<typeof useGetDistributionsHook>>>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useGetDistributionsHook>>>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): DefinedUseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useGetDistributionsInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetDistributionsHook>>>
-	>,
-	TError = void,
->(
-	options?: {
-		query?: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetDistributionsHook>>>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				UndefinedInitialDataOptions<
-					Awaited<ReturnType<ReturnType<typeof useGetDistributionsHook>>>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useGetDistributionsHook>>>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): UseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useGetDistributionsInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetDistributionsHook>>>
-	>,
-	TError = void,
->(
-	options?: {
-		query?: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetDistributionsHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
+      
 
-export function useGetDistributionsInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetDistributionsHook>>>
-	>,
-	TError = void,
->(
-	options?: {
-		query?: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetDistributionsHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-} {
-	const queryOptions = useGetDistributionsInfiniteQueryOptions(options);
-
-	const query = useInfiniteQuery(
-		queryOptions,
-		queryClient,
-	) as UseInfiniteQueryResult<TData, TError> & {
-		queryKey: DataTag<QueryKey, TData, TError>;
-	};
-
-	query.queryKey = queryOptions.queryKey;
-
-	return query;
+   return  { queryKey, queryFn, ...queryOptions} as UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetDistributionsHook>>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
 }
 
-export const useGetDistributionsQueryOptions = <
-	TData = Awaited<ReturnType<ReturnType<typeof useGetDistributionsHook>>>,
-	TError = void,
->(options?: {
-	query?: Partial<
-		UseQueryOptions<
-			Awaited<ReturnType<ReturnType<typeof useGetDistributionsHook>>>,
-			TError,
-			TData
-		>
-	>;
-}) => {
-	const { query: queryOptions } = options ?? {};
+export type GetDistributionsInfiniteQueryResult = NonNullable<Awaited<ReturnType<ReturnType<typeof useGetDistributionsHook>>>>
+export type GetDistributionsInfiniteQueryError = void
 
-	const queryKey = queryOptions?.queryKey ?? getGetDistributionsQueryKey();
 
-	const getDistributions = useGetDistributionsHook();
+export function useGetDistributionsInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetDistributionsHook>>>>, TError = void>(
+  options: { query:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetDistributionsHook>>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useGetDistributionsHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useGetDistributionsHook>>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetDistributionsInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetDistributionsHook>>>>, TError = void>(
+  options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetDistributionsHook>>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useGetDistributionsHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useGetDistributionsHook>>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetDistributionsInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetDistributionsHook>>>>, TError = void>(
+  options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetDistributionsHook>>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 
-	const queryFn: QueryFunction<
-		Awaited<ReturnType<ReturnType<typeof useGetDistributionsHook>>>
-	> = ({ signal }) => getDistributions(signal);
+export function useGetDistributionsInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetDistributionsHook>>>>, TError = void>(
+  options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetDistributionsHook>>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
-	return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
-		Awaited<ReturnType<ReturnType<typeof useGetDistributionsHook>>>,
-		TError,
-		TData
-	> & { queryKey: DataTag<QueryKey, TData, TError> };
-};
+  const queryOptions = useGetDistributionsInfiniteQueryOptions(options)
 
-export type GetDistributionsQueryResult = NonNullable<
-	Awaited<ReturnType<ReturnType<typeof useGetDistributionsHook>>>
->;
-export type GetDistributionsQueryError = void;
+  const query = useInfiniteQuery(queryOptions, queryClient) as  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 
-export function useGetDistributions<
-	TData = Awaited<ReturnType<ReturnType<typeof useGetDistributionsHook>>>,
-	TError = void,
->(
-	options: {
-		query: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetDistributionsHook>>>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				DefinedInitialDataOptions<
-					Awaited<ReturnType<ReturnType<typeof useGetDistributionsHook>>>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useGetDistributionsHook>>>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): DefinedUseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useGetDistributions<
-	TData = Awaited<ReturnType<ReturnType<typeof useGetDistributionsHook>>>,
-	TError = void,
->(
-	options?: {
-		query?: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetDistributionsHook>>>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				UndefinedInitialDataOptions<
-					Awaited<ReturnType<ReturnType<typeof useGetDistributionsHook>>>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useGetDistributionsHook>>>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useGetDistributions<
-	TData = Awaited<ReturnType<ReturnType<typeof useGetDistributionsHook>>>,
-	TError = void,
->(
-	options?: {
-		query?: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetDistributionsHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
+  query.queryKey = queryOptions.queryKey ;
 
-export function useGetDistributions<
-	TData = Awaited<ReturnType<ReturnType<typeof useGetDistributionsHook>>>,
-	TError = void,
->(
-	options?: {
-		query?: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetDistributionsHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-} {
-	const queryOptions = useGetDistributionsQueryOptions(options);
-
-	const query = useQuery(queryOptions, queryClient) as UseQueryResult<
-		TData,
-		TError
-	> & { queryKey: DataTag<QueryKey, TData, TError> };
-
-	query.queryKey = queryOptions.queryKey;
-
-	return query;
+  return query;
 }
+
+
+
+
+export const useGetDistributionsQueryOptions = <TData = Awaited<ReturnType<ReturnType<typeof useGetDistributionsHook>>>, TError = void>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetDistributionsHook>>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetDistributionsQueryKey();
+
+  const getDistributions =  useGetDistributionsHook();
+
+    const queryFn: QueryFunction<Awaited<ReturnType<ReturnType<typeof useGetDistributionsHook>>>> = ({ signal }) => getDistributions(signal);
+
+      
+
+      
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetDistributionsHook>>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetDistributionsQueryResult = NonNullable<Awaited<ReturnType<ReturnType<typeof useGetDistributionsHook>>>>
+export type GetDistributionsQueryError = void
+
+
+export function useGetDistributions<TData = Awaited<ReturnType<ReturnType<typeof useGetDistributionsHook>>>, TError = void>(
+  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetDistributionsHook>>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useGetDistributionsHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useGetDistributionsHook>>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetDistributions<TData = Awaited<ReturnType<ReturnType<typeof useGetDistributionsHook>>>, TError = void>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetDistributionsHook>>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useGetDistributionsHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useGetDistributionsHook>>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetDistributions<TData = Awaited<ReturnType<ReturnType<typeof useGetDistributionsHook>>>, TError = void>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetDistributionsHook>>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+
+export function useGetDistributions<TData = Awaited<ReturnType<ReturnType<typeof useGetDistributionsHook>>>, TError = void>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetDistributionsHook>>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = useGetDistributionsQueryOptions(options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  query.queryKey = queryOptions.queryKey ;
+
+  return query;
+}
+
+
+
+
 
 export const useCreateDistributionHook = () => {
-	const createDistribution = useClientMutator<void>();
+        const createDistribution = useClientMutator<void>();
 
-	return useCallback(
-		(newDistribution: NewDistribution, signal?: AbortSignal) => {
-			return createDistribution({
-				url: `/distributions`,
-				method: "POST",
-				headers: { "Content-Type": "application/json" },
-				data: newDistribution,
-				signal,
-			});
-		},
-		[createDistribution],
-	);
-};
+        return useCallback((
+    newDistribution: NewDistribution,
+ signal?: AbortSignal
+) => {
+        return createDistribution(
+          {url: `/distributions`, method: 'POST',
+      headers: {'Content-Type': 'application/json', },
+      data: newDistribution, signal
+    },
+          );
+        }, [createDistribution])
+      }
+    
 
-export const useCreateDistributionMutationOptions = <
-	TError = void,
-	TContext = unknown,
->(options?: {
-	mutation?: UseMutationOptions<
-		Awaited<ReturnType<ReturnType<typeof useCreateDistributionHook>>>,
-		TError,
-		{ data: NewDistribution },
-		TContext
-	>;
-}): UseMutationOptions<
-	Awaited<ReturnType<ReturnType<typeof useCreateDistributionHook>>>,
-	TError,
-	{ data: NewDistribution },
-	TContext
-> => {
-	const mutationKey = ["createDistribution"];
-	const { mutation: mutationOptions } = options
-		? options.mutation &&
-			"mutationKey" in options.mutation &&
-			options.mutation.mutationKey
-			? options
-			: { ...options, mutation: { ...options.mutation, mutationKey } }
-		: { mutation: { mutationKey } };
 
-	const createDistribution = useCreateDistributionHook();
+export const useCreateDistributionMutationOptions = <TError = void,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<ReturnType<typeof useCreateDistributionHook>>>, TError,{data: NewDistribution}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<ReturnType<typeof useCreateDistributionHook>>>, TError,{data: NewDistribution}, TContext> => {
 
-	const mutationFn: MutationFunction<
-		Awaited<ReturnType<ReturnType<typeof useCreateDistributionHook>>>,
-		{ data: NewDistribution }
-	> = (props) => {
-		const { data } = props ?? {};
+const mutationKey = ['createDistribution'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
 
-		return createDistribution(data);
-	};
+      const createDistribution =  useCreateDistributionHook()
 
-	return { mutationFn, ...mutationOptions };
-};
 
-export type CreateDistributionMutationResult = NonNullable<
-	Awaited<ReturnType<ReturnType<typeof useCreateDistributionHook>>>
->;
-export type CreateDistributionMutationBody = NewDistribution;
-export type CreateDistributionMutationError = void;
+      const mutationFn: MutationFunction<Awaited<ReturnType<ReturnType<typeof useCreateDistributionHook>>>, {data: NewDistribution}> = (props) => {
+          const {data} = props ?? {};
 
-export const useCreateDistribution = <TError = void, TContext = unknown>(
-	options?: {
-		mutation?: UseMutationOptions<
-			Awaited<ReturnType<ReturnType<typeof useCreateDistributionHook>>>,
-			TError,
-			{ data: NewDistribution },
-			TContext
-		>;
-	},
-	queryClient?: QueryClient,
-): UseMutationResult<
-	Awaited<ReturnType<ReturnType<typeof useCreateDistributionHook>>>,
-	TError,
-	{ data: NewDistribution },
-	TContext
-> => {
-	const mutationOptions = useCreateDistributionMutationOptions(options);
+          return  createDistribution(data,)
+        }
 
-	return useMutation(mutationOptions, queryClient);
-};
+        
 
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateDistributionMutationResult = NonNullable<Awaited<ReturnType<ReturnType<typeof useCreateDistributionHook>>>>
+    export type CreateDistributionMutationBody = NewDistribution
+    export type CreateDistributionMutationError = void
+
+    export const useCreateDistribution = <TError = void,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<ReturnType<typeof useCreateDistributionHook>>>, TError,{data: NewDistribution}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<ReturnType<typeof useCreateDistributionHook>>>,
+        TError,
+        {data: NewDistribution},
+        TContext
+      > => {
+
+      const mutationOptions = useCreateDistributionMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    
 export const useGetDistributionRolloutsHook = () => {
-	const getDistributionRollouts =
-		useClientMutator<DistributionRolloutStats[]>();
+        const getDistributionRollouts = useClientMutator<DistributionRolloutStats[]>();
 
-	return useCallback(
-		(signal?: AbortSignal) => {
-			return getDistributionRollouts({
-				url: `/distributions/rollout`,
-				method: "GET",
-				signal,
-			});
-		},
-		[getDistributionRollouts],
-	);
-};
+        return useCallback((
+    
+ signal?: AbortSignal
+) => {
+        return getDistributionRollouts(
+          {url: `/distributions/rollout`, method: 'GET', signal
+    },
+          );
+        }, [getDistributionRollouts])
+      }
+    
+
+
 
 export const getGetDistributionRolloutsInfiniteQueryKey = () => {
-	return ["infinite", `/distributions/rollout`] as const;
-};
+    return [
+    'infinite', `/distributions/rollout`
+    ] as const;
+    }
 
 export const getGetDistributionRolloutsQueryKey = () => {
-	return [`/distributions/rollout`] as const;
-};
+    return [
+    `/distributions/rollout`
+    ] as const;
+    }
 
-export const useGetDistributionRolloutsInfiniteQueryOptions = <
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetDistributionRolloutsHook>>>
-	>,
-	TError = unknown,
->(options?: {
-	query?: Partial<
-		UseInfiniteQueryOptions<
-			Awaited<ReturnType<ReturnType<typeof useGetDistributionRolloutsHook>>>,
-			TError,
-			TData
-		>
-	>;
-}) => {
-	const { query: queryOptions } = options ?? {};
+    
+export const useGetDistributionRolloutsInfiniteQueryOptions = <TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetDistributionRolloutsHook>>>>, TError = unknown>( options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetDistributionRolloutsHook>>>, TError, TData>>, }
+) => {
 
-	const queryKey =
-		queryOptions?.queryKey ?? getGetDistributionRolloutsInfiniteQueryKey();
+const {query: queryOptions} = options ?? {};
 
-	const getDistributionRollouts = useGetDistributionRolloutsHook();
+  const queryKey =  queryOptions?.queryKey ?? getGetDistributionRolloutsInfiniteQueryKey();
 
-	const queryFn: QueryFunction<
-		Awaited<ReturnType<ReturnType<typeof useGetDistributionRolloutsHook>>>
-	> = ({ signal }) => getDistributionRollouts(signal);
+  const getDistributionRollouts =  useGetDistributionRolloutsHook();
 
-	return { queryKey, queryFn, ...queryOptions } as UseInfiniteQueryOptions<
-		Awaited<ReturnType<ReturnType<typeof useGetDistributionRolloutsHook>>>,
-		TError,
-		TData
-	> & { queryKey: DataTag<QueryKey, TData, TError> };
-};
+    const queryFn: QueryFunction<Awaited<ReturnType<ReturnType<typeof useGetDistributionRolloutsHook>>>> = ({ signal }) => getDistributionRollouts(signal);
 
-export type GetDistributionRolloutsInfiniteQueryResult = NonNullable<
-	Awaited<ReturnType<ReturnType<typeof useGetDistributionRolloutsHook>>>
->;
-export type GetDistributionRolloutsInfiniteQueryError = unknown;
+      
 
-export function useGetDistributionRolloutsInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetDistributionRolloutsHook>>>
-	>,
-	TError = unknown,
->(
-	options: {
-		query: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetDistributionRolloutsHook>>>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				DefinedInitialDataOptions<
-					Awaited<
-						ReturnType<ReturnType<typeof useGetDistributionRolloutsHook>>
-					>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useGetDistributionRolloutsHook>>>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): DefinedUseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useGetDistributionRolloutsInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetDistributionRolloutsHook>>>
-	>,
-	TError = unknown,
->(
-	options?: {
-		query?: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetDistributionRolloutsHook>>>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				UndefinedInitialDataOptions<
-					Awaited<
-						ReturnType<ReturnType<typeof useGetDistributionRolloutsHook>>
-					>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useGetDistributionRolloutsHook>>>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): UseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useGetDistributionRolloutsInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetDistributionRolloutsHook>>>
-	>,
-	TError = unknown,
->(
-	options?: {
-		query?: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetDistributionRolloutsHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
+      
 
-export function useGetDistributionRolloutsInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetDistributionRolloutsHook>>>
-	>,
-	TError = unknown,
->(
-	options?: {
-		query?: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetDistributionRolloutsHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-} {
-	const queryOptions = useGetDistributionRolloutsInfiniteQueryOptions(options);
-
-	const query = useInfiniteQuery(
-		queryOptions,
-		queryClient,
-	) as UseInfiniteQueryResult<TData, TError> & {
-		queryKey: DataTag<QueryKey, TData, TError>;
-	};
-
-	query.queryKey = queryOptions.queryKey;
-
-	return query;
+   return  { queryKey, queryFn, ...queryOptions} as UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetDistributionRolloutsHook>>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
 }
 
-export const useGetDistributionRolloutsQueryOptions = <
-	TData = Awaited<
-		ReturnType<ReturnType<typeof useGetDistributionRolloutsHook>>
-	>,
-	TError = unknown,
->(options?: {
-	query?: Partial<
-		UseQueryOptions<
-			Awaited<ReturnType<ReturnType<typeof useGetDistributionRolloutsHook>>>,
-			TError,
-			TData
-		>
-	>;
-}) => {
-	const { query: queryOptions } = options ?? {};
+export type GetDistributionRolloutsInfiniteQueryResult = NonNullable<Awaited<ReturnType<ReturnType<typeof useGetDistributionRolloutsHook>>>>
+export type GetDistributionRolloutsInfiniteQueryError = unknown
 
-	const queryKey =
-		queryOptions?.queryKey ?? getGetDistributionRolloutsQueryKey();
 
-	const getDistributionRollouts = useGetDistributionRolloutsHook();
+export function useGetDistributionRolloutsInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetDistributionRolloutsHook>>>>, TError = unknown>(
+  options: { query:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetDistributionRolloutsHook>>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useGetDistributionRolloutsHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useGetDistributionRolloutsHook>>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetDistributionRolloutsInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetDistributionRolloutsHook>>>>, TError = unknown>(
+  options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetDistributionRolloutsHook>>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useGetDistributionRolloutsHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useGetDistributionRolloutsHook>>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetDistributionRolloutsInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetDistributionRolloutsHook>>>>, TError = unknown>(
+  options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetDistributionRolloutsHook>>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 
-	const queryFn: QueryFunction<
-		Awaited<ReturnType<ReturnType<typeof useGetDistributionRolloutsHook>>>
-	> = ({ signal }) => getDistributionRollouts(signal);
+export function useGetDistributionRolloutsInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetDistributionRolloutsHook>>>>, TError = unknown>(
+  options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetDistributionRolloutsHook>>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
-	return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
-		Awaited<ReturnType<ReturnType<typeof useGetDistributionRolloutsHook>>>,
-		TError,
-		TData
-	> & { queryKey: DataTag<QueryKey, TData, TError> };
-};
+  const queryOptions = useGetDistributionRolloutsInfiniteQueryOptions(options)
 
-export type GetDistributionRolloutsQueryResult = NonNullable<
-	Awaited<ReturnType<ReturnType<typeof useGetDistributionRolloutsHook>>>
->;
-export type GetDistributionRolloutsQueryError = unknown;
+  const query = useInfiniteQuery(queryOptions, queryClient) as  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 
-export function useGetDistributionRollouts<
-	TData = Awaited<
-		ReturnType<ReturnType<typeof useGetDistributionRolloutsHook>>
-	>,
-	TError = unknown,
->(
-	options: {
-		query: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetDistributionRolloutsHook>>>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				DefinedInitialDataOptions<
-					Awaited<
-						ReturnType<ReturnType<typeof useGetDistributionRolloutsHook>>
-					>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useGetDistributionRolloutsHook>>>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): DefinedUseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useGetDistributionRollouts<
-	TData = Awaited<
-		ReturnType<ReturnType<typeof useGetDistributionRolloutsHook>>
-	>,
-	TError = unknown,
->(
-	options?: {
-		query?: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetDistributionRolloutsHook>>>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				UndefinedInitialDataOptions<
-					Awaited<
-						ReturnType<ReturnType<typeof useGetDistributionRolloutsHook>>
-					>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useGetDistributionRolloutsHook>>>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useGetDistributionRollouts<
-	TData = Awaited<
-		ReturnType<ReturnType<typeof useGetDistributionRolloutsHook>>
-	>,
-	TError = unknown,
->(
-	options?: {
-		query?: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetDistributionRolloutsHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
+  query.queryKey = queryOptions.queryKey ;
 
-export function useGetDistributionRollouts<
-	TData = Awaited<
-		ReturnType<ReturnType<typeof useGetDistributionRolloutsHook>>
-	>,
-	TError = unknown,
->(
-	options?: {
-		query?: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetDistributionRolloutsHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-} {
-	const queryOptions = useGetDistributionRolloutsQueryOptions(options);
-
-	const query = useQuery(queryOptions, queryClient) as UseQueryResult<
-		TData,
-		TError
-	> & { queryKey: DataTag<QueryKey, TData, TError> };
-
-	query.queryKey = queryOptions.queryKey;
-
-	return query;
+  return query;
 }
+
+
+
+
+export const useGetDistributionRolloutsQueryOptions = <TData = Awaited<ReturnType<ReturnType<typeof useGetDistributionRolloutsHook>>>, TError = unknown>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetDistributionRolloutsHook>>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetDistributionRolloutsQueryKey();
+
+  const getDistributionRollouts =  useGetDistributionRolloutsHook();
+
+    const queryFn: QueryFunction<Awaited<ReturnType<ReturnType<typeof useGetDistributionRolloutsHook>>>> = ({ signal }) => getDistributionRollouts(signal);
+
+      
+
+      
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetDistributionRolloutsHook>>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetDistributionRolloutsQueryResult = NonNullable<Awaited<ReturnType<ReturnType<typeof useGetDistributionRolloutsHook>>>>
+export type GetDistributionRolloutsQueryError = unknown
+
+
+export function useGetDistributionRollouts<TData = Awaited<ReturnType<ReturnType<typeof useGetDistributionRolloutsHook>>>, TError = unknown>(
+  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetDistributionRolloutsHook>>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useGetDistributionRolloutsHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useGetDistributionRolloutsHook>>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetDistributionRollouts<TData = Awaited<ReturnType<ReturnType<typeof useGetDistributionRolloutsHook>>>, TError = unknown>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetDistributionRolloutsHook>>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useGetDistributionRolloutsHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useGetDistributionRolloutsHook>>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetDistributionRollouts<TData = Awaited<ReturnType<ReturnType<typeof useGetDistributionRolloutsHook>>>, TError = unknown>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetDistributionRolloutsHook>>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+
+export function useGetDistributionRollouts<TData = Awaited<ReturnType<ReturnType<typeof useGetDistributionRolloutsHook>>>, TError = unknown>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetDistributionRolloutsHook>>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = useGetDistributionRolloutsQueryOptions(options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  query.queryKey = queryOptions.queryKey ;
+
+  return query;
+}
+
+
+
+
 
 export const useGetDistributionByIdHook = () => {
-	const getDistributionById = useClientMutator<Distribution>();
+        const getDistributionById = useClientMutator<Distribution>();
 
-	return useCallback(
-		(distributionId: number, signal?: AbortSignal) => {
-			return getDistributionById({
-				url: `/distributions/${distributionId}`,
-				method: "GET",
-				signal,
-			});
-		},
-		[getDistributionById],
-	);
-};
-
-export const getGetDistributionByIdInfiniteQueryKey = (
-	distributionId?: number,
+        return useCallback((
+    distributionId: number,
+ signal?: AbortSignal
 ) => {
-	return ["infinite", `/distributions/${distributionId}`] as const;
-};
+        return getDistributionById(
+          {url: `/distributions/${distributionId}`, method: 'GET', signal
+    },
+          );
+        }, [getDistributionById])
+      }
+    
 
-export const getGetDistributionByIdQueryKey = (distributionId?: number) => {
-	return [`/distributions/${distributionId}`] as const;
-};
 
-export const useGetDistributionByIdInfiniteQueryOptions = <
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetDistributionByIdHook>>>
-	>,
-	TError = void,
->(
-	distributionId: number,
-	options?: {
-		query?: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetDistributionByIdHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
+
+export const getGetDistributionByIdInfiniteQueryKey = (distributionId?: number,) => {
+    return [
+    'infinite', `/distributions/${distributionId}`
+    ] as const;
+    }
+
+export const getGetDistributionByIdQueryKey = (distributionId?: number,) => {
+    return [
+    `/distributions/${distributionId}`
+    ] as const;
+    }
+
+    
+export const useGetDistributionByIdInfiniteQueryOptions = <TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetDistributionByIdHook>>>>, TError = void>(distributionId: number, options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetDistributionByIdHook>>>, TError, TData>>, }
 ) => {
-	const { query: queryOptions } = options ?? {};
 
-	const queryKey =
-		queryOptions?.queryKey ??
-		getGetDistributionByIdInfiniteQueryKey(distributionId);
+const {query: queryOptions} = options ?? {};
 
-	const getDistributionById = useGetDistributionByIdHook();
+  const queryKey =  queryOptions?.queryKey ?? getGetDistributionByIdInfiniteQueryKey(distributionId);
 
-	const queryFn: QueryFunction<
-		Awaited<ReturnType<ReturnType<typeof useGetDistributionByIdHook>>>
-	> = ({ signal }) => getDistributionById(distributionId, signal);
+  const getDistributionById =  useGetDistributionByIdHook();
 
-	return {
-		queryKey,
-		queryFn,
-		enabled: !!distributionId,
-		...queryOptions,
-	} as UseInfiniteQueryOptions<
-		Awaited<ReturnType<ReturnType<typeof useGetDistributionByIdHook>>>,
-		TError,
-		TData
-	> & { queryKey: DataTag<QueryKey, TData, TError> };
-};
+    const queryFn: QueryFunction<Awaited<ReturnType<ReturnType<typeof useGetDistributionByIdHook>>>> = ({ signal }) => getDistributionById(distributionId, signal);
 
-export type GetDistributionByIdInfiniteQueryResult = NonNullable<
-	Awaited<ReturnType<ReturnType<typeof useGetDistributionByIdHook>>>
->;
-export type GetDistributionByIdInfiniteQueryError = void;
+      
 
-export function useGetDistributionByIdInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetDistributionByIdHook>>>
-	>,
-	TError = void,
->(
-	distributionId: number,
-	options: {
-		query: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetDistributionByIdHook>>>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				DefinedInitialDataOptions<
-					Awaited<ReturnType<ReturnType<typeof useGetDistributionByIdHook>>>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useGetDistributionByIdHook>>>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): DefinedUseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useGetDistributionByIdInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetDistributionByIdHook>>>
-	>,
-	TError = void,
->(
-	distributionId: number,
-	options?: {
-		query?: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetDistributionByIdHook>>>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				UndefinedInitialDataOptions<
-					Awaited<ReturnType<ReturnType<typeof useGetDistributionByIdHook>>>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useGetDistributionByIdHook>>>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): UseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useGetDistributionByIdInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetDistributionByIdHook>>>
-	>,
-	TError = void,
->(
-	distributionId: number,
-	options?: {
-		query?: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetDistributionByIdHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
+      
 
-export function useGetDistributionByIdInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetDistributionByIdHook>>>
-	>,
-	TError = void,
->(
-	distributionId: number,
-	options?: {
-		query?: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetDistributionByIdHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-} {
-	const queryOptions = useGetDistributionByIdInfiniteQueryOptions(
-		distributionId,
-		options,
-	);
-
-	const query = useInfiniteQuery(
-		queryOptions,
-		queryClient,
-	) as UseInfiniteQueryResult<TData, TError> & {
-		queryKey: DataTag<QueryKey, TData, TError>;
-	};
-
-	query.queryKey = queryOptions.queryKey;
-
-	return query;
+   return  { queryKey, queryFn, enabled: !!(distributionId), ...queryOptions} as UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetDistributionByIdHook>>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
 }
 
-export const useGetDistributionByIdQueryOptions = <
-	TData = Awaited<ReturnType<ReturnType<typeof useGetDistributionByIdHook>>>,
-	TError = void,
->(
-	distributionId: number,
-	options?: {
-		query?: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetDistributionByIdHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-) => {
-	const { query: queryOptions } = options ?? {};
+export type GetDistributionByIdInfiniteQueryResult = NonNullable<Awaited<ReturnType<ReturnType<typeof useGetDistributionByIdHook>>>>
+export type GetDistributionByIdInfiniteQueryError = void
 
-	const queryKey =
-		queryOptions?.queryKey ?? getGetDistributionByIdQueryKey(distributionId);
 
-	const getDistributionById = useGetDistributionByIdHook();
+export function useGetDistributionByIdInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetDistributionByIdHook>>>>, TError = void>(
+ distributionId: number, options: { query:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetDistributionByIdHook>>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useGetDistributionByIdHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useGetDistributionByIdHook>>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetDistributionByIdInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetDistributionByIdHook>>>>, TError = void>(
+ distributionId: number, options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetDistributionByIdHook>>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useGetDistributionByIdHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useGetDistributionByIdHook>>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetDistributionByIdInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetDistributionByIdHook>>>>, TError = void>(
+ distributionId: number, options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetDistributionByIdHook>>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 
-	const queryFn: QueryFunction<
-		Awaited<ReturnType<ReturnType<typeof useGetDistributionByIdHook>>>
-	> = ({ signal }) => getDistributionById(distributionId, signal);
+export function useGetDistributionByIdInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetDistributionByIdHook>>>>, TError = void>(
+ distributionId: number, options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetDistributionByIdHook>>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
-	return {
-		queryKey,
-		queryFn,
-		enabled: !!distributionId,
-		...queryOptions,
-	} as UseQueryOptions<
-		Awaited<ReturnType<ReturnType<typeof useGetDistributionByIdHook>>>,
-		TError,
-		TData
-	> & { queryKey: DataTag<QueryKey, TData, TError> };
-};
+  const queryOptions = useGetDistributionByIdInfiniteQueryOptions(distributionId,options)
 
-export type GetDistributionByIdQueryResult = NonNullable<
-	Awaited<ReturnType<ReturnType<typeof useGetDistributionByIdHook>>>
->;
-export type GetDistributionByIdQueryError = void;
+  const query = useInfiniteQuery(queryOptions, queryClient) as  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 
-export function useGetDistributionById<
-	TData = Awaited<ReturnType<ReturnType<typeof useGetDistributionByIdHook>>>,
-	TError = void,
->(
-	distributionId: number,
-	options: {
-		query: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetDistributionByIdHook>>>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				DefinedInitialDataOptions<
-					Awaited<ReturnType<ReturnType<typeof useGetDistributionByIdHook>>>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useGetDistributionByIdHook>>>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): DefinedUseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useGetDistributionById<
-	TData = Awaited<ReturnType<ReturnType<typeof useGetDistributionByIdHook>>>,
-	TError = void,
->(
-	distributionId: number,
-	options?: {
-		query?: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetDistributionByIdHook>>>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				UndefinedInitialDataOptions<
-					Awaited<ReturnType<ReturnType<typeof useGetDistributionByIdHook>>>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useGetDistributionByIdHook>>>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useGetDistributionById<
-	TData = Awaited<ReturnType<ReturnType<typeof useGetDistributionByIdHook>>>,
-	TError = void,
->(
-	distributionId: number,
-	options?: {
-		query?: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetDistributionByIdHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
+  query.queryKey = queryOptions.queryKey ;
 
-export function useGetDistributionById<
-	TData = Awaited<ReturnType<ReturnType<typeof useGetDistributionByIdHook>>>,
-	TError = void,
->(
-	distributionId: number,
-	options?: {
-		query?: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetDistributionByIdHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-} {
-	const queryOptions = useGetDistributionByIdQueryOptions(
-		distributionId,
-		options,
-	);
-
-	const query = useQuery(queryOptions, queryClient) as UseQueryResult<
-		TData,
-		TError
-	> & { queryKey: DataTag<QueryKey, TData, TError> };
-
-	query.queryKey = queryOptions.queryKey;
-
-	return query;
+  return query;
 }
+
+
+
+
+export const useGetDistributionByIdQueryOptions = <TData = Awaited<ReturnType<ReturnType<typeof useGetDistributionByIdHook>>>, TError = void>(distributionId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetDistributionByIdHook>>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetDistributionByIdQueryKey(distributionId);
+
+  const getDistributionById =  useGetDistributionByIdHook();
+
+    const queryFn: QueryFunction<Awaited<ReturnType<ReturnType<typeof useGetDistributionByIdHook>>>> = ({ signal }) => getDistributionById(distributionId, signal);
+
+      
+
+      
+
+   return  { queryKey, queryFn, enabled: !!(distributionId), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetDistributionByIdHook>>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetDistributionByIdQueryResult = NonNullable<Awaited<ReturnType<ReturnType<typeof useGetDistributionByIdHook>>>>
+export type GetDistributionByIdQueryError = void
+
+
+export function useGetDistributionById<TData = Awaited<ReturnType<ReturnType<typeof useGetDistributionByIdHook>>>, TError = void>(
+ distributionId: number, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetDistributionByIdHook>>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useGetDistributionByIdHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useGetDistributionByIdHook>>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetDistributionById<TData = Awaited<ReturnType<ReturnType<typeof useGetDistributionByIdHook>>>, TError = void>(
+ distributionId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetDistributionByIdHook>>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useGetDistributionByIdHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useGetDistributionByIdHook>>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetDistributionById<TData = Awaited<ReturnType<ReturnType<typeof useGetDistributionByIdHook>>>, TError = void>(
+ distributionId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetDistributionByIdHook>>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+
+export function useGetDistributionById<TData = Awaited<ReturnType<ReturnType<typeof useGetDistributionByIdHook>>>, TError = void>(
+ distributionId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetDistributionByIdHook>>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = useGetDistributionByIdQueryOptions(distributionId,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  query.queryKey = queryOptions.queryKey ;
+
+  return query;
+}
+
+
+
+
 
 export const useDeleteDistributionByIdHook = () => {
-	const deleteDistributionById = useClientMutator<void>();
+        const deleteDistributionById = useClientMutator<void>();
 
-	return useCallback(
-		(distributionId: number) => {
-			return deleteDistributionById({
-				url: `/distributions/${distributionId}`,
-				method: "DELETE",
-			});
-		},
-		[deleteDistributionById],
-	);
-};
+        return useCallback((
+    distributionId: number,
+ ) => {
+        return deleteDistributionById(
+          {url: `/distributions/${distributionId}`, method: 'DELETE'
+    },
+          );
+        }, [deleteDistributionById])
+      }
+    
 
-export const useDeleteDistributionByIdMutationOptions = <
-	TError = void,
-	TContext = unknown,
->(options?: {
-	mutation?: UseMutationOptions<
-		Awaited<ReturnType<ReturnType<typeof useDeleteDistributionByIdHook>>>,
-		TError,
-		{ distributionId: number },
-		TContext
-	>;
-}): UseMutationOptions<
-	Awaited<ReturnType<ReturnType<typeof useDeleteDistributionByIdHook>>>,
-	TError,
-	{ distributionId: number },
-	TContext
-> => {
-	const mutationKey = ["deleteDistributionById"];
-	const { mutation: mutationOptions } = options
-		? options.mutation &&
-			"mutationKey" in options.mutation &&
-			options.mutation.mutationKey
-			? options
-			: { ...options, mutation: { ...options.mutation, mutationKey } }
-		: { mutation: { mutationKey } };
 
-	const deleteDistributionById = useDeleteDistributionByIdHook();
+export const useDeleteDistributionByIdMutationOptions = <TError = void,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<ReturnType<typeof useDeleteDistributionByIdHook>>>, TError,{distributionId: number}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<ReturnType<typeof useDeleteDistributionByIdHook>>>, TError,{distributionId: number}, TContext> => {
 
-	const mutationFn: MutationFunction<
-		Awaited<ReturnType<ReturnType<typeof useDeleteDistributionByIdHook>>>,
-		{ distributionId: number }
-	> = (props) => {
-		const { distributionId } = props ?? {};
+const mutationKey = ['deleteDistributionById'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
 
-		return deleteDistributionById(distributionId);
-	};
+      const deleteDistributionById =  useDeleteDistributionByIdHook()
 
-	return { mutationFn, ...mutationOptions };
-};
 
-export type DeleteDistributionByIdMutationResult = NonNullable<
-	Awaited<ReturnType<ReturnType<typeof useDeleteDistributionByIdHook>>>
->;
+      const mutationFn: MutationFunction<Awaited<ReturnType<ReturnType<typeof useDeleteDistributionByIdHook>>>, {distributionId: number}> = (props) => {
+          const {distributionId} = props ?? {};
 
-export type DeleteDistributionByIdMutationError = void;
+          return  deleteDistributionById(distributionId,)
+        }
 
-export const useDeleteDistributionById = <TError = void, TContext = unknown>(
-	options?: {
-		mutation?: UseMutationOptions<
-			Awaited<ReturnType<ReturnType<typeof useDeleteDistributionByIdHook>>>,
-			TError,
-			{ distributionId: number },
-			TContext
-		>;
-	},
-	queryClient?: QueryClient,
-): UseMutationResult<
-	Awaited<ReturnType<ReturnType<typeof useDeleteDistributionByIdHook>>>,
-	TError,
-	{ distributionId: number },
-	TContext
-> => {
-	const mutationOptions = useDeleteDistributionByIdMutationOptions(options);
+        
 
-	return useMutation(mutationOptions, queryClient);
-};
 
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DeleteDistributionByIdMutationResult = NonNullable<Awaited<ReturnType<ReturnType<typeof useDeleteDistributionByIdHook>>>>
+    
+    export type DeleteDistributionByIdMutationError = void
+
+    export const useDeleteDistributionById = <TError = void,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<ReturnType<typeof useDeleteDistributionByIdHook>>>, TError,{distributionId: number}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<ReturnType<typeof useDeleteDistributionByIdHook>>>,
+        TError,
+        {distributionId: number},
+        TContext
+      > => {
+
+      const mutationOptions = useDeleteDistributionByIdMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    
 export const useGetDistributionReleasesHook = () => {
-	const getDistributionReleases = useClientMutator<Release[]>();
+        const getDistributionReleases = useClientMutator<Release[]>();
 
-	return useCallback(
-		(distributionId: number, signal?: AbortSignal) => {
-			return getDistributionReleases({
-				url: `/distributions/${distributionId}/releases`,
-				method: "GET",
-				signal,
-			});
-		},
-		[getDistributionReleases],
-	);
-};
-
-export const getGetDistributionReleasesInfiniteQueryKey = (
-	distributionId?: number,
+        return useCallback((
+    distributionId: number,
+ signal?: AbortSignal
 ) => {
-	return ["infinite", `/distributions/${distributionId}/releases`] as const;
-};
+        return getDistributionReleases(
+          {url: `/distributions/${distributionId}/releases`, method: 'GET', signal
+    },
+          );
+        }, [getDistributionReleases])
+      }
+    
 
-export const getGetDistributionReleasesQueryKey = (distributionId?: number) => {
-	return [`/distributions/${distributionId}/releases`] as const;
-};
 
-export const useGetDistributionReleasesInfiniteQueryOptions = <
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetDistributionReleasesHook>>>
-	>,
-	TError = void,
->(
-	distributionId: number,
-	options?: {
-		query?: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetDistributionReleasesHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
+
+export const getGetDistributionReleasesInfiniteQueryKey = (distributionId?: number,) => {
+    return [
+    'infinite', `/distributions/${distributionId}/releases`
+    ] as const;
+    }
+
+export const getGetDistributionReleasesQueryKey = (distributionId?: number,) => {
+    return [
+    `/distributions/${distributionId}/releases`
+    ] as const;
+    }
+
+    
+export const useGetDistributionReleasesInfiniteQueryOptions = <TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetDistributionReleasesHook>>>>, TError = void>(distributionId: number, options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetDistributionReleasesHook>>>, TError, TData>>, }
 ) => {
-	const { query: queryOptions } = options ?? {};
 
-	const queryKey =
-		queryOptions?.queryKey ??
-		getGetDistributionReleasesInfiniteQueryKey(distributionId);
+const {query: queryOptions} = options ?? {};
 
-	const getDistributionReleases = useGetDistributionReleasesHook();
+  const queryKey =  queryOptions?.queryKey ?? getGetDistributionReleasesInfiniteQueryKey(distributionId);
 
-	const queryFn: QueryFunction<
-		Awaited<ReturnType<ReturnType<typeof useGetDistributionReleasesHook>>>
-	> = ({ signal }) => getDistributionReleases(distributionId, signal);
+  const getDistributionReleases =  useGetDistributionReleasesHook();
 
-	return {
-		queryKey,
-		queryFn,
-		enabled: !!distributionId,
-		...queryOptions,
-	} as UseInfiniteQueryOptions<
-		Awaited<ReturnType<ReturnType<typeof useGetDistributionReleasesHook>>>,
-		TError,
-		TData
-	> & { queryKey: DataTag<QueryKey, TData, TError> };
-};
+    const queryFn: QueryFunction<Awaited<ReturnType<ReturnType<typeof useGetDistributionReleasesHook>>>> = ({ signal }) => getDistributionReleases(distributionId, signal);
 
-export type GetDistributionReleasesInfiniteQueryResult = NonNullable<
-	Awaited<ReturnType<ReturnType<typeof useGetDistributionReleasesHook>>>
->;
-export type GetDistributionReleasesInfiniteQueryError = void;
+      
 
-export function useGetDistributionReleasesInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetDistributionReleasesHook>>>
-	>,
-	TError = void,
->(
-	distributionId: number,
-	options: {
-		query: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetDistributionReleasesHook>>>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				DefinedInitialDataOptions<
-					Awaited<
-						ReturnType<ReturnType<typeof useGetDistributionReleasesHook>>
-					>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useGetDistributionReleasesHook>>>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): DefinedUseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useGetDistributionReleasesInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetDistributionReleasesHook>>>
-	>,
-	TError = void,
->(
-	distributionId: number,
-	options?: {
-		query?: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetDistributionReleasesHook>>>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				UndefinedInitialDataOptions<
-					Awaited<
-						ReturnType<ReturnType<typeof useGetDistributionReleasesHook>>
-					>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useGetDistributionReleasesHook>>>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): UseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useGetDistributionReleasesInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetDistributionReleasesHook>>>
-	>,
-	TError = void,
->(
-	distributionId: number,
-	options?: {
-		query?: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetDistributionReleasesHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
+      
 
-export function useGetDistributionReleasesInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetDistributionReleasesHook>>>
-	>,
-	TError = void,
->(
-	distributionId: number,
-	options?: {
-		query?: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetDistributionReleasesHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-} {
-	const queryOptions = useGetDistributionReleasesInfiniteQueryOptions(
-		distributionId,
-		options,
-	);
-
-	const query = useInfiniteQuery(
-		queryOptions,
-		queryClient,
-	) as UseInfiniteQueryResult<TData, TError> & {
-		queryKey: DataTag<QueryKey, TData, TError>;
-	};
-
-	query.queryKey = queryOptions.queryKey;
-
-	return query;
+   return  { queryKey, queryFn, enabled: !!(distributionId), ...queryOptions} as UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetDistributionReleasesHook>>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
 }
 
-export const useGetDistributionReleasesQueryOptions = <
-	TData = Awaited<
-		ReturnType<ReturnType<typeof useGetDistributionReleasesHook>>
-	>,
-	TError = void,
->(
-	distributionId: number,
-	options?: {
-		query?: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetDistributionReleasesHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-) => {
-	const { query: queryOptions } = options ?? {};
+export type GetDistributionReleasesInfiniteQueryResult = NonNullable<Awaited<ReturnType<ReturnType<typeof useGetDistributionReleasesHook>>>>
+export type GetDistributionReleasesInfiniteQueryError = void
 
-	const queryKey =
-		queryOptions?.queryKey ??
-		getGetDistributionReleasesQueryKey(distributionId);
 
-	const getDistributionReleases = useGetDistributionReleasesHook();
+export function useGetDistributionReleasesInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetDistributionReleasesHook>>>>, TError = void>(
+ distributionId: number, options: { query:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetDistributionReleasesHook>>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useGetDistributionReleasesHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useGetDistributionReleasesHook>>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetDistributionReleasesInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetDistributionReleasesHook>>>>, TError = void>(
+ distributionId: number, options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetDistributionReleasesHook>>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useGetDistributionReleasesHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useGetDistributionReleasesHook>>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetDistributionReleasesInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetDistributionReleasesHook>>>>, TError = void>(
+ distributionId: number, options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetDistributionReleasesHook>>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 
-	const queryFn: QueryFunction<
-		Awaited<ReturnType<ReturnType<typeof useGetDistributionReleasesHook>>>
-	> = ({ signal }) => getDistributionReleases(distributionId, signal);
+export function useGetDistributionReleasesInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetDistributionReleasesHook>>>>, TError = void>(
+ distributionId: number, options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetDistributionReleasesHook>>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
-	return {
-		queryKey,
-		queryFn,
-		enabled: !!distributionId,
-		...queryOptions,
-	} as UseQueryOptions<
-		Awaited<ReturnType<ReturnType<typeof useGetDistributionReleasesHook>>>,
-		TError,
-		TData
-	> & { queryKey: DataTag<QueryKey, TData, TError> };
-};
+  const queryOptions = useGetDistributionReleasesInfiniteQueryOptions(distributionId,options)
 
-export type GetDistributionReleasesQueryResult = NonNullable<
-	Awaited<ReturnType<ReturnType<typeof useGetDistributionReleasesHook>>>
->;
-export type GetDistributionReleasesQueryError = void;
+  const query = useInfiniteQuery(queryOptions, queryClient) as  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 
-export function useGetDistributionReleases<
-	TData = Awaited<
-		ReturnType<ReturnType<typeof useGetDistributionReleasesHook>>
-	>,
-	TError = void,
->(
-	distributionId: number,
-	options: {
-		query: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetDistributionReleasesHook>>>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				DefinedInitialDataOptions<
-					Awaited<
-						ReturnType<ReturnType<typeof useGetDistributionReleasesHook>>
-					>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useGetDistributionReleasesHook>>>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): DefinedUseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useGetDistributionReleases<
-	TData = Awaited<
-		ReturnType<ReturnType<typeof useGetDistributionReleasesHook>>
-	>,
-	TError = void,
->(
-	distributionId: number,
-	options?: {
-		query?: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetDistributionReleasesHook>>>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				UndefinedInitialDataOptions<
-					Awaited<
-						ReturnType<ReturnType<typeof useGetDistributionReleasesHook>>
-					>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useGetDistributionReleasesHook>>>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useGetDistributionReleases<
-	TData = Awaited<
-		ReturnType<ReturnType<typeof useGetDistributionReleasesHook>>
-	>,
-	TError = void,
->(
-	distributionId: number,
-	options?: {
-		query?: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetDistributionReleasesHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
+  query.queryKey = queryOptions.queryKey ;
 
-export function useGetDistributionReleases<
-	TData = Awaited<
-		ReturnType<ReturnType<typeof useGetDistributionReleasesHook>>
-	>,
-	TError = void,
->(
-	distributionId: number,
-	options?: {
-		query?: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetDistributionReleasesHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-} {
-	const queryOptions = useGetDistributionReleasesQueryOptions(
-		distributionId,
-		options,
-	);
-
-	const query = useQuery(queryOptions, queryClient) as UseQueryResult<
-		TData,
-		TError
-	> & { queryKey: DataTag<QueryKey, TData, TError> };
-
-	query.queryKey = queryOptions.queryKey;
-
-	return query;
+  return query;
 }
+
+
+
+
+export const useGetDistributionReleasesQueryOptions = <TData = Awaited<ReturnType<ReturnType<typeof useGetDistributionReleasesHook>>>, TError = void>(distributionId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetDistributionReleasesHook>>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetDistributionReleasesQueryKey(distributionId);
+
+  const getDistributionReleases =  useGetDistributionReleasesHook();
+
+    const queryFn: QueryFunction<Awaited<ReturnType<ReturnType<typeof useGetDistributionReleasesHook>>>> = ({ signal }) => getDistributionReleases(distributionId, signal);
+
+      
+
+      
+
+   return  { queryKey, queryFn, enabled: !!(distributionId), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetDistributionReleasesHook>>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetDistributionReleasesQueryResult = NonNullable<Awaited<ReturnType<ReturnType<typeof useGetDistributionReleasesHook>>>>
+export type GetDistributionReleasesQueryError = void
+
+
+export function useGetDistributionReleases<TData = Awaited<ReturnType<ReturnType<typeof useGetDistributionReleasesHook>>>, TError = void>(
+ distributionId: number, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetDistributionReleasesHook>>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useGetDistributionReleasesHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useGetDistributionReleasesHook>>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetDistributionReleases<TData = Awaited<ReturnType<ReturnType<typeof useGetDistributionReleasesHook>>>, TError = void>(
+ distributionId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetDistributionReleasesHook>>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useGetDistributionReleasesHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useGetDistributionReleasesHook>>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetDistributionReleases<TData = Awaited<ReturnType<ReturnType<typeof useGetDistributionReleasesHook>>>, TError = void>(
+ distributionId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetDistributionReleasesHook>>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+
+export function useGetDistributionReleases<TData = Awaited<ReturnType<ReturnType<typeof useGetDistributionReleasesHook>>>, TError = void>(
+ distributionId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetDistributionReleasesHook>>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = useGetDistributionReleasesQueryOptions(distributionId,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  query.queryKey = queryOptions.queryKey ;
+
+  return query;
+}
+
+
+
+
 
 export const useCreateDistributionReleaseHook = () => {
-	const createDistributionRelease = useClientMutator<number>();
+        const createDistributionRelease = useClientMutator<number>();
 
-	return useCallback(
-		(
-			distributionId: number,
-			newDistributionRelease: NewDistributionRelease,
-			signal?: AbortSignal,
-		) => {
-			return createDistributionRelease({
-				url: `/distributions/${distributionId}/releases`,
-				method: "POST",
-				headers: { "Content-Type": "application/json" },
-				data: newDistributionRelease,
-				signal,
-			});
-		},
-		[createDistributionRelease],
-	);
-};
+        return useCallback((
+    distributionId: number,
+    newDistributionRelease: NewDistributionRelease,
+ signal?: AbortSignal
+) => {
+        return createDistributionRelease(
+          {url: `/distributions/${distributionId}/releases`, method: 'POST',
+      headers: {'Content-Type': 'application/json', },
+      data: newDistributionRelease, signal
+    },
+          );
+        }, [createDistributionRelease])
+      }
+    
 
-export const useCreateDistributionReleaseMutationOptions = <
-	TError = void,
-	TContext = unknown,
->(options?: {
-	mutation?: UseMutationOptions<
-		Awaited<ReturnType<ReturnType<typeof useCreateDistributionReleaseHook>>>,
-		TError,
-		{ distributionId: number; data: NewDistributionRelease },
-		TContext
-	>;
-}): UseMutationOptions<
-	Awaited<ReturnType<ReturnType<typeof useCreateDistributionReleaseHook>>>,
-	TError,
-	{ distributionId: number; data: NewDistributionRelease },
-	TContext
-> => {
-	const mutationKey = ["createDistributionRelease"];
-	const { mutation: mutationOptions } = options
-		? options.mutation &&
-			"mutationKey" in options.mutation &&
-			options.mutation.mutationKey
-			? options
-			: { ...options, mutation: { ...options.mutation, mutationKey } }
-		: { mutation: { mutationKey } };
 
-	const createDistributionRelease = useCreateDistributionReleaseHook();
+export const useCreateDistributionReleaseMutationOptions = <TError = void,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<ReturnType<typeof useCreateDistributionReleaseHook>>>, TError,{distributionId: number;data: NewDistributionRelease}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<ReturnType<typeof useCreateDistributionReleaseHook>>>, TError,{distributionId: number;data: NewDistributionRelease}, TContext> => {
 
-	const mutationFn: MutationFunction<
-		Awaited<ReturnType<ReturnType<typeof useCreateDistributionReleaseHook>>>,
-		{ distributionId: number; data: NewDistributionRelease }
-	> = (props) => {
-		const { distributionId, data } = props ?? {};
+const mutationKey = ['createDistributionRelease'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
 
-		return createDistributionRelease(distributionId, data);
-	};
+      const createDistributionRelease =  useCreateDistributionReleaseHook()
 
-	return { mutationFn, ...mutationOptions };
-};
 
-export type CreateDistributionReleaseMutationResult = NonNullable<
-	Awaited<ReturnType<ReturnType<typeof useCreateDistributionReleaseHook>>>
->;
-export type CreateDistributionReleaseMutationBody = NewDistributionRelease;
-export type CreateDistributionReleaseMutationError = void;
+      const mutationFn: MutationFunction<Awaited<ReturnType<ReturnType<typeof useCreateDistributionReleaseHook>>>, {distributionId: number;data: NewDistributionRelease}> = (props) => {
+          const {distributionId,data} = props ?? {};
 
-export const useCreateDistributionRelease = <TError = void, TContext = unknown>(
-	options?: {
-		mutation?: UseMutationOptions<
-			Awaited<ReturnType<ReturnType<typeof useCreateDistributionReleaseHook>>>,
-			TError,
-			{ distributionId: number; data: NewDistributionRelease },
-			TContext
-		>;
-	},
-	queryClient?: QueryClient,
-): UseMutationResult<
-	Awaited<ReturnType<ReturnType<typeof useCreateDistributionReleaseHook>>>,
-	TError,
-	{ distributionId: number; data: NewDistributionRelease },
-	TContext
-> => {
-	const mutationOptions = useCreateDistributionReleaseMutationOptions(options);
+          return  createDistributionRelease(distributionId,data,)
+        }
 
-	return useMutation(mutationOptions, queryClient);
-};
+        
 
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateDistributionReleaseMutationResult = NonNullable<Awaited<ReturnType<ReturnType<typeof useCreateDistributionReleaseHook>>>>
+    export type CreateDistributionReleaseMutationBody = NewDistributionRelease
+    export type CreateDistributionReleaseMutationError = void
+
+    export const useCreateDistributionRelease = <TError = void,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<ReturnType<typeof useCreateDistributionReleaseHook>>>, TError,{distributionId: number;data: NewDistributionRelease}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<ReturnType<typeof useCreateDistributionReleaseHook>>>,
+        TError,
+        {distributionId: number;data: NewDistributionRelease},
+        TContext
+      > => {
+
+      const mutationOptions = useCreateDistributionReleaseMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    
 export const useGetDistributionLatestReleaseHook = () => {
-	const getDistributionLatestRelease = useClientMutator<Release>();
+        const getDistributionLatestRelease = useClientMutator<Release>();
 
-	return useCallback(
-		(distributionId: number, signal?: AbortSignal) => {
-			return getDistributionLatestRelease({
-				url: `/distributions/${distributionId}/releases/latest`,
-				method: "GET",
-				signal,
-			});
-		},
-		[getDistributionLatestRelease],
-	);
-};
-
-export const getGetDistributionLatestReleaseInfiniteQueryKey = (
-	distributionId?: number,
+        return useCallback((
+    distributionId: number,
+ signal?: AbortSignal
 ) => {
-	return [
-		"infinite",
-		`/distributions/${distributionId}/releases/latest`,
-	] as const;
-};
+        return getDistributionLatestRelease(
+          {url: `/distributions/${distributionId}/releases/latest`, method: 'GET', signal
+    },
+          );
+        }, [getDistributionLatestRelease])
+      }
+    
 
-export const getGetDistributionLatestReleaseQueryKey = (
-	distributionId?: number,
+
+
+export const getGetDistributionLatestReleaseInfiniteQueryKey = (distributionId?: number,) => {
+    return [
+    'infinite', `/distributions/${distributionId}/releases/latest`
+    ] as const;
+    }
+
+export const getGetDistributionLatestReleaseQueryKey = (distributionId?: number,) => {
+    return [
+    `/distributions/${distributionId}/releases/latest`
+    ] as const;
+    }
+
+    
+export const useGetDistributionLatestReleaseInfiniteQueryOptions = <TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetDistributionLatestReleaseHook>>>>, TError = void>(distributionId: number, options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetDistributionLatestReleaseHook>>>, TError, TData>>, }
 ) => {
-	return [`/distributions/${distributionId}/releases/latest`] as const;
-};
 
-export const useGetDistributionLatestReleaseInfiniteQueryOptions = <
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetDistributionLatestReleaseHook>>>
-	>,
-	TError = void,
->(
-	distributionId: number,
-	options?: {
-		query?: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<
-					ReturnType<ReturnType<typeof useGetDistributionLatestReleaseHook>>
-				>,
-				TError,
-				TData
-			>
-		>;
-	},
-) => {
-	const { query: queryOptions } = options ?? {};
+const {query: queryOptions} = options ?? {};
 
-	const queryKey =
-		queryOptions?.queryKey ??
-		getGetDistributionLatestReleaseInfiniteQueryKey(distributionId);
+  const queryKey =  queryOptions?.queryKey ?? getGetDistributionLatestReleaseInfiniteQueryKey(distributionId);
 
-	const getDistributionLatestRelease = useGetDistributionLatestReleaseHook();
+  const getDistributionLatestRelease =  useGetDistributionLatestReleaseHook();
 
-	const queryFn: QueryFunction<
-		Awaited<ReturnType<ReturnType<typeof useGetDistributionLatestReleaseHook>>>
-	> = ({ signal }) => getDistributionLatestRelease(distributionId, signal);
+    const queryFn: QueryFunction<Awaited<ReturnType<ReturnType<typeof useGetDistributionLatestReleaseHook>>>> = ({ signal }) => getDistributionLatestRelease(distributionId, signal);
 
-	return {
-		queryKey,
-		queryFn,
-		enabled: !!distributionId,
-		...queryOptions,
-	} as UseInfiniteQueryOptions<
-		Awaited<ReturnType<ReturnType<typeof useGetDistributionLatestReleaseHook>>>,
-		TError,
-		TData
-	> & { queryKey: DataTag<QueryKey, TData, TError> };
-};
+      
 
-export type GetDistributionLatestReleaseInfiniteQueryResult = NonNullable<
-	Awaited<ReturnType<ReturnType<typeof useGetDistributionLatestReleaseHook>>>
->;
-export type GetDistributionLatestReleaseInfiniteQueryError = void;
+      
 
-export function useGetDistributionLatestReleaseInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetDistributionLatestReleaseHook>>>
-	>,
-	TError = void,
->(
-	distributionId: number,
-	options: {
-		query: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<
-					ReturnType<ReturnType<typeof useGetDistributionLatestReleaseHook>>
-				>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				DefinedInitialDataOptions<
-					Awaited<
-						ReturnType<ReturnType<typeof useGetDistributionLatestReleaseHook>>
-					>,
-					TError,
-					Awaited<
-						ReturnType<ReturnType<typeof useGetDistributionLatestReleaseHook>>
-					>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): DefinedUseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useGetDistributionLatestReleaseInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetDistributionLatestReleaseHook>>>
-	>,
-	TError = void,
->(
-	distributionId: number,
-	options?: {
-		query?: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<
-					ReturnType<ReturnType<typeof useGetDistributionLatestReleaseHook>>
-				>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				UndefinedInitialDataOptions<
-					Awaited<
-						ReturnType<ReturnType<typeof useGetDistributionLatestReleaseHook>>
-					>,
-					TError,
-					Awaited<
-						ReturnType<ReturnType<typeof useGetDistributionLatestReleaseHook>>
-					>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): UseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useGetDistributionLatestReleaseInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetDistributionLatestReleaseHook>>>
-	>,
-	TError = void,
->(
-	distributionId: number,
-	options?: {
-		query?: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<
-					ReturnType<ReturnType<typeof useGetDistributionLatestReleaseHook>>
-				>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-
-export function useGetDistributionLatestReleaseInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetDistributionLatestReleaseHook>>>
-	>,
-	TError = void,
->(
-	distributionId: number,
-	options?: {
-		query?: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<
-					ReturnType<ReturnType<typeof useGetDistributionLatestReleaseHook>>
-				>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-} {
-	const queryOptions = useGetDistributionLatestReleaseInfiniteQueryOptions(
-		distributionId,
-		options,
-	);
-
-	const query = useInfiniteQuery(
-		queryOptions,
-		queryClient,
-	) as UseInfiniteQueryResult<TData, TError> & {
-		queryKey: DataTag<QueryKey, TData, TError>;
-	};
-
-	query.queryKey = queryOptions.queryKey;
-
-	return query;
+   return  { queryKey, queryFn, enabled: !!(distributionId), ...queryOptions} as UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetDistributionLatestReleaseHook>>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
 }
 
-export const useGetDistributionLatestReleaseQueryOptions = <
-	TData = Awaited<
-		ReturnType<ReturnType<typeof useGetDistributionLatestReleaseHook>>
-	>,
-	TError = void,
->(
-	distributionId: number,
-	options?: {
-		query?: Partial<
-			UseQueryOptions<
-				Awaited<
-					ReturnType<ReturnType<typeof useGetDistributionLatestReleaseHook>>
-				>,
-				TError,
-				TData
-			>
-		>;
-	},
-) => {
-	const { query: queryOptions } = options ?? {};
+export type GetDistributionLatestReleaseInfiniteQueryResult = NonNullable<Awaited<ReturnType<ReturnType<typeof useGetDistributionLatestReleaseHook>>>>
+export type GetDistributionLatestReleaseInfiniteQueryError = void
 
-	const queryKey =
-		queryOptions?.queryKey ??
-		getGetDistributionLatestReleaseQueryKey(distributionId);
 
-	const getDistributionLatestRelease = useGetDistributionLatestReleaseHook();
+export function useGetDistributionLatestReleaseInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetDistributionLatestReleaseHook>>>>, TError = void>(
+ distributionId: number, options: { query:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetDistributionLatestReleaseHook>>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useGetDistributionLatestReleaseHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useGetDistributionLatestReleaseHook>>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetDistributionLatestReleaseInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetDistributionLatestReleaseHook>>>>, TError = void>(
+ distributionId: number, options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetDistributionLatestReleaseHook>>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useGetDistributionLatestReleaseHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useGetDistributionLatestReleaseHook>>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetDistributionLatestReleaseInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetDistributionLatestReleaseHook>>>>, TError = void>(
+ distributionId: number, options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetDistributionLatestReleaseHook>>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 
-	const queryFn: QueryFunction<
-		Awaited<ReturnType<ReturnType<typeof useGetDistributionLatestReleaseHook>>>
-	> = ({ signal }) => getDistributionLatestRelease(distributionId, signal);
+export function useGetDistributionLatestReleaseInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetDistributionLatestReleaseHook>>>>, TError = void>(
+ distributionId: number, options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetDistributionLatestReleaseHook>>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
-	return {
-		queryKey,
-		queryFn,
-		enabled: !!distributionId,
-		...queryOptions,
-	} as UseQueryOptions<
-		Awaited<ReturnType<ReturnType<typeof useGetDistributionLatestReleaseHook>>>,
-		TError,
-		TData
-	> & { queryKey: DataTag<QueryKey, TData, TError> };
-};
+  const queryOptions = useGetDistributionLatestReleaseInfiniteQueryOptions(distributionId,options)
 
-export type GetDistributionLatestReleaseQueryResult = NonNullable<
-	Awaited<ReturnType<ReturnType<typeof useGetDistributionLatestReleaseHook>>>
->;
-export type GetDistributionLatestReleaseQueryError = void;
+  const query = useInfiniteQuery(queryOptions, queryClient) as  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 
-export function useGetDistributionLatestRelease<
-	TData = Awaited<
-		ReturnType<ReturnType<typeof useGetDistributionLatestReleaseHook>>
-	>,
-	TError = void,
->(
-	distributionId: number,
-	options: {
-		query: Partial<
-			UseQueryOptions<
-				Awaited<
-					ReturnType<ReturnType<typeof useGetDistributionLatestReleaseHook>>
-				>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				DefinedInitialDataOptions<
-					Awaited<
-						ReturnType<ReturnType<typeof useGetDistributionLatestReleaseHook>>
-					>,
-					TError,
-					Awaited<
-						ReturnType<ReturnType<typeof useGetDistributionLatestReleaseHook>>
-					>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): DefinedUseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useGetDistributionLatestRelease<
-	TData = Awaited<
-		ReturnType<ReturnType<typeof useGetDistributionLatestReleaseHook>>
-	>,
-	TError = void,
->(
-	distributionId: number,
-	options?: {
-		query?: Partial<
-			UseQueryOptions<
-				Awaited<
-					ReturnType<ReturnType<typeof useGetDistributionLatestReleaseHook>>
-				>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				UndefinedInitialDataOptions<
-					Awaited<
-						ReturnType<ReturnType<typeof useGetDistributionLatestReleaseHook>>
-					>,
-					TError,
-					Awaited<
-						ReturnType<ReturnType<typeof useGetDistributionLatestReleaseHook>>
-					>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useGetDistributionLatestRelease<
-	TData = Awaited<
-		ReturnType<ReturnType<typeof useGetDistributionLatestReleaseHook>>
-	>,
-	TError = void,
->(
-	distributionId: number,
-	options?: {
-		query?: Partial<
-			UseQueryOptions<
-				Awaited<
-					ReturnType<ReturnType<typeof useGetDistributionLatestReleaseHook>>
-				>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
+  query.queryKey = queryOptions.queryKey ;
 
-export function useGetDistributionLatestRelease<
-	TData = Awaited<
-		ReturnType<ReturnType<typeof useGetDistributionLatestReleaseHook>>
-	>,
-	TError = void,
->(
-	distributionId: number,
-	options?: {
-		query?: Partial<
-			UseQueryOptions<
-				Awaited<
-					ReturnType<ReturnType<typeof useGetDistributionLatestReleaseHook>>
-				>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-} {
-	const queryOptions = useGetDistributionLatestReleaseQueryOptions(
-		distributionId,
-		options,
-	);
-
-	const query = useQuery(queryOptions, queryClient) as UseQueryResult<
-		TData,
-		TError
-	> & { queryKey: DataTag<QueryKey, TData, TError> };
-
-	query.queryKey = queryOptions.queryKey;
-
-	return query;
+  return query;
 }
+
+
+
+
+export const useGetDistributionLatestReleaseQueryOptions = <TData = Awaited<ReturnType<ReturnType<typeof useGetDistributionLatestReleaseHook>>>, TError = void>(distributionId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetDistributionLatestReleaseHook>>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetDistributionLatestReleaseQueryKey(distributionId);
+
+  const getDistributionLatestRelease =  useGetDistributionLatestReleaseHook();
+
+    const queryFn: QueryFunction<Awaited<ReturnType<ReturnType<typeof useGetDistributionLatestReleaseHook>>>> = ({ signal }) => getDistributionLatestRelease(distributionId, signal);
+
+      
+
+      
+
+   return  { queryKey, queryFn, enabled: !!(distributionId), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetDistributionLatestReleaseHook>>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetDistributionLatestReleaseQueryResult = NonNullable<Awaited<ReturnType<ReturnType<typeof useGetDistributionLatestReleaseHook>>>>
+export type GetDistributionLatestReleaseQueryError = void
+
+
+export function useGetDistributionLatestRelease<TData = Awaited<ReturnType<ReturnType<typeof useGetDistributionLatestReleaseHook>>>, TError = void>(
+ distributionId: number, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetDistributionLatestReleaseHook>>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useGetDistributionLatestReleaseHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useGetDistributionLatestReleaseHook>>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetDistributionLatestRelease<TData = Awaited<ReturnType<ReturnType<typeof useGetDistributionLatestReleaseHook>>>, TError = void>(
+ distributionId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetDistributionLatestReleaseHook>>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useGetDistributionLatestReleaseHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useGetDistributionLatestReleaseHook>>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetDistributionLatestRelease<TData = Awaited<ReturnType<ReturnType<typeof useGetDistributionLatestReleaseHook>>>, TError = void>(
+ distributionId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetDistributionLatestReleaseHook>>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+
+export function useGetDistributionLatestRelease<TData = Awaited<ReturnType<ReturnType<typeof useGetDistributionLatestReleaseHook>>>, TError = void>(
+ distributionId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetDistributionLatestReleaseHook>>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = useGetDistributionLatestReleaseQueryOptions(distributionId,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  query.queryKey = queryOptions.queryKey ;
+
+  return query;
+}
+
+
+
+
 
 export const useApiRolloutHook = () => {
-	const apiRollout = useClientMutator<DistributionRolloutStats>();
+        const apiRollout = useClientMutator<DistributionRolloutStats>();
 
-	return useCallback(
-		(distributionId: number, signal?: AbortSignal) => {
-			return apiRollout({
-				url: `/distributions/${distributionId}/rollout`,
-				method: "GET",
-				signal,
-			});
-		},
-		[apiRollout],
-	);
-};
-
-export const getApiRolloutInfiniteQueryKey = (distributionId?: number) => {
-	return ["infinite", `/distributions/${distributionId}/rollout`] as const;
-};
-
-export const getApiRolloutQueryKey = (distributionId?: number) => {
-	return [`/distributions/${distributionId}/rollout`] as const;
-};
-
-export const useApiRolloutInfiniteQueryOptions = <
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useApiRolloutHook>>>
-	>,
-	TError = unknown,
->(
-	distributionId: number,
-	options?: {
-		query?: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useApiRolloutHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
+        return useCallback((
+    distributionId: number,
+ signal?: AbortSignal
 ) => {
-	const { query: queryOptions } = options ?? {};
+        return apiRollout(
+          {url: `/distributions/${distributionId}/rollout`, method: 'GET', signal
+    },
+          );
+        }, [apiRollout])
+      }
+    
 
-	const queryKey =
-		queryOptions?.queryKey ?? getApiRolloutInfiniteQueryKey(distributionId);
 
-	const apiRollout = useApiRolloutHook();
 
-	const queryFn: QueryFunction<
-		Awaited<ReturnType<ReturnType<typeof useApiRolloutHook>>>
-	> = ({ signal }) => apiRollout(distributionId, signal);
+export const getApiRolloutInfiniteQueryKey = (distributionId?: number,) => {
+    return [
+    'infinite', `/distributions/${distributionId}/rollout`
+    ] as const;
+    }
 
-	return {
-		queryKey,
-		queryFn,
-		enabled: !!distributionId,
-		...queryOptions,
-	} as UseInfiniteQueryOptions<
-		Awaited<ReturnType<ReturnType<typeof useApiRolloutHook>>>,
-		TError,
-		TData
-	> & { queryKey: DataTag<QueryKey, TData, TError> };
-};
+export const getApiRolloutQueryKey = (distributionId?: number,) => {
+    return [
+    `/distributions/${distributionId}/rollout`
+    ] as const;
+    }
 
-export type ApiRolloutInfiniteQueryResult = NonNullable<
-	Awaited<ReturnType<ReturnType<typeof useApiRolloutHook>>>
->;
-export type ApiRolloutInfiniteQueryError = unknown;
+    
+export const useApiRolloutInfiniteQueryOptions = <TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useApiRolloutHook>>>>, TError = unknown>(distributionId: number, options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useApiRolloutHook>>>, TError, TData>>, }
+) => {
 
-export function useApiRolloutInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useApiRolloutHook>>>
-	>,
-	TError = unknown,
->(
-	distributionId: number,
-	options: {
-		query: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useApiRolloutHook>>>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				DefinedInitialDataOptions<
-					Awaited<ReturnType<ReturnType<typeof useApiRolloutHook>>>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useApiRolloutHook>>>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): DefinedUseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useApiRolloutInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useApiRolloutHook>>>
-	>,
-	TError = unknown,
->(
-	distributionId: number,
-	options?: {
-		query?: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useApiRolloutHook>>>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				UndefinedInitialDataOptions<
-					Awaited<ReturnType<ReturnType<typeof useApiRolloutHook>>>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useApiRolloutHook>>>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): UseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useApiRolloutInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useApiRolloutHook>>>
-	>,
-	TError = unknown,
->(
-	distributionId: number,
-	options?: {
-		query?: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useApiRolloutHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
+const {query: queryOptions} = options ?? {};
 
-export function useApiRolloutInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useApiRolloutHook>>>
-	>,
-	TError = unknown,
->(
-	distributionId: number,
-	options?: {
-		query?: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useApiRolloutHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-} {
-	const queryOptions = useApiRolloutInfiniteQueryOptions(
-		distributionId,
-		options,
-	);
+  const queryKey =  queryOptions?.queryKey ?? getApiRolloutInfiniteQueryKey(distributionId);
 
-	const query = useInfiniteQuery(
-		queryOptions,
-		queryClient,
-	) as UseInfiniteQueryResult<TData, TError> & {
-		queryKey: DataTag<QueryKey, TData, TError>;
-	};
+  const apiRollout =  useApiRolloutHook();
 
-	query.queryKey = queryOptions.queryKey;
+    const queryFn: QueryFunction<Awaited<ReturnType<ReturnType<typeof useApiRolloutHook>>>> = ({ signal }) => apiRollout(distributionId, signal);
 
-	return query;
+      
+
+      
+
+   return  { queryKey, queryFn, enabled: !!(distributionId), ...queryOptions} as UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useApiRolloutHook>>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
 }
 
-export const useApiRolloutQueryOptions = <
-	TData = Awaited<ReturnType<ReturnType<typeof useApiRolloutHook>>>,
-	TError = unknown,
->(
-	distributionId: number,
-	options?: {
-		query?: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useApiRolloutHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-) => {
-	const { query: queryOptions } = options ?? {};
+export type ApiRolloutInfiniteQueryResult = NonNullable<Awaited<ReturnType<ReturnType<typeof useApiRolloutHook>>>>
+export type ApiRolloutInfiniteQueryError = unknown
 
-	const queryKey =
-		queryOptions?.queryKey ?? getApiRolloutQueryKey(distributionId);
 
-	const apiRollout = useApiRolloutHook();
+export function useApiRolloutInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useApiRolloutHook>>>>, TError = unknown>(
+ distributionId: number, options: { query:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useApiRolloutHook>>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useApiRolloutHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useApiRolloutHook>>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useApiRolloutInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useApiRolloutHook>>>>, TError = unknown>(
+ distributionId: number, options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useApiRolloutHook>>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useApiRolloutHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useApiRolloutHook>>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useApiRolloutInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useApiRolloutHook>>>>, TError = unknown>(
+ distributionId: number, options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useApiRolloutHook>>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 
-	const queryFn: QueryFunction<
-		Awaited<ReturnType<ReturnType<typeof useApiRolloutHook>>>
-	> = ({ signal }) => apiRollout(distributionId, signal);
+export function useApiRolloutInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useApiRolloutHook>>>>, TError = unknown>(
+ distributionId: number, options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useApiRolloutHook>>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
-	return {
-		queryKey,
-		queryFn,
-		enabled: !!distributionId,
-		...queryOptions,
-	} as UseQueryOptions<
-		Awaited<ReturnType<ReturnType<typeof useApiRolloutHook>>>,
-		TError,
-		TData
-	> & { queryKey: DataTag<QueryKey, TData, TError> };
-};
+  const queryOptions = useApiRolloutInfiniteQueryOptions(distributionId,options)
 
-export type ApiRolloutQueryResult = NonNullable<
-	Awaited<ReturnType<ReturnType<typeof useApiRolloutHook>>>
->;
-export type ApiRolloutQueryError = unknown;
+  const query = useInfiniteQuery(queryOptions, queryClient) as  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 
-export function useApiRollout<
-	TData = Awaited<ReturnType<ReturnType<typeof useApiRolloutHook>>>,
-	TError = unknown,
->(
-	distributionId: number,
-	options: {
-		query: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useApiRolloutHook>>>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				DefinedInitialDataOptions<
-					Awaited<ReturnType<ReturnType<typeof useApiRolloutHook>>>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useApiRolloutHook>>>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): DefinedUseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useApiRollout<
-	TData = Awaited<ReturnType<ReturnType<typeof useApiRolloutHook>>>,
-	TError = unknown,
->(
-	distributionId: number,
-	options?: {
-		query?: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useApiRolloutHook>>>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				UndefinedInitialDataOptions<
-					Awaited<ReturnType<ReturnType<typeof useApiRolloutHook>>>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useApiRolloutHook>>>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useApiRollout<
-	TData = Awaited<ReturnType<ReturnType<typeof useApiRolloutHook>>>,
-	TError = unknown,
->(
-	distributionId: number,
-	options?: {
-		query?: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useApiRolloutHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
+  query.queryKey = queryOptions.queryKey ;
 
-export function useApiRollout<
-	TData = Awaited<ReturnType<ReturnType<typeof useApiRolloutHook>>>,
-	TError = unknown,
->(
-	distributionId: number,
-	options?: {
-		query?: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useApiRolloutHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-} {
-	const queryOptions = useApiRolloutQueryOptions(distributionId, options);
-
-	const query = useQuery(queryOptions, queryClient) as UseQueryResult<
-		TData,
-		TError
-	> & { queryKey: DataTag<QueryKey, TData, TError> };
-
-	query.queryKey = queryOptions.queryKey;
-
-	return query;
+  return query;
 }
+
+
+
+
+export const useApiRolloutQueryOptions = <TData = Awaited<ReturnType<ReturnType<typeof useApiRolloutHook>>>, TError = unknown>(distributionId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useApiRolloutHook>>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getApiRolloutQueryKey(distributionId);
+
+  const apiRollout =  useApiRolloutHook();
+
+    const queryFn: QueryFunction<Awaited<ReturnType<ReturnType<typeof useApiRolloutHook>>>> = ({ signal }) => apiRollout(distributionId, signal);
+
+      
+
+      
+
+   return  { queryKey, queryFn, enabled: !!(distributionId), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useApiRolloutHook>>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type ApiRolloutQueryResult = NonNullable<Awaited<ReturnType<ReturnType<typeof useApiRolloutHook>>>>
+export type ApiRolloutQueryError = unknown
+
+
+export function useApiRollout<TData = Awaited<ReturnType<ReturnType<typeof useApiRolloutHook>>>, TError = unknown>(
+ distributionId: number, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useApiRolloutHook>>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useApiRolloutHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useApiRolloutHook>>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useApiRollout<TData = Awaited<ReturnType<ReturnType<typeof useApiRolloutHook>>>, TError = unknown>(
+ distributionId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useApiRolloutHook>>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useApiRolloutHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useApiRolloutHook>>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useApiRollout<TData = Awaited<ReturnType<ReturnType<typeof useApiRolloutHook>>>, TError = unknown>(
+ distributionId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useApiRolloutHook>>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+
+export function useApiRollout<TData = Awaited<ReturnType<ReturnType<typeof useApiRolloutHook>>>, TError = unknown>(
+ distributionId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useApiRolloutHook>>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = useApiRolloutQueryOptions(distributionId,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  query.queryKey = queryOptions.queryKey ;
+
+  return query;
+}
+
+
+
+
 
 export const useSseHandlerHook = () => {
-	const sseHandler = useClientMutator<void>();
+        const sseHandler = useClientMutator<void>();
 
-	return useCallback(
-		(signal?: AbortSignal) => {
-			return sseHandler({ url: `/events`, method: "GET", signal });
-		},
-		[sseHandler],
-	);
-};
+        return useCallback((
+    
+ signal?: AbortSignal
+) => {
+        return sseHandler(
+          {url: `/events`, method: 'GET', signal
+    },
+          );
+        }, [sseHandler])
+      }
+    
+
+
 
 export const getSseHandlerInfiniteQueryKey = () => {
-	return ["infinite", `/events`] as const;
-};
+    return [
+    'infinite', `/events`
+    ] as const;
+    }
 
 export const getSseHandlerQueryKey = () => {
-	return [`/events`] as const;
-};
+    return [
+    `/events`
+    ] as const;
+    }
 
-export const useSseHandlerInfiniteQueryOptions = <
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useSseHandlerHook>>>
-	>,
-	TError = void,
->(options?: {
-	query?: Partial<
-		UseInfiniteQueryOptions<
-			Awaited<ReturnType<ReturnType<typeof useSseHandlerHook>>>,
-			TError,
-			TData
-		>
-	>;
-}) => {
-	const { query: queryOptions } = options ?? {};
+    
+export const useSseHandlerInfiniteQueryOptions = <TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useSseHandlerHook>>>>, TError = void>( options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useSseHandlerHook>>>, TError, TData>>, }
+) => {
 
-	const queryKey = queryOptions?.queryKey ?? getSseHandlerInfiniteQueryKey();
+const {query: queryOptions} = options ?? {};
 
-	const sseHandler = useSseHandlerHook();
+  const queryKey =  queryOptions?.queryKey ?? getSseHandlerInfiniteQueryKey();
 
-	const queryFn: QueryFunction<
-		Awaited<ReturnType<ReturnType<typeof useSseHandlerHook>>>
-	> = ({ signal }) => sseHandler(signal);
+  const sseHandler =  useSseHandlerHook();
 
-	return { queryKey, queryFn, ...queryOptions } as UseInfiniteQueryOptions<
-		Awaited<ReturnType<ReturnType<typeof useSseHandlerHook>>>,
-		TError,
-		TData
-	> & { queryKey: DataTag<QueryKey, TData, TError> };
-};
+    const queryFn: QueryFunction<Awaited<ReturnType<ReturnType<typeof useSseHandlerHook>>>> = ({ signal }) => sseHandler(signal);
 
-export type SseHandlerInfiniteQueryResult = NonNullable<
-	Awaited<ReturnType<ReturnType<typeof useSseHandlerHook>>>
->;
-export type SseHandlerInfiniteQueryError = void;
+      
 
-export function useSseHandlerInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useSseHandlerHook>>>
-	>,
-	TError = void,
->(
-	options: {
-		query: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useSseHandlerHook>>>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				DefinedInitialDataOptions<
-					Awaited<ReturnType<ReturnType<typeof useSseHandlerHook>>>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useSseHandlerHook>>>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): DefinedUseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useSseHandlerInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useSseHandlerHook>>>
-	>,
-	TError = void,
->(
-	options?: {
-		query?: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useSseHandlerHook>>>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				UndefinedInitialDataOptions<
-					Awaited<ReturnType<ReturnType<typeof useSseHandlerHook>>>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useSseHandlerHook>>>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): UseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useSseHandlerInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useSseHandlerHook>>>
-	>,
-	TError = void,
->(
-	options?: {
-		query?: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useSseHandlerHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
+      
 
-export function useSseHandlerInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useSseHandlerHook>>>
-	>,
-	TError = void,
->(
-	options?: {
-		query?: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useSseHandlerHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-} {
-	const queryOptions = useSseHandlerInfiniteQueryOptions(options);
-
-	const query = useInfiniteQuery(
-		queryOptions,
-		queryClient,
-	) as UseInfiniteQueryResult<TData, TError> & {
-		queryKey: DataTag<QueryKey, TData, TError>;
-	};
-
-	query.queryKey = queryOptions.queryKey;
-
-	return query;
+   return  { queryKey, queryFn, ...queryOptions} as UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useSseHandlerHook>>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
 }
 
-export const useSseHandlerQueryOptions = <
-	TData = Awaited<ReturnType<ReturnType<typeof useSseHandlerHook>>>,
-	TError = void,
->(options?: {
-	query?: Partial<
-		UseQueryOptions<
-			Awaited<ReturnType<ReturnType<typeof useSseHandlerHook>>>,
-			TError,
-			TData
-		>
-	>;
-}) => {
-	const { query: queryOptions } = options ?? {};
+export type SseHandlerInfiniteQueryResult = NonNullable<Awaited<ReturnType<ReturnType<typeof useSseHandlerHook>>>>
+export type SseHandlerInfiniteQueryError = void
 
-	const queryKey = queryOptions?.queryKey ?? getSseHandlerQueryKey();
 
-	const sseHandler = useSseHandlerHook();
+export function useSseHandlerInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useSseHandlerHook>>>>, TError = void>(
+  options: { query:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useSseHandlerHook>>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useSseHandlerHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useSseHandlerHook>>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useSseHandlerInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useSseHandlerHook>>>>, TError = void>(
+  options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useSseHandlerHook>>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useSseHandlerHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useSseHandlerHook>>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useSseHandlerInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useSseHandlerHook>>>>, TError = void>(
+  options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useSseHandlerHook>>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 
-	const queryFn: QueryFunction<
-		Awaited<ReturnType<ReturnType<typeof useSseHandlerHook>>>
-	> = ({ signal }) => sseHandler(signal);
+export function useSseHandlerInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useSseHandlerHook>>>>, TError = void>(
+  options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useSseHandlerHook>>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
-	return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
-		Awaited<ReturnType<ReturnType<typeof useSseHandlerHook>>>,
-		TError,
-		TData
-	> & { queryKey: DataTag<QueryKey, TData, TError> };
-};
+  const queryOptions = useSseHandlerInfiniteQueryOptions(options)
 
-export type SseHandlerQueryResult = NonNullable<
-	Awaited<ReturnType<ReturnType<typeof useSseHandlerHook>>>
->;
-export type SseHandlerQueryError = void;
+  const query = useInfiniteQuery(queryOptions, queryClient) as  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 
-export function useSseHandler<
-	TData = Awaited<ReturnType<ReturnType<typeof useSseHandlerHook>>>,
-	TError = void,
->(
-	options: {
-		query: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useSseHandlerHook>>>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				DefinedInitialDataOptions<
-					Awaited<ReturnType<ReturnType<typeof useSseHandlerHook>>>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useSseHandlerHook>>>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): DefinedUseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useSseHandler<
-	TData = Awaited<ReturnType<ReturnType<typeof useSseHandlerHook>>>,
-	TError = void,
->(
-	options?: {
-		query?: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useSseHandlerHook>>>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				UndefinedInitialDataOptions<
-					Awaited<ReturnType<ReturnType<typeof useSseHandlerHook>>>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useSseHandlerHook>>>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useSseHandler<
-	TData = Awaited<ReturnType<ReturnType<typeof useSseHandlerHook>>>,
-	TError = void,
->(
-	options?: {
-		query?: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useSseHandlerHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
+  query.queryKey = queryOptions.queryKey ;
 
-export function useSseHandler<
-	TData = Awaited<ReturnType<ReturnType<typeof useSseHandlerHook>>>,
-	TError = void,
->(
-	options?: {
-		query?: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useSseHandlerHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-} {
-	const queryOptions = useSseHandlerQueryOptions(options);
-
-	const query = useQuery(queryOptions, queryClient) as UseQueryResult<
-		TData,
-		TError
-	> & { queryKey: DataTag<QueryKey, TData, TError> };
-
-	query.queryKey = queryOptions.queryKey;
-
-	return query;
+  return query;
 }
+
+
+
+
+export const useSseHandlerQueryOptions = <TData = Awaited<ReturnType<ReturnType<typeof useSseHandlerHook>>>, TError = void>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useSseHandlerHook>>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getSseHandlerQueryKey();
+
+  const sseHandler =  useSseHandlerHook();
+
+    const queryFn: QueryFunction<Awaited<ReturnType<ReturnType<typeof useSseHandlerHook>>>> = ({ signal }) => sseHandler(signal);
+
+      
+
+      
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useSseHandlerHook>>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type SseHandlerQueryResult = NonNullable<Awaited<ReturnType<ReturnType<typeof useSseHandlerHook>>>>
+export type SseHandlerQueryError = void
+
+
+export function useSseHandler<TData = Awaited<ReturnType<ReturnType<typeof useSseHandlerHook>>>, TError = void>(
+  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useSseHandlerHook>>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useSseHandlerHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useSseHandlerHook>>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useSseHandler<TData = Awaited<ReturnType<ReturnType<typeof useSseHandlerHook>>>, TError = void>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useSseHandlerHook>>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useSseHandlerHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useSseHandlerHook>>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useSseHandler<TData = Awaited<ReturnType<ReturnType<typeof useSseHandlerHook>>>, TError = void>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useSseHandlerHook>>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+
+export function useSseHandler<TData = Awaited<ReturnType<ReturnType<typeof useSseHandlerHook>>>, TError = void>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useSseHandlerHook>>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = useSseHandlerQueryOptions(options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  query.queryKey = queryOptions.queryKey ;
+
+  return query;
+}
+
+
+
+
 
 export const useGetIpAddressInfoHook = () => {
-	const getIpAddressInfo = useClientMutator<IpAddressInfo>();
+        const getIpAddressInfo = useClientMutator<IpAddressInfo>();
 
-	return useCallback(
-		(ipAddressId: number, signal?: AbortSignal) => {
-			return getIpAddressInfo({
-				url: `/ip_address/${ipAddressId}`,
-				method: "GET",
-				signal,
-			});
-		},
-		[getIpAddressInfo],
-	);
-};
-
-export const getGetIpAddressInfoInfiniteQueryKey = (ipAddressId?: number) => {
-	return ["infinite", `/ip_address/${ipAddressId}`] as const;
-};
-
-export const getGetIpAddressInfoQueryKey = (ipAddressId?: number) => {
-	return [`/ip_address/${ipAddressId}`] as const;
-};
-
-export const useGetIpAddressInfoInfiniteQueryOptions = <
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetIpAddressInfoHook>>>
-	>,
-	TError = void | string,
->(
-	ipAddressId: number,
-	options?: {
-		query?: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetIpAddressInfoHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
+        return useCallback((
+    ipAddressId: number,
+ signal?: AbortSignal
 ) => {
-	const { query: queryOptions } = options ?? {};
+        return getIpAddressInfo(
+          {url: `/ip_address/${ipAddressId}`, method: 'GET', signal
+    },
+          );
+        }, [getIpAddressInfo])
+      }
+    
 
-	const queryKey =
-		queryOptions?.queryKey ?? getGetIpAddressInfoInfiniteQueryKey(ipAddressId);
 
-	const getIpAddressInfo = useGetIpAddressInfoHook();
 
-	const queryFn: QueryFunction<
-		Awaited<ReturnType<ReturnType<typeof useGetIpAddressInfoHook>>>
-	> = ({ signal }) => getIpAddressInfo(ipAddressId, signal);
+export const getGetIpAddressInfoInfiniteQueryKey = (ipAddressId?: number,) => {
+    return [
+    'infinite', `/ip_address/${ipAddressId}`
+    ] as const;
+    }
 
-	return {
-		queryKey,
-		queryFn,
-		enabled: !!ipAddressId,
-		...queryOptions,
-	} as UseInfiniteQueryOptions<
-		Awaited<ReturnType<ReturnType<typeof useGetIpAddressInfoHook>>>,
-		TError,
-		TData
-	> & { queryKey: DataTag<QueryKey, TData, TError> };
-};
+export const getGetIpAddressInfoQueryKey = (ipAddressId?: number,) => {
+    return [
+    `/ip_address/${ipAddressId}`
+    ] as const;
+    }
 
-export type GetIpAddressInfoInfiniteQueryResult = NonNullable<
-	Awaited<ReturnType<ReturnType<typeof useGetIpAddressInfoHook>>>
->;
-export type GetIpAddressInfoInfiniteQueryError = void | string;
+    
+export const useGetIpAddressInfoInfiniteQueryOptions = <TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetIpAddressInfoHook>>>>, TError = void | string>(ipAddressId: number, options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetIpAddressInfoHook>>>, TError, TData>>, }
+) => {
 
-export function useGetIpAddressInfoInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetIpAddressInfoHook>>>
-	>,
-	TError = void | string,
->(
-	ipAddressId: number,
-	options: {
-		query: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetIpAddressInfoHook>>>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				DefinedInitialDataOptions<
-					Awaited<ReturnType<ReturnType<typeof useGetIpAddressInfoHook>>>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useGetIpAddressInfoHook>>>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): DefinedUseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useGetIpAddressInfoInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetIpAddressInfoHook>>>
-	>,
-	TError = void | string,
->(
-	ipAddressId: number,
-	options?: {
-		query?: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetIpAddressInfoHook>>>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				UndefinedInitialDataOptions<
-					Awaited<ReturnType<ReturnType<typeof useGetIpAddressInfoHook>>>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useGetIpAddressInfoHook>>>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): UseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useGetIpAddressInfoInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetIpAddressInfoHook>>>
-	>,
-	TError = void | string,
->(
-	ipAddressId: number,
-	options?: {
-		query?: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetIpAddressInfoHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
+const {query: queryOptions} = options ?? {};
 
-export function useGetIpAddressInfoInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetIpAddressInfoHook>>>
-	>,
-	TError = void | string,
->(
-	ipAddressId: number,
-	options?: {
-		query?: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetIpAddressInfoHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-} {
-	const queryOptions = useGetIpAddressInfoInfiniteQueryOptions(
-		ipAddressId,
-		options,
-	);
+  const queryKey =  queryOptions?.queryKey ?? getGetIpAddressInfoInfiniteQueryKey(ipAddressId);
 
-	const query = useInfiniteQuery(
-		queryOptions,
-		queryClient,
-	) as UseInfiniteQueryResult<TData, TError> & {
-		queryKey: DataTag<QueryKey, TData, TError>;
-	};
+  const getIpAddressInfo =  useGetIpAddressInfoHook();
 
-	query.queryKey = queryOptions.queryKey;
+    const queryFn: QueryFunction<Awaited<ReturnType<ReturnType<typeof useGetIpAddressInfoHook>>>> = ({ signal }) => getIpAddressInfo(ipAddressId, signal);
 
-	return query;
+      
+
+      
+
+   return  { queryKey, queryFn, enabled: !!(ipAddressId), ...queryOptions} as UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetIpAddressInfoHook>>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
 }
 
-export const useGetIpAddressInfoQueryOptions = <
-	TData = Awaited<ReturnType<ReturnType<typeof useGetIpAddressInfoHook>>>,
-	TError = void | string,
->(
-	ipAddressId: number,
-	options?: {
-		query?: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetIpAddressInfoHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-) => {
-	const { query: queryOptions } = options ?? {};
+export type GetIpAddressInfoInfiniteQueryResult = NonNullable<Awaited<ReturnType<ReturnType<typeof useGetIpAddressInfoHook>>>>
+export type GetIpAddressInfoInfiniteQueryError = void | string
 
-	const queryKey =
-		queryOptions?.queryKey ?? getGetIpAddressInfoQueryKey(ipAddressId);
 
-	const getIpAddressInfo = useGetIpAddressInfoHook();
+export function useGetIpAddressInfoInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetIpAddressInfoHook>>>>, TError = void | string>(
+ ipAddressId: number, options: { query:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetIpAddressInfoHook>>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useGetIpAddressInfoHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useGetIpAddressInfoHook>>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetIpAddressInfoInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetIpAddressInfoHook>>>>, TError = void | string>(
+ ipAddressId: number, options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetIpAddressInfoHook>>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useGetIpAddressInfoHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useGetIpAddressInfoHook>>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetIpAddressInfoInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetIpAddressInfoHook>>>>, TError = void | string>(
+ ipAddressId: number, options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetIpAddressInfoHook>>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 
-	const queryFn: QueryFunction<
-		Awaited<ReturnType<ReturnType<typeof useGetIpAddressInfoHook>>>
-	> = ({ signal }) => getIpAddressInfo(ipAddressId, signal);
+export function useGetIpAddressInfoInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetIpAddressInfoHook>>>>, TError = void | string>(
+ ipAddressId: number, options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetIpAddressInfoHook>>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
-	return {
-		queryKey,
-		queryFn,
-		enabled: !!ipAddressId,
-		...queryOptions,
-	} as UseQueryOptions<
-		Awaited<ReturnType<ReturnType<typeof useGetIpAddressInfoHook>>>,
-		TError,
-		TData
-	> & { queryKey: DataTag<QueryKey, TData, TError> };
-};
+  const queryOptions = useGetIpAddressInfoInfiniteQueryOptions(ipAddressId,options)
 
-export type GetIpAddressInfoQueryResult = NonNullable<
-	Awaited<ReturnType<ReturnType<typeof useGetIpAddressInfoHook>>>
->;
-export type GetIpAddressInfoQueryError = void | string;
+  const query = useInfiniteQuery(queryOptions, queryClient) as  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 
-export function useGetIpAddressInfo<
-	TData = Awaited<ReturnType<ReturnType<typeof useGetIpAddressInfoHook>>>,
-	TError = void | string,
->(
-	ipAddressId: number,
-	options: {
-		query: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetIpAddressInfoHook>>>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				DefinedInitialDataOptions<
-					Awaited<ReturnType<ReturnType<typeof useGetIpAddressInfoHook>>>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useGetIpAddressInfoHook>>>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): DefinedUseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useGetIpAddressInfo<
-	TData = Awaited<ReturnType<ReturnType<typeof useGetIpAddressInfoHook>>>,
-	TError = void | string,
->(
-	ipAddressId: number,
-	options?: {
-		query?: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetIpAddressInfoHook>>>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				UndefinedInitialDataOptions<
-					Awaited<ReturnType<ReturnType<typeof useGetIpAddressInfoHook>>>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useGetIpAddressInfoHook>>>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useGetIpAddressInfo<
-	TData = Awaited<ReturnType<ReturnType<typeof useGetIpAddressInfoHook>>>,
-	TError = void | string,
->(
-	ipAddressId: number,
-	options?: {
-		query?: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetIpAddressInfoHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
+  query.queryKey = queryOptions.queryKey ;
 
-export function useGetIpAddressInfo<
-	TData = Awaited<ReturnType<ReturnType<typeof useGetIpAddressInfoHook>>>,
-	TError = void | string,
->(
-	ipAddressId: number,
-	options?: {
-		query?: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetIpAddressInfoHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-} {
-	const queryOptions = useGetIpAddressInfoQueryOptions(ipAddressId, options);
-
-	const query = useQuery(queryOptions, queryClient) as UseQueryResult<
-		TData,
-		TError
-	> & { queryKey: DataTag<QueryKey, TData, TError> };
-
-	query.queryKey = queryOptions.queryKey;
-
-	return query;
+  return query;
 }
+
+
+
+
+export const useGetIpAddressInfoQueryOptions = <TData = Awaited<ReturnType<ReturnType<typeof useGetIpAddressInfoHook>>>, TError = void | string>(ipAddressId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetIpAddressInfoHook>>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetIpAddressInfoQueryKey(ipAddressId);
+
+  const getIpAddressInfo =  useGetIpAddressInfoHook();
+
+    const queryFn: QueryFunction<Awaited<ReturnType<ReturnType<typeof useGetIpAddressInfoHook>>>> = ({ signal }) => getIpAddressInfo(ipAddressId, signal);
+
+      
+
+      
+
+   return  { queryKey, queryFn, enabled: !!(ipAddressId), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetIpAddressInfoHook>>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetIpAddressInfoQueryResult = NonNullable<Awaited<ReturnType<ReturnType<typeof useGetIpAddressInfoHook>>>>
+export type GetIpAddressInfoQueryError = void | string
+
+
+export function useGetIpAddressInfo<TData = Awaited<ReturnType<ReturnType<typeof useGetIpAddressInfoHook>>>, TError = void | string>(
+ ipAddressId: number, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetIpAddressInfoHook>>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useGetIpAddressInfoHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useGetIpAddressInfoHook>>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetIpAddressInfo<TData = Awaited<ReturnType<ReturnType<typeof useGetIpAddressInfoHook>>>, TError = void | string>(
+ ipAddressId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetIpAddressInfoHook>>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useGetIpAddressInfoHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useGetIpAddressInfoHook>>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetIpAddressInfo<TData = Awaited<ReturnType<ReturnType<typeof useGetIpAddressInfoHook>>>, TError = void | string>(
+ ipAddressId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetIpAddressInfoHook>>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+
+export function useGetIpAddressInfo<TData = Awaited<ReturnType<ReturnType<typeof useGetIpAddressInfoHook>>>, TError = void | string>(
+ ipAddressId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetIpAddressInfoHook>>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = useGetIpAddressInfoQueryOptions(ipAddressId,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  query.queryKey = queryOptions.queryKey ;
+
+  return query;
+}
+
+
+
+
 
 export const useUpdateIpAddressHook = () => {
-	const updateIpAddress = useClientMutator<IpAddressInfo>();
+        const updateIpAddress = useClientMutator<IpAddressInfo>();
 
-	return useCallback(
-		(ipAddressId: number, updateIpAddressRequest: UpdateIpAddressRequest) => {
-			return updateIpAddress({
-				url: `/ip_address/${ipAddressId}`,
-				method: "PUT",
-				headers: { "Content-Type": "application/json" },
-				data: updateIpAddressRequest,
-			});
-		},
-		[updateIpAddress],
-	);
-};
+        return useCallback((
+    ipAddressId: number,
+    updateIpAddressRequest: UpdateIpAddressRequest,
+ ) => {
+        return updateIpAddress(
+          {url: `/ip_address/${ipAddressId}`, method: 'PUT',
+      headers: {'Content-Type': 'application/json', },
+      data: updateIpAddressRequest
+    },
+          );
+        }, [updateIpAddress])
+      }
+    
 
-export const useUpdateIpAddressMutationOptions = <
-	TError = void | string,
-	TContext = unknown,
->(options?: {
-	mutation?: UseMutationOptions<
-		Awaited<ReturnType<ReturnType<typeof useUpdateIpAddressHook>>>,
-		TError,
-		{ ipAddressId: number; data: UpdateIpAddressRequest },
-		TContext
-	>;
-}): UseMutationOptions<
-	Awaited<ReturnType<ReturnType<typeof useUpdateIpAddressHook>>>,
-	TError,
-	{ ipAddressId: number; data: UpdateIpAddressRequest },
-	TContext
-> => {
-	const mutationKey = ["updateIpAddress"];
-	const { mutation: mutationOptions } = options
-		? options.mutation &&
-			"mutationKey" in options.mutation &&
-			options.mutation.mutationKey
-			? options
-			: { ...options, mutation: { ...options.mutation, mutationKey } }
-		: { mutation: { mutationKey } };
 
-	const updateIpAddress = useUpdateIpAddressHook();
+export const useUpdateIpAddressMutationOptions = <TError = void | string,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<ReturnType<typeof useUpdateIpAddressHook>>>, TError,{ipAddressId: number;data: UpdateIpAddressRequest}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<ReturnType<typeof useUpdateIpAddressHook>>>, TError,{ipAddressId: number;data: UpdateIpAddressRequest}, TContext> => {
 
-	const mutationFn: MutationFunction<
-		Awaited<ReturnType<ReturnType<typeof useUpdateIpAddressHook>>>,
-		{ ipAddressId: number; data: UpdateIpAddressRequest }
-	> = (props) => {
-		const { ipAddressId, data } = props ?? {};
+const mutationKey = ['updateIpAddress'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
 
-		return updateIpAddress(ipAddressId, data);
-	};
+      const updateIpAddress =  useUpdateIpAddressHook()
 
-	return { mutationFn, ...mutationOptions };
-};
 
-export type UpdateIpAddressMutationResult = NonNullable<
-	Awaited<ReturnType<ReturnType<typeof useUpdateIpAddressHook>>>
->;
-export type UpdateIpAddressMutationBody = UpdateIpAddressRequest;
-export type UpdateIpAddressMutationError = void | string;
+      const mutationFn: MutationFunction<Awaited<ReturnType<ReturnType<typeof useUpdateIpAddressHook>>>, {ipAddressId: number;data: UpdateIpAddressRequest}> = (props) => {
+          const {ipAddressId,data} = props ?? {};
 
-export const useUpdateIpAddress = <TError = void | string, TContext = unknown>(
-	options?: {
-		mutation?: UseMutationOptions<
-			Awaited<ReturnType<ReturnType<typeof useUpdateIpAddressHook>>>,
-			TError,
-			{ ipAddressId: number; data: UpdateIpAddressRequest },
-			TContext
-		>;
-	},
-	queryClient?: QueryClient,
-): UseMutationResult<
-	Awaited<ReturnType<ReturnType<typeof useUpdateIpAddressHook>>>,
-	TError,
-	{ ipAddressId: number; data: UpdateIpAddressRequest },
-	TContext
-> => {
-	const mutationOptions = useUpdateIpAddressMutationOptions(options);
+          return  updateIpAddress(ipAddressId,data,)
+        }
 
-	return useMutation(mutationOptions, queryClient);
-};
+        
 
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdateIpAddressMutationResult = NonNullable<Awaited<ReturnType<ReturnType<typeof useUpdateIpAddressHook>>>>
+    export type UpdateIpAddressMutationBody = UpdateIpAddressRequest
+    export type UpdateIpAddressMutationError = void | string
+
+    export const useUpdateIpAddress = <TError = void | string,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<ReturnType<typeof useUpdateIpAddressHook>>>, TError,{ipAddressId: number;data: UpdateIpAddressRequest}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<ReturnType<typeof useUpdateIpAddressHook>>>,
+        TError,
+        {ipAddressId: number;data: UpdateIpAddressRequest},
+        TContext
+      > => {
+
+      const mutationOptions = useUpdateIpAddressMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    
 export const useGetIpAddressesHook = () => {
-	const getIpAddresses = useClientMutator<IpAddressListResponse>();
+        const getIpAddresses = useClientMutator<IpAddressListResponse>();
 
-	return useCallback(
-		(signal?: AbortSignal) => {
-			return getIpAddresses({ url: `/ip_addresses`, method: "GET", signal });
-		},
-		[getIpAddresses],
-	);
-};
+        return useCallback((
+    
+ signal?: AbortSignal
+) => {
+        return getIpAddresses(
+          {url: `/ip_addresses`, method: 'GET', signal
+    },
+          );
+        }, [getIpAddresses])
+      }
+    
+
+
 
 export const getGetIpAddressesInfiniteQueryKey = () => {
-	return ["infinite", `/ip_addresses`] as const;
-};
+    return [
+    'infinite', `/ip_addresses`
+    ] as const;
+    }
 
 export const getGetIpAddressesQueryKey = () => {
-	return [`/ip_addresses`] as const;
-};
+    return [
+    `/ip_addresses`
+    ] as const;
+    }
 
-export const useGetIpAddressesInfiniteQueryOptions = <
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetIpAddressesHook>>>
-	>,
-	TError = void | string,
->(options?: {
-	query?: Partial<
-		UseInfiniteQueryOptions<
-			Awaited<ReturnType<ReturnType<typeof useGetIpAddressesHook>>>,
-			TError,
-			TData
-		>
-	>;
-}) => {
-	const { query: queryOptions } = options ?? {};
+    
+export const useGetIpAddressesInfiniteQueryOptions = <TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetIpAddressesHook>>>>, TError = void | string>( options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetIpAddressesHook>>>, TError, TData>>, }
+) => {
 
-	const queryKey =
-		queryOptions?.queryKey ?? getGetIpAddressesInfiniteQueryKey();
+const {query: queryOptions} = options ?? {};
 
-	const getIpAddresses = useGetIpAddressesHook();
+  const queryKey =  queryOptions?.queryKey ?? getGetIpAddressesInfiniteQueryKey();
 
-	const queryFn: QueryFunction<
-		Awaited<ReturnType<ReturnType<typeof useGetIpAddressesHook>>>
-	> = ({ signal }) => getIpAddresses(signal);
+  const getIpAddresses =  useGetIpAddressesHook();
 
-	return { queryKey, queryFn, ...queryOptions } as UseInfiniteQueryOptions<
-		Awaited<ReturnType<ReturnType<typeof useGetIpAddressesHook>>>,
-		TError,
-		TData
-	> & { queryKey: DataTag<QueryKey, TData, TError> };
-};
+    const queryFn: QueryFunction<Awaited<ReturnType<ReturnType<typeof useGetIpAddressesHook>>>> = ({ signal }) => getIpAddresses(signal);
 
-export type GetIpAddressesInfiniteQueryResult = NonNullable<
-	Awaited<ReturnType<ReturnType<typeof useGetIpAddressesHook>>>
->;
-export type GetIpAddressesInfiniteQueryError = void | string;
+      
 
-export function useGetIpAddressesInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetIpAddressesHook>>>
-	>,
-	TError = void | string,
->(
-	options: {
-		query: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetIpAddressesHook>>>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				DefinedInitialDataOptions<
-					Awaited<ReturnType<ReturnType<typeof useGetIpAddressesHook>>>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useGetIpAddressesHook>>>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): DefinedUseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useGetIpAddressesInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetIpAddressesHook>>>
-	>,
-	TError = void | string,
->(
-	options?: {
-		query?: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetIpAddressesHook>>>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				UndefinedInitialDataOptions<
-					Awaited<ReturnType<ReturnType<typeof useGetIpAddressesHook>>>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useGetIpAddressesHook>>>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): UseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useGetIpAddressesInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetIpAddressesHook>>>
-	>,
-	TError = void | string,
->(
-	options?: {
-		query?: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetIpAddressesHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
+      
 
-export function useGetIpAddressesInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetIpAddressesHook>>>
-	>,
-	TError = void | string,
->(
-	options?: {
-		query?: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetIpAddressesHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-} {
-	const queryOptions = useGetIpAddressesInfiniteQueryOptions(options);
-
-	const query = useInfiniteQuery(
-		queryOptions,
-		queryClient,
-	) as UseInfiniteQueryResult<TData, TError> & {
-		queryKey: DataTag<QueryKey, TData, TError>;
-	};
-
-	query.queryKey = queryOptions.queryKey;
-
-	return query;
+   return  { queryKey, queryFn, ...queryOptions} as UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetIpAddressesHook>>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
 }
 
-export const useGetIpAddressesQueryOptions = <
-	TData = Awaited<ReturnType<ReturnType<typeof useGetIpAddressesHook>>>,
-	TError = void | string,
->(options?: {
-	query?: Partial<
-		UseQueryOptions<
-			Awaited<ReturnType<ReturnType<typeof useGetIpAddressesHook>>>,
-			TError,
-			TData
-		>
-	>;
-}) => {
-	const { query: queryOptions } = options ?? {};
+export type GetIpAddressesInfiniteQueryResult = NonNullable<Awaited<ReturnType<ReturnType<typeof useGetIpAddressesHook>>>>
+export type GetIpAddressesInfiniteQueryError = void | string
 
-	const queryKey = queryOptions?.queryKey ?? getGetIpAddressesQueryKey();
 
-	const getIpAddresses = useGetIpAddressesHook();
+export function useGetIpAddressesInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetIpAddressesHook>>>>, TError = void | string>(
+  options: { query:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetIpAddressesHook>>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useGetIpAddressesHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useGetIpAddressesHook>>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetIpAddressesInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetIpAddressesHook>>>>, TError = void | string>(
+  options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetIpAddressesHook>>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useGetIpAddressesHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useGetIpAddressesHook>>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetIpAddressesInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetIpAddressesHook>>>>, TError = void | string>(
+  options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetIpAddressesHook>>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 
-	const queryFn: QueryFunction<
-		Awaited<ReturnType<ReturnType<typeof useGetIpAddressesHook>>>
-	> = ({ signal }) => getIpAddresses(signal);
+export function useGetIpAddressesInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetIpAddressesHook>>>>, TError = void | string>(
+  options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetIpAddressesHook>>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
-	return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
-		Awaited<ReturnType<ReturnType<typeof useGetIpAddressesHook>>>,
-		TError,
-		TData
-	> & { queryKey: DataTag<QueryKey, TData, TError> };
-};
+  const queryOptions = useGetIpAddressesInfiniteQueryOptions(options)
 
-export type GetIpAddressesQueryResult = NonNullable<
-	Awaited<ReturnType<ReturnType<typeof useGetIpAddressesHook>>>
->;
-export type GetIpAddressesQueryError = void | string;
+  const query = useInfiniteQuery(queryOptions, queryClient) as  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 
-export function useGetIpAddresses<
-	TData = Awaited<ReturnType<ReturnType<typeof useGetIpAddressesHook>>>,
-	TError = void | string,
->(
-	options: {
-		query: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetIpAddressesHook>>>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				DefinedInitialDataOptions<
-					Awaited<ReturnType<ReturnType<typeof useGetIpAddressesHook>>>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useGetIpAddressesHook>>>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): DefinedUseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useGetIpAddresses<
-	TData = Awaited<ReturnType<ReturnType<typeof useGetIpAddressesHook>>>,
-	TError = void | string,
->(
-	options?: {
-		query?: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetIpAddressesHook>>>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				UndefinedInitialDataOptions<
-					Awaited<ReturnType<ReturnType<typeof useGetIpAddressesHook>>>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useGetIpAddressesHook>>>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useGetIpAddresses<
-	TData = Awaited<ReturnType<ReturnType<typeof useGetIpAddressesHook>>>,
-	TError = void | string,
->(
-	options?: {
-		query?: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetIpAddressesHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
+  query.queryKey = queryOptions.queryKey ;
 
-export function useGetIpAddresses<
-	TData = Awaited<ReturnType<ReturnType<typeof useGetIpAddressesHook>>>,
-	TError = void | string,
->(
-	options?: {
-		query?: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetIpAddressesHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-} {
-	const queryOptions = useGetIpAddressesQueryOptions(options);
-
-	const query = useQuery(queryOptions, queryClient) as UseQueryResult<
-		TData,
-		TError
-	> & { queryKey: DataTag<QueryKey, TData, TError> };
-
-	query.queryKey = queryOptions.queryKey;
-
-	return query;
+  return query;
 }
+
+
+
+
+export const useGetIpAddressesQueryOptions = <TData = Awaited<ReturnType<ReturnType<typeof useGetIpAddressesHook>>>, TError = void | string>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetIpAddressesHook>>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetIpAddressesQueryKey();
+
+  const getIpAddresses =  useGetIpAddressesHook();
+
+    const queryFn: QueryFunction<Awaited<ReturnType<ReturnType<typeof useGetIpAddressesHook>>>> = ({ signal }) => getIpAddresses(signal);
+
+      
+
+      
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetIpAddressesHook>>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetIpAddressesQueryResult = NonNullable<Awaited<ReturnType<ReturnType<typeof useGetIpAddressesHook>>>>
+export type GetIpAddressesQueryError = void | string
+
+
+export function useGetIpAddresses<TData = Awaited<ReturnType<ReturnType<typeof useGetIpAddressesHook>>>, TError = void | string>(
+  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetIpAddressesHook>>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useGetIpAddressesHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useGetIpAddressesHook>>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetIpAddresses<TData = Awaited<ReturnType<ReturnType<typeof useGetIpAddressesHook>>>, TError = void | string>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetIpAddressesHook>>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useGetIpAddressesHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useGetIpAddressesHook>>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetIpAddresses<TData = Awaited<ReturnType<ReturnType<typeof useGetIpAddressesHook>>>, TError = void | string>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetIpAddressesHook>>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+
+export function useGetIpAddresses<TData = Awaited<ReturnType<ReturnType<typeof useGetIpAddressesHook>>>, TError = void | string>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetIpAddressesHook>>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = useGetIpAddressesQueryOptions(options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  query.queryKey = queryOptions.queryKey ;
+
+  return query;
+}
+
+
+
+
 
 export const useGetLabelsHook = () => {
-	const getLabels = useClientMutator<LabelWithValues[]>();
+        const getLabels = useClientMutator<LabelWithValues[]>();
 
-	return useCallback(
-		(signal?: AbortSignal) => {
-			return getLabels({ url: `/labels`, method: "GET", signal });
-		},
-		[getLabels],
-	);
-};
+        return useCallback((
+    
+ signal?: AbortSignal
+) => {
+        return getLabels(
+          {url: `/labels`, method: 'GET', signal
+    },
+          );
+        }, [getLabels])
+      }
+    
+
+
 
 export const getGetLabelsInfiniteQueryKey = () => {
-	return ["infinite", `/labels`] as const;
-};
+    return [
+    'infinite', `/labels`
+    ] as const;
+    }
 
 export const getGetLabelsQueryKey = () => {
-	return [`/labels`] as const;
-};
+    return [
+    `/labels`
+    ] as const;
+    }
 
-export const useGetLabelsInfiniteQueryOptions = <
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetLabelsHook>>>
-	>,
-	TError = void,
->(options?: {
-	query?: Partial<
-		UseInfiniteQueryOptions<
-			Awaited<ReturnType<ReturnType<typeof useGetLabelsHook>>>,
-			TError,
-			TData
-		>
-	>;
-}) => {
-	const { query: queryOptions } = options ?? {};
+    
+export const useGetLabelsInfiniteQueryOptions = <TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetLabelsHook>>>>, TError = void>( options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetLabelsHook>>>, TError, TData>>, }
+) => {
 
-	const queryKey = queryOptions?.queryKey ?? getGetLabelsInfiniteQueryKey();
+const {query: queryOptions} = options ?? {};
 
-	const getLabels = useGetLabelsHook();
+  const queryKey =  queryOptions?.queryKey ?? getGetLabelsInfiniteQueryKey();
 
-	const queryFn: QueryFunction<
-		Awaited<ReturnType<ReturnType<typeof useGetLabelsHook>>>
-	> = ({ signal }) => getLabels(signal);
+  const getLabels =  useGetLabelsHook();
 
-	return { queryKey, queryFn, ...queryOptions } as UseInfiniteQueryOptions<
-		Awaited<ReturnType<ReturnType<typeof useGetLabelsHook>>>,
-		TError,
-		TData
-	> & { queryKey: DataTag<QueryKey, TData, TError> };
-};
+    const queryFn: QueryFunction<Awaited<ReturnType<ReturnType<typeof useGetLabelsHook>>>> = ({ signal }) => getLabels(signal);
 
-export type GetLabelsInfiniteQueryResult = NonNullable<
-	Awaited<ReturnType<ReturnType<typeof useGetLabelsHook>>>
->;
-export type GetLabelsInfiniteQueryError = void;
+      
 
-export function useGetLabelsInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetLabelsHook>>>
-	>,
-	TError = void,
->(
-	options: {
-		query: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetLabelsHook>>>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				DefinedInitialDataOptions<
-					Awaited<ReturnType<ReturnType<typeof useGetLabelsHook>>>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useGetLabelsHook>>>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): DefinedUseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useGetLabelsInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetLabelsHook>>>
-	>,
-	TError = void,
->(
-	options?: {
-		query?: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetLabelsHook>>>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				UndefinedInitialDataOptions<
-					Awaited<ReturnType<ReturnType<typeof useGetLabelsHook>>>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useGetLabelsHook>>>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): UseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useGetLabelsInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetLabelsHook>>>
-	>,
-	TError = void,
->(
-	options?: {
-		query?: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetLabelsHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
+      
 
-export function useGetLabelsInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetLabelsHook>>>
-	>,
-	TError = void,
->(
-	options?: {
-		query?: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetLabelsHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-} {
-	const queryOptions = useGetLabelsInfiniteQueryOptions(options);
-
-	const query = useInfiniteQuery(
-		queryOptions,
-		queryClient,
-	) as UseInfiniteQueryResult<TData, TError> & {
-		queryKey: DataTag<QueryKey, TData, TError>;
-	};
-
-	query.queryKey = queryOptions.queryKey;
-
-	return query;
+   return  { queryKey, queryFn, ...queryOptions} as UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetLabelsHook>>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
 }
 
-export const useGetLabelsQueryOptions = <
-	TData = Awaited<ReturnType<ReturnType<typeof useGetLabelsHook>>>,
-	TError = void,
->(options?: {
-	query?: Partial<
-		UseQueryOptions<
-			Awaited<ReturnType<ReturnType<typeof useGetLabelsHook>>>,
-			TError,
-			TData
-		>
-	>;
-}) => {
-	const { query: queryOptions } = options ?? {};
+export type GetLabelsInfiniteQueryResult = NonNullable<Awaited<ReturnType<ReturnType<typeof useGetLabelsHook>>>>
+export type GetLabelsInfiniteQueryError = void
 
-	const queryKey = queryOptions?.queryKey ?? getGetLabelsQueryKey();
 
-	const getLabels = useGetLabelsHook();
+export function useGetLabelsInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetLabelsHook>>>>, TError = void>(
+  options: { query:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetLabelsHook>>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useGetLabelsHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useGetLabelsHook>>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetLabelsInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetLabelsHook>>>>, TError = void>(
+  options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetLabelsHook>>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useGetLabelsHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useGetLabelsHook>>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetLabelsInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetLabelsHook>>>>, TError = void>(
+  options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetLabelsHook>>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 
-	const queryFn: QueryFunction<
-		Awaited<ReturnType<ReturnType<typeof useGetLabelsHook>>>
-	> = ({ signal }) => getLabels(signal);
+export function useGetLabelsInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetLabelsHook>>>>, TError = void>(
+  options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetLabelsHook>>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
-	return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
-		Awaited<ReturnType<ReturnType<typeof useGetLabelsHook>>>,
-		TError,
-		TData
-	> & { queryKey: DataTag<QueryKey, TData, TError> };
-};
+  const queryOptions = useGetLabelsInfiniteQueryOptions(options)
 
-export type GetLabelsQueryResult = NonNullable<
-	Awaited<ReturnType<ReturnType<typeof useGetLabelsHook>>>
->;
-export type GetLabelsQueryError = void;
+  const query = useInfiniteQuery(queryOptions, queryClient) as  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 
-export function useGetLabels<
-	TData = Awaited<ReturnType<ReturnType<typeof useGetLabelsHook>>>,
-	TError = void,
->(
-	options: {
-		query: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetLabelsHook>>>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				DefinedInitialDataOptions<
-					Awaited<ReturnType<ReturnType<typeof useGetLabelsHook>>>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useGetLabelsHook>>>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): DefinedUseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useGetLabels<
-	TData = Awaited<ReturnType<ReturnType<typeof useGetLabelsHook>>>,
-	TError = void,
->(
-	options?: {
-		query?: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetLabelsHook>>>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				UndefinedInitialDataOptions<
-					Awaited<ReturnType<ReturnType<typeof useGetLabelsHook>>>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useGetLabelsHook>>>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useGetLabels<
-	TData = Awaited<ReturnType<ReturnType<typeof useGetLabelsHook>>>,
-	TError = void,
->(
-	options?: {
-		query?: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetLabelsHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
+  query.queryKey = queryOptions.queryKey ;
 
-export function useGetLabels<
-	TData = Awaited<ReturnType<ReturnType<typeof useGetLabelsHook>>>,
-	TError = void,
->(
-	options?: {
-		query?: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetLabelsHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-} {
-	const queryOptions = useGetLabelsQueryOptions(options);
-
-	const query = useQuery(queryOptions, queryClient) as UseQueryResult<
-		TData,
-		TError
-	> & { queryKey: DataTag<QueryKey, TData, TError> };
-
-	query.queryKey = queryOptions.queryKey;
-
-	return query;
+  return query;
 }
+
+
+
+
+export const useGetLabelsQueryOptions = <TData = Awaited<ReturnType<ReturnType<typeof useGetLabelsHook>>>, TError = void>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetLabelsHook>>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetLabelsQueryKey();
+
+  const getLabels =  useGetLabelsHook();
+
+    const queryFn: QueryFunction<Awaited<ReturnType<ReturnType<typeof useGetLabelsHook>>>> = ({ signal }) => getLabels(signal);
+
+      
+
+      
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetLabelsHook>>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetLabelsQueryResult = NonNullable<Awaited<ReturnType<ReturnType<typeof useGetLabelsHook>>>>
+export type GetLabelsQueryError = void
+
+
+export function useGetLabels<TData = Awaited<ReturnType<ReturnType<typeof useGetLabelsHook>>>, TError = void>(
+  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetLabelsHook>>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useGetLabelsHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useGetLabelsHook>>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetLabels<TData = Awaited<ReturnType<ReturnType<typeof useGetLabelsHook>>>, TError = void>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetLabelsHook>>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useGetLabelsHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useGetLabelsHook>>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetLabels<TData = Awaited<ReturnType<ReturnType<typeof useGetLabelsHook>>>, TError = void>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetLabelsHook>>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+
+export function useGetLabels<TData = Awaited<ReturnType<ReturnType<typeof useGetLabelsHook>>>, TError = void>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetLabelsHook>>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = useGetLabelsQueryOptions(options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  query.queryKey = queryOptions.queryKey ;
+
+  return query;
+}
+
+
+
+
 
 export const useDeleteLabelHook = () => {
-	const deleteLabel = useClientMutator<void>();
+        const deleteLabel = useClientMutator<void>();
 
-	return useCallback(
-		(key: string) => {
-			return deleteLabel({ url: `/labels/${key}`, method: "DELETE" });
-		},
-		[deleteLabel],
-	);
-};
+        return useCallback((
+    key: string,
+ ) => {
+        return deleteLabel(
+          {url: `/labels/${key}`, method: 'DELETE'
+    },
+          );
+        }, [deleteLabel])
+      }
+    
 
-export const useDeleteLabelMutationOptions = <
-	TError = void,
-	TContext = unknown,
->(options?: {
-	mutation?: UseMutationOptions<
-		Awaited<ReturnType<ReturnType<typeof useDeleteLabelHook>>>,
-		TError,
-		{ key: string },
-		TContext
-	>;
-}): UseMutationOptions<
-	Awaited<ReturnType<ReturnType<typeof useDeleteLabelHook>>>,
-	TError,
-	{ key: string },
-	TContext
-> => {
-	const mutationKey = ["deleteLabel"];
-	const { mutation: mutationOptions } = options
-		? options.mutation &&
-			"mutationKey" in options.mutation &&
-			options.mutation.mutationKey
-			? options
-			: { ...options, mutation: { ...options.mutation, mutationKey } }
-		: { mutation: { mutationKey } };
 
-	const deleteLabel = useDeleteLabelHook();
+export const useDeleteLabelMutationOptions = <TError = void,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<ReturnType<typeof useDeleteLabelHook>>>, TError,{key: string}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<ReturnType<typeof useDeleteLabelHook>>>, TError,{key: string}, TContext> => {
 
-	const mutationFn: MutationFunction<
-		Awaited<ReturnType<ReturnType<typeof useDeleteLabelHook>>>,
-		{ key: string }
-	> = (props) => {
-		const { key } = props ?? {};
+const mutationKey = ['deleteLabel'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
 
-		return deleteLabel(key);
-	};
+      const deleteLabel =  useDeleteLabelHook()
 
-	return { mutationFn, ...mutationOptions };
-};
 
-export type DeleteLabelMutationResult = NonNullable<
-	Awaited<ReturnType<ReturnType<typeof useDeleteLabelHook>>>
->;
+      const mutationFn: MutationFunction<Awaited<ReturnType<ReturnType<typeof useDeleteLabelHook>>>, {key: string}> = (props) => {
+          const {key} = props ?? {};
 
-export type DeleteLabelMutationError = void;
+          return  deleteLabel(key,)
+        }
 
-export const useDeleteLabel = <TError = void, TContext = unknown>(
-	options?: {
-		mutation?: UseMutationOptions<
-			Awaited<ReturnType<ReturnType<typeof useDeleteLabelHook>>>,
-			TError,
-			{ key: string },
-			TContext
-		>;
-	},
-	queryClient?: QueryClient,
-): UseMutationResult<
-	Awaited<ReturnType<ReturnType<typeof useDeleteLabelHook>>>,
-	TError,
-	{ key: string },
-	TContext
-> => {
-	const mutationOptions = useDeleteLabelMutationOptions(options);
+        
 
-	return useMutation(mutationOptions, queryClient);
-};
 
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DeleteLabelMutationResult = NonNullable<Awaited<ReturnType<ReturnType<typeof useDeleteLabelHook>>>>
+    
+    export type DeleteLabelMutationError = void
+
+    export const useDeleteLabel = <TError = void,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<ReturnType<typeof useDeleteLabelHook>>>, TError,{key: string}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<ReturnType<typeof useDeleteLabelHook>>>,
+        TError,
+        {key: string},
+        TContext
+      > => {
+
+      const mutationOptions = useDeleteLabelMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    
 export const useGetModemListHook = () => {
-	const getModemList = useClientMutator<Modem[]>();
+        const getModemList = useClientMutator<Modem[]>();
 
-	return useCallback(
-		(signal?: AbortSignal) => {
-			return getModemList({ url: `/modems`, method: "GET", signal });
-		},
-		[getModemList],
-	);
-};
+        return useCallback((
+    
+ signal?: AbortSignal
+) => {
+        return getModemList(
+          {url: `/modems`, method: 'GET', signal
+    },
+          );
+        }, [getModemList])
+      }
+    
+
+
 
 export const getGetModemListInfiniteQueryKey = () => {
-	return ["infinite", `/modems`] as const;
-};
+    return [
+    'infinite', `/modems`
+    ] as const;
+    }
 
 export const getGetModemListQueryKey = () => {
-	return [`/modems`] as const;
-};
+    return [
+    `/modems`
+    ] as const;
+    }
 
-export const useGetModemListInfiniteQueryOptions = <
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetModemListHook>>>
-	>,
-	TError = void,
->(options?: {
-	query?: Partial<
-		UseInfiniteQueryOptions<
-			Awaited<ReturnType<ReturnType<typeof useGetModemListHook>>>,
-			TError,
-			TData
-		>
-	>;
-}) => {
-	const { query: queryOptions } = options ?? {};
+    
+export const useGetModemListInfiniteQueryOptions = <TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetModemListHook>>>>, TError = void>( options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetModemListHook>>>, TError, TData>>, }
+) => {
 
-	const queryKey = queryOptions?.queryKey ?? getGetModemListInfiniteQueryKey();
+const {query: queryOptions} = options ?? {};
 
-	const getModemList = useGetModemListHook();
+  const queryKey =  queryOptions?.queryKey ?? getGetModemListInfiniteQueryKey();
 
-	const queryFn: QueryFunction<
-		Awaited<ReturnType<ReturnType<typeof useGetModemListHook>>>
-	> = ({ signal }) => getModemList(signal);
+  const getModemList =  useGetModemListHook();
 
-	return { queryKey, queryFn, ...queryOptions } as UseInfiniteQueryOptions<
-		Awaited<ReturnType<ReturnType<typeof useGetModemListHook>>>,
-		TError,
-		TData
-	> & { queryKey: DataTag<QueryKey, TData, TError> };
-};
+    const queryFn: QueryFunction<Awaited<ReturnType<ReturnType<typeof useGetModemListHook>>>> = ({ signal }) => getModemList(signal);
 
-export type GetModemListInfiniteQueryResult = NonNullable<
-	Awaited<ReturnType<ReturnType<typeof useGetModemListHook>>>
->;
-export type GetModemListInfiniteQueryError = void;
+      
 
-export function useGetModemListInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetModemListHook>>>
-	>,
-	TError = void,
->(
-	options: {
-		query: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetModemListHook>>>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				DefinedInitialDataOptions<
-					Awaited<ReturnType<ReturnType<typeof useGetModemListHook>>>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useGetModemListHook>>>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): DefinedUseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useGetModemListInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetModemListHook>>>
-	>,
-	TError = void,
->(
-	options?: {
-		query?: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetModemListHook>>>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				UndefinedInitialDataOptions<
-					Awaited<ReturnType<ReturnType<typeof useGetModemListHook>>>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useGetModemListHook>>>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): UseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useGetModemListInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetModemListHook>>>
-	>,
-	TError = void,
->(
-	options?: {
-		query?: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetModemListHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
+      
 
-export function useGetModemListInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetModemListHook>>>
-	>,
-	TError = void,
->(
-	options?: {
-		query?: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetModemListHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-} {
-	const queryOptions = useGetModemListInfiniteQueryOptions(options);
-
-	const query = useInfiniteQuery(
-		queryOptions,
-		queryClient,
-	) as UseInfiniteQueryResult<TData, TError> & {
-		queryKey: DataTag<QueryKey, TData, TError>;
-	};
-
-	query.queryKey = queryOptions.queryKey;
-
-	return query;
+   return  { queryKey, queryFn, ...queryOptions} as UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetModemListHook>>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
 }
 
-export const useGetModemListQueryOptions = <
-	TData = Awaited<ReturnType<ReturnType<typeof useGetModemListHook>>>,
-	TError = void,
->(options?: {
-	query?: Partial<
-		UseQueryOptions<
-			Awaited<ReturnType<ReturnType<typeof useGetModemListHook>>>,
-			TError,
-			TData
-		>
-	>;
-}) => {
-	const { query: queryOptions } = options ?? {};
+export type GetModemListInfiniteQueryResult = NonNullable<Awaited<ReturnType<ReturnType<typeof useGetModemListHook>>>>
+export type GetModemListInfiniteQueryError = void
 
-	const queryKey = queryOptions?.queryKey ?? getGetModemListQueryKey();
 
-	const getModemList = useGetModemListHook();
+export function useGetModemListInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetModemListHook>>>>, TError = void>(
+  options: { query:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetModemListHook>>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useGetModemListHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useGetModemListHook>>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetModemListInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetModemListHook>>>>, TError = void>(
+  options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetModemListHook>>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useGetModemListHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useGetModemListHook>>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetModemListInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetModemListHook>>>>, TError = void>(
+  options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetModemListHook>>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 
-	const queryFn: QueryFunction<
-		Awaited<ReturnType<ReturnType<typeof useGetModemListHook>>>
-	> = ({ signal }) => getModemList(signal);
+export function useGetModemListInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetModemListHook>>>>, TError = void>(
+  options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetModemListHook>>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
-	return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
-		Awaited<ReturnType<ReturnType<typeof useGetModemListHook>>>,
-		TError,
-		TData
-	> & { queryKey: DataTag<QueryKey, TData, TError> };
-};
+  const queryOptions = useGetModemListInfiniteQueryOptions(options)
 
-export type GetModemListQueryResult = NonNullable<
-	Awaited<ReturnType<ReturnType<typeof useGetModemListHook>>>
->;
-export type GetModemListQueryError = void;
+  const query = useInfiniteQuery(queryOptions, queryClient) as  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 
-export function useGetModemList<
-	TData = Awaited<ReturnType<ReturnType<typeof useGetModemListHook>>>,
-	TError = void,
->(
-	options: {
-		query: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetModemListHook>>>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				DefinedInitialDataOptions<
-					Awaited<ReturnType<ReturnType<typeof useGetModemListHook>>>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useGetModemListHook>>>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): DefinedUseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useGetModemList<
-	TData = Awaited<ReturnType<ReturnType<typeof useGetModemListHook>>>,
-	TError = void,
->(
-	options?: {
-		query?: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetModemListHook>>>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				UndefinedInitialDataOptions<
-					Awaited<ReturnType<ReturnType<typeof useGetModemListHook>>>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useGetModemListHook>>>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useGetModemList<
-	TData = Awaited<ReturnType<ReturnType<typeof useGetModemListHook>>>,
-	TError = void,
->(
-	options?: {
-		query?: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetModemListHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
+  query.queryKey = queryOptions.queryKey ;
 
-export function useGetModemList<
-	TData = Awaited<ReturnType<ReturnType<typeof useGetModemListHook>>>,
-	TError = void,
->(
-	options?: {
-		query?: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetModemListHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-} {
-	const queryOptions = useGetModemListQueryOptions(options);
-
-	const query = useQuery(queryOptions, queryClient) as UseQueryResult<
-		TData,
-		TError
-	> & { queryKey: DataTag<QueryKey, TData, TError> };
-
-	query.queryKey = queryOptions.queryKey;
-
-	return query;
+  return query;
 }
+
+
+
+
+export const useGetModemListQueryOptions = <TData = Awaited<ReturnType<ReturnType<typeof useGetModemListHook>>>, TError = void>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetModemListHook>>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetModemListQueryKey();
+
+  const getModemList =  useGetModemListHook();
+
+    const queryFn: QueryFunction<Awaited<ReturnType<ReturnType<typeof useGetModemListHook>>>> = ({ signal }) => getModemList(signal);
+
+      
+
+      
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetModemListHook>>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetModemListQueryResult = NonNullable<Awaited<ReturnType<ReturnType<typeof useGetModemListHook>>>>
+export type GetModemListQueryError = void
+
+
+export function useGetModemList<TData = Awaited<ReturnType<ReturnType<typeof useGetModemListHook>>>, TError = void>(
+  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetModemListHook>>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useGetModemListHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useGetModemListHook>>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetModemList<TData = Awaited<ReturnType<ReturnType<typeof useGetModemListHook>>>, TError = void>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetModemListHook>>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useGetModemListHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useGetModemListHook>>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetModemList<TData = Awaited<ReturnType<ReturnType<typeof useGetModemListHook>>>, TError = void>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetModemListHook>>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+
+export function useGetModemList<TData = Awaited<ReturnType<ReturnType<typeof useGetModemListHook>>>, TError = void>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetModemListHook>>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = useGetModemListQueryOptions(options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  query.queryKey = queryOptions.queryKey ;
+
+  return query;
+}
+
+
+
+
 
 export const useGetModemByIdHook = () => {
-	const getModemById = useClientMutator<Modem>();
+        const getModemById = useClientMutator<Modem>();
 
-	return useCallback(
-		(modemId: number, signal?: AbortSignal) => {
-			return getModemById({ url: `/modems/${modemId}`, method: "GET", signal });
-		},
-		[getModemById],
-	);
-};
-
-export const getGetModemByIdInfiniteQueryKey = (modemId?: number) => {
-	return ["infinite", `/modems/${modemId}`] as const;
-};
-
-export const getGetModemByIdQueryKey = (modemId?: number) => {
-	return [`/modems/${modemId}`] as const;
-};
-
-export const useGetModemByIdInfiniteQueryOptions = <
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetModemByIdHook>>>
-	>,
-	TError = void,
->(
-	modemId: number,
-	options?: {
-		query?: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetModemByIdHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
+        return useCallback((
+    modemId: number,
+ signal?: AbortSignal
 ) => {
-	const { query: queryOptions } = options ?? {};
+        return getModemById(
+          {url: `/modems/${modemId}`, method: 'GET', signal
+    },
+          );
+        }, [getModemById])
+      }
+    
 
-	const queryKey =
-		queryOptions?.queryKey ?? getGetModemByIdInfiniteQueryKey(modemId);
 
-	const getModemById = useGetModemByIdHook();
 
-	const queryFn: QueryFunction<
-		Awaited<ReturnType<ReturnType<typeof useGetModemByIdHook>>>
-	> = ({ signal }) => getModemById(modemId, signal);
+export const getGetModemByIdInfiniteQueryKey = (modemId?: number,) => {
+    return [
+    'infinite', `/modems/${modemId}`
+    ] as const;
+    }
 
-	return {
-		queryKey,
-		queryFn,
-		enabled: !!modemId,
-		...queryOptions,
-	} as UseInfiniteQueryOptions<
-		Awaited<ReturnType<ReturnType<typeof useGetModemByIdHook>>>,
-		TError,
-		TData
-	> & { queryKey: DataTag<QueryKey, TData, TError> };
-};
+export const getGetModemByIdQueryKey = (modemId?: number,) => {
+    return [
+    `/modems/${modemId}`
+    ] as const;
+    }
 
-export type GetModemByIdInfiniteQueryResult = NonNullable<
-	Awaited<ReturnType<ReturnType<typeof useGetModemByIdHook>>>
->;
-export type GetModemByIdInfiniteQueryError = void;
+    
+export const useGetModemByIdInfiniteQueryOptions = <TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetModemByIdHook>>>>, TError = void>(modemId: number, options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetModemByIdHook>>>, TError, TData>>, }
+) => {
 
-export function useGetModemByIdInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetModemByIdHook>>>
-	>,
-	TError = void,
->(
-	modemId: number,
-	options: {
-		query: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetModemByIdHook>>>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				DefinedInitialDataOptions<
-					Awaited<ReturnType<ReturnType<typeof useGetModemByIdHook>>>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useGetModemByIdHook>>>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): DefinedUseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useGetModemByIdInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetModemByIdHook>>>
-	>,
-	TError = void,
->(
-	modemId: number,
-	options?: {
-		query?: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetModemByIdHook>>>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				UndefinedInitialDataOptions<
-					Awaited<ReturnType<ReturnType<typeof useGetModemByIdHook>>>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useGetModemByIdHook>>>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): UseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useGetModemByIdInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetModemByIdHook>>>
-	>,
-	TError = void,
->(
-	modemId: number,
-	options?: {
-		query?: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetModemByIdHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
+const {query: queryOptions} = options ?? {};
 
-export function useGetModemByIdInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetModemByIdHook>>>
-	>,
-	TError = void,
->(
-	modemId: number,
-	options?: {
-		query?: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetModemByIdHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-} {
-	const queryOptions = useGetModemByIdInfiniteQueryOptions(modemId, options);
+  const queryKey =  queryOptions?.queryKey ?? getGetModemByIdInfiniteQueryKey(modemId);
 
-	const query = useInfiniteQuery(
-		queryOptions,
-		queryClient,
-	) as UseInfiniteQueryResult<TData, TError> & {
-		queryKey: DataTag<QueryKey, TData, TError>;
-	};
+  const getModemById =  useGetModemByIdHook();
 
-	query.queryKey = queryOptions.queryKey;
+    const queryFn: QueryFunction<Awaited<ReturnType<ReturnType<typeof useGetModemByIdHook>>>> = ({ signal }) => getModemById(modemId, signal);
 
-	return query;
+      
+
+      
+
+   return  { queryKey, queryFn, enabled: !!(modemId), ...queryOptions} as UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetModemByIdHook>>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
 }
 
-export const useGetModemByIdQueryOptions = <
-	TData = Awaited<ReturnType<ReturnType<typeof useGetModemByIdHook>>>,
-	TError = void,
->(
-	modemId: number,
-	options?: {
-		query?: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetModemByIdHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-) => {
-	const { query: queryOptions } = options ?? {};
+export type GetModemByIdInfiniteQueryResult = NonNullable<Awaited<ReturnType<ReturnType<typeof useGetModemByIdHook>>>>
+export type GetModemByIdInfiniteQueryError = void
 
-	const queryKey = queryOptions?.queryKey ?? getGetModemByIdQueryKey(modemId);
 
-	const getModemById = useGetModemByIdHook();
+export function useGetModemByIdInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetModemByIdHook>>>>, TError = void>(
+ modemId: number, options: { query:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetModemByIdHook>>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useGetModemByIdHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useGetModemByIdHook>>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetModemByIdInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetModemByIdHook>>>>, TError = void>(
+ modemId: number, options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetModemByIdHook>>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useGetModemByIdHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useGetModemByIdHook>>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetModemByIdInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetModemByIdHook>>>>, TError = void>(
+ modemId: number, options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetModemByIdHook>>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 
-	const queryFn: QueryFunction<
-		Awaited<ReturnType<ReturnType<typeof useGetModemByIdHook>>>
-	> = ({ signal }) => getModemById(modemId, signal);
+export function useGetModemByIdInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetModemByIdHook>>>>, TError = void>(
+ modemId: number, options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetModemByIdHook>>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
-	return {
-		queryKey,
-		queryFn,
-		enabled: !!modemId,
-		...queryOptions,
-	} as UseQueryOptions<
-		Awaited<ReturnType<ReturnType<typeof useGetModemByIdHook>>>,
-		TError,
-		TData
-	> & { queryKey: DataTag<QueryKey, TData, TError> };
-};
+  const queryOptions = useGetModemByIdInfiniteQueryOptions(modemId,options)
 
-export type GetModemByIdQueryResult = NonNullable<
-	Awaited<ReturnType<ReturnType<typeof useGetModemByIdHook>>>
->;
-export type GetModemByIdQueryError = void;
+  const query = useInfiniteQuery(queryOptions, queryClient) as  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 
-export function useGetModemById<
-	TData = Awaited<ReturnType<ReturnType<typeof useGetModemByIdHook>>>,
-	TError = void,
->(
-	modemId: number,
-	options: {
-		query: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetModemByIdHook>>>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				DefinedInitialDataOptions<
-					Awaited<ReturnType<ReturnType<typeof useGetModemByIdHook>>>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useGetModemByIdHook>>>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): DefinedUseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useGetModemById<
-	TData = Awaited<ReturnType<ReturnType<typeof useGetModemByIdHook>>>,
-	TError = void,
->(
-	modemId: number,
-	options?: {
-		query?: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetModemByIdHook>>>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				UndefinedInitialDataOptions<
-					Awaited<ReturnType<ReturnType<typeof useGetModemByIdHook>>>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useGetModemByIdHook>>>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useGetModemById<
-	TData = Awaited<ReturnType<ReturnType<typeof useGetModemByIdHook>>>,
-	TError = void,
->(
-	modemId: number,
-	options?: {
-		query?: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetModemByIdHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
+  query.queryKey = queryOptions.queryKey ;
 
-export function useGetModemById<
-	TData = Awaited<ReturnType<ReturnType<typeof useGetModemByIdHook>>>,
-	TError = void,
->(
-	modemId: number,
-	options?: {
-		query?: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetModemByIdHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-} {
-	const queryOptions = useGetModemByIdQueryOptions(modemId, options);
-
-	const query = useQuery(queryOptions, queryClient) as UseQueryResult<
-		TData,
-		TError
-	> & { queryKey: DataTag<QueryKey, TData, TError> };
-
-	query.queryKey = queryOptions.queryKey;
-
-	return query;
+  return query;
 }
+
+
+
+
+export const useGetModemByIdQueryOptions = <TData = Awaited<ReturnType<ReturnType<typeof useGetModemByIdHook>>>, TError = void>(modemId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetModemByIdHook>>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetModemByIdQueryKey(modemId);
+
+  const getModemById =  useGetModemByIdHook();
+
+    const queryFn: QueryFunction<Awaited<ReturnType<ReturnType<typeof useGetModemByIdHook>>>> = ({ signal }) => getModemById(modemId, signal);
+
+      
+
+      
+
+   return  { queryKey, queryFn, enabled: !!(modemId), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetModemByIdHook>>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetModemByIdQueryResult = NonNullable<Awaited<ReturnType<ReturnType<typeof useGetModemByIdHook>>>>
+export type GetModemByIdQueryError = void
+
+
+export function useGetModemById<TData = Awaited<ReturnType<ReturnType<typeof useGetModemByIdHook>>>, TError = void>(
+ modemId: number, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetModemByIdHook>>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useGetModemByIdHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useGetModemByIdHook>>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetModemById<TData = Awaited<ReturnType<ReturnType<typeof useGetModemByIdHook>>>, TError = void>(
+ modemId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetModemByIdHook>>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useGetModemByIdHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useGetModemByIdHook>>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetModemById<TData = Awaited<ReturnType<ReturnType<typeof useGetModemByIdHook>>>, TError = void>(
+ modemId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetModemByIdHook>>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+
+export function useGetModemById<TData = Awaited<ReturnType<ReturnType<typeof useGetModemByIdHook>>>, TError = void>(
+ modemId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetModemByIdHook>>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = useGetModemByIdQueryOptions(modemId,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  query.queryKey = queryOptions.queryKey ;
+
+  return query;
+}
+
+
+
+
 
 export const useGetNetworksHook = () => {
-	const getNetworks = useClientMutator<void>();
+        const getNetworks = useClientMutator<void>();
 
-	return useCallback(
-		(params?: GetNetworksParams, signal?: AbortSignal) => {
-			return getNetworks({ url: `/networks`, method: "GET", params, signal });
-		},
-		[getNetworks],
-	);
-};
-
-export const getGetNetworksInfiniteQueryKey = (params?: GetNetworksParams) => {
-	return ["infinite", `/networks`, ...(params ? [params] : [])] as const;
-};
-
-export const getGetNetworksQueryKey = (params?: GetNetworksParams) => {
-	return [`/networks`, ...(params ? [params] : [])] as const;
-};
-
-export const useGetNetworksInfiniteQueryOptions = <
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetNetworksHook>>>,
-		GetNetworksParams["offset"]
-	>,
-	TError = string,
->(
-	params?: GetNetworksParams,
-	options?: {
-		query?: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetNetworksHook>>>,
-				TError,
-				TData,
-				QueryKey,
-				GetNetworksParams["offset"]
-			>
-		>;
-	},
+        return useCallback((
+    params?: GetNetworksParams,
+ signal?: AbortSignal
 ) => {
-	const { query: queryOptions } = options ?? {};
+        return getNetworks(
+          {url: `/networks`, method: 'GET',
+        params, signal
+    },
+          );
+        }, [getNetworks])
+      }
+    
 
-	const queryKey =
-		queryOptions?.queryKey ?? getGetNetworksInfiniteQueryKey(params);
 
-	const getNetworks = useGetNetworksHook();
 
-	const queryFn: QueryFunction<
-		Awaited<ReturnType<ReturnType<typeof useGetNetworksHook>>>,
-		QueryKey,
-		GetNetworksParams["offset"]
-	> = ({ signal, pageParam }) =>
-		getNetworks({ ...params, offset: pageParam || params?.["offset"] }, signal);
+export const getGetNetworksInfiniteQueryKey = (params?: GetNetworksParams,) => {
+    return [
+    'infinite', `/networks`, ...(params ? [params]: [])
+    ] as const;
+    }
 
-	return { queryKey, queryFn, ...queryOptions } as UseInfiniteQueryOptions<
-		Awaited<ReturnType<ReturnType<typeof useGetNetworksHook>>>,
-		TError,
-		TData,
-		QueryKey,
-		GetNetworksParams["offset"]
-	> & { queryKey: DataTag<QueryKey, TData, TError> };
-};
+export const getGetNetworksQueryKey = (params?: GetNetworksParams,) => {
+    return [
+    `/networks`, ...(params ? [params]: [])
+    ] as const;
+    }
 
-export type GetNetworksInfiniteQueryResult = NonNullable<
-	Awaited<ReturnType<ReturnType<typeof useGetNetworksHook>>>
->;
-export type GetNetworksInfiniteQueryError = string;
+    
+export const useGetNetworksInfiniteQueryOptions = <TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetNetworksHook>>>, GetNetworksParams['offset']>, TError = string>(params?: GetNetworksParams, options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetNetworksHook>>>, TError, TData, QueryKey, GetNetworksParams['offset']>>, }
+) => {
 
-export function useGetNetworksInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetNetworksHook>>>,
-		GetNetworksParams["offset"]
-	>,
-	TError = string,
->(
-	params: undefined | GetNetworksParams,
-	options: {
-		query: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetNetworksHook>>>,
-				TError,
-				TData,
-				QueryKey,
-				GetNetworksParams["offset"]
-			>
-		> &
-			Pick<
-				DefinedInitialDataOptions<
-					Awaited<ReturnType<ReturnType<typeof useGetNetworksHook>>>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useGetNetworksHook>>>,
-					QueryKey
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): DefinedUseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useGetNetworksInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetNetworksHook>>>,
-		GetNetworksParams["offset"]
-	>,
-	TError = string,
->(
-	params?: GetNetworksParams,
-	options?: {
-		query?: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetNetworksHook>>>,
-				TError,
-				TData,
-				QueryKey,
-				GetNetworksParams["offset"]
-			>
-		> &
-			Pick<
-				UndefinedInitialDataOptions<
-					Awaited<ReturnType<ReturnType<typeof useGetNetworksHook>>>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useGetNetworksHook>>>,
-					QueryKey
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): UseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useGetNetworksInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetNetworksHook>>>,
-		GetNetworksParams["offset"]
-	>,
-	TError = string,
->(
-	params?: GetNetworksParams,
-	options?: {
-		query?: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetNetworksHook>>>,
-				TError,
-				TData,
-				QueryKey,
-				GetNetworksParams["offset"]
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
+const {query: queryOptions} = options ?? {};
 
-export function useGetNetworksInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetNetworksHook>>>,
-		GetNetworksParams["offset"]
-	>,
-	TError = string,
->(
-	params?: GetNetworksParams,
-	options?: {
-		query?: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetNetworksHook>>>,
-				TError,
-				TData,
-				QueryKey,
-				GetNetworksParams["offset"]
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-} {
-	const queryOptions = useGetNetworksInfiniteQueryOptions(params, options);
+  const queryKey =  queryOptions?.queryKey ?? getGetNetworksInfiniteQueryKey(params);
 
-	const query = useInfiniteQuery(
-		queryOptions,
-		queryClient,
-	) as UseInfiniteQueryResult<TData, TError> & {
-		queryKey: DataTag<QueryKey, TData, TError>;
-	};
+  const getNetworks =  useGetNetworksHook();
 
-	query.queryKey = queryOptions.queryKey;
+    const queryFn: QueryFunction<Awaited<ReturnType<ReturnType<typeof useGetNetworksHook>>>, QueryKey, GetNetworksParams['offset']> = ({ signal, pageParam }) => getNetworks({...params, 'offset': pageParam || params?.['offset']}, signal);
 
-	return query;
+      
+
+      
+
+   return  { queryKey, queryFn, ...queryOptions} as UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetNetworksHook>>>, TError, TData, QueryKey, GetNetworksParams['offset']> & { queryKey: DataTag<QueryKey, TData, TError> }
 }
 
-export const useGetNetworksQueryOptions = <
-	TData = Awaited<ReturnType<ReturnType<typeof useGetNetworksHook>>>,
-	TError = string,
->(
-	params?: GetNetworksParams,
-	options?: {
-		query?: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetNetworksHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-) => {
-	const { query: queryOptions } = options ?? {};
+export type GetNetworksInfiniteQueryResult = NonNullable<Awaited<ReturnType<ReturnType<typeof useGetNetworksHook>>>>
+export type GetNetworksInfiniteQueryError = string
 
-	const queryKey = queryOptions?.queryKey ?? getGetNetworksQueryKey(params);
 
-	const getNetworks = useGetNetworksHook();
+export function useGetNetworksInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetNetworksHook>>>, GetNetworksParams['offset']>, TError = string>(
+ params: undefined |  GetNetworksParams, options: { query:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetNetworksHook>>>, TError, TData, QueryKey, GetNetworksParams['offset']>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useGetNetworksHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useGetNetworksHook>>>, QueryKey
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetNetworksInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetNetworksHook>>>, GetNetworksParams['offset']>, TError = string>(
+ params?: GetNetworksParams, options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetNetworksHook>>>, TError, TData, QueryKey, GetNetworksParams['offset']>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useGetNetworksHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useGetNetworksHook>>>, QueryKey
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetNetworksInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetNetworksHook>>>, GetNetworksParams['offset']>, TError = string>(
+ params?: GetNetworksParams, options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetNetworksHook>>>, TError, TData, QueryKey, GetNetworksParams['offset']>>, }
+ , queryClient?: QueryClient
+  ):  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 
-	const queryFn: QueryFunction<
-		Awaited<ReturnType<ReturnType<typeof useGetNetworksHook>>>
-	> = ({ signal }) => getNetworks(params, signal);
+export function useGetNetworksInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetNetworksHook>>>, GetNetworksParams['offset']>, TError = string>(
+ params?: GetNetworksParams, options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetNetworksHook>>>, TError, TData, QueryKey, GetNetworksParams['offset']>>, }
+ , queryClient?: QueryClient 
+ ):  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
-	return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
-		Awaited<ReturnType<ReturnType<typeof useGetNetworksHook>>>,
-		TError,
-		TData
-	> & { queryKey: DataTag<QueryKey, TData, TError> };
-};
+  const queryOptions = useGetNetworksInfiniteQueryOptions(params,options)
 
-export type GetNetworksQueryResult = NonNullable<
-	Awaited<ReturnType<ReturnType<typeof useGetNetworksHook>>>
->;
-export type GetNetworksQueryError = string;
+  const query = useInfiniteQuery(queryOptions, queryClient) as  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 
-export function useGetNetworks<
-	TData = Awaited<ReturnType<ReturnType<typeof useGetNetworksHook>>>,
-	TError = string,
->(
-	params: undefined | GetNetworksParams,
-	options: {
-		query: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetNetworksHook>>>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				DefinedInitialDataOptions<
-					Awaited<ReturnType<ReturnType<typeof useGetNetworksHook>>>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useGetNetworksHook>>>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): DefinedUseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useGetNetworks<
-	TData = Awaited<ReturnType<ReturnType<typeof useGetNetworksHook>>>,
-	TError = string,
->(
-	params?: GetNetworksParams,
-	options?: {
-		query?: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetNetworksHook>>>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				UndefinedInitialDataOptions<
-					Awaited<ReturnType<ReturnType<typeof useGetNetworksHook>>>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useGetNetworksHook>>>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useGetNetworks<
-	TData = Awaited<ReturnType<ReturnType<typeof useGetNetworksHook>>>,
-	TError = string,
->(
-	params?: GetNetworksParams,
-	options?: {
-		query?: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetNetworksHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
+  query.queryKey = queryOptions.queryKey ;
 
-export function useGetNetworks<
-	TData = Awaited<ReturnType<ReturnType<typeof useGetNetworksHook>>>,
-	TError = string,
->(
-	params?: GetNetworksParams,
-	options?: {
-		query?: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetNetworksHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-} {
-	const queryOptions = useGetNetworksQueryOptions(params, options);
-
-	const query = useQuery(queryOptions, queryClient) as UseQueryResult<
-		TData,
-		TError
-	> & { queryKey: DataTag<QueryKey, TData, TError> };
-
-	query.queryKey = queryOptions.queryKey;
-
-	return query;
+  return query;
 }
+
+
+
+
+export const useGetNetworksQueryOptions = <TData = Awaited<ReturnType<ReturnType<typeof useGetNetworksHook>>>, TError = string>(params?: GetNetworksParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetNetworksHook>>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetNetworksQueryKey(params);
+
+  const getNetworks =  useGetNetworksHook();
+
+    const queryFn: QueryFunction<Awaited<ReturnType<ReturnType<typeof useGetNetworksHook>>>> = ({ signal }) => getNetworks(params, signal);
+
+      
+
+      
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetNetworksHook>>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetNetworksQueryResult = NonNullable<Awaited<ReturnType<ReturnType<typeof useGetNetworksHook>>>>
+export type GetNetworksQueryError = string
+
+
+export function useGetNetworks<TData = Awaited<ReturnType<ReturnType<typeof useGetNetworksHook>>>, TError = string>(
+ params: undefined |  GetNetworksParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetNetworksHook>>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useGetNetworksHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useGetNetworksHook>>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetNetworks<TData = Awaited<ReturnType<ReturnType<typeof useGetNetworksHook>>>, TError = string>(
+ params?: GetNetworksParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetNetworksHook>>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useGetNetworksHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useGetNetworksHook>>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetNetworks<TData = Awaited<ReturnType<ReturnType<typeof useGetNetworksHook>>>, TError = string>(
+ params?: GetNetworksParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetNetworksHook>>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+
+export function useGetNetworks<TData = Awaited<ReturnType<ReturnType<typeof useGetNetworksHook>>>, TError = string>(
+ params?: GetNetworksParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetNetworksHook>>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = useGetNetworksQueryOptions(params,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  query.queryKey = queryOptions.queryKey ;
+
+  return query;
+}
+
+
+
+
 
 export const useCreateNetworkHook = () => {
-	const createNetwork = useClientMutator<void>();
+        const createNetwork = useClientMutator<void>();
 
-	return useCallback(
-		(signal?: AbortSignal) => {
-			return createNetwork({ url: `/networks`, method: "POST", signal });
-		},
-		[createNetwork],
-	);
-};
+        return useCallback((
+    
+ signal?: AbortSignal
+) => {
+        return createNetwork(
+          {url: `/networks`, method: 'POST', signal
+    },
+          );
+        }, [createNetwork])
+      }
+    
 
-export const useCreateNetworkMutationOptions = <
-	TError = void | string,
-	TContext = unknown,
->(options?: {
-	mutation?: UseMutationOptions<
-		Awaited<ReturnType<ReturnType<typeof useCreateNetworkHook>>>,
-		TError,
-		void,
-		TContext
-	>;
-}): UseMutationOptions<
-	Awaited<ReturnType<ReturnType<typeof useCreateNetworkHook>>>,
-	TError,
-	void,
-	TContext
-> => {
-	const mutationKey = ["createNetwork"];
-	const { mutation: mutationOptions } = options
-		? options.mutation &&
-			"mutationKey" in options.mutation &&
-			options.mutation.mutationKey
-			? options
-			: { ...options, mutation: { ...options.mutation, mutationKey } }
-		: { mutation: { mutationKey } };
 
-	const createNetwork = useCreateNetworkHook();
+export const useCreateNetworkMutationOptions = <TError = void | string,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<ReturnType<typeof useCreateNetworkHook>>>, TError,void, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<ReturnType<typeof useCreateNetworkHook>>>, TError,void, TContext> => {
 
-	const mutationFn: MutationFunction<
-		Awaited<ReturnType<ReturnType<typeof useCreateNetworkHook>>>,
-		void
-	> = () => {
-		return createNetwork();
-	};
+const mutationKey = ['createNetwork'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
 
-	return { mutationFn, ...mutationOptions };
-};
+      const createNetwork =  useCreateNetworkHook()
 
-export type CreateNetworkMutationResult = NonNullable<
-	Awaited<ReturnType<ReturnType<typeof useCreateNetworkHook>>>
->;
 
-export type CreateNetworkMutationError = void | string;
+      const mutationFn: MutationFunction<Awaited<ReturnType<ReturnType<typeof useCreateNetworkHook>>>, void> = () => {
+          
 
-export const useCreateNetwork = <TError = void | string, TContext = unknown>(
-	options?: {
-		mutation?: UseMutationOptions<
-			Awaited<ReturnType<ReturnType<typeof useCreateNetworkHook>>>,
-			TError,
-			void,
-			TContext
-		>;
-	},
-	queryClient?: QueryClient,
-): UseMutationResult<
-	Awaited<ReturnType<ReturnType<typeof useCreateNetworkHook>>>,
-	TError,
-	void,
-	TContext
-> => {
-	const mutationOptions = useCreateNetworkMutationOptions(options);
+          return  createNetwork()
+        }
 
-	return useMutation(mutationOptions, queryClient);
-};
+        
 
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateNetworkMutationResult = NonNullable<Awaited<ReturnType<ReturnType<typeof useCreateNetworkHook>>>>
+    
+    export type CreateNetworkMutationError = void | string
+
+    export const useCreateNetwork = <TError = void | string,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<ReturnType<typeof useCreateNetworkHook>>>, TError,void, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<ReturnType<typeof useCreateNetworkHook>>>,
+        TError,
+        void,
+        TContext
+      > => {
+
+      const mutationOptions = useCreateNetworkMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    
 export const useGetNetworkByIdHook = () => {
-	const getNetworkById = useClientMutator<void>();
+        const getNetworkById = useClientMutator<void>();
 
-	return useCallback(
-		(networkId: number, signal?: AbortSignal) => {
-			return getNetworkById({
-				url: `/networks/${networkId}`,
-				method: "GET",
-				signal,
-			});
-		},
-		[getNetworkById],
-	);
-};
-
-export const getGetNetworkByIdInfiniteQueryKey = (networkId?: number) => {
-	return ["infinite", `/networks/${networkId}`] as const;
-};
-
-export const getGetNetworkByIdQueryKey = (networkId?: number) => {
-	return [`/networks/${networkId}`] as const;
-};
-
-export const useGetNetworkByIdInfiniteQueryOptions = <
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetNetworkByIdHook>>>
-	>,
-	TError = string,
->(
-	networkId: number,
-	options?: {
-		query?: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetNetworkByIdHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
+        return useCallback((
+    networkId: number,
+ signal?: AbortSignal
 ) => {
-	const { query: queryOptions } = options ?? {};
+        return getNetworkById(
+          {url: `/networks/${networkId}`, method: 'GET', signal
+    },
+          );
+        }, [getNetworkById])
+      }
+    
 
-	const queryKey =
-		queryOptions?.queryKey ?? getGetNetworkByIdInfiniteQueryKey(networkId);
 
-	const getNetworkById = useGetNetworkByIdHook();
 
-	const queryFn: QueryFunction<
-		Awaited<ReturnType<ReturnType<typeof useGetNetworkByIdHook>>>
-	> = ({ signal }) => getNetworkById(networkId, signal);
+export const getGetNetworkByIdInfiniteQueryKey = (networkId?: number,) => {
+    return [
+    'infinite', `/networks/${networkId}`
+    ] as const;
+    }
 
-	return {
-		queryKey,
-		queryFn,
-		enabled: !!networkId,
-		...queryOptions,
-	} as UseInfiniteQueryOptions<
-		Awaited<ReturnType<ReturnType<typeof useGetNetworkByIdHook>>>,
-		TError,
-		TData
-	> & { queryKey: DataTag<QueryKey, TData, TError> };
-};
+export const getGetNetworkByIdQueryKey = (networkId?: number,) => {
+    return [
+    `/networks/${networkId}`
+    ] as const;
+    }
 
-export type GetNetworkByIdInfiniteQueryResult = NonNullable<
-	Awaited<ReturnType<ReturnType<typeof useGetNetworkByIdHook>>>
->;
-export type GetNetworkByIdInfiniteQueryError = string;
+    
+export const useGetNetworkByIdInfiniteQueryOptions = <TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetNetworkByIdHook>>>>, TError = string>(networkId: number, options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetNetworkByIdHook>>>, TError, TData>>, }
+) => {
 
-export function useGetNetworkByIdInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetNetworkByIdHook>>>
-	>,
-	TError = string,
->(
-	networkId: number,
-	options: {
-		query: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetNetworkByIdHook>>>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				DefinedInitialDataOptions<
-					Awaited<ReturnType<ReturnType<typeof useGetNetworkByIdHook>>>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useGetNetworkByIdHook>>>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): DefinedUseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useGetNetworkByIdInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetNetworkByIdHook>>>
-	>,
-	TError = string,
->(
-	networkId: number,
-	options?: {
-		query?: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetNetworkByIdHook>>>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				UndefinedInitialDataOptions<
-					Awaited<ReturnType<ReturnType<typeof useGetNetworkByIdHook>>>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useGetNetworkByIdHook>>>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): UseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useGetNetworkByIdInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetNetworkByIdHook>>>
-	>,
-	TError = string,
->(
-	networkId: number,
-	options?: {
-		query?: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetNetworkByIdHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
+const {query: queryOptions} = options ?? {};
 
-export function useGetNetworkByIdInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetNetworkByIdHook>>>
-	>,
-	TError = string,
->(
-	networkId: number,
-	options?: {
-		query?: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetNetworkByIdHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-} {
-	const queryOptions = useGetNetworkByIdInfiniteQueryOptions(
-		networkId,
-		options,
-	);
+  const queryKey =  queryOptions?.queryKey ?? getGetNetworkByIdInfiniteQueryKey(networkId);
 
-	const query = useInfiniteQuery(
-		queryOptions,
-		queryClient,
-	) as UseInfiniteQueryResult<TData, TError> & {
-		queryKey: DataTag<QueryKey, TData, TError>;
-	};
+  const getNetworkById =  useGetNetworkByIdHook();
 
-	query.queryKey = queryOptions.queryKey;
+    const queryFn: QueryFunction<Awaited<ReturnType<ReturnType<typeof useGetNetworkByIdHook>>>> = ({ signal }) => getNetworkById(networkId, signal);
 
-	return query;
+      
+
+      
+
+   return  { queryKey, queryFn, enabled: !!(networkId), ...queryOptions} as UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetNetworkByIdHook>>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
 }
 
-export const useGetNetworkByIdQueryOptions = <
-	TData = Awaited<ReturnType<ReturnType<typeof useGetNetworkByIdHook>>>,
-	TError = string,
->(
-	networkId: number,
-	options?: {
-		query?: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetNetworkByIdHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-) => {
-	const { query: queryOptions } = options ?? {};
+export type GetNetworkByIdInfiniteQueryResult = NonNullable<Awaited<ReturnType<ReturnType<typeof useGetNetworkByIdHook>>>>
+export type GetNetworkByIdInfiniteQueryError = string
 
-	const queryKey =
-		queryOptions?.queryKey ?? getGetNetworkByIdQueryKey(networkId);
 
-	const getNetworkById = useGetNetworkByIdHook();
+export function useGetNetworkByIdInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetNetworkByIdHook>>>>, TError = string>(
+ networkId: number, options: { query:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetNetworkByIdHook>>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useGetNetworkByIdHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useGetNetworkByIdHook>>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetNetworkByIdInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetNetworkByIdHook>>>>, TError = string>(
+ networkId: number, options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetNetworkByIdHook>>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useGetNetworkByIdHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useGetNetworkByIdHook>>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetNetworkByIdInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetNetworkByIdHook>>>>, TError = string>(
+ networkId: number, options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetNetworkByIdHook>>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 
-	const queryFn: QueryFunction<
-		Awaited<ReturnType<ReturnType<typeof useGetNetworkByIdHook>>>
-	> = ({ signal }) => getNetworkById(networkId, signal);
+export function useGetNetworkByIdInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetNetworkByIdHook>>>>, TError = string>(
+ networkId: number, options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetNetworkByIdHook>>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
-	return {
-		queryKey,
-		queryFn,
-		enabled: !!networkId,
-		...queryOptions,
-	} as UseQueryOptions<
-		Awaited<ReturnType<ReturnType<typeof useGetNetworkByIdHook>>>,
-		TError,
-		TData
-	> & { queryKey: DataTag<QueryKey, TData, TError> };
-};
+  const queryOptions = useGetNetworkByIdInfiniteQueryOptions(networkId,options)
 
-export type GetNetworkByIdQueryResult = NonNullable<
-	Awaited<ReturnType<ReturnType<typeof useGetNetworkByIdHook>>>
->;
-export type GetNetworkByIdQueryError = string;
+  const query = useInfiniteQuery(queryOptions, queryClient) as  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 
-export function useGetNetworkById<
-	TData = Awaited<ReturnType<ReturnType<typeof useGetNetworkByIdHook>>>,
-	TError = string,
->(
-	networkId: number,
-	options: {
-		query: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetNetworkByIdHook>>>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				DefinedInitialDataOptions<
-					Awaited<ReturnType<ReturnType<typeof useGetNetworkByIdHook>>>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useGetNetworkByIdHook>>>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): DefinedUseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useGetNetworkById<
-	TData = Awaited<ReturnType<ReturnType<typeof useGetNetworkByIdHook>>>,
-	TError = string,
->(
-	networkId: number,
-	options?: {
-		query?: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetNetworkByIdHook>>>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				UndefinedInitialDataOptions<
-					Awaited<ReturnType<ReturnType<typeof useGetNetworkByIdHook>>>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useGetNetworkByIdHook>>>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useGetNetworkById<
-	TData = Awaited<ReturnType<ReturnType<typeof useGetNetworkByIdHook>>>,
-	TError = string,
->(
-	networkId: number,
-	options?: {
-		query?: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetNetworkByIdHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
+  query.queryKey = queryOptions.queryKey ;
 
-export function useGetNetworkById<
-	TData = Awaited<ReturnType<ReturnType<typeof useGetNetworkByIdHook>>>,
-	TError = string,
->(
-	networkId: number,
-	options?: {
-		query?: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetNetworkByIdHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-} {
-	const queryOptions = useGetNetworkByIdQueryOptions(networkId, options);
-
-	const query = useQuery(queryOptions, queryClient) as UseQueryResult<
-		TData,
-		TError
-	> & { queryKey: DataTag<QueryKey, TData, TError> };
-
-	query.queryKey = queryOptions.queryKey;
-
-	return query;
+  return query;
 }
+
+
+
+
+export const useGetNetworkByIdQueryOptions = <TData = Awaited<ReturnType<ReturnType<typeof useGetNetworkByIdHook>>>, TError = string>(networkId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetNetworkByIdHook>>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetNetworkByIdQueryKey(networkId);
+
+  const getNetworkById =  useGetNetworkByIdHook();
+
+    const queryFn: QueryFunction<Awaited<ReturnType<ReturnType<typeof useGetNetworkByIdHook>>>> = ({ signal }) => getNetworkById(networkId, signal);
+
+      
+
+      
+
+   return  { queryKey, queryFn, enabled: !!(networkId), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetNetworkByIdHook>>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetNetworkByIdQueryResult = NonNullable<Awaited<ReturnType<ReturnType<typeof useGetNetworkByIdHook>>>>
+export type GetNetworkByIdQueryError = string
+
+
+export function useGetNetworkById<TData = Awaited<ReturnType<ReturnType<typeof useGetNetworkByIdHook>>>, TError = string>(
+ networkId: number, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetNetworkByIdHook>>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useGetNetworkByIdHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useGetNetworkByIdHook>>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetNetworkById<TData = Awaited<ReturnType<ReturnType<typeof useGetNetworkByIdHook>>>, TError = string>(
+ networkId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetNetworkByIdHook>>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useGetNetworkByIdHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useGetNetworkByIdHook>>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetNetworkById<TData = Awaited<ReturnType<ReturnType<typeof useGetNetworkByIdHook>>>, TError = string>(
+ networkId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetNetworkByIdHook>>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+
+export function useGetNetworkById<TData = Awaited<ReturnType<ReturnType<typeof useGetNetworkByIdHook>>>, TError = string>(
+ networkId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetNetworkByIdHook>>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = useGetNetworkByIdQueryOptions(networkId,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  query.queryKey = queryOptions.queryKey ;
+
+  return query;
+}
+
+
+
+
 
 export const useDeleteNetworkByIdHook = () => {
-	const deleteNetworkById = useClientMutator<void>();
+        const deleteNetworkById = useClientMutator<void>();
 
-	return useCallback(
-		(networkId: number) => {
-			return deleteNetworkById({
-				url: `/networks/${networkId}`,
-				method: "DELETE",
-			});
-		},
-		[deleteNetworkById],
-	);
-};
+        return useCallback((
+    networkId: number,
+ ) => {
+        return deleteNetworkById(
+          {url: `/networks/${networkId}`, method: 'DELETE'
+    },
+          );
+        }, [deleteNetworkById])
+      }
+    
 
-export const useDeleteNetworkByIdMutationOptions = <
-	TError = string,
-	TContext = unknown,
->(options?: {
-	mutation?: UseMutationOptions<
-		Awaited<ReturnType<ReturnType<typeof useDeleteNetworkByIdHook>>>,
-		TError,
-		{ networkId: number },
-		TContext
-	>;
-}): UseMutationOptions<
-	Awaited<ReturnType<ReturnType<typeof useDeleteNetworkByIdHook>>>,
-	TError,
-	{ networkId: number },
-	TContext
-> => {
-	const mutationKey = ["deleteNetworkById"];
-	const { mutation: mutationOptions } = options
-		? options.mutation &&
-			"mutationKey" in options.mutation &&
-			options.mutation.mutationKey
-			? options
-			: { ...options, mutation: { ...options.mutation, mutationKey } }
-		: { mutation: { mutationKey } };
 
-	const deleteNetworkById = useDeleteNetworkByIdHook();
+export const useDeleteNetworkByIdMutationOptions = <TError = string,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<ReturnType<typeof useDeleteNetworkByIdHook>>>, TError,{networkId: number}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<ReturnType<typeof useDeleteNetworkByIdHook>>>, TError,{networkId: number}, TContext> => {
 
-	const mutationFn: MutationFunction<
-		Awaited<ReturnType<ReturnType<typeof useDeleteNetworkByIdHook>>>,
-		{ networkId: number }
-	> = (props) => {
-		const { networkId } = props ?? {};
+const mutationKey = ['deleteNetworkById'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
 
-		return deleteNetworkById(networkId);
-	};
+      const deleteNetworkById =  useDeleteNetworkByIdHook()
 
-	return { mutationFn, ...mutationOptions };
-};
 
-export type DeleteNetworkByIdMutationResult = NonNullable<
-	Awaited<ReturnType<ReturnType<typeof useDeleteNetworkByIdHook>>>
->;
+      const mutationFn: MutationFunction<Awaited<ReturnType<ReturnType<typeof useDeleteNetworkByIdHook>>>, {networkId: number}> = (props) => {
+          const {networkId} = props ?? {};
 
-export type DeleteNetworkByIdMutationError = string;
+          return  deleteNetworkById(networkId,)
+        }
 
-export const useDeleteNetworkById = <TError = string, TContext = unknown>(
-	options?: {
-		mutation?: UseMutationOptions<
-			Awaited<ReturnType<ReturnType<typeof useDeleteNetworkByIdHook>>>,
-			TError,
-			{ networkId: number },
-			TContext
-		>;
-	},
-	queryClient?: QueryClient,
-): UseMutationResult<
-	Awaited<ReturnType<ReturnType<typeof useDeleteNetworkByIdHook>>>,
-	TError,
-	{ networkId: number },
-	TContext
-> => {
-	const mutationOptions = useDeleteNetworkByIdMutationOptions(options);
+        
 
-	return useMutation(mutationOptions, queryClient);
-};
 
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DeleteNetworkByIdMutationResult = NonNullable<Awaited<ReturnType<ReturnType<typeof useDeleteNetworkByIdHook>>>>
+    
+    export type DeleteNetworkByIdMutationError = string
+
+    export const useDeleteNetworkById = <TError = string,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<ReturnType<typeof useDeleteNetworkByIdHook>>>, TError,{networkId: number}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<ReturnType<typeof useDeleteNetworkByIdHook>>>,
+        TError,
+        {networkId: number},
+        TContext
+      > => {
+
+      const mutationOptions = useDeleteNetworkByIdMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    
 export const useGetPackagesHook = () => {
-	const getPackages = useClientMutator<Package[]>();
+        const getPackages = useClientMutator<Package[]>();
 
-	return useCallback(
-		(signal?: AbortSignal) => {
-			return getPackages({ url: `/packages`, method: "GET", signal });
-		},
-		[getPackages],
-	);
-};
+        return useCallback((
+    
+ signal?: AbortSignal
+) => {
+        return getPackages(
+          {url: `/packages`, method: 'GET', signal
+    },
+          );
+        }, [getPackages])
+      }
+    
+
+
 
 export const getGetPackagesInfiniteQueryKey = () => {
-	return ["infinite", `/packages`] as const;
-};
+    return [
+    'infinite', `/packages`
+    ] as const;
+    }
 
 export const getGetPackagesQueryKey = () => {
-	return [`/packages`] as const;
-};
+    return [
+    `/packages`
+    ] as const;
+    }
 
-export const useGetPackagesInfiniteQueryOptions = <
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetPackagesHook>>>
-	>,
-	TError = string,
->(options?: {
-	query?: Partial<
-		UseInfiniteQueryOptions<
-			Awaited<ReturnType<ReturnType<typeof useGetPackagesHook>>>,
-			TError,
-			TData
-		>
-	>;
-}) => {
-	const { query: queryOptions } = options ?? {};
+    
+export const useGetPackagesInfiniteQueryOptions = <TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetPackagesHook>>>>, TError = string>( options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetPackagesHook>>>, TError, TData>>, }
+) => {
 
-	const queryKey = queryOptions?.queryKey ?? getGetPackagesInfiniteQueryKey();
+const {query: queryOptions} = options ?? {};
 
-	const getPackages = useGetPackagesHook();
+  const queryKey =  queryOptions?.queryKey ?? getGetPackagesInfiniteQueryKey();
 
-	const queryFn: QueryFunction<
-		Awaited<ReturnType<ReturnType<typeof useGetPackagesHook>>>
-	> = ({ signal }) => getPackages(signal);
+  const getPackages =  useGetPackagesHook();
 
-	return { queryKey, queryFn, ...queryOptions } as UseInfiniteQueryOptions<
-		Awaited<ReturnType<ReturnType<typeof useGetPackagesHook>>>,
-		TError,
-		TData
-	> & { queryKey: DataTag<QueryKey, TData, TError> };
-};
+    const queryFn: QueryFunction<Awaited<ReturnType<ReturnType<typeof useGetPackagesHook>>>> = ({ signal }) => getPackages(signal);
 
-export type GetPackagesInfiniteQueryResult = NonNullable<
-	Awaited<ReturnType<ReturnType<typeof useGetPackagesHook>>>
->;
-export type GetPackagesInfiniteQueryError = string;
+      
 
-export function useGetPackagesInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetPackagesHook>>>
-	>,
-	TError = string,
->(
-	options: {
-		query: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetPackagesHook>>>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				DefinedInitialDataOptions<
-					Awaited<ReturnType<ReturnType<typeof useGetPackagesHook>>>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useGetPackagesHook>>>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): DefinedUseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useGetPackagesInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetPackagesHook>>>
-	>,
-	TError = string,
->(
-	options?: {
-		query?: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetPackagesHook>>>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				UndefinedInitialDataOptions<
-					Awaited<ReturnType<ReturnType<typeof useGetPackagesHook>>>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useGetPackagesHook>>>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): UseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useGetPackagesInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetPackagesHook>>>
-	>,
-	TError = string,
->(
-	options?: {
-		query?: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetPackagesHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
+      
 
-export function useGetPackagesInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetPackagesHook>>>
-	>,
-	TError = string,
->(
-	options?: {
-		query?: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetPackagesHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-} {
-	const queryOptions = useGetPackagesInfiniteQueryOptions(options);
-
-	const query = useInfiniteQuery(
-		queryOptions,
-		queryClient,
-	) as UseInfiniteQueryResult<TData, TError> & {
-		queryKey: DataTag<QueryKey, TData, TError>;
-	};
-
-	query.queryKey = queryOptions.queryKey;
-
-	return query;
+   return  { queryKey, queryFn, ...queryOptions} as UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetPackagesHook>>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
 }
 
-export const useGetPackagesQueryOptions = <
-	TData = Awaited<ReturnType<ReturnType<typeof useGetPackagesHook>>>,
-	TError = string,
->(options?: {
-	query?: Partial<
-		UseQueryOptions<
-			Awaited<ReturnType<ReturnType<typeof useGetPackagesHook>>>,
-			TError,
-			TData
-		>
-	>;
-}) => {
-	const { query: queryOptions } = options ?? {};
+export type GetPackagesInfiniteQueryResult = NonNullable<Awaited<ReturnType<ReturnType<typeof useGetPackagesHook>>>>
+export type GetPackagesInfiniteQueryError = string
 
-	const queryKey = queryOptions?.queryKey ?? getGetPackagesQueryKey();
 
-	const getPackages = useGetPackagesHook();
+export function useGetPackagesInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetPackagesHook>>>>, TError = string>(
+  options: { query:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetPackagesHook>>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useGetPackagesHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useGetPackagesHook>>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetPackagesInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetPackagesHook>>>>, TError = string>(
+  options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetPackagesHook>>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useGetPackagesHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useGetPackagesHook>>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetPackagesInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetPackagesHook>>>>, TError = string>(
+  options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetPackagesHook>>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 
-	const queryFn: QueryFunction<
-		Awaited<ReturnType<ReturnType<typeof useGetPackagesHook>>>
-	> = ({ signal }) => getPackages(signal);
+export function useGetPackagesInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetPackagesHook>>>>, TError = string>(
+  options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetPackagesHook>>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
-	return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
-		Awaited<ReturnType<ReturnType<typeof useGetPackagesHook>>>,
-		TError,
-		TData
-	> & { queryKey: DataTag<QueryKey, TData, TError> };
-};
+  const queryOptions = useGetPackagesInfiniteQueryOptions(options)
 
-export type GetPackagesQueryResult = NonNullable<
-	Awaited<ReturnType<ReturnType<typeof useGetPackagesHook>>>
->;
-export type GetPackagesQueryError = string;
+  const query = useInfiniteQuery(queryOptions, queryClient) as  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 
-export function useGetPackages<
-	TData = Awaited<ReturnType<ReturnType<typeof useGetPackagesHook>>>,
-	TError = string,
->(
-	options: {
-		query: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetPackagesHook>>>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				DefinedInitialDataOptions<
-					Awaited<ReturnType<ReturnType<typeof useGetPackagesHook>>>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useGetPackagesHook>>>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): DefinedUseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useGetPackages<
-	TData = Awaited<ReturnType<ReturnType<typeof useGetPackagesHook>>>,
-	TError = string,
->(
-	options?: {
-		query?: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetPackagesHook>>>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				UndefinedInitialDataOptions<
-					Awaited<ReturnType<ReturnType<typeof useGetPackagesHook>>>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useGetPackagesHook>>>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useGetPackages<
-	TData = Awaited<ReturnType<ReturnType<typeof useGetPackagesHook>>>,
-	TError = string,
->(
-	options?: {
-		query?: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetPackagesHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
+  query.queryKey = queryOptions.queryKey ;
 
-export function useGetPackages<
-	TData = Awaited<ReturnType<ReturnType<typeof useGetPackagesHook>>>,
-	TError = string,
->(
-	options?: {
-		query?: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetPackagesHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-} {
-	const queryOptions = useGetPackagesQueryOptions(options);
-
-	const query = useQuery(queryOptions, queryClient) as UseQueryResult<
-		TData,
-		TError
-	> & { queryKey: DataTag<QueryKey, TData, TError> };
-
-	query.queryKey = queryOptions.queryKey;
-
-	return query;
+  return query;
 }
+
+
+
+
+export const useGetPackagesQueryOptions = <TData = Awaited<ReturnType<ReturnType<typeof useGetPackagesHook>>>, TError = string>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetPackagesHook>>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetPackagesQueryKey();
+
+  const getPackages =  useGetPackagesHook();
+
+    const queryFn: QueryFunction<Awaited<ReturnType<ReturnType<typeof useGetPackagesHook>>>> = ({ signal }) => getPackages(signal);
+
+      
+
+      
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetPackagesHook>>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetPackagesQueryResult = NonNullable<Awaited<ReturnType<ReturnType<typeof useGetPackagesHook>>>>
+export type GetPackagesQueryError = string
+
+
+export function useGetPackages<TData = Awaited<ReturnType<ReturnType<typeof useGetPackagesHook>>>, TError = string>(
+  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetPackagesHook>>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useGetPackagesHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useGetPackagesHook>>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetPackages<TData = Awaited<ReturnType<ReturnType<typeof useGetPackagesHook>>>, TError = string>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetPackagesHook>>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useGetPackagesHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useGetPackagesHook>>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetPackages<TData = Awaited<ReturnType<ReturnType<typeof useGetPackagesHook>>>, TError = string>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetPackagesHook>>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+
+export function useGetPackages<TData = Awaited<ReturnType<ReturnType<typeof useGetPackagesHook>>>, TError = string>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetPackagesHook>>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = useGetPackagesQueryOptions(options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  query.queryKey = queryOptions.queryKey ;
+
+  return query;
+}
+
+
+
+
 
 export const useReleasePackageHook = () => {
-	const releasePackage = useClientMutator<void>();
+        const releasePackage = useClientMutator<void>();
 
-	return useCallback(
-		(releasePackageRequest: ReleasePackageRequest) => {
-			const formData = new FormData();
-			formData.append(`file`, releasePackageRequest.file);
+        return useCallback((
+    releasePackageRequest: ReleasePackageRequest,
+ ) => {const formData = new FormData();
+formData.append(`file`, releasePackageRequest.file)
 
-			return releasePackage({
-				url: `/packages`,
-				method: "PUT",
-				headers: { "Content-Type": "multipart/form-data" },
-				data: formData,
-			});
-		},
-		[releasePackage],
-	);
-};
+        return releasePackage(
+          {url: `/packages`, method: 'PUT',
+      headers: {'Content-Type': 'multipart/form-data', },
+       data: formData
+    },
+          );
+        }, [releasePackage])
+      }
+    
 
-export const useReleasePackageMutationOptions = <
-	TError = string,
-	TContext = unknown,
->(options?: {
-	mutation?: UseMutationOptions<
-		Awaited<ReturnType<ReturnType<typeof useReleasePackageHook>>>,
-		TError,
-		{ data: ReleasePackageRequest },
-		TContext
-	>;
-}): UseMutationOptions<
-	Awaited<ReturnType<ReturnType<typeof useReleasePackageHook>>>,
-	TError,
-	{ data: ReleasePackageRequest },
-	TContext
-> => {
-	const mutationKey = ["releasePackage"];
-	const { mutation: mutationOptions } = options
-		? options.mutation &&
-			"mutationKey" in options.mutation &&
-			options.mutation.mutationKey
-			? options
-			: { ...options, mutation: { ...options.mutation, mutationKey } }
-		: { mutation: { mutationKey } };
 
-	const releasePackage = useReleasePackageHook();
+export const useReleasePackageMutationOptions = <TError = string,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<ReturnType<typeof useReleasePackageHook>>>, TError,{data: ReleasePackageRequest}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<ReturnType<typeof useReleasePackageHook>>>, TError,{data: ReleasePackageRequest}, TContext> => {
 
-	const mutationFn: MutationFunction<
-		Awaited<ReturnType<ReturnType<typeof useReleasePackageHook>>>,
-		{ data: ReleasePackageRequest }
-	> = (props) => {
-		const { data } = props ?? {};
+const mutationKey = ['releasePackage'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
 
-		return releasePackage(data);
-	};
+      const releasePackage =  useReleasePackageHook()
 
-	return { mutationFn, ...mutationOptions };
-};
 
-export type ReleasePackageMutationResult = NonNullable<
-	Awaited<ReturnType<ReturnType<typeof useReleasePackageHook>>>
->;
-export type ReleasePackageMutationBody = ReleasePackageRequest;
-export type ReleasePackageMutationError = string;
+      const mutationFn: MutationFunction<Awaited<ReturnType<ReturnType<typeof useReleasePackageHook>>>, {data: ReleasePackageRequest}> = (props) => {
+          const {data} = props ?? {};
 
-export const useReleasePackage = <TError = string, TContext = unknown>(
-	options?: {
-		mutation?: UseMutationOptions<
-			Awaited<ReturnType<ReturnType<typeof useReleasePackageHook>>>,
-			TError,
-			{ data: ReleasePackageRequest },
-			TContext
-		>;
-	},
-	queryClient?: QueryClient,
-): UseMutationResult<
-	Awaited<ReturnType<ReturnType<typeof useReleasePackageHook>>>,
-	TError,
-	{ data: ReleasePackageRequest },
-	TContext
-> => {
-	const mutationOptions = useReleasePackageMutationOptions(options);
+          return  releasePackage(data,)
+        }
 
-	return useMutation(mutationOptions, queryClient);
-};
+        
 
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ReleasePackageMutationResult = NonNullable<Awaited<ReturnType<ReturnType<typeof useReleasePackageHook>>>>
+    export type ReleasePackageMutationBody = ReleasePackageRequest
+    export type ReleasePackageMutationError = string
+
+    export const useReleasePackage = <TError = string,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<ReturnType<typeof useReleasePackageHook>>>, TError,{data: ReleasePackageRequest}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<ReturnType<typeof useReleasePackageHook>>>,
+        TError,
+        {data: ReleasePackageRequest},
+        TContext
+      > => {
+
+      const mutationOptions = useReleasePackageMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    
 export const useDownloadPackageHook = () => {
-	const downloadPackage = useClientMutator<unknown>();
+        const downloadPackage = useClientMutator<unknown>();
 
-	return useCallback(
-		(params: DownloadPackageParams, signal?: AbortSignal) => {
-			return downloadPackage({
-				url: `/packages/download`,
-				method: "GET",
-				params,
-				signal,
-			});
-		},
-		[downloadPackage],
-	);
-};
-
-export const getDownloadPackageInfiniteQueryKey = (
-	params?: DownloadPackageParams,
+        return useCallback((
+    params: DownloadPackageParams,
+ signal?: AbortSignal
 ) => {
-	return [
-		"infinite",
-		`/packages/download`,
-		...(params ? [params] : []),
-	] as const;
-};
+        return downloadPackage(
+          {url: `/packages/download`, method: 'GET',
+        params, signal
+    },
+          );
+        }, [downloadPackage])
+      }
+    
 
-export const getDownloadPackageQueryKey = (params?: DownloadPackageParams) => {
-	return [`/packages/download`, ...(params ? [params] : [])] as const;
-};
 
-export const useDownloadPackageInfiniteQueryOptions = <
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useDownloadPackageHook>>>,
-		DownloadPackageParams["offset"]
-	>,
-	TError = void,
->(
-	params: DownloadPackageParams,
-	options?: {
-		query?: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useDownloadPackageHook>>>,
-				TError,
-				TData,
-				QueryKey,
-				DownloadPackageParams["offset"]
-			>
-		>;
-	},
+
+export const getDownloadPackageInfiniteQueryKey = (params?: DownloadPackageParams,) => {
+    return [
+    'infinite', `/packages/download`, ...(params ? [params]: [])
+    ] as const;
+    }
+
+export const getDownloadPackageQueryKey = (params?: DownloadPackageParams,) => {
+    return [
+    `/packages/download`, ...(params ? [params]: [])
+    ] as const;
+    }
+
+    
+export const useDownloadPackageInfiniteQueryOptions = <TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useDownloadPackageHook>>>, DownloadPackageParams['offset']>, TError = void>(params: DownloadPackageParams, options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useDownloadPackageHook>>>, TError, TData, QueryKey, DownloadPackageParams['offset']>>, }
 ) => {
-	const { query: queryOptions } = options ?? {};
 
-	const queryKey =
-		queryOptions?.queryKey ?? getDownloadPackageInfiniteQueryKey(params);
+const {query: queryOptions} = options ?? {};
 
-	const downloadPackage = useDownloadPackageHook();
+  const queryKey =  queryOptions?.queryKey ?? getDownloadPackageInfiniteQueryKey(params);
 
-	const queryFn: QueryFunction<
-		Awaited<ReturnType<ReturnType<typeof useDownloadPackageHook>>>,
-		QueryKey,
-		DownloadPackageParams["offset"]
-	> = ({ signal, pageParam }) =>
-		downloadPackage(
-			{ ...params, offset: pageParam || params?.["offset"] },
-			signal,
-		);
+  const downloadPackage =  useDownloadPackageHook();
 
-	return { queryKey, queryFn, ...queryOptions } as UseInfiniteQueryOptions<
-		Awaited<ReturnType<ReturnType<typeof useDownloadPackageHook>>>,
-		TError,
-		TData,
-		QueryKey,
-		DownloadPackageParams["offset"]
-	> & { queryKey: DataTag<QueryKey, TData, TError> };
-};
+    const queryFn: QueryFunction<Awaited<ReturnType<ReturnType<typeof useDownloadPackageHook>>>, QueryKey, DownloadPackageParams['offset']> = ({ signal, pageParam }) => downloadPackage({...params, 'offset': pageParam || params?.['offset']}, signal);
 
-export type DownloadPackageInfiniteQueryResult = NonNullable<
-	Awaited<ReturnType<ReturnType<typeof useDownloadPackageHook>>>
->;
-export type DownloadPackageInfiniteQueryError = void;
+      
 
-export function useDownloadPackageInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useDownloadPackageHook>>>,
-		DownloadPackageParams["offset"]
-	>,
-	TError = void,
->(
-	params: DownloadPackageParams,
-	options: {
-		query: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useDownloadPackageHook>>>,
-				TError,
-				TData,
-				QueryKey,
-				DownloadPackageParams["offset"]
-			>
-		> &
-			Pick<
-				DefinedInitialDataOptions<
-					Awaited<ReturnType<ReturnType<typeof useDownloadPackageHook>>>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useDownloadPackageHook>>>,
-					QueryKey
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): DefinedUseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useDownloadPackageInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useDownloadPackageHook>>>,
-		DownloadPackageParams["offset"]
-	>,
-	TError = void,
->(
-	params: DownloadPackageParams,
-	options?: {
-		query?: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useDownloadPackageHook>>>,
-				TError,
-				TData,
-				QueryKey,
-				DownloadPackageParams["offset"]
-			>
-		> &
-			Pick<
-				UndefinedInitialDataOptions<
-					Awaited<ReturnType<ReturnType<typeof useDownloadPackageHook>>>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useDownloadPackageHook>>>,
-					QueryKey
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): UseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useDownloadPackageInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useDownloadPackageHook>>>,
-		DownloadPackageParams["offset"]
-	>,
-	TError = void,
->(
-	params: DownloadPackageParams,
-	options?: {
-		query?: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useDownloadPackageHook>>>,
-				TError,
-				TData,
-				QueryKey,
-				DownloadPackageParams["offset"]
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
+      
 
-export function useDownloadPackageInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useDownloadPackageHook>>>,
-		DownloadPackageParams["offset"]
-	>,
-	TError = void,
->(
-	params: DownloadPackageParams,
-	options?: {
-		query?: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useDownloadPackageHook>>>,
-				TError,
-				TData,
-				QueryKey,
-				DownloadPackageParams["offset"]
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-} {
-	const queryOptions = useDownloadPackageInfiniteQueryOptions(params, options);
-
-	const query = useInfiniteQuery(
-		queryOptions,
-		queryClient,
-	) as UseInfiniteQueryResult<TData, TError> & {
-		queryKey: DataTag<QueryKey, TData, TError>;
-	};
-
-	query.queryKey = queryOptions.queryKey;
-
-	return query;
+   return  { queryKey, queryFn, ...queryOptions} as UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useDownloadPackageHook>>>, TError, TData, QueryKey, DownloadPackageParams['offset']> & { queryKey: DataTag<QueryKey, TData, TError> }
 }
 
-export const useDownloadPackageQueryOptions = <
-	TData = Awaited<ReturnType<ReturnType<typeof useDownloadPackageHook>>>,
-	TError = void,
->(
-	params: DownloadPackageParams,
-	options?: {
-		query?: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useDownloadPackageHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-) => {
-	const { query: queryOptions } = options ?? {};
+export type DownloadPackageInfiniteQueryResult = NonNullable<Awaited<ReturnType<ReturnType<typeof useDownloadPackageHook>>>>
+export type DownloadPackageInfiniteQueryError = void
 
-	const queryKey = queryOptions?.queryKey ?? getDownloadPackageQueryKey(params);
 
-	const downloadPackage = useDownloadPackageHook();
+export function useDownloadPackageInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useDownloadPackageHook>>>, DownloadPackageParams['offset']>, TError = void>(
+ params: DownloadPackageParams, options: { query:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useDownloadPackageHook>>>, TError, TData, QueryKey, DownloadPackageParams['offset']>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useDownloadPackageHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useDownloadPackageHook>>>, QueryKey
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useDownloadPackageInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useDownloadPackageHook>>>, DownloadPackageParams['offset']>, TError = void>(
+ params: DownloadPackageParams, options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useDownloadPackageHook>>>, TError, TData, QueryKey, DownloadPackageParams['offset']>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useDownloadPackageHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useDownloadPackageHook>>>, QueryKey
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useDownloadPackageInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useDownloadPackageHook>>>, DownloadPackageParams['offset']>, TError = void>(
+ params: DownloadPackageParams, options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useDownloadPackageHook>>>, TError, TData, QueryKey, DownloadPackageParams['offset']>>, }
+ , queryClient?: QueryClient
+  ):  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 
-	const queryFn: QueryFunction<
-		Awaited<ReturnType<ReturnType<typeof useDownloadPackageHook>>>
-	> = ({ signal }) => downloadPackage(params, signal);
+export function useDownloadPackageInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useDownloadPackageHook>>>, DownloadPackageParams['offset']>, TError = void>(
+ params: DownloadPackageParams, options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useDownloadPackageHook>>>, TError, TData, QueryKey, DownloadPackageParams['offset']>>, }
+ , queryClient?: QueryClient 
+ ):  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
-	return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
-		Awaited<ReturnType<ReturnType<typeof useDownloadPackageHook>>>,
-		TError,
-		TData
-	> & { queryKey: DataTag<QueryKey, TData, TError> };
-};
+  const queryOptions = useDownloadPackageInfiniteQueryOptions(params,options)
 
-export type DownloadPackageQueryResult = NonNullable<
-	Awaited<ReturnType<ReturnType<typeof useDownloadPackageHook>>>
->;
-export type DownloadPackageQueryError = void;
+  const query = useInfiniteQuery(queryOptions, queryClient) as  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 
-export function useDownloadPackage<
-	TData = Awaited<ReturnType<ReturnType<typeof useDownloadPackageHook>>>,
-	TError = void,
->(
-	params: DownloadPackageParams,
-	options: {
-		query: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useDownloadPackageHook>>>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				DefinedInitialDataOptions<
-					Awaited<ReturnType<ReturnType<typeof useDownloadPackageHook>>>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useDownloadPackageHook>>>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): DefinedUseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useDownloadPackage<
-	TData = Awaited<ReturnType<ReturnType<typeof useDownloadPackageHook>>>,
-	TError = void,
->(
-	params: DownloadPackageParams,
-	options?: {
-		query?: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useDownloadPackageHook>>>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				UndefinedInitialDataOptions<
-					Awaited<ReturnType<ReturnType<typeof useDownloadPackageHook>>>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useDownloadPackageHook>>>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useDownloadPackage<
-	TData = Awaited<ReturnType<ReturnType<typeof useDownloadPackageHook>>>,
-	TError = void,
->(
-	params: DownloadPackageParams,
-	options?: {
-		query?: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useDownloadPackageHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
+  query.queryKey = queryOptions.queryKey ;
 
-export function useDownloadPackage<
-	TData = Awaited<ReturnType<ReturnType<typeof useDownloadPackageHook>>>,
-	TError = void,
->(
-	params: DownloadPackageParams,
-	options?: {
-		query?: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useDownloadPackageHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-} {
-	const queryOptions = useDownloadPackageQueryOptions(params, options);
-
-	const query = useQuery(queryOptions, queryClient) as UseQueryResult<
-		TData,
-		TError
-	> & { queryKey: DataTag<QueryKey, TData, TError> };
-
-	query.queryKey = queryOptions.queryKey;
-
-	return query;
+  return query;
 }
+
+
+
+
+export const useDownloadPackageQueryOptions = <TData = Awaited<ReturnType<ReturnType<typeof useDownloadPackageHook>>>, TError = void>(params: DownloadPackageParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useDownloadPackageHook>>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getDownloadPackageQueryKey(params);
+
+  const downloadPackage =  useDownloadPackageHook();
+
+    const queryFn: QueryFunction<Awaited<ReturnType<ReturnType<typeof useDownloadPackageHook>>>> = ({ signal }) => downloadPackage(params, signal);
+
+      
+
+      
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useDownloadPackageHook>>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type DownloadPackageQueryResult = NonNullable<Awaited<ReturnType<ReturnType<typeof useDownloadPackageHook>>>>
+export type DownloadPackageQueryError = void
+
+
+export function useDownloadPackage<TData = Awaited<ReturnType<ReturnType<typeof useDownloadPackageHook>>>, TError = void>(
+ params: DownloadPackageParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useDownloadPackageHook>>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useDownloadPackageHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useDownloadPackageHook>>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useDownloadPackage<TData = Awaited<ReturnType<ReturnType<typeof useDownloadPackageHook>>>, TError = void>(
+ params: DownloadPackageParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useDownloadPackageHook>>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useDownloadPackageHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useDownloadPackageHook>>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useDownloadPackage<TData = Awaited<ReturnType<ReturnType<typeof useDownloadPackageHook>>>, TError = void>(
+ params: DownloadPackageParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useDownloadPackageHook>>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+
+export function useDownloadPackage<TData = Awaited<ReturnType<ReturnType<typeof useDownloadPackageHook>>>, TError = void>(
+ params: DownloadPackageParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useDownloadPackageHook>>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = useDownloadPackageQueryOptions(params,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  query.queryKey = queryOptions.queryKey ;
+
+  return query;
+}
+
+
+
+
 
 export const useGetPackageLatestHook = () => {
-	const getPackageLatest = useClientMutator<Package>();
+        const getPackageLatest = useClientMutator<Package>();
 
-	return useCallback(
-		(packageName: string, signal?: AbortSignal) => {
-			return getPackageLatest({
-				url: `/packages/${packageName}/latest`,
-				method: "GET",
-				signal,
-			});
-		},
-		[getPackageLatest],
-	);
-};
-
-export const getGetPackageLatestInfiniteQueryKey = (packageName?: string) => {
-	return ["infinite", `/packages/${packageName}/latest`] as const;
-};
-
-export const getGetPackageLatestQueryKey = (packageName?: string) => {
-	return [`/packages/${packageName}/latest`] as const;
-};
-
-export const useGetPackageLatestInfiniteQueryOptions = <
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetPackageLatestHook>>>
-	>,
-	TError = void | string,
->(
-	packageName: string,
-	options?: {
-		query?: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetPackageLatestHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
+        return useCallback((
+    packageName: string,
+ signal?: AbortSignal
 ) => {
-	const { query: queryOptions } = options ?? {};
+        return getPackageLatest(
+          {url: `/packages/${packageName}/latest`, method: 'GET', signal
+    },
+          );
+        }, [getPackageLatest])
+      }
+    
 
-	const queryKey =
-		queryOptions?.queryKey ?? getGetPackageLatestInfiniteQueryKey(packageName);
 
-	const getPackageLatest = useGetPackageLatestHook();
 
-	const queryFn: QueryFunction<
-		Awaited<ReturnType<ReturnType<typeof useGetPackageLatestHook>>>
-	> = ({ signal }) => getPackageLatest(packageName, signal);
+export const getGetPackageLatestInfiniteQueryKey = (packageName?: string,) => {
+    return [
+    'infinite', `/packages/${packageName}/latest`
+    ] as const;
+    }
 
-	return {
-		queryKey,
-		queryFn,
-		enabled: !!packageName,
-		...queryOptions,
-	} as UseInfiniteQueryOptions<
-		Awaited<ReturnType<ReturnType<typeof useGetPackageLatestHook>>>,
-		TError,
-		TData
-	> & { queryKey: DataTag<QueryKey, TData, TError> };
-};
+export const getGetPackageLatestQueryKey = (packageName?: string,) => {
+    return [
+    `/packages/${packageName}/latest`
+    ] as const;
+    }
 
-export type GetPackageLatestInfiniteQueryResult = NonNullable<
-	Awaited<ReturnType<ReturnType<typeof useGetPackageLatestHook>>>
->;
-export type GetPackageLatestInfiniteQueryError = void | string;
+    
+export const useGetPackageLatestInfiniteQueryOptions = <TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetPackageLatestHook>>>>, TError = void | string>(packageName: string, options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetPackageLatestHook>>>, TError, TData>>, }
+) => {
 
-export function useGetPackageLatestInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetPackageLatestHook>>>
-	>,
-	TError = void | string,
->(
-	packageName: string,
-	options: {
-		query: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetPackageLatestHook>>>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				DefinedInitialDataOptions<
-					Awaited<ReturnType<ReturnType<typeof useGetPackageLatestHook>>>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useGetPackageLatestHook>>>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): DefinedUseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useGetPackageLatestInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetPackageLatestHook>>>
-	>,
-	TError = void | string,
->(
-	packageName: string,
-	options?: {
-		query?: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetPackageLatestHook>>>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				UndefinedInitialDataOptions<
-					Awaited<ReturnType<ReturnType<typeof useGetPackageLatestHook>>>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useGetPackageLatestHook>>>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): UseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useGetPackageLatestInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetPackageLatestHook>>>
-	>,
-	TError = void | string,
->(
-	packageName: string,
-	options?: {
-		query?: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetPackageLatestHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
+const {query: queryOptions} = options ?? {};
 
-export function useGetPackageLatestInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetPackageLatestHook>>>
-	>,
-	TError = void | string,
->(
-	packageName: string,
-	options?: {
-		query?: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetPackageLatestHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-} {
-	const queryOptions = useGetPackageLatestInfiniteQueryOptions(
-		packageName,
-		options,
-	);
+  const queryKey =  queryOptions?.queryKey ?? getGetPackageLatestInfiniteQueryKey(packageName);
 
-	const query = useInfiniteQuery(
-		queryOptions,
-		queryClient,
-	) as UseInfiniteQueryResult<TData, TError> & {
-		queryKey: DataTag<QueryKey, TData, TError>;
-	};
+  const getPackageLatest =  useGetPackageLatestHook();
 
-	query.queryKey = queryOptions.queryKey;
+    const queryFn: QueryFunction<Awaited<ReturnType<ReturnType<typeof useGetPackageLatestHook>>>> = ({ signal }) => getPackageLatest(packageName, signal);
 
-	return query;
+      
+
+      
+
+   return  { queryKey, queryFn, enabled: !!(packageName), ...queryOptions} as UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetPackageLatestHook>>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
 }
 
-export const useGetPackageLatestQueryOptions = <
-	TData = Awaited<ReturnType<ReturnType<typeof useGetPackageLatestHook>>>,
-	TError = void | string,
->(
-	packageName: string,
-	options?: {
-		query?: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetPackageLatestHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-) => {
-	const { query: queryOptions } = options ?? {};
+export type GetPackageLatestInfiniteQueryResult = NonNullable<Awaited<ReturnType<ReturnType<typeof useGetPackageLatestHook>>>>
+export type GetPackageLatestInfiniteQueryError = void | string
 
-	const queryKey =
-		queryOptions?.queryKey ?? getGetPackageLatestQueryKey(packageName);
 
-	const getPackageLatest = useGetPackageLatestHook();
+export function useGetPackageLatestInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetPackageLatestHook>>>>, TError = void | string>(
+ packageName: string, options: { query:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetPackageLatestHook>>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useGetPackageLatestHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useGetPackageLatestHook>>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetPackageLatestInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetPackageLatestHook>>>>, TError = void | string>(
+ packageName: string, options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetPackageLatestHook>>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useGetPackageLatestHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useGetPackageLatestHook>>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetPackageLatestInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetPackageLatestHook>>>>, TError = void | string>(
+ packageName: string, options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetPackageLatestHook>>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 
-	const queryFn: QueryFunction<
-		Awaited<ReturnType<ReturnType<typeof useGetPackageLatestHook>>>
-	> = ({ signal }) => getPackageLatest(packageName, signal);
+export function useGetPackageLatestInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetPackageLatestHook>>>>, TError = void | string>(
+ packageName: string, options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetPackageLatestHook>>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
-	return {
-		queryKey,
-		queryFn,
-		enabled: !!packageName,
-		...queryOptions,
-	} as UseQueryOptions<
-		Awaited<ReturnType<ReturnType<typeof useGetPackageLatestHook>>>,
-		TError,
-		TData
-	> & { queryKey: DataTag<QueryKey, TData, TError> };
-};
+  const queryOptions = useGetPackageLatestInfiniteQueryOptions(packageName,options)
 
-export type GetPackageLatestQueryResult = NonNullable<
-	Awaited<ReturnType<ReturnType<typeof useGetPackageLatestHook>>>
->;
-export type GetPackageLatestQueryError = void | string;
+  const query = useInfiniteQuery(queryOptions, queryClient) as  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 
-export function useGetPackageLatest<
-	TData = Awaited<ReturnType<ReturnType<typeof useGetPackageLatestHook>>>,
-	TError = void | string,
->(
-	packageName: string,
-	options: {
-		query: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetPackageLatestHook>>>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				DefinedInitialDataOptions<
-					Awaited<ReturnType<ReturnType<typeof useGetPackageLatestHook>>>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useGetPackageLatestHook>>>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): DefinedUseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useGetPackageLatest<
-	TData = Awaited<ReturnType<ReturnType<typeof useGetPackageLatestHook>>>,
-	TError = void | string,
->(
-	packageName: string,
-	options?: {
-		query?: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetPackageLatestHook>>>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				UndefinedInitialDataOptions<
-					Awaited<ReturnType<ReturnType<typeof useGetPackageLatestHook>>>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useGetPackageLatestHook>>>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useGetPackageLatest<
-	TData = Awaited<ReturnType<ReturnType<typeof useGetPackageLatestHook>>>,
-	TError = void | string,
->(
-	packageName: string,
-	options?: {
-		query?: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetPackageLatestHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
+  query.queryKey = queryOptions.queryKey ;
 
-export function useGetPackageLatest<
-	TData = Awaited<ReturnType<ReturnType<typeof useGetPackageLatestHook>>>,
-	TError = void | string,
->(
-	packageName: string,
-	options?: {
-		query?: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetPackageLatestHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-} {
-	const queryOptions = useGetPackageLatestQueryOptions(packageName, options);
-
-	const query = useQuery(queryOptions, queryClient) as UseQueryResult<
-		TData,
-		TError
-	> & { queryKey: DataTag<QueryKey, TData, TError> };
-
-	query.queryKey = queryOptions.queryKey;
-
-	return query;
+  return query;
 }
+
+
+
+
+export const useGetPackageLatestQueryOptions = <TData = Awaited<ReturnType<ReturnType<typeof useGetPackageLatestHook>>>, TError = void | string>(packageName: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetPackageLatestHook>>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetPackageLatestQueryKey(packageName);
+
+  const getPackageLatest =  useGetPackageLatestHook();
+
+    const queryFn: QueryFunction<Awaited<ReturnType<ReturnType<typeof useGetPackageLatestHook>>>> = ({ signal }) => getPackageLatest(packageName, signal);
+
+      
+
+      
+
+   return  { queryKey, queryFn, enabled: !!(packageName), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetPackageLatestHook>>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetPackageLatestQueryResult = NonNullable<Awaited<ReturnType<ReturnType<typeof useGetPackageLatestHook>>>>
+export type GetPackageLatestQueryError = void | string
+
+
+export function useGetPackageLatest<TData = Awaited<ReturnType<ReturnType<typeof useGetPackageLatestHook>>>, TError = void | string>(
+ packageName: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetPackageLatestHook>>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useGetPackageLatestHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useGetPackageLatestHook>>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetPackageLatest<TData = Awaited<ReturnType<ReturnType<typeof useGetPackageLatestHook>>>, TError = void | string>(
+ packageName: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetPackageLatestHook>>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useGetPackageLatestHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useGetPackageLatestHook>>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetPackageLatest<TData = Awaited<ReturnType<ReturnType<typeof useGetPackageLatestHook>>>, TError = void | string>(
+ packageName: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetPackageLatestHook>>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+
+export function useGetPackageLatest<TData = Awaited<ReturnType<ReturnType<typeof useGetPackageLatestHook>>>, TError = void | string>(
+ packageName: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetPackageLatestHook>>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = useGetPackageLatestQueryOptions(packageName,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  query.queryKey = queryOptions.queryKey ;
+
+  return query;
+}
+
+
+
+
 
 export const useGetReleasesHook = () => {
-	const getReleases = useClientMutator<Release[]>();
+        const getReleases = useClientMutator<Release[]>();
 
-	return useCallback(
-		(signal?: AbortSignal) => {
-			return getReleases({ url: `/releases`, method: "GET", signal });
-		},
-		[getReleases],
-	);
-};
+        return useCallback((
+    
+ signal?: AbortSignal
+) => {
+        return getReleases(
+          {url: `/releases`, method: 'GET', signal
+    },
+          );
+        }, [getReleases])
+      }
+    
+
+
 
 export const getGetReleasesInfiniteQueryKey = () => {
-	return ["infinite", `/releases`] as const;
-};
+    return [
+    'infinite', `/releases`
+    ] as const;
+    }
 
 export const getGetReleasesQueryKey = () => {
-	return [`/releases`] as const;
-};
+    return [
+    `/releases`
+    ] as const;
+    }
 
-export const useGetReleasesInfiniteQueryOptions = <
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetReleasesHook>>>
-	>,
-	TError = void,
->(options?: {
-	query?: Partial<
-		UseInfiniteQueryOptions<
-			Awaited<ReturnType<ReturnType<typeof useGetReleasesHook>>>,
-			TError,
-			TData
-		>
-	>;
-}) => {
-	const { query: queryOptions } = options ?? {};
+    
+export const useGetReleasesInfiniteQueryOptions = <TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetReleasesHook>>>>, TError = void>( options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetReleasesHook>>>, TError, TData>>, }
+) => {
 
-	const queryKey = queryOptions?.queryKey ?? getGetReleasesInfiniteQueryKey();
+const {query: queryOptions} = options ?? {};
 
-	const getReleases = useGetReleasesHook();
+  const queryKey =  queryOptions?.queryKey ?? getGetReleasesInfiniteQueryKey();
 
-	const queryFn: QueryFunction<
-		Awaited<ReturnType<ReturnType<typeof useGetReleasesHook>>>
-	> = ({ signal }) => getReleases(signal);
+  const getReleases =  useGetReleasesHook();
 
-	return { queryKey, queryFn, ...queryOptions } as UseInfiniteQueryOptions<
-		Awaited<ReturnType<ReturnType<typeof useGetReleasesHook>>>,
-		TError,
-		TData
-	> & { queryKey: DataTag<QueryKey, TData, TError> };
-};
+    const queryFn: QueryFunction<Awaited<ReturnType<ReturnType<typeof useGetReleasesHook>>>> = ({ signal }) => getReleases(signal);
 
-export type GetReleasesInfiniteQueryResult = NonNullable<
-	Awaited<ReturnType<ReturnType<typeof useGetReleasesHook>>>
->;
-export type GetReleasesInfiniteQueryError = void;
+      
 
-export function useGetReleasesInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetReleasesHook>>>
-	>,
-	TError = void,
->(
-	options: {
-		query: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetReleasesHook>>>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				DefinedInitialDataOptions<
-					Awaited<ReturnType<ReturnType<typeof useGetReleasesHook>>>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useGetReleasesHook>>>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): DefinedUseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useGetReleasesInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetReleasesHook>>>
-	>,
-	TError = void,
->(
-	options?: {
-		query?: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetReleasesHook>>>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				UndefinedInitialDataOptions<
-					Awaited<ReturnType<ReturnType<typeof useGetReleasesHook>>>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useGetReleasesHook>>>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): UseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useGetReleasesInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetReleasesHook>>>
-	>,
-	TError = void,
->(
-	options?: {
-		query?: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetReleasesHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
+      
 
-export function useGetReleasesInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetReleasesHook>>>
-	>,
-	TError = void,
->(
-	options?: {
-		query?: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetReleasesHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-} {
-	const queryOptions = useGetReleasesInfiniteQueryOptions(options);
-
-	const query = useInfiniteQuery(
-		queryOptions,
-		queryClient,
-	) as UseInfiniteQueryResult<TData, TError> & {
-		queryKey: DataTag<QueryKey, TData, TError>;
-	};
-
-	query.queryKey = queryOptions.queryKey;
-
-	return query;
+   return  { queryKey, queryFn, ...queryOptions} as UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetReleasesHook>>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
 }
 
-export const useGetReleasesQueryOptions = <
-	TData = Awaited<ReturnType<ReturnType<typeof useGetReleasesHook>>>,
-	TError = void,
->(options?: {
-	query?: Partial<
-		UseQueryOptions<
-			Awaited<ReturnType<ReturnType<typeof useGetReleasesHook>>>,
-			TError,
-			TData
-		>
-	>;
-}) => {
-	const { query: queryOptions } = options ?? {};
+export type GetReleasesInfiniteQueryResult = NonNullable<Awaited<ReturnType<ReturnType<typeof useGetReleasesHook>>>>
+export type GetReleasesInfiniteQueryError = void
 
-	const queryKey = queryOptions?.queryKey ?? getGetReleasesQueryKey();
 
-	const getReleases = useGetReleasesHook();
+export function useGetReleasesInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetReleasesHook>>>>, TError = void>(
+  options: { query:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetReleasesHook>>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useGetReleasesHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useGetReleasesHook>>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetReleasesInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetReleasesHook>>>>, TError = void>(
+  options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetReleasesHook>>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useGetReleasesHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useGetReleasesHook>>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetReleasesInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetReleasesHook>>>>, TError = void>(
+  options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetReleasesHook>>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 
-	const queryFn: QueryFunction<
-		Awaited<ReturnType<ReturnType<typeof useGetReleasesHook>>>
-	> = ({ signal }) => getReleases(signal);
+export function useGetReleasesInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetReleasesHook>>>>, TError = void>(
+  options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetReleasesHook>>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
-	return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
-		Awaited<ReturnType<ReturnType<typeof useGetReleasesHook>>>,
-		TError,
-		TData
-	> & { queryKey: DataTag<QueryKey, TData, TError> };
-};
+  const queryOptions = useGetReleasesInfiniteQueryOptions(options)
 
-export type GetReleasesQueryResult = NonNullable<
-	Awaited<ReturnType<ReturnType<typeof useGetReleasesHook>>>
->;
-export type GetReleasesQueryError = void;
+  const query = useInfiniteQuery(queryOptions, queryClient) as  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 
-export function useGetReleases<
-	TData = Awaited<ReturnType<ReturnType<typeof useGetReleasesHook>>>,
-	TError = void,
->(
-	options: {
-		query: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetReleasesHook>>>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				DefinedInitialDataOptions<
-					Awaited<ReturnType<ReturnType<typeof useGetReleasesHook>>>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useGetReleasesHook>>>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): DefinedUseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useGetReleases<
-	TData = Awaited<ReturnType<ReturnType<typeof useGetReleasesHook>>>,
-	TError = void,
->(
-	options?: {
-		query?: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetReleasesHook>>>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				UndefinedInitialDataOptions<
-					Awaited<ReturnType<ReturnType<typeof useGetReleasesHook>>>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useGetReleasesHook>>>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useGetReleases<
-	TData = Awaited<ReturnType<ReturnType<typeof useGetReleasesHook>>>,
-	TError = void,
->(
-	options?: {
-		query?: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetReleasesHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
+  query.queryKey = queryOptions.queryKey ;
 
-export function useGetReleases<
-	TData = Awaited<ReturnType<ReturnType<typeof useGetReleasesHook>>>,
-	TError = void,
->(
-	options?: {
-		query?: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetReleasesHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-} {
-	const queryOptions = useGetReleasesQueryOptions(options);
-
-	const query = useQuery(queryOptions, queryClient) as UseQueryResult<
-		TData,
-		TError
-	> & { queryKey: DataTag<QueryKey, TData, TError> };
-
-	query.queryKey = queryOptions.queryKey;
-
-	return query;
+  return query;
 }
+
+
+
+
+export const useGetReleasesQueryOptions = <TData = Awaited<ReturnType<ReturnType<typeof useGetReleasesHook>>>, TError = void>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetReleasesHook>>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetReleasesQueryKey();
+
+  const getReleases =  useGetReleasesHook();
+
+    const queryFn: QueryFunction<Awaited<ReturnType<ReturnType<typeof useGetReleasesHook>>>> = ({ signal }) => getReleases(signal);
+
+      
+
+      
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetReleasesHook>>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetReleasesQueryResult = NonNullable<Awaited<ReturnType<ReturnType<typeof useGetReleasesHook>>>>
+export type GetReleasesQueryError = void
+
+
+export function useGetReleases<TData = Awaited<ReturnType<ReturnType<typeof useGetReleasesHook>>>, TError = void>(
+  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetReleasesHook>>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useGetReleasesHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useGetReleasesHook>>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetReleases<TData = Awaited<ReturnType<ReturnType<typeof useGetReleasesHook>>>, TError = void>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetReleasesHook>>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useGetReleasesHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useGetReleasesHook>>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetReleases<TData = Awaited<ReturnType<ReturnType<typeof useGetReleasesHook>>>, TError = void>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetReleasesHook>>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+
+export function useGetReleases<TData = Awaited<ReturnType<ReturnType<typeof useGetReleasesHook>>>, TError = void>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetReleasesHook>>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = useGetReleasesQueryOptions(options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  query.queryKey = queryOptions.queryKey ;
+
+  return query;
+}
+
+
+
+
 
 export const useGetReleaseHook = () => {
-	const getRelease = useClientMutator<Release>();
+        const getRelease = useClientMutator<Release>();
 
-	return useCallback(
-		(releaseId: number, signal?: AbortSignal) => {
-			return getRelease({
-				url: `/releases/${releaseId}`,
-				method: "GET",
-				signal,
-			});
-		},
-		[getRelease],
-	);
-};
-
-export const getGetReleaseInfiniteQueryKey = (releaseId?: number) => {
-	return ["infinite", `/releases/${releaseId}`] as const;
-};
-
-export const getGetReleaseQueryKey = (releaseId?: number) => {
-	return [`/releases/${releaseId}`] as const;
-};
-
-export const useGetReleaseInfiniteQueryOptions = <
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetReleaseHook>>>
-	>,
-	TError = void,
->(
-	releaseId: number,
-	options?: {
-		query?: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetReleaseHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
+        return useCallback((
+    releaseId: number,
+ signal?: AbortSignal
 ) => {
-	const { query: queryOptions } = options ?? {};
+        return getRelease(
+          {url: `/releases/${releaseId}`, method: 'GET', signal
+    },
+          );
+        }, [getRelease])
+      }
+    
 
-	const queryKey =
-		queryOptions?.queryKey ?? getGetReleaseInfiniteQueryKey(releaseId);
 
-	const getRelease = useGetReleaseHook();
 
-	const queryFn: QueryFunction<
-		Awaited<ReturnType<ReturnType<typeof useGetReleaseHook>>>
-	> = ({ signal }) => getRelease(releaseId, signal);
+export const getGetReleaseInfiniteQueryKey = (releaseId?: number,) => {
+    return [
+    'infinite', `/releases/${releaseId}`
+    ] as const;
+    }
 
-	return {
-		queryKey,
-		queryFn,
-		enabled: !!releaseId,
-		...queryOptions,
-	} as UseInfiniteQueryOptions<
-		Awaited<ReturnType<ReturnType<typeof useGetReleaseHook>>>,
-		TError,
-		TData
-	> & { queryKey: DataTag<QueryKey, TData, TError> };
-};
+export const getGetReleaseQueryKey = (releaseId?: number,) => {
+    return [
+    `/releases/${releaseId}`
+    ] as const;
+    }
 
-export type GetReleaseInfiniteQueryResult = NonNullable<
-	Awaited<ReturnType<ReturnType<typeof useGetReleaseHook>>>
->;
-export type GetReleaseInfiniteQueryError = void;
+    
+export const useGetReleaseInfiniteQueryOptions = <TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetReleaseHook>>>>, TError = void>(releaseId: number, options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetReleaseHook>>>, TError, TData>>, }
+) => {
 
-export function useGetReleaseInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetReleaseHook>>>
-	>,
-	TError = void,
->(
-	releaseId: number,
-	options: {
-		query: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetReleaseHook>>>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				DefinedInitialDataOptions<
-					Awaited<ReturnType<ReturnType<typeof useGetReleaseHook>>>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useGetReleaseHook>>>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): DefinedUseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useGetReleaseInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetReleaseHook>>>
-	>,
-	TError = void,
->(
-	releaseId: number,
-	options?: {
-		query?: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetReleaseHook>>>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				UndefinedInitialDataOptions<
-					Awaited<ReturnType<ReturnType<typeof useGetReleaseHook>>>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useGetReleaseHook>>>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): UseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useGetReleaseInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetReleaseHook>>>
-	>,
-	TError = void,
->(
-	releaseId: number,
-	options?: {
-		query?: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetReleaseHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
+const {query: queryOptions} = options ?? {};
 
-export function useGetReleaseInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetReleaseHook>>>
-	>,
-	TError = void,
->(
-	releaseId: number,
-	options?: {
-		query?: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetReleaseHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-} {
-	const queryOptions = useGetReleaseInfiniteQueryOptions(releaseId, options);
+  const queryKey =  queryOptions?.queryKey ?? getGetReleaseInfiniteQueryKey(releaseId);
 
-	const query = useInfiniteQuery(
-		queryOptions,
-		queryClient,
-	) as UseInfiniteQueryResult<TData, TError> & {
-		queryKey: DataTag<QueryKey, TData, TError>;
-	};
+  const getRelease =  useGetReleaseHook();
 
-	query.queryKey = queryOptions.queryKey;
+    const queryFn: QueryFunction<Awaited<ReturnType<ReturnType<typeof useGetReleaseHook>>>> = ({ signal }) => getRelease(releaseId, signal);
 
-	return query;
+      
+
+      
+
+   return  { queryKey, queryFn, enabled: !!(releaseId), ...queryOptions} as UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetReleaseHook>>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
 }
 
-export const useGetReleaseQueryOptions = <
-	TData = Awaited<ReturnType<ReturnType<typeof useGetReleaseHook>>>,
-	TError = void,
->(
-	releaseId: number,
-	options?: {
-		query?: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetReleaseHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-) => {
-	const { query: queryOptions } = options ?? {};
+export type GetReleaseInfiniteQueryResult = NonNullable<Awaited<ReturnType<ReturnType<typeof useGetReleaseHook>>>>
+export type GetReleaseInfiniteQueryError = void
 
-	const queryKey = queryOptions?.queryKey ?? getGetReleaseQueryKey(releaseId);
 
-	const getRelease = useGetReleaseHook();
+export function useGetReleaseInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetReleaseHook>>>>, TError = void>(
+ releaseId: number, options: { query:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetReleaseHook>>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useGetReleaseHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useGetReleaseHook>>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetReleaseInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetReleaseHook>>>>, TError = void>(
+ releaseId: number, options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetReleaseHook>>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useGetReleaseHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useGetReleaseHook>>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetReleaseInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetReleaseHook>>>>, TError = void>(
+ releaseId: number, options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetReleaseHook>>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 
-	const queryFn: QueryFunction<
-		Awaited<ReturnType<ReturnType<typeof useGetReleaseHook>>>
-	> = ({ signal }) => getRelease(releaseId, signal);
+export function useGetReleaseInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetReleaseHook>>>>, TError = void>(
+ releaseId: number, options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetReleaseHook>>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
-	return {
-		queryKey,
-		queryFn,
-		enabled: !!releaseId,
-		...queryOptions,
-	} as UseQueryOptions<
-		Awaited<ReturnType<ReturnType<typeof useGetReleaseHook>>>,
-		TError,
-		TData
-	> & { queryKey: DataTag<QueryKey, TData, TError> };
-};
+  const queryOptions = useGetReleaseInfiniteQueryOptions(releaseId,options)
 
-export type GetReleaseQueryResult = NonNullable<
-	Awaited<ReturnType<ReturnType<typeof useGetReleaseHook>>>
->;
-export type GetReleaseQueryError = void;
+  const query = useInfiniteQuery(queryOptions, queryClient) as  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 
-export function useGetRelease<
-	TData = Awaited<ReturnType<ReturnType<typeof useGetReleaseHook>>>,
-	TError = void,
->(
-	releaseId: number,
-	options: {
-		query: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetReleaseHook>>>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				DefinedInitialDataOptions<
-					Awaited<ReturnType<ReturnType<typeof useGetReleaseHook>>>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useGetReleaseHook>>>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): DefinedUseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useGetRelease<
-	TData = Awaited<ReturnType<ReturnType<typeof useGetReleaseHook>>>,
-	TError = void,
->(
-	releaseId: number,
-	options?: {
-		query?: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetReleaseHook>>>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				UndefinedInitialDataOptions<
-					Awaited<ReturnType<ReturnType<typeof useGetReleaseHook>>>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useGetReleaseHook>>>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useGetRelease<
-	TData = Awaited<ReturnType<ReturnType<typeof useGetReleaseHook>>>,
-	TError = void,
->(
-	releaseId: number,
-	options?: {
-		query?: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetReleaseHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
+  query.queryKey = queryOptions.queryKey ;
 
-export function useGetRelease<
-	TData = Awaited<ReturnType<ReturnType<typeof useGetReleaseHook>>>,
-	TError = void,
->(
-	releaseId: number,
-	options?: {
-		query?: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetReleaseHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-} {
-	const queryOptions = useGetReleaseQueryOptions(releaseId, options);
-
-	const query = useQuery(queryOptions, queryClient) as UseQueryResult<
-		TData,
-		TError
-	> & { queryKey: DataTag<QueryKey, TData, TError> };
-
-	query.queryKey = queryOptions.queryKey;
-
-	return query;
+  return query;
 }
+
+
+
+
+export const useGetReleaseQueryOptions = <TData = Awaited<ReturnType<ReturnType<typeof useGetReleaseHook>>>, TError = void>(releaseId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetReleaseHook>>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetReleaseQueryKey(releaseId);
+
+  const getRelease =  useGetReleaseHook();
+
+    const queryFn: QueryFunction<Awaited<ReturnType<ReturnType<typeof useGetReleaseHook>>>> = ({ signal }) => getRelease(releaseId, signal);
+
+      
+
+      
+
+   return  { queryKey, queryFn, enabled: !!(releaseId), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetReleaseHook>>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetReleaseQueryResult = NonNullable<Awaited<ReturnType<ReturnType<typeof useGetReleaseHook>>>>
+export type GetReleaseQueryError = void
+
+
+export function useGetRelease<TData = Awaited<ReturnType<ReturnType<typeof useGetReleaseHook>>>, TError = void>(
+ releaseId: number, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetReleaseHook>>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useGetReleaseHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useGetReleaseHook>>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetRelease<TData = Awaited<ReturnType<ReturnType<typeof useGetReleaseHook>>>, TError = void>(
+ releaseId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetReleaseHook>>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useGetReleaseHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useGetReleaseHook>>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetRelease<TData = Awaited<ReturnType<ReturnType<typeof useGetReleaseHook>>>, TError = void>(
+ releaseId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetReleaseHook>>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+
+export function useGetRelease<TData = Awaited<ReturnType<ReturnType<typeof useGetReleaseHook>>>, TError = void>(
+ releaseId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetReleaseHook>>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = useGetReleaseQueryOptions(releaseId,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  query.queryKey = queryOptions.queryKey ;
+
+  return query;
+}
+
+
+
+
 
 export const usePatchReleaseHook = () => {
-	const patchRelease = useClientMutator<void>();
+        const patchRelease = useClientMutator<void>();
 
-	return useCallback(
-		(releaseId: number, updateRelease: UpdateRelease, signal?: AbortSignal) => {
-			return patchRelease({
-				url: `/releases/${releaseId}`,
-				method: "POST",
-				headers: { "Content-Type": "application/json" },
-				data: updateRelease,
-				signal,
-			});
-		},
-		[patchRelease],
-	);
-};
+        return useCallback((
+    releaseId: number,
+    updateRelease: UpdateRelease,
+ signal?: AbortSignal
+) => {
+        return patchRelease(
+          {url: `/releases/${releaseId}`, method: 'POST',
+      headers: {'Content-Type': 'application/json', },
+      data: updateRelease, signal
+    },
+          );
+        }, [patchRelease])
+      }
+    
 
-export const usePatchReleaseMutationOptions = <
-	TError = void,
-	TContext = unknown,
->(options?: {
-	mutation?: UseMutationOptions<
-		Awaited<ReturnType<ReturnType<typeof usePatchReleaseHook>>>,
-		TError,
-		{ releaseId: number; data: UpdateRelease },
-		TContext
-	>;
-}): UseMutationOptions<
-	Awaited<ReturnType<ReturnType<typeof usePatchReleaseHook>>>,
-	TError,
-	{ releaseId: number; data: UpdateRelease },
-	TContext
-> => {
-	const mutationKey = ["patchRelease"];
-	const { mutation: mutationOptions } = options
-		? options.mutation &&
-			"mutationKey" in options.mutation &&
-			options.mutation.mutationKey
-			? options
-			: { ...options, mutation: { ...options.mutation, mutationKey } }
-		: { mutation: { mutationKey } };
 
-	const patchRelease = usePatchReleaseHook();
+export const usePatchReleaseMutationOptions = <TError = void,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<ReturnType<typeof usePatchReleaseHook>>>, TError,{releaseId: number;data: UpdateRelease}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<ReturnType<typeof usePatchReleaseHook>>>, TError,{releaseId: number;data: UpdateRelease}, TContext> => {
 
-	const mutationFn: MutationFunction<
-		Awaited<ReturnType<ReturnType<typeof usePatchReleaseHook>>>,
-		{ releaseId: number; data: UpdateRelease }
-	> = (props) => {
-		const { releaseId, data } = props ?? {};
+const mutationKey = ['patchRelease'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
 
-		return patchRelease(releaseId, data);
-	};
+      const patchRelease =  usePatchReleaseHook()
 
-	return { mutationFn, ...mutationOptions };
-};
 
-export type PatchReleaseMutationResult = NonNullable<
-	Awaited<ReturnType<ReturnType<typeof usePatchReleaseHook>>>
->;
-export type PatchReleaseMutationBody = UpdateRelease;
-export type PatchReleaseMutationError = void;
+      const mutationFn: MutationFunction<Awaited<ReturnType<ReturnType<typeof usePatchReleaseHook>>>, {releaseId: number;data: UpdateRelease}> = (props) => {
+          const {releaseId,data} = props ?? {};
 
-export const usePatchRelease = <TError = void, TContext = unknown>(
-	options?: {
-		mutation?: UseMutationOptions<
-			Awaited<ReturnType<ReturnType<typeof usePatchReleaseHook>>>,
-			TError,
-			{ releaseId: number; data: UpdateRelease },
-			TContext
-		>;
-	},
-	queryClient?: QueryClient,
-): UseMutationResult<
-	Awaited<ReturnType<ReturnType<typeof usePatchReleaseHook>>>,
-	TError,
-	{ releaseId: number; data: UpdateRelease },
-	TContext
-> => {
-	const mutationOptions = usePatchReleaseMutationOptions(options);
+          return  patchRelease(releaseId,data,)
+        }
 
-	return useMutation(mutationOptions, queryClient);
-};
+        
 
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type PatchReleaseMutationResult = NonNullable<Awaited<ReturnType<ReturnType<typeof usePatchReleaseHook>>>>
+    export type PatchReleaseMutationBody = UpdateRelease
+    export type PatchReleaseMutationError = void
+
+    export const usePatchRelease = <TError = void,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<ReturnType<typeof usePatchReleaseHook>>>, TError,{releaseId: number;data: UpdateRelease}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<ReturnType<typeof usePatchReleaseHook>>>,
+        TError,
+        {releaseId: number;data: UpdateRelease},
+        TContext
+      > => {
+
+      const mutationOptions = usePatchReleaseMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    
 export const useApiGetReleaseDeploymentHook = () => {
-	const apiGetReleaseDeployment = useClientMutator<Deployment>();
+        const apiGetReleaseDeployment = useClientMutator<Deployment>();
 
-	return useCallback(
-		(releaseId: number, signal?: AbortSignal) => {
-			return apiGetReleaseDeployment({
-				url: `/releases/${releaseId}/deployment`,
-				method: "GET",
-				signal,
-			});
-		},
-		[apiGetReleaseDeployment],
-	);
-};
-
-export const getApiGetReleaseDeploymentInfiniteQueryKey = (
-	releaseId?: number,
+        return useCallback((
+    releaseId: number,
+ signal?: AbortSignal
 ) => {
-	return ["infinite", `/releases/${releaseId}/deployment`] as const;
-};
+        return apiGetReleaseDeployment(
+          {url: `/releases/${releaseId}/deployment`, method: 'GET', signal
+    },
+          );
+        }, [apiGetReleaseDeployment])
+      }
+    
 
-export const getApiGetReleaseDeploymentQueryKey = (releaseId?: number) => {
-	return [`/releases/${releaseId}/deployment`] as const;
-};
 
-export const useApiGetReleaseDeploymentInfiniteQueryOptions = <
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useApiGetReleaseDeploymentHook>>>
-	>,
-	TError = unknown,
->(
-	releaseId: number,
-	options?: {
-		query?: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useApiGetReleaseDeploymentHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
+
+export const getApiGetReleaseDeploymentInfiniteQueryKey = (releaseId?: number,) => {
+    return [
+    'infinite', `/releases/${releaseId}/deployment`
+    ] as const;
+    }
+
+export const getApiGetReleaseDeploymentQueryKey = (releaseId?: number,) => {
+    return [
+    `/releases/${releaseId}/deployment`
+    ] as const;
+    }
+
+    
+export const useApiGetReleaseDeploymentInfiniteQueryOptions = <TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useApiGetReleaseDeploymentHook>>>>, TError = unknown>(releaseId: number, options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useApiGetReleaseDeploymentHook>>>, TError, TData>>, }
 ) => {
-	const { query: queryOptions } = options ?? {};
 
-	const queryKey =
-		queryOptions?.queryKey ??
-		getApiGetReleaseDeploymentInfiniteQueryKey(releaseId);
+const {query: queryOptions} = options ?? {};
 
-	const apiGetReleaseDeployment = useApiGetReleaseDeploymentHook();
+  const queryKey =  queryOptions?.queryKey ?? getApiGetReleaseDeploymentInfiniteQueryKey(releaseId);
 
-	const queryFn: QueryFunction<
-		Awaited<ReturnType<ReturnType<typeof useApiGetReleaseDeploymentHook>>>
-	> = ({ signal }) => apiGetReleaseDeployment(releaseId, signal);
+  const apiGetReleaseDeployment =  useApiGetReleaseDeploymentHook();
 
-	return {
-		queryKey,
-		queryFn,
-		enabled: !!releaseId,
-		...queryOptions,
-	} as UseInfiniteQueryOptions<
-		Awaited<ReturnType<ReturnType<typeof useApiGetReleaseDeploymentHook>>>,
-		TError,
-		TData
-	> & { queryKey: DataTag<QueryKey, TData, TError> };
-};
+    const queryFn: QueryFunction<Awaited<ReturnType<ReturnType<typeof useApiGetReleaseDeploymentHook>>>> = ({ signal }) => apiGetReleaseDeployment(releaseId, signal);
 
-export type ApiGetReleaseDeploymentInfiniteQueryResult = NonNullable<
-	Awaited<ReturnType<ReturnType<typeof useApiGetReleaseDeploymentHook>>>
->;
-export type ApiGetReleaseDeploymentInfiniteQueryError = unknown;
+      
 
-export function useApiGetReleaseDeploymentInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useApiGetReleaseDeploymentHook>>>
-	>,
-	TError = unknown,
->(
-	releaseId: number,
-	options: {
-		query: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useApiGetReleaseDeploymentHook>>>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				DefinedInitialDataOptions<
-					Awaited<
-						ReturnType<ReturnType<typeof useApiGetReleaseDeploymentHook>>
-					>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useApiGetReleaseDeploymentHook>>>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): DefinedUseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useApiGetReleaseDeploymentInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useApiGetReleaseDeploymentHook>>>
-	>,
-	TError = unknown,
->(
-	releaseId: number,
-	options?: {
-		query?: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useApiGetReleaseDeploymentHook>>>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				UndefinedInitialDataOptions<
-					Awaited<
-						ReturnType<ReturnType<typeof useApiGetReleaseDeploymentHook>>
-					>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useApiGetReleaseDeploymentHook>>>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): UseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useApiGetReleaseDeploymentInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useApiGetReleaseDeploymentHook>>>
-	>,
-	TError = unknown,
->(
-	releaseId: number,
-	options?: {
-		query?: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useApiGetReleaseDeploymentHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
+      
 
-export function useApiGetReleaseDeploymentInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useApiGetReleaseDeploymentHook>>>
-	>,
-	TError = unknown,
->(
-	releaseId: number,
-	options?: {
-		query?: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useApiGetReleaseDeploymentHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-} {
-	const queryOptions = useApiGetReleaseDeploymentInfiniteQueryOptions(
-		releaseId,
-		options,
-	);
-
-	const query = useInfiniteQuery(
-		queryOptions,
-		queryClient,
-	) as UseInfiniteQueryResult<TData, TError> & {
-		queryKey: DataTag<QueryKey, TData, TError>;
-	};
-
-	query.queryKey = queryOptions.queryKey;
-
-	return query;
+   return  { queryKey, queryFn, enabled: !!(releaseId), ...queryOptions} as UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useApiGetReleaseDeploymentHook>>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
 }
 
-export const useApiGetReleaseDeploymentQueryOptions = <
-	TData = Awaited<
-		ReturnType<ReturnType<typeof useApiGetReleaseDeploymentHook>>
-	>,
-	TError = unknown,
->(
-	releaseId: number,
-	options?: {
-		query?: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useApiGetReleaseDeploymentHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-) => {
-	const { query: queryOptions } = options ?? {};
+export type ApiGetReleaseDeploymentInfiniteQueryResult = NonNullable<Awaited<ReturnType<ReturnType<typeof useApiGetReleaseDeploymentHook>>>>
+export type ApiGetReleaseDeploymentInfiniteQueryError = unknown
 
-	const queryKey =
-		queryOptions?.queryKey ?? getApiGetReleaseDeploymentQueryKey(releaseId);
 
-	const apiGetReleaseDeployment = useApiGetReleaseDeploymentHook();
+export function useApiGetReleaseDeploymentInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useApiGetReleaseDeploymentHook>>>>, TError = unknown>(
+ releaseId: number, options: { query:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useApiGetReleaseDeploymentHook>>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useApiGetReleaseDeploymentHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useApiGetReleaseDeploymentHook>>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useApiGetReleaseDeploymentInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useApiGetReleaseDeploymentHook>>>>, TError = unknown>(
+ releaseId: number, options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useApiGetReleaseDeploymentHook>>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useApiGetReleaseDeploymentHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useApiGetReleaseDeploymentHook>>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useApiGetReleaseDeploymentInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useApiGetReleaseDeploymentHook>>>>, TError = unknown>(
+ releaseId: number, options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useApiGetReleaseDeploymentHook>>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 
-	const queryFn: QueryFunction<
-		Awaited<ReturnType<ReturnType<typeof useApiGetReleaseDeploymentHook>>>
-	> = ({ signal }) => apiGetReleaseDeployment(releaseId, signal);
+export function useApiGetReleaseDeploymentInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useApiGetReleaseDeploymentHook>>>>, TError = unknown>(
+ releaseId: number, options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useApiGetReleaseDeploymentHook>>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
-	return {
-		queryKey,
-		queryFn,
-		enabled: !!releaseId,
-		...queryOptions,
-	} as UseQueryOptions<
-		Awaited<ReturnType<ReturnType<typeof useApiGetReleaseDeploymentHook>>>,
-		TError,
-		TData
-	> & { queryKey: DataTag<QueryKey, TData, TError> };
-};
+  const queryOptions = useApiGetReleaseDeploymentInfiniteQueryOptions(releaseId,options)
 
-export type ApiGetReleaseDeploymentQueryResult = NonNullable<
-	Awaited<ReturnType<ReturnType<typeof useApiGetReleaseDeploymentHook>>>
->;
-export type ApiGetReleaseDeploymentQueryError = unknown;
+  const query = useInfiniteQuery(queryOptions, queryClient) as  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 
-export function useApiGetReleaseDeployment<
-	TData = Awaited<
-		ReturnType<ReturnType<typeof useApiGetReleaseDeploymentHook>>
-	>,
-	TError = unknown,
->(
-	releaseId: number,
-	options: {
-		query: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useApiGetReleaseDeploymentHook>>>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				DefinedInitialDataOptions<
-					Awaited<
-						ReturnType<ReturnType<typeof useApiGetReleaseDeploymentHook>>
-					>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useApiGetReleaseDeploymentHook>>>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): DefinedUseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useApiGetReleaseDeployment<
-	TData = Awaited<
-		ReturnType<ReturnType<typeof useApiGetReleaseDeploymentHook>>
-	>,
-	TError = unknown,
->(
-	releaseId: number,
-	options?: {
-		query?: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useApiGetReleaseDeploymentHook>>>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				UndefinedInitialDataOptions<
-					Awaited<
-						ReturnType<ReturnType<typeof useApiGetReleaseDeploymentHook>>
-					>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useApiGetReleaseDeploymentHook>>>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useApiGetReleaseDeployment<
-	TData = Awaited<
-		ReturnType<ReturnType<typeof useApiGetReleaseDeploymentHook>>
-	>,
-	TError = unknown,
->(
-	releaseId: number,
-	options?: {
-		query?: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useApiGetReleaseDeploymentHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
+  query.queryKey = queryOptions.queryKey ;
 
-export function useApiGetReleaseDeployment<
-	TData = Awaited<
-		ReturnType<ReturnType<typeof useApiGetReleaseDeploymentHook>>
-	>,
-	TError = unknown,
->(
-	releaseId: number,
-	options?: {
-		query?: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useApiGetReleaseDeploymentHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-} {
-	const queryOptions = useApiGetReleaseDeploymentQueryOptions(
-		releaseId,
-		options,
-	);
-
-	const query = useQuery(queryOptions, queryClient) as UseQueryResult<
-		TData,
-		TError
-	> & { queryKey: DataTag<QueryKey, TData, TError> };
-
-	query.queryKey = queryOptions.queryKey;
-
-	return query;
+  return query;
 }
+
+
+
+
+export const useApiGetReleaseDeploymentQueryOptions = <TData = Awaited<ReturnType<ReturnType<typeof useApiGetReleaseDeploymentHook>>>, TError = unknown>(releaseId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useApiGetReleaseDeploymentHook>>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getApiGetReleaseDeploymentQueryKey(releaseId);
+
+  const apiGetReleaseDeployment =  useApiGetReleaseDeploymentHook();
+
+    const queryFn: QueryFunction<Awaited<ReturnType<ReturnType<typeof useApiGetReleaseDeploymentHook>>>> = ({ signal }) => apiGetReleaseDeployment(releaseId, signal);
+
+      
+
+      
+
+   return  { queryKey, queryFn, enabled: !!(releaseId), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useApiGetReleaseDeploymentHook>>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type ApiGetReleaseDeploymentQueryResult = NonNullable<Awaited<ReturnType<ReturnType<typeof useApiGetReleaseDeploymentHook>>>>
+export type ApiGetReleaseDeploymentQueryError = unknown
+
+
+export function useApiGetReleaseDeployment<TData = Awaited<ReturnType<ReturnType<typeof useApiGetReleaseDeploymentHook>>>, TError = unknown>(
+ releaseId: number, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useApiGetReleaseDeploymentHook>>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useApiGetReleaseDeploymentHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useApiGetReleaseDeploymentHook>>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useApiGetReleaseDeployment<TData = Awaited<ReturnType<ReturnType<typeof useApiGetReleaseDeploymentHook>>>, TError = unknown>(
+ releaseId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useApiGetReleaseDeploymentHook>>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useApiGetReleaseDeploymentHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useApiGetReleaseDeploymentHook>>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useApiGetReleaseDeployment<TData = Awaited<ReturnType<ReturnType<typeof useApiGetReleaseDeploymentHook>>>, TError = unknown>(
+ releaseId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useApiGetReleaseDeploymentHook>>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+
+export function useApiGetReleaseDeployment<TData = Awaited<ReturnType<ReturnType<typeof useApiGetReleaseDeploymentHook>>>, TError = unknown>(
+ releaseId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useApiGetReleaseDeploymentHook>>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = useApiGetReleaseDeploymentQueryOptions(releaseId,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  query.queryKey = queryOptions.queryKey ;
+
+  return query;
+}
+
+
+
+
 
 export const useApiReleaseDeploymentHook = () => {
-	const apiReleaseDeployment = useClientMutator<Deployment>();
+        const apiReleaseDeployment = useClientMutator<Deployment>();
 
-	return useCallback(
-		(releaseId: number, signal?: AbortSignal) => {
-			return apiReleaseDeployment({
-				url: `/releases/${releaseId}/deployment`,
-				method: "POST",
-				signal,
-			});
-		},
-		[apiReleaseDeployment],
-	);
-};
+        return useCallback((
+    releaseId: number,
+ signal?: AbortSignal
+) => {
+        return apiReleaseDeployment(
+          {url: `/releases/${releaseId}/deployment`, method: 'POST', signal
+    },
+          );
+        }, [apiReleaseDeployment])
+      }
+    
 
-export const useApiReleaseDeploymentMutationOptions = <
-	TError = unknown,
-	TContext = unknown,
->(options?: {
-	mutation?: UseMutationOptions<
-		Awaited<ReturnType<ReturnType<typeof useApiReleaseDeploymentHook>>>,
-		TError,
-		{ releaseId: number },
-		TContext
-	>;
-}): UseMutationOptions<
-	Awaited<ReturnType<ReturnType<typeof useApiReleaseDeploymentHook>>>,
-	TError,
-	{ releaseId: number },
-	TContext
-> => {
-	const mutationKey = ["apiReleaseDeployment"];
-	const { mutation: mutationOptions } = options
-		? options.mutation &&
-			"mutationKey" in options.mutation &&
-			options.mutation.mutationKey
-			? options
-			: { ...options, mutation: { ...options.mutation, mutationKey } }
-		: { mutation: { mutationKey } };
 
-	const apiReleaseDeployment = useApiReleaseDeploymentHook();
+export const useApiReleaseDeploymentMutationOptions = <TError = unknown,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<ReturnType<typeof useApiReleaseDeploymentHook>>>, TError,{releaseId: number}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<ReturnType<typeof useApiReleaseDeploymentHook>>>, TError,{releaseId: number}, TContext> => {
 
-	const mutationFn: MutationFunction<
-		Awaited<ReturnType<ReturnType<typeof useApiReleaseDeploymentHook>>>,
-		{ releaseId: number }
-	> = (props) => {
-		const { releaseId } = props ?? {};
+const mutationKey = ['apiReleaseDeployment'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
 
-		return apiReleaseDeployment(releaseId);
-	};
+      const apiReleaseDeployment =  useApiReleaseDeploymentHook()
 
-	return { mutationFn, ...mutationOptions };
-};
 
-export type ApiReleaseDeploymentMutationResult = NonNullable<
-	Awaited<ReturnType<ReturnType<typeof useApiReleaseDeploymentHook>>>
->;
+      const mutationFn: MutationFunction<Awaited<ReturnType<ReturnType<typeof useApiReleaseDeploymentHook>>>, {releaseId: number}> = (props) => {
+          const {releaseId} = props ?? {};
 
-export type ApiReleaseDeploymentMutationError = unknown;
+          return  apiReleaseDeployment(releaseId,)
+        }
 
-export const useApiReleaseDeployment = <TError = unknown, TContext = unknown>(
-	options?: {
-		mutation?: UseMutationOptions<
-			Awaited<ReturnType<ReturnType<typeof useApiReleaseDeploymentHook>>>,
-			TError,
-			{ releaseId: number },
-			TContext
-		>;
-	},
-	queryClient?: QueryClient,
-): UseMutationResult<
-	Awaited<ReturnType<ReturnType<typeof useApiReleaseDeploymentHook>>>,
-	TError,
-	{ releaseId: number },
-	TContext
-> => {
-	const mutationOptions = useApiReleaseDeploymentMutationOptions(options);
+        
 
-	return useMutation(mutationOptions, queryClient);
-};
 
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ApiReleaseDeploymentMutationResult = NonNullable<Awaited<ReturnType<ReturnType<typeof useApiReleaseDeploymentHook>>>>
+    
+    export type ApiReleaseDeploymentMutationError = unknown
+
+    export const useApiReleaseDeployment = <TError = unknown,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<ReturnType<typeof useApiReleaseDeploymentHook>>>, TError,{releaseId: number}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<ReturnType<typeof useApiReleaseDeploymentHook>>>,
+        TError,
+        {releaseId: number},
+        TContext
+      > => {
+
+      const mutationOptions = useApiReleaseDeploymentMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    
 export const useApiConfirmFullRolloutHook = () => {
-	const apiConfirmFullRollout = useClientMutator<Deployment>();
+        const apiConfirmFullRollout = useClientMutator<Deployment>();
 
-	return useCallback(
-		(releaseId: number, signal?: AbortSignal) => {
-			return apiConfirmFullRollout({
-				url: `/releases/${releaseId}/deployment/confirm`,
-				method: "POST",
-				signal,
-			});
-		},
-		[apiConfirmFullRollout],
-	);
-};
+        return useCallback((
+    releaseId: number,
+ signal?: AbortSignal
+) => {
+        return apiConfirmFullRollout(
+          {url: `/releases/${releaseId}/deployment/confirm`, method: 'POST', signal
+    },
+          );
+        }, [apiConfirmFullRollout])
+      }
+    
 
-export const useApiConfirmFullRolloutMutationOptions = <
-	TError = void,
-	TContext = unknown,
->(options?: {
-	mutation?: UseMutationOptions<
-		Awaited<ReturnType<ReturnType<typeof useApiConfirmFullRolloutHook>>>,
-		TError,
-		{ releaseId: number },
-		TContext
-	>;
-}): UseMutationOptions<
-	Awaited<ReturnType<ReturnType<typeof useApiConfirmFullRolloutHook>>>,
-	TError,
-	{ releaseId: number },
-	TContext
-> => {
-	const mutationKey = ["apiConfirmFullRollout"];
-	const { mutation: mutationOptions } = options
-		? options.mutation &&
-			"mutationKey" in options.mutation &&
-			options.mutation.mutationKey
-			? options
-			: { ...options, mutation: { ...options.mutation, mutationKey } }
-		: { mutation: { mutationKey } };
 
-	const apiConfirmFullRollout = useApiConfirmFullRolloutHook();
+export const useApiConfirmFullRolloutMutationOptions = <TError = void,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<ReturnType<typeof useApiConfirmFullRolloutHook>>>, TError,{releaseId: number}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<ReturnType<typeof useApiConfirmFullRolloutHook>>>, TError,{releaseId: number}, TContext> => {
 
-	const mutationFn: MutationFunction<
-		Awaited<ReturnType<ReturnType<typeof useApiConfirmFullRolloutHook>>>,
-		{ releaseId: number }
-	> = (props) => {
-		const { releaseId } = props ?? {};
+const mutationKey = ['apiConfirmFullRollout'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
 
-		return apiConfirmFullRollout(releaseId);
-	};
+      const apiConfirmFullRollout =  useApiConfirmFullRolloutHook()
 
-	return { mutationFn, ...mutationOptions };
-};
 
-export type ApiConfirmFullRolloutMutationResult = NonNullable<
-	Awaited<ReturnType<ReturnType<typeof useApiConfirmFullRolloutHook>>>
->;
+      const mutationFn: MutationFunction<Awaited<ReturnType<ReturnType<typeof useApiConfirmFullRolloutHook>>>, {releaseId: number}> = (props) => {
+          const {releaseId} = props ?? {};
 
-export type ApiConfirmFullRolloutMutationError = void;
+          return  apiConfirmFullRollout(releaseId,)
+        }
 
-export const useApiConfirmFullRollout = <TError = void, TContext = unknown>(
-	options?: {
-		mutation?: UseMutationOptions<
-			Awaited<ReturnType<ReturnType<typeof useApiConfirmFullRolloutHook>>>,
-			TError,
-			{ releaseId: number },
-			TContext
-		>;
-	},
-	queryClient?: QueryClient,
-): UseMutationResult<
-	Awaited<ReturnType<ReturnType<typeof useApiConfirmFullRolloutHook>>>,
-	TError,
-	{ releaseId: number },
-	TContext
-> => {
-	const mutationOptions = useApiConfirmFullRolloutMutationOptions(options);
+        
 
-	return useMutation(mutationOptions, queryClient);
-};
 
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ApiConfirmFullRolloutMutationResult = NonNullable<Awaited<ReturnType<ReturnType<typeof useApiConfirmFullRolloutHook>>>>
+    
+    export type ApiConfirmFullRolloutMutationError = void
+
+    export const useApiConfirmFullRollout = <TError = void,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<ReturnType<typeof useApiConfirmFullRolloutHook>>>, TError,{releaseId: number}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<ReturnType<typeof useApiConfirmFullRolloutHook>>>,
+        TError,
+        {releaseId: number},
+        TContext
+      > => {
+
+      const mutationOptions = useApiConfirmFullRolloutMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    
 export const useApiGetDeploymentDevicesHook = () => {
-	const apiGetDeploymentDevices =
-		useClientMutator<DeploymentDeviceWithStatus[]>();
+        const apiGetDeploymentDevices = useClientMutator<DeploymentDeviceWithStatus[]>();
 
-	return useCallback(
-		(releaseId: number, signal?: AbortSignal) => {
-			return apiGetDeploymentDevices({
-				url: `/releases/${releaseId}/deployment/devices`,
-				method: "GET",
-				signal,
-			});
-		},
-		[apiGetDeploymentDevices],
-	);
-};
-
-export const getApiGetDeploymentDevicesInfiniteQueryKey = (
-	releaseId?: number,
+        return useCallback((
+    releaseId: number,
+ signal?: AbortSignal
 ) => {
-	return ["infinite", `/releases/${releaseId}/deployment/devices`] as const;
-};
+        return apiGetDeploymentDevices(
+          {url: `/releases/${releaseId}/deployment/devices`, method: 'GET', signal
+    },
+          );
+        }, [apiGetDeploymentDevices])
+      }
+    
 
-export const getApiGetDeploymentDevicesQueryKey = (releaseId?: number) => {
-	return [`/releases/${releaseId}/deployment/devices`] as const;
-};
 
-export const useApiGetDeploymentDevicesInfiniteQueryOptions = <
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useApiGetDeploymentDevicesHook>>>
-	>,
-	TError = unknown,
->(
-	releaseId: number,
-	options?: {
-		query?: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useApiGetDeploymentDevicesHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
+
+export const getApiGetDeploymentDevicesInfiniteQueryKey = (releaseId?: number,) => {
+    return [
+    'infinite', `/releases/${releaseId}/deployment/devices`
+    ] as const;
+    }
+
+export const getApiGetDeploymentDevicesQueryKey = (releaseId?: number,) => {
+    return [
+    `/releases/${releaseId}/deployment/devices`
+    ] as const;
+    }
+
+    
+export const useApiGetDeploymentDevicesInfiniteQueryOptions = <TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useApiGetDeploymentDevicesHook>>>>, TError = unknown>(releaseId: number, options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useApiGetDeploymentDevicesHook>>>, TError, TData>>, }
 ) => {
-	const { query: queryOptions } = options ?? {};
 
-	const queryKey =
-		queryOptions?.queryKey ??
-		getApiGetDeploymentDevicesInfiniteQueryKey(releaseId);
+const {query: queryOptions} = options ?? {};
 
-	const apiGetDeploymentDevices = useApiGetDeploymentDevicesHook();
+  const queryKey =  queryOptions?.queryKey ?? getApiGetDeploymentDevicesInfiniteQueryKey(releaseId);
 
-	const queryFn: QueryFunction<
-		Awaited<ReturnType<ReturnType<typeof useApiGetDeploymentDevicesHook>>>
-	> = ({ signal }) => apiGetDeploymentDevices(releaseId, signal);
+  const apiGetDeploymentDevices =  useApiGetDeploymentDevicesHook();
 
-	return {
-		queryKey,
-		queryFn,
-		enabled: !!releaseId,
-		...queryOptions,
-	} as UseInfiniteQueryOptions<
-		Awaited<ReturnType<ReturnType<typeof useApiGetDeploymentDevicesHook>>>,
-		TError,
-		TData
-	> & { queryKey: DataTag<QueryKey, TData, TError> };
-};
+    const queryFn: QueryFunction<Awaited<ReturnType<ReturnType<typeof useApiGetDeploymentDevicesHook>>>> = ({ signal }) => apiGetDeploymentDevices(releaseId, signal);
 
-export type ApiGetDeploymentDevicesInfiniteQueryResult = NonNullable<
-	Awaited<ReturnType<ReturnType<typeof useApiGetDeploymentDevicesHook>>>
->;
-export type ApiGetDeploymentDevicesInfiniteQueryError = unknown;
+      
 
-export function useApiGetDeploymentDevicesInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useApiGetDeploymentDevicesHook>>>
-	>,
-	TError = unknown,
->(
-	releaseId: number,
-	options: {
-		query: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useApiGetDeploymentDevicesHook>>>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				DefinedInitialDataOptions<
-					Awaited<
-						ReturnType<ReturnType<typeof useApiGetDeploymentDevicesHook>>
-					>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useApiGetDeploymentDevicesHook>>>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): DefinedUseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useApiGetDeploymentDevicesInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useApiGetDeploymentDevicesHook>>>
-	>,
-	TError = unknown,
->(
-	releaseId: number,
-	options?: {
-		query?: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useApiGetDeploymentDevicesHook>>>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				UndefinedInitialDataOptions<
-					Awaited<
-						ReturnType<ReturnType<typeof useApiGetDeploymentDevicesHook>>
-					>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useApiGetDeploymentDevicesHook>>>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): UseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useApiGetDeploymentDevicesInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useApiGetDeploymentDevicesHook>>>
-	>,
-	TError = unknown,
->(
-	releaseId: number,
-	options?: {
-		query?: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useApiGetDeploymentDevicesHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
+      
 
-export function useApiGetDeploymentDevicesInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useApiGetDeploymentDevicesHook>>>
-	>,
-	TError = unknown,
->(
-	releaseId: number,
-	options?: {
-		query?: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useApiGetDeploymentDevicesHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-} {
-	const queryOptions = useApiGetDeploymentDevicesInfiniteQueryOptions(
-		releaseId,
-		options,
-	);
-
-	const query = useInfiniteQuery(
-		queryOptions,
-		queryClient,
-	) as UseInfiniteQueryResult<TData, TError> & {
-		queryKey: DataTag<QueryKey, TData, TError>;
-	};
-
-	query.queryKey = queryOptions.queryKey;
-
-	return query;
+   return  { queryKey, queryFn, enabled: !!(releaseId), ...queryOptions} as UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useApiGetDeploymentDevicesHook>>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
 }
 
-export const useApiGetDeploymentDevicesQueryOptions = <
-	TData = Awaited<
-		ReturnType<ReturnType<typeof useApiGetDeploymentDevicesHook>>
-	>,
-	TError = unknown,
->(
-	releaseId: number,
-	options?: {
-		query?: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useApiGetDeploymentDevicesHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-) => {
-	const { query: queryOptions } = options ?? {};
+export type ApiGetDeploymentDevicesInfiniteQueryResult = NonNullable<Awaited<ReturnType<ReturnType<typeof useApiGetDeploymentDevicesHook>>>>
+export type ApiGetDeploymentDevicesInfiniteQueryError = unknown
 
-	const queryKey =
-		queryOptions?.queryKey ?? getApiGetDeploymentDevicesQueryKey(releaseId);
 
-	const apiGetDeploymentDevices = useApiGetDeploymentDevicesHook();
+export function useApiGetDeploymentDevicesInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useApiGetDeploymentDevicesHook>>>>, TError = unknown>(
+ releaseId: number, options: { query:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useApiGetDeploymentDevicesHook>>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useApiGetDeploymentDevicesHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useApiGetDeploymentDevicesHook>>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useApiGetDeploymentDevicesInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useApiGetDeploymentDevicesHook>>>>, TError = unknown>(
+ releaseId: number, options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useApiGetDeploymentDevicesHook>>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useApiGetDeploymentDevicesHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useApiGetDeploymentDevicesHook>>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useApiGetDeploymentDevicesInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useApiGetDeploymentDevicesHook>>>>, TError = unknown>(
+ releaseId: number, options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useApiGetDeploymentDevicesHook>>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 
-	const queryFn: QueryFunction<
-		Awaited<ReturnType<ReturnType<typeof useApiGetDeploymentDevicesHook>>>
-	> = ({ signal }) => apiGetDeploymentDevices(releaseId, signal);
+export function useApiGetDeploymentDevicesInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useApiGetDeploymentDevicesHook>>>>, TError = unknown>(
+ releaseId: number, options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useApiGetDeploymentDevicesHook>>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
-	return {
-		queryKey,
-		queryFn,
-		enabled: !!releaseId,
-		...queryOptions,
-	} as UseQueryOptions<
-		Awaited<ReturnType<ReturnType<typeof useApiGetDeploymentDevicesHook>>>,
-		TError,
-		TData
-	> & { queryKey: DataTag<QueryKey, TData, TError> };
-};
+  const queryOptions = useApiGetDeploymentDevicesInfiniteQueryOptions(releaseId,options)
 
-export type ApiGetDeploymentDevicesQueryResult = NonNullable<
-	Awaited<ReturnType<ReturnType<typeof useApiGetDeploymentDevicesHook>>>
->;
-export type ApiGetDeploymentDevicesQueryError = unknown;
+  const query = useInfiniteQuery(queryOptions, queryClient) as  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 
-export function useApiGetDeploymentDevices<
-	TData = Awaited<
-		ReturnType<ReturnType<typeof useApiGetDeploymentDevicesHook>>
-	>,
-	TError = unknown,
->(
-	releaseId: number,
-	options: {
-		query: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useApiGetDeploymentDevicesHook>>>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				DefinedInitialDataOptions<
-					Awaited<
-						ReturnType<ReturnType<typeof useApiGetDeploymentDevicesHook>>
-					>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useApiGetDeploymentDevicesHook>>>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): DefinedUseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useApiGetDeploymentDevices<
-	TData = Awaited<
-		ReturnType<ReturnType<typeof useApiGetDeploymentDevicesHook>>
-	>,
-	TError = unknown,
->(
-	releaseId: number,
-	options?: {
-		query?: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useApiGetDeploymentDevicesHook>>>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				UndefinedInitialDataOptions<
-					Awaited<
-						ReturnType<ReturnType<typeof useApiGetDeploymentDevicesHook>>
-					>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useApiGetDeploymentDevicesHook>>>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useApiGetDeploymentDevices<
-	TData = Awaited<
-		ReturnType<ReturnType<typeof useApiGetDeploymentDevicesHook>>
-	>,
-	TError = unknown,
->(
-	releaseId: number,
-	options?: {
-		query?: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useApiGetDeploymentDevicesHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
+  query.queryKey = queryOptions.queryKey ;
 
-export function useApiGetDeploymentDevices<
-	TData = Awaited<
-		ReturnType<ReturnType<typeof useApiGetDeploymentDevicesHook>>
-	>,
-	TError = unknown,
->(
-	releaseId: number,
-	options?: {
-		query?: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useApiGetDeploymentDevicesHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-} {
-	const queryOptions = useApiGetDeploymentDevicesQueryOptions(
-		releaseId,
-		options,
-	);
-
-	const query = useQuery(queryOptions, queryClient) as UseQueryResult<
-		TData,
-		TError
-	> & { queryKey: DataTag<QueryKey, TData, TError> };
-
-	query.queryKey = queryOptions.queryKey;
-
-	return query;
+  return query;
 }
+
+
+
+
+export const useApiGetDeploymentDevicesQueryOptions = <TData = Awaited<ReturnType<ReturnType<typeof useApiGetDeploymentDevicesHook>>>, TError = unknown>(releaseId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useApiGetDeploymentDevicesHook>>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getApiGetDeploymentDevicesQueryKey(releaseId);
+
+  const apiGetDeploymentDevices =  useApiGetDeploymentDevicesHook();
+
+    const queryFn: QueryFunction<Awaited<ReturnType<ReturnType<typeof useApiGetDeploymentDevicesHook>>>> = ({ signal }) => apiGetDeploymentDevices(releaseId, signal);
+
+      
+
+      
+
+   return  { queryKey, queryFn, enabled: !!(releaseId), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useApiGetDeploymentDevicesHook>>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type ApiGetDeploymentDevicesQueryResult = NonNullable<Awaited<ReturnType<ReturnType<typeof useApiGetDeploymentDevicesHook>>>>
+export type ApiGetDeploymentDevicesQueryError = unknown
+
+
+export function useApiGetDeploymentDevices<TData = Awaited<ReturnType<ReturnType<typeof useApiGetDeploymentDevicesHook>>>, TError = unknown>(
+ releaseId: number, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useApiGetDeploymentDevicesHook>>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useApiGetDeploymentDevicesHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useApiGetDeploymentDevicesHook>>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useApiGetDeploymentDevices<TData = Awaited<ReturnType<ReturnType<typeof useApiGetDeploymentDevicesHook>>>, TError = unknown>(
+ releaseId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useApiGetDeploymentDevicesHook>>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useApiGetDeploymentDevicesHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useApiGetDeploymentDevicesHook>>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useApiGetDeploymentDevices<TData = Awaited<ReturnType<ReturnType<typeof useApiGetDeploymentDevicesHook>>>, TError = unknown>(
+ releaseId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useApiGetDeploymentDevicesHook>>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+
+export function useApiGetDeploymentDevices<TData = Awaited<ReturnType<ReturnType<typeof useApiGetDeploymentDevicesHook>>>, TError = unknown>(
+ releaseId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useApiGetDeploymentDevicesHook>>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = useApiGetDeploymentDevicesQueryOptions(releaseId,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  query.queryKey = queryOptions.queryKey ;
+
+  return query;
+}
+
+
+
+
 
 export const useGetDistributionReleasePackagesHook = () => {
-	const getDistributionReleasePackages = useClientMutator<Package[]>();
+        const getDistributionReleasePackages = useClientMutator<Package[]>();
 
-	return useCallback(
-		(releaseId: number, signal?: AbortSignal) => {
-			return getDistributionReleasePackages({
-				url: `/releases/${releaseId}/packages`,
-				method: "GET",
-				signal,
-			});
-		},
-		[getDistributionReleasePackages],
-	);
-};
-
-export const getGetDistributionReleasePackagesInfiniteQueryKey = (
-	releaseId?: number,
+        return useCallback((
+    releaseId: number,
+ signal?: AbortSignal
 ) => {
-	return ["infinite", `/releases/${releaseId}/packages`] as const;
-};
+        return getDistributionReleasePackages(
+          {url: `/releases/${releaseId}/packages`, method: 'GET', signal
+    },
+          );
+        }, [getDistributionReleasePackages])
+      }
+    
 
-export const getGetDistributionReleasePackagesQueryKey = (
-	releaseId?: number,
+
+
+export const getGetDistributionReleasePackagesInfiniteQueryKey = (releaseId?: number,) => {
+    return [
+    'infinite', `/releases/${releaseId}/packages`
+    ] as const;
+    }
+
+export const getGetDistributionReleasePackagesQueryKey = (releaseId?: number,) => {
+    return [
+    `/releases/${releaseId}/packages`
+    ] as const;
+    }
+
+    
+export const useGetDistributionReleasePackagesInfiniteQueryOptions = <TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetDistributionReleasePackagesHook>>>>, TError = void>(releaseId: number, options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetDistributionReleasePackagesHook>>>, TError, TData>>, }
 ) => {
-	return [`/releases/${releaseId}/packages`] as const;
-};
 
-export const useGetDistributionReleasePackagesInfiniteQueryOptions = <
-	TData = InfiniteData<
-		Awaited<
-			ReturnType<ReturnType<typeof useGetDistributionReleasePackagesHook>>
-		>
-	>,
-	TError = void,
->(
-	releaseId: number,
-	options?: {
-		query?: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<
-					ReturnType<ReturnType<typeof useGetDistributionReleasePackagesHook>>
-				>,
-				TError,
-				TData
-			>
-		>;
-	},
-) => {
-	const { query: queryOptions } = options ?? {};
+const {query: queryOptions} = options ?? {};
 
-	const queryKey =
-		queryOptions?.queryKey ??
-		getGetDistributionReleasePackagesInfiniteQueryKey(releaseId);
+  const queryKey =  queryOptions?.queryKey ?? getGetDistributionReleasePackagesInfiniteQueryKey(releaseId);
 
-	const getDistributionReleasePackages =
-		useGetDistributionReleasePackagesHook();
+  const getDistributionReleasePackages =  useGetDistributionReleasePackagesHook();
 
-	const queryFn: QueryFunction<
-		Awaited<
-			ReturnType<ReturnType<typeof useGetDistributionReleasePackagesHook>>
-		>
-	> = ({ signal }) => getDistributionReleasePackages(releaseId, signal);
+    const queryFn: QueryFunction<Awaited<ReturnType<ReturnType<typeof useGetDistributionReleasePackagesHook>>>> = ({ signal }) => getDistributionReleasePackages(releaseId, signal);
 
-	return {
-		queryKey,
-		queryFn,
-		enabled: !!releaseId,
-		...queryOptions,
-	} as UseInfiniteQueryOptions<
-		Awaited<
-			ReturnType<ReturnType<typeof useGetDistributionReleasePackagesHook>>
-		>,
-		TError,
-		TData
-	> & { queryKey: DataTag<QueryKey, TData, TError> };
-};
+      
 
-export type GetDistributionReleasePackagesInfiniteQueryResult = NonNullable<
-	Awaited<ReturnType<ReturnType<typeof useGetDistributionReleasePackagesHook>>>
->;
-export type GetDistributionReleasePackagesInfiniteQueryError = void;
+      
 
-export function useGetDistributionReleasePackagesInfinite<
-	TData = InfiniteData<
-		Awaited<
-			ReturnType<ReturnType<typeof useGetDistributionReleasePackagesHook>>
-		>
-	>,
-	TError = void,
->(
-	releaseId: number,
-	options: {
-		query: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<
-					ReturnType<ReturnType<typeof useGetDistributionReleasePackagesHook>>
-				>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				DefinedInitialDataOptions<
-					Awaited<
-						ReturnType<ReturnType<typeof useGetDistributionReleasePackagesHook>>
-					>,
-					TError,
-					Awaited<
-						ReturnType<ReturnType<typeof useGetDistributionReleasePackagesHook>>
-					>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): DefinedUseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useGetDistributionReleasePackagesInfinite<
-	TData = InfiniteData<
-		Awaited<
-			ReturnType<ReturnType<typeof useGetDistributionReleasePackagesHook>>
-		>
-	>,
-	TError = void,
->(
-	releaseId: number,
-	options?: {
-		query?: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<
-					ReturnType<ReturnType<typeof useGetDistributionReleasePackagesHook>>
-				>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				UndefinedInitialDataOptions<
-					Awaited<
-						ReturnType<ReturnType<typeof useGetDistributionReleasePackagesHook>>
-					>,
-					TError,
-					Awaited<
-						ReturnType<ReturnType<typeof useGetDistributionReleasePackagesHook>>
-					>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): UseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useGetDistributionReleasePackagesInfinite<
-	TData = InfiniteData<
-		Awaited<
-			ReturnType<ReturnType<typeof useGetDistributionReleasePackagesHook>>
-		>
-	>,
-	TError = void,
->(
-	releaseId: number,
-	options?: {
-		query?: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<
-					ReturnType<ReturnType<typeof useGetDistributionReleasePackagesHook>>
-				>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-
-export function useGetDistributionReleasePackagesInfinite<
-	TData = InfiniteData<
-		Awaited<
-			ReturnType<ReturnType<typeof useGetDistributionReleasePackagesHook>>
-		>
-	>,
-	TError = void,
->(
-	releaseId: number,
-	options?: {
-		query?: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<
-					ReturnType<ReturnType<typeof useGetDistributionReleasePackagesHook>>
-				>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-} {
-	const queryOptions = useGetDistributionReleasePackagesInfiniteQueryOptions(
-		releaseId,
-		options,
-	);
-
-	const query = useInfiniteQuery(
-		queryOptions,
-		queryClient,
-	) as UseInfiniteQueryResult<TData, TError> & {
-		queryKey: DataTag<QueryKey, TData, TError>;
-	};
-
-	query.queryKey = queryOptions.queryKey;
-
-	return query;
+   return  { queryKey, queryFn, enabled: !!(releaseId), ...queryOptions} as UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetDistributionReleasePackagesHook>>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
 }
 
-export const useGetDistributionReleasePackagesQueryOptions = <
-	TData = Awaited<
-		ReturnType<ReturnType<typeof useGetDistributionReleasePackagesHook>>
-	>,
-	TError = void,
->(
-	releaseId: number,
-	options?: {
-		query?: Partial<
-			UseQueryOptions<
-				Awaited<
-					ReturnType<ReturnType<typeof useGetDistributionReleasePackagesHook>>
-				>,
-				TError,
-				TData
-			>
-		>;
-	},
-) => {
-	const { query: queryOptions } = options ?? {};
+export type GetDistributionReleasePackagesInfiniteQueryResult = NonNullable<Awaited<ReturnType<ReturnType<typeof useGetDistributionReleasePackagesHook>>>>
+export type GetDistributionReleasePackagesInfiniteQueryError = void
 
-	const queryKey =
-		queryOptions?.queryKey ??
-		getGetDistributionReleasePackagesQueryKey(releaseId);
 
-	const getDistributionReleasePackages =
-		useGetDistributionReleasePackagesHook();
+export function useGetDistributionReleasePackagesInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetDistributionReleasePackagesHook>>>>, TError = void>(
+ releaseId: number, options: { query:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetDistributionReleasePackagesHook>>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useGetDistributionReleasePackagesHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useGetDistributionReleasePackagesHook>>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetDistributionReleasePackagesInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetDistributionReleasePackagesHook>>>>, TError = void>(
+ releaseId: number, options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetDistributionReleasePackagesHook>>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useGetDistributionReleasePackagesHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useGetDistributionReleasePackagesHook>>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetDistributionReleasePackagesInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetDistributionReleasePackagesHook>>>>, TError = void>(
+ releaseId: number, options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetDistributionReleasePackagesHook>>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 
-	const queryFn: QueryFunction<
-		Awaited<
-			ReturnType<ReturnType<typeof useGetDistributionReleasePackagesHook>>
-		>
-	> = ({ signal }) => getDistributionReleasePackages(releaseId, signal);
+export function useGetDistributionReleasePackagesInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetDistributionReleasePackagesHook>>>>, TError = void>(
+ releaseId: number, options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetDistributionReleasePackagesHook>>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
-	return {
-		queryKey,
-		queryFn,
-		enabled: !!releaseId,
-		...queryOptions,
-	} as UseQueryOptions<
-		Awaited<
-			ReturnType<ReturnType<typeof useGetDistributionReleasePackagesHook>>
-		>,
-		TError,
-		TData
-	> & { queryKey: DataTag<QueryKey, TData, TError> };
-};
+  const queryOptions = useGetDistributionReleasePackagesInfiniteQueryOptions(releaseId,options)
 
-export type GetDistributionReleasePackagesQueryResult = NonNullable<
-	Awaited<ReturnType<ReturnType<typeof useGetDistributionReleasePackagesHook>>>
->;
-export type GetDistributionReleasePackagesQueryError = void;
+  const query = useInfiniteQuery(queryOptions, queryClient) as  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 
-export function useGetDistributionReleasePackages<
-	TData = Awaited<
-		ReturnType<ReturnType<typeof useGetDistributionReleasePackagesHook>>
-	>,
-	TError = void,
->(
-	releaseId: number,
-	options: {
-		query: Partial<
-			UseQueryOptions<
-				Awaited<
-					ReturnType<ReturnType<typeof useGetDistributionReleasePackagesHook>>
-				>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				DefinedInitialDataOptions<
-					Awaited<
-						ReturnType<ReturnType<typeof useGetDistributionReleasePackagesHook>>
-					>,
-					TError,
-					Awaited<
-						ReturnType<ReturnType<typeof useGetDistributionReleasePackagesHook>>
-					>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): DefinedUseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useGetDistributionReleasePackages<
-	TData = Awaited<
-		ReturnType<ReturnType<typeof useGetDistributionReleasePackagesHook>>
-	>,
-	TError = void,
->(
-	releaseId: number,
-	options?: {
-		query?: Partial<
-			UseQueryOptions<
-				Awaited<
-					ReturnType<ReturnType<typeof useGetDistributionReleasePackagesHook>>
-				>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				UndefinedInitialDataOptions<
-					Awaited<
-						ReturnType<ReturnType<typeof useGetDistributionReleasePackagesHook>>
-					>,
-					TError,
-					Awaited<
-						ReturnType<ReturnType<typeof useGetDistributionReleasePackagesHook>>
-					>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useGetDistributionReleasePackages<
-	TData = Awaited<
-		ReturnType<ReturnType<typeof useGetDistributionReleasePackagesHook>>
-	>,
-	TError = void,
->(
-	releaseId: number,
-	options?: {
-		query?: Partial<
-			UseQueryOptions<
-				Awaited<
-					ReturnType<ReturnType<typeof useGetDistributionReleasePackagesHook>>
-				>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
+  query.queryKey = queryOptions.queryKey ;
 
-export function useGetDistributionReleasePackages<
-	TData = Awaited<
-		ReturnType<ReturnType<typeof useGetDistributionReleasePackagesHook>>
-	>,
-	TError = void,
->(
-	releaseId: number,
-	options?: {
-		query?: Partial<
-			UseQueryOptions<
-				Awaited<
-					ReturnType<ReturnType<typeof useGetDistributionReleasePackagesHook>>
-				>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-} {
-	const queryOptions = useGetDistributionReleasePackagesQueryOptions(
-		releaseId,
-		options,
-	);
-
-	const query = useQuery(queryOptions, queryClient) as UseQueryResult<
-		TData,
-		TError
-	> & { queryKey: DataTag<QueryKey, TData, TError> };
-
-	query.queryKey = queryOptions.queryKey;
-
-	return query;
+  return query;
 }
+
+
+
+
+export const useGetDistributionReleasePackagesQueryOptions = <TData = Awaited<ReturnType<ReturnType<typeof useGetDistributionReleasePackagesHook>>>, TError = void>(releaseId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetDistributionReleasePackagesHook>>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetDistributionReleasePackagesQueryKey(releaseId);
+
+  const getDistributionReleasePackages =  useGetDistributionReleasePackagesHook();
+
+    const queryFn: QueryFunction<Awaited<ReturnType<ReturnType<typeof useGetDistributionReleasePackagesHook>>>> = ({ signal }) => getDistributionReleasePackages(releaseId, signal);
+
+      
+
+      
+
+   return  { queryKey, queryFn, enabled: !!(releaseId), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetDistributionReleasePackagesHook>>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetDistributionReleasePackagesQueryResult = NonNullable<Awaited<ReturnType<ReturnType<typeof useGetDistributionReleasePackagesHook>>>>
+export type GetDistributionReleasePackagesQueryError = void
+
+
+export function useGetDistributionReleasePackages<TData = Awaited<ReturnType<ReturnType<typeof useGetDistributionReleasePackagesHook>>>, TError = void>(
+ releaseId: number, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetDistributionReleasePackagesHook>>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useGetDistributionReleasePackagesHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useGetDistributionReleasePackagesHook>>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetDistributionReleasePackages<TData = Awaited<ReturnType<ReturnType<typeof useGetDistributionReleasePackagesHook>>>, TError = void>(
+ releaseId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetDistributionReleasePackagesHook>>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useGetDistributionReleasePackagesHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useGetDistributionReleasePackagesHook>>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetDistributionReleasePackages<TData = Awaited<ReturnType<ReturnType<typeof useGetDistributionReleasePackagesHook>>>, TError = void>(
+ releaseId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetDistributionReleasePackagesHook>>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+
+export function useGetDistributionReleasePackages<TData = Awaited<ReturnType<ReturnType<typeof useGetDistributionReleasePackagesHook>>>, TError = void>(
+ releaseId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetDistributionReleasePackagesHook>>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = useGetDistributionReleasePackagesQueryOptions(releaseId,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  query.queryKey = queryOptions.queryKey ;
+
+  return query;
+}
+
+
+
+
 
 export const useAddPackageToReleaseHook = () => {
-	const addPackageToRelease = useClientMutator<void>();
+        const addPackageToRelease = useClientMutator<void>();
 
-	return useCallback(
-		(
-			releaseId: number,
-			replacementPackage: ReplacementPackage,
-			signal?: AbortSignal,
-		) => {
-			return addPackageToRelease({
-				url: `/releases/${releaseId}/packages`,
-				method: "POST",
-				headers: { "Content-Type": "application/json" },
-				data: replacementPackage,
-				signal,
-			});
-		},
-		[addPackageToRelease],
-	);
-};
+        return useCallback((
+    releaseId: number,
+    replacementPackage: ReplacementPackage,
+ signal?: AbortSignal
+) => {
+        return addPackageToRelease(
+          {url: `/releases/${releaseId}/packages`, method: 'POST',
+      headers: {'Content-Type': 'application/json', },
+      data: replacementPackage, signal
+    },
+          );
+        }, [addPackageToRelease])
+      }
+    
 
-export const useAddPackageToReleaseMutationOptions = <
-	TError = void,
-	TContext = unknown,
->(options?: {
-	mutation?: UseMutationOptions<
-		Awaited<ReturnType<ReturnType<typeof useAddPackageToReleaseHook>>>,
-		TError,
-		{ releaseId: number; data: ReplacementPackage },
-		TContext
-	>;
-}): UseMutationOptions<
-	Awaited<ReturnType<ReturnType<typeof useAddPackageToReleaseHook>>>,
-	TError,
-	{ releaseId: number; data: ReplacementPackage },
-	TContext
-> => {
-	const mutationKey = ["addPackageToRelease"];
-	const { mutation: mutationOptions } = options
-		? options.mutation &&
-			"mutationKey" in options.mutation &&
-			options.mutation.mutationKey
-			? options
-			: { ...options, mutation: { ...options.mutation, mutationKey } }
-		: { mutation: { mutationKey } };
 
-	const addPackageToRelease = useAddPackageToReleaseHook();
+export const useAddPackageToReleaseMutationOptions = <TError = void,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<ReturnType<typeof useAddPackageToReleaseHook>>>, TError,{releaseId: number;data: ReplacementPackage}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<ReturnType<typeof useAddPackageToReleaseHook>>>, TError,{releaseId: number;data: ReplacementPackage}, TContext> => {
 
-	const mutationFn: MutationFunction<
-		Awaited<ReturnType<ReturnType<typeof useAddPackageToReleaseHook>>>,
-		{ releaseId: number; data: ReplacementPackage }
-	> = (props) => {
-		const { releaseId, data } = props ?? {};
+const mutationKey = ['addPackageToRelease'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
 
-		return addPackageToRelease(releaseId, data);
-	};
+      const addPackageToRelease =  useAddPackageToReleaseHook()
 
-	return { mutationFn, ...mutationOptions };
-};
 
-export type AddPackageToReleaseMutationResult = NonNullable<
-	Awaited<ReturnType<ReturnType<typeof useAddPackageToReleaseHook>>>
->;
-export type AddPackageToReleaseMutationBody = ReplacementPackage;
-export type AddPackageToReleaseMutationError = void;
+      const mutationFn: MutationFunction<Awaited<ReturnType<ReturnType<typeof useAddPackageToReleaseHook>>>, {releaseId: number;data: ReplacementPackage}> = (props) => {
+          const {releaseId,data} = props ?? {};
 
-export const useAddPackageToRelease = <TError = void, TContext = unknown>(
-	options?: {
-		mutation?: UseMutationOptions<
-			Awaited<ReturnType<ReturnType<typeof useAddPackageToReleaseHook>>>,
-			TError,
-			{ releaseId: number; data: ReplacementPackage },
-			TContext
-		>;
-	},
-	queryClient?: QueryClient,
-): UseMutationResult<
-	Awaited<ReturnType<ReturnType<typeof useAddPackageToReleaseHook>>>,
-	TError,
-	{ releaseId: number; data: ReplacementPackage },
-	TContext
-> => {
-	const mutationOptions = useAddPackageToReleaseMutationOptions(options);
+          return  addPackageToRelease(releaseId,data,)
+        }
 
-	return useMutation(mutationOptions, queryClient);
-};
+        
 
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type AddPackageToReleaseMutationResult = NonNullable<Awaited<ReturnType<ReturnType<typeof useAddPackageToReleaseHook>>>>
+    export type AddPackageToReleaseMutationBody = ReplacementPackage
+    export type AddPackageToReleaseMutationError = void
+
+    export const useAddPackageToRelease = <TError = void,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<ReturnType<typeof useAddPackageToReleaseHook>>>, TError,{releaseId: number;data: ReplacementPackage}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<ReturnType<typeof useAddPackageToReleaseHook>>>,
+        TError,
+        {releaseId: number;data: ReplacementPackage},
+        TContext
+      > => {
+
+      const mutationOptions = useAddPackageToReleaseMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    
 export const useUpdatePackageForReleaseHook = () => {
-	const updatePackageForRelease = useClientMutator<void>();
+        const updatePackageForRelease = useClientMutator<void>();
 
-	return useCallback(
-		(releaseId: number, packageId: number) => {
-			return updatePackageForRelease({
-				url: `/releases/${releaseId}/packages/${packageId}`,
-				method: "PUT",
-			});
-		},
-		[updatePackageForRelease],
-	);
-};
+        return useCallback((
+    releaseId: number,
+    packageId: number,
+ ) => {
+        return updatePackageForRelease(
+          {url: `/releases/${releaseId}/packages/${packageId}`, method: 'PUT'
+    },
+          );
+        }, [updatePackageForRelease])
+      }
+    
 
-export const useUpdatePackageForReleaseMutationOptions = <
-	TError = void,
-	TContext = unknown,
->(options?: {
-	mutation?: UseMutationOptions<
-		Awaited<ReturnType<ReturnType<typeof useUpdatePackageForReleaseHook>>>,
-		TError,
-		{ releaseId: number; packageId: number },
-		TContext
-	>;
-}): UseMutationOptions<
-	Awaited<ReturnType<ReturnType<typeof useUpdatePackageForReleaseHook>>>,
-	TError,
-	{ releaseId: number; packageId: number },
-	TContext
-> => {
-	const mutationKey = ["updatePackageForRelease"];
-	const { mutation: mutationOptions } = options
-		? options.mutation &&
-			"mutationKey" in options.mutation &&
-			options.mutation.mutationKey
-			? options
-			: { ...options, mutation: { ...options.mutation, mutationKey } }
-		: { mutation: { mutationKey } };
 
-	const updatePackageForRelease = useUpdatePackageForReleaseHook();
+export const useUpdatePackageForReleaseMutationOptions = <TError = void,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<ReturnType<typeof useUpdatePackageForReleaseHook>>>, TError,{releaseId: number;packageId: number}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<ReturnType<typeof useUpdatePackageForReleaseHook>>>, TError,{releaseId: number;packageId: number}, TContext> => {
 
-	const mutationFn: MutationFunction<
-		Awaited<ReturnType<ReturnType<typeof useUpdatePackageForReleaseHook>>>,
-		{ releaseId: number; packageId: number }
-	> = (props) => {
-		const { releaseId, packageId } = props ?? {};
+const mutationKey = ['updatePackageForRelease'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
 
-		return updatePackageForRelease(releaseId, packageId);
-	};
+      const updatePackageForRelease =  useUpdatePackageForReleaseHook()
 
-	return { mutationFn, ...mutationOptions };
-};
 
-export type UpdatePackageForReleaseMutationResult = NonNullable<
-	Awaited<ReturnType<ReturnType<typeof useUpdatePackageForReleaseHook>>>
->;
+      const mutationFn: MutationFunction<Awaited<ReturnType<ReturnType<typeof useUpdatePackageForReleaseHook>>>, {releaseId: number;packageId: number}> = (props) => {
+          const {releaseId,packageId} = props ?? {};
 
-export type UpdatePackageForReleaseMutationError = void;
+          return  updatePackageForRelease(releaseId,packageId,)
+        }
 
-export const useUpdatePackageForRelease = <TError = void, TContext = unknown>(
-	options?: {
-		mutation?: UseMutationOptions<
-			Awaited<ReturnType<ReturnType<typeof useUpdatePackageForReleaseHook>>>,
-			TError,
-			{ releaseId: number; packageId: number },
-			TContext
-		>;
-	},
-	queryClient?: QueryClient,
-): UseMutationResult<
-	Awaited<ReturnType<ReturnType<typeof useUpdatePackageForReleaseHook>>>,
-	TError,
-	{ releaseId: number; packageId: number },
-	TContext
-> => {
-	const mutationOptions = useUpdatePackageForReleaseMutationOptions(options);
+        
 
-	return useMutation(mutationOptions, queryClient);
-};
 
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdatePackageForReleaseMutationResult = NonNullable<Awaited<ReturnType<ReturnType<typeof useUpdatePackageForReleaseHook>>>>
+    
+    export type UpdatePackageForReleaseMutationError = void
+
+    export const useUpdatePackageForRelease = <TError = void,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<ReturnType<typeof useUpdatePackageForReleaseHook>>>, TError,{releaseId: number;packageId: number}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<ReturnType<typeof useUpdatePackageForReleaseHook>>>,
+        TError,
+        {releaseId: number;packageId: number},
+        TContext
+      > => {
+
+      const mutationOptions = useUpdatePackageForReleaseMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    
 export const useDeletePackageForReleaseHook = () => {
-	const deletePackageForRelease = useClientMutator<void>();
+        const deletePackageForRelease = useClientMutator<void>();
 
-	return useCallback(
-		(releaseId: number, packageId: number) => {
-			return deletePackageForRelease({
-				url: `/releases/${releaseId}/packages/${packageId}`,
-				method: "DELETE",
-			});
-		},
-		[deletePackageForRelease],
-	);
-};
+        return useCallback((
+    releaseId: number,
+    packageId: number,
+ ) => {
+        return deletePackageForRelease(
+          {url: `/releases/${releaseId}/packages/${packageId}`, method: 'DELETE'
+    },
+          );
+        }, [deletePackageForRelease])
+      }
+    
 
-export const useDeletePackageForReleaseMutationOptions = <
-	TError = void,
-	TContext = unknown,
->(options?: {
-	mutation?: UseMutationOptions<
-		Awaited<ReturnType<ReturnType<typeof useDeletePackageForReleaseHook>>>,
-		TError,
-		{ releaseId: number; packageId: number },
-		TContext
-	>;
-}): UseMutationOptions<
-	Awaited<ReturnType<ReturnType<typeof useDeletePackageForReleaseHook>>>,
-	TError,
-	{ releaseId: number; packageId: number },
-	TContext
-> => {
-	const mutationKey = ["deletePackageForRelease"];
-	const { mutation: mutationOptions } = options
-		? options.mutation &&
-			"mutationKey" in options.mutation &&
-			options.mutation.mutationKey
-			? options
-			: { ...options, mutation: { ...options.mutation, mutationKey } }
-		: { mutation: { mutationKey } };
 
-	const deletePackageForRelease = useDeletePackageForReleaseHook();
+export const useDeletePackageForReleaseMutationOptions = <TError = void,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<ReturnType<typeof useDeletePackageForReleaseHook>>>, TError,{releaseId: number;packageId: number}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<ReturnType<typeof useDeletePackageForReleaseHook>>>, TError,{releaseId: number;packageId: number}, TContext> => {
 
-	const mutationFn: MutationFunction<
-		Awaited<ReturnType<ReturnType<typeof useDeletePackageForReleaseHook>>>,
-		{ releaseId: number; packageId: number }
-	> = (props) => {
-		const { releaseId, packageId } = props ?? {};
+const mutationKey = ['deletePackageForRelease'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
 
-		return deletePackageForRelease(releaseId, packageId);
-	};
+      const deletePackageForRelease =  useDeletePackageForReleaseHook()
 
-	return { mutationFn, ...mutationOptions };
-};
 
-export type DeletePackageForReleaseMutationResult = NonNullable<
-	Awaited<ReturnType<ReturnType<typeof useDeletePackageForReleaseHook>>>
->;
+      const mutationFn: MutationFunction<Awaited<ReturnType<ReturnType<typeof useDeletePackageForReleaseHook>>>, {releaseId: number;packageId: number}> = (props) => {
+          const {releaseId,packageId} = props ?? {};
 
-export type DeletePackageForReleaseMutationError = void;
+          return  deletePackageForRelease(releaseId,packageId,)
+        }
 
-export const useDeletePackageForRelease = <TError = void, TContext = unknown>(
-	options?: {
-		mutation?: UseMutationOptions<
-			Awaited<ReturnType<ReturnType<typeof useDeletePackageForReleaseHook>>>,
-			TError,
-			{ releaseId: number; packageId: number },
-			TContext
-		>;
-	},
-	queryClient?: QueryClient,
-): UseMutationResult<
-	Awaited<ReturnType<ReturnType<typeof useDeletePackageForReleaseHook>>>,
-	TError,
-	{ releaseId: number; packageId: number },
-	TContext
-> => {
-	const mutationOptions = useDeletePackageForReleaseMutationOptions(options);
+        
 
-	return useMutation(mutationOptions, queryClient);
-};
 
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DeletePackageForReleaseMutationResult = NonNullable<Awaited<ReturnType<ReturnType<typeof useDeletePackageForReleaseHook>>>>
+    
+    export type DeletePackageForReleaseMutationError = void
+
+    export const useDeletePackageForRelease = <TError = void,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<ReturnType<typeof useDeletePackageForReleaseHook>>>, TError,{releaseId: number;packageId: number}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<ReturnType<typeof useDeletePackageForReleaseHook>>>,
+        TError,
+        {releaseId: number;packageId: number},
+        TContext
+      > => {
+
+      const mutationOptions = useDeletePackageForReleaseMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    
 export const useGetReleaseServicesHook = () => {
-	const getReleaseServices = useClientMutator<ReleaseService[]>();
+        const getReleaseServices = useClientMutator<ReleaseService[]>();
 
-	return useCallback(
-		(releaseId: number, signal?: AbortSignal) => {
-			return getReleaseServices({
-				url: `/releases/${releaseId}/services`,
-				method: "GET",
-				signal,
-			});
-		},
-		[getReleaseServices],
-	);
-};
-
-export const getGetReleaseServicesInfiniteQueryKey = (releaseId?: number) => {
-	return ["infinite", `/releases/${releaseId}/services`] as const;
-};
-
-export const getGetReleaseServicesQueryKey = (releaseId?: number) => {
-	return [`/releases/${releaseId}/services`] as const;
-};
-
-export const useGetReleaseServicesInfiniteQueryOptions = <
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetReleaseServicesHook>>>
-	>,
-	TError = void,
->(
-	releaseId: number,
-	options?: {
-		query?: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetReleaseServicesHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
+        return useCallback((
+    releaseId: number,
+ signal?: AbortSignal
 ) => {
-	const { query: queryOptions } = options ?? {};
+        return getReleaseServices(
+          {url: `/releases/${releaseId}/services`, method: 'GET', signal
+    },
+          );
+        }, [getReleaseServices])
+      }
+    
 
-	const queryKey =
-		queryOptions?.queryKey ?? getGetReleaseServicesInfiniteQueryKey(releaseId);
 
-	const getReleaseServices = useGetReleaseServicesHook();
 
-	const queryFn: QueryFunction<
-		Awaited<ReturnType<ReturnType<typeof useGetReleaseServicesHook>>>
-	> = ({ signal }) => getReleaseServices(releaseId, signal);
+export const getGetReleaseServicesInfiniteQueryKey = (releaseId?: number,) => {
+    return [
+    'infinite', `/releases/${releaseId}/services`
+    ] as const;
+    }
 
-	return {
-		queryKey,
-		queryFn,
-		enabled: !!releaseId,
-		...queryOptions,
-	} as UseInfiniteQueryOptions<
-		Awaited<ReturnType<ReturnType<typeof useGetReleaseServicesHook>>>,
-		TError,
-		TData
-	> & { queryKey: DataTag<QueryKey, TData, TError> };
-};
+export const getGetReleaseServicesQueryKey = (releaseId?: number,) => {
+    return [
+    `/releases/${releaseId}/services`
+    ] as const;
+    }
 
-export type GetReleaseServicesInfiniteQueryResult = NonNullable<
-	Awaited<ReturnType<ReturnType<typeof useGetReleaseServicesHook>>>
->;
-export type GetReleaseServicesInfiniteQueryError = void;
+    
+export const useGetReleaseServicesInfiniteQueryOptions = <TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetReleaseServicesHook>>>>, TError = void>(releaseId: number, options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetReleaseServicesHook>>>, TError, TData>>, }
+) => {
 
-export function useGetReleaseServicesInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetReleaseServicesHook>>>
-	>,
-	TError = void,
->(
-	releaseId: number,
-	options: {
-		query: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetReleaseServicesHook>>>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				DefinedInitialDataOptions<
-					Awaited<ReturnType<ReturnType<typeof useGetReleaseServicesHook>>>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useGetReleaseServicesHook>>>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): DefinedUseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useGetReleaseServicesInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetReleaseServicesHook>>>
-	>,
-	TError = void,
->(
-	releaseId: number,
-	options?: {
-		query?: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetReleaseServicesHook>>>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				UndefinedInitialDataOptions<
-					Awaited<ReturnType<ReturnType<typeof useGetReleaseServicesHook>>>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useGetReleaseServicesHook>>>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): UseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useGetReleaseServicesInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetReleaseServicesHook>>>
-	>,
-	TError = void,
->(
-	releaseId: number,
-	options?: {
-		query?: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetReleaseServicesHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
+const {query: queryOptions} = options ?? {};
 
-export function useGetReleaseServicesInfinite<
-	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetReleaseServicesHook>>>
-	>,
-	TError = void,
->(
-	releaseId: number,
-	options?: {
-		query?: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetReleaseServicesHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-} {
-	const queryOptions = useGetReleaseServicesInfiniteQueryOptions(
-		releaseId,
-		options,
-	);
+  const queryKey =  queryOptions?.queryKey ?? getGetReleaseServicesInfiniteQueryKey(releaseId);
 
-	const query = useInfiniteQuery(
-		queryOptions,
-		queryClient,
-	) as UseInfiniteQueryResult<TData, TError> & {
-		queryKey: DataTag<QueryKey, TData, TError>;
-	};
+  const getReleaseServices =  useGetReleaseServicesHook();
 
-	query.queryKey = queryOptions.queryKey;
+    const queryFn: QueryFunction<Awaited<ReturnType<ReturnType<typeof useGetReleaseServicesHook>>>> = ({ signal }) => getReleaseServices(releaseId, signal);
 
-	return query;
+      
+
+      
+
+   return  { queryKey, queryFn, enabled: !!(releaseId), ...queryOptions} as UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetReleaseServicesHook>>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
 }
 
-export const useGetReleaseServicesQueryOptions = <
-	TData = Awaited<ReturnType<ReturnType<typeof useGetReleaseServicesHook>>>,
-	TError = void,
->(
-	releaseId: number,
-	options?: {
-		query?: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetReleaseServicesHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-) => {
-	const { query: queryOptions } = options ?? {};
+export type GetReleaseServicesInfiniteQueryResult = NonNullable<Awaited<ReturnType<ReturnType<typeof useGetReleaseServicesHook>>>>
+export type GetReleaseServicesInfiniteQueryError = void
 
-	const queryKey =
-		queryOptions?.queryKey ?? getGetReleaseServicesQueryKey(releaseId);
 
-	const getReleaseServices = useGetReleaseServicesHook();
+export function useGetReleaseServicesInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetReleaseServicesHook>>>>, TError = void>(
+ releaseId: number, options: { query:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetReleaseServicesHook>>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useGetReleaseServicesHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useGetReleaseServicesHook>>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetReleaseServicesInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetReleaseServicesHook>>>>, TError = void>(
+ releaseId: number, options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetReleaseServicesHook>>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useGetReleaseServicesHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useGetReleaseServicesHook>>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetReleaseServicesInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetReleaseServicesHook>>>>, TError = void>(
+ releaseId: number, options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetReleaseServicesHook>>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 
-	const queryFn: QueryFunction<
-		Awaited<ReturnType<ReturnType<typeof useGetReleaseServicesHook>>>
-	> = ({ signal }) => getReleaseServices(releaseId, signal);
+export function useGetReleaseServicesInfinite<TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetReleaseServicesHook>>>>, TError = void>(
+ releaseId: number, options?: { query?:Partial<UseInfiniteQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetReleaseServicesHook>>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
-	return {
-		queryKey,
-		queryFn,
-		enabled: !!releaseId,
-		...queryOptions,
-	} as UseQueryOptions<
-		Awaited<ReturnType<ReturnType<typeof useGetReleaseServicesHook>>>,
-		TError,
-		TData
-	> & { queryKey: DataTag<QueryKey, TData, TError> };
-};
+  const queryOptions = useGetReleaseServicesInfiniteQueryOptions(releaseId,options)
 
-export type GetReleaseServicesQueryResult = NonNullable<
-	Awaited<ReturnType<ReturnType<typeof useGetReleaseServicesHook>>>
->;
-export type GetReleaseServicesQueryError = void;
+  const query = useInfiniteQuery(queryOptions, queryClient) as  UseInfiniteQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 
-export function useGetReleaseServices<
-	TData = Awaited<ReturnType<ReturnType<typeof useGetReleaseServicesHook>>>,
-	TError = void,
->(
-	releaseId: number,
-	options: {
-		query: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetReleaseServicesHook>>>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				DefinedInitialDataOptions<
-					Awaited<ReturnType<ReturnType<typeof useGetReleaseServicesHook>>>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useGetReleaseServicesHook>>>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): DefinedUseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useGetReleaseServices<
-	TData = Awaited<ReturnType<ReturnType<typeof useGetReleaseServicesHook>>>,
-	TError = void,
->(
-	releaseId: number,
-	options?: {
-		query?: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetReleaseServicesHook>>>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				UndefinedInitialDataOptions<
-					Awaited<ReturnType<ReturnType<typeof useGetReleaseServicesHook>>>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useGetReleaseServicesHook>>>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useGetReleaseServices<
-	TData = Awaited<ReturnType<ReturnType<typeof useGetReleaseServicesHook>>>,
-	TError = void,
->(
-	releaseId: number,
-	options?: {
-		query?: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetReleaseServicesHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
+  query.queryKey = queryOptions.queryKey ;
 
-export function useGetReleaseServices<
-	TData = Awaited<ReturnType<ReturnType<typeof useGetReleaseServicesHook>>>,
-	TError = void,
->(
-	releaseId: number,
-	options?: {
-		query?: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetReleaseServicesHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-} {
-	const queryOptions = useGetReleaseServicesQueryOptions(releaseId, options);
-
-	const query = useQuery(queryOptions, queryClient) as UseQueryResult<
-		TData,
-		TError
-	> & { queryKey: DataTag<QueryKey, TData, TError> };
-
-	query.queryKey = queryOptions.queryKey;
-
-	return query;
+  return query;
 }
+
+
+
+
+export const useGetReleaseServicesQueryOptions = <TData = Awaited<ReturnType<ReturnType<typeof useGetReleaseServicesHook>>>, TError = void>(releaseId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetReleaseServicesHook>>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetReleaseServicesQueryKey(releaseId);
+
+  const getReleaseServices =  useGetReleaseServicesHook();
+
+    const queryFn: QueryFunction<Awaited<ReturnType<ReturnType<typeof useGetReleaseServicesHook>>>> = ({ signal }) => getReleaseServices(releaseId, signal);
+
+      
+
+      
+
+   return  { queryKey, queryFn, enabled: !!(releaseId), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetReleaseServicesHook>>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetReleaseServicesQueryResult = NonNullable<Awaited<ReturnType<ReturnType<typeof useGetReleaseServicesHook>>>>
+export type GetReleaseServicesQueryError = void
+
+
+export function useGetReleaseServices<TData = Awaited<ReturnType<ReturnType<typeof useGetReleaseServicesHook>>>, TError = void>(
+ releaseId: number, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetReleaseServicesHook>>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useGetReleaseServicesHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useGetReleaseServicesHook>>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetReleaseServices<TData = Awaited<ReturnType<ReturnType<typeof useGetReleaseServicesHook>>>, TError = void>(
+ releaseId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetReleaseServicesHook>>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<ReturnType<typeof useGetReleaseServicesHook>>>,
+          TError,
+          Awaited<ReturnType<ReturnType<typeof useGetReleaseServicesHook>>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetReleaseServices<TData = Awaited<ReturnType<ReturnType<typeof useGetReleaseServicesHook>>>, TError = void>(
+ releaseId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetReleaseServicesHook>>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+
+export function useGetReleaseServices<TData = Awaited<ReturnType<ReturnType<typeof useGetReleaseServicesHook>>>, TError = void>(
+ releaseId: number, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<ReturnType<typeof useGetReleaseServicesHook>>>, TError, TData>>, }
+ , queryClient?: QueryClient 
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = useGetReleaseServicesQueryOptions(releaseId,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  query.queryKey = queryOptions.queryKey ;
+
+  return query;
+}
+
+
+
+
 
 export const useCreateReleaseServiceHook = () => {
-	const createReleaseService = useClientMutator<ReleaseService>();
+        const createReleaseService = useClientMutator<ReleaseService>();
 
-	return useCallback(
-		(
-			releaseId: number,
-			createReleaseService: CreateReleaseService,
-			signal?: AbortSignal,
-		) => {
-			return createReleaseService({
-				url: `/releases/${releaseId}/services`,
-				method: "POST",
-				headers: { "Content-Type": "application/json" },
-				data: createReleaseService,
-				signal,
-			});
-		},
-		[createReleaseService],
-	);
-};
+        return useCallback((
+    releaseId: number,
+    createReleaseService: CreateReleaseService,
+ signal?: AbortSignal
+) => {
+        return createReleaseService(
+          {url: `/releases/${releaseId}/services`, method: 'POST',
+      headers: {'Content-Type': 'application/json', },
+      data: createReleaseService, signal
+    },
+          );
+        }, [createReleaseService])
+      }
+    
 
-export const useCreateReleaseServiceMutationOptions = <
-	TError = void,
-	TContext = unknown,
->(options?: {
-	mutation?: UseMutationOptions<
-		Awaited<ReturnType<ReturnType<typeof useCreateReleaseServiceHook>>>,
-		TError,
-		{ releaseId: number; data: CreateReleaseService },
-		TContext
-	>;
-}): UseMutationOptions<
-	Awaited<ReturnType<ReturnType<typeof useCreateReleaseServiceHook>>>,
-	TError,
-	{ releaseId: number; data: CreateReleaseService },
-	TContext
-> => {
-	const mutationKey = ["createReleaseService"];
-	const { mutation: mutationOptions } = options
-		? options.mutation &&
-			"mutationKey" in options.mutation &&
-			options.mutation.mutationKey
-			? options
-			: { ...options, mutation: { ...options.mutation, mutationKey } }
-		: { mutation: { mutationKey } };
 
-	const createReleaseService = useCreateReleaseServiceHook();
+export const useCreateReleaseServiceMutationOptions = <TError = void,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<ReturnType<typeof useCreateReleaseServiceHook>>>, TError,{releaseId: number;data: CreateReleaseService}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<ReturnType<typeof useCreateReleaseServiceHook>>>, TError,{releaseId: number;data: CreateReleaseService}, TContext> => {
 
-	const mutationFn: MutationFunction<
-		Awaited<ReturnType<ReturnType<typeof useCreateReleaseServiceHook>>>,
-		{ releaseId: number; data: CreateReleaseService }
-	> = (props) => {
-		const { releaseId, data } = props ?? {};
+const mutationKey = ['createReleaseService'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
 
-		return createReleaseService(releaseId, data);
-	};
+      const createReleaseService =  useCreateReleaseServiceHook()
 
-	return { mutationFn, ...mutationOptions };
-};
 
-export type CreateReleaseServiceMutationResult = NonNullable<
-	Awaited<ReturnType<ReturnType<typeof useCreateReleaseServiceHook>>>
->;
-export type CreateReleaseServiceMutationBody = CreateReleaseService;
-export type CreateReleaseServiceMutationError = void;
+      const mutationFn: MutationFunction<Awaited<ReturnType<ReturnType<typeof useCreateReleaseServiceHook>>>, {releaseId: number;data: CreateReleaseService}> = (props) => {
+          const {releaseId,data} = props ?? {};
 
-export const useCreateReleaseService = <TError = void, TContext = unknown>(
-	options?: {
-		mutation?: UseMutationOptions<
-			Awaited<ReturnType<ReturnType<typeof useCreateReleaseServiceHook>>>,
-			TError,
-			{ releaseId: number; data: CreateReleaseService },
-			TContext
-		>;
-	},
-	queryClient?: QueryClient,
-): UseMutationResult<
-	Awaited<ReturnType<ReturnType<typeof useCreateReleaseServiceHook>>>,
-	TError,
-	{ releaseId: number; data: CreateReleaseService },
-	TContext
-> => {
-	const mutationOptions = useCreateReleaseServiceMutationOptions(options);
+          return  createReleaseService(releaseId,data,)
+        }
 
-	return useMutation(mutationOptions, queryClient);
-};
+        
 
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateReleaseServiceMutationResult = NonNullable<Awaited<ReturnType<ReturnType<typeof useCreateReleaseServiceHook>>>>
+    export type CreateReleaseServiceMutationBody = CreateReleaseService
+    export type CreateReleaseServiceMutationError = void
+
+    export const useCreateReleaseService = <TError = void,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<ReturnType<typeof useCreateReleaseServiceHook>>>, TError,{releaseId: number;data: CreateReleaseService}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<ReturnType<typeof useCreateReleaseServiceHook>>>,
+        TError,
+        {releaseId: number;data: CreateReleaseService},
+        TContext
+      > => {
+
+      const mutationOptions = useCreateReleaseServiceMutationOptions(options);
+
+      return useMutation(mutationOptions, queryClient);
+    }
+    
 export const useDeleteReleaseServiceHook = () => {
-	const deleteReleaseService = useClientMutator<void>();
+        const deleteReleaseService = useClientMutator<void>();
 
-	return useCallback(
-		(releaseId: number, serviceId: number) => {
-			return deleteReleaseService({
-				url: `/releases/${releaseId}/services/${serviceId}`,
-				method: "DELETE",
-			});
-		},
-		[deleteReleaseService],
-	);
-};
+        return useCallback((
+    releaseId: number,
+    serviceId: number,
+ ) => {
+        return deleteReleaseService(
+          {url: `/releases/${releaseId}/services/${serviceId}`, method: 'DELETE'
+    },
+          );
+        }, [deleteReleaseService])
+      }
+    
 
-export const useDeleteReleaseServiceMutationOptions = <
-	TError = void,
-	TContext = unknown,
->(options?: {
-	mutation?: UseMutationOptions<
-		Awaited<ReturnType<ReturnType<typeof useDeleteReleaseServiceHook>>>,
-		TError,
-		{ releaseId: number; serviceId: number },
-		TContext
-	>;
-}): UseMutationOptions<
-	Awaited<ReturnType<ReturnType<typeof useDeleteReleaseServiceHook>>>,
-	TError,
-	{ releaseId: number; serviceId: number },
-	TContext
-> => {
-	const mutationKey = ["deleteReleaseService"];
-	const { mutation: mutationOptions } = options
-		? options.mutation &&
-			"mutationKey" in options.mutation &&
-			options.mutation.mutationKey
-			? options
-			: { ...options, mutation: { ...options.mutation, mutationKey } }
-		: { mutation: { mutationKey } };
 
-	const deleteReleaseService = useDeleteReleaseServiceHook();
+export const useDeleteReleaseServiceMutationOptions = <TError = void,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<ReturnType<typeof useDeleteReleaseServiceHook>>>, TError,{releaseId: number;serviceId: number}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<ReturnType<typeof useDeleteReleaseServiceHook>>>, TError,{releaseId: number;serviceId: number}, TContext> => {
 
-	const mutationFn: MutationFunction<
-		Awaited<ReturnType<ReturnType<typeof useDeleteReleaseServiceHook>>>,
-		{ releaseId: number; serviceId: number }
-	> = (props) => {
-		const { releaseId, serviceId } = props ?? {};
+const mutationKey = ['deleteReleaseService'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
 
-		return deleteReleaseService(releaseId, serviceId);
-	};
+      const deleteReleaseService =  useDeleteReleaseServiceHook()
 
-	return { mutationFn, ...mutationOptions };
-};
 
-export type DeleteReleaseServiceMutationResult = NonNullable<
-	Awaited<ReturnType<ReturnType<typeof useDeleteReleaseServiceHook>>>
->;
+      const mutationFn: MutationFunction<Awaited<ReturnType<ReturnType<typeof useDeleteReleaseServiceHook>>>, {releaseId: number;serviceId: number}> = (props) => {
+          const {releaseId,serviceId} = props ?? {};
 
-export type DeleteReleaseServiceMutationError = void;
+          return  deleteReleaseService(releaseId,serviceId,)
+        }
 
-export const useDeleteReleaseService = <TError = void, TContext = unknown>(
-	options?: {
-		mutation?: UseMutationOptions<
-			Awaited<ReturnType<ReturnType<typeof useDeleteReleaseServiceHook>>>,
-			TError,
-			{ releaseId: number; serviceId: number },
-			TContext
-		>;
-	},
-	queryClient?: QueryClient,
-): UseMutationResult<
-	Awaited<ReturnType<ReturnType<typeof useDeleteReleaseServiceHook>>>,
-	TError,
-	{ releaseId: number; serviceId: number },
-	TContext
-> => {
-	const mutationOptions = useDeleteReleaseServiceMutationOptions(options);
+        
 
-	return useMutation(mutationOptions, queryClient);
-};
 
-/**
- * @deprecated
- */
-export const useCreateTagHook = () => {
-	const createTag = useClientMutator<Tag>();
+  return  { mutationFn, ...mutationOptions }}
 
-	return useCallback(
-		(newTag: NewTag, signal?: AbortSignal) => {
-			return createTag({
-				url: `/tags`,
-				method: "POST",
-				headers: { "Content-Type": "application/json" },
-				data: newTag,
-				signal,
-			});
-		},
-		[createTag],
-	);
-};
+    export type DeleteReleaseServiceMutationResult = NonNullable<Awaited<ReturnType<ReturnType<typeof useDeleteReleaseServiceHook>>>>
+    
+    export type DeleteReleaseServiceMutationError = void
 
-export const useCreateTagMutationOptions = <
-	TError = string,
-	TContext = unknown,
->(options?: {
-	mutation?: UseMutationOptions<
-		Awaited<ReturnType<ReturnType<typeof useCreateTagHook>>>,
-		TError,
-		{ data: NewTag },
-		TContext
-	>;
-}): UseMutationOptions<
-	Awaited<ReturnType<ReturnType<typeof useCreateTagHook>>>,
-	TError,
-	{ data: NewTag },
-	TContext
-> => {
-	const mutationKey = ["createTag"];
-	const { mutation: mutationOptions } = options
-		? options.mutation &&
-			"mutationKey" in options.mutation &&
-			options.mutation.mutationKey
-			? options
-			: { ...options, mutation: { ...options.mutation, mutationKey } }
-		: { mutation: { mutationKey } };
+    export const useDeleteReleaseService = <TError = void,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<ReturnType<typeof useDeleteReleaseServiceHook>>>, TError,{releaseId: number;serviceId: number}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<ReturnType<typeof useDeleteReleaseServiceHook>>>,
+        TError,
+        {releaseId: number;serviceId: number},
+        TContext
+      > => {
 
-	const createTag = useCreateTagHook();
+      const mutationOptions = useDeleteReleaseServiceMutationOptions(options);
 
-	const mutationFn: MutationFunction<
-		Awaited<ReturnType<ReturnType<typeof useCreateTagHook>>>,
-		{ data: NewTag }
-	> = (props) => {
-		const { data } = props ?? {};
-
-		return createTag(data);
-	};
-
-	return { mutationFn, ...mutationOptions };
-};
-
-export type CreateTagMutationResult = NonNullable<
-	Awaited<ReturnType<ReturnType<typeof useCreateTagHook>>>
->;
-export type CreateTagMutationBody = NewTag;
-export type CreateTagMutationError = string;
-
-/**
- * @deprecated
- */
-export const useCreateTag = <TError = string, TContext = unknown>(
-	options?: {
-		mutation?: UseMutationOptions<
-			Awaited<ReturnType<ReturnType<typeof useCreateTagHook>>>,
-			TError,
-			{ data: NewTag },
-			TContext
-		>;
-	},
-	queryClient?: QueryClient,
-): UseMutationResult<
-	Awaited<ReturnType<ReturnType<typeof useCreateTagHook>>>,
-	TError,
-	{ data: NewTag },
-	TContext
-> => {
-	const mutationOptions = useCreateTagMutationOptions(options);
-
-	return useMutation(mutationOptions, queryClient);
-};
+      return useMutation(mutationOptions, queryClient);
+    }

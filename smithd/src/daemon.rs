@@ -3,6 +3,7 @@ use crate::commander::CommanderHandle;
 use crate::dbus::DbusHandle;
 use crate::downloader::DownloaderHandle;
 use crate::filemanager::FileManagerHandle;
+use crate::logstream::LogStreamHandle;
 use crate::magic::MagicHandle;
 use crate::police::PoliceHandle;
 use crate::postman::PostmanHandle;
@@ -35,12 +36,15 @@ pub async fn run() {
 
     let filemanager = FileManagerHandle::new(shutdown.signals(), configuration.clone());
 
+    let logstream = LogStreamHandle::new(shutdown.signals(), configuration.clone());
+
     let commander = CommanderHandle::new(
         shutdown.signals(),
         tunnel.clone(),
         updater.clone(),
         downloader.clone(),
         filemanager.clone(),
+        logstream.clone(),
     );
 
     let _postman = PostmanHandle::new(
