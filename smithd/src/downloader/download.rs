@@ -369,6 +369,7 @@ async fn download_file(
 
             Err(e) => {
                 error!("Error downloading chunk: {}", e);
+                file.flush().await?;
                 drop(file);
 
                 // Clean up .part file on chunk error
