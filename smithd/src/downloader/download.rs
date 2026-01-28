@@ -346,9 +346,9 @@ async fn download_file(
             drop(file);
 
             // Clean up .part file on force_stop
-            let _ = tokio::fs::remove_file(part_path_str)
-                .await
-                .inspect_err(|e| warn!("Failed to clean up .part file: {}", e));
+            // let _ = tokio::fs::remove_file(part_path_str)
+            //     .await
+            //     .inspect_err(|e| warn!("Failed to clean up .part file: {}", e));
 
             return Err(anyhow::anyhow!("Download interrupted by force_stop"));
         }
