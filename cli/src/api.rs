@@ -566,4 +566,30 @@ impl SmithAPI {
 
         Ok((device_id, last_command.cmd_id as u64))
     }
+
+    pub async fn approve_device(&self, device_id: u64) -> Result<()> {
+        let client = Client::new();
+
+        client
+            .post(format!("{}/devices/{}/approval", self.domain, device_id))
+            .header("Authorization", format!("Bearer {}", &self.bearer_token))
+            .send()
+            .await?
+            .error_for_status()?;
+
+        Ok(())
+    }
+
+    pub async fn revoke_device(&self, device_id: u64) -> Result<()> {
+        let client = Client::new();
+
+        client
+            .delete(format!("{}/devices/{}/approval", self.domain, device_id))
+            .header("Authorization", format!("Bearer {}", &self.bearer_token))
+            .send()
+            .await?
+            .error_for_status()?;
+
+        Ok(())
+    }
 }
