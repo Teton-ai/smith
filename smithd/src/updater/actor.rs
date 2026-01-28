@@ -175,13 +175,14 @@ impl Actor {
 
     fn should_skip_install(&self, package_name: &str) -> bool {
         if let Some(failure) = self.install_failures.get(package_name)
-            && failure.consecutive_failures >= MAX_INSTALL_RETRIES {
-                warn!(
-                    "Skipping install of {} after {} consecutive failures (last: {})",
-                    package_name, failure.consecutive_failures, failure.last_failure_kind
-                );
-                return true;
-            }
+            && failure.consecutive_failures >= MAX_INSTALL_RETRIES
+        {
+            warn!(
+                "Skipping install of {} after {} consecutive failures (last: {})",
+                package_name, failure.consecutive_failures, failure.last_failure_kind
+            );
+            return true;
+        }
         false
     }
 

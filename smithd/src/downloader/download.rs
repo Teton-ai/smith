@@ -165,73 +165,76 @@ async fn download_file(
     // Check if final file already exists and is complete
     if let Ok(final_metadata) = tokio::fs::metadata(local_path).await
         && final_metadata.len() == content_length
-            && let Ok(Some(stored)) = xattr::get(local_path, "user.etag") {
-                let stored_etag = String::from_utf8_lossy(&stored);
-                if let Some(current_etag) = etag
-                    && stored_etag.as_ref() == current_etag {
-                        info!("File already fully downloaded at {}", local_path);
-                        stats.success = true;
-                        stats.bytes_downloaded = content_length;
-                        return Ok(stats);
-                    }
-            }
+        && let Ok(Some(stored)) = xattr::get(local_path, "user.etag")
+    {
+        let stored_etag = String::from_utf8_lossy(&stored);
+        if let Some(current_etag) = etag
+            && stored_etag.as_ref() == current_etag
+        {
+            info!("File already fully downloaded at {}", local_path);
+            stats.success = true;
+            stats.bytes_downloaded = content_length;
+            return Ok(stats);
+        }
+    }
 
     // Build get based on if some of the file has already been downloaded
     let mut request = client.get(presigned_url);
 
     if downloaded > 0
-        && let Some(stored) = xattr::get(part_path_str, "user.etag")? {
-            let stored_etag = String::from_utf8_lossy(&stored);
+        && let Some(stored) = xattr::get(part_path_str, "user.etag")?
+    {
+        let stored_etag = String::from_utf8_lossy(&stored);
 
-            match etag {
-                Some(etag) if stored_etag == etag => {
-                    // Check if the .part file is complete (just needs finalization)
-                    if downloaded == content_length {
-                        info!("Part file complete, finalizing: {}", local_path);
-                        tokio::fs::rename(part_path_str, local_path).await?;
-                        stats.success = true;
-                        stats.bytes_downloaded = downloaded;
-                        return Ok(stats);
-                    }
-
-                    if downloaded > content_length {
-                        // Different file somehow (this should never hit)
-                        resume_download = false;
-                        downloaded = 0;
-                    } else {
-                        resume_download = true;
-                        info!("Resuming download from byte {}", downloaded);
-                        request = request.header("Range", format!("bytes={}-", downloaded));
-                    }
+        match etag {
+            Some(etag) if stored_etag == etag => {
+                // Check if the .part file is complete (just needs finalization)
+                if downloaded == content_length {
+                    info!("Part file complete, finalizing: {}", local_path);
+                    tokio::fs::rename(part_path_str, local_path).await?;
+                    stats.success = true;
+                    stats.bytes_downloaded = downloaded;
+                    return Ok(stats);
                 }
-                Some(etag) => {
-                    warn!(
-                        "ETag mismatch (local: {}, remote: {}), restarting download",
-                        stored_etag, etag
-                    );
-                    // Remove the existing .part file and start over
-                    tokio::fs::remove_file(part_path_str).await?;
 
-                    if downloaded > content_length {
-                        // Different file somehow (this should never hit)
-                        resume_download = false;
-                        downloaded = 0;
-                    } else {
-                        resume_download = true;
-                        info!("Resuming download from byte {}", downloaded);
-                        request = request.header("Range", format!("bytes={}-", downloaded));
-                    }
-                }
-                None => {
-                    // No stored ETag, cannot verify, restart download
-                    warn!("No ETag provided by server, restarting download");
-                    tokio::fs::remove_file(local_path).await?;
-
+                if downloaded > content_length {
+                    // Different file somehow (this should never hit)
                     resume_download = false;
                     downloaded = 0;
+                } else {
+                    resume_download = true;
+                    info!("Resuming download from byte {}", downloaded);
+                    request = request.header("Range", format!("bytes={}-", downloaded));
                 }
             }
+            Some(etag) => {
+                warn!(
+                    "ETag mismatch (local: {}, remote: {}), restarting download",
+                    stored_etag, etag
+                );
+                // Remove the existing .part file and start over
+                tokio::fs::remove_file(part_path_str).await?;
+
+                if downloaded > content_length {
+                    // Different file somehow (this should never hit)
+                    resume_download = false;
+                    downloaded = 0;
+                } else {
+                    resume_download = true;
+                    info!("Resuming download from byte {}", downloaded);
+                    request = request.header("Range", format!("bytes={}-", downloaded));
+                }
+            }
+            None => {
+                // No stored ETag, cannot verify, restart download
+                warn!("No ETag provided by server, restarting download");
+                tokio::fs::remove_file(local_path).await?;
+
+                resume_download = false;
+                downloaded = 0;
+            }
         }
+    }
 
     // Send the request to download the file
     let mut response = request.send().await?;
