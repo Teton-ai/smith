@@ -38,3 +38,7 @@ gen-api-client:
 
 seed:
 	psql postgres://postgres:postgres@localhost:5432/postgres -f seed.sql
+
+debug.smithd:
+	cargo build --release -p smith
+    sudo ln -sf $(CURDIR)/target/release/smithd /usr/bin/smithd

@@ -7,6 +7,7 @@ use crate::shutdown::ShutdownSignals;
 use crate::utils::network::NetworkClient;
 use anyhow::{self, Context};
 use download::download_file_mb;
+use tokio::sync::Mutex;
 use tokio::{
     sync::{mpsc, oneshot},
     time,
@@ -37,11 +38,12 @@ struct Downloader {
     shutdown: ShutdownSignals,
     receiver: mpsc::Receiver<DownloaderMessage>,
     magic: MagicHandle,
-    is_downloading: Arc<AtomicUsize>,
+    downloading_count: Arc<AtomicUsize>,
     network: NetworkClient,
     force_stop: Arc<AtomicBool>,
     last_download_status: Arc<AtomicBool>,
     timeout: u64,
+    download_lock: Arc<Mutex<()>>,
 }
 
 impl Downloader {
@@ -55,16 +57,18 @@ impl Downloader {
         let force_stop = Arc::new(AtomicBool::new(false));
         let is_downloading = Arc::new(AtomicUsize::new(0));
         let last_download_status = Arc::new(AtomicBool::new(false));
+        let download_lock = Arc::new(Mutex::new(()));
 
         Self {
             shutdown,
             receiver,
             magic,
             network,
-            is_downloading,
+            downloading_count: is_downloading,
             force_stop,
             timeout,
             last_download_status,
+            download_lock,
         }
     }
 
@@ -76,14 +80,18 @@ impl Downloader {
                 rate,
                 rpc,
             } => {
-                self.is_downloading.fetch_add(1, Ordering::SeqCst);
+                self.downloading_count.fetch_add(1, Ordering::SeqCst);
 
                 let magic = self.magic.clone();
                 let force_stop = self.force_stop.clone();
-                let is_downloading = self.is_downloading.clone();
+                let is_downloading = self.downloading_count.clone();
                 let last_download_status = self.last_download_status.clone();
+                let download_lock = self.download_lock.clone();
 
                 tokio::spawn(async move {
+                    // Aqcuire global lock
+                    let _guard = download_lock.lock().await;
+
                     // Do the download
                     let result =
                         download_file_mb(magic, remote_file, local_file, rate, force_stop).await;
@@ -100,12 +108,14 @@ impl Downloader {
                     if let Some(rpc) = rpc {
                         let _ = rpc.send(result);
                     }
+
+                    // Lock released when _gaurd dropped
                 });
             }
             DownloaderMessage::CheckStatus { rpc } => {
                 // Check if the thread is currently downloading
                 let mut status = DownloadingStatus::Failed;
-                if self.is_downloading.load(Ordering::SeqCst) > 0 {
+                if self.downloading_count.load(Ordering::SeqCst) > 0 {
                     status = DownloadingStatus::Downloading;
                 } else if self.last_download_status.load(Ordering::SeqCst) {
                     status = DownloadingStatus::Success;
@@ -134,16 +144,24 @@ impl Downloader {
                     let mut count = 1;
 
                     loop {
-                        if !self.is_downloading.load(Ordering::SeqCst) > 0 {
+                        let active_downloads = self.downloading_count.load(Ordering::SeqCst);
+
+                        if active_downloads == 0 {
+                            info!("All downloads stopped, exiting.");
                             break;
-                        } else {
-                            info!("Waiting for download task to finish");
-                            time::sleep(time::Duration::from_secs(1)).await;
-                            if count > self.timeout {
+                        }
+
+                        info!("Waiting for download task to finish");
+                        time::sleep(time::Duration::from_secs(1)).await;
+
+                        if count > self.timeout {
+                            info!("Download task did not finish in time. Forcing stop");
+                            if !self.force_stop.load(Ordering::SeqCst) {
                                 self.force_stop.store(true, Ordering::SeqCst);
                             }
-                            count += 1;
                         }
+                        count += 1;
+
                     }
                     info!("Download task shutting down gracefully");
                     break;
@@ -163,7 +181,7 @@ impl DownloaderHandle {
     pub fn new(shutdown: ShutdownSignals, magic: MagicHandle) -> Self {
         let (sender, receiver) = mpsc::channel(8);
 
-        let timeout = 60; // 60 second timeout
+        let timeout = 5; // 5 second timeout
 
         let mut actor = Downloader::new(shutdown, receiver, magic, timeout);
 

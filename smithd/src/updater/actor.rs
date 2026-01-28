@@ -4,11 +4,72 @@ use crate::shutdown::ShutdownSignals;
 use crate::utils::network::NetworkClient;
 use anyhow::Context;
 use anyhow::Result;
+use std::collections::HashMap;
 use tokio::process::Command;
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
 use tokio::time::{self, Duration};
 use tracing::{error, info, warn};
+
+const MAX_INSTALL_RETRIES: u32 = 3;
+
+#[derive(Clone, Debug)]
+enum InstallFailureKind {
+    CorruptPackage,
+    SystemError,
+    Unknown,
+}
+
+impl std::fmt::Display for InstallFailureKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            InstallFailureKind::CorruptPackage => write!(f, "CorruptPackage"),
+            InstallFailureKind::SystemError => write!(f, "SystemError"),
+            InstallFailureKind::Unknown => write!(f, "Unknown"),
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+struct PackageFailure {
+    consecutive_failures: u32,
+    last_failure_kind: InstallFailureKind,
+}
+
+fn classify_install_failure(stderr: &str) -> InstallFailureKind {
+    let stderr_lower = stderr.to_lowercase();
+
+    let corrupt_patterns = [
+        "is not a debian format archive",
+        "archive is corrupt",
+        "unexpected end of file",
+        "could not read meta data",
+    ];
+
+    for pattern in &corrupt_patterns {
+        if stderr_lower.contains(pattern) {
+            return InstallFailureKind::CorruptPackage;
+        }
+    }
+
+    let system_patterns = [
+        "dpkg was interrupted",
+        "dependency problems",
+        "conflicts with",
+        "no space left on device",
+        "unable to access dpkg",
+        "unmet dependencies",
+        "broken packages",
+    ];
+
+    for pattern in &system_patterns {
+        if stderr_lower.contains(pattern) {
+            return InstallFailureKind::SystemError;
+        }
+    }
+
+    InstallFailureKind::Unknown
+}
 
 #[derive(Debug)]
 pub enum ActorMessage {
@@ -45,6 +106,7 @@ pub struct Actor {
     last_update: Option<Result<time::Instant>>,
     last_upgrade: Option<Result<time::Instant>>,
     downloader: DownloaderHandle,
+    install_failures: HashMap<String, PackageFailure>,
 }
 
 impl Actor {
@@ -64,6 +126,7 @@ impl Actor {
             last_update: None,
             last_upgrade: None,
             downloader,
+            install_failures: HashMap::new(),
         }
     }
 
@@ -94,6 +157,35 @@ impl Actor {
         }
     }
 
+    /// Record an install failure for a package. Returns `true` if the `.deb` file
+    /// should be deleted (only for corrupt-package errors where re-download may help).
+    fn handle_install_failure(&mut self, package_name: &str, kind: InstallFailureKind) -> bool {
+        let entry = self
+            .install_failures
+            .entry(package_name.to_string())
+            .or_insert(PackageFailure {
+                consecutive_failures: 0,
+                last_failure_kind: kind.clone(),
+            });
+        entry.consecutive_failures += 1;
+        entry.last_failure_kind = kind.clone();
+
+        matches!(kind, InstallFailureKind::CorruptPackage)
+    }
+
+    fn should_skip_install(&self, package_name: &str) -> bool {
+        if let Some(failure) = self.install_failures.get(package_name)
+            && failure.consecutive_failures >= MAX_INSTALL_RETRIES
+        {
+            warn!(
+                "Skipping install of {} after {} consecutive failures (last: {})",
+                package_name, failure.consecutive_failures, failure.last_failure_kind
+            );
+            return true;
+        }
+        false
+    }
+
     async fn handle_message(&mut self, msg: ActorMessage) {
         match msg {
             ActorMessage::Update => {
@@ -110,6 +202,7 @@ impl Actor {
                     info!(
                         "Upgrading from release_id {release_id:?} to target_release_id {target_release_id:?}"
                     );
+                    self.install_failures.clear();
 
                     self.update().await;
 
@@ -279,7 +372,7 @@ impl Actor {
         Ok(())
     }
 
-    async fn upgrade_device(&self) -> Result<()> {
+    async fn upgrade_device(&mut self) -> Result<()> {
         // Check if previous update was successful
         match self.last_update {
             Some(Ok(time)) => {
@@ -329,6 +422,10 @@ impl Actor {
             let package_name = package.name;
             let package_file = package.file;
             let package_version = package.version;
+
+            if self.should_skip_install(&package_name) {
+                continue;
+            }
 
             let path = std::env::current_dir()?;
             let packages_folder = path.join("packages");
@@ -389,11 +486,29 @@ impl Actor {
                     Ok(Ok(status)) => {
                         if status.status.success() {
                             info!("Successfully installed package {}", package_name);
+                            self.install_failures.remove(&package_name);
                         } else {
                             let stderr = String::from_utf8_lossy(&status.stderr);
                             error!("Failed to install package {}: {}", package_name, stderr);
 
-                            // Check if error is due to dpkg interruption requiring 'dpkg --configure -a'
+                            let kind = classify_install_failure(&stderr);
+                            let should_delete = self.handle_install_failure(&package_name, kind);
+
+                            if should_delete {
+                                if let Err(e) = tokio::fs::remove_file(&package_file).await {
+                                    error!(
+                                        "Failed to remove package file {}: {}",
+                                        package_file.display(),
+                                        e
+                                    );
+                                } else {
+                                    info!(
+                                        "Removed package file {} so it will be re-downloaded",
+                                        package_file.display()
+                                    );
+                                }
+                            }
+
                             if stderr.contains("dpkg was interrupted")
                                 && stderr.contains("dpkg --configure -a")
                             {
@@ -414,12 +529,14 @@ impl Actor {
                             "Failed to execute install command for {}: {}",
                             package_name, e
                         );
+                        self.handle_install_failure(&package_name, InstallFailureKind::Unknown);
                     }
                     Err(_) => {
                         error!(
                             "apt install for package {} timed out after 5 minutes",
                             package_name
                         );
+                        self.handle_install_failure(&package_name, InstallFailureKind::Unknown);
                     }
                 }
             }
