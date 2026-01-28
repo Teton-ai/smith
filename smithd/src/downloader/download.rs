@@ -215,20 +215,13 @@ async fn download_file(
                 // Remove the existing .part file and start over
                 tokio::fs::remove_file(part_path_str).await?;
 
-                if downloaded > content_length {
-                    // Different file somehow (this should never hit)
-                    resume_download = false;
-                    downloaded = 0;
-                } else {
-                    resume_download = true;
-                    info!("Resuming download from byte {}", downloaded);
-                    request = request.header("Range", format!("bytes={}-", downloaded));
-                }
+                resume_download = false;
+                downloaded = 0;
             }
             None => {
                 // No stored ETag, cannot verify, restart download
                 warn!("No ETag provided by server, restarting download");
-                tokio::fs::remove_file(local_path).await?;
+                tokio::fs::remove_file(part_path_str).await?;
 
                 resume_download = false;
                 downloaded = 0;
@@ -267,6 +260,48 @@ async fn download_file(
                 "Failed to download file from pre-signed URL: {:?}",
                 response.status()
             ));
+        }
+    }
+
+    if resume_download && downloaded > 0 {
+        if let Some(content_range) = response.headers().get("content-range") {
+            let range_str = content_range.to_str().unwrap_or("");
+            // Should be like "bytes 5000-9999/1000"
+            if !range_str.starts_with(&format!("bytes {}-", downloaded)) {
+                warn!(
+                    "Server sent wrong range: {}, expected to start at {}. Restarting download.",
+                    range_str, downloaded
+                );
+
+                tokio::fs::remove_file(part_path_str).await?;
+                downloaded = 0;
+                resume_download = false;
+
+                // Request again without range header
+                response = client.get(presigned_url).send().await?;
+
+                if !response.status().is_success() {
+                    return Err(anyhow::anyhow!(
+                        "Failed to download file from pre-signed URL: {:?}",
+                        response.status()
+                    ));
+                }
+            }
+        } else {
+            warn!("No content-range header on 206 response, restarting download");
+            tokio::fs::remove_file(part_path_str).await?;
+            downloaded = 0;
+            resume_download = false;
+
+            // Request again without range header
+            response = client.get(presigned_url).send().await?;
+
+            if !response.status().is_success() {
+                return Err(anyhow::anyhow!(
+                    "Failed to download file from pre-signed URL: {:?}",
+                    response.status()
+                ));
+            }
         }
     }
 
@@ -337,9 +372,9 @@ async fn download_file(
                 drop(file);
 
                 // Clean up .part file on chunk error
-                let _ = tokio::fs::remove_file(part_path_str)
-                    .await
-                    .inspect_err(|e| warn!("Failed to clean up .part file: {}", e));
+                // let _ = tokio::fs::remove_file(part_path_str)
+                //     .await
+                //     .inspect_err(|e| warn!("Failed to clean up .part file: {}", e));
 
                 return Err(anyhow::anyhow!("Download error: {}", e));
             }
