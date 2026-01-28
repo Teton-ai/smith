@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::{mpsc, RwLock};
+use tokio::sync::{RwLock, mpsc};
 use tracing::info;
 
 pub struct LogSession {
@@ -51,11 +51,7 @@ impl LogStreamSessions {
         sessions.get(session_id).map(|s| s.dashboard_tx.clone())
     }
 
-    pub async fn validate_device_for_session(
-        &self,
-        session_id: &str,
-        device_serial: &str,
-    ) -> bool {
+    pub async fn validate_device_for_session(&self, session_id: &str, device_serial: &str) -> bool {
         let sessions = self.sessions.read().await;
         sessions
             .get(session_id)

@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useClientMutator } from "@/app/api-client-mutator";
 
-interface DeviceService {
+export interface DeviceService {
 	id: number;
 	release_id: number;
 	package_id: number | null;

@@ -35,7 +35,8 @@ impl LogStreamHandle {
             .send(msg)
             .await
             .map_err(|_| anyhow::anyhow!("Failed to send start stream message"))?;
-        rx.await.map_err(|_| anyhow::anyhow!("Failed to receive result"))?
+        rx.await
+            .map_err(|_| anyhow::anyhow!("Failed to receive result"))?
     }
 
     pub async fn stop_stream(&self, session_id: String) {

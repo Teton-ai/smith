@@ -7,29 +7,15 @@ import { useState } from "react";
 import { useGetDeviceInfo } from "@/app/api-client";
 import DeviceHeader from "../DeviceHeader";
 import LogViewer from "./LogViewer";
-import { useDeviceServices } from "./useDeviceServices";
-
-interface DeviceService {
-	id: number;
-	release_id: number;
-	package_id: number | null;
-	service_name: string;
-	watchdog_sec: number | null;
-	created_at: string;
-}
+import { type DeviceService, useDeviceServices } from "./useDeviceServices";
 
 const ServicesPage = () => {
 	const params = useParams();
 	const serial = params.serial as string;
 
 	const { data: device, isLoading: deviceLoading } = useGetDeviceInfo(serial);
-	const { data: servicesData, isLoading: servicesLoading } =
+	const { data: services, isLoading: servicesLoading } =
 		useDeviceServices(serial);
-
-	// Fallback to hardcoded service for testing
-	const services = servicesData?.length ? servicesData : [
-		{ id: 0, release_id: 0, package_id: null, service_name: "smithd", watchdog_sec: null, created_at: "" }
-	];
 
 	const [selectedService, setSelectedService] = useState<string | null>(null);
 
@@ -153,7 +139,6 @@ const ServicesPage = () => {
 									key={selectedService}
 									deviceSerial={serial}
 									serviceName={selectedService}
-									isFollowing={true}
 								/>
 							</>
 						) : (

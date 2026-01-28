@@ -8,14 +8,9 @@ import { useConfig } from "@/app/hooks/config";
 interface LogViewerProps {
 	deviceSerial: string;
 	serviceName: string;
-	isFollowing: boolean;
 }
 
-const LogViewer = ({
-	deviceSerial,
-	serviceName,
-	isFollowing,
-}: LogViewerProps) => {
+const LogViewer = ({ deviceSerial, serviceName }: LogViewerProps) => {
 	const { getAccessTokenSilently } = useAuth0();
 	const { config } = useConfig();
 	const [logs, setLogs] = useState<string[]>([]);

@@ -7,8 +7,8 @@ use std::process::Stdio;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 use tokio::sync::{mpsc, oneshot};
-use tokio_tungstenite::tungstenite::http::Request;
 use tokio_tungstenite::tungstenite::Message;
+use tokio_tungstenite::tungstenite::http::Request;
 use tracing::{error, info};
 
 struct LogStream {
@@ -61,7 +61,10 @@ impl Actor {
         ws_url: String,
     ) -> Result<()> {
         if self.streams.contains_key(&session_id) {
-            return Err(anyhow::anyhow!("Stream already exists for session {}", session_id));
+            return Err(anyhow::anyhow!(
+                "Stream already exists for session {}",
+                session_id
+            ));
         }
 
         let token = self
@@ -130,11 +133,17 @@ async fn run_log_stream(
     let request = Request::builder()
         .uri(ws_url)
         .header("Authorization", format!("Bearer {}", device_token))
-        .header("Host", url::Url::parse(ws_url)?.host_str().unwrap_or("localhost"))
+        .header(
+            "Host",
+            url::Url::parse(ws_url)?.host_str().unwrap_or("localhost"),
+        )
         .header("Connection", "Upgrade")
         .header("Upgrade", "websocket")
         .header("Sec-WebSocket-Version", "13")
-        .header("Sec-WebSocket-Key", tokio_tungstenite::tungstenite::handshake::client::generate_key())
+        .header(
+            "Sec-WebSocket-Key",
+            tokio_tungstenite::tungstenite::handshake::client::generate_key(),
+        )
         .body(())?;
 
     let (ws_stream, _) = tokio_tungstenite::connect_async(request).await?;
@@ -158,7 +167,10 @@ async fn run_log_stream(
         .kill_on_drop(true)
         .spawn()?;
 
-    let stdout = child.stdout.take().ok_or_else(|| anyhow::anyhow!("Failed to capture stdout"))?;
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| anyhow::anyhow!("Failed to capture stdout"))?;
     let mut reader = BufReader::new(stdout).lines();
 
     loop {

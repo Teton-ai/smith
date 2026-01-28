@@ -68,16 +68,11 @@ pub async fn home(
     Json(payload): Json<HomePost>,
 ) -> (StatusCode, Json<HomePostResponse>) {
     let release_id = payload.release_id;
-    let _ = crate::home::save_responses(
-        device.id,
-        &device.serial_number,
-        payload,
-        &state.pg_pool,
-    )
-    .await
-    .inspect_err(|err| {
-        error!("Error saving responses: {:?}", err);
-    });
+    let _ = crate::home::save_responses(device.id, &device.serial_number, payload, &state.pg_pool)
+        .await
+        .inspect_err(|err| {
+            error!("Error saving responses: {:?}", err);
+        });
 
     let response = HomePostResponse {
         timestamp: SystemTime::now()

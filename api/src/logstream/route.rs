@@ -1,12 +1,10 @@
 use super::session::LogStreamSessions;
-use crate::home::add_commands;
 use crate::State;
+use crate::home::add_commands;
 use axum::{
     Extension,
     extract::{
-        Path,
-        Query,
-        WebSocketUpgrade,
+        Path, Query, WebSocketUpgrade,
         ws::{Message, WebSocket},
     },
     http::StatusCode,
@@ -73,16 +71,9 @@ pub async fn dashboard_logs_ws(
     .ok_or(StatusCode::NOT_FOUND)?;
 
     let session_id = Uuid::new_v4().to_string();
-    // TODO: Use state.config.api_public_url once env is properly configured
-    // For Docker: smithd can reach API via "api:8080" (docker network name)
-    let api_url = if state.config.api_public_url.contains("localhost") {
-        "http://api:8080".to_string()
-    } else {
-        state.config.api_public_url.clone()
-    };
     let ws_url = format!(
         "{}/ws/stream-logs/{}",
-        api_url.replace("http", "ws"),
+        state.config.api_public_url.replace("http", "ws"),
         session_id
     );
 
@@ -157,7 +148,10 @@ async fn handle_dashboard_ws(
     while let Some(msg) = ws_rx.next().await {
         match msg {
             Ok(Message::Close(_)) => {
-                info!("Dashboard closed WebSocket for session {}", session_id_clone);
+                info!(
+                    "Dashboard closed WebSocket for session {}",
+                    session_id_clone
+                );
                 break;
             }
             Ok(Message::Ping(_)) => {
@@ -185,7 +179,10 @@ async fn handle_dashboard_ws(
     sessions_clone.remove_session(&session_id_clone).await;
     forward_task.abort();
 
-    info!("Dashboard log stream ended for session {}", session_id_clone);
+    info!(
+        "Dashboard log stream ended for session {}",
+        session_id_clone
+    );
 }
 
 /// WebSocket endpoint for device to send log stream
