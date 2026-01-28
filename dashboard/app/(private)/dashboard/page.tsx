@@ -1,42 +1,25 @@
 "use client";
 
-import { useQueryClient } from "@tanstack/react-query";
 import {
-	AlertCircle,
 	AlertTriangle,
-	Calendar,
-	Check,
 	CheckCircle,
 	ChevronRight,
 	Clock,
 	Cpu,
 	Package,
-	X,
 	XCircle,
 } from "lucide-react";
 import Link from "next/link";
-import type React from "react";
-import { useEffect, useState } from "react";
 import NetworkQualityIndicator from "@/app/components/NetworkQualityIndicator";
 import { useConfig } from "@/app/hooks/config";
 import {
 	type Device,
-	useApproveDevice,
 	useGetDashboard,
 	useGetDevices,
-	useRevokeDevice,
 } from "../../api-client";
 
 const AdminPanel = () => {
 	const { config } = useConfig();
-	const queryClient = useQueryClient();
-	const [processingDevices, setProcessingDevices] = useState<Set<number>>(
-		new Set(),
-	);
-	const [toast, setToast] = useState<{
-		message: string;
-		type: "success" | "error";
-	} | null>(null);
 
 	// Build exclude_labels query param
 	const excludeLabels =
@@ -47,11 +30,6 @@ const AdminPanel = () => {
 	const dashboardQuery = useGetDashboard({
 		query: { refetchInterval: 5000 },
 	});
-
-	const unapprovedDevices = useGetDevices(
-		{ approved: false },
-		{ query: { refetchInterval: 5000 } },
-	);
 
 	const { data: outdatedDevices = [], isLoading: outdatedLoading } =
 		useGetDevices(
@@ -72,21 +50,10 @@ const AdminPanel = () => {
 			{ query: { refetchInterval: 5000 } },
 		);
 
-	const approveDeviceHook = useApproveDevice();
-	const revokeDeviceHook = useRevokeDevice();
-
 	const loading =
 		dashboardQuery.isLoading ||
-		unapprovedDevices.isLoading ||
 		outdatedLoading ||
 		offlineLoading;
-
-	useEffect(() => {
-		if (toast) {
-			const timer = setTimeout(() => setToast(null), 3000);
-			return () => clearTimeout(timer);
-		}
-	}, [toast]);
 
 	const getDeviceName = (device: Device) => device.serial_number;
 
@@ -105,80 +72,6 @@ const AdminPanel = () => {
 
 	const getFlagUrl = (countryCode: string) => {
 		return `https://flagicons.lipis.dev/flags/4x3/${countryCode.toLowerCase()}.svg`;
-	};
-
-	const handleApprove = async (deviceId: number, e: React.MouseEvent) => {
-		e.stopPropagation();
-
-		const device = unapprovedDevices.data?.find((d) => d.id === deviceId);
-		const deviceName = device?.serial_number || "Device";
-
-		setProcessingDevices((prev) => new Set(prev).add(deviceId));
-
-		const success = await approveDeviceHook.mutateAsync({ deviceId });
-
-		if (success) {
-			queryClient.invalidateQueries({ queryKey: unapprovedDevices.queryKey });
-			queryClient.invalidateQueries({ queryKey: dashboardQuery.queryKey });
-			setToast({
-				message: `${deviceName} approved successfully`,
-				type: "success",
-			});
-		} else {
-			setToast({
-				message: `Failed to approve ${deviceName}`,
-				type: "error",
-			});
-		}
-
-		setProcessingDevices((prev) => {
-			const newSet = new Set(prev);
-			newSet.delete(deviceId);
-			return newSet;
-		});
-	};
-
-	const handleReject = async (deviceId: number, e: React.MouseEvent) => {
-		e.stopPropagation();
-
-		const device = unapprovedDevices.data?.find((d) => d.id === deviceId);
-		const deviceName = device?.serial_number || "Device";
-
-		if (
-			!confirm(
-				`Are you sure you want to reject ${deviceName}? This will archive it.`,
-			)
-		) {
-			return;
-		}
-
-		setProcessingDevices((prev) => new Set(prev).add(deviceId));
-
-		const success = await revokeDeviceHook.mutateAsync({ deviceId });
-
-		if (success) {
-			queryClient.invalidateQueries({ queryKey: unapprovedDevices.queryKey });
-			queryClient.invalidateQueries({ queryKey: dashboardQuery.queryKey });
-			setToast({
-				message: `${deviceName} rejected and archived`,
-				type: "success",
-			});
-		} else {
-			setToast({
-				message: `Failed to reject ${deviceName}`,
-				type: "error",
-			});
-		}
-
-		setProcessingDevices((prev) => {
-			const newSet = new Set(prev);
-			newSet.delete(deviceId);
-			return newSet;
-		});
-	};
-
-	const getDeviceHostname = (device: Device) => {
-		return device.system_info?.hostname || "No hostname";
 	};
 
 	// Sort by last_seen descending (most recent first), never seen at the end
@@ -252,37 +145,8 @@ const AdminPanel = () => {
 		neverSeen.length > 0;
 
 	return (
-		<>
-			{/* Toast Notification */}
-			{toast && (
-				<div
-					className={`fixed top-4 right-4 z-50 p-4 rounded-lg shadow-lg border ${
-						toast.type === "success"
-							? "bg-green-50 text-green-800 border-green-200"
-							: "bg-red-50 text-red-800 border-red-200"
-					} transition-all duration-300 ease-in-out`}
-				>
-					<div className="flex items-center space-x-2">
-						{toast.type === "success" ? (
-							<Check className="w-5 h-5 text-green-600" />
-						) : (
-							<X className="w-5 h-5 text-red-600" />
-						)}
-						<span className="text-sm font-medium">{toast.message}</span>
-						<button
-							onClick={() => setToast(null)}
-							className="ml-2 text-gray-400 hover:text-gray-600"
-						>
-							<X className="w-4 h-4" />
-						</button>
-					</div>
-				</div>
-			)}
-
-			<div className="flex gap-6">
-				{/* Main Content */}
-				<div className="flex-1 space-y-6">
-					{/* Overview Stats */}
+		<div className="space-y-6">
+			{/* Overview Stats */}
 					<div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
 						{loading ? (
 							// Skeleton loading for stats
@@ -381,7 +245,7 @@ const AdminPanel = () => {
 											return (
 												<Link
 													key={device.id}
-													className="block px-4 py-3 hover:bg-purple-50 cursor-pointer transition-colors"
+													className="block px-4 py-3 hover:bg-purple-50 transition-colors"
 													href={`/devices/${device.serial_number}`}
 												>
 													<div className="flex items-center justify-between">
@@ -462,7 +326,7 @@ const AdminPanel = () => {
 											return (
 												<Link
 													key={device.id}
-													className="block px-4 py-3 hover:bg-yellow-50 cursor-pointer transition-colors"
+													className="block px-4 py-3 hover:bg-yellow-50 transition-colors"
 													href={`/devices/${device.serial_number}`}
 												>
 													<div className="flex items-center justify-between">
@@ -527,7 +391,7 @@ const AdminPanel = () => {
 											return (
 												<Link
 													key={device.id}
-													className="block px-4 py-3 hover:bg-orange-50 cursor-pointer transition-colors"
+													className="block px-4 py-3 hover:bg-orange-50 transition-colors"
 													href={`/devices/${device.serial_number}`}
 												>
 													<div className="flex items-center justify-between">
@@ -592,7 +456,7 @@ const AdminPanel = () => {
 											return (
 												<Link
 													key={device.id}
-													className="block px-4 py-3 hover:bg-red-50 cursor-pointer transition-colors"
+													className="block px-4 py-3 hover:bg-red-50 transition-colors"
 													href={`/devices/${device.serial_number}`}
 												>
 													<div className="flex items-center justify-between">
@@ -657,7 +521,7 @@ const AdminPanel = () => {
 											return (
 												<Link
 													key={device.id}
-													className="block px-4 py-3 hover:bg-gray-50 cursor-pointer transition-colors"
+													className="block px-4 py-3 hover:bg-gray-50 transition-colors"
 													href={`/devices/${device.serial_number}`}
 												>
 													<div className="flex items-center justify-between">
@@ -721,92 +585,7 @@ const AdminPanel = () => {
 							</div>
 						</div>
 					)}
-				</div>
-
-				{/* Right Sidebar - Unapproved Devices */}
-				<div className="hidden xl:block w-96 space-y-6">
-					<div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
-						<div className="bg-orange-50 px-4 py-3 border-b border-gray-200">
-							<div className="flex items-center justify-between">
-								<h4 className="text-sm font-semibold text-orange-800">
-									Pending Approval
-								</h4>
-								{!loading && (unapprovedDevices.data || []).length > 0 && (
-									<span className="text-xs text-orange-600">
-										{unapprovedDevices.data?.length || 0} device
-										{unapprovedDevices.data?.length !== 1 ? "s" : ""}
-									</span>
-								)}
-							</div>
-						</div>
-						<div className="max-h-[calc(100vh-200px)] overflow-y-auto">
-							{loading ? (
-								<div className="p-4 space-y-3">
-									{[...Array(3)].map((_, i) => (
-										<div key={i} className="animate-pulse">
-											<div className="h-4 bg-gray-200 rounded w-3/4 mb-2"></div>
-											<div className="h-3 bg-gray-200 rounded w-1/2"></div>
-										</div>
-									))}
-								</div>
-							) : unapprovedDevices.data?.length === 0 ? (
-								<div className="p-6 text-center">
-									<CheckCircle className="w-10 h-10 text-green-500 mx-auto mb-2" />
-									<p className="text-sm font-medium text-gray-900 mb-1">
-										All caught up!
-									</p>
-									<p className="text-xs text-gray-600">
-										No devices pending approval
-									</p>
-								</div>
-							) : (
-								<div className="divide-y divide-gray-200">
-									{unapprovedDevices.data?.map((device) => (
-										<div key={device.id} className="p-4 hover:bg-gray-50">
-											<div className="flex items-start justify-between mb-2">
-												<div className="flex items-center space-x-2 min-w-0 flex-1">
-													<AlertCircle className="w-4 h-4 text-orange-500 flex-shrink-0" />
-													<div className="min-w-0">
-														<p className="text-sm font-medium text-gray-900 truncate">
-															{device.serial_number}
-														</p>
-														<p className="text-xs text-gray-500 truncate">
-															{getDeviceHostname(device)}
-														</p>
-													</div>
-												</div>
-											</div>
-											<div className="flex items-center space-x-1 text-xs text-gray-500 mb-3">
-												<Calendar className="w-3 h-3" />
-												<span>{formatTimeAgo(device.created_on)}</span>
-											</div>
-											<div className="flex space-x-2">
-												<button
-													onClick={(e) => handleApprove(device.id, e)}
-													disabled={processingDevices.has(device.id)}
-													className="flex-1 flex items-center justify-center space-x-1 px-3 py-1.5 text-xs font-medium text-white bg-green-600 hover:bg-green-700 disabled:bg-gray-300 disabled:cursor-not-allowed rounded transition-colors"
-												>
-													<CheckCircle className="w-3 h-3" />
-													<span>Approve</span>
-												</button>
-												<button
-													onClick={(e) => handleReject(device.id, e)}
-													disabled={processingDevices.has(device.id)}
-													className="flex-1 flex items-center justify-center space-x-1 px-3 py-1.5 text-xs font-medium text-white bg-red-600 hover:bg-red-700 disabled:bg-gray-300 disabled:cursor-not-allowed rounded transition-colors"
-												>
-													<XCircle className="w-3 h-3" />
-													<span>Reject</span>
-												</button>
-											</div>
-										</div>
-									))}
-								</div>
-							)}
-						</div>
-					</div>
-				</div>
-			</div>
-		</>
+		</div>
 	);
 };
 
