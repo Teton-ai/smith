@@ -145,7 +145,7 @@ pub async fn get_bundle_commands(
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
 
-    let limit = pagination.limit.unwrap_or(10).clamp(0, 10);
+    let limit = pagination.limit.unwrap_or(100).clamp(0, 100);
 
     let where_clause = if let Some(starting_after) = pagination.starting_after {
         format!(
