@@ -1,9 +1,12 @@
+use std::collections::HashMap;
+
 use models::deployment::Deployment;
 use models::deployment::DeploymentRequest;
 use models::deployment::DeploymentStatus;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sqlx::PgPool;
+use sqlx::types::Json as SqlxJson;
 use sqlx::types::chrono;
 use utoipa::ToSchema;
 
@@ -21,6 +24,8 @@ pub struct DeploymentDeviceWithStatus {
     pub target_release_id: Option<i32>,
     pub last_ping: Option<chrono::DateTime<chrono::Utc>>,
     pub added_at: chrono::DateTime<chrono::Utc>,
+    #[schema(value_type = HashMap<String, String>)]
+    pub labels: SqlxJson<HashMap<String, String>>,
 }
 
 pub async fn get_deployment(
@@ -339,10 +344,14 @@ pub async fn get_devices_in_deployment(
                 d.release_id,
                 d.target_release_id,
                 d.last_ping,
-                dd.created_at AS added_at
+                dd.created_at AS added_at,
+                COALESCE(JSONB_OBJECT_AGG(l.name, dl.value) FILTER (WHERE l.name IS NOT NULL), '{}') as "labels!: SqlxJson<HashMap<String, String>>"
             FROM deployment_devices dd
             JOIN device d ON dd.device_id = d.id
+            LEFT JOIN device_label dl ON dl.device_id = d.id
+            LEFT JOIN label l ON l.id = dl.label_id
             WHERE dd.deployment_id = $1
+            GROUP BY d.id, d.serial_number, d.release_id, d.target_release_id, d.last_ping, dd.created_at
             ORDER BY dd.created_at ASC
             "#,
         deployment.id
