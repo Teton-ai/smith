@@ -9,6 +9,7 @@ import {
 	Loader2,
 	Search,
 	Tag,
+	Terminal,
 	User,
 	X,
 } from "lucide-react";
@@ -25,6 +26,7 @@ import {
 	useGetDevicesInfinite,
 	useGetDistributionRollouts,
 	useGetReleases,
+	useIssueCommandsToDevices,
 	useUpdateDevicesTargetRelease,
 } from "../../api-client";
 
@@ -162,6 +164,10 @@ const DevicesPage = () => {
 	>(undefined);
 	const [bulkDeployReleaseSearch, setBulkDeployReleaseSearch] = useState("");
 	const [mounted, setMounted] = useState(false);
+
+	// Bulk command state
+	const [showBulkCommandModal, setShowBulkCommandModal] = useState(false);
+	const [freeFormCommand, setFreeFormCommand] = useState("");
 
 	const formatRelativeTime = (dateString: string) => {
 		return moment(dateString).fromNow();
@@ -345,6 +351,34 @@ const DevicesPage = () => {
 			data: {
 				target_release_id: selectedReleaseId,
 				devices: Array.from(selectedDeviceIds),
+			},
+		});
+	};
+
+	// Bulk command mutation
+	const { mutate: issueCommands, isPending: isIssuingCommands } =
+		useIssueCommandsToDevices({
+			mutation: {
+				onSuccess: () => {
+					setShowBulkCommandModal(false);
+					setSelectedDeviceIds(new Set());
+					setFreeFormCommand("");
+				},
+				onError: (error) => {
+					console.error("Failed to issue commands:", error);
+				},
+			},
+		});
+
+	const handleBulkCommand = () => {
+		if (!freeFormCommand.trim()) return;
+
+		issueCommands({
+			data: {
+				devices: Array.from(selectedDeviceIds),
+				commands: [
+					{ command: { FreeForm: { cmd: freeFormCommand } }, continue_on_error: false },
+				],
 			},
 		});
 	};
@@ -1138,6 +1172,13 @@ const DevicesPage = () => {
 							Clear Selection
 						</button>
 						<button
+							onClick={() => setShowBulkCommandModal(true)}
+							className="px-4 py-2 bg-purple-600 text-white rounded hover:bg-purple-700 cursor-pointer flex items-center gap-2"
+						>
+							<Terminal className="w-4 h-4" />
+							Run Command
+						</button>
+						<button
 							onClick={() => setShowBulkDeployModal(true)}
 							className="px-4 py-2 bg-amber-600 text-white rounded hover:bg-amber-700 cursor-pointer"
 						>
@@ -1375,6 +1416,92 @@ const DevicesPage = () => {
 										</span>
 									) : (
 										"Deploy"
+									)}
+								</button>
+							</div>
+						</div>
+					</div>,
+					document.body,
+				)}
+
+			{/* Bulk Command Modal */}
+			{mounted &&
+				showBulkCommandModal &&
+				createPortal(
+					<div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 animate-in fade-in duration-200">
+						<div className="bg-white rounded-lg shadow-xl p-6 w-[520px] animate-in zoom-in-95 duration-200">
+							<div className="flex justify-between items-center mb-4">
+								<h2 className="text-xl font-semibold text-gray-900">
+									Run Command on Selected Devices
+								</h2>
+								<button
+									onClick={() => {
+										setShowBulkCommandModal(false);
+										setFreeFormCommand("");
+									}}
+									className="text-gray-400 hover:text-gray-600 cursor-pointer"
+								>
+									<X className="w-5 h-5" />
+								</button>
+							</div>
+
+							{/* Info Banner */}
+							<div className="bg-purple-50 border border-purple-200 rounded-lg p-4 mb-4">
+								<div className="flex gap-3">
+									<Terminal className="w-5 h-5 text-purple-600 flex-shrink-0 mt-0.5" />
+									<div>
+										<p className="text-purple-800 font-medium">
+											Execute Command on {selectedDeviceIds.size} Device
+											{selectedDeviceIds.size > 1 ? "s" : ""}
+										</p>
+										<p className="text-purple-700 text-sm mt-1">
+											The command will be queued and executed on all selected
+											devices when they check in.
+										</p>
+									</div>
+								</div>
+							</div>
+
+							{/* Command Input */}
+							<div className="mb-6">
+								<label className="block text-sm font-medium text-gray-700 mb-2">
+									Command
+								</label>
+								<input
+									type="text"
+									value={freeFormCommand}
+									onChange={(e) => setFreeFormCommand(e.target.value)}
+									placeholder="e.g., ls -la /var/log"
+									className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-purple-500 focus:border-purple-500 text-gray-900 placeholder-gray-400"
+								/>
+								<p className="mt-1 text-xs text-gray-500">
+									Enter a shell command to execute on the selected devices
+								</p>
+							</div>
+
+							{/* Action Buttons */}
+							<div className="flex justify-end gap-3">
+								<button
+									onClick={() => {
+										setShowBulkCommandModal(false);
+										setFreeFormCommand("");
+									}}
+									className="px-4 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 cursor-pointer"
+								>
+									Cancel
+								</button>
+								<button
+									onClick={handleBulkCommand}
+									disabled={!freeFormCommand.trim() || isIssuingCommands}
+									className="px-4 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+								>
+									{isIssuingCommands ? (
+										<span className="flex items-center gap-2">
+											<Loader2 className="w-4 h-4 animate-spin" />
+											Sending...
+										</span>
+									) : (
+										"Run Command"
 									)}
 								</button>
 							</div>
