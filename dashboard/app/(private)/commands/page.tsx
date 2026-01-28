@@ -192,7 +192,10 @@ const BundleCard = ({ bundle }: { bundle: BundleWithCommands }) => {
 								</span>
 								<button
 									onClick={() =>
-										copyToClipboard(commandDisplay.content, "cmd-" + bundle.uuid)
+										copyToClipboard(
+											commandDisplay.content,
+											"cmd-" + bundle.uuid,
+										)
 									}
 									className="text-gray-400 hover:text-gray-600 cursor-pointer"
 								>
@@ -207,9 +210,7 @@ const BundleCard = ({ bundle }: { bundle: BundleWithCommands }) => {
 								{typeof commandDisplay.content === "object" &&
 								commandDisplay.content !== null &&
 								"cmd" in commandDisplay.content
-									? String(
-											(commandDisplay.content as { cmd: string }).cmd,
-										)
+									? String((commandDisplay.content as { cmd: string }).cmd)
 									: JSON.stringify(commandDisplay.content, null, 2)}
 							</pre>
 						</div>
@@ -308,7 +309,9 @@ const CommandsPage = () => {
 			) : bundles.length === 0 ? (
 				<div className="text-center py-12 bg-white border border-gray-200 rounded-lg">
 					<Send className="w-12 h-12 text-gray-300 mx-auto mb-3" />
-					<p className="text-gray-500">No bulk commands have been executed yet</p>
+					<p className="text-gray-500">
+						No bulk commands have been executed yet
+					</p>
 					<p className="text-sm text-gray-400 mt-1">
 						Select devices and run a command to see results here
 					</p>
