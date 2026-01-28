@@ -391,6 +391,9 @@ const DeploymentStatusPage = () => {
 													Serial Number
 												</th>
 												<th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+													Labels
+												</th>
+												<th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
 													Status
 												</th>
 												<th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -411,6 +414,25 @@ const DeploymentStatusPage = () => {
 													>
 														<td className="px-4 py-3 text-sm font-mono text-gray-900">
 															{device.serial_number}
+														</td>
+														<td className="px-4 py-3 text-sm">
+															{device.labels &&
+															Object.keys(device.labels).length > 0 ? (
+																<div className="flex flex-wrap gap-1">
+																	{Object.entries(device.labels).map(
+																		([key, value]) => (
+																			<code
+																				key={key}
+																				className="px-1.5 py-0.5 text-xs font-mono rounded border bg-gray-100 text-gray-700 border-gray-200"
+																			>
+																				{key}={value}
+																			</code>
+																		),
+																	)}
+																</div>
+															) : (
+																<span className="text-xs text-gray-400">-</span>
+															)}
 														</td>
 														<td className="px-4 py-3 text-sm">
 															<span
