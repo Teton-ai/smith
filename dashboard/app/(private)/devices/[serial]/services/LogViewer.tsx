@@ -85,11 +85,18 @@ const LogViewer = ({ deviceSerial, serviceName }: LogViewerProps) => {
 				wsRef.current = null;
 			}
 		};
-	}, [config?.API_BASE_URL, deviceSerial, serviceName, getAccessTokenSilently, scrollToBottom]);
+	}, [
+		config?.API_BASE_URL,
+		deviceSerial,
+		serviceName,
+		getAccessTokenSilently,
+		scrollToBottom,
+	]);
 
+	// biome-ignore lint/correctness/useExhaustiveDependencies: scroll when logs change
 	useEffect(() => {
 		scrollToBottom();
-	}, [logs, scrollToBottom]);
+	}, [logs.length, scrollToBottom]);
 
 	return (
 		<div className="relative">
@@ -128,9 +135,7 @@ const LogViewer = ({ deviceSerial, serviceName }: LogViewerProps) => {
 						</span>
 					</div>
 					{logs.length > 0 && (
-						<span className="text-xs text-gray-500">
-							{logs.length} lines
-						</span>
+						<span className="text-xs text-gray-500">{logs.length} lines</span>
 					)}
 				</div>
 

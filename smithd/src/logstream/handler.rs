@@ -12,23 +12,17 @@ pub struct LogStreamHandle {
 impl LogStreamHandle {
     pub fn new(shutdown: ShutdownSignals, magic: MagicHandle) -> Self {
         let (sender, receiver) = mpsc::channel(8);
-        let mut actor = Actor::new(shutdown, receiver, magic);
+        let mut actor = Actor::new(shutdown, receiver, sender.clone(), magic);
         tokio::spawn(async move { actor.run().await });
 
         Self { sender }
     }
 
-    pub async fn start_stream(
-        &self,
-        session_id: String,
-        service_name: String,
-        ws_url: String,
-    ) -> Result<()> {
+    pub async fn start_stream(&self, session_id: String, service_name: String) -> Result<()> {
         let (tx, rx) = oneshot::channel();
         let msg = ActorMessage::StartStream {
             session_id,
             service_name,
-            ws_url,
             result: tx,
         };
         self.sender

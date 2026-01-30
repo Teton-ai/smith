@@ -13,9 +13,12 @@ use axum::{
 use futures::{SinkExt, StreamExt};
 use serde::Deserialize;
 use smith::utils::schema::{SafeCommandRequest, SafeCommandTx};
+use std::time::Duration;
 use tokio::sync::mpsc;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 use uuid::Uuid;
+
+const SESSION_CONNECT_TIMEOUT: Duration = Duration::from_secs(60);
 
 #[derive(Deserialize)]
 pub struct WsAuthQuery {
@@ -71,11 +74,6 @@ pub async fn dashboard_logs_ws(
     .ok_or(StatusCode::NOT_FOUND)?;
 
     let session_id = Uuid::new_v4().to_string();
-    let ws_url = format!(
-        "{}/ws/stream-logs/{}",
-        state.config.api_public_url.replace("http", "ws"),
-        session_id
-    );
 
     info!(
         "Dashboard requesting logs for device {} service {} - session {}",
@@ -88,7 +86,6 @@ pub async fn dashboard_logs_ws(
             session_id,
             device_serial,
             service_name,
-            ws_url,
             state,
             sessions,
         )
@@ -100,28 +97,19 @@ async fn handle_dashboard_ws(
     session_id: String,
     device_serial: String,
     service_name: String,
-    ws_url: String,
     state: State,
     sessions: LogStreamSessions,
 ) {
     let (mut ws_tx, mut ws_rx) = socket.split();
     let (log_tx, mut log_rx) = mpsc::channel::<String>(100);
 
-    sessions
-        .create_session(
-            session_id.clone(),
-            device_serial.clone(),
-            service_name.clone(),
-            log_tx,
-        )
-        .await;
+    sessions.create_session(session_id.clone(), log_tx).await;
 
     let command = SafeCommandRequest {
         id: -10,
         command: SafeCommandTx::StreamLogs {
             session_id: session_id.clone(),
             service_name: service_name.clone(),
-            ws_url,
         },
         continue_on_error: false,
     };
@@ -136,6 +124,24 @@ async fn handle_dashboard_ws(
 
     let session_id_clone = session_id.clone();
     let sessions_clone = sessions.clone();
+
+    // Wait for device to connect with timeout
+    let device_connected = sessions
+        .wait_for_device(&session_id, SESSION_CONNECT_TIMEOUT)
+        .await;
+    if !device_connected {
+        warn!(
+            "Device did not connect within timeout for session {}",
+            session_id_clone
+        );
+        let _ = ws_tx
+            .send(Message::Text(
+                "[Error: Device did not connect in time]".to_string(),
+            ))
+            .await;
+        sessions_clone.remove_session(&session_id_clone).await;
+        return;
+    }
 
     let forward_task = tokio::spawn(async move {
         while let Some(log_line) = log_rx.recv().await {

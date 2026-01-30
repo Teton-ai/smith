@@ -18,15 +18,19 @@ mod tunnel;
 mod upgrade;
 mod variable;
 
+pub struct Handles {
+    pub tunnel: TunnelHandle,
+    pub updater: UpdaterHandle,
+    pub downloader: DownloaderHandle,
+    pub filemanager: FileManagerHandle,
+    pub logstream: LogStreamHandle,
+}
+
 struct CommandQueueExecutor {
     shutdown: ShutdownSignals,
     queue: mpsc::Receiver<SafeCommandRequest>,
     responses: mpsc::Sender<SafeCommandResponse>,
-    tunnel_handle: TunnelHandle,
-    updater_handle: UpdaterHandle,
-    downloader_handle: DownloaderHandle,
-    filemanager_handle: FileManagerHandle,
-    logstream_handle: LogStreamHandle,
+    handles: Handles,
 }
 
 impl CommandQueueExecutor {
@@ -34,21 +38,13 @@ impl CommandQueueExecutor {
         shutdown: ShutdownSignals,
         queue: mpsc::Receiver<SafeCommandRequest>,
         responses: mpsc::Sender<SafeCommandResponse>,
-        tunnel_handle: TunnelHandle,
-        updater_handle: UpdaterHandle,
-        downloader_handle: DownloaderHandle,
-        filemanager_handle: FileManagerHandle,
-        logstream_handle: LogStreamHandle,
+        handles: Handles,
     ) -> Self {
         Self {
             shutdown,
             queue,
             responses,
-            tunnel_handle,
-            updater_handle,
-            downloader_handle,
-            filemanager_handle,
-            logstream_handle,
+            handles,
         }
     }
 
@@ -68,9 +64,9 @@ impl CommandQueueExecutor {
                 port,
                 user,
                 pub_key,
-            } => tunnel::open_port(action.id, &self.tunnel_handle, port, user, pub_key).await,
-            SafeCommandTx::CloseTunnel => tunnel::close_ssh(action.id, &self.tunnel_handle).await,
-            SafeCommandTx::Upgrade => upgrade::upgrade(action.id, &self.updater_handle).await,
+            } => tunnel::open_port(action.id, &self.handles.tunnel, port, user, pub_key).await,
+            SafeCommandTx::CloseTunnel => tunnel::close_ssh(action.id, &self.handles.tunnel).await,
+            SafeCommandTx::Upgrade => upgrade::upgrade(action.id, &self.handles.updater).await,
             SafeCommandTx::UpdateNetwork { network } => network::execute(action.id, network).await,
             SafeCommandTx::DownloadOTA {
                 tools,
@@ -79,8 +75,8 @@ impl CommandQueueExecutor {
             } => {
                 ota::download_ota(
                     action.id,
-                    &self.downloader_handle,
-                    &self.filemanager_handle,
+                    &self.handles.downloader,
+                    &self.handles.filemanager,
                     &tools,
                     &payload,
                     rate,
@@ -88,26 +84,19 @@ impl CommandQueueExecutor {
                 .await
             }
             SafeCommandTx::CheckOTAStatus => {
-                ota::check_ota(action.id, &self.downloader_handle).await
+                ota::check_ota(action.id, &self.handles.downloader).await
             }
-            SafeCommandTx::StartOTA => ota::start_ota(action.id, &self.filemanager_handle).await,
+            SafeCommandTx::StartOTA => ota::start_ota(action.id, &self.handles.filemanager).await,
             SafeCommandTx::TestNetwork => network::test_network(action.id).await,
             SafeCommandTx::StreamLogs {
                 session_id,
                 service_name,
-                ws_url,
             } => {
-                logs::start_stream(
-                    action.id,
-                    &self.logstream_handle,
-                    session_id,
-                    service_name,
-                    ws_url,
-                )
-                .await
+                logs::start_stream(action.id, &self.handles.logstream, session_id, service_name)
+                    .await
             }
             SafeCommandTx::StopLogStream { session_id } => {
-                logs::stop_stream(action.id, &self.logstream_handle, session_id).await
+                logs::stop_stream(action.id, &self.handles.logstream, session_id).await
             }
         }
     }
@@ -234,14 +223,7 @@ pub struct CommanderHandle {
 }
 
 impl CommanderHandle {
-    pub fn new(
-        shutdown: ShutdownSignals,
-        tunnel: TunnelHandle,
-        updater: UpdaterHandle,
-        downloader: DownloaderHandle,
-        filemanager: FileManagerHandle,
-        logstream: LogStreamHandle,
-    ) -> Self {
+    pub fn new(shutdown: ShutdownSignals, handles: Handles) -> Self {
         let (sender, receiver) = mpsc::channel(10);
         let (command_queue_tx, command_queue_rx) = mpsc::channel(10);
         let (response_queue_tx, response_queue_rx) = mpsc::channel(10);
@@ -251,16 +233,8 @@ impl CommanderHandle {
             command_queue_tx,
             response_queue_rx,
         );
-        let mut actor2 = CommandQueueExecutor::new(
-            shutdown,
-            command_queue_rx,
-            response_queue_tx,
-            tunnel,
-            updater,
-            downloader,
-            filemanager,
-            logstream,
-        );
+        let mut actor2 =
+            CommandQueueExecutor::new(shutdown, command_queue_rx, response_queue_tx, handles);
         tokio::spawn(async move { actor.run().await });
         tokio::spawn(async move { actor2.run().await });
 

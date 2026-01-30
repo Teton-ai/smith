@@ -141,7 +141,6 @@ pub enum SafeCommandTx {
     StreamLogs {
         session_id: String,
         service_name: String,
-        ws_url: String,
     },
     StopLogStream {
         session_id: String,

@@ -1,12 +1,13 @@
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::{RwLock, mpsc};
+use std::time::Duration;
+use tokio::sync::{RwLock, mpsc, watch};
 use tracing::info;
 
 pub struct LogSession {
-    pub device_serial: String,
-    pub service_name: String,
     pub dashboard_tx: mpsc::Sender<String>,
+    pub device_connected_tx: watch::Sender<bool>,
+    pub device_connected_rx: watch::Receiver<bool>,
 }
 
 #[derive(Clone, Default)]
@@ -21,20 +22,15 @@ impl LogStreamSessions {
         }
     }
 
-    pub async fn create_session(
-        &self,
-        session_id: String,
-        device_serial: String,
-        service_name: String,
-        dashboard_tx: mpsc::Sender<String>,
-    ) {
+    pub async fn create_session(&self, session_id: String, dashboard_tx: mpsc::Sender<String>) {
+        let (device_connected_tx, device_connected_rx) = watch::channel(false);
         let mut sessions = self.sessions.write().await;
         sessions.insert(
             session_id.clone(),
             LogSession {
-                device_serial,
-                service_name,
                 dashboard_tx,
+                device_connected_tx,
+                device_connected_rx,
             },
         );
         info!("Created log session: {}", session_id);
@@ -48,14 +44,38 @@ impl LogStreamSessions {
 
     pub async fn get_session_tx(&self, session_id: &str) -> Option<mpsc::Sender<String>> {
         let sessions = self.sessions.read().await;
-        sessions.get(session_id).map(|s| s.dashboard_tx.clone())
+        if let Some(session) = sessions.get(session_id) {
+            let _ = session.device_connected_tx.send(true);
+            Some(session.dashboard_tx.clone())
+        } else {
+            None
+        }
     }
 
-    pub async fn validate_device_for_session(&self, session_id: &str, device_serial: &str) -> bool {
-        let sessions = self.sessions.read().await;
-        sessions
-            .get(session_id)
-            .map(|s| s.device_serial == device_serial)
-            .unwrap_or(false)
+    pub async fn wait_for_device(&self, session_id: &str, timeout: Duration) -> bool {
+        let rx = {
+            let sessions = self.sessions.read().await;
+            sessions
+                .get(session_id)
+                .map(|s| s.device_connected_rx.clone())
+        };
+
+        let Some(mut rx) = rx else {
+            return false;
+        };
+
+        let result = tokio::time::timeout(timeout, async {
+            loop {
+                if *rx.borrow() {
+                    return true;
+                }
+                if rx.changed().await.is_err() {
+                    return false;
+                }
+            }
+        })
+        .await;
+
+        result.unwrap_or(false)
     }
 }

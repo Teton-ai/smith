@@ -1,5 +1,5 @@
 use crate::bouncer::BouncerHandle;
-use crate::commander::CommanderHandle;
+use crate::commander::{CommanderHandle, Handles};
 use crate::dbus::DbusHandle;
 use crate::downloader::DownloaderHandle;
 use crate::filemanager::FileManagerHandle;
@@ -40,11 +40,13 @@ pub async fn run() {
 
     let commander = CommanderHandle::new(
         shutdown.signals(),
-        tunnel.clone(),
-        updater.clone(),
-        downloader.clone(),
-        filemanager.clone(),
-        logstream.clone(),
+        Handles {
+            tunnel: tunnel.clone(),
+            updater: updater.clone(),
+            downloader: downloader.clone(),
+            filemanager: filemanager.clone(),
+            logstream: logstream.clone(),
+        },
     );
 
     let _postman = PostmanHandle::new(

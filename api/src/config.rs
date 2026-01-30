@@ -70,8 +70,6 @@ pub struct Config {
     pub cloudfront: CloudFrontConfig,
     /// Labels to exclude from dashboard stats, format: "key=value,key2=value2"
     pub dashboard_excluded_labels: Vec<String>,
-    /// Public URL of the API for WebSocket connections (e.g., "https://api.example.com")
-    pub api_public_url: String,
 }
 
 impl Config {
@@ -97,8 +95,6 @@ impl Config {
                 .ok()
                 .map(|s| s.split(',').map(|l| l.trim().to_string()).collect())
                 .unwrap_or_default(),
-            api_public_url: env::var("API_PUBLIC_URL")
-                .unwrap_or_else(|_| "http://localhost:8080".to_string()),
         })
     }
 }

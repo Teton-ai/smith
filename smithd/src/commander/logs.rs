@@ -6,12 +6,8 @@ pub(super) async fn start_stream(
     handle: &LogStreamHandle,
     session_id: String,
     service_name: String,
-    ws_url: String,
 ) -> SafeCommandResponse {
-    match handle
-        .start_stream(session_id.clone(), service_name, ws_url)
-        .await
-    {
+    match handle.start_stream(session_id.clone(), service_name).await {
         Ok(()) => SafeCommandResponse {
             id,
             command: SafeCommandRx::LogStreamStarted { session_id },

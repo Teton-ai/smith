@@ -4,12 +4,15 @@ use anyhow::Result;
 use futures_util::{SinkExt, StreamExt};
 use std::collections::HashMap;
 use std::process::Stdio;
+use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 use tokio::sync::{mpsc, oneshot};
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::http::Request;
 use tracing::{error, info};
+
+const STREAM_TIMEOUT: Duration = Duration::from_secs(30 * 60); // 30 minutes max
 
 struct LogStream {
     task: tokio::task::JoinHandle<()>,
@@ -25,10 +28,12 @@ pub enum ActorMessage {
     StartStream {
         session_id: String,
         service_name: String,
-        ws_url: String,
         result: oneshot::Sender<Result<()>>,
     },
     StopStream {
+        session_id: String,
+    },
+    StreamEnded {
         session_id: String,
     },
 }
@@ -36,6 +41,7 @@ pub enum ActorMessage {
 pub struct Actor {
     shutdown: ShutdownSignals,
     receiver: mpsc::Receiver<ActorMessage>,
+    sender: mpsc::Sender<ActorMessage>,
     magic: MagicHandle,
     streams: HashMap<String, LogStream>,
 }
@@ -44,22 +50,19 @@ impl Actor {
     pub fn new(
         shutdown: ShutdownSignals,
         receiver: mpsc::Receiver<ActorMessage>,
+        sender: mpsc::Sender<ActorMessage>,
         magic: MagicHandle,
     ) -> Self {
         Self {
             shutdown,
             receiver,
+            sender,
             magic,
             streams: HashMap::new(),
         }
     }
 
-    async fn start_stream(
-        &mut self,
-        session_id: String,
-        service_name: String,
-        ws_url: String,
-    ) -> Result<()> {
+    async fn start_stream(&mut self, session_id: String, service_name: String) -> Result<()> {
         if self.streams.contains_key(&session_id) {
             return Err(anyhow::anyhow!(
                 "Stream already exists for session {}",
@@ -72,14 +75,46 @@ impl Actor {
             .get_token()
             .await
             .ok_or_else(|| anyhow::anyhow!("No device token available"))?;
+
+        // Extract just the host from server URL (e.g., "https://api.smith.teton.ai/smith" -> "wss://api.smith.teton.ai")
+        let server_url = self.magic.get_server().await;
+        let parsed = url::Url::parse(&server_url)?;
+        let ws_scheme = if parsed.scheme() == "https" {
+            "wss"
+        } else {
+            "ws"
+        };
+        let host = parsed
+            .host_str()
+            .ok_or_else(|| anyhow::anyhow!("Invalid server URL: no host"))?;
+        let port_suffix = parsed.port().map(|p| format!(":{}", p)).unwrap_or_default();
+        let ws_url = format!(
+            "{}://{}{}/ws/stream-logs/{}",
+            ws_scheme, host, port_suffix, session_id
+        );
+
         let session_id_clone = session_id.clone();
         let shutdown = self.shutdown.clone();
+        let cleanup_sender = self.sender.clone();
 
         let task = tokio::spawn(async move {
-            if let Err(e) = run_log_stream(&ws_url, &token, &service_name, shutdown).await {
-                error!("Log stream error for session {}: {}", session_id_clone, e);
+            let result = tokio::time::timeout(
+                STREAM_TIMEOUT,
+                run_log_stream(&ws_url, &token, &service_name, shutdown),
+            )
+            .await;
+
+            match result {
+                Ok(Ok(())) => info!("Log stream ended for session {}", session_id_clone),
+                Ok(Err(e)) => error!("Log stream error for session {}: {}", session_id_clone, e),
+                Err(_) => info!("Log stream timed out for session {}", session_id_clone),
             }
-            info!("Log stream ended for session {}", session_id_clone);
+
+            let _ = cleanup_sender
+                .send(ActorMessage::StreamEnded {
+                    session_id: session_id_clone,
+                })
+                .await;
         });
 
         self.streams.insert(session_id, LogStream { task });
@@ -100,12 +135,16 @@ impl Actor {
             tokio::select! {
                 Some(msg) = self.receiver.recv() => {
                     match msg {
-                        ActorMessage::StartStream { session_id, service_name, ws_url, result } => {
-                            let res = self.start_stream(session_id, service_name, ws_url).await;
+                        ActorMessage::StartStream { session_id, service_name, result } => {
+                            let res = self.start_stream(session_id, service_name).await;
                             let _ = result.send(res);
                         }
                         ActorMessage::StopStream { session_id } => {
                             self.stop_stream(&session_id);
+                        }
+                        ActorMessage::StreamEnded { session_id } => {
+                            self.streams.remove(&session_id);
+                            info!("Cleaned up finished stream for session {}", session_id);
                         }
                     }
                 }
