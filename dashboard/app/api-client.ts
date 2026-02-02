@@ -184,6 +184,15 @@ export interface DeviceRelease {
 	target_release?: Release;
 }
 
+export interface DeviceService {
+	created_at: string;
+	id: number;
+	package_id?: number;
+	release_id: number;
+	service_name: string;
+	watchdog_sec?: number;
+}
+
 export interface DeviceTree {
 	compatible?: string[];
 	model?: string;
@@ -2308,298 +2317,6 @@ export const useUpdateDevicesTargetRelease = <
 
 	return useMutation(mutationOptions, queryClient);
 };
-
-/**
- * @deprecated
- */
-export const useGetTagsHook = () => {
-	const getTags = useClientMutator<Tag[]>();
-
-	return useCallback(
-		(signal?: AbortSignal) => {
-			return getTags({ url: `/tags`, method: "GET", signal });
-		},
-		[getTags],
-	);
-};
-
-export const getGetTagsInfiniteQueryKey = () => {
-	return ["infinite", `/tags`] as const;
-};
-
-export const getGetTagsQueryKey = () => {
-	return [`/tags`] as const;
-};
-
-export const useGetTagsInfiniteQueryOptions = <
-	TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetTagsHook>>>>,
-	TError = string,
->(options?: {
-	query?: Partial<
-		UseInfiniteQueryOptions<
-			Awaited<ReturnType<ReturnType<typeof useGetTagsHook>>>,
-			TError,
-			TData
-		>
-	>;
-}) => {
-	const { query: queryOptions } = options ?? {};
-
-	const queryKey = queryOptions?.queryKey ?? getGetTagsInfiniteQueryKey();
-
-	const getTags = useGetTagsHook();
-
-	const queryFn: QueryFunction<
-		Awaited<ReturnType<ReturnType<typeof useGetTagsHook>>>
-	> = ({ signal }) => getTags(signal);
-
-	return { queryKey, queryFn, ...queryOptions } as UseInfiniteQueryOptions<
-		Awaited<ReturnType<ReturnType<typeof useGetTagsHook>>>,
-		TError,
-		TData
-	> & { queryKey: DataTag<QueryKey, TData, TError> };
-};
-
-export type GetTagsInfiniteQueryResult = NonNullable<
-	Awaited<ReturnType<ReturnType<typeof useGetTagsHook>>>
->;
-export type GetTagsInfiniteQueryError = string;
-
-export function useGetTagsInfinite<
-	TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetTagsHook>>>>,
-	TError = string,
->(
-	options: {
-		query: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetTagsHook>>>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				DefinedInitialDataOptions<
-					Awaited<ReturnType<ReturnType<typeof useGetTagsHook>>>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useGetTagsHook>>>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): DefinedUseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useGetTagsInfinite<
-	TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetTagsHook>>>>,
-	TError = string,
->(
-	options?: {
-		query?: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetTagsHook>>>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				UndefinedInitialDataOptions<
-					Awaited<ReturnType<ReturnType<typeof useGetTagsHook>>>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useGetTagsHook>>>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): UseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useGetTagsInfinite<
-	TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetTagsHook>>>>,
-	TError = string,
->(
-	options?: {
-		query?: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetTagsHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-/**
- * @deprecated
- */
-
-export function useGetTagsInfinite<
-	TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetTagsHook>>>>,
-	TError = string,
->(
-	options?: {
-		query?: Partial<
-			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetTagsHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseInfiniteQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-} {
-	const queryOptions = useGetTagsInfiniteQueryOptions(options);
-
-	const query = useInfiniteQuery(
-		queryOptions,
-		queryClient,
-	) as UseInfiniteQueryResult<TData, TError> & {
-		queryKey: DataTag<QueryKey, TData, TError>;
-	};
-
-	query.queryKey = queryOptions.queryKey;
-
-	return query;
-}
-
-export const useGetTagsQueryOptions = <
-	TData = Awaited<ReturnType<ReturnType<typeof useGetTagsHook>>>,
-	TError = string,
->(options?: {
-	query?: Partial<
-		UseQueryOptions<
-			Awaited<ReturnType<ReturnType<typeof useGetTagsHook>>>,
-			TError,
-			TData
-		>
-	>;
-}) => {
-	const { query: queryOptions } = options ?? {};
-
-	const queryKey = queryOptions?.queryKey ?? getGetTagsQueryKey();
-
-	const getTags = useGetTagsHook();
-
-	const queryFn: QueryFunction<
-		Awaited<ReturnType<ReturnType<typeof useGetTagsHook>>>
-	> = ({ signal }) => getTags(signal);
-
-	return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
-		Awaited<ReturnType<ReturnType<typeof useGetTagsHook>>>,
-		TError,
-		TData
-	> & { queryKey: DataTag<QueryKey, TData, TError> };
-};
-
-export type GetTagsQueryResult = NonNullable<
-	Awaited<ReturnType<ReturnType<typeof useGetTagsHook>>>
->;
-export type GetTagsQueryError = string;
-
-export function useGetTags<
-	TData = Awaited<ReturnType<ReturnType<typeof useGetTagsHook>>>,
-	TError = string,
->(
-	options: {
-		query: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetTagsHook>>>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				DefinedInitialDataOptions<
-					Awaited<ReturnType<ReturnType<typeof useGetTagsHook>>>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useGetTagsHook>>>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): DefinedUseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useGetTags<
-	TData = Awaited<ReturnType<ReturnType<typeof useGetTagsHook>>>,
-	TError = string,
->(
-	options?: {
-		query?: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetTagsHook>>>,
-				TError,
-				TData
-			>
-		> &
-			Pick<
-				UndefinedInitialDataOptions<
-					Awaited<ReturnType<ReturnType<typeof useGetTagsHook>>>,
-					TError,
-					Awaited<ReturnType<ReturnType<typeof useGetTagsHook>>>
-				>,
-				"initialData"
-			>;
-	},
-	queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useGetTags<
-	TData = Awaited<ReturnType<ReturnType<typeof useGetTagsHook>>>,
-	TError = string,
->(
-	options?: {
-		query?: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetTagsHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-};
-/**
- * @deprecated
- */
-
-export function useGetTags<
-	TData = Awaited<ReturnType<ReturnType<typeof useGetTagsHook>>>,
-	TError = string,
->(
-	options?: {
-		query?: Partial<
-			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetTagsHook>>>,
-				TError,
-				TData
-			>
-		>;
-	},
-	queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-	queryKey: DataTag<QueryKey, TData, TError>;
-} {
-	const queryOptions = useGetTagsQueryOptions(options);
-
-	const query = useQuery(queryOptions, queryClient) as UseQueryResult<
-		TData,
-		TError
-	> & { queryKey: DataTag<QueryKey, TData, TError> };
-
-	query.queryKey = queryOptions.queryKey;
-
-	return query;
-}
 
 export const useGetVariablesHook = () => {
 	const getVariables = useClientMutator<Variable[]>();
@@ -5179,43 +4896,40 @@ export const useUpdateDeviceTargetRelease = <
 	return useMutation(mutationOptions, queryClient);
 };
 
-/**
- * @deprecated
- */
-export const useGetTagForDeviceHook = () => {
-	const getTagForDevice = useClientMutator<Tag[]>();
+export const useGetServicesForDeviceHook = () => {
+	const getServicesForDevice = useClientMutator<DeviceService[]>();
 
 	return useCallback(
 		(deviceId: string, signal?: AbortSignal) => {
-			return getTagForDevice({
-				url: `/devices/${deviceId}/tags`,
+			return getServicesForDevice({
+				url: `/devices/${deviceId}/services`,
 				method: "GET",
 				signal,
 			});
 		},
-		[getTagForDevice],
+		[getServicesForDevice],
 	);
 };
 
-export const getGetTagForDeviceInfiniteQueryKey = (deviceId?: string) => {
-	return ["infinite", `/devices/${deviceId}/tags`] as const;
+export const getGetServicesForDeviceInfiniteQueryKey = (deviceId?: string) => {
+	return ["infinite", `/devices/${deviceId}/services`] as const;
 };
 
-export const getGetTagForDeviceQueryKey = (deviceId?: string) => {
-	return [`/devices/${deviceId}/tags`] as const;
+export const getGetServicesForDeviceQueryKey = (deviceId?: string) => {
+	return [`/devices/${deviceId}/services`] as const;
 };
 
-export const useGetTagForDeviceInfiniteQueryOptions = <
+export const useGetServicesForDeviceInfiniteQueryOptions = <
 	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetTagForDeviceHook>>>
+		Awaited<ReturnType<ReturnType<typeof useGetServicesForDeviceHook>>>
 	>,
-	TError = string,
+	TError = void,
 >(
 	deviceId: string,
 	options?: {
 		query?: Partial<
 			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetTagForDeviceHook>>>,
+				Awaited<ReturnType<ReturnType<typeof useGetServicesForDeviceHook>>>,
 				TError,
 				TData
 			>
@@ -5225,13 +4939,13 @@ export const useGetTagForDeviceInfiniteQueryOptions = <
 	const { query: queryOptions } = options ?? {};
 
 	const queryKey =
-		queryOptions?.queryKey ?? getGetTagForDeviceInfiniteQueryKey(deviceId);
+		queryOptions?.queryKey ?? getGetServicesForDeviceInfiniteQueryKey(deviceId);
 
-	const getTagForDevice = useGetTagForDeviceHook();
+	const getServicesForDevice = useGetServicesForDeviceHook();
 
 	const queryFn: QueryFunction<
-		Awaited<ReturnType<ReturnType<typeof useGetTagForDeviceHook>>>
-	> = ({ signal }) => getTagForDevice(deviceId, signal);
+		Awaited<ReturnType<ReturnType<typeof useGetServicesForDeviceHook>>>
+	> = ({ signal }) => getServicesForDevice(deviceId, signal);
 
 	return {
 		queryKey,
@@ -5239,37 +4953,37 @@ export const useGetTagForDeviceInfiniteQueryOptions = <
 		enabled: !!deviceId,
 		...queryOptions,
 	} as UseInfiniteQueryOptions<
-		Awaited<ReturnType<ReturnType<typeof useGetTagForDeviceHook>>>,
+		Awaited<ReturnType<ReturnType<typeof useGetServicesForDeviceHook>>>,
 		TError,
 		TData
 	> & { queryKey: DataTag<QueryKey, TData, TError> };
 };
 
-export type GetTagForDeviceInfiniteQueryResult = NonNullable<
-	Awaited<ReturnType<ReturnType<typeof useGetTagForDeviceHook>>>
+export type GetServicesForDeviceInfiniteQueryResult = NonNullable<
+	Awaited<ReturnType<ReturnType<typeof useGetServicesForDeviceHook>>>
 >;
-export type GetTagForDeviceInfiniteQueryError = string;
+export type GetServicesForDeviceInfiniteQueryError = void;
 
-export function useGetTagForDeviceInfinite<
+export function useGetServicesForDeviceInfinite<
 	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetTagForDeviceHook>>>
+		Awaited<ReturnType<ReturnType<typeof useGetServicesForDeviceHook>>>
 	>,
-	TError = string,
+	TError = void,
 >(
 	deviceId: string,
 	options: {
 		query: Partial<
 			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetTagForDeviceHook>>>,
+				Awaited<ReturnType<ReturnType<typeof useGetServicesForDeviceHook>>>,
 				TError,
 				TData
 			>
 		> &
 			Pick<
 				DefinedInitialDataOptions<
-					Awaited<ReturnType<ReturnType<typeof useGetTagForDeviceHook>>>,
+					Awaited<ReturnType<ReturnType<typeof useGetServicesForDeviceHook>>>,
 					TError,
-					Awaited<ReturnType<ReturnType<typeof useGetTagForDeviceHook>>>
+					Awaited<ReturnType<ReturnType<typeof useGetServicesForDeviceHook>>>
 				>,
 				"initialData"
 			>;
@@ -5278,26 +4992,26 @@ export function useGetTagForDeviceInfinite<
 ): DefinedUseInfiniteQueryResult<TData, TError> & {
 	queryKey: DataTag<QueryKey, TData, TError>;
 };
-export function useGetTagForDeviceInfinite<
+export function useGetServicesForDeviceInfinite<
 	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetTagForDeviceHook>>>
+		Awaited<ReturnType<ReturnType<typeof useGetServicesForDeviceHook>>>
 	>,
-	TError = string,
+	TError = void,
 >(
 	deviceId: string,
 	options?: {
 		query?: Partial<
 			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetTagForDeviceHook>>>,
+				Awaited<ReturnType<ReturnType<typeof useGetServicesForDeviceHook>>>,
 				TError,
 				TData
 			>
 		> &
 			Pick<
 				UndefinedInitialDataOptions<
-					Awaited<ReturnType<ReturnType<typeof useGetTagForDeviceHook>>>,
+					Awaited<ReturnType<ReturnType<typeof useGetServicesForDeviceHook>>>,
 					TError,
-					Awaited<ReturnType<ReturnType<typeof useGetTagForDeviceHook>>>
+					Awaited<ReturnType<ReturnType<typeof useGetServicesForDeviceHook>>>
 				>,
 				"initialData"
 			>;
@@ -5306,17 +5020,17 @@ export function useGetTagForDeviceInfinite<
 ): UseInfiniteQueryResult<TData, TError> & {
 	queryKey: DataTag<QueryKey, TData, TError>;
 };
-export function useGetTagForDeviceInfinite<
+export function useGetServicesForDeviceInfinite<
 	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetTagForDeviceHook>>>
+		Awaited<ReturnType<ReturnType<typeof useGetServicesForDeviceHook>>>
 	>,
-	TError = string,
+	TError = void,
 >(
 	deviceId: string,
 	options?: {
 		query?: Partial<
 			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetTagForDeviceHook>>>,
+				Awaited<ReturnType<ReturnType<typeof useGetServicesForDeviceHook>>>,
 				TError,
 				TData
 			>
@@ -5326,21 +5040,18 @@ export function useGetTagForDeviceInfinite<
 ): UseInfiniteQueryResult<TData, TError> & {
 	queryKey: DataTag<QueryKey, TData, TError>;
 };
-/**
- * @deprecated
- */
 
-export function useGetTagForDeviceInfinite<
+export function useGetServicesForDeviceInfinite<
 	TData = InfiniteData<
-		Awaited<ReturnType<ReturnType<typeof useGetTagForDeviceHook>>>
+		Awaited<ReturnType<ReturnType<typeof useGetServicesForDeviceHook>>>
 	>,
-	TError = string,
+	TError = void,
 >(
 	deviceId: string,
 	options?: {
 		query?: Partial<
 			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetTagForDeviceHook>>>,
+				Awaited<ReturnType<ReturnType<typeof useGetServicesForDeviceHook>>>,
 				TError,
 				TData
 			>
@@ -5350,7 +5061,7 @@ export function useGetTagForDeviceInfinite<
 ): UseInfiniteQueryResult<TData, TError> & {
 	queryKey: DataTag<QueryKey, TData, TError>;
 } {
-	const queryOptions = useGetTagForDeviceInfiniteQueryOptions(
+	const queryOptions = useGetServicesForDeviceInfiniteQueryOptions(
 		deviceId,
 		options,
 	);
@@ -5367,15 +5078,15 @@ export function useGetTagForDeviceInfinite<
 	return query;
 }
 
-export const useGetTagForDeviceQueryOptions = <
-	TData = Awaited<ReturnType<ReturnType<typeof useGetTagForDeviceHook>>>,
-	TError = string,
+export const useGetServicesForDeviceQueryOptions = <
+	TData = Awaited<ReturnType<ReturnType<typeof useGetServicesForDeviceHook>>>,
+	TError = void,
 >(
 	deviceId: string,
 	options?: {
 		query?: Partial<
 			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetTagForDeviceHook>>>,
+				Awaited<ReturnType<ReturnType<typeof useGetServicesForDeviceHook>>>,
 				TError,
 				TData
 			>
@@ -5385,13 +5096,13 @@ export const useGetTagForDeviceQueryOptions = <
 	const { query: queryOptions } = options ?? {};
 
 	const queryKey =
-		queryOptions?.queryKey ?? getGetTagForDeviceQueryKey(deviceId);
+		queryOptions?.queryKey ?? getGetServicesForDeviceQueryKey(deviceId);
 
-	const getTagForDevice = useGetTagForDeviceHook();
+	const getServicesForDevice = useGetServicesForDeviceHook();
 
 	const queryFn: QueryFunction<
-		Awaited<ReturnType<ReturnType<typeof useGetTagForDeviceHook>>>
-	> = ({ signal }) => getTagForDevice(deviceId, signal);
+		Awaited<ReturnType<ReturnType<typeof useGetServicesForDeviceHook>>>
+	> = ({ signal }) => getServicesForDevice(deviceId, signal);
 
 	return {
 		queryKey,
@@ -5399,35 +5110,35 @@ export const useGetTagForDeviceQueryOptions = <
 		enabled: !!deviceId,
 		...queryOptions,
 	} as UseQueryOptions<
-		Awaited<ReturnType<ReturnType<typeof useGetTagForDeviceHook>>>,
+		Awaited<ReturnType<ReturnType<typeof useGetServicesForDeviceHook>>>,
 		TError,
 		TData
 	> & { queryKey: DataTag<QueryKey, TData, TError> };
 };
 
-export type GetTagForDeviceQueryResult = NonNullable<
-	Awaited<ReturnType<ReturnType<typeof useGetTagForDeviceHook>>>
+export type GetServicesForDeviceQueryResult = NonNullable<
+	Awaited<ReturnType<ReturnType<typeof useGetServicesForDeviceHook>>>
 >;
-export type GetTagForDeviceQueryError = string;
+export type GetServicesForDeviceQueryError = void;
 
-export function useGetTagForDevice<
-	TData = Awaited<ReturnType<ReturnType<typeof useGetTagForDeviceHook>>>,
-	TError = string,
+export function useGetServicesForDevice<
+	TData = Awaited<ReturnType<ReturnType<typeof useGetServicesForDeviceHook>>>,
+	TError = void,
 >(
 	deviceId: string,
 	options: {
 		query: Partial<
 			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetTagForDeviceHook>>>,
+				Awaited<ReturnType<ReturnType<typeof useGetServicesForDeviceHook>>>,
 				TError,
 				TData
 			>
 		> &
 			Pick<
 				DefinedInitialDataOptions<
-					Awaited<ReturnType<ReturnType<typeof useGetTagForDeviceHook>>>,
+					Awaited<ReturnType<ReturnType<typeof useGetServicesForDeviceHook>>>,
 					TError,
-					Awaited<ReturnType<ReturnType<typeof useGetTagForDeviceHook>>>
+					Awaited<ReturnType<ReturnType<typeof useGetServicesForDeviceHook>>>
 				>,
 				"initialData"
 			>;
@@ -5436,24 +5147,24 @@ export function useGetTagForDevice<
 ): DefinedUseQueryResult<TData, TError> & {
 	queryKey: DataTag<QueryKey, TData, TError>;
 };
-export function useGetTagForDevice<
-	TData = Awaited<ReturnType<ReturnType<typeof useGetTagForDeviceHook>>>,
-	TError = string,
+export function useGetServicesForDevice<
+	TData = Awaited<ReturnType<ReturnType<typeof useGetServicesForDeviceHook>>>,
+	TError = void,
 >(
 	deviceId: string,
 	options?: {
 		query?: Partial<
 			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetTagForDeviceHook>>>,
+				Awaited<ReturnType<ReturnType<typeof useGetServicesForDeviceHook>>>,
 				TError,
 				TData
 			>
 		> &
 			Pick<
 				UndefinedInitialDataOptions<
-					Awaited<ReturnType<ReturnType<typeof useGetTagForDeviceHook>>>,
+					Awaited<ReturnType<ReturnType<typeof useGetServicesForDeviceHook>>>,
 					TError,
-					Awaited<ReturnType<ReturnType<typeof useGetTagForDeviceHook>>>
+					Awaited<ReturnType<ReturnType<typeof useGetServicesForDeviceHook>>>
 				>,
 				"initialData"
 			>;
@@ -5462,15 +5173,15 @@ export function useGetTagForDevice<
 ): UseQueryResult<TData, TError> & {
 	queryKey: DataTag<QueryKey, TData, TError>;
 };
-export function useGetTagForDevice<
-	TData = Awaited<ReturnType<ReturnType<typeof useGetTagForDeviceHook>>>,
-	TError = string,
+export function useGetServicesForDevice<
+	TData = Awaited<ReturnType<ReturnType<typeof useGetServicesForDeviceHook>>>,
+	TError = void,
 >(
 	deviceId: string,
 	options?: {
 		query?: Partial<
 			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetTagForDeviceHook>>>,
+				Awaited<ReturnType<ReturnType<typeof useGetServicesForDeviceHook>>>,
 				TError,
 				TData
 			>
@@ -5480,19 +5191,16 @@ export function useGetTagForDevice<
 ): UseQueryResult<TData, TError> & {
 	queryKey: DataTag<QueryKey, TData, TError>;
 };
-/**
- * @deprecated
- */
 
-export function useGetTagForDevice<
-	TData = Awaited<ReturnType<ReturnType<typeof useGetTagForDeviceHook>>>,
-	TError = string,
+export function useGetServicesForDevice<
+	TData = Awaited<ReturnType<ReturnType<typeof useGetServicesForDeviceHook>>>,
+	TError = void,
 >(
 	deviceId: string,
 	options?: {
 		query?: Partial<
 			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetTagForDeviceHook>>>,
+				Awaited<ReturnType<ReturnType<typeof useGetServicesForDeviceHook>>>,
 				TError,
 				TData
 			>
@@ -5502,7 +5210,7 @@ export function useGetTagForDevice<
 ): UseQueryResult<TData, TError> & {
 	queryKey: DataTag<QueryKey, TData, TError>;
 } {
-	const queryOptions = useGetTagForDeviceQueryOptions(deviceId, options);
+	const queryOptions = useGetServicesForDeviceQueryOptions(deviceId, options);
 
 	const query = useQuery(queryOptions, queryClient) as UseQueryResult<
 		TData,
@@ -5513,178 +5221,6 @@ export function useGetTagForDevice<
 
 	return query;
 }
-
-/**
- * @deprecated
- */
-export const useAddTagToDeviceHook = () => {
-	const addTagToDevice = useClientMutator<void>();
-
-	return useCallback(
-		(deviceId: number, tagId: number) => {
-			return addTagToDevice({
-				url: `/devices/${deviceId}/tags/${tagId}`,
-				method: "PUT",
-			});
-		},
-		[addTagToDevice],
-	);
-};
-
-export const useAddTagToDeviceMutationOptions = <
-	TError = void | string,
-	TContext = unknown,
->(options?: {
-	mutation?: UseMutationOptions<
-		Awaited<ReturnType<ReturnType<typeof useAddTagToDeviceHook>>>,
-		TError,
-		{ deviceId: number; tagId: number },
-		TContext
-	>;
-}): UseMutationOptions<
-	Awaited<ReturnType<ReturnType<typeof useAddTagToDeviceHook>>>,
-	TError,
-	{ deviceId: number; tagId: number },
-	TContext
-> => {
-	const mutationKey = ["addTagToDevice"];
-	const { mutation: mutationOptions } = options
-		? options.mutation &&
-			"mutationKey" in options.mutation &&
-			options.mutation.mutationKey
-			? options
-			: { ...options, mutation: { ...options.mutation, mutationKey } }
-		: { mutation: { mutationKey } };
-
-	const addTagToDevice = useAddTagToDeviceHook();
-
-	const mutationFn: MutationFunction<
-		Awaited<ReturnType<ReturnType<typeof useAddTagToDeviceHook>>>,
-		{ deviceId: number; tagId: number }
-	> = (props) => {
-		const { deviceId, tagId } = props ?? {};
-
-		return addTagToDevice(deviceId, tagId);
-	};
-
-	return { mutationFn, ...mutationOptions };
-};
-
-export type AddTagToDeviceMutationResult = NonNullable<
-	Awaited<ReturnType<ReturnType<typeof useAddTagToDeviceHook>>>
->;
-
-export type AddTagToDeviceMutationError = void | string;
-
-/**
- * @deprecated
- */
-export const useAddTagToDevice = <TError = void | string, TContext = unknown>(
-	options?: {
-		mutation?: UseMutationOptions<
-			Awaited<ReturnType<ReturnType<typeof useAddTagToDeviceHook>>>,
-			TError,
-			{ deviceId: number; tagId: number },
-			TContext
-		>;
-	},
-	queryClient?: QueryClient,
-): UseMutationResult<
-	Awaited<ReturnType<ReturnType<typeof useAddTagToDeviceHook>>>,
-	TError,
-	{ deviceId: number; tagId: number },
-	TContext
-> => {
-	const mutationOptions = useAddTagToDeviceMutationOptions(options);
-
-	return useMutation(mutationOptions, queryClient);
-};
-
-/**
- * @deprecated
- */
-export const useDeleteTagFromDeviceHook = () => {
-	const deleteTagFromDevice = useClientMutator<void>();
-
-	return useCallback(
-		(deviceId: number, tagId: number) => {
-			return deleteTagFromDevice({
-				url: `/devices/${deviceId}/tags/${tagId}`,
-				method: "DELETE",
-			});
-		},
-		[deleteTagFromDevice],
-	);
-};
-
-export const useDeleteTagFromDeviceMutationOptions = <
-	TError = string,
-	TContext = unknown,
->(options?: {
-	mutation?: UseMutationOptions<
-		Awaited<ReturnType<ReturnType<typeof useDeleteTagFromDeviceHook>>>,
-		TError,
-		{ deviceId: number; tagId: number },
-		TContext
-	>;
-}): UseMutationOptions<
-	Awaited<ReturnType<ReturnType<typeof useDeleteTagFromDeviceHook>>>,
-	TError,
-	{ deviceId: number; tagId: number },
-	TContext
-> => {
-	const mutationKey = ["deleteTagFromDevice"];
-	const { mutation: mutationOptions } = options
-		? options.mutation &&
-			"mutationKey" in options.mutation &&
-			options.mutation.mutationKey
-			? options
-			: { ...options, mutation: { ...options.mutation, mutationKey } }
-		: { mutation: { mutationKey } };
-
-	const deleteTagFromDevice = useDeleteTagFromDeviceHook();
-
-	const mutationFn: MutationFunction<
-		Awaited<ReturnType<ReturnType<typeof useDeleteTagFromDeviceHook>>>,
-		{ deviceId: number; tagId: number }
-	> = (props) => {
-		const { deviceId, tagId } = props ?? {};
-
-		return deleteTagFromDevice(deviceId, tagId);
-	};
-
-	return { mutationFn, ...mutationOptions };
-};
-
-export type DeleteTagFromDeviceMutationResult = NonNullable<
-	Awaited<ReturnType<ReturnType<typeof useDeleteTagFromDeviceHook>>>
->;
-
-export type DeleteTagFromDeviceMutationError = string;
-
-/**
- * @deprecated
- */
-export const useDeleteTagFromDevice = <TError = string, TContext = unknown>(
-	options?: {
-		mutation?: UseMutationOptions<
-			Awaited<ReturnType<ReturnType<typeof useDeleteTagFromDeviceHook>>>,
-			TError,
-			{ deviceId: number; tagId: number },
-			TContext
-		>;
-	},
-	queryClient?: QueryClient,
-): UseMutationResult<
-	Awaited<ReturnType<ReturnType<typeof useDeleteTagFromDeviceHook>>>,
-	TError,
-	{ deviceId: number; tagId: number },
-	TContext
-> => {
-	const mutationOptions = useDeleteTagFromDeviceMutationOptions(options);
-
-	return useMutation(mutationOptions, queryClient);
-};
 
 export const useDeleteTokenHook = () => {
 	const deleteToken = useClientMutator<void>();
@@ -15541,95 +15077,6 @@ export const useDeleteReleaseService = <TError = void, TContext = unknown>(
 	TContext
 > => {
 	const mutationOptions = useDeleteReleaseServiceMutationOptions(options);
-
-	return useMutation(mutationOptions, queryClient);
-};
-
-/**
- * @deprecated
- */
-export const useCreateTagHook = () => {
-	const createTag = useClientMutator<Tag>();
-
-	return useCallback(
-		(newTag: NewTag, signal?: AbortSignal) => {
-			return createTag({
-				url: `/tags`,
-				method: "POST",
-				headers: { "Content-Type": "application/json" },
-				data: newTag,
-				signal,
-			});
-		},
-		[createTag],
-	);
-};
-
-export const useCreateTagMutationOptions = <
-	TError = string,
-	TContext = unknown,
->(options?: {
-	mutation?: UseMutationOptions<
-		Awaited<ReturnType<ReturnType<typeof useCreateTagHook>>>,
-		TError,
-		{ data: NewTag },
-		TContext
-	>;
-}): UseMutationOptions<
-	Awaited<ReturnType<ReturnType<typeof useCreateTagHook>>>,
-	TError,
-	{ data: NewTag },
-	TContext
-> => {
-	const mutationKey = ["createTag"];
-	const { mutation: mutationOptions } = options
-		? options.mutation &&
-			"mutationKey" in options.mutation &&
-			options.mutation.mutationKey
-			? options
-			: { ...options, mutation: { ...options.mutation, mutationKey } }
-		: { mutation: { mutationKey } };
-
-	const createTag = useCreateTagHook();
-
-	const mutationFn: MutationFunction<
-		Awaited<ReturnType<ReturnType<typeof useCreateTagHook>>>,
-		{ data: NewTag }
-	> = (props) => {
-		const { data } = props ?? {};
-
-		return createTag(data);
-	};
-
-	return { mutationFn, ...mutationOptions };
-};
-
-export type CreateTagMutationResult = NonNullable<
-	Awaited<ReturnType<ReturnType<typeof useCreateTagHook>>>
->;
-export type CreateTagMutationBody = NewTag;
-export type CreateTagMutationError = string;
-
-/**
- * @deprecated
- */
-export const useCreateTag = <TError = string, TContext = unknown>(
-	options?: {
-		mutation?: UseMutationOptions<
-			Awaited<ReturnType<ReturnType<typeof useCreateTagHook>>>,
-			TError,
-			{ data: NewTag },
-			TContext
-		>;
-	},
-	queryClient?: QueryClient,
-): UseMutationResult<
-	Awaited<ReturnType<ReturnType<typeof useCreateTagHook>>>,
-	TError,
-	{ data: NewTag },
-	TContext
-> => {
-	const mutationOptions = useCreateTagMutationOptions(options);
 
 	return useMutation(mutationOptions, queryClient);
 };

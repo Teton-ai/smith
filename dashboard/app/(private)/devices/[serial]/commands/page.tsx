@@ -119,6 +119,12 @@ const CommandsPage = () => {
 					<button className="py-2 px-1 border-b-2 border-blue-500 text-blue-600 font-medium text-sm">
 						Commands
 					</button>
+					<Link
+						href={`/devices/${serial}/services`}
+						className="block py-2 px-1 border-b-2 border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 font-medium text-sm transition-colors cursor-pointer"
+					>
+						Services
+					</Link>
 				</nav>
 			</div>
 

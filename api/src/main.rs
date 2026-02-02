@@ -43,6 +43,7 @@ mod handlers;
 mod health;
 mod home;
 mod ip_address;
+mod logstream;
 mod metric;
 mod middlewares;
 mod modem;
@@ -167,6 +168,8 @@ async fn start_main_server(config: &'static Config, authorization: Authorization
     let (tx_message, _rx_message) = broadcast::channel::<PublicEvent>(1);
     let tx_message = Arc::new(Mutex::new(tx_message));
 
+    let log_sessions = logstream::LogStreamSessions::new();
+
     // Create JwksClient once at startup
     let jwks_client =
         DebugJwksClient::init(&config.auth0_issuer).expect("Failed to initialize JWKS client");
@@ -271,6 +274,7 @@ async fn start_main_server(config: &'static Config, authorization: Authorization
             device::route::issue_commands_to_device,
             device::route::get_all_commands_for_device
         ))
+        .routes(routes!(device::route::get_services_for_device))
         .routes(routes!(rollout::route::api_rollout,))
         .routes(routes!(rollout::route::get_distribution_rollouts))
         .routes(routes!(deployment::route::api_get_deployment_devices))
@@ -340,12 +344,18 @@ async fn start_main_server(config: &'static Config, authorization: Authorization
         )
         .layer(DefaultBodyLimit::max(512000000));
 
+    let (ws_router, _ws_api) = OpenApiRouter::with_openapi(ApiDoc::openapi())
+        .routes(routes!(logstream::dashboard_logs_ws))
+        .routes(routes!(logstream::device_logs_ws))
+        .split_for_parts();
+
     let app = Router::new()
         .route("/", get(|| async { Redirect::temporary("/docs") }))
         .merge(public_router)
         .merge(device_router)
         .merge(protected_router)
         .merge(smith_router)
+        .merge(ws_router)
         .route("/metrics", get(move || ready(recorder_handle.render())))
         .route("/health", get(health::check))
         .merge(SwaggerUi::new("/docs").url("/openapi.json", api_doc))
@@ -372,7 +382,8 @@ async fn start_main_server(config: &'static Config, authorization: Authorization
                 )
             }),
         )
-        .layer(Extension(state));
+        .layer(Extension(state))
+        .layer(Extension(log_sessions));
 
     let listener = TcpListener::bind("0.0.0.0:8080")
         .await

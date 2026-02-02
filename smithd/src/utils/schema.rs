@@ -90,6 +90,16 @@ pub enum SafeCommandRx {
         upload_duration_ms: Option<u64>,
         timed_out: bool,
     },
+    LogStreamStarted {
+        session_id: String,
+    },
+    LogStreamStopped {
+        session_id: String,
+    },
+    LogStreamError {
+        session_id: String,
+        error: String,
+    },
 }
 
 #[derive(Serialize, Deserialize, Default, Debug)]
@@ -128,6 +138,13 @@ pub enum SafeCommandTx {
     CheckOTAStatus,
     StartOTA,
     TestNetwork,
+    StreamLogs {
+        session_id: String,
+        service_name: String,
+    },
+    StopLogStream {
+        session_id: String,
+    },
 }
 
 // RESPONSE THAT IT GETS

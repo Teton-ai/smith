@@ -2311,3 +2311,77 @@ pub async fn get_labels(
 
     Ok(Json(labels))
 }
+
+#[derive(serde::Serialize, utoipa::ToSchema)]
+pub struct DeviceService {
+    pub id: i32,
+    pub release_id: i32,
+    pub package_id: Option<i32>,
+    pub service_name: String,
+    pub watchdog_sec: Option<i32>,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+}
+
+#[utoipa::path(
+    get,
+    path = "/devices/{device_id}/services",
+    params(
+        ("device_id" = String, Path, description = "Device ID or serial number"),
+    ),
+    responses(
+        (status = StatusCode::OK, description = "List of services for the device's current release", body = Vec<DeviceService>),
+        (status = StatusCode::NOT_FOUND, description = "Device not found or device has no release"),
+        (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to retrieve services"),
+    ),
+    security(
+        ("auth_token" = [])
+    ),
+    tag = DEVICES_TAG
+)]
+pub async fn get_services_for_device(
+    Path(device_id): Path<String>,
+    Extension(state): Extension<State>,
+) -> Result<Json<Vec<DeviceService>>, StatusCode> {
+    let device = sqlx::query!(
+        r#"
+        SELECT id, release_id
+        FROM device
+        WHERE
+            CASE
+                WHEN $1 ~ '^[0-9]+$' AND length($1) <= 10 THEN
+                    id = $1::int4
+                ELSE
+                    serial_number = $1
+            END
+        "#,
+        device_id
+    )
+    .fetch_optional(&state.pg_pool)
+    .await
+    .map_err(|err| {
+        error!("Failed to fetch device: {err}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    let device = device.ok_or(StatusCode::NOT_FOUND)?;
+    let release_id = device.release_id.ok_or(StatusCode::NOT_FOUND)?;
+
+    let services = sqlx::query_as!(
+        DeviceService,
+        r#"
+        SELECT id, release_id, package_id, service_name, watchdog_sec, created_at
+        FROM release_services
+        WHERE release_id = $1
+        ORDER BY service_name
+        "#,
+        release_id
+    )
+    .fetch_all(&state.pg_pool)
+    .await
+    .map_err(|err| {
+        error!("Failed to fetch services for device: {err}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    Ok(Json(services))
+}

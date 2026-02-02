@@ -12,7 +12,7 @@ models = { path = "../models" }
 anyhow.workspace = true
 
 rust-s3 = "0.35.1"
-axum = { workspace = true, features = ["macros", "multipart"] }
+axum = { workspace = true, features = ["macros", "multipart", "ws"] }
 axum-extra = { version = "0.9.4", features = ["typed-header", "query"] }
 chrono = { workspace = true }
 dotenvy = "0.15.7"
@@ -56,3 +56,4 @@ tokio-stream = { version = "0.1.16", features = ["sync"] }
 tokio-util = { version = "0.7.17", features = ["io"] }
 toml = "0.8.20"
 cloudfront_sign = "0.4.1"
+uuid = { version = "1.0", features = ["v4"] }
