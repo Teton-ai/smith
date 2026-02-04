@@ -194,12 +194,12 @@ const BundleCard = ({ bundle }: { bundle: BundleWithCommands }) => {
 									onClick={() =>
 										copyToClipboard(
 											commandDisplay.content,
-											"cmd-" + bundle.uuid,
+											`cmd-${bundle.uuid}`,
 										)
 									}
 									className="text-gray-400 hover:text-gray-600 cursor-pointer"
 								>
-									{copiedId === "cmd-" + bundle.uuid ? (
+									{copiedId === `cmd-${bundle.uuid}` ? (
 										<Check className="w-3 h-3 text-green-600" />
 									) : (
 										<Copy className="w-3 h-3" />
@@ -270,12 +270,12 @@ const BundleCard = ({ bundle }: { bundle: BundleWithCommands }) => {
 												onClick={() =>
 													copyToClipboard(
 														responseDisplay,
-														"resp-" + response.cmd_id,
+														`resp-${response.cmd_id}`,
 													)
 												}
 												className="absolute top-2 right-2 text-gray-400 hover:text-white p-1 rounded opacity-0 group-hover:opacity-100 cursor-pointer"
 											>
-												{copiedId === "resp-" + response.cmd_id ? (
+												{copiedId === `resp-${response.cmd_id}` ? (
 													<Check className="w-3 h-3 text-green-400" />
 												) : (
 													<Copy className="w-3 h-3" />

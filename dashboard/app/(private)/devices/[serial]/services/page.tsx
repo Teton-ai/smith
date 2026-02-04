@@ -25,6 +25,7 @@ const ServicesPage = () => {
 	const loading = deviceLoading || servicesLoading;
 
 	const handleSelectService = (serviceName: string) => {
+		setConnectionStatus("connecting");
 		setSelectedService(serviceName);
 	};
 

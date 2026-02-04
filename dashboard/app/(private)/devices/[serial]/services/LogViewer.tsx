@@ -8,10 +8,16 @@ import { useConfig } from "@/app/hooks/config";
 interface LogViewerProps {
 	deviceSerial: string;
 	serviceName: string;
-	onStatusChange?: (status: "connecting" | "connected" | "disconnected") => void;
+	onStatusChange?: (
+		status: "connecting" | "connected" | "disconnected",
+	) => void;
 }
 
-const LogViewer = ({ deviceSerial, serviceName, onStatusChange }: LogViewerProps) => {
+const LogViewer = ({
+	deviceSerial,
+	serviceName,
+	onStatusChange,
+}: LogViewerProps) => {
 	const { getAccessTokenSilently } = useAuth0();
 	const { config } = useConfig();
 	const [logs, setLogs] = useState<string[]>([]);
@@ -67,6 +73,7 @@ const LogViewer = ({ deviceSerial, serviceName, onStatusChange }: LogViewerProps
 				};
 
 				ws.onclose = (event) => {
+					setIsConnecting(false);
 					setIsConnected(false);
 					if (event.code !== 1000) {
 						setError(`Connection closed: ${event.reason || "Unknown reason"}`);
@@ -130,7 +137,9 @@ const LogViewer = ({ deviceSerial, serviceName, onStatusChange }: LogViewerProps
 
 				{error && (
 					<div className="absolute inset-0 flex items-center justify-center bg-gray-900/90 z-10">
-						<span className="text-sm" style={{ color: "#ffffff" }}>{error}</span>
+						<span className="text-sm" style={{ color: "#ffffff" }}>
+							{error}
+						</span>
 					</div>
 				)}
 
