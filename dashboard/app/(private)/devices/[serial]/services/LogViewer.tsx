@@ -8,9 +8,16 @@ import { useConfig } from "@/app/hooks/config";
 interface LogViewerProps {
 	deviceSerial: string;
 	serviceName: string;
+	onStatusChange?: (
+		status: "connecting" | "connected" | "disconnected",
+	) => void;
 }
 
-const LogViewer = ({ deviceSerial, serviceName }: LogViewerProps) => {
+const LogViewer = ({
+	deviceSerial,
+	serviceName,
+	onStatusChange,
+}: LogViewerProps) => {
 	const { getAccessTokenSilently } = useAuth0();
 	const { config } = useConfig();
 	const [logs, setLogs] = useState<string[]>([]);
@@ -66,6 +73,7 @@ const LogViewer = ({ deviceSerial, serviceName }: LogViewerProps) => {
 				};
 
 				ws.onclose = (event) => {
+					setIsConnecting(false);
 					setIsConnected(false);
 					if (event.code !== 1000) {
 						setError(`Connection closed: ${event.reason || "Unknown reason"}`);
@@ -98,59 +106,60 @@ const LogViewer = ({ deviceSerial, serviceName }: LogViewerProps) => {
 		scrollToBottom();
 	}, [logs.length, scrollToBottom]);
 
+	useEffect(() => {
+		if (onStatusChange) {
+			if (isConnecting) {
+				onStatusChange("connecting");
+			} else if (isConnected) {
+				onStatusChange("connected");
+			} else {
+				onStatusChange("disconnected");
+			}
+		}
+	}, [isConnecting, isConnected, onStatusChange]);
+
 	return (
-		<div className="relative">
-			{isConnecting && (
-				<div className="absolute inset-0 flex items-center justify-center bg-gray-900/80 rounded-lg z-10">
-					<div className="flex flex-col items-center space-y-2">
-						<Loader2 className="w-8 h-8 text-gray-400 animate-spin" />
-						<span className="text-gray-400 text-sm">
-							Connecting to device...
-						</span>
-						<span className="text-gray-500 text-xs">
-							(Device polls every ~20 seconds)
-						</span>
+		<div className="relative group">
+			<div className="relative">
+				{isConnecting && (
+					<div className="absolute inset-0 flex items-center justify-center bg-gray-900/90 z-10">
+						<div className="flex flex-col items-center gap-2">
+							<Loader2 className="w-6 h-6 text-gray-400 animate-spin" />
+							<span className="text-gray-400 text-sm">
+								Waiting for device...
+							</span>
+							<span className="text-gray-500 text-xs">
+								Device polls every ~20 seconds
+							</span>
+						</div>
 					</div>
-				</div>
-			)}
+				)}
 
-			{error && (
-				<div className="absolute inset-0 flex items-center justify-center bg-gray-900/80 rounded-lg z-10">
-					<div className="flex flex-col items-center space-y-2">
-						<span className="text-red-400 text-sm">{error}</span>
-					</div>
-				</div>
-			)}
-
-			<div className="relative group">
-				<div className="flex items-center justify-between mb-2">
-					<div className="flex items-center space-x-2">
-						<div
-							className={`w-2 h-2 rounded-full ${
-								isConnected ? "bg-green-500" : "bg-gray-500"
-							}`}
-						/>
-						<span className="text-xs text-gray-500">
-							{isConnected ? "Connected" : "Disconnected"}
+				{error && (
+					<div className="absolute inset-0 flex items-center justify-center bg-gray-900/90 z-10">
+						<span className="text-sm" style={{ color: "#ffffff" }}>
+							{error}
 						</span>
 					</div>
-					{logs.length > 0 && (
-						<span className="text-xs text-gray-500">{logs.length} lines</span>
-					)}
-				</div>
+				)}
 
 				<pre
 					ref={logContainerRef}
-					className="bg-gray-900 text-gray-100 p-4 rounded-lg font-mono text-xs overflow-auto h-96 whitespace-pre-wrap"
+					className="bg-gray-900 p-3 font-mono text-xs overflow-auto h-[28rem] whitespace-pre-wrap leading-relaxed rounded-lg"
+					style={{ color: "#ffffff" }}
 				>
-					{logs.length > 0 ? logs.join("\n") : "Waiting for logs..."}
+					{logs.length > 0 ? (
+						logs.join("\n")
+					) : (
+						<span style={{ color: "#ffffff" }}>Waiting for logs...</span>
+					)}
 				</pre>
 
 				{logs.length > 0 && (
 					<button
 						onClick={copyToClipboard}
-						className="absolute top-10 right-2 p-2 text-gray-400 hover:text-white hover:bg-gray-700 rounded transition-all opacity-0 group-hover:opacity-100"
-						title={copied ? "Copied!" : "Copy to clipboard"}
+						className="absolute top-2 right-2 p-1.5 bg-gray-800 hover:bg-gray-700 text-gray-400 hover:text-white rounded transition-colors opacity-0 group-hover:opacity-100 cursor-pointer"
+						title={copied ? "Copied!" : "Copy logs"}
 					>
 						{copied ? (
 							<Check className="w-4 h-4 text-green-400" />
