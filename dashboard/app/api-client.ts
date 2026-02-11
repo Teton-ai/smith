@@ -86,6 +86,11 @@ export interface Deployment {
 	updated_at: string;
 }
 
+export interface DeploymentRequest {
+	canary_device_labels?: string[];
+	canary_device_ids?: number[];
+}
+
 export interface DeploymentDeviceWithStatus {
 	added_at: string;
 	device_id: number;
@@ -13431,10 +13436,11 @@ export const useApiReleaseDeploymentHook = () => {
 	const apiReleaseDeployment = useClientMutator<Deployment>();
 
 	return useCallback(
-		(releaseId: number, signal?: AbortSignal) => {
+		(releaseId: number, data?: DeploymentRequest, signal?: AbortSignal) => {
 			return apiReleaseDeployment({
 				url: `/releases/${releaseId}/deployment`,
 				method: "POST",
+				data,
 				signal,
 			});
 		},
@@ -13449,13 +13455,13 @@ export const useApiReleaseDeploymentMutationOptions = <
 	mutation?: UseMutationOptions<
 		Awaited<ReturnType<ReturnType<typeof useApiReleaseDeploymentHook>>>,
 		TError,
-		{ releaseId: number },
+		{ releaseId: number; data?: DeploymentRequest },
 		TContext
 	>;
 }): UseMutationOptions<
 	Awaited<ReturnType<ReturnType<typeof useApiReleaseDeploymentHook>>>,
 	TError,
-	{ releaseId: number },
+	{ releaseId: number; data?: DeploymentRequest },
 	TContext
 > => {
 	const mutationKey = ["apiReleaseDeployment"];
@@ -13471,11 +13477,11 @@ export const useApiReleaseDeploymentMutationOptions = <
 
 	const mutationFn: MutationFunction<
 		Awaited<ReturnType<ReturnType<typeof useApiReleaseDeploymentHook>>>,
-		{ releaseId: number }
+		{ releaseId: number; data?: DeploymentRequest }
 	> = (props) => {
-		const { releaseId } = props ?? {};
+		const { releaseId, data } = props ?? {};
 
-		return apiReleaseDeployment(releaseId);
+		return apiReleaseDeployment(releaseId, data);
 	};
 
 	return { mutationFn, ...mutationOptions };
@@ -13492,7 +13498,7 @@ export const useApiReleaseDeployment = <TError = unknown, TContext = unknown>(
 		mutation?: UseMutationOptions<
 			Awaited<ReturnType<ReturnType<typeof useApiReleaseDeploymentHook>>>,
 			TError,
-			{ releaseId: number },
+			{ releaseId: number; data?: DeploymentRequest },
 			TContext
 		>;
 	},
@@ -13500,7 +13506,7 @@ export const useApiReleaseDeployment = <TError = unknown, TContext = unknown>(
 ): UseMutationResult<
 	Awaited<ReturnType<ReturnType<typeof useApiReleaseDeploymentHook>>>,
 	TError,
-	{ releaseId: number },
+	{ releaseId: number; data?: DeploymentRequest },
 	TContext
 > => {
 	const mutationOptions = useApiReleaseDeploymentMutationOptions(options);

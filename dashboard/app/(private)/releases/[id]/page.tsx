@@ -8,6 +8,7 @@ import {
 	Box,
 	Calendar,
 	CheckCircle,
+	ChevronRight,
 	ChevronsUpDown,
 	Clock,
 	Cog,
@@ -22,18 +23,22 @@ import {
 	Trash2,
 	X,
 	XCircle,
+	Zap,
 } from "lucide-react";
 import moment from "moment";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import {
+	type DeploymentRequest,
+	type Device,
 	type Package,
 	useAddPackageToRelease,
 	useApiGetReleaseDeployment,
 	useApiReleaseDeployment,
 	useDeletePackageForRelease,
+	useGetDevices,
 	useGetDistributionById,
 	useGetDistributionReleasePackages,
 	useGetPackages,
@@ -41,6 +46,7 @@ import {
 	useGetReleaseServices,
 	usePatchRelease,
 } from "@/app/api-client";
+import LabelAutocomplete from "@/app/components/LabelAutocomplete";
 
 const ReleaseDetailPage = () => {
 	const router = useRouter();
@@ -58,6 +64,15 @@ const ReleaseDetailPage = () => {
 	const [packageSearchQuery, setPackageSearchQuery] = useState("");
 	const [showDeployModal, setShowDeployModal] = useState(false);
 	const [deploying, setDeploying] = useState(false);
+	const [canaryMode, setCanaryMode] = useState<
+		"automatic" | "labels" | "devices"
+	>("automatic");
+	const [canaryLabels, setCanaryLabels] = useState<string[]>([]);
+	const [canaryDeviceIds, setCanaryDeviceIds] = useState<Set<number>>(
+		new Set(),
+	);
+	const [deviceSearchQuery, setDeviceSearchQuery] = useState("");
+	const [deployStep, setDeployStep] = useState<1 | 2>(1);
 	const [showYankModal, setShowYankModal] = useState(false);
 	const [yanking, setYanking] = useState(false);
 	const [yankReason, setYankReason] = useState("");
@@ -108,6 +123,51 @@ const ReleaseDetailPage = () => {
 			retry: false,
 		},
 	});
+
+	// Eligible devices: online + up-to-date in distribution (used for devices mode)
+	const { data: eligibleDevices = [], isLoading: eligibleDevicesLoading } =
+		useGetDevices(
+			{
+				distribution_id: release?.distribution_id,
+				online: true,
+				outdated: false,
+			},
+			{
+				query: {
+					enabled:
+						showDeployModal &&
+						canaryMode === "devices" &&
+						!!release?.distribution_id,
+				},
+			},
+		);
+
+	// Devices matching selected labels (used for labels mode preview)
+	const { data: labelMatchDevices = [], isLoading: labelDevicesLoading } =
+		useGetDevices(
+			{
+				distribution_id: release?.distribution_id,
+				outdated: false,
+				labels: canaryLabels,
+			},
+			{
+				query: {
+					enabled:
+						showDeployModal &&
+						canaryMode === "labels" &&
+						canaryLabels.length > 0 &&
+						!!release?.distribution_id,
+				},
+			},
+		);
+
+	const filteredEligibleDevices = useMemo(() => {
+		if (!deviceSearchQuery) return eligibleDevices;
+		const q = deviceSearchQuery.toLowerCase();
+		return eligibleDevices.filter((d: Device) =>
+			d.serial_number.toLowerCase().includes(q),
+		);
+	}, [eligibleDevices, deviceSearchQuery]);
 
 	useEffect(() => {
 		setMounted(true);
@@ -305,14 +365,30 @@ const ReleaseDetailPage = () => {
 		}
 	};
 
+	const handleOpenDeployModal = () => {
+		setCanaryMode("automatic");
+		setCanaryLabels([]);
+		setCanaryDeviceIds(new Set());
+		setDeviceSearchQuery("");
+		setDeployStep(1);
+		setShowDeployModal(true);
+	};
+
 	const releaseDeploymentHook = useApiReleaseDeployment();
 
 	const handleDeployRelease = async () => {
 		if (!release || deploying) return;
 
+		let data: DeploymentRequest | undefined;
+		if (canaryMode === "labels" && canaryLabels.length > 0) {
+			data = { canary_device_labels: canaryLabels };
+		} else if (canaryMode === "devices" && canaryDeviceIds.size > 0) {
+			data = { canary_device_ids: Array.from(canaryDeviceIds) };
+		}
+
 		setDeploying(true);
 		try {
-			await releaseDeploymentHook.mutateAsync({ releaseId });
+			await releaseDeploymentHook.mutateAsync({ releaseId, data });
 			setShowDeployModal(false);
 			router.push(`/releases/${releaseId}/deployment`);
 		} catch (error: any) {
@@ -517,7 +593,7 @@ const ReleaseDetailPage = () => {
 											</Link>
 										) : (
 											<button
-												onClick={() => setShowDeployModal(true)}
+												onClick={handleOpenDeployModal}
 												className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700 transition-colors cursor-pointer"
 											>
 												<Rocket className="w-4 h-4" />
@@ -536,11 +612,26 @@ const ReleaseDetailPage = () => {
 					showDeployModal &&
 					createPortal(
 						<div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 animate-in fade-in duration-200">
-							<div className="bg-white rounded-lg shadow-xl p-6 w-[520px] animate-in zoom-in-95 duration-200">
-								<div className="flex items-center justify-between mb-6">
-									<h3 className="text-lg font-semibold text-gray-900">
-										Deploy Release v{release.version}
-									</h3>
+							<div
+								className={`bg-white rounded-lg shadow-xl max-h-[90vh] flex flex-col animate-in zoom-in-95 duration-200 transition-all ${
+									deployStep === 1 ? "w-[520px]" : "w-[900px]"
+								}`}
+							>
+								{/* Header */}
+								<div className="flex items-center justify-between p-6 pb-4 border-b border-gray-200">
+									<div>
+										<h3 className="text-lg font-semibold text-gray-900">
+											Deploy Release v{release.version}
+										</h3>
+										{deployStep === 2 && (
+											<p className="text-xs text-gray-500 mt-0.5">
+												Step 2 of 2 &mdash;{" "}
+												{canaryMode === "labels"
+													? "Select labels for canary devices"
+													: "Select canary devices"}
+											</p>
+										)}
+									</div>
 									<button
 										onClick={() => setShowDeployModal(false)}
 										className="text-gray-400 hover:text-gray-600 cursor-pointer"
@@ -549,64 +640,436 @@ const ReleaseDetailPage = () => {
 									</button>
 								</div>
 
-								<div className="space-y-4 mb-6">
-									<p className="text-sm text-gray-700">
-										This will deploy the release in two phases:
-									</p>
+								{/* Step 1: Choose canary strategy */}
+								{deployStep === 1 && (
+									<>
+										<div className="p-6 space-y-4 overflow-y-auto">
+											<p className="text-sm text-gray-600">
+												First, a small group of canary devices will receive the
+												update. After verifying they update successfully, you
+												can roll out to all remaining devices.
+											</p>
 
-									<div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-										<h4 className="font-medium text-blue-900 text-sm mb-2">
-											Phase 1: Canary Deployment
-										</h4>
-										<ul className="text-sm text-blue-800 space-y-1 list-disc list-inside">
-											<li>Deploy to ~10 recently active devices</li>
-											<li>Wait for successful updates (up to 5 minutes)</li>
-											<li>You will be prompted to confirm when complete</li>
-										</ul>
-									</div>
+											<div className="space-y-3">
+												{(
+													[
+														{
+															mode: "automatic" as const,
+															title: "Automatic",
+															icon: <Zap className="w-5 h-5 text-amber-500" />,
+															description:
+																"~10 online devices are automatically selected by network quality. Best for routine deployments.",
+														},
+														{
+															mode: "labels" as const,
+															title: "By Labels",
+															icon: <Tag className="w-5 h-5 text-blue-500" />,
+															description:
+																"Target devices matching specific labels (e.g. env=staging). All matching up-to-date devices will be included.",
+														},
+														{
+															mode: "devices" as const,
+															title: "Select Devices",
+															icon: <Cpu className="w-5 h-5 text-purple-500" />,
+															description:
+																"Hand-pick specific devices for the canary. Use this when you need precise control.",
+														},
+													] as const
+												).map((option) => (
+													<button
+														key={option.mode}
+														onClick={() => setCanaryMode(option.mode)}
+														className={`w-full text-left p-4 rounded-lg border-2 transition-all cursor-pointer ${
+															canaryMode === option.mode
+																? "border-blue-500 bg-blue-50"
+																: "border-gray-200 hover:border-gray-300 hover:bg-gray-50"
+														}`}
+													>
+														<div className="flex items-start gap-3">
+															<div className="flex-shrink-0 mt-0.5">
+																{option.icon}
+															</div>
+															<div>
+																<div className="font-medium text-gray-900 text-sm">
+																	{option.title}
+																</div>
+																<p className="text-xs text-gray-500 mt-1">
+																	{option.description}
+																</p>
+															</div>
+														</div>
+													</button>
+												))}
+											</div>
+										</div>
 
-									<div className="bg-green-50 border border-green-200 rounded-lg p-4">
-										<h4 className="font-medium text-green-900 text-sm mb-2">
-											Phase 2: Full Rollout
-										</h4>
-										<ul className="text-sm text-green-800 space-y-1 list-disc list-inside">
-											<li>Manually confirm to proceed after canary success</li>
-											<li>Deploy to all remaining devices in distribution</li>
-											<li>Devices will update as they come online</li>
-										</ul>
-									</div>
-								</div>
+										{/* Step 1 Footer */}
+										<div className="flex justify-end space-x-3 p-6 pt-4 border-t border-gray-200">
+											<button
+												onClick={() => setShowDeployModal(false)}
+												disabled={deploying}
+												className="px-4 py-2 text-sm font-medium text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-md transition-colors cursor-pointer"
+											>
+												Cancel
+											</button>
+											{canaryMode === "automatic" ? (
+												<button
+													onClick={handleDeployRelease}
+													disabled={deploying}
+													className={`flex items-center space-x-2 px-4 py-2 text-sm font-medium rounded-md transition-colors ${
+														deploying
+															? "bg-gray-200 text-gray-400 cursor-not-allowed"
+															: "bg-blue-600 text-white hover:bg-blue-700 cursor-pointer"
+													}`}
+												>
+													{deploying ? (
+														<>
+															<div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+															<span>Starting...</span>
+														</>
+													) : (
+														<>
+															<Rocket className="w-4 h-4" />
+															<span>Start Deployment</span>
+														</>
+													)}
+												</button>
+											) : (
+												<button
+													onClick={() => setDeployStep(2)}
+													className="flex items-center space-x-2 px-4 py-2 text-sm font-medium rounded-md bg-blue-600 text-white hover:bg-blue-700 transition-colors cursor-pointer"
+												>
+													<span>Next: Select Devices</span>
+													<ChevronRight className="w-4 h-4" />
+												</button>
+											)}
+										</div>
+									</>
+								)}
 
-								<div className="flex justify-end space-x-3">
-									<button
-										onClick={() => setShowDeployModal(false)}
-										disabled={deploying}
-										className="px-4 py-2 text-sm font-medium text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-md transition-colors cursor-pointer"
-									>
-										Cancel
-									</button>
-									<button
-										onClick={handleDeployRelease}
-										disabled={deploying}
-										className={`flex items-center space-x-2 px-4 py-2 text-sm font-medium rounded-md transition-colors ${
-											deploying
-												? "bg-gray-200 text-gray-400 cursor-not-allowed"
-												: "bg-blue-600 text-white hover:bg-blue-700 cursor-pointer"
-										}`}
-									>
-										{deploying ? (
-											<>
-												<div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-												<span>Starting...</span>
-											</>
-										) : (
-											<>
-												<Rocket className="w-4 h-4" />
-												<span>Start Deployment</span>
-											</>
-										)}
-									</button>
-								</div>
+								{/* Step 2: Select & Preview */}
+								{deployStep === 2 && (
+									<>
+										<div className="flex-1 overflow-hidden grid grid-cols-2 divide-x divide-gray-200 min-h-[400px]">
+											{/* Left column: selection controls */}
+											<div className="p-6 overflow-y-auto space-y-3">
+												{canaryMode === "labels" && (
+													<div className="space-y-3">
+														<LabelAutocomplete
+															onSelect={(label) =>
+																setCanaryLabels((prev) => [...prev, label])
+															}
+															existingFilters={canaryLabels}
+														/>
+														{canaryLabels.length > 0 && (
+															<div className="flex flex-wrap gap-1">
+																{canaryLabels.map((label) => (
+																	<span
+																		key={label}
+																		className="inline-flex items-center px-2 py-0.5 text-xs font-medium bg-blue-100 text-blue-800 rounded-full"
+																	>
+																		{label}
+																		<button
+																			onClick={() =>
+																				setCanaryLabels((prev) =>
+																					prev.filter((l) => l !== label),
+																				)
+																			}
+																			className="ml-1 text-blue-600 hover:text-blue-900 cursor-pointer"
+																		>
+																			<X className="w-3 h-3" />
+																		</button>
+																	</span>
+																))}
+															</div>
+														)}
+														<p className="text-xs text-gray-500">
+															All up-to-date devices matching these labels will
+															be included in the canary.
+														</p>
+													</div>
+												)}
+
+												{canaryMode === "devices" && (
+													<div className="space-y-2">
+														<div className="relative">
+															<Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
+															<input
+																type="text"
+																placeholder="Search by serial number..."
+																value={deviceSearchQuery}
+																onChange={(e) =>
+																	setDeviceSearchQuery(e.target.value)
+																}
+																className="w-full pl-8 pr-3 py-1.5 text-sm border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-gray-900 placeholder-gray-400 bg-white"
+															/>
+														</div>
+														<div className="max-h-[400px] overflow-y-auto border border-gray-200 rounded-md">
+															{eligibleDevicesLoading ? (
+																<div className="p-4 text-center text-sm text-gray-500">
+																	Loading devices...
+																</div>
+															) : filteredEligibleDevices.length === 0 ? (
+																<div className="p-4 text-center text-sm text-gray-500">
+																	No eligible devices found
+																</div>
+															) : (
+																filteredEligibleDevices.map(
+																	(device: Device) => {
+																		const isSelected = canaryDeviceIds.has(
+																			device.id,
+																		);
+																		return (
+																			<div
+																				key={device.id}
+																				onClick={() =>
+																					setCanaryDeviceIds((prev) => {
+																						const next = new Set(prev);
+																						if (next.has(device.id)) {
+																							next.delete(device.id);
+																						} else {
+																							next.add(device.id);
+																						}
+																						return next;
+																					})
+																				}
+																				className={`flex items-center gap-3 px-3 py-2.5 border-b border-gray-100 last:border-b-0 transition-colors cursor-pointer ${
+																					isSelected
+																						? "bg-blue-50"
+																						: "hover:bg-gray-50"
+																				}`}
+																			>
+																				<div
+																					className={`w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0 transition-colors ${
+																						isSelected
+																							? "bg-blue-600"
+																							: "border-2 border-gray-300"
+																					}`}
+																				>
+																					{isSelected && (
+																						<svg
+																							className="w-3 h-3 text-white"
+																							fill="none"
+																							viewBox="0 0 24 24"
+																							stroke="currentColor"
+																						>
+																							<path
+																								strokeLinecap="round"
+																								strokeLinejoin="round"
+																								strokeWidth={2}
+																								d="M5 13l4 4L19 7"
+																							/>
+																						</svg>
+																					)}
+																				</div>
+																				<span className="text-sm font-medium text-gray-900 truncate flex-shrink-0">
+																					{device.serial_number}
+																				</span>
+																				{device.labels &&
+																					Object.keys(device.labels).length >
+																						0 && (
+																						<div className="flex flex-wrap gap-1 min-w-0">
+																							{Object.entries(
+																								device.labels,
+																							).map(([key, value]) => (
+																								<code
+																									key={key}
+																									className="px-1 py-0.5 text-[10px] font-mono rounded border bg-gray-100 text-gray-600 border-gray-200"
+																								>
+																									{key}={value}
+																								</code>
+																							))}
+																						</div>
+																					)}
+																			</div>
+																		);
+																	},
+																)
+															)}
+														</div>
+													</div>
+												)}
+											</div>
+
+											{/* Right column: live preview */}
+											<div className="p-6 overflow-y-auto bg-gray-50 flex flex-col">
+												{canaryMode === "labels" &&
+													(canaryLabels.length === 0 ? (
+														<>
+															<h4 className="font-medium text-gray-900 text-sm mb-1">
+																Canary Preview
+															</h4>
+															<div className="flex-1 flex items-center justify-center text-sm text-gray-400">
+																Select labels to see matching devices
+															</div>
+														</>
+													) : labelDevicesLoading ? (
+														<>
+															<h4 className="font-medium text-gray-900 text-sm mb-3">
+																Canary Preview
+															</h4>
+															<div className="flex-1 flex items-center justify-center text-sm text-gray-400">
+																Loading...
+															</div>
+														</>
+													) : labelMatchDevices.length === 0 ? (
+														<>
+															<h4 className="font-medium text-gray-900 text-sm mb-1">
+																0 devices will receive the canary update
+															</h4>
+															<div className="flex-1 flex items-center justify-center text-sm text-gray-400">
+																No matching devices
+															</div>
+														</>
+													) : (
+														<>
+															<h4 className="font-medium text-gray-900 text-sm mb-3">
+																{labelMatchDevices.length} device
+																{labelMatchDevices.length !== 1 ? "s" : ""} will
+																receive the canary update
+															</h4>
+															<div className="border border-gray-200 rounded-md bg-white overflow-y-auto flex-1">
+																{labelMatchDevices.map((device: Device) => (
+																	<div
+																		key={device.id}
+																		className="flex items-center gap-2 px-3 py-2.5 border-b border-gray-100 last:border-b-0"
+																	>
+																		<span className="text-sm font-mono text-gray-900 flex-shrink-0">
+																			{device.serial_number}
+																		</span>
+																		{device.labels &&
+																			Object.keys(device.labels).length > 0 && (
+																				<div className="flex flex-wrap gap-1 min-w-0">
+																					{Object.entries(device.labels).map(
+																						([key, value]) => (
+																							<code
+																								key={key}
+																								className="px-1.5 py-0.5 text-[10px] font-mono rounded border bg-gray-100 text-gray-700 border-gray-200"
+																							>
+																								{key}={value}
+																							</code>
+																						),
+																					)}
+																				</div>
+																			)}
+																	</div>
+																))}
+															</div>
+														</>
+													))}
+
+												{canaryMode === "devices" &&
+													(canaryDeviceIds.size === 0 ? (
+														<>
+															<h4 className="font-medium text-gray-900 text-sm mb-1">
+																Canary Preview
+															</h4>
+															<div className="flex-1 flex items-center justify-center text-sm text-gray-400">
+																Select devices from the list
+															</div>
+														</>
+													) : (
+														<>
+															<h4 className="font-medium text-gray-900 text-sm mb-3">
+																{canaryDeviceIds.size} device
+																{canaryDeviceIds.size !== 1 ? "s" : ""} will
+																receive the canary update
+															</h4>
+															<div className="border border-gray-200 rounded-md bg-white overflow-y-auto flex-1">
+																{eligibleDevices
+																	.filter((d: Device) =>
+																		canaryDeviceIds.has(d.id),
+																	)
+																	.map((device: Device) => (
+																		<div
+																			key={device.id}
+																			className="flex items-center gap-2 px-3 py-2.5 border-b border-gray-100 last:border-b-0"
+																		>
+																			<span className="text-sm font-mono text-gray-900 flex-shrink-0">
+																				{device.serial_number}
+																			</span>
+																			{device.labels &&
+																				Object.keys(device.labels).length >
+																					0 && (
+																					<div className="flex flex-wrap gap-1 min-w-0">
+																						{Object.entries(device.labels).map(
+																							([key, value]) => (
+																								<code
+																									key={key}
+																									className="px-1.5 py-0.5 text-[10px] font-mono rounded border bg-gray-100 text-gray-700 border-gray-200"
+																								>
+																									{key}={value}
+																								</code>
+																							),
+																						)}
+																					</div>
+																				)}
+																			<button
+																				onClick={() =>
+																					setCanaryDeviceIds((prev) => {
+																						const next = new Set(prev);
+																						next.delete(device.id);
+																						return next;
+																					})
+																				}
+																				className="text-gray-400 hover:text-red-500 cursor-pointer ml-auto flex-shrink-0"
+																			>
+																				<X className="w-3.5 h-3.5" />
+																			</button>
+																		</div>
+																	))}
+															</div>
+														</>
+													))}
+											</div>
+										</div>
+
+										{/* Step 2 Footer */}
+										<div className="flex justify-between p-6 pt-4 border-t border-gray-200">
+											<button
+												onClick={() => setDeployStep(1)}
+												disabled={deploying}
+												className="flex items-center space-x-2 px-4 py-2 text-sm font-medium text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-md transition-colors cursor-pointer"
+											>
+												<ArrowLeft className="w-4 h-4" />
+												<span>Back</span>
+											</button>
+											<button
+												onClick={handleDeployRelease}
+												disabled={
+													deploying ||
+													(canaryMode === "labels" &&
+														canaryLabels.length === 0) ||
+													(canaryMode === "devices" &&
+														canaryDeviceIds.size === 0)
+												}
+												className={`flex items-center space-x-2 px-4 py-2 text-sm font-medium rounded-md transition-colors ${
+													deploying ||
+													(canaryMode === "labels" &&
+														canaryLabels.length === 0) ||
+													(
+														canaryMode === "devices" &&
+															canaryDeviceIds.size === 0
+													)
+														? "bg-gray-200 text-gray-400 cursor-not-allowed"
+														: "bg-blue-600 text-white hover:bg-blue-700 cursor-pointer"
+												}`}
+											>
+												{deploying ? (
+													<>
+														<div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+														<span>Starting...</span>
+													</>
+												) : (
+													<>
+														<Rocket className="w-4 h-4" />
+														<span>Start Deployment</span>
+													</>
+												)}
+											</button>
+										</div>
+									</>
+								)}
 							</div>
 						</div>,
 						document.body,

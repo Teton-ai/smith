@@ -35,4 +35,7 @@ pub struct DeploymentRequest {
     /// Optionally decide which devices go into the canary release with this filter.
     /// e.g. `canary_device_labels=["label1=a", "label2=b"]`
     pub canary_device_labels: Option<Vec<String>>,
+    /// Optionally specify exact device IDs for the canary release.
+    /// Cannot be used together with `canary_device_labels`.
+    pub canary_device_ids: Option<Vec<i32>>,
 }
