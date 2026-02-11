@@ -72,9 +72,66 @@ pub async fn new_deployment(
     .fetch_one(&mut *tx)
     .await?;
 
-    let res = if let Some(canary_device_labels) = request.and_then(|req| req.canary_device_labels)
-        && !canary_device_labels.is_empty()
-    {
+    let labels_opt = request
+        .as_ref()
+        .and_then(|r| r.canary_device_labels.as_ref());
+    let ids_opt = request.as_ref().and_then(|r| r.canary_device_ids.as_ref());
+
+    if matches!(labels_opt, Some(l) if l.is_empty()) {
+        tx.rollback().await?;
+        return Err(ApiError::bad_request(
+            "canary_device_labels cannot be empty.",
+        ));
+    }
+    if matches!(ids_opt, Some(i) if i.is_empty()) {
+        tx.rollback().await?;
+        return Err(ApiError::bad_request("canary_device_ids cannot be empty."));
+    }
+
+    let has_labels = labels_opt.is_some_and(|l| !l.is_empty());
+    let has_ids = ids_opt.is_some_and(|i| !i.is_empty());
+
+    if has_labels && has_ids {
+        tx.rollback().await?;
+        return Err(ApiError::bad_request(
+            "Cannot specify both canary_device_labels and canary_device_ids.",
+        ));
+    }
+
+    let res = if has_ids {
+        let canary_device_ids = request
+            .as_ref()
+            .unwrap()
+            .canary_device_ids
+            .as_ref()
+            .unwrap();
+        sqlx::query!(
+            r#"
+            WITH selected_devices AS (
+                SELECT d.id FROM device d
+                JOIN release r ON d.release_id = r.id
+                WHERE
+                    d.id = ANY($3)
+                    AND d.release_id = d.target_release_id
+                    AND d.last_ping > NOW() - INTERVAL '5 minutes'
+                    AND r.distribution_id = $1
+            )
+            INSERT INTO deployment_devices (deployment_id, device_id)
+            SELECT $2, id FROM selected_devices
+            "#,
+            release.distribution_id,
+            deployment.id,
+            canary_device_ids.as_slice()
+        )
+        .execute(&mut *tx)
+        .await?
+    } else if has_labels {
+        let canary_device_labels = request
+            .as_ref()
+            .unwrap()
+            .canary_device_labels
+            .as_ref()
+            .unwrap();
         sqlx::query!(
             r#"
             WITH selected_devices AS (
@@ -89,7 +146,6 @@ pub async fn new_deployment(
             )
             INSERT INTO deployment_devices (deployment_id, device_id)
             SELECT $2, id FROM selected_devices
-
             "#,
             release.distribution_id,
             deployment.id,

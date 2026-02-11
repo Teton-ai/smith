@@ -12,6 +12,7 @@ services:
     volumes:
       # Mount source code for hot reloading
       - ./api:/app/api
+      - ./cli:/app/cli
       - ./models:/app/models
       - ./smithd:/app/smithd
       # Cache cargo registry and build artifacts for faster rebuilds

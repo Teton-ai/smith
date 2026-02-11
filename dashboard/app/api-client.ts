@@ -86,9 +86,12 @@ export interface Deployment {
 	updated_at: string;
 }
 
+export type DeploymentDeviceWithStatusLabels = { [key: string]: string };
+
 export interface DeploymentDeviceWithStatus {
 	added_at: string;
 	device_id: number;
+	labels: DeploymentDeviceWithStatusLabels;
 	last_ping?: string;
 	release_id?: number;
 	serial_number: string;
