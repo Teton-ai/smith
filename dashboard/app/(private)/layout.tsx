@@ -48,14 +48,21 @@ function useApiVersion() {
 
 	useEffect(() => {
 		if (!config?.API_BASE_URL) return;
-		fetch(`${config.API_BASE_URL}/health`)
-			.then((res) => res.text())
-			.then((text) => {
-				// Response format: "I'm good: 0.2.116"
-				const match = text.match(/:\s*(.+)/);
-				if (match) setVersion(match[1].trim());
+		const controller = new AbortController();
+		fetch(`${config.API_BASE_URL}/health`, { signal: controller.signal })
+			.then((res) => {
+				if (!res.ok) return;
+				return res.text().then((text) => {
+					// Response format: "I'm good: 0.2.116"
+					const match = text.match(/:\s*(.+)/);
+					if (match) setVersion(match[1].trim());
+				});
 			})
-			.catch(() => {});
+			.catch((err) => {
+				if (err?.name === "AbortError") return;
+				console.error("Failed to fetch API version:", err);
+			});
+		return () => controller.abort();
 	}, [config?.API_BASE_URL]);
 
 	return version;
