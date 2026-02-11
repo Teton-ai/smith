@@ -72,14 +72,24 @@ pub async fn new_deployment(
     .fetch_one(&mut *tx)
     .await?;
 
-    let has_labels = request
+    let labels_opt = request
         .as_ref()
-        .and_then(|r| r.canary_device_labels.as_ref())
-        .is_some_and(|l| !l.is_empty());
-    let has_ids = request
-        .as_ref()
-        .and_then(|r| r.canary_device_ids.as_ref())
-        .is_some_and(|ids| !ids.is_empty());
+        .and_then(|r| r.canary_device_labels.as_ref());
+    let ids_opt = request.as_ref().and_then(|r| r.canary_device_ids.as_ref());
+
+    if matches!(labels_opt, Some(l) if l.is_empty()) {
+        tx.rollback().await?;
+        return Err(ApiError::bad_request(
+            "canary_device_labels cannot be empty.",
+        ));
+    }
+    if matches!(ids_opt, Some(i) if i.is_empty()) {
+        tx.rollback().await?;
+        return Err(ApiError::bad_request("canary_device_ids cannot be empty."));
+    }
+
+    let has_labels = labels_opt.is_some_and(|l| !l.is_empty());
+    let has_ids = ids_opt.is_some_and(|i| !i.is_empty());
 
     if has_labels && has_ids {
         tx.rollback().await?;
