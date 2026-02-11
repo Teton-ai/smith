@@ -19,10 +19,12 @@ export default function Auth0ProviderWrapper({
 		<Auth0Provider
 			domain={config!.AUTH0_DOMAIN}
 			clientId={config!.AUTH0_CLIENT_ID}
+			cacheLocation="localstorage"
+			useRefreshTokens={true}
 			authorizationParams={{
 				redirect_uri: config!.AUTH0_REDIRECT_URI,
 				audience: config!.AUTH0_AUDIENCE,
-				scope: "openid profile email",
+				scope: "openid profile email offline_access",
 			}}
 		>
 			{children}
