@@ -38,9 +38,7 @@ function SidebarLabel({ children }: { children: React.ReactNode }) {
 
 function MobileSidebarLabel({ children }: { children: React.ReactNode }) {
 	return (
-		<span className="text-sm font-medium whitespace-nowrap">
-			{children}
-		</span>
+		<span className="text-sm font-medium whitespace-nowrap">{children}</span>
 	);
 }
 
@@ -120,9 +118,7 @@ export default function PrivateLayout({
 								{/* Active accent */}
 								<div
 									className={`absolute left-0 top-1 bottom-1 w-[3px] rounded-r-full bg-indigo-600 transition-all duration-300 ease-out ${
-										active
-											? "opacity-100 scale-y-100"
-											: "opacity-0 scale-y-0"
+										active ? "opacity-100 scale-y-100" : "opacity-0 scale-y-0"
 									}`}
 								/>
 								<div className="flex items-center justify-center w-16 shrink-0">
@@ -233,9 +229,7 @@ export default function PrivateLayout({
 										<div className="flex items-center justify-center w-12 shrink-0">
 											<Icon className="w-[18px] h-[18px]" />
 										</div>
-										<MobileSidebarLabel>
-											{item.label}
-										</MobileSidebarLabel>
+										<MobileSidebarLabel>{item.label}</MobileSidebarLabel>
 									</Link>
 								);
 							})}

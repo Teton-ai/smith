@@ -118,9 +118,7 @@ export default function Profile({ sidebar, expanded }: ProfileProps) {
 									<p className="text-sm font-medium text-gray-900 truncate">
 										{user.name}
 									</p>
-									<p className="text-sm text-gray-500 truncate">
-										{user.email}
-									</p>
+									<p className="text-sm text-gray-500 truncate">{user.email}</p>
 								</div>
 							</div>
 						</div>
@@ -183,9 +181,7 @@ export default function Profile({ sidebar, expanded }: ProfileProps) {
 								<p className="text-sm font-medium text-gray-900 truncate">
 									{user.name}
 								</p>
-								<p className="text-sm text-gray-500 truncate">
-									{user.email}
-								</p>
+								<p className="text-sm text-gray-500 truncate">{user.email}</p>
 							</div>
 						</div>
 					</div>
