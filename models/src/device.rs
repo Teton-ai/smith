@@ -23,6 +23,7 @@ pub struct Device {
     pub serial_number: String,
     pub note: Option<String>,
     pub last_seen: Option<DateTime<Utc>>,
+    pub online: bool,
     pub created_on: DateTime<Utc>,
     pub approved: bool,
     pub has_token: Option<bool>,
@@ -54,7 +55,7 @@ pub struct DeviceFilter {
     /// Filter by labels. Format: key=value. Multiple labels can be provided.
     #[serde(default)]
     pub labels: Vec<String>,
-    /// Filter by online status. If true, only devices online in the last 5 minutes.
+    /// Filter by online status. If true, only devices online in the last 3 minutes.
     pub online: Option<bool>,
     /// Filter by outdated status. If true, only devices where release_id != target_release_id.
     pub outdated: Option<bool>,

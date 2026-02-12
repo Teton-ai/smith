@@ -36,7 +36,7 @@ impl Dashboard {
         let online_count = sqlx::query_scalar!(
             r#"
             SELECT COUNT(*) FROM device d
-            WHERE d.last_ping >= now() - INTERVAL '5 minutes'
+            WHERE d.last_ping >= now() - INTERVAL '3 minutes'
             AND d.archived = false
             AND NOT EXISTS (
                 SELECT 1 FROM device_label dl
@@ -55,7 +55,7 @@ impl Dashboard {
         let offline_count = sqlx::query_scalar!(
             r#"
             SELECT COUNT(*) FROM device d
-            WHERE d.last_ping < now() - INTERVAL '5 minutes'
+            WHERE d.last_ping < now() - INTERVAL '3 minutes'
             AND d.archived = false
             AND NOT EXISTS (
                 SELECT 1 FROM device_label dl

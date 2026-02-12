@@ -120,6 +120,7 @@ export interface Device {
 	ip_address_id?: number;
 	labels: DeviceLabels;
 	last_seen?: string;
+	online: boolean;
 	modem?: Modem;
 	modem_id?: number;
 	network?: DeviceNetwork;
@@ -421,7 +422,7 @@ export type GetDevicesParams = {
 	 */
 	labels?: string[];
 	/**
-	 * Filter by online status. If true, only devices online in the last 5 minutes.
+	 * Filter by online status. If true, only devices online in the last 3 minutes.
 	 */
 	online?: boolean;
 	/**

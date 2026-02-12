@@ -90,7 +90,7 @@ const DeploymentStatusPage = () => {
 		}
 		if (
 			device.last_ping &&
-			moment(device.last_ping).isAfter(moment().subtract(5, "minutes"))
+			moment(device.last_ping).isAfter(moment().subtract(3, "minutes"))
 		) {
 			return {
 				status: "updating",
