@@ -4,6 +4,10 @@ use keyring::Entry;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::fs::{File, OpenOptions};
+use std::io::{Read, Write};
+use std::os::unix::fs::PermissionsExt;
+use std::path::PathBuf;
 
 use crate::config::Config;
 
@@ -80,15 +84,25 @@ pub async fn login(config: &Config, open: bool) -> anyhow::Result<()> {
         println!("{:?}", resp);
 
         if let (Some(access_token), Some(refresh_token)) = (resp.access_token, resp.refresh_token) {
-            let user = whoami::username();
-            let entry = Entry::new("SMITH_KEYS", &user)?;
             let current_profile = config.current_profile.clone();
 
-            let session_secrets = entry.get_password();
-
-            let mut session_secrets = match session_secrets {
-                Ok(secrets) => serde_json::from_str::<SessionSecrets>(&secrets)?,
-                Err(_) => SessionSecrets::default(),
+            // Try to get existing secrets from either storage
+            let mut session_secrets = match try_keyring_get() {
+                Ok(Some(json)) => serde_json::from_str::<SessionSecrets>(&json)?,
+                Ok(None) => {
+                    // Try file storage
+                    match try_file_get()? {
+                        Some(json) => serde_json::from_str::<SessionSecrets>(&json)?,
+                        None => SessionSecrets::default(),
+                    }
+                }
+                Err(_) => {
+                    // Try file storage
+                    match try_file_get()? {
+                        Some(json) => serde_json::from_str::<SessionSecrets>(&json)?,
+                        None => SessionSecrets::default(),
+                    }
+                }
             };
 
             let new_profile_secrets = ProfileSecrets {
@@ -103,7 +117,20 @@ pub async fn login(config: &Config, open: bool) -> anyhow::Result<()> {
                     .profiles
                     .insert(current_profile, new_profile_secrets);
             }
-            entry.set_password(&serde_json::to_string(&session_secrets)?)?;
+
+            // Try keyring first, fall back to file
+            let json = serde_json::to_string(&session_secrets)?;
+            match try_keyring_set(&json) {
+                Ok(()) => {
+                    // Success - keyring available
+                }
+                Err(e) => {
+                    // Keyring unavailable, use file storage
+                    eprintln!("Warning: System keyring unavailable ({})", e);
+                    eprintln!("Using file storage: ~/.smith/credentials.json");
+                    try_file_set(&json)?;
+                }
+            }
 
             break;
         };
@@ -122,11 +149,21 @@ pub async fn login(config: &Config, open: bool) -> anyhow::Result<()> {
 }
 
 pub fn logout() -> anyhow::Result<()> {
-    let user = whoami::username();
-    let entry = Entry::new("SMITH_KEYS", &user)?;
-    entry.delete_credential()?;
-    print!("Logged out, credentials removed.");
-    Ok(())
+    // Try both storage methods
+    let keyring_result = try_keyring_delete();
+    let file_result = try_file_delete();
+
+    // Success if either succeeded
+    let keyring_ok = keyring_result.is_ok();
+    let file_ok = file_result.is_ok();
+
+    if keyring_ok || file_ok {
+        println!("Logged out, credentials removed.");
+        Ok(())
+    } else {
+        // Both failed with real errors
+        Err(anyhow!("Failed to remove credentials"))
+    }
 }
 
 pub async fn show(config: &Config) -> anyhow::Result<()> {
@@ -258,15 +295,36 @@ pub struct ProfileSecrets {
 }
 
 pub async fn get_secrets(config: &Config) -> Result<Option<SessionSecrets>> {
-    let user = whoami::username();
-    let entry = Entry::new("SMITH_KEYS", &user)?;
     let current_profile = config.current_profile.clone();
 
-    let session_secrets = entry.get_password();
-    let mut session_secrets = match session_secrets {
-        Ok(secrets) => serde_json::from_str::<SessionSecrets>(&secrets)?,
-        Err(_) => return Ok(None),
+    // Try keyring first, fall back to file storage
+    let (secrets_json, storage_method) = match try_keyring_get() {
+        Ok(Some(json)) => (json, StorageMethod::Keyring),
+        Ok(None) => {
+            // No keyring credentials, try file
+            match try_file_get()? {
+                Some(json) => (json, StorageMethod::File),
+                None => return Ok(None), // Not logged in
+            }
+        }
+        Err(e) if is_keyring_unavailable(&e) => {
+            // Keyring unavailable, try file
+            match try_file_get()? {
+                Some(json) => (json, StorageMethod::File),
+                None => return Ok(None),
+            }
+        }
+        Err(e) => {
+            // Real keyring error, warn and try file
+            eprintln!("Warning: Keyring error: {}", e);
+            match try_file_get()? {
+                Some(json) => (json, StorageMethod::File),
+                None => return Ok(None),
+            }
+        }
     };
+
+    let mut session_secrets = serde_json::from_str::<SessionSecrets>(&secrets_json)?;
 
     // Check if the profile exists, return None if it doesn't
     if !session_secrets.profiles.contains_key(&current_profile) {
@@ -310,12 +368,125 @@ pub async fn get_secrets(config: &Config) -> Result<Option<SessionSecrets>> {
         } else {
             return Err(anyhow!("Profile not found"));
         }
-        entry.set_password(&serde_json::to_string(&session_secrets)?)?;
+
+        // Save refreshed tokens to same storage method
+        let updated_json = serde_json::to_string(&session_secrets)?;
+        match storage_method {
+            StorageMethod::Keyring => try_keyring_set(&updated_json)?,
+            StorageMethod::File => try_file_set(&updated_json)?,
+        }
 
         return Ok(Some(session_secrets));
     }
 
     Ok(Some(session_secrets))
+}
+
+// Storage method tracking
+#[derive(Debug, Clone, Copy)]
+enum StorageMethod {
+    Keyring,
+    File,
+}
+
+// Get path to credentials file
+fn credentials_file_path() -> Result<PathBuf> {
+    let home = dirs::home_dir().ok_or_else(|| anyhow!("Could not find home directory"))?;
+    Ok(home.join(".smith").join("credentials.json"))
+}
+
+// Keyring operations
+fn try_keyring_get() -> Result<Option<String>> {
+    let user = whoami::username();
+    let entry = Entry::new("SMITH_KEYS", &user)?;
+
+    match entry.get_password() {
+        Ok(password) => Ok(Some(password)),
+        Err(keyring::Error::NoEntry) => Ok(None),
+        Err(e) => Err(anyhow!("Keyring error: {}", e)),
+    }
+}
+
+fn try_keyring_set(value: &str) -> Result<()> {
+    let user = whoami::username();
+    let entry = Entry::new("SMITH_KEYS", &user)?;
+    entry.set_password(value)?;
+    Ok(())
+}
+
+fn try_keyring_delete() -> Result<()> {
+    let user = whoami::username();
+    let entry = Entry::new("SMITH_KEYS", &user)?;
+    entry.delete_credential()?;
+    Ok(())
+}
+
+// File operations
+fn try_file_get() -> Result<Option<String>> {
+    let path = credentials_file_path()?;
+
+    match File::open(&path) {
+        Ok(mut file) => {
+            let mut contents = String::new();
+            file.read_to_string(&mut contents)?;
+            Ok(Some(contents))
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(anyhow!("Failed to read credentials file: {}", e)),
+    }
+}
+
+fn try_file_set(value: &str) -> Result<()> {
+    let path = credentials_file_path()?;
+
+    // Create directory if it doesn't exist
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    // Atomic write: write to temp file, then rename
+    let temp_path = path.with_extension("tmp");
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .open(&temp_path)?;
+
+    // Set permissions to 0600 (owner read/write only)
+    let mut perms = file.metadata()?.permissions();
+    perms.set_mode(0o600);
+    file.set_permissions(perms)?;
+
+    // Write content
+    file.write_all(value.as_bytes())?;
+    file.sync_all()?;
+    drop(file);
+
+    // Atomic rename
+    std::fs::rename(&temp_path, &path)?;
+
+    Ok(())
+}
+
+fn try_file_delete() -> Result<()> {
+    let path = credentials_file_path()?;
+
+    match std::fs::remove_file(&path) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(anyhow!("Failed to delete credentials file: {}", e)),
+    }
+}
+
+// Utility to detect keyring unavailability
+fn is_keyring_unavailable(error: &anyhow::Error) -> bool {
+    let error_string = format!("{}", error);
+    // Common error patterns for keyring unavailability
+    error_string.contains("NoStorageAccess")
+        || error_string.contains("org.freedesktop.secrets")
+        || error_string.contains("DBus")
+        || error_string.contains("Cannot autolaunch D-Bus")
+        || error_string.contains("No such file or directory")
 }
 
 #[cfg(test)]
