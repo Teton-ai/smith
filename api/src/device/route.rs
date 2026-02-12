@@ -100,6 +100,7 @@ pub async fn get_devices(
             d.serial_number,
             d.note,
             d.last_ping as last_seen,
+            CASE WHEN d.last_ping > NOW() - INTERVAL '3 minutes' THEN true ELSE false END as "online!",
             d.created_on,
             d.approved,
             d.token IS NOT NULL as has_token,
@@ -169,8 +170,8 @@ pub async fn get_devices(
           AND (COALESCE($3, false) = true OR d.archived = false)
           AND (CARDINALITY($4::text[]) = 0 OR l.name || '=' || dl.value = ANY($4))
           AND ($5::boolean IS NULL OR
-               ($5 = true AND d.last_ping >= now() - INTERVAL '5 minutes') OR
-               ($5 = false AND d.last_ping < now() - INTERVAL '5 minutes'))
+               ($5 = true AND d.last_ping >= now() - INTERVAL '3 minutes') OR
+               ($5 = false AND d.last_ping < now() - INTERVAL '3 minutes'))
           AND ($6::boolean IS NULL OR
                ($6 = true AND d.release_id != d.target_release_id) OR
                ($6 = false AND d.release_id = d.target_release_id))
@@ -311,6 +312,7 @@ pub async fn get_devices(
                 serial_number: row.serial_number,
                 note: row.note,
                 last_seen: row.last_seen,
+                online: row.online,
                 created_on: row.created_on,
                 approved: row.approved,
                 has_token: row.has_token,
@@ -396,7 +398,7 @@ pub async fn get_health_for_device(
         serial_number,
         last_ping,
         CASE
-        WHEN last_ping > NOW() - INTERVAL '5 minutes'
+        WHEN last_ping > NOW() - INTERVAL '3 minutes'
         THEN true
         ELSE false
         END AS is_healthy
@@ -1552,6 +1554,7 @@ pub async fn get_device_info(
         d.serial_number,
         d.note,
         d.last_ping as last_seen,
+        CASE WHEN d.last_ping > NOW() - INTERVAL '3 minutes' THEN true ELSE false END as "online!",
         d.created_on,
         d.approved,
         d.token IS NOT NULL as has_token,
@@ -1731,6 +1734,7 @@ pub async fn get_device_info(
         serial_number: device_row.serial_number,
         note: device_row.note,
         last_seen: device_row.last_seen,
+        online: device_row.online,
         created_on: device_row.created_on,
         approved: device_row.approved,
         has_token: device_row.has_token,

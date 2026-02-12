@@ -113,7 +113,7 @@ pub async fn new_deployment(
                 WHERE
                     d.id = ANY($3)
                     AND d.release_id = d.target_release_id
-                    AND d.last_ping > NOW() - INTERVAL '5 minutes'
+                    AND d.last_ping > NOW() - INTERVAL '3 minutes'
                     AND r.distribution_id = $1
             )
             INSERT INTO deployment_devices (deployment_id, device_id)
@@ -160,7 +160,7 @@ pub async fn new_deployment(
                 SELECT d.id FROM device d
                 JOIN release r ON d.release_id = r.id
                 LEFT JOIN device_network dn ON d.id = dn.device_id
-                WHERE d.last_ping > NOW() - INTERVAL '5 minutes'
+                WHERE d.last_ping > NOW() - INTERVAL '3 minutes'
                 AND d.release_id = d.target_release_id
                 AND r.distribution_id = $1
                 ORDER BY
