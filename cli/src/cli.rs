@@ -263,4 +263,22 @@ pub enum Commands {
         #[arg(required = true, value_name = "KEY=VALUE")]
         set_labels: Vec<String>,
     },
+
+    /// Approve devices for fleet management
+    Approve {
+        #[command(flatten)]
+        selector: DeviceSelector,
+        /// Skip confirmation prompt
+        #[arg(short = 'y', long)]
+        yes: bool,
+    },
+
+    /// Revoke device approval
+    Revoke {
+        #[command(flatten)]
+        selector: DeviceSelector,
+        /// Skip confirmation prompt
+        #[arg(short = 'y', long)]
+        yes: bool,
+    },
 }
