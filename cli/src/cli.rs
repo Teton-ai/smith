@@ -247,8 +247,8 @@ pub enum Commands {
         /// Wait for command results (polls until completion)
         #[arg(short, long, default_value = "false")]
         wait: bool,
-        /// Command to execute on the devices
-        #[arg(trailing_var_arg = true, required = true)]
+        /// Command to execute on the devices (provide after -- or via stdin)
+        #[arg(last = true)]
         command: Vec<String>,
     },
 

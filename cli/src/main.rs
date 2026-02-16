@@ -19,7 +19,12 @@ use clap_complete::generate;
 use colored::Colorize;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use models::device::{Device, DeviceFilter};
-use std::{collections::HashSet, io, thread, time::Duration};
+use std::{
+    collections::HashSet,
+    io::{self, Read},
+    thread,
+    time::Duration,
+};
 use termion::raw::IntoRawMode;
 use tokio::sync::oneshot;
 use tunnel::Session;
@@ -149,27 +154,16 @@ fn update(_check: bool) -> Result<(), anyhow::Error> {
 fn check_and_update_if_needed() -> Result<(), anyhow::Error> {
     let last_check_file = config::Config::get_last_update_check_file();
 
-    let should_check = if last_check_file.exists() {
-        if let Ok(contents) = std::fs::read_to_string(&last_check_file) {
-            if let Ok(timestamp) = contents.trim().parse::<i64>() {
-                let last_check = chrono::DateTime::from_timestamp(timestamp, 0);
-                let now = chrono::Utc::now();
-
-                if let Some(last_check) = last_check {
-                    let duration = now.signed_duration_since(last_check);
-                    duration.num_hours() >= 24
-                } else {
-                    true
-                }
-            } else {
-                true
-            }
-        } else {
-            true
-        }
-    } else {
-        true
-    };
+    let should_check = std::fs::read_to_string(&last_check_file)
+        .ok()
+        .and_then(|contents| contents.trim().parse::<i64>().ok())
+        .and_then(|timestamp| chrono::DateTime::from_timestamp(timestamp, 0))
+        .map(|last_check| {
+            let now = chrono::Utc::now();
+            let duration = now.signed_duration_since(last_check);
+            duration.num_hours() >= 24
+        })
+        .unwrap_or(true);
 
     if should_check {
         let current_version = self_update::cargo_crate_version!();
@@ -1402,7 +1396,31 @@ async fn main() -> anyhow::Result<()> {
 
                 let api = SmithAPI::new(secrets, &config);
 
-                let cmd_string = command.join(" ");
+                // Determine command source: args after -- OR stdin
+                let cmd_string = if !command.is_empty() {
+                    // Command provided via args after --, just use it
+                    // Note: We don't check stdin here because in non-interactive environments
+                    // (like CI or this tool's context), stdin might appear non-terminal even
+                    // when no data is being piped. The user explicitly used -- so we trust that.
+                    command.join(" ")
+                } else {
+                    // No args after --, try to read from stdin
+                    let mut buffer = String::new();
+                    let bytes_read = io::stdin()
+                        .read_to_string(&mut buffer)
+                        .context("Failed to read command from stdin")?;
+
+                    let trimmed = buffer.trim();
+
+                    if bytes_read == 0 || trimmed.is_empty() {
+                        // No stdin data available
+                        bail!(
+                            "error: command must be provided either:\n  - as arguments after '--' (e.g., sm run -d 1234 -- echo hello)\n  - via stdin (e.g., echo 'sleep 1' | sm run -d 1234)"
+                        );
+                    }
+
+                    trimmed.to_string()
+                };
 
                 let target_devices = resolve_target_devices(
                     &api,
