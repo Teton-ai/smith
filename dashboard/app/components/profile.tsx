@@ -65,7 +65,7 @@ export default function Profile({ sidebar, expanded }: ProfileProps) {
 					onClick={() => setIsOpen(!isOpen)}
 					className="flex items-center w-full h-10 rounded-md text-gray-600 hover:bg-gray-100 hover:text-gray-900 transition-colors duration-200 cursor-pointer group/item"
 				>
-					<div className="flex items-center justify-center w-16 shrink-0">
+					<div className="flex items-center justify-center w-12 shrink-0">
 						{user.picture ? (
 							<Image
 								src={user.picture}
