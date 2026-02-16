@@ -19,7 +19,12 @@ use clap_complete::generate;
 use colored::Colorize;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use models::device::{Device, DeviceFilter};
-use std::{collections::HashSet, io, thread, time::Duration};
+use std::{
+    collections::HashSet,
+    io::{self, IsTerminal, Read},
+    thread,
+    time::Duration,
+};
 use termion::raw::IntoRawMode;
 use tokio::sync::oneshot;
 use tunnel::Session;
@@ -149,27 +154,16 @@ fn update(_check: bool) -> Result<(), anyhow::Error> {
 fn check_and_update_if_needed() -> Result<(), anyhow::Error> {
     let last_check_file = config::Config::get_last_update_check_file();
 
-    let should_check = if last_check_file.exists() {
-        if let Ok(contents) = std::fs::read_to_string(&last_check_file) {
-            if let Ok(timestamp) = contents.trim().parse::<i64>() {
-                let last_check = chrono::DateTime::from_timestamp(timestamp, 0);
-                let now = chrono::Utc::now();
-
-                if let Some(last_check) = last_check {
-                    let duration = now.signed_duration_since(last_check);
-                    duration.num_hours() >= 24
-                } else {
-                    true
-                }
-            } else {
-                true
-            }
-        } else {
-            true
-        }
-    } else {
-        true
-    };
+    let should_check = std::fs::read_to_string(&last_check_file)
+        .ok()
+        .and_then(|contents| contents.trim().parse::<i64>().ok())
+        .and_then(|timestamp| chrono::DateTime::from_timestamp(timestamp, 0))
+        .map(|last_check| {
+            let now = chrono::Utc::now();
+            let duration = now.signed_duration_since(last_check);
+            duration.num_hours() >= 24
+        })
+        .unwrap_or(true);
 
     if should_check {
         let current_version = self_update::cargo_crate_version!();
@@ -1391,7 +1385,7 @@ async fn main() -> anyhow::Result<()> {
             }
             Commands::Run {
                 selector,
-                devices: device_filters,
+                yes,
                 wait,
                 command,
             } => {
@@ -1402,11 +1396,47 @@ async fn main() -> anyhow::Result<()> {
 
                 let api = SmithAPI::new(secrets, &config);
 
-                let cmd_string = command.join(" ");
+                // Determine command source: args after -- OR stdin
+                let cmd_from_stdin;
+                let cmd_string = if !command.is_empty() {
+                    // Command provided via args after --, validate that -- was actually present
+                    if !std::env::args().any(|arg| arg == "--") {
+                        bail!(
+                            "error: command must be provided either:\n  - as arguments after '--' (e.g., sm run 1234 -- echo hello)\n  - via stdin (e.g., echo 'sleep 1' | sm run 1234)"
+                        );
+                    }
+                    cmd_from_stdin = false;
+                    command.join(" ")
+                } else {
+                    // No args after --, try to read from stdin
+                    // First check if stdin is a TTY to avoid blocking
+                    if io::stdin().is_terminal() {
+                        bail!(
+                            "error: command must be provided either:\n  - as arguments after '--' (e.g., sm run 1234 -- echo hello)\n  - via stdin (e.g., echo 'sleep 1' | sm run 1234)"
+                        );
+                    }
+
+                    let mut buffer = String::new();
+                    let bytes_read = io::stdin()
+                        .read_to_string(&mut buffer)
+                        .context("Failed to read command from stdin")?;
+
+                    let trimmed = buffer.trim();
+
+                    if bytes_read == 0 || trimmed.is_empty() {
+                        // No stdin data available
+                        bail!(
+                            "error: command must be provided either:\n  - as arguments after '--' (e.g., sm run 1234 -- echo hello)\n  - via stdin (e.g., echo 'sleep 1' | sm run 1234)"
+                        );
+                    }
+
+                    cmd_from_stdin = true;
+                    trimmed.to_string()
+                };
 
                 let target_devices = resolve_target_devices(
                     &api,
-                    device_filters,
+                    selector.ids,
                     selector.labels,
                     selector.online,
                     selector.offline,
@@ -1426,11 +1456,48 @@ async fn main() -> anyhow::Result<()> {
                     return Ok(());
                 }
 
+                // Show devices preview and confirm
+                let total_count = target_devices.len();
+                let preview_count = 10.min(total_count);
+
                 println!(
                     "Running command '{}' on {} device(s):",
                     cmd_string.bold(),
-                    target_devices.len()
+                    total_count
                 );
+
+                for device in target_devices.iter().take(preview_count) {
+                    println!("  - {}", device.serial_number);
+                }
+
+                if total_count > preview_count {
+                    println!(
+                        "  {} ({} more devices...)",
+                        "...".dimmed(),
+                        total_count - preview_count
+                    );
+                }
+
+                if total_count > 1 && !yes && cmd_from_stdin {
+                    bail!(
+                        "error: cannot prompt for confirmation when command is piped via stdin.\nUse -y/--yes to proceed with multiple devices."
+                    );
+                }
+
+                if total_count > 1 && !yes {
+                    print!("\n{} [y/N]: ", "Proceed?".bold());
+                    io::Write::flush(&mut io::stdout())?;
+
+                    let mut input = String::new();
+                    io::stdin().read_line(&mut input)?;
+
+                    if input.trim().to_lowercase() != "y" {
+                        println!("Cancelled.");
+                        return Ok(());
+                    }
+                }
+
+                println!();
 
                 let mut command_ids = Vec::new();
 

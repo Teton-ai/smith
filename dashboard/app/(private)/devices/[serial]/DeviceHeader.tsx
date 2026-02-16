@@ -111,7 +111,7 @@ const DeviceHeader: React.FC<DeviceHeaderProps> = ({ device, serial }) => {
 
 	const handleRunCommand = async () => {
 		if (!runCommand.trim()) return;
-		const command = `sm run -d ${device?.serial_number || serial} ${runCommand}`;
+		const command = `sm run ${device?.serial_number || serial} -- ${runCommand}`;
 		try {
 			await navigator.clipboard.writeText(command);
 			setRunCopied(true);
@@ -153,7 +153,7 @@ const DeviceHeader: React.FC<DeviceHeaderProps> = ({ device, serial }) => {
 								content={
 									runCopied
 										? "Copied to clipboard!"
-										: `Copy command: sm run -d ${serial} ${runCommand || "<command>"}`
+										: `Copy command: sm run ${serial} -- ${runCommand || "<command>"}`
 								}
 							>
 								<button
@@ -484,7 +484,7 @@ const DeviceHeader: React.FC<DeviceHeaderProps> = ({ device, serial }) => {
 							content={
 								runCopied
 									? "Copied to clipboard!"
-									: `Copy command: sm run -d ${device?.serial_number || serial} ${runCommand || "<command>"}`
+									: `Copy command: sm run ${device?.serial_number || serial} -- ${runCommand || "<command>"}`
 							}
 						>
 							<button
