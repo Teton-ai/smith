@@ -3,7 +3,6 @@
 import { useQueryClient } from "@tanstack/react-query";
 import {
 	ArrowLeft,
-	Calendar,
 	Check,
 	CheckCircle,
 	Layers,
@@ -11,8 +10,8 @@ import {
 	X,
 	XCircle,
 } from "lucide-react";
-import Link from "next/link";
 import moment from "moment";
+import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import {
@@ -243,9 +242,7 @@ export default function ApprovalsPage() {
 					<p className="text-sm font-medium text-gray-900 mb-1">
 						All caught up!
 					</p>
-					<p className="text-xs text-gray-500">
-						No devices pending approval
-					</p>
+					<p className="text-xs text-gray-500">No devices pending approval</p>
 				</div>
 			) : (
 				<div className="bg-white rounded-lg border border-gray-200 overflow-hidden">

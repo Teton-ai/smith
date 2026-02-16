@@ -75,195 +75,195 @@ export default function ButtonsPage() {
 		<div className="max-w-5xl mx-auto px-6 py-12">
 			<h1 className="text-3xl font-bold text-gray-900 mb-12">Button</h1>
 
-				{/* Color Variants */}
-				<section className="mb-16">
-					<h2 className="text-xs font-medium text-gray-400 uppercase tracking-widest mb-6">
-						Variants
-					</h2>
-					<div className="space-y-5">
-						{variants.map((v) => (
-							<div key={v.name} className="flex items-center gap-4">
-								<span className="text-sm text-gray-500 w-24 shrink-0 text-right">
-									{v.name}
-								</span>
-								<div className="flex flex-wrap items-center gap-3">
-									{v.labels.map((label) => (
-										<button
-											key={label}
-											className={`px-3 py-2 text-sm rounded-md cursor-pointer ${v.bg} ${v.hover} ${v.text}`}
-										>
-											{label}
-										</button>
-									))}
-								</div>
-							</div>
-						))}
-						<div className="flex items-center gap-4">
+			{/* Color Variants */}
+			<section className="mb-16">
+				<h2 className="text-xs font-medium text-gray-400 uppercase tracking-widest mb-6">
+					Variants
+				</h2>
+				<div className="space-y-5">
+					{variants.map((v) => (
+						<div key={v.name} className="flex items-center gap-4">
 							<span className="text-sm text-gray-500 w-24 shrink-0 text-right">
-								Ghost
-							</span>
-							<div className="flex flex-wrap items-center gap-4">
-								<button className="text-sm text-blue-600 hover:text-blue-800 cursor-pointer">
-									View all
-								</button>
-								<button className="text-sm text-blue-600 hover:underline cursor-pointer">
-									device-001
-								</button>
-								<button className="text-sm text-gray-400 hover:text-gray-600 cursor-pointer">
-									Clear filter
-								</button>
-							</div>
-						</div>
-					</div>
-				</section>
-
-				{/* Sizes */}
-				<section className="mb-16">
-					<h2 className="text-xs font-medium text-gray-400 uppercase tracking-widest mb-6">
-						Sizes
-					</h2>
-					<div className="space-y-5">
-						{variants.map((v) => (
-							<div key={v.name} className="flex items-center gap-4">
-								<span className="text-sm text-gray-500 w-24 shrink-0 text-right">
-									{v.name}
-								</span>
-								<div className="flex flex-wrap items-end gap-3">
-									{sizes.map((s) => (
-										<button
-											key={s.name}
-											className={`${s.px} ${s.py} ${s.text} rounded-md cursor-pointer ${v.bg} ${v.hover} ${v.text}`}
-										>
-											{s.name}
-										</button>
-									))}
-								</div>
-							</div>
-						))}
-					</div>
-				</section>
-
-				{/* Icon Buttons */}
-				<section className="mb-16">
-					<h2 className="text-xs font-medium text-gray-400 uppercase tracking-widest mb-6">
-						With Icons
-					</h2>
-					<div className="space-y-5">
-						<div className="flex items-center gap-4">
-							<span className="text-sm text-gray-500 w-24 shrink-0 text-right">
-								Icon + Text
+								{v.name}
 							</span>
 							<div className="flex flex-wrap items-center gap-3">
-								<button className="px-3 py-2 text-sm bg-blue-600 text-white rounded-md hover:bg-blue-700 cursor-pointer flex items-center gap-2">
-									<Plus className="w-4 h-4" />
-									Add Device
-								</button>
-								<button className="px-3 py-2 text-sm bg-purple-600 text-white rounded-md hover:bg-purple-700 cursor-pointer flex items-center gap-2">
-									<Terminal className="w-4 h-4" />
-									Run Command
-								</button>
-								<button className="px-3 py-2 text-sm bg-green-600 text-white rounded-md hover:bg-green-700 cursor-pointer flex items-center gap-2">
-									<Download className="w-4 h-4" />
-									Download
-								</button>
-								<button className="px-3 py-2 text-sm bg-amber-600 text-white rounded-md hover:bg-amber-700 cursor-pointer flex items-center gap-2">
-									<Send className="w-4 h-4" />
-									Deploy
-								</button>
-								<button className="px-3 py-2 text-sm bg-red-600 text-white rounded-md hover:bg-red-700 cursor-pointer flex items-center gap-2">
-									<Trash2 className="w-4 h-4" />
-									Delete
-								</button>
-							</div>
-						</div>
-						<div className="flex items-center gap-4">
-							<span className="text-sm text-gray-500 w-24 shrink-0 text-right">
-								Icon Only
-							</span>
-							<div className="flex flex-wrap items-center gap-2">
-								<button className="p-2 text-gray-400 hover:text-gray-600 cursor-pointer rounded-md hover:bg-gray-100">
-									<Plus className="w-4 h-4" />
-								</button>
-								<button className="p-2 text-gray-400 hover:text-gray-600 cursor-pointer rounded-md hover:bg-gray-100">
-									<Trash2 className="w-4 h-4" />
-								</button>
-								<button className="p-2 text-gray-400 hover:text-gray-600 cursor-pointer rounded-md hover:bg-gray-100">
-									<ArrowRight className="w-4 h-4" />
-								</button>
-								<button className="p-2 text-gray-400 hover:text-gray-600 cursor-pointer rounded-md hover:bg-gray-100">
-									<X className="w-4 h-4" />
-								</button>
-								<button className="p-2 text-gray-400 hover:text-gray-600 cursor-pointer rounded-md hover:bg-gray-100">
-									<Terminal className="w-4 h-4" />
-								</button>
-							</div>
-						</div>
-					</div>
-				</section>
-
-				{/* Toggle / Filter */}
-				<section className="mb-16">
-					<h2 className="text-xs font-medium text-gray-400 uppercase tracking-widest mb-6">
-						Toggle / Filter
-					</h2>
-					<div className="space-y-5">
-						<div className="flex items-center gap-4">
-							<span className="text-sm text-gray-500 w-24 shrink-0 text-right">
-								Status
-							</span>
-							<ToggleDemo />
-						</div>
-						<div className="flex items-center gap-4">
-							<span className="text-sm text-gray-500 w-24 shrink-0 text-right">
-								Release
-							</span>
-							<FilterToggleDemo />
-						</div>
-					</div>
-				</section>
-
-				{/* States */}
-				<section className="mb-16">
-					<h2 className="text-xs font-medium text-gray-400 uppercase tracking-widest mb-6">
-						States
-					</h2>
-					<div className="space-y-5">
-						{variants.map((v) => (
-							<div key={v.name} className="flex items-center gap-4">
-								<span className="text-sm text-gray-500 w-24 shrink-0 text-right">
-									{v.name}
-								</span>
-								<div className="flex flex-wrap items-center gap-3">
+								{v.labels.map((label) => (
 									<button
+										key={label}
 										className={`px-3 py-2 text-sm rounded-md cursor-pointer ${v.bg} ${v.hover} ${v.text}`}
 									>
-										Default
+										{label}
 									</button>
-									<button
-										disabled
-										className={`px-3 py-2 text-sm rounded-md ${v.bg} ${v.text} disabled:opacity-50 disabled:cursor-not-allowed`}
-									>
-										Disabled
-									</button>
-									<button
-										onClick={() => simulateLoading(v.name)}
-										disabled={loadingVariant === v.name}
-										className={`px-3 py-2 text-sm rounded-md cursor-pointer ${v.bg} ${v.hover} ${v.text} disabled:opacity-50 disabled:cursor-not-allowed`}
-									>
-										{loadingVariant === v.name ? (
-											<span className="flex items-center gap-2">
-												<Loader2 className="w-4 h-4 animate-spin" />
-												Loading...
-											</span>
-										) : (
-											"Click to Load"
-										)}
-									</button>
-								</div>
+								))}
 							</div>
-						))}
+						</div>
+					))}
+					<div className="flex items-center gap-4">
+						<span className="text-sm text-gray-500 w-24 shrink-0 text-right">
+							Ghost
+						</span>
+						<div className="flex flex-wrap items-center gap-4">
+							<button className="text-sm text-blue-600 hover:text-blue-800 cursor-pointer">
+								View all
+							</button>
+							<button className="text-sm text-blue-600 hover:underline cursor-pointer">
+								device-001
+							</button>
+							<button className="text-sm text-gray-400 hover:text-gray-600 cursor-pointer">
+								Clear filter
+							</button>
+						</div>
 					</div>
-				</section>
+				</div>
+			</section>
+
+			{/* Sizes */}
+			<section className="mb-16">
+				<h2 className="text-xs font-medium text-gray-400 uppercase tracking-widest mb-6">
+					Sizes
+				</h2>
+				<div className="space-y-5">
+					{variants.map((v) => (
+						<div key={v.name} className="flex items-center gap-4">
+							<span className="text-sm text-gray-500 w-24 shrink-0 text-right">
+								{v.name}
+							</span>
+							<div className="flex flex-wrap items-end gap-3">
+								{sizes.map((s) => (
+									<button
+										key={s.name}
+										className={`${s.px} ${s.py} ${s.text} rounded-md cursor-pointer ${v.bg} ${v.hover} ${v.text}`}
+									>
+										{s.name}
+									</button>
+								))}
+							</div>
+						</div>
+					))}
+				</div>
+			</section>
+
+			{/* Icon Buttons */}
+			<section className="mb-16">
+				<h2 className="text-xs font-medium text-gray-400 uppercase tracking-widest mb-6">
+					With Icons
+				</h2>
+				<div className="space-y-5">
+					<div className="flex items-center gap-4">
+						<span className="text-sm text-gray-500 w-24 shrink-0 text-right">
+							Icon + Text
+						</span>
+						<div className="flex flex-wrap items-center gap-3">
+							<button className="px-3 py-2 text-sm bg-blue-600 text-white rounded-md hover:bg-blue-700 cursor-pointer flex items-center gap-2">
+								<Plus className="w-4 h-4" />
+								Add Device
+							</button>
+							<button className="px-3 py-2 text-sm bg-purple-600 text-white rounded-md hover:bg-purple-700 cursor-pointer flex items-center gap-2">
+								<Terminal className="w-4 h-4" />
+								Run Command
+							</button>
+							<button className="px-3 py-2 text-sm bg-green-600 text-white rounded-md hover:bg-green-700 cursor-pointer flex items-center gap-2">
+								<Download className="w-4 h-4" />
+								Download
+							</button>
+							<button className="px-3 py-2 text-sm bg-amber-600 text-white rounded-md hover:bg-amber-700 cursor-pointer flex items-center gap-2">
+								<Send className="w-4 h-4" />
+								Deploy
+							</button>
+							<button className="px-3 py-2 text-sm bg-red-600 text-white rounded-md hover:bg-red-700 cursor-pointer flex items-center gap-2">
+								<Trash2 className="w-4 h-4" />
+								Delete
+							</button>
+						</div>
+					</div>
+					<div className="flex items-center gap-4">
+						<span className="text-sm text-gray-500 w-24 shrink-0 text-right">
+							Icon Only
+						</span>
+						<div className="flex flex-wrap items-center gap-2">
+							<button className="p-2 text-gray-400 hover:text-gray-600 cursor-pointer rounded-md hover:bg-gray-100">
+								<Plus className="w-4 h-4" />
+							</button>
+							<button className="p-2 text-gray-400 hover:text-gray-600 cursor-pointer rounded-md hover:bg-gray-100">
+								<Trash2 className="w-4 h-4" />
+							</button>
+							<button className="p-2 text-gray-400 hover:text-gray-600 cursor-pointer rounded-md hover:bg-gray-100">
+								<ArrowRight className="w-4 h-4" />
+							</button>
+							<button className="p-2 text-gray-400 hover:text-gray-600 cursor-pointer rounded-md hover:bg-gray-100">
+								<X className="w-4 h-4" />
+							</button>
+							<button className="p-2 text-gray-400 hover:text-gray-600 cursor-pointer rounded-md hover:bg-gray-100">
+								<Terminal className="w-4 h-4" />
+							</button>
+						</div>
+					</div>
+				</div>
+			</section>
+
+			{/* Toggle / Filter */}
+			<section className="mb-16">
+				<h2 className="text-xs font-medium text-gray-400 uppercase tracking-widest mb-6">
+					Toggle / Filter
+				</h2>
+				<div className="space-y-5">
+					<div className="flex items-center gap-4">
+						<span className="text-sm text-gray-500 w-24 shrink-0 text-right">
+							Status
+						</span>
+						<ToggleDemo />
+					</div>
+					<div className="flex items-center gap-4">
+						<span className="text-sm text-gray-500 w-24 shrink-0 text-right">
+							Release
+						</span>
+						<FilterToggleDemo />
+					</div>
+				</div>
+			</section>
+
+			{/* States */}
+			<section className="mb-16">
+				<h2 className="text-xs font-medium text-gray-400 uppercase tracking-widest mb-6">
+					States
+				</h2>
+				<div className="space-y-5">
+					{variants.map((v) => (
+						<div key={v.name} className="flex items-center gap-4">
+							<span className="text-sm text-gray-500 w-24 shrink-0 text-right">
+								{v.name}
+							</span>
+							<div className="flex flex-wrap items-center gap-3">
+								<button
+									className={`px-3 py-2 text-sm rounded-md cursor-pointer ${v.bg} ${v.hover} ${v.text}`}
+								>
+									Default
+								</button>
+								<button
+									disabled
+									className={`px-3 py-2 text-sm rounded-md ${v.bg} ${v.text} disabled:opacity-50 disabled:cursor-not-allowed`}
+								>
+									Disabled
+								</button>
+								<button
+									onClick={() => simulateLoading(v.name)}
+									disabled={loadingVariant === v.name}
+									className={`px-3 py-2 text-sm rounded-md cursor-pointer ${v.bg} ${v.hover} ${v.text} disabled:opacity-50 disabled:cursor-not-allowed`}
+								>
+									{loadingVariant === v.name ? (
+										<span className="flex items-center gap-2">
+											<Loader2 className="w-4 h-4 animate-spin" />
+											Loading...
+										</span>
+									) : (
+										"Click to Load"
+									)}
+								</button>
+							</div>
+						</div>
+					))}
+				</div>
+			</section>
 		</div>
 	);
 }
