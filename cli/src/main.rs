@@ -1385,7 +1385,6 @@ async fn main() -> anyhow::Result<()> {
             }
             Commands::Run {
                 selector,
-                devices: device_filters,
                 wait,
                 command,
             } => {
@@ -1415,7 +1414,7 @@ async fn main() -> anyhow::Result<()> {
                     if bytes_read == 0 || trimmed.is_empty() {
                         // No stdin data available
                         bail!(
-                            "error: command must be provided either:\n  - as arguments after '--' (e.g., sm run -d 1234 -- echo hello)\n  - via stdin (e.g., echo 'sleep 1' | sm run -d 1234)"
+                            "error: command must be provided either:\n  - as arguments after '--' (e.g., sm run 1234 -- echo hello)\n  - via stdin (e.g., echo 'sleep 1' | sm run 1234)"
                         );
                     }
 
@@ -1424,7 +1423,7 @@ async fn main() -> anyhow::Result<()> {
 
                 let target_devices = resolve_target_devices(
                     &api,
-                    device_filters,
+                    selector.ids,
                     selector.labels,
                     selector.online,
                     selector.offline,

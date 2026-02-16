@@ -241,9 +241,6 @@ pub enum Commands {
     Run {
         #[command(flatten)]
         selector: DeviceSelector,
-        /// Specific device serial numbers or IDs to target
-        #[arg(short, long = "device")]
-        devices: Vec<String>,
         /// Wait for command results (polls until completion)
         #[arg(short, long, default_value = "false")]
         wait: bool,
