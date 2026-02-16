@@ -30,9 +30,15 @@ impl SmithTestEnvironment {
         // Build and start API
         let postgres_host = postgres.get_host().await?;
         let postgres_port = postgres.get_host_port_ipv4(5432).await?;
-        
+
         let api = GenericImage::new("smith-api", "test")
-            .with_env_var("DATABASE_URL", &format!("postgres://postgres:postgres@{}:{}/postgres", postgres_host, postgres_port))
+            .with_env_var(
+                "DATABASE_URL",
+                &format!(
+                    "postgres://postgres:postgres@{}:{}/postgres",
+                    postgres_host, postgres_port
+                ),
+            )
             .with_env_var("RUST_LOG", "info")
             // Required environment variables for API
             .with_env_var("PACKAGES_BUCKET_NAME", "test-packages-bucket")
