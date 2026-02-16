@@ -241,6 +241,9 @@ pub enum Commands {
     Run {
         #[command(flatten)]
         selector: DeviceSelector,
+        /// Skip confirmation prompt
+        #[arg(short = 'y', long)]
+        yes: bool,
         /// Wait for command results (polls until completion)
         #[arg(short, long, default_value = "false")]
         wait: bool,

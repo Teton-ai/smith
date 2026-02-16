@@ -1385,6 +1385,7 @@ async fn main() -> anyhow::Result<()> {
             }
             Commands::Run {
                 selector,
+                yes,
                 wait,
                 command,
             } => {
@@ -1443,11 +1444,42 @@ async fn main() -> anyhow::Result<()> {
                     return Ok(());
                 }
 
+                // Show devices preview and confirm
+                let total_count = target_devices.len();
+                let preview_count = 10.min(total_count);
+
                 println!(
                     "Running command '{}' on {} device(s):",
                     cmd_string.bold(),
-                    target_devices.len()
+                    total_count
                 );
+
+                for device in target_devices.iter().take(preview_count) {
+                    println!("  - {}", device.serial_number);
+                }
+
+                if total_count > preview_count {
+                    println!(
+                        "  {} ({} more devices...)",
+                        "...".dimmed(),
+                        total_count - preview_count
+                    );
+                }
+
+                if total_count > 1 && !yes {
+                    print!("\n{} [y/N]: ", "Proceed?".bold());
+                    io::Write::flush(&mut io::stdout())?;
+
+                    let mut input = String::new();
+                    io::stdin().read_line(&mut input)?;
+
+                    if input.trim().to_lowercase() != "y" {
+                        println!("Cancelled.");
+                        return Ok(());
+                    }
+                }
+
+                println!();
 
                 let mut command_ids = Vec::new();
 
