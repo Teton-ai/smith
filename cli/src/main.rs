@@ -21,7 +21,7 @@ use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use models::device::{Device, DeviceFilter};
 use std::{
     collections::HashSet,
-    io::{self, Read},
+    io::{self, IsTerminal, Read},
     thread,
     time::Duration,
 };
@@ -1398,13 +1398,22 @@ async fn main() -> anyhow::Result<()> {
 
                 // Determine command source: args after -- OR stdin
                 let cmd_string = if !command.is_empty() {
-                    // Command provided via args after --, just use it
-                    // Note: We don't check stdin here because in non-interactive environments
-                    // (like CI or this tool's context), stdin might appear non-terminal even
-                    // when no data is being piped. The user explicitly used -- so we trust that.
+                    // Command provided via args after --, validate that -- was actually present
+                    if !std::env::args().any(|arg| arg == "--") {
+                        bail!(
+                            "error: command must be provided either:\n  - as arguments after '--' (e.g., sm run 1234 -- echo hello)\n  - via stdin (e.g., echo 'sleep 1' | sm run 1234)"
+                        );
+                    }
                     command.join(" ")
                 } else {
                     // No args after --, try to read from stdin
+                    // First check if stdin is a TTY to avoid blocking
+                    if io::stdin().is_terminal() {
+                        bail!(
+                            "error: command must be provided either:\n  - as arguments after '--' (e.g., sm run 1234 -- echo hello)\n  - via stdin (e.g., echo 'sleep 1' | sm run 1234)"
+                        );
+                    }
+
                     let mut buffer = String::new();
                     let bytes_read = io::stdin()
                         .read_to_string(&mut buffer)
