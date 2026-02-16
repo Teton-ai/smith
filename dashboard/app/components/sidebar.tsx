@@ -101,7 +101,7 @@ export default function Sidebar({
 										active ? "opacity-100 scale-y-100" : "opacity-0 scale-y-0"
 									}`}
 								/>
-								<div className="flex items-center justify-center w-16 shrink-0">
+								<div className="flex items-center justify-center w-12 shrink-0">
 									<Icon className="w-[18px] h-[18px] transition-transform duration-200 group-hover/item:scale-110" />
 								</div>
 								<DesktopLabel>{item.label}</DesktopLabel>
@@ -124,7 +124,7 @@ export default function Sidebar({
 										: {})}
 									className="flex items-center h-10 rounded-md text-gray-600 hover:bg-gray-100 hover:text-gray-900 transition-colors duration-200 cursor-pointer group/item"
 								>
-									<div className="flex items-center justify-center w-16 shrink-0">
+									<div className="flex items-center justify-center w-12 shrink-0">
 										<Icon className="w-[18px] h-[18px] transition-transform duration-200 group-hover/item:scale-110" />
 									</div>
 									<DesktopLabel>{item.label}</DesktopLabel>
