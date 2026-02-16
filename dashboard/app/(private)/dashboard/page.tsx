@@ -364,14 +364,24 @@ const AdminPanel = () => {
 					) : hasAttentionDevices ? (
 						<div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
 							{/* Pending Update Section */}
-							{stuckUpdates.length > 0 && (
-								<div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
-									<div className="bg-purple-50 px-4 py-3 border-b border-gray-200">
-										<h4 className="text-sm font-semibold text-purple-800 flex items-center">
-											<Package className="w-4 h-4 mr-2" />
-											Pending Update ({stuckUpdates.length})
-										</h4>
+							<div className="bg-white rounded-lg border border-gray-200 overflow-hidden flex flex-col">
+								<div className="bg-purple-50 px-4 py-3 border-b border-gray-200">
+									<h4 className="text-sm font-semibold text-purple-800 flex items-center">
+										<Package className="w-4 h-4 mr-2" />
+										Pending Update ({stuckUpdates.length})
+									</h4>
+								</div>
+								{stuckUpdates.length === 0 ? (
+									<div className="p-6 text-center flex-1 flex flex-col items-center justify-center">
+										<CheckCircle className="w-10 h-10 text-green-500 mx-auto mb-2" />
+										<p className="text-sm font-medium text-gray-900 mb-1">
+											All up to date
+										</p>
+										<p className="text-xs text-gray-600">
+											No online devices with pending updates
+										</p>
 									</div>
+								) : (
 									<div className="divide-y divide-gray-200">
 										{stuckUpdates.slice(0, 10).map((device) => {
 											const isOnline = device.last_seen
@@ -446,8 +456,8 @@ const AdminPanel = () => {
 											</div>
 										)}
 									</div>
-								</div>
-							)}
+								)}
+							</div>
 
 							{/* Recently Offline Section */}
 							{recentlyOffline.length > 0 && (
