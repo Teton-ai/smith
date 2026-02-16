@@ -58,6 +58,7 @@ const AdminPanel = () => {
 			{
 				outdated: true,
 				outdated_minutes: 30,
+				online: true,
 				exclude_labels: excludeLabels,
 			},
 			{ query: { refetchInterval: 5000 } },
