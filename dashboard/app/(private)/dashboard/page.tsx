@@ -193,7 +193,7 @@ const AdminPanel = () => {
 						</div>
 
 						<Link
-							href="/approvals"
+							href="/devices?approved=false"
 							className={`rounded-lg border p-6 transition-colors cursor-pointer ${
 								unapprovedDevices.length > 0
 									? "bg-orange-50 border-orange-200 hover:bg-orange-100"

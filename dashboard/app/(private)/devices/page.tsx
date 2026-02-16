@@ -1,17 +1,22 @@
 "use client";
 
+import { useQueryClient } from "@tanstack/react-query";
 import {
 	AlertTriangle,
 	Calendar,
+	Check,
+	CheckCircle,
 	ChevronDown,
 	Cpu,
 	GitBranch,
+	Layers,
 	Loader2,
 	Search,
 	Tag,
 	Terminal,
 	User,
 	X,
+	XCircle,
 } from "lucide-react";
 import moment from "moment";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -23,11 +28,14 @@ import {
 	type Device,
 	type DistributionRolloutStats,
 	type Release,
+	useApproveDevice,
+	useDeleteDevice,
 	useGetDevicesInfinite,
 	useGetDistributionRollouts,
 	useGetReleases,
 	useIssueCommandsToDevices,
 	useUpdateDevicesTargetRelease,
+	useUpdateDeviceTargetRelease,
 } from "../../api-client";
 
 const Tooltip = ({
@@ -136,9 +144,11 @@ const PAGE_SIZE = 100;
 const DevicesPage = () => {
 	const router = useRouter();
 	const searchParams = useSearchParams();
+	const queryClient = useQueryClient();
 	const [searchTerm, setSearchTerm] = useState("");
 	const [debouncedSearchTerm, setDebouncedSearchTerm] = useState("");
 	const [showOutdatedOnly, setShowOutdatedOnly] = useState(false);
+	const [showPendingApproval, setShowPendingApproval] = useState(false);
 	const [labelFilters, setLabelFilters] = useState<string[]>([]);
 	const [onlineStatusFilter, setOnlineStatusFilter] = useState<
 		"all" | "online" | "offline"
@@ -169,6 +179,18 @@ const DevicesPage = () => {
 	const [showBulkCommandModal, setShowBulkCommandModal] = useState(false);
 	const [freeFormCommand, setFreeFormCommand] = useState("");
 
+	// Approval state
+	const [approveModalDevice, setApproveModalDevice] = useState<Device | null>(
+		null,
+	);
+	const [selectedDistribution, setSelectedDistribution] = useState<
+		string | null
+	>(null);
+	const [toast, setToast] = useState<{
+		message: string;
+		type: "success" | "error";
+	} | null>(null);
+
 	const formatRelativeTime = (dateString: string) => {
 		return moment(dateString).fromNow();
 	};
@@ -177,12 +199,25 @@ const DevicesPage = () => {
 		setMounted(true);
 	}, []);
 
+	// Toast auto-dismiss
+	useEffect(() => {
+		if (toast) {
+			const timer = setTimeout(() => setToast(null), 3000);
+			return () => clearTimeout(timer);
+		}
+	}, [toast]);
+
+	const approveDeviceHook = useApproveDevice();
+	const deleteDeviceHook = useDeleteDevice();
+	const updateTargetRelease = useUpdateDeviceTargetRelease();
+
 	const {
 		data: devicesData,
 		isLoading: loading,
 		fetchNextPage,
 		hasNextPage,
 		isFetchingNextPage,
+		queryKey: devicesQueryKey,
 	} = useGetDevicesInfinite(
 		{
 			labels: labelFilters.length > 0 ? labelFilters : undefined,
@@ -194,6 +229,7 @@ const DevicesPage = () => {
 						: undefined,
 			search: debouncedSearchTerm.trim() || undefined,
 			outdated: showOutdatedOnly || undefined,
+			approved: showPendingApproval ? false : undefined,
 			release_id: releaseFilter,
 			distribution_id: distributionFilter,
 			limit: PAGE_SIZE,
@@ -222,6 +258,37 @@ const DevicesPage = () => {
 
 	// Fetch all releases
 	const { data: allReleases = [] } = useGetReleases();
+
+	// Group stable releases by distribution for the approve modal
+	const approvalDistributionMap = useMemo(() => {
+		const grouped: Record<
+			string,
+			{ id: number; latestRelease: Release; count: number }
+		> = {};
+		const sorted = [...allReleases]
+			.filter((r) => !r.draft && !r.yanked)
+			.sort(
+				(a, b) =>
+					new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
+			);
+		for (const release of sorted) {
+			const distName = release.distribution_name || "Unknown";
+			if (!grouped[distName]) {
+				grouped[distName] = {
+					id: release.distribution_id,
+					latestRelease: release,
+					count: 1,
+				};
+			} else {
+				grouped[distName].count++;
+			}
+		}
+		return grouped;
+	}, [allReleases]);
+
+	const selectedApprovalRelease = selectedDistribution
+		? approvalDistributionMap[selectedDistribution]?.latestRelease
+		: null;
 
 	// Fetch distribution rollouts to filter out empty distributions
 	const {
@@ -407,9 +474,14 @@ const DevicesPage = () => {
 		const labelsParam = searchParams.get("labels");
 		const releaseIdParam = searchParams.get("release_id");
 		const distributionIdParam = searchParams.get("distribution_id");
+		const approvedParam = searchParams.get("approved");
 
 		if (outdated === "true") {
 			setShowOutdatedOnly(true);
+		}
+
+		if (approvedParam === "false") {
+			setShowPendingApproval(true);
 		}
 
 		if (online) {
@@ -546,6 +618,46 @@ const DevicesPage = () => {
 		updateURL({ outdated: newValue ? "true" : undefined });
 	};
 
+	const handlePendingApprovalToggle = () => {
+		const newValue = !showPendingApproval;
+		setShowPendingApproval(newValue);
+		setSelectedDeviceIds(new Set());
+		updateURL({ approved: newValue ? "false" : undefined });
+	};
+
+	const handleApproveAndAssign = async () => {
+		if (!selectedApprovalRelease) return;
+
+		const deviceIds = Array.from(selectedDeviceIds);
+		const count = deviceIds.length;
+
+		setApproveModalDevice(null);
+
+		try {
+			for (const deviceId of deviceIds) {
+				await approveDeviceHook.mutateAsync({ deviceId });
+				await updateTargetRelease.mutateAsync({
+					deviceId,
+					data: { target_release_id: selectedApprovalRelease.id },
+				});
+			}
+
+			queryClient.invalidateQueries({ queryKey: devicesQueryKey });
+			setToast({
+				message: `${count} device${count > 1 ? "s" : ""} approved → ${selectedDistribution} ${selectedApprovalRelease.version}`,
+				type: "success",
+			});
+			setSelectedDeviceIds(new Set());
+		} catch {
+			setToast({
+				message: `Failed to approve some devices`,
+				type: "error",
+			});
+		} finally {
+			setSelectedDistribution(null);
+		}
+	};
+
 	const addLabelFilter = (labelInput: string) => {
 		const parts = labelInput.split("=");
 		if (parts.length === 2) {
@@ -635,6 +747,32 @@ const DevicesPage = () => {
 
 	return (
 		<div className="space-y-6">
+			{/* Toast Notification */}
+			{toast && (
+				<div
+					className={`fixed top-4 right-4 z-50 p-4 rounded-lg shadow-lg border ${
+						toast.type === "success"
+							? "bg-green-50 text-green-800 border-green-200"
+							: "bg-red-50 text-red-800 border-red-200"
+					} transition-all duration-300 ease-in-out`}
+				>
+					<div className="flex items-center space-x-2">
+						{toast.type === "success" ? (
+							<Check className="w-5 h-5 text-green-600" />
+						) : (
+							<X className="w-5 h-5 text-red-600" />
+						)}
+						<span className="text-sm font-medium">{toast.message}</span>
+						<button
+							onClick={() => setToast(null)}
+							className="ml-2 text-gray-400 hover:text-gray-600 cursor-pointer"
+						>
+							<X className="w-4 h-4" />
+						</button>
+					</div>
+				</div>
+			)}
+
 			{/* Search and Filters */}
 			<div className="flex flex-col space-y-3">
 				<div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
@@ -697,6 +835,18 @@ const DevicesPage = () => {
 							}`}
 						>
 							Outdated
+						</button>
+
+						{/* Pending Approval Filter */}
+						<button
+							onClick={handlePendingApprovalToggle}
+							className={`px-3 py-2 text-sm rounded-md transition-colors cursor-pointer ${
+								showPendingApproval
+									? "bg-orange-600 text-white"
+									: "bg-gray-100 text-gray-700 hover:bg-gray-200"
+							}`}
+						>
+							Pending Approval
 						</button>
 
 						{/* Release Filter Dropdown */}
@@ -1174,19 +1324,78 @@ const DevicesPage = () => {
 						>
 							Clear Selection
 						</button>
-						<button
-							onClick={() => setShowBulkCommandModal(true)}
-							className="px-4 py-2 bg-purple-600 text-white rounded hover:bg-purple-700 cursor-pointer flex items-center gap-2"
-						>
-							<Terminal className="w-4 h-4" />
-							Run Command
-						</button>
-						<button
-							onClick={() => setShowBulkDeployModal(true)}
-							className="px-4 py-2 bg-amber-600 text-white rounded hover:bg-amber-700 cursor-pointer"
-						>
-							Deploy to Selected
-						</button>
+						{showPendingApproval ? (
+							<>
+								<button
+									onClick={() => {
+										const deviceIds = Array.from(selectedDeviceIds);
+										const count = deviceIds.length;
+										if (
+											!confirm(
+												`Are you sure you want to reject ${count} device${count > 1 ? "s" : ""}? This will archive them.`,
+											)
+										) {
+											return;
+										}
+										Promise.all(
+											deviceIds.map((id) =>
+												deleteDeviceHook.mutateAsync({ deviceId: id }),
+											),
+										)
+											.then(() => {
+												queryClient.invalidateQueries({
+													queryKey: devicesQueryKey,
+												});
+												setToast({
+													message: `${count} device${count > 1 ? "s" : ""} rejected and archived`,
+													type: "success",
+												});
+												setSelectedDeviceIds(new Set());
+											})
+											.catch(() => {
+												setToast({
+													message: "Failed to reject some devices",
+													type: "error",
+												});
+											});
+									}}
+									className="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700 cursor-pointer flex items-center gap-2"
+								>
+									<XCircle className="w-4 h-4" />
+									Reject
+								</button>
+								<button
+									onClick={() => {
+										setApproveModalDevice(
+											filteredDevices.find((d) =>
+												selectedDeviceIds.has(d.id),
+											) || null,
+										);
+										setSelectedDistribution(null);
+									}}
+									className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 cursor-pointer flex items-center gap-2"
+								>
+									<CheckCircle className="w-4 h-4" />
+									Approve & Assign
+								</button>
+							</>
+						) : (
+							<>
+								<button
+									onClick={() => setShowBulkCommandModal(true)}
+									className="px-4 py-2 bg-purple-600 text-white rounded hover:bg-purple-700 cursor-pointer flex items-center gap-2"
+								>
+									<Terminal className="w-4 h-4" />
+									Run Command
+								</button>
+								<button
+									onClick={() => setShowBulkDeployModal(true)}
+									className="px-4 py-2 bg-amber-600 text-white rounded hover:bg-amber-700 cursor-pointer"
+								>
+									Deploy to Selected
+								</button>
+							</>
+						)}
 					</div>
 				</div>
 			)}
@@ -1506,6 +1715,120 @@ const DevicesPage = () => {
 									) : (
 										"Run Command"
 									)}
+								</button>
+							</div>
+						</div>
+					</div>,
+					document.body,
+				)}
+
+			{/* Approve & Assign Distribution Modal */}
+			{mounted &&
+				approveModalDevice &&
+				createPortal(
+					<div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 animate-in fade-in duration-200">
+						<div className="bg-white rounded-lg shadow-xl p-6 w-[520px] animate-in zoom-in-95 duration-200">
+							<div className="flex justify-between items-center mb-4">
+								<div>
+									<h2 className="text-xl font-semibold text-gray-900">
+										Approve & Assign Distribution
+									</h2>
+									<p className="text-sm text-gray-500 mt-0.5">
+										{selectedDeviceIds.size} device
+										{selectedDeviceIds.size > 1 ? "s" : ""}
+									</p>
+								</div>
+								<button
+									onClick={() => setApproveModalDevice(null)}
+									className="text-gray-400 hover:text-gray-600 cursor-pointer"
+								>
+									<X className="w-5 h-5" />
+								</button>
+							</div>
+
+							<label className="block text-sm font-medium text-gray-700 mb-3">
+								Select a distribution
+							</label>
+
+							{Object.keys(approvalDistributionMap).length === 0 ? (
+								<div className="text-center py-6 text-gray-500 text-sm border border-gray-200 rounded-md mb-6">
+									No distributions with stable releases available
+								</div>
+							) : (
+								<div className="space-y-2 max-h-64 overflow-y-auto mb-6">
+									{Object.entries(approvalDistributionMap).map(
+										([distName, { latestRelease, count }]) => (
+											<button
+												key={distName}
+												onClick={() => setSelectedDistribution(distName)}
+												className={`w-full text-left p-4 rounded-lg border transition-colors cursor-pointer ${
+													selectedDistribution === distName
+														? "border-indigo-500 bg-indigo-50"
+														: "border-gray-200 hover:border-gray-300 hover:bg-gray-50"
+												}`}
+											>
+												<div className="flex items-center justify-between">
+													<div className="flex items-center space-x-3">
+														<Layers
+															className={`w-5 h-5 ${
+																selectedDistribution === distName
+																	? "text-indigo-600"
+																	: "text-gray-400"
+															}`}
+														/>
+														<div>
+															<p className="font-medium text-gray-900">
+																{distName}
+															</p>
+															<p className="text-xs text-gray-500 mt-0.5">
+																Latest: {latestRelease.version} ·{" "}
+																{formatRelativeTime(latestRelease.created_at)} ·{" "}
+																{count} release{count !== 1 ? "s" : ""}
+															</p>
+														</div>
+													</div>
+													{selectedDistribution === distName && (
+														<div className="w-5 h-5 bg-indigo-600 rounded-full flex items-center justify-center flex-shrink-0">
+															<svg
+																className="w-3 h-3 text-white"
+																fill="none"
+																viewBox="0 0 24 24"
+																stroke="currentColor"
+															>
+																<path
+																	strokeLinecap="round"
+																	strokeLinejoin="round"
+																	strokeWidth={2}
+																	d="M5 13l4 4L19 7"
+																/>
+															</svg>
+														</div>
+													)}
+												</div>
+											</button>
+										),
+									)}
+								</div>
+							)}
+
+							<div className="flex justify-end space-x-3">
+								<button
+									onClick={() => setApproveModalDevice(null)}
+									className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 transition-colors cursor-pointer"
+								>
+									Cancel
+								</button>
+								<button
+									onClick={handleApproveAndAssign}
+									disabled={!selectedApprovalRelease}
+									className="flex items-center space-x-2 px-4 py-2 text-sm font-medium text-white bg-green-600 hover:bg-green-700 disabled:bg-gray-300 disabled:cursor-not-allowed rounded-md transition-colors cursor-pointer"
+								>
+									<CheckCircle className="w-4 h-4" />
+									<span>
+										{selectedApprovalRelease
+											? `Approve → ${selectedApprovalRelease.version}`
+											: "Approve & Assign"}
+									</span>
 								</button>
 							</div>
 						</div>
