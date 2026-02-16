@@ -1397,6 +1397,7 @@ async fn main() -> anyhow::Result<()> {
                 let api = SmithAPI::new(secrets, &config);
 
                 // Determine command source: args after -- OR stdin
+                let cmd_from_stdin;
                 let cmd_string = if !command.is_empty() {
                     // Command provided via args after --, validate that -- was actually present
                     if !std::env::args().any(|arg| arg == "--") {
@@ -1404,6 +1405,7 @@ async fn main() -> anyhow::Result<()> {
                             "error: command must be provided either:\n  - as arguments after '--' (e.g., sm run 1234 -- echo hello)\n  - via stdin (e.g., echo 'sleep 1' | sm run 1234)"
                         );
                     }
+                    cmd_from_stdin = false;
                     command.join(" ")
                 } else {
                     // No args after --, try to read from stdin
@@ -1428,6 +1430,7 @@ async fn main() -> anyhow::Result<()> {
                         );
                     }
 
+                    cmd_from_stdin = true;
                     trimmed.to_string()
                 };
 
@@ -1472,6 +1475,12 @@ async fn main() -> anyhow::Result<()> {
                         "  {} ({} more devices...)",
                         "...".dimmed(),
                         total_count - preview_count
+                    );
+                }
+
+                if total_count > 1 && !yes && cmd_from_stdin {
+                    bail!(
+                        "error: cannot prompt for confirmation when command is piped via stdin.\nUse -y/--yes to proceed with multiple devices."
                     );
                 }
 
