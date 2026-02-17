@@ -28,6 +28,10 @@ import { useInfiniteQuery, useMutation, useQuery } from "@tanstack/react-query";
 import { useCallback } from "react";
 
 import { useClientMutator } from "./api-client-mutator";
+export interface ApproveDeviceBody {
+	target_release_id?: number;
+}
+
 export type BundleCommandsCommandsItem = { [key: string]: unknown };
 
 export interface BundleCommands {
@@ -467,6 +471,8 @@ export type GetDevicesParams = {
 	 */
 	distribution_id?: number;
 };
+
+export type ApproveDeviceBody = null | ApproveDeviceBody;
 
 export type GetAllCommandsForDeviceParams = {
 	starting_after?: number;
@@ -3109,10 +3115,16 @@ export const useApproveDeviceHook = () => {
 	const approveDevice = useClientMutator<boolean>();
 
 	return useCallback(
-		(deviceId: number, signal?: AbortSignal) => {
+		(
+			deviceId: number,
+			approveDeviceBody: ApproveDeviceBody,
+			signal?: AbortSignal,
+		) => {
 			return approveDevice({
 				url: `/devices/${deviceId}/approval`,
 				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				data: approveDeviceBody,
 				signal,
 			});
 		},
@@ -3121,19 +3133,19 @@ export const useApproveDeviceHook = () => {
 };
 
 export const useApproveDeviceMutationOptions = <
-	TError = string,
+	TError = void | string,
 	TContext = unknown,
 >(options?: {
 	mutation?: UseMutationOptions<
 		Awaited<ReturnType<ReturnType<typeof useApproveDeviceHook>>>,
 		TError,
-		{ deviceId: number },
+		{ deviceId: number; data: ApproveDeviceBody },
 		TContext
 	>;
 }): UseMutationOptions<
 	Awaited<ReturnType<ReturnType<typeof useApproveDeviceHook>>>,
 	TError,
-	{ deviceId: number },
+	{ deviceId: number; data: ApproveDeviceBody },
 	TContext
 > => {
 	const mutationKey = ["approveDevice"];
@@ -3149,11 +3161,11 @@ export const useApproveDeviceMutationOptions = <
 
 	const mutationFn: MutationFunction<
 		Awaited<ReturnType<ReturnType<typeof useApproveDeviceHook>>>,
-		{ deviceId: number }
+		{ deviceId: number; data: ApproveDeviceBody }
 	> = (props) => {
-		const { deviceId } = props ?? {};
+		const { deviceId, data } = props ?? {};
 
-		return approveDevice(deviceId);
+		return approveDevice(deviceId, data);
 	};
 
 	return { mutationFn, ...mutationOptions };
@@ -3162,15 +3174,15 @@ export const useApproveDeviceMutationOptions = <
 export type ApproveDeviceMutationResult = NonNullable<
 	Awaited<ReturnType<ReturnType<typeof useApproveDeviceHook>>>
 >;
+export type ApproveDeviceMutationBody = ApproveDeviceBody;
+export type ApproveDeviceMutationError = void | string;
 
-export type ApproveDeviceMutationError = string;
-
-export const useApproveDevice = <TError = string, TContext = unknown>(
+export const useApproveDevice = <TError = void | string, TContext = unknown>(
 	options?: {
 		mutation?: UseMutationOptions<
 			Awaited<ReturnType<ReturnType<typeof useApproveDeviceHook>>>,
 			TError,
-			{ deviceId: number },
+			{ deviceId: number; data: ApproveDeviceBody },
 			TContext
 		>;
 	},
@@ -3178,7 +3190,7 @@ export const useApproveDevice = <TError = string, TContext = unknown>(
 ): UseMutationResult<
 	Awaited<ReturnType<ReturnType<typeof useApproveDeviceHook>>>,
 	TError,
-	{ deviceId: number },
+	{ deviceId: number; data: ApproveDeviceBody },
 	TContext
 > => {
 	const mutationOptions = useApproveDeviceMutationOptions(options);

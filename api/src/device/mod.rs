@@ -74,6 +74,11 @@ pub struct UpdateDeviceRelease {
 }
 
 #[derive(Debug, Deserialize, Serialize, utoipa::ToSchema)]
+pub struct ApproveDeviceBody {
+    pub target_release_id: Option<i32>,
+}
+
+#[derive(Debug, Deserialize, Serialize, utoipa::ToSchema)]
 pub struct UpdateDevicesRelease {
     pub target_release_id: i32,
     pub devices: Vec<i32>,

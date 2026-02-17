@@ -35,7 +35,6 @@ import {
 	useGetReleases,
 	useIssueCommandsToDevices,
 	useUpdateDevicesTargetRelease,
-	useUpdateDeviceTargetRelease,
 } from "../../api-client";
 
 const Tooltip = ({
@@ -209,7 +208,6 @@ const DevicesPage = () => {
 
 	const approveDeviceHook = useApproveDevice();
 	const deleteDeviceHook = useDeleteDevice();
-	const updateTargetRelease = useUpdateDeviceTargetRelease();
 
 	const {
 		data: devicesData,
@@ -635,8 +633,7 @@ const DevicesPage = () => {
 
 		try {
 			for (const deviceId of deviceIds) {
-				await approveDeviceHook.mutateAsync({ deviceId });
-				await updateTargetRelease.mutateAsync({
+				await approveDeviceHook.mutateAsync({
 					deviceId,
 					data: { target_release_id: selectedApprovalRelease.id },
 				});
