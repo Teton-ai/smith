@@ -379,7 +379,7 @@ const ReleaseDetailPage = () => {
 	const handleDeployRelease = async () => {
 		if (!release || deploying) return;
 
-		let data: DeploymentRequest | undefined;
+		let data: DeploymentRequest = {};
 		if (canaryMode === "labels" && canaryLabels.length > 0) {
 			data = { canary_device_labels: canaryLabels };
 		} else if (canaryMode === "devices" && canaryDeviceIds.size > 0) {

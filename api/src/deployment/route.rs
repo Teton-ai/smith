@@ -45,6 +45,7 @@ pub async fn api_get_release_deployment(
     params(
         ("release_id" = i32, Path),
     ),
+  request_body = DeploymentRequest,
   responses(
         (status = StatusCode::OK, body = Deployment),
   ),
