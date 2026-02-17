@@ -1,7 +1,8 @@
 use crate::State;
 use crate::device::{
-    DeviceHealth, DeviceLedgerItem, DeviceLedgerItemPaginated, DeviceRelease, LabelWithValues,
-    NewVariable, Note, RawDevice, UpdateDeviceRelease, UpdateDevicesRelease, Variable,
+    ApproveDeviceBody, DeviceHealth, DeviceLedgerItem, DeviceLedgerItemPaginated, DeviceRelease,
+    LabelWithValues, NewVariable, Note, RawDevice, UpdateDeviceRelease, UpdateDevicesRelease,
+    Variable,
 };
 use crate::event::PublicEvent;
 use crate::handlers::AuthedDevice;
@@ -1979,8 +1980,10 @@ pub async fn delete_label(
     params(
         ("device_id" = i32, Path),
     ),
+    request_body(content = Option<ApproveDeviceBody>, content_type = "application/json"),
     responses(
         (status = 200, description = "Device approved successfully", body = bool),
+        (status = 404, description = "Release not found"),
         (status = 500, description = "Failed to approve device", body = String),
     ),
     security(
@@ -1991,7 +1994,25 @@ pub async fn delete_label(
 pub async fn approve_device(
     Path(device_id): Path<i32>,
     Extension(state): Extension<State>,
+    body: Option<Json<ApproveDeviceBody>>,
 ) -> axum::response::Result<Json<bool>, StatusCode> {
+    let target_release_id = body.and_then(|b| b.target_release_id);
+
+    if let Some(release_id) = target_release_id {
+        let releases = sqlx::query!("SELECT COUNT(*) FROM release WHERE id = $1", release_id)
+            .fetch_one(&state.pg_pool)
+            .await
+            .map_err(|err| {
+                error!("Failed to check if release exists: {err}");
+                StatusCode::INTERNAL_SERVER_ERROR
+            })?;
+
+        if releases.count == Some(0) {
+            error!("Release {release_id} not found");
+            return Err(StatusCode::NOT_FOUND);
+        }
+    }
+
     let mut tx = state.pg_pool.begin().await.map_err(|err| {
         error!("Failed to start transaction {err}");
         StatusCode::INTERNAL_SERVER_ERROR
@@ -2010,11 +2031,31 @@ pub async fn approve_device(
 
     let approved_serial_number = response.serial_number;
 
+    if let Some(release_id) = target_release_id {
+        sqlx::query!(
+            "UPDATE device SET target_release_id = $1, target_release_id_set_at = NOW() WHERE id = $2",
+            release_id,
+            device_id
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(|err| {
+            error!("Failed to set target release for device {device_id}: {err}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+    }
+
+    let ledger_text = if target_release_id.is_some() {
+        "Device approved and release assigned.".to_string()
+    } else {
+        "Device approved.".to_string()
+    };
+
     sqlx::query!(
         r#"INSERT INTO ledger (device_id, "class", "text") VALUES ($1, $2, $3)"#,
         device_id,
         "approved",
-        format!("Device approved.")
+        ledger_text
     )
     .execute(&mut *tx)
     .await
