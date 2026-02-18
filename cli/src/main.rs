@@ -8,6 +8,7 @@ mod tunnel;
 
 use crate::cli::{
     Cli, Commands, DistroCommands, GetResourceType, RestartResourceType, StatusResourceType,
+    TunnelCommands,
 };
 use crate::commands::devices::get_online_colored;
 use crate::print::TablePrint;
@@ -1265,121 +1266,137 @@ async fn main() -> anyhow::Result<()> {
                 }
                 DistroCommands::Releases => {}
             },
-            cli::Commands::Tunnel {
-                serial_number,
-                overview_debug,
-            } => {
-                let secrets = auth::get_secrets(&config)
-                    .await
-                    .with_context(|| "Error getting token")?
-                    .with_context(|| "No Token found, please Login")?;
-
-                let pub_key = config.get_identity_pub_key().await?;
-                eprintln!("Debug: Public key being sent: {}", pub_key.trim());
-
-                let api = SmithAPI::new(secrets, &config);
-
-                let device = api.get_device(serial_number.clone()).await?;
-                if device.last_seen.is_none_or(|last_seen| {
-                    chrono::Utc::now()
-                        .signed_duration_since(last_seen)
-                        .num_minutes()
-                        >= 5
-                }) {
-                    let mut last_ping = "never".to_string();
-                    if let Some(last_seen) = device.last_seen {
-                        last_ping =
-                            HumanTime::from(last_seen.with_timezone(&chrono::Utc)).to_string();
-                    }
-                    bail!("This device is offline. Last ping was {}", last_ping);
-                }
-
-                println!(
-                    "Creating tunnel for device [{}] {} {:?}",
-                    device.id,
-                    &serial_number.bold(),
-                    overview_debug
-                );
-
-                let m = MultiProgress::new();
-                let pb2 = m.add(ProgressBar::new_spinner());
-                pb2.enable_steady_tick(Duration::from_millis(50));
-                pb2.set_style(
-                    ProgressStyle::with_template("{spinner:.blue} {msg}")
-                        .unwrap()
-                        .tick_strings(&["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]),
-                );
-                pb2.set_message("Sending request to smith");
-
-                let (tx, rx) = oneshot::channel();
-                let username = config.current_tunnel_username();
-                eprintln!("Debug: Using username: {}", username);
-                let username_clone = username.clone();
-                let tunnel_openning_handler = tokio::spawn(async move {
-                    api.open_tunnel(device.id as u64, pub_key, username_clone)
+            cli::Commands::Tunnel { command } => match command {
+                TunnelCommands::Open {
+                    serial_number,
+                    overview_debug,
+                } => {
+                    let secrets = auth::get_secrets(&config)
                         .await
-                        .unwrap();
-                    pb2.set_message("Request sent to smith 💻");
+                        .with_context(|| "Error getting token")?
+                        .with_context(|| "No Token found, please Login")?;
 
-                    let port;
-                    loop {
-                        let response = api.get_last_command(device.id as u64).await.unwrap();
+                    let pub_key = config.get_identity_pub_key().await?;
+                    eprintln!("Debug: Public key being sent: {}", pub_key.trim());
 
-                        if response.fetched {
-                            pb2.set_message("Command fetched by device 👍");
+                    let api = SmithAPI::new(secrets, &config);
+
+                    let device = api.get_device(serial_number.clone()).await?;
+                    if device.last_seen.is_none_or(|last_seen| {
+                        chrono::Utc::now()
+                            .signed_duration_since(last_seen)
+                            .num_minutes()
+                            >= 5
+                    }) {
+                        let mut last_ping = "never".to_string();
+                        if let Some(last_seen) = device.last_seen {
+                            last_ping =
+                                HumanTime::from(last_seen.with_timezone(&chrono::Utc)).to_string();
                         }
-
-                        if let Some(response) = response.response {
-                            port = response["OpenTunnel"]["port_server"].as_u64().unwrap();
-
-                            tx.send(port).unwrap();
-                            break;
-                        }
-
-                        thread::sleep(Duration::from_secs(1));
+                        bail!("This device is offline. Last ping was {}", last_ping);
                     }
 
-                    pb2.finish_with_message(format!("{} {}", "Port:".bold(), port));
-                    api
-                });
+                    println!(
+                        "Creating tunnel for device [{}] {} {:?}",
+                        device.id,
+                        &serial_number.bold(),
+                        overview_debug
+                    );
 
-                let port = rx.await.unwrap() as u16;
+                    let m = MultiProgress::new();
+                    let pb2 = m.add(ProgressBar::new_spinner());
+                    pb2.enable_steady_tick(Duration::from_millis(50));
+                    pb2.set_style(
+                        ProgressStyle::with_template("{spinner:.blue} {msg}")
+                            .unwrap()
+                            .tick_strings(&["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]),
+                    );
+                    pb2.set_message("Sending request to smith");
 
-                println!("Opening tunnel to port {}", port);
+                    let (tx, rx) = oneshot::channel();
+                    let username = config.current_tunnel_username();
+                    eprintln!("Debug: Using username: {}", username);
+                    let username_clone = username.clone();
+                    let tunnel_openning_handler = tokio::spawn(async move {
+                        api.open_tunnel(device.id as u64, pub_key, username_clone)
+                            .await
+                            .unwrap();
+                        pb2.set_message("Request sent to smith 💻");
 
-                let api = tunnel_openning_handler.await.unwrap();
+                        let port;
+                        loop {
+                            let response = api.get_last_command(device.id as u64).await.unwrap();
 
-                // Give the server a moment to set up the SSH tunnel
-                println!("Waiting for tunnel setup...");
+                            if response.fetched {
+                                pb2.set_message("Command fetched by device 👍");
+                            }
 
-                // Wait for server-side setup to complete
-                tokio::time::sleep(Duration::from_secs(10)).await;
+                            if let Some(response) = response.response {
+                                port = response["OpenTunnel"]["port_server"].as_u64().unwrap();
 
-                let tunnel_server = config.current_tunnel_server();
-                eprintln!("Debug: Connecting to {}:{}", tunnel_server, port);
-                eprintln!("Debug: Using private key: {}", config.get_identity_file());
-                let mut ssh = Session::connect(
-                    config.get_identity_file(),
-                    username,
-                    None,
-                    (tunnel_server, port),
-                )
-                .await?;
-                println!("Connected");
-                // We're using `termion` to put the terminal into raw mode, so that we can
-                // display the output of interactive applications correctly
-                let _raw_term = io::stdout().into_raw_mode()?;
-                ssh.call().await.with_context(|| "skill issues")?;
+                                tx.send(port).unwrap();
+                                break;
+                            }
 
-                println!("Exitcode: {:?}", ());
-                ssh.close().await?;
+                            thread::sleep(Duration::from_secs(1));
+                        }
 
-                api.close_tunnel(device.id as u64)
-                    .await
-                    .inspect_err(|e| eprintln!("Warning: Failed to close tunnel on device: {e}"))?;
+                        pb2.finish_with_message(format!("{} {}", "Port:".bold(), port));
+                        api
+                    });
 
-                return Ok(());
-            }
+                    let port = rx.await.unwrap() as u16;
+
+                    println!("Opening tunnel to port {}", port);
+
+                    let api = tunnel_openning_handler.await.unwrap();
+
+                    // Give the server a moment to set up the SSH tunnel
+                    println!("Waiting for tunnel setup...");
+
+                    // Wait for server-side setup to complete
+                    tokio::time::sleep(Duration::from_secs(10)).await;
+
+                    let tunnel_server = config.current_tunnel_server();
+                    eprintln!("Debug: Connecting to {}:{}", tunnel_server, port);
+                    eprintln!("Debug: Using private key: {}", config.get_identity_file());
+                    let mut ssh = Session::connect(
+                        config.get_identity_file(),
+                        username,
+                        None,
+                        (tunnel_server, port),
+                    )
+                    .await?;
+                    println!("Connected");
+                    // We're using `termion` to put the terminal into raw mode, so that we can
+                    // display the output of interactive applications correctly
+                    let _raw_term = io::stdout().into_raw_mode()?;
+                    ssh.call().await.with_context(|| "skill issues")?;
+
+                    println!("Exitcode: {:?}", ());
+                    ssh.close().await?;
+
+                    api.close_tunnel(device.id as u64).await.inspect_err(|e| {
+                        eprintln!("Warning: Failed to close tunnel on device: {e}")
+                    })?;
+
+                    return Ok(());
+                }
+                TunnelCommands::Close { serial_number } => {
+                    let secrets = auth::get_secrets(&config)
+                        .await
+                        .with_context(|| "Error getting token")?
+                        .with_context(|| "No Token found, please Login")?;
+
+                    let api = SmithAPI::new(secrets, &config);
+                    let device = api.get_device(serial_number).await?;
+
+                    api.close_tunnel(device.id as u64).await?;
+
+                    println!("CloseTunnel command sent to device");
+                    return Ok(());
+                }
+            },
             Commands::Releases { command } => {
                 command.handle(config).await?;
             }
