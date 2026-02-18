@@ -38,7 +38,15 @@ impl Session {
         openssh_cert_path: Option<P>,
         addrs: A,
     ) -> Result<Self> {
+        let user = user.into();
+        let key_path_display = key_path.as_ref().display().to_string();
+
+        eprintln!("Debug: Loading SSH key from: {}", key_path_display);
         let key_pair = load_secret_key(key_path, None)?;
+        eprintln!(
+            "Debug: Key loaded successfully, algorithm: {:?}",
+            key_pair.algorithm()
+        );
 
         // load ssh certificate
         let mut openssh_cert = None;
@@ -54,18 +62,25 @@ impl Session {
         let config = Arc::new(config);
         let sh = Client {};
 
+        eprintln!("Debug: Connecting to SSH server...");
         let mut session = client::connect(config, addrs, sh).await?;
+        eprintln!(
+            "Debug: Connected, attempting authentication for user: {}",
+            user
+        );
 
         let auth_res = match openssh_cert {
             Some(cert) => {
+                eprintln!("Debug: Using certificate authentication");
                 session
-                    .authenticate_openssh_cert(user, Arc::new(key_pair), cert)
+                    .authenticate_openssh_cert(&user, Arc::new(key_pair), cert)
                     .await?
             }
             None => {
+                eprintln!("Debug: Using public key authentication");
                 session
                     .authenticate_publickey(
-                        user,
+                        &user,
                         PrivateKeyWithHashAlg::new(
                             Arc::new(key_pair),
                             session.best_supported_rsa_hash().await?.flatten(),
@@ -75,8 +90,16 @@ impl Session {
             }
         };
 
+        eprintln!(
+            "Debug: Authentication result - success: {}",
+            auth_res.success()
+        );
         if !auth_res.success() {
-            anyhow::bail!("SSH authentication failed");
+            anyhow::bail!(
+                "SSH authentication failed for user '{}'. Please check:\n  1. User '{}' exists on the device\n  2. SSH key was properly added to ~/.ssh/authorized_keys\n  3. You waited long enough for the tunnel to be established",
+                user,
+                user
+            );
         }
 
         Ok(Self { session })

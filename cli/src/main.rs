@@ -1275,6 +1275,7 @@ async fn main() -> anyhow::Result<()> {
                     .with_context(|| "No Token found, please Login")?;
 
                 let pub_key = config.get_identity_pub_key().await?;
+                eprintln!("Debug: Public key being sent: {}", pub_key.trim());
 
                 let api = SmithAPI::new(secrets, &config);
 
@@ -1312,8 +1313,11 @@ async fn main() -> anyhow::Result<()> {
 
                 let (tx, rx) = oneshot::channel();
                 let username = config.current_tunnel_username();
+                eprintln!("Debug: Using username: {}", username);
                 let username_clone = username.clone();
+                let api_clone = api.clone();
                 let tunnel_openning_handler = tokio::spawn(async move {
+                    let api = api_clone;
                     api.open_tunnel(device.id as u64, pub_key, username_clone)
                         .await
                         .unwrap();
@@ -1353,6 +1357,8 @@ async fn main() -> anyhow::Result<()> {
                 tokio::time::sleep(Duration::from_secs(10)).await;
 
                 let tunnel_server = config.current_tunnel_server();
+                eprintln!("Debug: Connecting to {}:{}", tunnel_server, port);
+                eprintln!("Debug: Using private key: {}", config.get_identity_file());
                 let mut ssh = Session::connect(
                     config.get_identity_file(),
                     username,
@@ -1368,6 +1374,11 @@ async fn main() -> anyhow::Result<()> {
 
                 println!("Exitcode: {:?}", ());
                 ssh.close().await?;
+
+                api.close_tunnel(device.id as u64)
+                    .await
+                    .inspect_err(|e| eprintln!("Warning: Failed to close tunnel on device: {e}"))?;
+
                 return Ok(());
             }
             Commands::Releases { command } => {
