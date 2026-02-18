@@ -285,6 +285,29 @@ impl SmithAPI {
         Ok(())
     }
 
+    pub async fn close_tunnel(&self, device_id: u64) -> Result<()> {
+        let client = Client::new();
+
+        let close_tunnel_command = schema::SafeCommandRequest {
+            id: 0,
+            command: schema::SafeCommandTx::CloseTunnel,
+            continue_on_error: false,
+        };
+
+        let resp = client
+            .post(format!("{}/devices/{device_id}/commands", self.domain))
+            .header("Authorization", format!("Bearer {}", &self.bearer_token))
+            .json(&serde_json::json!([close_tunnel_command]));
+
+        let response_code = resp.send().await?.status();
+
+        if response_code != 201 {
+            return Err(anyhow::anyhow!("Failed to close tunnel"));
+        }
+
+        Ok(())
+    }
+
     pub async fn get_last_command(&self, device_id: u64) -> Result<DeviceCommandResponse> {
         let client = Client::new();
 

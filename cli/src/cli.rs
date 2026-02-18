@@ -209,10 +209,14 @@ pub enum Commands {
         command: ReleasesCommands,
     },
 
-    /// Tunneling options into a device
+    /// Open an SSH tunnel to a device
     Tunnel {
-        /// Device serial number to tunnel into
+        /// Device serial number
         serial_number: String,
+
+        /// Close the tunnel instead of opening it
+        #[arg(long)]
+        close: bool,
 
         /// Setup for overview debug
         #[arg(long)]
