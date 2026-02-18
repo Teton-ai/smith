@@ -146,24 +146,6 @@ pub enum RestartResourceType {
 }
 
 #[derive(Subcommand)]
-pub enum TunnelCommands {
-    /// Open an SSH tunnel to a device
-    Open {
-        /// Device serial number to tunnel into
-        serial_number: String,
-
-        /// Setup for overview debug
-        #[arg(long)]
-        overview_debug: bool,
-    },
-    /// Close the SSH tunnel on a device
-    Close {
-        /// Device serial number to close the tunnel on
-        serial_number: String,
-    },
-}
-
-#[derive(Subcommand)]
 pub enum Commands {
     /// Commands to handle current profile to use
     Profile { profile: Option<String> },
@@ -227,10 +209,18 @@ pub enum Commands {
         command: ReleasesCommands,
     },
 
-    /// Tunneling options into a device
+    /// Open an SSH tunnel to a device
     Tunnel {
-        #[clap(subcommand)]
-        command: TunnelCommands,
+        /// Device serial number
+        serial_number: String,
+
+        /// Close the tunnel instead of opening it
+        #[arg(long)]
+        close: bool,
+
+        /// Setup for overview debug
+        #[arg(long)]
+        overview_debug: bool,
     },
 
     /// Generate shell completion scripts
