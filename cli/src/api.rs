@@ -25,7 +25,6 @@ impl HandleApiError for Response {
     }
 }
 
-#[derive(Clone)]
 pub struct SmithAPI {
     domain: String,
     bearer_token: String,

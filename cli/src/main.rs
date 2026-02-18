@@ -1315,9 +1315,7 @@ async fn main() -> anyhow::Result<()> {
                 let username = config.current_tunnel_username();
                 eprintln!("Debug: Using username: {}", username);
                 let username_clone = username.clone();
-                let api_clone = api.clone();
                 let tunnel_openning_handler = tokio::spawn(async move {
-                    let api = api_clone;
                     api.open_tunnel(device.id as u64, pub_key, username_clone)
                         .await
                         .unwrap();
@@ -1342,13 +1340,14 @@ async fn main() -> anyhow::Result<()> {
                     }
 
                     pb2.finish_with_message(format!("{} {}", "Port:".bold(), port));
+                    api
                 });
 
                 let port = rx.await.unwrap() as u16;
 
                 println!("Opening tunnel to port {}", port);
 
-                tunnel_openning_handler.await.unwrap();
+                let api = tunnel_openning_handler.await.unwrap();
 
                 // Give the server a moment to set up the SSH tunnel
                 println!("Waiting for tunnel setup...");
