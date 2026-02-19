@@ -22,6 +22,7 @@ import moment from "moment";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { Button } from "@/app/components/button";
 import LabelAutocomplete from "@/app/components/LabelAutocomplete";
 import NetworkQualityIndicator from "@/app/components/NetworkQualityIndicator";
 import {
@@ -790,61 +791,44 @@ const DevicesPage = () => {
 
 						{/* Online Status Filter */}
 						<div className="flex space-x-1">
-							<button
+							<Button
+								variant={onlineStatusFilter === "all" ? "primary" : "secondary"}
 								onClick={() => handleOnlineStatusChange("all")}
-								className={`px-3 py-2 text-sm rounded-md transition-colors cursor-pointer ${
-									onlineStatusFilter === "all"
-										? "bg-blue-600 text-white"
-										: "bg-gray-100 text-gray-700 hover:bg-gray-200"
-								}`}
 							>
 								All
-							</button>
-							<button
+							</Button>
+							<Button
+								variant={onlineStatusFilter === "online" ? "success" : "secondary"}
 								onClick={() => handleOnlineStatusChange("online")}
-								className={`px-3 py-2 text-sm rounded-md transition-colors cursor-pointer ${
-									onlineStatusFilter === "online"
-										? "bg-green-600 text-white"
-										: "bg-gray-100 text-gray-700 hover:bg-gray-200"
-								}`}
 							>
 								Online
-							</button>
-							<button
+							</Button>
+							<Button
+								variant={onlineStatusFilter === "offline" ? "secondary" : "secondary"}
+								className={onlineStatusFilter === "offline" ? "bg-gray-600 hover:bg-gray-700 text-white" : ""}
 								onClick={() => handleOnlineStatusChange("offline")}
-								className={`px-3 py-2 text-sm rounded-md transition-colors cursor-pointer ${
-									onlineStatusFilter === "offline"
-										? "bg-gray-600 text-white"
-										: "bg-gray-100 text-gray-700 hover:bg-gray-200"
-								}`}
 							>
 								Offline
-							</button>
+							</Button>
 						</div>
 
 						{/* Outdated Filter */}
-						<button
+						<Button
+							variant={showOutdatedOnly ? "warning" : "secondary"}
+							className={showOutdatedOnly ? "bg-orange-600 hover:bg-orange-700" : ""}
 							onClick={handleOutdatedToggle}
-							className={`px-3 py-2 text-sm rounded-md transition-colors cursor-pointer ${
-								showOutdatedOnly
-									? "bg-orange-600 text-white"
-									: "bg-gray-100 text-gray-700 hover:bg-gray-200"
-							}`}
 						>
 							Outdated
-						</button>
+						</Button>
 
 						{/* Pending Approval Filter */}
-						<button
+						<Button
+							variant={showPendingApproval ? "warning" : "secondary"}
+							className={showPendingApproval ? "bg-orange-600 hover:bg-orange-700" : ""}
 							onClick={handlePendingApprovalToggle}
-							className={`px-3 py-2 text-sm rounded-md transition-colors cursor-pointer ${
-								showPendingApproval
-									? "bg-orange-600 text-white"
-									: "bg-gray-100 text-gray-700 hover:bg-gray-200"
-							}`}
 						>
 							Pending Approval
-						</button>
+						</Button>
 
 						{/* Release Filter Dropdown */}
 						<div className="relative" ref={releaseDropdownRef}>
@@ -1315,15 +1299,17 @@ const DevicesPage = () => {
 						{selectedDeviceIds.size > 1 ? "s" : ""} selected
 					</span>
 					<div className="flex gap-2">
-						<button
+						<Button
+							variant="secondary"
 							onClick={() => setSelectedDeviceIds(new Set())}
-							className="px-4 py-2 bg-gray-100 text-gray-700 rounded hover:bg-gray-200 cursor-pointer"
 						>
 							Clear Selection
-						</button>
+						</Button>
 						{showPendingApproval ? (
 							<>
-								<button
+								<Button
+									variant="danger"
+									icon={<XCircle className="w-4 h-4" />}
 									onClick={() => {
 										const deviceIds = Array.from(selectedDeviceIds);
 										const count = deviceIds.length;
@@ -1356,12 +1342,12 @@ const DevicesPage = () => {
 												});
 											});
 									}}
-									className="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700 cursor-pointer flex items-center gap-2"
 								>
-									<XCircle className="w-4 h-4" />
 									Reject
-								</button>
-								<button
+								</Button>
+								<Button
+									variant="success"
+									icon={<CheckCircle className="w-4 h-4" />}
 									onClick={() => {
 										setApproveModalDevice(
 											filteredDevices.find((d) =>
@@ -1370,27 +1356,25 @@ const DevicesPage = () => {
 										);
 										setSelectedDistribution(null);
 									}}
-									className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 cursor-pointer flex items-center gap-2"
 								>
-									<CheckCircle className="w-4 h-4" />
 									Approve & Assign
-								</button>
+								</Button>
 							</>
 						) : (
 							<>
-								<button
+								<Button
+									variant="purple"
+									icon={<Terminal className="w-4 h-4" />}
 									onClick={() => setShowBulkCommandModal(true)}
-									className="px-4 py-2 bg-purple-600 text-white rounded hover:bg-purple-700 cursor-pointer flex items-center gap-2"
 								>
-									<Terminal className="w-4 h-4" />
 									Run Command
-								</button>
-								<button
+								</Button>
+								<Button
+									variant="warning"
 									onClick={() => setShowBulkDeployModal(true)}
-									className="px-4 py-2 bg-amber-600 text-white rounded hover:bg-amber-700 cursor-pointer"
 								>
 									Deploy to Selected
-								</button>
+								</Button>
 							</>
 						)}
 					</div>
