@@ -117,9 +117,7 @@ function ToggleDemo() {
 			</div>
 			<Button
 				variant={outdated ? "warning" : "secondary"}
-				className={
-					outdated ? "bg-orange-600 hover:bg-orange-700" : ""
-				}
+				className={outdated ? "bg-orange-600 hover:bg-orange-700" : ""}
 				onClick={() => setOutdated(!outdated)}
 			>
 				Outdated

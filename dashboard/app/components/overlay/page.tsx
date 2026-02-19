@@ -19,19 +19,11 @@ export default function OverlayPage() {
 					Modal
 				</h2>
 				<div className="flex flex-wrap items-center gap-3">
-					<Button onClick={() => setBasicOpen(true)}>
-						Basic Modal
-					</Button>
-					<Button
-						variant="secondary"
-						onClick={() => setWideOpen(true)}
-					>
+					<Button onClick={() => setBasicOpen(true)}>Basic Modal</Button>
+					<Button variant="secondary" onClick={() => setWideOpen(true)}>
 						Wide Modal
 					</Button>
-					<Button
-						variant="secondary"
-						onClick={() => setNoFooterOpen(true)}
-					>
+					<Button variant="secondary" onClick={() => setNoFooterOpen(true)}>
 						No Footer
 					</Button>
 				</div>
@@ -45,21 +37,15 @@ export default function OverlayPage() {
 				subtitle="This is a basic modal"
 				footer={
 					<>
-						<Button
-							variant="secondary"
-							onClick={() => setBasicOpen(false)}
-						>
+						<Button variant="secondary" onClick={() => setBasicOpen(false)}>
 							Cancel
 						</Button>
-						<Button onClick={() => setBasicOpen(false)}>
-							Confirm
-						</Button>
+						<Button onClick={() => setBasicOpen(false)}>Confirm</Button>
 					</>
 				}
 			>
 				<p className="text-sm text-gray-600">
-					Are you sure you want to perform this action? This cannot be
-					undone.
+					Are you sure you want to perform this action? This cannot be undone.
 				</p>
 			</Modal>
 
@@ -72,21 +58,16 @@ export default function OverlayPage() {
 				width="w-[900px]"
 				footer={
 					<>
-						<Button
-							variant="secondary"
-							onClick={() => setWideOpen(false)}
-						>
+						<Button variant="secondary" onClick={() => setWideOpen(false)}>
 							Cancel
 						</Button>
-						<Button onClick={() => setWideOpen(false)}>
-							Start Deployment
-						</Button>
+						<Button onClick={() => setWideOpen(false)}>Start Deployment</Button>
 					</>
 				}
 			>
 				<p className="text-sm text-gray-600">
-					Wide modals are useful for multi-step flows with side-by-side
-					content like device selection with a preview panel.
+					Wide modals are useful for multi-step flows with side-by-side content
+					like device selection with a preview panel.
 				</p>
 			</Modal>
 
@@ -97,8 +78,8 @@ export default function OverlayPage() {
 				title="Information"
 			>
 				<p className="text-sm text-gray-600">
-					A modal without a footer. Close it with the X button, press
-					Escape, or click the backdrop.
+					A modal without a footer. Close it with the X button, press Escape, or
+					click the backdrop.
 				</p>
 			</Modal>
 		</div>

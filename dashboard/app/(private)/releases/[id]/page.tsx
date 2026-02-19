@@ -8,7 +8,6 @@ import {
 	Box,
 	Calendar,
 	CheckCircle,
-	ChevronRight,
 	ChevronsUpDown,
 	Clock,
 	Cog,
@@ -46,8 +45,8 @@ import {
 	useGetReleaseServices,
 	usePatchRelease,
 } from "@/app/api-client";
-import LabelAutocomplete from "@/app/components/LabelAutocomplete";
 import { Button, IconButton } from "@/app/components/button";
+import LabelAutocomplete from "@/app/components/LabelAutocomplete";
 import { Modal } from "@/app/components/modal";
 
 const ReleaseDetailPage = () => {
@@ -645,10 +644,8 @@ const ReleaseDetailPage = () => {
 									icon={<Rocket className="w-4 h-4" />}
 									disabled={
 										deploying ||
-										(canaryMode === "labels" &&
-											canaryLabels.length === 0) ||
-										(canaryMode === "devices" &&
-											canaryDeviceIds.size === 0)
+										(canaryMode === "labels" && canaryLabels.length === 0) ||
+										(canaryMode === "devices" && canaryDeviceIds.size === 0)
 									}
 									onClick={handleDeployRelease}
 								>
@@ -662,9 +659,9 @@ const ReleaseDetailPage = () => {
 					{deployStep === 1 && (
 						<div className="space-y-4">
 							<p className="text-sm text-gray-600">
-								First, a small group of canary devices will receive the
-								update. After verifying they update successfully, you
-								can roll out to all remaining devices.
+								First, a small group of canary devices will receive the update.
+								After verifying they update successfully, you can roll out to
+								all remaining devices.
 							</p>
 
 							<div className="space-y-3">
@@ -703,9 +700,7 @@ const ReleaseDetailPage = () => {
 										}`}
 									>
 										<div className="flex items-start gap-3">
-											<div className="flex-shrink-0 mt-0.5">
-												{option.icon}
-											</div>
+											<div className="flex-shrink-0 mt-0.5">{option.icon}</div>
 											<div>
 												<div className="font-medium text-gray-900 text-sm">
 													{option.title}
@@ -757,8 +752,8 @@ const ReleaseDetailPage = () => {
 											</div>
 										)}
 										<p className="text-xs text-gray-500">
-											All up-to-date devices matching these labels will
-											be included in the canary.
+											All up-to-date devices matching these labels will be
+											included in the canary.
 										</p>
 									</div>
 								)}
@@ -771,9 +766,7 @@ const ReleaseDetailPage = () => {
 												type="text"
 												placeholder="Search by serial number..."
 												value={deviceSearchQuery}
-												onChange={(e) =>
-													setDeviceSearchQuery(e.target.value)
-												}
+												onChange={(e) => setDeviceSearchQuery(e.target.value)}
 												className="w-full pl-8 pr-3 py-1.5 text-sm border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-gray-900 placeholder-gray-400 bg-white"
 											/>
 										</div>
@@ -787,77 +780,70 @@ const ReleaseDetailPage = () => {
 													No eligible devices found
 												</div>
 											) : (
-												filteredEligibleDevices.map(
-													(device: Device) => {
-														const isSelected = canaryDeviceIds.has(
-															device.id,
-														);
-														return (
+												filteredEligibleDevices.map((device: Device) => {
+													const isSelected = canaryDeviceIds.has(device.id);
+													return (
+														<div
+															key={device.id}
+															onClick={() =>
+																setCanaryDeviceIds((prev) => {
+																	const next = new Set(prev);
+																	if (next.has(device.id)) {
+																		next.delete(device.id);
+																	} else {
+																		next.add(device.id);
+																	}
+																	return next;
+																})
+															}
+															className={`flex items-center gap-3 px-3 py-2.5 border-b border-gray-100 last:border-b-0 transition-colors cursor-pointer ${
+																isSelected ? "bg-blue-50" : "hover:bg-gray-50"
+															}`}
+														>
 															<div
-																key={device.id}
-																onClick={() =>
-																	setCanaryDeviceIds((prev) => {
-																		const next = new Set(prev);
-																		if (next.has(device.id)) {
-																			next.delete(device.id);
-																		} else {
-																			next.add(device.id);
-																		}
-																		return next;
-																	})
-																}
-																className={`flex items-center gap-3 px-3 py-2.5 border-b border-gray-100 last:border-b-0 transition-colors cursor-pointer ${
+																className={`w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0 transition-colors ${
 																	isSelected
-																		? "bg-blue-50"
-																		: "hover:bg-gray-50"
+																		? "bg-blue-600"
+																		: "border-2 border-gray-300"
 																}`}
 															>
-																<div
-																	className={`w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0 transition-colors ${
-																		isSelected
-																			? "bg-blue-600"
-																			: "border-2 border-gray-300"
-																	}`}
-																>
-																	{isSelected && (
-																		<svg
-																			className="w-3 h-3 text-white"
-																			fill="none"
-																			viewBox="0 0 24 24"
-																			stroke="currentColor"
-																		>
-																			<path
-																				strokeLinecap="round"
-																				strokeLinejoin="round"
-																				strokeWidth={2}
-																				d="M5 13l4 4L19 7"
-																			/>
-																		</svg>
-																	)}
-																</div>
-																<span className="text-sm font-medium text-gray-900 truncate flex-shrink-0">
-																	{device.serial_number}
-																</span>
-																{device.labels &&
-																	Object.keys(device.labels).length >
-																		0 && (
-																		<div className="flex flex-wrap gap-1 min-w-0">
-																			{Object.entries(
-																				device.labels,
-																			).map(([key, value]) => (
+																{isSelected && (
+																	<svg
+																		className="w-3 h-3 text-white"
+																		fill="none"
+																		viewBox="0 0 24 24"
+																		stroke="currentColor"
+																	>
+																		<path
+																			strokeLinecap="round"
+																			strokeLinejoin="round"
+																			strokeWidth={2}
+																			d="M5 13l4 4L19 7"
+																		/>
+																	</svg>
+																)}
+															</div>
+															<span className="text-sm font-medium text-gray-900 truncate flex-shrink-0">
+																{device.serial_number}
+															</span>
+															{device.labels &&
+																Object.keys(device.labels).length > 0 && (
+																	<div className="flex flex-wrap gap-1 min-w-0">
+																		{Object.entries(device.labels).map(
+																			([key, value]) => (
 																				<code
 																					key={key}
 																					className="px-1 py-0.5 text-[10px] font-mono rounded border bg-gray-100 text-gray-600 border-gray-200"
 																				>
 																					{key}={value}
 																				</code>
-																			))}
-																		</div>
-																	)}
-															</div>
-														);
-													},
-												)
+																			),
+																		)}
+																	</div>
+																)}
+														</div>
+													);
+												})
 											)}
 										</div>
 									</div>
@@ -898,8 +884,8 @@ const ReleaseDetailPage = () => {
 										<>
 											<h4 className="font-medium text-gray-900 text-sm mb-3">
 												{labelMatchDevices.length} device
-												{labelMatchDevices.length !== 1 ? "s" : ""} will
-												receive the canary update
+												{labelMatchDevices.length !== 1 ? "s" : ""} will receive
+												the canary update
 											</h4>
 											<div className="border border-gray-200 rounded-md bg-white overflow-y-auto flex-1">
 												{labelMatchDevices.map((device: Device) => (
@@ -945,14 +931,12 @@ const ReleaseDetailPage = () => {
 										<>
 											<h4 className="font-medium text-gray-900 text-sm mb-3">
 												{canaryDeviceIds.size} device
-												{canaryDeviceIds.size !== 1 ? "s" : ""} will
-												receive the canary update
+												{canaryDeviceIds.size !== 1 ? "s" : ""} will receive the
+												canary update
 											</h4>
 											<div className="border border-gray-200 rounded-md bg-white overflow-y-auto flex-1">
 												{eligibleDevices
-													.filter((d: Device) =>
-														canaryDeviceIds.has(d.id),
-													)
+													.filter((d: Device) => canaryDeviceIds.has(d.id))
 													.map((device: Device) => (
 														<div
 															key={device.id}
@@ -962,8 +946,7 @@ const ReleaseDetailPage = () => {
 																{device.serial_number}
 															</span>
 															{device.labels &&
-																Object.keys(device.labels).length >
-																	0 && (
+																Object.keys(device.labels).length > 0 && (
 																	<div className="flex flex-wrap gap-1 min-w-0">
 																		{Object.entries(device.labels).map(
 																			([key, value]) => (
@@ -1041,8 +1024,8 @@ const ReleaseDetailPage = () => {
 										Warning
 									</h4>
 									<p className="text-sm text-red-800">
-										Yanking a release will prevent devices from updating
-										to this version. This action cannot be undone.
+										Yanking a release will prevent devices from updating to this
+										version. This action cannot be undone.
 									</p>
 								</div>
 							</div>
@@ -1089,9 +1072,7 @@ const ReleaseDetailPage = () => {
 					>
 						<div className="mb-4 p-3 bg-gray-50 rounded-md">
 							<div className="text-sm">
-								<div className="font-medium text-gray-900">
-									Current Version
-								</div>
+								<div className="font-medium text-gray-900">Current Version</div>
 								<div className="text-gray-600 mt-1">
 									{packageToReplace.name} v{packageToReplace.version}
 								</div>
@@ -1133,8 +1114,7 @@ const ReleaseDetailPage = () => {
 													pkg.name === packageToReplace.name &&
 													pkg.id !== packageToReplace.id &&
 													(!distribution ||
-														pkg.architecture ===
-															distribution.architecture) &&
+														pkg.architecture === distribution.architecture) &&
 													(packageSearchQuery === "" ||
 														pkg.version
 															.toLowerCase()
@@ -1157,9 +1137,7 @@ const ReleaseDetailPage = () => {
 												{filteredPackages.map((pkg) => (
 													<button
 														key={pkg.id}
-														onClick={() =>
-															setSelectedAvailablePackage(pkg.id)
-														}
+														onClick={() => setSelectedAvailablePackage(pkg.id)}
 														className={`w-full text-left p-3 border-b border-gray-200 last:border-b-0 hover:bg-gray-50 transition-colors cursor-pointer ${
 															selectedAvailablePackage === pkg.id
 																? "bg-blue-50 hover:bg-blue-50"
@@ -1289,9 +1267,7 @@ const ReleaseDetailPage = () => {
 											}
 										});
 
-									const filteredPackages = Array.from(
-										packagesByName.values(),
-									)
+									const filteredPackages = Array.from(packagesByName.values())
 										.filter(
 											(pkg) =>
 												packageSearchQuery === "" ||
@@ -1315,9 +1291,7 @@ const ReleaseDetailPage = () => {
 											{filteredPackages.map((pkg) => (
 												<button
 													key={pkg.id}
-													onClick={() =>
-														setSelectedAvailablePackage(pkg.id)
-													}
+													onClick={() => setSelectedAvailablePackage(pkg.id)}
 													className={`w-full text-left p-3 border-b border-gray-200 last:border-b-0 hover:bg-gray-50 transition-colors cursor-pointer ${
 														selectedAvailablePackage === pkg.id
 															? "bg-blue-50 hover:bg-blue-50"

@@ -62,21 +62,15 @@ export function Modal({
 		>
 			<div
 				className={`bg-white rounded-lg shadow-xl max-h-[90vh] flex flex-col ${width} max-w-full transition-all duration-200 ${
-					visible
-						? "opacity-100 scale-100"
-						: "opacity-0 scale-95"
+					visible ? "opacity-100 scale-100" : "opacity-0 scale-95"
 				}`}
 			>
 				{/* Header */}
 				<div className="flex items-center justify-between p-6 pb-4">
 					<div>
-						<h3 className="text-lg font-semibold text-gray-900">
-							{title}
-						</h3>
+						<h3 className="text-lg font-semibold text-gray-900">{title}</h3>
 						{subtitle && (
-							<p className="text-xs text-gray-500 mt-0.5">
-								{subtitle}
-							</p>
+							<p className="text-xs text-gray-500 mt-0.5">{subtitle}</p>
 						)}
 					</div>
 					<button
@@ -95,9 +89,7 @@ export function Modal({
 				{footer && (
 					<>
 						<hr className="border-gray-200" />
-						<div className="flex justify-end space-x-3 p-6 pt-4">
-							{footer}
-						</div>
+						<div className="flex justify-end space-x-3 p-6 pt-4">{footer}</div>
 					</>
 				)}
 			</div>

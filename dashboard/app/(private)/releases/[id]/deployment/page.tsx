@@ -292,12 +292,18 @@ const DeploymentStatusPage = () => {
 													<div className="mt-4">
 														<Button
 															loading={confirmFullRolloutHook.isPending}
-															icon={!confirmFullRolloutHook.isPending ? <CheckCircle2 className="w-4 h-4" /> : undefined}
+															icon={
+																!confirmFullRolloutHook.isPending ? (
+																	<CheckCircle2 className="w-4 h-4" />
+																) : undefined
+															}
 															onClick={() => {
 																confirmFullRolloutHook.mutate({ releaseId });
 															}}
 														>
-															{confirmFullRolloutHook.isPending ? "Confirming..." : "Confirm Full Rollout"}
+															{confirmFullRolloutHook.isPending
+																? "Confirming..."
+																: "Confirm Full Rollout"}
 														</Button>
 													</div>
 												</>

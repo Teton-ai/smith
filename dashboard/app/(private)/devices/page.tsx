@@ -22,8 +22,8 @@ import moment from "moment";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/app/components/button";
-import { Modal } from "@/app/components/modal";
 import LabelAutocomplete from "@/app/components/LabelAutocomplete";
+import { Modal } from "@/app/components/modal";
 import NetworkQualityIndicator from "@/app/components/NetworkQualityIndicator";
 import {
 	type Device,
@@ -792,14 +792,22 @@ const DevicesPage = () => {
 								All
 							</Button>
 							<Button
-								variant={onlineStatusFilter === "online" ? "success" : "secondary"}
+								variant={
+									onlineStatusFilter === "online" ? "success" : "secondary"
+								}
 								onClick={() => handleOnlineStatusChange("online")}
 							>
 								Online
 							</Button>
 							<Button
-								variant={onlineStatusFilter === "offline" ? "secondary" : "secondary"}
-								className={onlineStatusFilter === "offline" ? "bg-gray-600 hover:bg-gray-700 text-white" : ""}
+								variant={
+									onlineStatusFilter === "offline" ? "secondary" : "secondary"
+								}
+								className={
+									onlineStatusFilter === "offline"
+										? "bg-gray-600 hover:bg-gray-700 text-white"
+										: ""
+								}
 								onClick={() => handleOnlineStatusChange("offline")}
 							>
 								Offline
@@ -809,7 +817,9 @@ const DevicesPage = () => {
 						{/* Outdated Filter */}
 						<Button
 							variant={showOutdatedOnly ? "warning" : "secondary"}
-							className={showOutdatedOnly ? "bg-orange-600 hover:bg-orange-700" : ""}
+							className={
+								showOutdatedOnly ? "bg-orange-600 hover:bg-orange-700" : ""
+							}
 							onClick={handleOutdatedToggle}
 						>
 							Outdated
@@ -818,7 +828,9 @@ const DevicesPage = () => {
 						{/* Pending Approval Filter */}
 						<Button
 							variant={showPendingApproval ? "warning" : "secondary"}
-							className={showPendingApproval ? "bg-orange-600 hover:bg-orange-700" : ""}
+							className={
+								showPendingApproval ? "bg-orange-600 hover:bg-orange-700" : ""
+							}
 							onClick={handlePendingApprovalToggle}
 						>
 							Pending Approval
@@ -1415,10 +1427,9 @@ const DevicesPage = () => {
 								Direct Deployment - Bypasses Canary
 							</p>
 							<p className="text-amber-700 text-sm mt-1">
-								This will deploy directly to {selectedDeviceIds.size}{" "}
-								device
-								{selectedDeviceIds.size > 1 ? "s" : ""} without the
-								standard canary rollout process. Use with caution.
+								This will deploy directly to {selectedDeviceIds.size} device
+								{selectedDeviceIds.size > 1 ? "s" : ""} without the standard
+								canary rollout process. Use with caution.
 							</p>
 						</div>
 					</div>
@@ -1428,8 +1439,8 @@ const DevicesPage = () => {
 				{hasMixedDistributions && (
 					<div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-4">
 						<p className="text-red-800 text-sm">
-							Selected devices belong to different distributions. Please
-							select devices from a single distribution.
+							Selected devices belong to different distributions. Please select
+							devices from a single distribution.
 						</p>
 					</div>
 				)}
@@ -1438,8 +1449,8 @@ const DevicesPage = () => {
 				{!hasMixedDistributions && distributionIds.size === 0 && (
 					<div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-4">
 						<p className="text-yellow-800 text-sm">
-							Selected devices have no release assigned. Please select
-							devices that have a release.
+							Selected devices have no release assigned. Please select devices
+							that have a release.
 						</p>
 					</div>
 				)}
@@ -1468,9 +1479,7 @@ const DevicesPage = () => {
 									type="text"
 									placeholder="Search releases..."
 									value={bulkDeployReleaseSearch}
-									onChange={(e) =>
-										setBulkDeployReleaseSearch(e.target.value)
-									}
+									onChange={(e) => setBulkDeployReleaseSearch(e.target.value)}
 									className="w-full pl-10 pr-3 py-2 bg-white text-gray-900 border border-gray-300 rounded-md focus:ring-amber-500 focus:border-amber-500 placeholder:text-gray-400"
 								/>
 							</div>
@@ -1484,14 +1493,10 @@ const DevicesPage = () => {
 												bulkDeployReleaseSearch === "" ||
 												release.version
 													.toLowerCase()
-													.includes(
-														bulkDeployReleaseSearch.toLowerCase(),
-													) ||
+													.includes(bulkDeployReleaseSearch.toLowerCase()) ||
 												release.distribution_name
 													?.toLowerCase()
-													.includes(
-														bulkDeployReleaseSearch.toLowerCase(),
-													),
+													.includes(bulkDeployReleaseSearch.toLowerCase()),
 										)
 										.sort(
 											(a: Release, b: Release) =>
@@ -1625,8 +1630,8 @@ const DevicesPage = () => {
 								{selectedDeviceIds.size > 1 ? "s" : ""}
 							</p>
 							<p className="text-purple-700 text-sm mt-1">
-								The command will be queued and executed on all selected
-								devices when they check in.
+								The command will be queued and executed on all selected devices
+								when they check in.
 							</p>
 						</div>
 					</div>
@@ -1708,9 +1713,7 @@ const DevicesPage = () => {
 												}`}
 											/>
 											<div>
-												<p className="font-medium text-gray-900">
-													{distName}
-												</p>
+												<p className="font-medium text-gray-900">{distName}</p>
 												<p className="text-xs text-gray-500 mt-0.5">
 													Latest: {latestRelease.version} ·{" "}
 													{formatRelativeTime(latestRelease.created_at)} ·{" "}
