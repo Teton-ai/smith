@@ -23,6 +23,7 @@ import {
 	useApiGetReleaseDeployment,
 	useGetRelease,
 } from "@/app/api-client";
+import { Button } from "@/app/components/button";
 
 const DeploymentStatusPage = () => {
 	const params = useParams();
@@ -289,25 +290,21 @@ const DeploymentStatusPage = () => {
 														All canary devices have been successfully updated!
 													</p>
 													<div className="mt-4">
-														<button
+														<Button
+															loading={confirmFullRolloutHook.isPending}
+															icon={
+																!confirmFullRolloutHook.isPending ? (
+																	<CheckCircle2 className="w-4 h-4" />
+																) : undefined
+															}
 															onClick={() => {
 																confirmFullRolloutHook.mutate({ releaseId });
 															}}
-															disabled={confirmFullRolloutHook.isPending}
-															className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center space-x-2 transition-colors"
 														>
-															{confirmFullRolloutHook.isPending ? (
-																<>
-																	<Loader2 className="w-4 h-4 animate-spin" />
-																	<span>Confirming...</span>
-																</>
-															) : (
-																<>
-																	<CheckCircle2 className="w-4 h-4" />
-																	<span>Confirm Full Rollout</span>
-																</>
-															)}
-														</button>
+															{confirmFullRolloutHook.isPending
+																? "Confirming..."
+																: "Confirm Full Rollout"}
+														</Button>
 													</div>
 												</>
 											) : (

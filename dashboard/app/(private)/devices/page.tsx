@@ -21,8 +21,9 @@ import {
 import moment from "moment";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { createPortal } from "react-dom";
+import { Button } from "@/app/components/button";
 import LabelAutocomplete from "@/app/components/LabelAutocomplete";
+import { Modal } from "@/app/components/modal";
 import NetworkQualityIndicator from "@/app/components/NetworkQualityIndicator";
 import {
 	type Device,
@@ -172,8 +173,6 @@ const DevicesPage = () => {
 		number | undefined
 	>(undefined);
 	const [bulkDeployReleaseSearch, setBulkDeployReleaseSearch] = useState("");
-	const [mounted, setMounted] = useState(false);
-
 	// Bulk command state
 	const [showBulkCommandModal, setShowBulkCommandModal] = useState(false);
 	const [freeFormCommand, setFreeFormCommand] = useState("");
@@ -193,10 +192,6 @@ const DevicesPage = () => {
 	const formatRelativeTime = (dateString: string) => {
 		return moment(dateString).fromNow();
 	};
-
-	useEffect(() => {
-		setMounted(true);
-	}, []);
 
 	// Toast auto-dismiss
 	useEffect(() => {
@@ -790,61 +785,56 @@ const DevicesPage = () => {
 
 						{/* Online Status Filter */}
 						<div className="flex space-x-1">
-							<button
+							<Button
+								variant={onlineStatusFilter === "all" ? "primary" : "secondary"}
 								onClick={() => handleOnlineStatusChange("all")}
-								className={`px-3 py-2 text-sm rounded-md transition-colors cursor-pointer ${
-									onlineStatusFilter === "all"
-										? "bg-blue-600 text-white"
-										: "bg-gray-100 text-gray-700 hover:bg-gray-200"
-								}`}
 							>
 								All
-							</button>
-							<button
+							</Button>
+							<Button
+								variant={
+									onlineStatusFilter === "online" ? "success" : "secondary"
+								}
 								onClick={() => handleOnlineStatusChange("online")}
-								className={`px-3 py-2 text-sm rounded-md transition-colors cursor-pointer ${
-									onlineStatusFilter === "online"
-										? "bg-green-600 text-white"
-										: "bg-gray-100 text-gray-700 hover:bg-gray-200"
-								}`}
 							>
 								Online
-							</button>
-							<button
-								onClick={() => handleOnlineStatusChange("offline")}
-								className={`px-3 py-2 text-sm rounded-md transition-colors cursor-pointer ${
+							</Button>
+							<Button
+								variant={
+									onlineStatusFilter === "offline" ? "secondary" : "secondary"
+								}
+								className={
 									onlineStatusFilter === "offline"
-										? "bg-gray-600 text-white"
-										: "bg-gray-100 text-gray-700 hover:bg-gray-200"
-								}`}
+										? "bg-gray-600 hover:bg-gray-700 text-white"
+										: ""
+								}
+								onClick={() => handleOnlineStatusChange("offline")}
 							>
 								Offline
-							</button>
+							</Button>
 						</div>
 
 						{/* Outdated Filter */}
-						<button
+						<Button
+							variant={showOutdatedOnly ? "warning" : "secondary"}
+							className={
+								showOutdatedOnly ? "bg-orange-600 hover:bg-orange-700" : ""
+							}
 							onClick={handleOutdatedToggle}
-							className={`px-3 py-2 text-sm rounded-md transition-colors cursor-pointer ${
-								showOutdatedOnly
-									? "bg-orange-600 text-white"
-									: "bg-gray-100 text-gray-700 hover:bg-gray-200"
-							}`}
 						>
 							Outdated
-						</button>
+						</Button>
 
 						{/* Pending Approval Filter */}
-						<button
+						<Button
+							variant={showPendingApproval ? "warning" : "secondary"}
+							className={
+								showPendingApproval ? "bg-orange-600 hover:bg-orange-700" : ""
+							}
 							onClick={handlePendingApprovalToggle}
-							className={`px-3 py-2 text-sm rounded-md transition-colors cursor-pointer ${
-								showPendingApproval
-									? "bg-orange-600 text-white"
-									: "bg-gray-100 text-gray-700 hover:bg-gray-200"
-							}`}
 						>
 							Pending Approval
-						</button>
+						</Button>
 
 						{/* Release Filter Dropdown */}
 						<div className="relative" ref={releaseDropdownRef}>
@@ -1287,20 +1277,14 @@ const DevicesPage = () => {
 						{/* Load More Button */}
 						{hasNextPage && (
 							<div className="border-t border-gray-200">
-								<button
+								<Button
+									variant="ghost"
+									loading={isFetchingNextPage}
 									onClick={() => fetchNextPage()}
-									disabled={isFetchingNextPage}
-									className="w-full py-2 px-4 text-sm font-medium text-blue-600 bg-blue-50 rounded-md hover:bg-blue-100 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer transition-colors"
+									className="w-full py-2 px-4 text-sm font-medium text-blue-600 bg-blue-50 rounded-md hover:bg-blue-100"
 								>
-									{isFetchingNextPage ? (
-										<span className="flex items-center justify-center gap-2">
-											<Loader2 className="w-4 h-4 animate-spin" />
-											Loading more...
-										</span>
-									) : (
-										`Load more devices`
-									)}
-								</button>
+									{isFetchingNextPage ? "Loading more..." : "Load more devices"}
+								</Button>
 							</div>
 						)}
 					</div>
@@ -1315,15 +1299,17 @@ const DevicesPage = () => {
 						{selectedDeviceIds.size > 1 ? "s" : ""} selected
 					</span>
 					<div className="flex gap-2">
-						<button
+						<Button
+							variant="secondary"
 							onClick={() => setSelectedDeviceIds(new Set())}
-							className="px-4 py-2 bg-gray-100 text-gray-700 rounded hover:bg-gray-200 cursor-pointer"
 						>
 							Clear Selection
-						</button>
+						</Button>
 						{showPendingApproval ? (
 							<>
-								<button
+								<Button
+									variant="danger"
+									icon={<XCircle className="w-4 h-4" />}
 									onClick={() => {
 										const deviceIds = Array.from(selectedDeviceIds);
 										const count = deviceIds.length;
@@ -1356,12 +1342,12 @@ const DevicesPage = () => {
 												});
 											});
 									}}
-									className="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700 cursor-pointer flex items-center gap-2"
 								>
-									<XCircle className="w-4 h-4" />
 									Reject
-								</button>
-								<button
+								</Button>
+								<Button
+									variant="success"
+									icon={<CheckCircle className="w-4 h-4" />}
 									onClick={() => {
 										setApproveModalDevice(
 											filteredDevices.find((d) =>
@@ -1370,27 +1356,25 @@ const DevicesPage = () => {
 										);
 										setSelectedDistribution(null);
 									}}
-									className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 cursor-pointer flex items-center gap-2"
 								>
-									<CheckCircle className="w-4 h-4" />
 									Approve & Assign
-								</button>
+								</Button>
 							</>
 						) : (
 							<>
-								<button
+								<Button
+									variant="purple"
+									icon={<Terminal className="w-4 h-4" />}
 									onClick={() => setShowBulkCommandModal(true)}
-									className="px-4 py-2 bg-purple-600 text-white rounded hover:bg-purple-700 cursor-pointer flex items-center gap-2"
 								>
-									<Terminal className="w-4 h-4" />
 									Run Command
-								</button>
-								<button
+								</Button>
+								<Button
+									variant="warning"
 									onClick={() => setShowBulkDeployModal(true)}
-									className="px-4 py-2 bg-amber-600 text-white rounded hover:bg-amber-700 cursor-pointer"
 								>
 									Deploy to Selected
-								</button>
+								</Button>
 							</>
 						)}
 					</div>
@@ -1398,394 +1382,187 @@ const DevicesPage = () => {
 			)}
 
 			{/* Bulk Deploy Modal */}
-			{mounted &&
-				showBulkDeployModal &&
-				createPortal(
-					<div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 animate-in fade-in duration-200">
-						<div className="bg-white rounded-lg shadow-xl p-6 w-[520px] animate-in zoom-in-95 duration-200">
-							<div className="flex justify-between items-center mb-4">
-								<h2 className="text-xl font-semibold text-gray-900">
-									Deploy to Selected Devices
-								</h2>
-								<button
-									onClick={() => {
-										setShowBulkDeployModal(false);
-										setSelectedReleaseId(undefined);
-										setBulkDeployReleaseSearch("");
-									}}
-									className="text-gray-400 hover:text-gray-600 cursor-pointer"
-								>
-									<X className="w-5 h-5" />
-								</button>
-							</div>
-
-							{/* Warning Banner */}
-							<div className="bg-amber-50 border border-amber-200 rounded-lg p-4 mb-4">
-								<div className="flex gap-3">
-									<AlertTriangle className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
-									<div>
-										<p className="text-amber-800 font-medium">
-											Direct Deployment - Bypasses Canary
-										</p>
-										<p className="text-amber-700 text-sm mt-1">
-											This will deploy directly to {selectedDeviceIds.size}{" "}
-											device
-											{selectedDeviceIds.size > 1 ? "s" : ""} without the
-											standard canary rollout process. Use with caution.
-										</p>
-									</div>
-								</div>
-							</div>
-
-							{/* Distribution Mismatch Error */}
-							{hasMixedDistributions && (
-								<div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-4">
-									<p className="text-red-800 text-sm">
-										Selected devices belong to different distributions. Please
-										select devices from a single distribution.
-									</p>
-								</div>
-							)}
-
-							{/* No Distribution Warning */}
-							{!hasMixedDistributions && distributionIds.size === 0 && (
-								<div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-4">
-									<p className="text-yellow-800 text-sm">
-										Selected devices have no release assigned. Please select
-										devices that have a release.
-									</p>
-								</div>
-							)}
-
-							{/* Release Selector */}
-							<div className="mb-6">
-								<label className="block text-sm font-medium text-gray-700 mb-2">
-									Target Release
-								</label>
-								{hasMixedDistributions || distributionIds.size === 0 ? (
-									<div className="text-center py-4 text-gray-500 text-sm border border-gray-200 rounded-md">
-										{hasMixedDistributions
-											? "Cannot select release for mixed distributions"
-											: "No releases available"}
-									</div>
-								) : availableReleasesForBulkDeploy.length === 0 ? (
-									<div className="text-center py-4 text-gray-500 text-sm border border-gray-200 rounded-md">
-										No releases available for this distribution
-									</div>
-								) : (
-									<div className="space-y-3">
-										{/* Search Input */}
-										<div className="relative">
-											<Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-											<input
-												type="text"
-												placeholder="Search releases..."
-												value={bulkDeployReleaseSearch}
-												onChange={(e) =>
-													setBulkDeployReleaseSearch(e.target.value)
-												}
-												className="w-full pl-10 pr-3 py-2 bg-white text-gray-900 border border-gray-300 rounded-md focus:ring-amber-500 focus:border-amber-500 placeholder:text-gray-400"
-											/>
-										</div>
-
-										{/* Release List */}
-										<div className="border border-gray-200 rounded-md max-h-[280px] overflow-y-auto">
-											{(() => {
-												const filteredReleases = availableReleasesForBulkDeploy
-													.filter(
-														(release: Release) =>
-															bulkDeployReleaseSearch === "" ||
-															release.version
-																.toLowerCase()
-																.includes(
-																	bulkDeployReleaseSearch.toLowerCase(),
-																) ||
-															release.distribution_name
-																?.toLowerCase()
-																.includes(
-																	bulkDeployReleaseSearch.toLowerCase(),
-																),
-													)
-													.sort(
-														(a: Release, b: Release) =>
-															new Date(b.created_at).getTime() -
-															new Date(a.created_at).getTime(),
-													);
-
-												if (filteredReleases.length === 0) {
-													return (
-														<div className="text-center py-4 text-gray-500 text-sm">
-															No releases match your search
-														</div>
-													);
-												}
-
-												return filteredReleases.map((release: Release) => (
-													<button
-														key={release.id}
-														onClick={() => setSelectedReleaseId(release.id)}
-														className={`w-full text-left p-3 border-b border-gray-200 last:border-b-0 hover:bg-gray-50 transition-colors cursor-pointer ${
-															selectedReleaseId === release.id
-																? "bg-amber-50 hover:bg-amber-50"
-																: ""
-														}`}
-													>
-														<div className="flex items-start justify-between">
-															<div className="flex-1 min-w-0">
-																<div className="flex items-center space-x-2">
-																	<div className="p-1.5 bg-gray-100 text-gray-600 rounded">
-																		<Tag className="w-3 h-3" />
-																	</div>
-																	<span className="font-medium text-gray-900">
-																		{release.version}
-																	</span>
-																	{release.draft && (
-																		<span className="px-2 py-0.5 text-xs font-medium bg-yellow-100 text-yellow-800 rounded-full">
-																			Draft
-																		</span>
-																	)}
-																	{release.yanked && (
-																		<span className="px-2 py-0.5 text-xs font-medium bg-red-100 text-red-800 rounded-full">
-																			Yanked
-																		</span>
-																	)}
-																</div>
-																<div className="flex items-center space-x-3 mt-1.5 text-xs text-gray-500">
-																	<div className="flex items-center space-x-1">
-																		<Calendar className="w-3 h-3" />
-																		<span>
-																			{formatRelativeTime(release.created_at)}
-																		</span>
-																	</div>
-																	<div className="flex items-center space-x-1">
-																		<User className="w-3 h-3" />
-																		<span>
-																			{release.user_email ||
-																				(release.user_id
-																					? `User #${release.user_id}`
-																					: "Unknown")}
-																		</span>
-																	</div>
-																</div>
-															</div>
-															{selectedReleaseId === release.id && (
-																<div className="flex-shrink-0 ml-2">
-																	<div className="w-5 h-5 bg-amber-600 rounded-full flex items-center justify-center">
-																		<svg
-																			className="w-3 h-3 text-white"
-																			fill="none"
-																			viewBox="0 0 24 24"
-																			stroke="currentColor"
-																		>
-																			<path
-																				strokeLinecap="round"
-																				strokeLinejoin="round"
-																				strokeWidth={2}
-																				d="M5 13l4 4L19 7"
-																			/>
-																		</svg>
-																	</div>
-																</div>
-															)}
-														</div>
-													</button>
-												));
-											})()}
-										</div>
-									</div>
-								)}
-							</div>
-
-							{/* Action Buttons */}
-							<div className="flex justify-end gap-3">
-								<button
-									onClick={() => {
-										setShowBulkDeployModal(false);
-										setSelectedReleaseId(undefined);
-										setBulkDeployReleaseSearch("");
-									}}
-									className="px-4 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 cursor-pointer"
-								>
-									Cancel
-								</button>
-								<button
-									onClick={handleBulkDeploy}
-									disabled={
-										!selectedReleaseId ||
-										hasMixedDistributions ||
-										distributionIds.size === 0 ||
-										isDeploying
-									}
-									className="px-4 py-2 bg-amber-600 text-white rounded-md hover:bg-amber-700 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
-								>
-									{isDeploying ? (
-										<span className="flex items-center gap-2">
-											<Loader2 className="w-4 h-4 animate-spin" />
-											Deploying...
-										</span>
-									) : (
-										"Deploy"
-									)}
-								</button>
-							</div>
+			<Modal
+				open={showBulkDeployModal}
+				onClose={() => {
+					setShowBulkDeployModal(false);
+					setSelectedReleaseId(undefined);
+					setBulkDeployReleaseSearch("");
+				}}
+				title="Deploy to Selected Devices"
+				footer={
+					<>
+						<Button
+							variant="secondary"
+							disabled={isDeploying}
+							onClick={() => {
+								setShowBulkDeployModal(false);
+								setSelectedReleaseId(undefined);
+								setBulkDeployReleaseSearch("");
+							}}
+						>
+							Cancel
+						</Button>
+						<Button
+							variant="warning"
+							loading={isDeploying}
+							disabled={
+								!selectedReleaseId ||
+								hasMixedDistributions ||
+								distributionIds.size === 0
+							}
+							onClick={handleBulkDeploy}
+						>
+							{isDeploying ? "Deploying..." : "Deploy"}
+						</Button>
+					</>
+				}
+			>
+				{/* Warning Banner */}
+				<div className="bg-amber-50 border border-amber-200 rounded-lg p-4 mb-4">
+					<div className="flex gap-3">
+						<AlertTriangle className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
+						<div>
+							<p className="text-amber-800 font-medium">
+								Direct Deployment - Bypasses Canary
+							</p>
+							<p className="text-amber-700 text-sm mt-1">
+								This will deploy directly to {selectedDeviceIds.size} device
+								{selectedDeviceIds.size > 1 ? "s" : ""} without the standard
+								canary rollout process. Use with caution.
+							</p>
 						</div>
-					</div>,
-					document.body,
+					</div>
+				</div>
+
+				{/* Distribution Mismatch Error */}
+				{hasMixedDistributions && (
+					<div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-4">
+						<p className="text-red-800 text-sm">
+							Selected devices belong to different distributions. Please select
+							devices from a single distribution.
+						</p>
+					</div>
 				)}
 
-			{/* Bulk Command Modal */}
-			{mounted &&
-				showBulkCommandModal &&
-				createPortal(
-					<div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 animate-in fade-in duration-200">
-						<div className="bg-white rounded-lg shadow-xl p-6 w-[520px] animate-in zoom-in-95 duration-200">
-							<div className="flex justify-between items-center mb-4">
-								<h2 className="text-xl font-semibold text-gray-900">
-									Run Command on Selected Devices
-								</h2>
-								<button
-									onClick={() => {
-										setShowBulkCommandModal(false);
-										setFreeFormCommand("");
-									}}
-									className="text-gray-400 hover:text-gray-600 cursor-pointer"
-								>
-									<X className="w-5 h-5" />
-								</button>
-							</div>
+				{/* No Distribution Warning */}
+				{!hasMixedDistributions && distributionIds.size === 0 && (
+					<div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-4">
+						<p className="text-yellow-800 text-sm">
+							Selected devices have no release assigned. Please select devices
+							that have a release.
+						</p>
+					</div>
+				)}
 
-							{/* Info Banner */}
-							<div className="bg-purple-50 border border-purple-200 rounded-lg p-4 mb-4">
-								<div className="flex gap-3">
-									<Terminal className="w-5 h-5 text-purple-600 flex-shrink-0 mt-0.5" />
-									<div>
-										<p className="text-purple-800 font-medium">
-											Execute Command on {selectedDeviceIds.size} Device
-											{selectedDeviceIds.size > 1 ? "s" : ""}
-										</p>
-										<p className="text-purple-700 text-sm mt-1">
-											The command will be queued and executed on all selected
-											devices when they check in.
-										</p>
-									</div>
-								</div>
-							</div>
-
-							{/* Command Input */}
-							<div className="mb-6">
-								<label className="block text-sm font-medium text-gray-700 mb-2">
-									Command
-								</label>
+				{/* Release Selector */}
+				<div>
+					<label className="block text-sm font-medium text-gray-700 mb-2">
+						Target Release
+					</label>
+					{hasMixedDistributions || distributionIds.size === 0 ? (
+						<div className="text-center py-4 text-gray-500 text-sm border border-gray-200 rounded-md">
+							{hasMixedDistributions
+								? "Cannot select release for mixed distributions"
+								: "No releases available"}
+						</div>
+					) : availableReleasesForBulkDeploy.length === 0 ? (
+						<div className="text-center py-4 text-gray-500 text-sm border border-gray-200 rounded-md">
+							No releases available for this distribution
+						</div>
+					) : (
+						<div className="space-y-3">
+							{/* Search Input */}
+							<div className="relative">
+								<Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
 								<input
 									type="text"
-									value={freeFormCommand}
-									onChange={(e) => setFreeFormCommand(e.target.value)}
-									placeholder="e.g., ls -la /var/log"
-									className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-purple-500 focus:border-purple-500 text-gray-900 placeholder-gray-400"
+									placeholder="Search releases..."
+									value={bulkDeployReleaseSearch}
+									onChange={(e) => setBulkDeployReleaseSearch(e.target.value)}
+									className="w-full pl-10 pr-3 py-2 bg-white text-gray-900 border border-gray-300 rounded-md focus:ring-amber-500 focus:border-amber-500 placeholder:text-gray-400"
 								/>
-								<p className="mt-1 text-xs text-gray-500">
-									Enter a shell command to execute on the selected devices
-								</p>
 							</div>
 
-							{/* Action Buttons */}
-							<div className="flex justify-end gap-3">
-								<button
-									onClick={() => {
-										setShowBulkCommandModal(false);
-										setFreeFormCommand("");
-									}}
-									className="px-4 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 cursor-pointer"
-								>
-									Cancel
-								</button>
-								<button
-									onClick={handleBulkCommand}
-									disabled={!freeFormCommand.trim() || isIssuingCommands}
-									className="px-4 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
-								>
-									{isIssuingCommands ? (
-										<span className="flex items-center gap-2">
-											<Loader2 className="w-4 h-4 animate-spin" />
-											Sending...
-										</span>
-									) : (
-										"Run Command"
-									)}
-								</button>
-							</div>
-						</div>
-					</div>,
-					document.body,
-				)}
+							{/* Release List */}
+							<div className="border border-gray-200 rounded-md max-h-[280px] overflow-y-auto">
+								{(() => {
+									const filteredReleases = availableReleasesForBulkDeploy
+										.filter(
+											(release: Release) =>
+												bulkDeployReleaseSearch === "" ||
+												release.version
+													.toLowerCase()
+													.includes(bulkDeployReleaseSearch.toLowerCase()) ||
+												release.distribution_name
+													?.toLowerCase()
+													.includes(bulkDeployReleaseSearch.toLowerCase()),
+										)
+										.sort(
+											(a: Release, b: Release) =>
+												new Date(b.created_at).getTime() -
+												new Date(a.created_at).getTime(),
+										);
 
-			{/* Approve & Assign Distribution Modal */}
-			{mounted &&
-				approveModalDevice &&
-				createPortal(
-					<div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 animate-in fade-in duration-200">
-						<div className="bg-white rounded-lg shadow-xl p-6 w-[520px] animate-in zoom-in-95 duration-200">
-							<div className="flex justify-between items-center mb-4">
-								<div>
-									<h2 className="text-xl font-semibold text-gray-900">
-										Approve & Assign Distribution
-									</h2>
-									<p className="text-sm text-gray-500 mt-0.5">
-										{selectedDeviceIds.size} device
-										{selectedDeviceIds.size > 1 ? "s" : ""}
-									</p>
-								</div>
-								<button
-									onClick={() => setApproveModalDevice(null)}
-									className="text-gray-400 hover:text-gray-600 cursor-pointer"
-								>
-									<X className="w-5 h-5" />
-								</button>
-							</div>
+									if (filteredReleases.length === 0) {
+										return (
+											<div className="text-center py-4 text-gray-500 text-sm">
+												No releases match your search
+											</div>
+										);
+									}
 
-							<label className="block text-sm font-medium text-gray-700 mb-3">
-								Select a distribution
-							</label>
-
-							{Object.keys(approvalDistributionMap).length === 0 ? (
-								<div className="text-center py-6 text-gray-500 text-sm border border-gray-200 rounded-md mb-6">
-									No distributions with stable releases available
-								</div>
-							) : (
-								<div className="space-y-2 max-h-64 overflow-y-auto mb-6">
-									{Object.entries(approvalDistributionMap).map(
-										([distName, { latestRelease, count }]) => (
-											<button
-												key={distName}
-												onClick={() => setSelectedDistribution(distName)}
-												className={`w-full text-left p-4 rounded-lg border transition-colors cursor-pointer ${
-													selectedDistribution === distName
-														? "border-indigo-500 bg-indigo-50"
-														: "border-gray-200 hover:border-gray-300 hover:bg-gray-50"
-												}`}
-											>
-												<div className="flex items-center justify-between">
-													<div className="flex items-center space-x-3">
-														<Layers
-															className={`w-5 h-5 ${
-																selectedDistribution === distName
-																	? "text-indigo-600"
-																	: "text-gray-400"
-															}`}
-														/>
-														<div>
-															<p className="font-medium text-gray-900">
-																{distName}
-															</p>
-															<p className="text-xs text-gray-500 mt-0.5">
-																Latest: {latestRelease.version} ·{" "}
-																{formatRelativeTime(latestRelease.created_at)} ·{" "}
-																{count} release{count !== 1 ? "s" : ""}
-															</p>
+									return filteredReleases.map((release: Release) => (
+										<button
+											key={release.id}
+											onClick={() => setSelectedReleaseId(release.id)}
+											className={`w-full text-left p-3 border-b border-gray-200 last:border-b-0 hover:bg-gray-50 transition-colors cursor-pointer ${
+												selectedReleaseId === release.id
+													? "bg-amber-50 hover:bg-amber-50"
+													: ""
+											}`}
+										>
+											<div className="flex items-start justify-between">
+												<div className="flex-1 min-w-0">
+													<div className="flex items-center space-x-2">
+														<div className="p-1.5 bg-gray-100 text-gray-600 rounded">
+															<Tag className="w-3 h-3" />
+														</div>
+														<span className="font-medium text-gray-900">
+															{release.version}
+														</span>
+														{release.draft && (
+															<span className="px-2 py-0.5 text-xs font-medium bg-yellow-100 text-yellow-800 rounded-full">
+																Draft
+															</span>
+														)}
+														{release.yanked && (
+															<span className="px-2 py-0.5 text-xs font-medium bg-red-100 text-red-800 rounded-full">
+																Yanked
+															</span>
+														)}
+													</div>
+													<div className="flex items-center space-x-3 mt-1.5 text-xs text-gray-500">
+														<div className="flex items-center space-x-1">
+															<Calendar className="w-3 h-3" />
+															<span>
+																{formatRelativeTime(release.created_at)}
+															</span>
+														</div>
+														<div className="flex items-center space-x-1">
+															<User className="w-3 h-3" />
+															<span>
+																{release.user_email ||
+																	(release.user_id
+																		? `User #${release.user_id}`
+																		: "Unknown")}
+															</span>
 														</div>
 													</div>
-													{selectedDistribution === distName && (
-														<div className="w-5 h-5 bg-indigo-600 rounded-full flex items-center justify-center flex-shrink-0">
+												</div>
+												{selectedReleaseId === release.id && (
+													<div className="flex-shrink-0 ml-2">
+														<div className="w-5 h-5 bg-amber-600 rounded-full flex items-center justify-center">
 															<svg
 																className="w-3 h-3 text-white"
 																fill="none"
@@ -1800,38 +1577,174 @@ const DevicesPage = () => {
 																/>
 															</svg>
 														</div>
-													)}
-												</div>
-											</button>
-										),
-									)}
-								</div>
-							)}
-
-							<div className="flex justify-end space-x-3">
-								<button
-									onClick={() => setApproveModalDevice(null)}
-									className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 transition-colors cursor-pointer"
-								>
-									Cancel
-								</button>
-								<button
-									onClick={handleApproveAndAssign}
-									disabled={!selectedApprovalRelease}
-									className="flex items-center space-x-2 px-4 py-2 text-sm font-medium text-white bg-green-600 hover:bg-green-700 disabled:bg-gray-300 disabled:cursor-not-allowed rounded-md transition-colors cursor-pointer"
-								>
-									<CheckCircle className="w-4 h-4" />
-									<span>
-										{selectedApprovalRelease
-											? `Approve → ${selectedApprovalRelease.version}`
-											: "Approve & Assign"}
-									</span>
-								</button>
+													</div>
+												)}
+											</div>
+										</button>
+									));
+								})()}
 							</div>
 						</div>
-					</div>,
-					document.body,
+					)}
+				</div>
+			</Modal>
+
+			{/* Bulk Command Modal */}
+			<Modal
+				open={showBulkCommandModal}
+				onClose={() => {
+					setShowBulkCommandModal(false);
+					setFreeFormCommand("");
+				}}
+				title="Run Command on Selected Devices"
+				footer={
+					<>
+						<Button
+							variant="secondary"
+							disabled={isIssuingCommands}
+							onClick={() => {
+								setShowBulkCommandModal(false);
+								setFreeFormCommand("");
+							}}
+						>
+							Cancel
+						</Button>
+						<Button
+							variant="purple"
+							loading={isIssuingCommands}
+							disabled={!freeFormCommand.trim()}
+							onClick={handleBulkCommand}
+						>
+							{isIssuingCommands ? "Sending..." : "Run Command"}
+						</Button>
+					</>
+				}
+			>
+				{/* Info Banner */}
+				<div className="bg-purple-50 border border-purple-200 rounded-lg p-4 mb-4">
+					<div className="flex gap-3">
+						<Terminal className="w-5 h-5 text-purple-600 flex-shrink-0 mt-0.5" />
+						<div>
+							<p className="text-purple-800 font-medium">
+								Execute Command on {selectedDeviceIds.size} Device
+								{selectedDeviceIds.size > 1 ? "s" : ""}
+							</p>
+							<p className="text-purple-700 text-sm mt-1">
+								The command will be queued and executed on all selected devices
+								when they check in.
+							</p>
+						</div>
+					</div>
+				</div>
+
+				{/* Command Input */}
+				<div>
+					<label className="block text-sm font-medium text-gray-700 mb-2">
+						Command
+					</label>
+					<input
+						type="text"
+						value={freeFormCommand}
+						onChange={(e) => setFreeFormCommand(e.target.value)}
+						placeholder="e.g., ls -la /var/log"
+						className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-purple-500 focus:border-purple-500 text-gray-900 placeholder-gray-400"
+					/>
+					<p className="mt-1 text-xs text-gray-500">
+						Enter a shell command to execute on the selected devices
+					</p>
+				</div>
+			</Modal>
+
+			{/* Approve & Assign Distribution Modal */}
+			<Modal
+				open={!!approveModalDevice}
+				onClose={() => setApproveModalDevice(null)}
+				title="Approve & Assign Distribution"
+				subtitle={`${selectedDeviceIds.size} device${selectedDeviceIds.size > 1 ? "s" : ""}`}
+				footer={
+					<>
+						<Button
+							variant="secondary"
+							onClick={() => setApproveModalDevice(null)}
+						>
+							Cancel
+						</Button>
+						<Button
+							variant="success"
+							icon={<CheckCircle className="w-4 h-4" />}
+							disabled={!selectedApprovalRelease}
+							onClick={handleApproveAndAssign}
+						>
+							{selectedApprovalRelease
+								? `Approve → ${selectedApprovalRelease.version}`
+								: "Approve & Assign"}
+						</Button>
+					</>
+				}
+			>
+				<label className="block text-sm font-medium text-gray-700 mb-3">
+					Select a distribution
+				</label>
+
+				{Object.keys(approvalDistributionMap).length === 0 ? (
+					<div className="text-center py-6 text-gray-500 text-sm border border-gray-200 rounded-md">
+						No distributions with stable releases available
+					</div>
+				) : (
+					<div className="space-y-2 max-h-64 overflow-y-auto">
+						{Object.entries(approvalDistributionMap).map(
+							([distName, { latestRelease, count }]) => (
+								<button
+									key={distName}
+									onClick={() => setSelectedDistribution(distName)}
+									className={`w-full text-left p-4 rounded-lg border transition-colors cursor-pointer ${
+										selectedDistribution === distName
+											? "border-indigo-500 bg-indigo-50"
+											: "border-gray-200 hover:border-gray-300 hover:bg-gray-50"
+									}`}
+								>
+									<div className="flex items-center justify-between">
+										<div className="flex items-center space-x-3">
+											<Layers
+												className={`w-5 h-5 ${
+													selectedDistribution === distName
+														? "text-indigo-600"
+														: "text-gray-400"
+												}`}
+											/>
+											<div>
+												<p className="font-medium text-gray-900">{distName}</p>
+												<p className="text-xs text-gray-500 mt-0.5">
+													Latest: {latestRelease.version} ·{" "}
+													{formatRelativeTime(latestRelease.created_at)} ·{" "}
+													{count} release{count !== 1 ? "s" : ""}
+												</p>
+											</div>
+										</div>
+										{selectedDistribution === distName && (
+											<div className="w-5 h-5 bg-indigo-600 rounded-full flex items-center justify-center flex-shrink-0">
+												<svg
+													className="w-3 h-3 text-white"
+													fill="none"
+													viewBox="0 0 24 24"
+													stroke="currentColor"
+												>
+													<path
+														strokeLinecap="round"
+														strokeLinejoin="round"
+														strokeWidth={2}
+														d="M5 13l4 4L19 7"
+													/>
+												</svg>
+											</div>
+										)}
+									</div>
+								</button>
+							),
+						)}
+					</div>
 				)}
+			</Modal>
 		</div>
 	);
 };
