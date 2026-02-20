@@ -1,3 +1,4 @@
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sqlx;
@@ -110,6 +111,12 @@ pub enum SafeCommandRx {
         upload_duration_ms: Option<u64>,
         timed_out: bool,
     },
+    ExtendedNetworkTest {
+        samples: Vec<SpeedSample>,
+        network_info: Option<NetworkInfo>,
+        total_duration_ms: u64,
+        error: Option<String>,
+    },
     LogStreamStarted {
         session_id: String,
     },
@@ -158,6 +165,9 @@ pub enum SafeCommandTx {
     CheckOTAStatus,
     StartOTA,
     TestNetwork,
+    ExtendedNetworkTest {
+        duration_minutes: u32,
+    },
     StreamLogs {
         session_id: String,
         service_name: String,
@@ -199,16 +209,20 @@ pub enum NetworkType {
 
 impl From<Option<String>> for NetworkType {
     fn from(value: Option<String>) -> Self {
-        match value
-            .expect("error: failed to get network type string")
-            .as_str()
-            .to_lowercase()
-            .as_str()
-        {
-            "wifi" => NetworkType::Wifi,
-            "ethernet" => NetworkType::Ethernet,
-            "dongle" => NetworkType::Dongle,
-            _ => panic!("error: invalid network type string"),
+        match value.as_deref().map(|s| s.to_lowercase()) {
+            Some(s) => match s.as_str() {
+                "wifi" => NetworkType::Wifi,
+                "ethernet" => NetworkType::Ethernet,
+                "dongle" => NetworkType::Dongle,
+                other => {
+                    tracing::warn!(network_type = %other, "Unknown network type, defaulting to Ethernet");
+                    NetworkType::Ethernet
+                }
+            },
+            None => {
+                tracing::warn!("Missing network type, defaulting to Ethernet");
+                NetworkType::Ethernet
+            }
         }
     }
 }
@@ -232,4 +246,55 @@ pub struct NewNetwork {
     pub name: String,
     pub description: Option<String>,
     pub password: Option<String>,
+}
+
+// Extended network test types
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct SpeedSample {
+    pub started_at: DateTime<Utc>,
+    pub download_bytes: usize,
+    pub download_mbps: f64,
+    pub upload_bytes: Option<usize>,
+    pub upload_mbps: Option<f64>,
+    pub duration_ms: u64,
+    pub timed_out: bool,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub enum InterfaceType {
+    Wifi,
+    Ethernet,
+    Lte,
+    Unknown,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub enum NetworkDetails {
+    Wifi {
+        ssid: Option<String>,
+        signal_dbm: Option<i32>,
+        frequency_mhz: Option<u32>,
+        vht_mcs: Option<u8>,
+        vht_nss: Option<u8>,
+        channel_width_mhz: Option<u8>,
+    },
+    Ethernet {
+        speed_mbps: Option<u32>,
+        duplex: Option<String>,
+        link_detected: bool,
+    },
+    Lte {
+        operator: Option<String>,
+        signal_quality: Option<i32>,
+        access_technology: Option<String>,
+    },
+    Unknown,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct NetworkInfo {
+    pub interface_type: InterfaceType,
+    pub interface_name: String,
+    pub details: NetworkDetails,
 }

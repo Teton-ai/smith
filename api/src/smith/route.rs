@@ -5,16 +5,18 @@ use crate::handlers::AuthedDevice;
 use crate::ip_address::extract_client_ip;
 use crate::storage::Storage;
 use crate::{State, storage};
-use axum::body::Body;
+use axum::body::{Body, Bytes};
 use axum::extract::{ConnectInfo, Multipart, Path, Query};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::Response;
 use axum::{Extension, Json};
+use futures::stream;
 use serde::{Deserialize, Serialize};
 use smith::utils::schema::{
     DeviceRegistration, DeviceRegistrationResponse, HomePost, HomePostResponse, Package,
     ServiceCheck,
 };
+use std::convert::Infallible;
 use std::net::SocketAddr;
 use std::time::SystemTime;
 use tracing::{debug, error, info};
@@ -360,13 +362,21 @@ pub async fn list_release_packages(
 )]
 pub async fn test_file() -> Response<Body> {
     const FILE_SIZE: usize = 20 * 1024 * 1024; // 20MB
-    let data = vec![0u8; FILE_SIZE];
+    const CHUNK_SIZE: usize = 64 * 1024; // 64KB chunks
+    const NUM_CHUNKS: usize = FILE_SIZE / CHUNK_SIZE;
+
+    // Create a single zero-filled chunk that gets cloned for each iteration
+    // This uses ~64KB regardless of how many concurrent requests
+    let zero_chunk = Bytes::from(vec![0u8; CHUNK_SIZE]);
+
+    let body_stream =
+        stream::iter((0..NUM_CHUNKS).map(move |_| Ok::<_, Infallible>(zero_chunk.clone())));
 
     Response::builder()
         .status(StatusCode::OK)
         .header("Content-Type", "application/octet-stream")
         .header("Content-Length", FILE_SIZE.to_string())
-        .body(Body::from(data))
+        .body(Body::from_stream(body_stream))
         .unwrap()
 }
 

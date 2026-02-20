@@ -1,4 +1,5 @@
 use anyhow::Result;
+use chrono::{DateTime, Utc};
 use models::{
     deployment::{Deployment, DeploymentRequest},
     device::{CommandsPaginated, Device, DeviceCommandResponse, DeviceFilter},
@@ -6,8 +7,53 @@ use models::{
     release::{Release, UpdateRelease},
 };
 use reqwest::{Client, Response};
+use serde::Deserialize;
 use smith::utils::schema::{self, Package};
 use std::collections::HashMap;
+
+#[derive(Debug, Deserialize)]
+pub struct StartExtendedTestResponse {
+    pub session_id: String,
+    pub device_count: i32,
+    pub message: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ExtendedTestStatus {
+    pub session_id: String,
+    pub status: String,
+    pub label_filter: String,
+    pub duration_minutes: i32,
+    pub device_count: i32,
+    pub completed_count: i32,
+    pub created_at: DateTime<Utc>,
+    pub results: Vec<DeviceExtendedTestResult>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct DeviceExtendedTestResult {
+    pub device_id: i32,
+    pub serial_number: String,
+    pub status: String,
+    pub minute_stats: Option<Vec<MinuteStats>>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct MinuteStats {
+    pub minute: u8,
+    pub sample_count: u32,
+    pub download: SpeedStats,
+    pub upload: Option<SpeedStats>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SpeedStats {
+    pub average_mbps: f64,
+    pub std_dev: f64,
+    pub q25: f64,
+    pub q50: f64,
+    pub q75: f64,
+}
 
 trait HandleApiError: Sized {
     async fn handle_error(self) -> anyhow::Result<Self>;
@@ -352,6 +398,46 @@ impl SmithAPI {
         }
 
         Ok(())
+    }
+
+    pub async fn start_extended_network_test(
+        &self,
+        label_filter: String,
+        duration_minutes: u32,
+    ) -> Result<StartExtendedTestResponse> {
+        let client = Client::new();
+
+        let request = serde_json::json!({
+            "label_filter": label_filter,
+            "duration_minutes": duration_minutes
+        });
+
+        let resp = client
+            .post(format!("{}/network/extended-test", self.domain))
+            .header("Authorization", format!("Bearer {}", &self.bearer_token))
+            .json(&request)
+            .send()
+            .await?
+            .handle_error()
+            .await?;
+
+        Ok(resp.json().await?)
+    }
+
+    pub async fn get_extended_test_status(&self, session_id: &str) -> Result<ExtendedTestStatus> {
+        let client = Client::new();
+
+        let resp = client
+            .get(format!(
+                "{}/network/extended-test/{}",
+                self.domain, session_id
+            ))
+            .header("Authorization", format!("Bearer {}", &self.bearer_token))
+            .send()
+            .await?
+            .error_for_status()?;
+
+        Ok(resp.json().await?)
     }
 
     pub async fn send_logs_command(&self, device_id: u64) -> Result<(u64, u64)> {

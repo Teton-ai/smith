@@ -12,7 +12,7 @@ use crate::cli::{
 use crate::commands::devices::get_online_colored;
 use crate::print::TablePrint;
 use anyhow::{Context, bail};
-use api::SmithAPI;
+use api::{ExtendedTestStatus, SmithAPI};
 use chrono_humanize::HumanTime;
 use clap::{CommandFactory, Parser};
 use clap_complete::generate;
@@ -1149,7 +1149,7 @@ async fn main() -> anyhow::Result<()> {
                     println!("{}", logs);
                 }
             }
-            Commands::TestNetwork { selector } => {
+            Commands::TestNetwork { command } => {
                 let secrets = auth::get_secrets(&config)
                     .await
                     .with_context(|| "Error getting token")?
@@ -1157,42 +1157,157 @@ async fn main() -> anyhow::Result<()> {
 
                 let api = SmithAPI::new(secrets, &config);
 
-                let devices = resolve_devices_from_selector(&api, &selector).await?;
+                match command {
+                    cli::TestNetworkCommands::Quick { selector } => {
+                        let devices = resolve_devices_from_selector(&api, &selector).await?;
 
-                if devices.is_empty() {
-                    println!("No devices found matching the selector");
-                    return Ok(());
-                }
-
-                // Deduplicate devices
-                let mut seen_ids = HashSet::new();
-                let devices: Vec<_> = devices
-                    .into_iter()
-                    .filter(|device| seen_ids.insert(device.id))
-                    .collect();
-
-                println!(
-                    "Sending network test command to {} device(s):",
-                    devices.len()
-                );
-
-                for device in &devices {
-                    match api.test_network(device.serial_number.clone()).await {
-                        Ok(_) => {
-                            println!("  {} {}", "✓".bright_green(), device.serial_number);
+                        if devices.is_empty() {
+                            println!("No devices found matching the selector");
+                            return Ok(());
                         }
-                        Err(e) => {
-                            println!("  {} {} - Failed: {}", "✗".red(), device.serial_number, e);
+
+                        // Deduplicate devices
+                        let mut seen_ids = HashSet::new();
+                        let devices: Vec<_> = devices
+                            .into_iter()
+                            .filter(|device| seen_ids.insert(device.id))
+                            .collect();
+
+                        println!(
+                            "Sending network test command to {} device(s):",
+                            devices.len()
+                        );
+
+                        for device in &devices {
+                            match api.test_network(device.serial_number.clone()).await {
+                                Ok(_) => {
+                                    println!("  {} {}", "✓".bright_green(), device.serial_number);
+                                }
+                                Err(e) => {
+                                    println!(
+                                        "  {} {} - Failed: {}",
+                                        "✗".red(),
+                                        device.serial_number,
+                                        e
+                                    );
+                                }
+                            }
+                        }
+
+                        println!(
+                            "\n{}",
+                            "Network test commands sent successfully!".bright_green()
+                        );
+                        println!(
+                            "Each device will download a 20MB test file and report back the results."
+                        );
+                        println!("Check the dashboard to see the results.");
+                    }
+                    cli::TestNetworkCommands::Extended {
+                        labels,
+                        duration,
+                        wait,
+                        poll_interval,
+                    } => {
+                        let label_filter = labels.join(",");
+                        println!("Starting extended network test...");
+                        println!("  Labels: {}", label_filter);
+                        println!("  Duration: {} minutes", duration);
+
+                        let response = api
+                            .start_extended_network_test(label_filter.clone(), duration)
+                            .await?;
+
+                        println!("\n{}", "Extended network test started!".bright_green());
+                        println!("  {}", response.message);
+                        println!("  Session ID: {}", response.session_id);
+                        println!("  Devices: {}", response.device_count);
+
+                        if !wait {
+                            println!(
+                                "\nTo check status: sm test-network status {}",
+                                response.session_id
+                            );
+                            return Ok(());
+                        }
+
+                        println!("\nPolling for results (Ctrl+C to stop)...\n");
+
+                        loop {
+                            tokio::time::sleep(tokio::time::Duration::from_secs(poll_interval))
+                                .await;
+
+                            let status = api.get_extended_test_status(&response.session_id).await?;
+
+                            println!(
+                                "Progress: {}/{} devices completed",
+                                status.completed_count, status.device_count
+                            );
+
+                            if status.status == "completed" || status.status == "canceled" {
+                                println!(
+                                    "\n{}",
+                                    "=== Extended Network Test Complete ===".bright_green()
+                                );
+                                print_extended_test_results(&status);
+                                break;
+                            }
+
+                            if status.status == "failed" {
+                                println!("\n{}", "Extended network test failed!".red());
+                                break;
+                            }
+                        }
+                    }
+                    cli::TestNetworkCommands::Status { session_id } => {
+                        let status = api.get_extended_test_status(&session_id).await?;
+
+                        println!("Session: {}", status.session_id);
+                        println!("Label filter: {}", status.label_filter);
+                        println!("Duration: {} minutes", status.duration_minutes);
+                        println!("Status: {}", status.status);
+                        println!(
+                            "Progress: {}/{} devices completed",
+                            status.completed_count, status.device_count
+                        );
+
+                        // Show time info
+                        let now = chrono::Utc::now();
+                        let end_time = status.created_at
+                            + chrono::Duration::minutes(status.duration_minutes as i64);
+                        let remaining = end_time - now;
+
+                        if status.status == "completed" {
+                            let elapsed = now - status.created_at;
+                            let mins = elapsed.num_minutes();
+                            let secs = elapsed.num_seconds() % 60;
+                            println!(
+                                "Completed in {}m{}s (started at {})",
+                                mins,
+                                secs,
+                                status.created_at.format("%H:%M:%S")
+                            );
+                        } else if remaining.num_seconds() > 0 {
+                            let mins = remaining.num_minutes();
+                            let secs = remaining.num_seconds() % 60;
+                            println!(
+                                "Time remaining: {}m{}s (started at {})",
+                                mins,
+                                secs,
+                                status.created_at.format("%H:%M:%S")
+                            );
+                        } else {
+                            println!(
+                                "Should be finishing... (started at {})",
+                                status.created_at.format("%H:%M:%S")
+                            );
+                        }
+
+                        if !status.results.is_empty() {
+                            print_extended_test_results(&status);
                         }
                     }
                 }
-
-                println!(
-                    "\n{}",
-                    "Network test commands sent successfully!".bright_green()
-                );
-                println!("Each device will download a 20MB test file and report back the results.");
-                println!("Check the dashboard to see the results.");
             }
             Commands::Command { ids } => {
                 let secrets = auth::get_secrets(&config)
@@ -2056,5 +2171,44 @@ fn get_colored_arch(arch: &str) -> String {
         "s390x" => arch.red().to_string(),
         "riscv64" => arch.bright_purple().to_string(),
         _ => arch.white().to_string(),
+    }
+}
+
+fn print_extended_test_results(status: &ExtendedTestStatus) {
+    println!();
+    for result in &status.results {
+        let status_str = match result.status.as_str() {
+            "completed" => "completed".bright_green().to_string(),
+            "running" => "running".yellow().to_string(),
+            "pending" => "pending".white().to_string(),
+            "canceled" => "canceled".yellow().to_string(),
+            _ => result.status.red().to_string(),
+        };
+
+        println!(
+            "Device: {} ({}) - {}",
+            result.serial_number, result.device_id, status_str
+        );
+
+        if let Some(minute_stats) = &result.minute_stats {
+            for stats in minute_stats {
+                println!("  Minute {}: {} samples", stats.minute, stats.sample_count);
+                println!(
+                    "    Download: avg={:.2} Mbps, stddev={:.2}, q25={:.2}, q50={:.2}, q75={:.2}",
+                    stats.download.average_mbps,
+                    stats.download.std_dev,
+                    stats.download.q25,
+                    stats.download.q50,
+                    stats.download.q75
+                );
+                if let Some(upload) = &stats.upload {
+                    println!(
+                        "    Upload:   avg={:.2} Mbps, stddev={:.2}, q25={:.2}, q50={:.2}, q75={:.2}",
+                        upload.average_mbps, upload.std_dev, upload.q25, upload.q50, upload.q75
+                    );
+                }
+            }
+        }
+        println!();
     }
 }
