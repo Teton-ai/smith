@@ -56,6 +56,17 @@ xattr = "1.6.1"
 tokio-tungstenite = { version = "0.21", features = ["native-tls"] }
 url = "2.5"
 
+[dev-dependencies]
+testcontainers = "0.23"
+wiremock = "0.6"
+assert_matches = "1.5"
+rstest = "0.23"
+serial_test = "3.2"
+tokio-test = "0.4"
+proptest = "1.6"
+hyper = { version = "1.8", features = ["full"] }
+http-body-util = "0.1"
+
 [package.metadata.deb]
 maintainer-scripts = "debian/"
 assets = [

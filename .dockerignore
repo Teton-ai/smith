@@ -4,3 +4,9 @@ Dockerfile
 .git
 .gitignore
 .env
+volumes
+node_modules
+dashboard/node_modules
+dashboard/.next
+docs/book
+*.log

@@ -49,6 +49,14 @@ jobs:
       - name: Run tests
         run: cargo test --workspace
 
+      - name: Build Docker images for integration tests
+        run: ./scripts/build-test-images.sh
+
+      - name: Run integration tests
+        run: cargo test --package smith --test '*' -- --ignored --nocapture --test-threads=1
+        env:
+          RUST_LOG: info,smithd=debug
+
       - name: Dashboard linting
         working-directory: ./dashboard
         run: biome ci .
