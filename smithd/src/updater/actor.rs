@@ -488,10 +488,15 @@ impl Actor {
                             info!("Successfully installed package {}", package_name);
                             self.install_failures.remove(&package_name);
                         } else {
+                            let stdout = String::from_utf8_lossy(&status.stdout);
                             let stderr = String::from_utf8_lossy(&status.stderr);
-                            error!("Failed to install package {}: {}", package_name, stderr);
+                            error!(
+                                "Failed to install package {}:\nstderr: {}\nstdout: {}",
+                                package_name, stderr, stdout
+                            );
 
-                            let kind = classify_install_failure(&stderr);
+                            let combined_output = format!("{}\n{}", stderr, stdout);
+                            let kind = classify_install_failure(&combined_output);
                             let should_delete = self.handle_install_failure(&package_name, kind);
 
                             if should_delete {
@@ -509,8 +514,8 @@ impl Actor {
                                 }
                             }
 
-                            if stderr.contains("dpkg was interrupted")
-                                && stderr.contains("dpkg --configure -a")
+                            if combined_output.contains("dpkg was interrupted")
+                                && combined_output.contains("dpkg --configure -a")
                             {
                                 info!(
                                     "Detected dpkg interruption for package {}, attempting recovery",
