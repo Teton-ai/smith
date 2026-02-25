@@ -3,10 +3,10 @@ services:
   api:
     build:
       context: .
-      dockerfile: api.Dockerfile
+      dockerfile: docker/api.Dockerfile
     container_name: smith-api
     env_file:
-      - .env
+      - api/.env
     ports:
       - "8080:8080"
     volumes:
@@ -28,9 +28,9 @@ services:
   postgres:
     container_name: smith-postgres
     build:
-      dockerfile: postgres.Dockerfile
-    env_file:
-      - .env
+      dockerfile: docker/postgres.Dockerfile
+    environment:
+      POSTGRES_PASSWORD: postgres
     ports:
       - "5432:5432"
     volumes:
@@ -52,7 +52,7 @@ services:
   device:
     build:
       context: .
-      dockerfile: device.Dockerfile
+      dockerfile: docker/device.Dockerfile
       args:
         # Override with ubuntu:22.04 for x86_64 Linux development
         BASE_IMAGE: ${DEVICE_BASE_IMAGE:-nvcr.io/nvidia/l4t-base:r36.2.0}

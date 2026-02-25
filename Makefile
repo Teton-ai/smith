@@ -1,4 +1,4 @@
-include .env
+# No global env file needed
 export DOCKER_CLI_HINTS=false
 
 .DEFAULT_GOAL := up
@@ -30,14 +30,14 @@ schema:
 
 init:
 	echo "Initializing the repo"
-	test -f .env || cp .env.template .env
+	test -f api/.env || cp api/.env.template api/.env
 	test -f dashboard/.env || cp dashboard/.env.template dashboard/.env
 
 gen-api-client:
 	cd dashboard && npm run gen-api-client
 
 seed:
-	psql postgres://postgres:postgres@localhost:5432/postgres -f seed.sql
+	psql postgres://postgres:postgres@localhost:5432/postgres -f api/seeds/seed.sql
 
 debug.smithd:
 	cargo build --release -p smith

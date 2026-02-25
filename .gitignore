@@ -6,7 +6,7 @@ magic.toml
 fleet.sql
 volumes
 .idea
-.env
+api/.env
 
 schema.sql
 .DS_Store

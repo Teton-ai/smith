@@ -38,5 +38,5 @@ RUN cd /tmp \
     && cd .. && rm -r pg_partman-${PARTMAN_VERSION#v} ${PARTMAN_VERSION}.tar.gz
 
 # Copy initialization script
-COPY init-db.sh /docker-entrypoint-initdb.d/
+COPY scripts/init-db.sh /docker-entrypoint-initdb.d/
 RUN chmod +x /docker-entrypoint-initdb.d/init-db.sh

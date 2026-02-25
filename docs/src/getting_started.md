@@ -5,12 +5,15 @@ Follow this guide to get started with local development.
 ## Setup
 
 First, you will need the following stuff installed/setup:
-- Docker
-- 1password
-- node
+- Docker & Docker Compose
+- Rust (1.75+)  
+- Node.js (18+)
+- PostgreSQL client (`psql`)
+- 1Password CLI (optional)
 
-Then run `make init`. This will initialize the repo with all the stuff you need. At the time of writing this will
-- Create .env files (.env and dashboard/.env) for you. Please fill in the missing values
+Then run `make init`. This will initialize the repo with all the stuff you need. This will:
+- Create service-specific .env files (`api/.env` and `dashboard/.env`) from templates
+- You'll need to fill in the missing values in both files
 
 ## Starting the platform
 
