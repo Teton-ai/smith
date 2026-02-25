@@ -719,6 +719,7 @@ pub struct ExtendedTestSessionSummary {
     pub session_id: Uuid,
     #[schema(value_type = String)]
     pub created_at: DateTime<Utc>,
+    pub label_filter: String,
     pub device_count: i64,
     pub completed_count: i64,
     pub status: String,
@@ -743,13 +744,14 @@ pub async fn list_extended_test_sessions(
         SELECT
             nts.id,
             nts.created_at,
+            nts.label_filter,
             nts.device_count,
             COUNT(cr.id) as completed_count,
             COUNT(cq.id) FILTER (WHERE cq.canceled) as canceled_count
         FROM network_test_sessions nts
         JOIN command_queue cq ON cq.bundle = nts.bundle_id
         LEFT JOIN command_response cr ON cr.command_id = cq.id
-        GROUP BY nts.id, nts.created_at, nts.device_count
+        GROUP BY nts.id, nts.created_at, nts.label_filter, nts.device_count
         ORDER BY nts.created_at DESC
         LIMIT 50
         "#
@@ -783,6 +785,7 @@ pub async fn list_extended_test_sessions(
             ExtendedTestSessionSummary {
                 session_id: row.id,
                 created_at: row.created_at,
+                label_filter: row.label_filter,
                 device_count,
                 completed_count,
                 status: status.to_string(),
@@ -863,4 +866,99 @@ pub async fn cancel_extended_test(
         canceled_count,
         message: format!("Canceled {} pending commands", canceled_count),
     }))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct FindSessionsByDevicesQuery {
+    /// Comma-separated list of device serial numbers
+    pub serial_numbers: String,
+}
+
+/// Find extended test sessions that were run for a specific set of devices
+///
+/// The serial numbers are hashed and compared against stored device_set_hash to find exact matches.
+#[utoipa::path(
+    get,
+    path = "/network/extended-test/sessions/by-devices",
+    params(
+        ("serial_numbers" = String, Query, description = "Comma-separated list of device serial numbers")
+    ),
+    responses(
+        (status = 200, description = "Sessions matching the device set", body = Vec<ExtendedTestSessionSummary>),
+        (status = 400, description = "Invalid serial numbers"),
+        (status = 500, description = "Internal server error"),
+    ),
+    security(("auth_token" = [])),
+    tag = EXTENDED_TEST_TAG
+)]
+pub async fn find_sessions_by_devices(
+    Query(query): Query<FindSessionsByDevicesQuery>,
+    Extension(state): Extension<State>,
+) -> Result<Json<Vec<ExtendedTestSessionSummary>>, StatusCode> {
+    // Parse and sort serial numbers, then compute hash
+    let mut serial_numbers: Vec<&str> = query.serial_numbers.split(',').map(|s| s.trim()).collect();
+    if serial_numbers.is_empty() {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    serial_numbers.sort();
+    let serial_numbers_str = serial_numbers.join(",");
+
+    // Query sessions with matching device_set_hash (using PostgreSQL md5)
+    let sessions = sqlx::query!(
+        r#"
+        SELECT
+            nts.id,
+            nts.created_at,
+            nts.label_filter,
+            nts.device_count,
+            COUNT(cr.id) as completed_count,
+            COUNT(cq.id) FILTER (WHERE cq.canceled) as canceled_count
+        FROM network_test_sessions nts
+        JOIN command_queue cq ON cq.bundle = nts.bundle_id
+        LEFT JOIN command_response cr ON cr.command_id = cq.id
+        WHERE nts.device_set_hash = md5($1)
+        GROUP BY nts.id, nts.created_at, nts.label_filter, nts.device_count
+        ORDER BY nts.created_at DESC
+        LIMIT 50
+        "#,
+        &serial_numbers_str
+    )
+    .fetch_all(&state.pg_pool)
+    .await
+    .map_err(|err| {
+        error!("Failed to fetch sessions by device hash: {err}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    let summaries: Vec<ExtendedTestSessionSummary> = sessions
+        .into_iter()
+        .map(|row| {
+            let device_count = row.device_count as i64;
+            let completed_count = row.completed_count.unwrap_or(0);
+            let canceled_count = row.canceled_count.unwrap_or(0);
+            let all_resolved = completed_count + canceled_count >= device_count;
+            let status = if all_resolved {
+                if canceled_count > 0 {
+                    "canceled"
+                } else {
+                    "completed"
+                }
+            } else if completed_count > 0 {
+                "partial"
+            } else {
+                "running"
+            };
+
+            ExtendedTestSessionSummary {
+                session_id: row.id,
+                created_at: row.created_at,
+                label_filter: row.label_filter,
+                device_count,
+                completed_count,
+                status: status.to_string(),
+            }
+        })
+        .collect();
+
+    Ok(Json(summaries))
 }

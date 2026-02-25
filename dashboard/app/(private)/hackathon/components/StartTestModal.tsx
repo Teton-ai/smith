@@ -11,8 +11,10 @@ interface StartTestModalProps {
 	isError: boolean;
 	durationMinutes: number;
 	onDurationChange: (minutes: number) => void;
-	labelFilter: string;
-	onLabelFilterChange: (filter: string) => void;
+	// Selection from landing page
+	selectedLabels?: string[];
+	selectedDeviceCount?: number;
+	selectionMode?: "labels" | "devices";
 }
 
 function estimateDataUsageMB(durationMinutes: number): string {
@@ -65,8 +67,9 @@ export default function StartTestModal({
 	isError,
 	durationMinutes,
 	onDurationChange,
-	labelFilter,
-	onLabelFilterChange,
+	selectedLabels = [],
+	selectedDeviceCount = 0,
+	selectionMode = "labels",
 }: StartTestModalProps) {
 	const { data: dongleInfo, isLoading: dongleCheckLoading } = useOnlineDevicesDongleCheck();
 
@@ -109,24 +112,34 @@ export default function StartTestModal({
 						</p>
 					</div>
 
-					{/* Label Filter Input */}
+					{/* Selected Devices Display */}
 					<div>
 						<label className="block text-sm font-medium text-gray-700 mb-2">
 							<div className="flex items-center space-x-2">
 								<Tag className="w-4 h-4" />
-								<span>Label Filter</span>
+								<span>Target Devices</span>
 							</div>
 						</label>
-						<input
-							type="text"
-							value={labelFilter}
-							onChange={(e) => onLabelFilterChange(e.target.value)}
-							placeholder="e.g., location=office or env=prod"
-							className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-						/>
-						<p className="mt-1 text-xs text-gray-500">
-							Format: key=value (leave empty for all online devices)
-						</p>
+						<div className="px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg">
+							{selectionMode === "labels" && selectedLabels.length > 0 ? (
+								<div className="flex flex-wrap gap-2">
+									{selectedLabels.map((label) => (
+										<span
+											key={label}
+											className="inline-flex items-center px-2 py-1 rounded-full text-sm bg-indigo-100 text-indigo-800"
+										>
+											{label}
+										</span>
+									))}
+								</div>
+							) : selectionMode === "devices" && selectedDeviceCount > 0 ? (
+								<p className="text-sm text-gray-900">
+									{selectedDeviceCount} device{selectedDeviceCount !== 1 ? "s" : ""} selected
+								</p>
+							) : (
+								<p className="text-sm text-gray-500">All online devices</p>
+							)}
+						</div>
 					</div>
 
 					{/* Dongle Warning */}
@@ -160,7 +173,7 @@ export default function StartTestModal({
 							))}
 						</div>
 						<p className="mt-1 text-xs text-gray-500">
-							Longer tests provide more data points but keep devices busy longer
+							Longer tests provide more data points, but use more data and stress the connection longer
 						</p>
 					</div>
 				</div>

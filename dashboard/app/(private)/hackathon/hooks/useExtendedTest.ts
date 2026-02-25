@@ -6,6 +6,7 @@ import { useClientMutator } from "@/app/api-client-mutator";
 export interface ExtendedTestSessionSummary {
 	session_id: string;
 	created_at: string;
+	label_filter: string;
 	device_count: number;
 	completed_count: number;
 	status: string;
@@ -84,6 +85,22 @@ export const useExtendedTestSessions = () => {
 		queryKey: ["extendedTestSessions"],
 		queryFn: () =>
 			fetcher({ url: "/network/extended-test/sessions", method: "GET" }),
+	});
+};
+
+// Find sessions that were run for a specific set of devices (by serial numbers)
+export const useSessionsByDevices = (serialNumbers: string[]) => {
+	const fetcher = useClientMutator<ExtendedTestSessionSummary[]>();
+	const sortedSerials = [...serialNumbers].sort().join(",");
+
+	return useQuery({
+		queryKey: ["sessionsByDevices", sortedSerials],
+		queryFn: () =>
+			fetcher({
+				url: `/network/extended-test/sessions/by-devices?serial_numbers=${encodeURIComponent(sortedSerials)}`,
+				method: "GET",
+			}),
+		enabled: serialNumbers.length > 0,
 	});
 };
 

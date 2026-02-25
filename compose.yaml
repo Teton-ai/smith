@@ -5,8 +5,12 @@ services:
       context: .
       dockerfile: api/dev.Dockerfile
     container_name: smith-api
+    cap_add:
+      - NET_ADMIN
     env_file:
       - .env
+    environment:
+      - GLOBAL_BANDWIDTH_LIMIT=${GLOBAL_BANDWIDTH_LIMIT:-100}
     ports:
       - "8080:8080"
     volumes:
@@ -19,6 +23,7 @@ services:
       - cargo-registry:/usr/local/cargo/registry
       - cargo-git:/usr/local/cargo/git
       - target-cache:/app/target
+      - ./scripts/api-throttle.sh:/app/api-throttle.sh:ro
     networks:
       - backend
       - device-network
@@ -62,10 +67,17 @@ services:
         # Override with ubuntu:22.04 for x86_64 Linux development
         BASE_IMAGE: ${DEVICE_BASE_IMAGE:-nvcr.io/nvidia/l4t-base:r36.2.0}
     privileged: true
+    cap_add:
+      - NET_ADMIN
     volumes:
       - /sys/fs/cgroup:/sys/fs/cgroup:rw
+      - ./scripts/network-throttle.sh:/app/network-throttle.sh:ro
     environment:
       - RUST_LOG=INFO
+      - NETWORK_THROTTLE=${NETWORK_THROTTLE:-random}
+    entrypoint: ["/bin/bash", "-c", "/app/network-throttle.sh && exec /lib/systemd/systemd"]
+    deploy:
+      replicas: ${DEVICE_REPLICAS:-1}
     networks:
       - device-network
     depends_on:

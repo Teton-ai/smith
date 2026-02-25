@@ -11,12 +11,13 @@ WORKDIR /app
 RUN cargo install cargo-watch
 RUN rustup component add rustfmt clippy
 
-# Install build dependencies
+# Install build dependencies and iproute2 for traffic control
 RUN apt-get update && apt-get install -y \
     build-essential \
     libssl-dev \
     pkg-config \
     libdbus-1-dev \
+    iproute2 \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy workspace configuration files first for better caching
@@ -29,6 +30,9 @@ COPY models ./models
 COPY updater ./updater
 COPY cli ./cli
 
+# Copy sqlx offline cache
+COPY .sqlx ./.sqlx
+
 # Pre-build dependencies with offline mode (no DB available during build)
 # At runtime, cargo-watch will use the live database for type checking
 RUN SQLX_OFFLINE=true cargo build --package api
@@ -37,6 +41,13 @@ RUN SQLX_OFFLINE=true cargo build --package api
 ENV ROLES_PATH=./api/roles.toml
 
 EXPOSE 8080
+
+# Copy throttle script (also mounted as volume in compose for dev)
+COPY scripts/api-throttle.sh /app/api-throttle.sh
+RUN chmod +x /app/api-throttle.sh
+
+# Use throttle script as entrypoint to apply bandwidth limit before starting
+ENTRYPOINT ["/app/api-throttle.sh"]
 
 # Use cargo-watch to rebuild and restart on file changes
 # The -x run will execute cargo run, -w watches for changes

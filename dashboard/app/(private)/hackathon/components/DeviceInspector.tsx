@@ -25,7 +25,7 @@ function getWifiDetails(details: NetworkDetails): WifiDetails | null {
 	return null;
 }
 
-function generateDiagnosis(device: DeviceStressTestResult): string[] {
+function generateDiagnosis(device: DeviceExtendedTestResult): string[] {
 	const diagnoses: string[] = [];
 
 	if (!device.minute_stats || device.minute_stats.length === 0) {
@@ -180,7 +180,7 @@ export default function DeviceInspector({ device, onClose }: DeviceInspectorProp
 											borderRadius: "6px",
 											fontSize: "12px",
 										}}
-										formatter={(value: number) => `${value.toFixed(2)} Mbps`}
+										formatter={(value: number | undefined) => value !== undefined ? `${value.toFixed(2)} Mbps` : ""}
 									/>
 									<Legend wrapperStyle={{ fontSize: "12px" }} />
 									<Line

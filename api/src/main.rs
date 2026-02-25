@@ -213,6 +213,7 @@ async fn start_main_server(config: &'static Config, authorization: Authorization
         .routes(routes!(network::route::start_extended_network_test))
         .routes(routes!(network::route::get_extended_test_status))
         .routes(routes!(network::route::list_extended_test_sessions))
+        .routes(routes!(network::route::find_sessions_by_devices))
         .routes(routes!(network::route::cancel_extended_test))
         .routes(routes!(device::route::get_devices))
         .routes(routes!(
