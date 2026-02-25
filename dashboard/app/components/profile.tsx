@@ -88,7 +88,7 @@ export default function Profile({ sidebar, expanded }: ProfileProps) {
 							<ChevronRight className="w-3.5 h-3.5 ml-1 shrink-0" />
 						</span>
 					) : (
-						<span className="text-sm font-medium whitespace-nowrap flex items-center opacity-0 -translate-x-2 group-hover/sidebar:opacity-100 group-hover/sidebar:translate-x-0 transition-all duration-300 ease-out pointer-events-none group-hover/sidebar:pointer-events-auto">
+						<span className="text-sm font-medium whitespace-nowrap flex items-center opacity-0 -translate-x-2 group-hover/sidebar:opacity-100 group-hover/sidebar:translate-x-0 transition-all duration-300 ease-out pointer-events-none group-hover/sidebar:pointer-events-auto delay-0 group-hover/sidebar:delay-500">
 							<span className="truncate max-w-[100px]">
 								{user.name || user.email}
 							</span>

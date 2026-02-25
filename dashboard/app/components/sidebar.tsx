@@ -26,7 +26,7 @@ interface SidebarProps {
 
 function DesktopLabel({ children }: { children: React.ReactNode }) {
 	return (
-		<span className="text-sm font-medium whitespace-nowrap opacity-0 -translate-x-2 group-hover/sidebar:opacity-100 group-hover/sidebar:translate-x-0 transition-all duration-300 ease-out pointer-events-none group-hover/sidebar:pointer-events-auto">
+		<span className="text-sm font-medium whitespace-nowrap opacity-0 -translate-x-2 group-hover/sidebar:opacity-100 group-hover/sidebar:translate-x-0 transition-all duration-300 ease-out pointer-events-none group-hover/sidebar:pointer-events-auto delay-0 group-hover/sidebar:delay-500">
 			{children}
 		</span>
 	);
@@ -55,7 +55,7 @@ export default function Sidebar({
 	return (
 		<div className={`flex min-h-screen ${className || "bg-gray-50"}`}>
 			{/* Desktop sidebar */}
-			<aside className="hidden md:flex flex-col fixed inset-y-0 left-0 z-40 bg-white border-r border-gray-200 w-16 hover:w-56 transition-all duration-300 ease-in-out group/sidebar">
+			<aside className="hidden md:flex flex-col fixed inset-y-0 left-0 z-40 bg-white border-r border-gray-200 w-16 hover:w-56 transition-all duration-300 ease-in-out group/sidebar delay-0 hover:delay-500">
 				{/* Logo */}
 				<div className="flex items-center h-16 px-4 shrink-0">
 					<Link
@@ -67,11 +67,18 @@ export default function Sidebar({
 							alt="Smith Logo"
 							width={32}
 							height={32}
-							className="shrink-0 rounded-md shadow-sm transition-transform duration-300 group-hover/sidebar:scale-105"
+							className="shrink-0 rounded-md shadow-sm"
+							style={{
+								display: "block",
+								minWidth: "32px",
+								minHeight: "32px",
+								maxWidth: "32px",
+								maxHeight: "32px",
+							}}
 						/>
 					</Link>
 					{versionText && (
-						<span className="ml-3 text-[11px] text-gray-400 font-mono whitespace-nowrap opacity-0 -translate-x-2 group-hover/sidebar:opacity-100 group-hover/sidebar:translate-x-0 transition-all duration-300 ease-out">
+						<span className="ml-3 text-[11px] text-gray-400 font-mono whitespace-nowrap opacity-0 -translate-x-2 group-hover/sidebar:opacity-100 group-hover/sidebar:translate-x-0 transition-all duration-300 ease-out delay-0 group-hover/sidebar:delay-500">
 							v{versionText}
 						</span>
 					)}
