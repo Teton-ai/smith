@@ -68,12 +68,12 @@ export default function Sidebar({
 							width={32}
 							height={32}
 							className="shrink-0 rounded-md shadow-sm"
-							style={{ 
-								display: 'block',
-								minWidth: '32px', 
-								minHeight: '32px',
-								maxWidth: '32px',
-								maxHeight: '32px'
+							style={{
+								display: "block",
+								minWidth: "32px",
+								minHeight: "32px",
+								maxWidth: "32px",
+								maxHeight: "32px",
 							}}
 						/>
 					</Link>
