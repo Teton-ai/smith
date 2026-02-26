@@ -43,6 +43,7 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: ./dashboard
+          file: ./dashboard/dashboard.prod.Dockerfile
           push: true
           tags: |
             tetonai/smith-dashboard
