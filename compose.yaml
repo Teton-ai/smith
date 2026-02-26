@@ -78,6 +78,8 @@ services:
       context: ./dashboard
       dockerfile: dashboard-dev.Dockerfile
     container_name: smith-dashboard
+    env_file:
+      - ./dashboard/.env
     ports:
       - "3000:3000"
     volumes:
