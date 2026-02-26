@@ -1,26 +1,23 @@
-use crate::asset::Asset;
-use crate::db::{DBHandler, DeviceWithToken};
-use crate::device::{Device, RegistrationError};
-use crate::ip_address::IpAddressInfo;
+use crate::device::{
+    RegistrationError, get_target_release, save_last_ping_with_ip, save_release_id,
+};
+use crate::handlers::AuthedDevice;
+use crate::ip_address::extract_client_ip;
+use crate::storage::Storage;
 use crate::{State, storage};
 use axum::body::Body;
 use axum::extract::{ConnectInfo, Multipart, Path, Query};
 use axum::http::{HeaderMap, StatusCode};
-use axum::response::{IntoResponse, Response};
+use axum::response::Response;
 use axum::{Extension, Json};
-use futures::TryStreamExt;
-use s3::Bucket;
-use s3::creds::Credentials;
-use s3::error::S3Error;
 use serde::{Deserialize, Serialize};
 use smith::utils::schema::{
     DeviceRegistration, DeviceRegistrationResponse, HomePost, HomePostResponse, Package,
 };
-use std::error::Error;
 use std::net::SocketAddr;
 use std::time::SystemTime;
 use tracing::{debug, error, info};
-use utoipa::ToSchema;
+use utoipa::{IntoParams, ToSchema};
 
 #[utoipa::path(
   post,
@@ -32,12 +29,11 @@ use utoipa::ToSchema;
         (status = 500, description = "Internal server error")
   )
 )]
-#[tracing::instrument]
 pub async fn register_device(
     Extension(state): Extension<State>,
     Json(payload): Json<DeviceRegistration>,
 ) -> (StatusCode, Json<DeviceRegistrationResponse>) {
-    let token = Device::register_device(payload, &state.pg_pool, state.config).await;
+    let token = crate::device::register_device(payload, &state.pg_pool, state.config).await;
 
     match token {
         Ok(token) => (StatusCode::OK, Json(token)),
@@ -64,18 +60,17 @@ pub async fn register_device(
         ("device_token" = [])
   ),
 )]
-#[tracing::instrument]
 pub async fn home(
     headers: HeaderMap,
-    device: DeviceWithToken,
+    device: AuthedDevice,
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
     Extension(state): Extension<State>,
     Json(payload): Json<HomePost>,
 ) -> (StatusCode, Json<HomePostResponse>) {
     let release_id = payload.release_id;
-    DBHandler::save_responses(&device, payload, &state.pg_pool)
+    let _ = crate::home::save_responses(device.id, &device.serial_number, payload, &state.pg_pool)
         .await
-        .unwrap_or_else(|err| {
+        .inspect_err(|err| {
             error!("Error saving responses: {:?}", err);
         });
 
@@ -83,20 +78,22 @@ pub async fn home(
         timestamp: SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
             .unwrap_or_default(),
-        commands: DBHandler::get_commands(&device, &state.pg_pool).await,
-        target_release_id: Device::get_target_release(&device, &state.pg_pool).await,
+        commands: crate::home::get_commands(device.id, &device.serial_number, &state.pg_pool)
+            .await
+            .unwrap_or(Vec::new()),
+        target_release_id: get_target_release(device.id, &state.pg_pool).await,
     };
 
-    let client_ip = Some(IpAddressInfo::extract_client_ip(&headers, addr));
+    let client_ip = Some(extract_client_ip(&headers, addr));
     tokio::spawn(async move {
-        Device::save_release_id(&device, release_id, &state.pg_pool)
+        let _ = save_release_id(device.id, release_id, &state.pg_pool)
             .await
-            .unwrap_or_else(|err| {
+            .inspect_err(|err| {
                 error!("Error saving release_id: {:?}", err);
             });
-        Device::save_last_ping_with_ip(&device, client_ip, &state.pg_pool, state.config)
+        let _ = save_last_ping_with_ip(device.id, client_ip, &state.pg_pool, state.config)
             .await
-            .unwrap_or_else(|err| {
+            .inspect_err(|err| {
                 error!("Error saving last ping with IP: {:?}", err);
             });
     });
@@ -104,11 +101,16 @@ pub async fn home(
     (StatusCode::OK, Json(response))
 }
 
+#[derive(Deserialize, Debug, IntoParams)]
+pub struct DownloadParams {
+    path: String,
+}
+
 #[utoipa::path(
   get,
-  path = "/smith/download/{path}",
+  path = "/smith/download",
   params(
-        ("path" = String, Path, description = "File path to download")
+        DownloadParams
   ),
   responses(
         (status = 200, description = "File download successful", content_type = "application/octet-stream"),
@@ -119,36 +121,74 @@ pub async fn home(
         ("device_token" = [])
   ),
 )]
-#[tracing::instrument]
 pub async fn download_file(
-    _device: DeviceWithToken,
-    path: Option<Path<String>>,
+    _device: AuthedDevice,
+    Query(params): Query<DownloadParams>,
     Extension(state): Extension<State>,
 ) -> Result<axum::response::Response<Body>, StatusCode> {
-    // Get file path from request
-    let file_path = match path {
-        Some(p) => p.0,
-        None => return Err(StatusCode::BAD_REQUEST),
-    };
+    let file_path = &params.path;
 
-    // Split into directory path and file name
-    let (dir_path, file_name) = if let Some(idx) = file_path.rfind('/') {
-        (&file_path[..idx], &file_path[idx + 1..])
+    // Strip leading slash if present
+    let path = file_path.strip_prefix('/').unwrap_or(file_path.as_str());
+    // Split into bucket, directory path, and file name
+    let (bucket, dir_path, file_name) = if let Some(first_idx) = path.find('/') {
+        let bucket = &path[..first_idx];
+        let remaining_path = &path[first_idx + 1..];
+
+        if let Some(last_idx) = remaining_path.rfind('/') {
+            let dir_path = &remaining_path[..last_idx];
+            let file_name = &remaining_path[last_idx + 1..];
+            (bucket, dir_path, file_name)
+        } else {
+            (bucket, "", remaining_path)
+        }
     } else {
-        ("", file_path.as_str())
+        (path, "", "")
     };
 
-    // Get a signed link to the s3 file
-    let response = storage::Storage::download_from_s3(
-        &state.config.assets_bucket_name,
-        Some(dir_path),
-        file_name,
-    )
-    .await
-    .map_err(|err| {
-        error!("Failed to get signed link from S3 {:?}", err);
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
+    if file_name.is_empty() || bucket.is_empty() {
+        error!("File name is empty in the requested path: {}", path);
+        return Err(StatusCode::BAD_REQUEST);
+    }
+
+    // Add more buckets here if needed
+    let response = match bucket.to_lowercase().as_str() {
+        // "packages" => &state.config.packages_bucket_name,
+        // "assets" => &state.config.assets_bucket_name,
+        "packages" => storage::Storage::download_package_from_cdn(
+            &state.config.packages_bucket_name,
+            Some(dir_path),
+            file_name,
+            &state.config.cloudfront.package_domain_name,
+            &state.config.cloudfront.package_key_pair_id,
+            &state.config.cloudfront.package_private_key,
+        )
+        .await
+        .map_err(|err| {
+            error!("Failed to get signed link from CDN {:?}", err);
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?,
+        // TODO: need to implement asset downloading or put
+        // ota stuff in packages bucket
+        //
+        // "assets" => storage::Storage::download_package_from_cdn(
+        //     &state.config.packages_bucket_name,
+        //     Some(dir_path),
+        //     file_name,
+        //     &state.config.cloudfront.package_domain_name,
+        //     &state.config.cloudfront.package_key_pair_id,
+        //     &state.config.cloudfront.package_private_key,
+        // )
+        // .await
+        // .map_err(|err| {
+        //     error!("Failed to get signed link from CDN {:?}", err);
+        //     StatusCode::INTERNAL_SERVER_ERROR
+        // })?,
+        _ => {
+            error!("Invalid bucket name requested: {}", bucket);
+            return Err(StatusCode::BAD_REQUEST);
+        }
+    };
 
     Ok(response)
 }
@@ -173,52 +213,13 @@ pub struct FetchPackageQuery {
         ("device_token" = [])
   ),
 )]
-#[tracing::instrument]
 pub async fn fetch_package(
-    _device: DeviceWithToken,
+    _device: AuthedDevice,
     Extension(state): Extension<State>,
     params: Query<FetchPackageQuery>,
 ) -> Result<Response, Response> {
-    let deb_package_name = &params.name;
-    debug!("Fetching package {}", &deb_package_name);
-    let bucket = Bucket::new(
-        &state.config.packages_bucket_name,
-        state
-            .config
-            .aws_region
-            .parse()
-            .expect("error: failed to parse AWS region"),
-        Credentials::default().unwrap(),
-    )
-    .map_err(|e| {
-        error!("{:?}", e);
-        StatusCode::INTERNAL_SERVER_ERROR.into_response()
-    })?;
-
-    let stream = bucket
-        .get_object_stream(&deb_package_name)
-        .await
-        .map_err(|e| {
-            error!("{:?}", e);
-            match e {
-                S3Error::HttpFailWithBody(404, _) => (
-                    StatusCode::NOT_FOUND,
-                    format!("{} package not found", &deb_package_name),
-                )
-                    .into_response(),
-
-                _ => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
-            }
-        })?;
-
-    let adapted_stream = stream
-        .bytes
-        .map_ok(|data| data)
-        .map_err(|e| Box::new(e) as Box<dyn Error + Send + Sync + 'static>);
-
-    let stream = Body::from_stream(adapted_stream);
-
-    Ok(Response::new(stream).into_response())
+    debug!("Fetching package {}", &params.name);
+    crate::package::route::stream_package_from_s3(&params.name, state.config).await
 }
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
@@ -239,9 +240,8 @@ pub struct UploadResult {
         ("device_token" = [])
   ),
 )]
-#[tracing::instrument]
 pub async fn upload_file(
-    _device: DeviceWithToken,
+    _device: AuthedDevice,
     path: Option<Path<String>>,
     Extension(state): Extension<State>,
     mut multipart: Multipart,
@@ -252,31 +252,33 @@ pub async fn upload_file(
         file_name.push('/');
     }
 
-    let mut file_data = Vec::new();
-    while let Some(field) = multipart
+    let field = multipart
         .next_field()
         .await
         .expect("error: failed to get next multipart field")
-    {
-        if let Some(local_file_name) = field.file_name().map(|s| s.to_string()) {
-            file_name.push_str(&local_file_name);
-        }
-        match field.bytes().await {
-            Ok(bytes) => file_data.extend(bytes.clone()),
-            _ => return Err(StatusCode::BAD_REQUEST),
-        };
-    }
+        .ok_or(StatusCode::BAD_REQUEST)?;
+    let Some(local_file_name) = field.file_name() else {
+        return Err(StatusCode::BAD_REQUEST);
+    };
+    file_name.push_str(local_file_name);
+
+    let file_data = field.bytes().await.map_err(|_| StatusCode::BAD_REQUEST)?;
 
     if file_name.is_empty() {
         return Err(StatusCode::BAD_REQUEST);
     }
 
-    Asset::new(&file_name, &file_data, state.config)
-        .await
-        .map_err(|err| {
-            error!("{:?}", err);
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?;
+    Storage::save_to_s3(
+        &state.config.assets_bucket_name,
+        None,
+        &file_name,
+        &file_data,
+    )
+    .await
+    .map_err(|err| {
+        error!("{:?}", err);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
 
     Ok(Json(UploadResult {
         url: format!("s3://{}/{}", &state.config.assets_bucket_name, &file_name),
@@ -297,9 +299,8 @@ pub async fn upload_file(
         ("device_token" = [])
   ),
 )]
-#[tracing::instrument]
 pub async fn list_release_packages(
-    _device: DeviceWithToken,
+    _device: AuthedDevice,
     Path(release_id): Path<i32>,
     Extension(state): Extension<State>,
 ) -> Result<Json<Vec<Package>>, Json<Vec<Package>>> {
@@ -340,4 +341,22 @@ pub async fn test_file() -> Response<Body> {
         .header("Content-Length", FILE_SIZE.to_string())
         .body(Body::from(data))
         .unwrap()
+}
+
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct UploadTestResult {
+    pub bytes_received: usize,
+}
+
+#[utoipa::path(
+    post,
+    path = "/smith/network/test-upload",
+    responses(
+        (status = 200, description = "Receives upload data for network speed testing", body = UploadTestResult),
+    )
+)]
+pub async fn test_upload(body: axum::body::Bytes) -> Json<UploadTestResult> {
+    Json(UploadTestResult {
+        bytes_received: body.len(),
+    })
 }

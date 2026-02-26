@@ -1,42 +1,43 @@
 use crate::State;
 use crate::device::{
-    AuthDevice, CommandsPaginated, Device, DeviceCommandResponse, DeviceHealth, DeviceLabels,
-    DeviceLedgerItem, DeviceLedgerItemPaginated, DeviceNetwork, DeviceRelease, LeanDevice,
-    LeanResponse, NewVariable, Note, RawDevice, Tag, UpdateDeviceRelease, UpdateDevicesRelease,
-    Variable, helpers,
+    ApproveDeviceBody, DeviceHealth, DeviceLedgerItem, DeviceLedgerItemPaginated, DeviceRelease,
+    LabelWithValues, NewVariable, Note, RawDevice, UpdateDeviceRelease, UpdateDevicesRelease,
+    Variable,
 };
 use crate::event::PublicEvent;
+use crate::handlers::AuthedDevice;
 use crate::middlewares::authorization;
-use crate::modem::Modem;
-use crate::release::Release;
+use crate::release::get_release_by_id;
+use crate::slack::send_slack_notification;
 use crate::user::CurrentUser;
 use axum::extract::Host;
 use axum::extract::Path;
 use axum::http::StatusCode;
 use axum::{Extension, Json};
 use axum_extra::extract::Query;
+use models::device::{
+    CommandsPaginated, Device, DeviceCommandResponse, DeviceFilter, DeviceNetwork,
+};
+use models::modem::Modem;
+use models::release::Release;
 use serde::Deserialize;
+use serde_json::json;
 use smith::utils::schema;
 use smith::utils::schema::SafeCommandRequest;
-use sqlx::Row;
+use sqlx::types::Json as SqlxJson;
 use std::collections::HashMap;
-use tracing::{debug, error};
+use tracing::error;
+use utoipa::IntoParams;
 
 const DEVICE_TAG: &str = "device";
 const DEVICES_TAG: &str = "devices";
-
-#[derive(Deserialize, Debug)]
-pub struct LeanDeviceFilter {
-    reverse: Option<bool>,
-    limit: Option<i64>,
-}
 
 #[utoipa::path(
     get,
     path = "/device",
     responses(
         (status = StatusCode::OK, description = "Return Device Information", body = RawDevice),
-
+        (status = StatusCode::NOT_FOUND, description = "Device not found"),
     ),
     security(
         ("device_token" = [])
@@ -44,285 +45,42 @@ pub struct LeanDeviceFilter {
     tag = DEVICE_TAG,
 )]
 pub async fn get_device(
-    Extension(AuthDevice(device)): Extension<AuthDevice>,
-) -> axum::response::Result<Json<RawDevice>, StatusCode> {
-    Ok(Json(device))
-}
-
-// TODO: this is getting crazy huge, maybe it would be nice to have an handler
-// per filter type instead of only 1 to handle all, maybe that could also have
-// some performance benefits to let axum handle the matching of the arms
-#[utoipa::path(
-    get,
-    path = "/lean/{filter_kind}/{filter_value}",
-    responses(
-        (status = 200, description = "Filtered devices", body = LeanResponse),
-        (status = 403, description = "Forbidden"),
-        (status = 500, description = "Failed to retrieve devices", body = String),
-    ),
-    security(
-        ("auth_token" = [])
-    ),
-    tag = DEVICES_TAG
-)]
-#[deprecated(
-    since = "0.2.65",
-    note = "We are moving to `/devices` endpoint and make it support conditional params/filters"
-)]
-pub async fn get_devices_new(
+    device: AuthedDevice,
     Extension(state): Extension<State>,
-    Extension(current_user): Extension<CurrentUser>,
-    Path((filter_kind, filter_value)): Path<(String, String)>,
-    Query(query_params): Query<LeanDeviceFilter>,
-) -> axum::response::Result<Json<LeanResponse>, StatusCode> {
-    let reverse = query_params.reverse.unwrap_or(false);
-    let limit = query_params.limit.unwrap_or(100);
-
-    let allowed = authorization::check(current_user, "devices", "read");
-
-    if !allowed {
-        return Err(StatusCode::FORBIDDEN);
-    }
-
-    debug!(
-        "Fetching devices with filter kind: {filter_kind}, filter value: {filter_value}, reverse: {reverse}, limit: {limit}"
-    );
-    let devices = match (filter_kind.as_str(), reverse) {
-    ("sn", true) => {
-      sqlx::query_as!(LeanDevice, "SELECT id, serial_number, last_ping as last_seen, approved, release_id = target_release_id as up_to_date, ip_address_id FROM device WHERE serial_number LIKE '%' || $1 || '%' AND archived = false LIMIT $2", filter_value, limit)
-        .fetch_all(&state.pg_pool)
-        .await
-        .map_err(|err| {
-          error!("Failed to get devices {err}");
-          StatusCode::INTERNAL_SERVER_ERROR
-        })
-    },
-    ("sn", false) => {
-      sqlx::query_as!(LeanDevice, "SELECT id, serial_number, last_ping as last_seen, approved, release_id = target_release_id as up_to_date, ip_address_id FROM device WHERE serial_number LIKE '%' || $1 || '%' AND archived = false LIMIT $2", filter_value, limit)
-        .fetch_all(&state.pg_pool)
-        .await
-        .map_err(|err| {
-          error!("Failed to get devices {err}");
-          StatusCode::INTERNAL_SERVER_ERROR
-        })
-    },
-    ("approved", true) => {
-      let value = filter_value.parse().unwrap_or(false);
-      sqlx::query_as!(LeanDevice, "SELECT id, serial_number, last_ping as last_seen, approved, release_id = target_release_id as up_to_date, ip_address_id FROM device WHERE approved != $1 AND archived = false LIMIT $2", value, limit)
-        .fetch_all(&state.pg_pool)
-        .await
-        .map_err(|err| {
-          error!("Failed to get devices {err}");
-          StatusCode::INTERNAL_SERVER_ERROR
-        })
-    },
-    ("approved", false) => {
-      let value = filter_value.parse().unwrap_or(false);
-      sqlx::query_as!(LeanDevice, "SELECT id, serial_number, last_ping as last_seen, approved, release_id = target_release_id as up_to_date, ip_address_id FROM device WHERE approved = $1 AND archived = false LIMIT $2", value, limit)
-        .fetch_all(&state.pg_pool)
-        .await
-        .map_err(|err| {
-          error!("Failed to get devices {err}");
-          StatusCode::INTERNAL_SERVER_ERROR
-        })
-    }
-    ("tag", true) => {
-      sqlx::query_as!(LeanDevice, r#"SELECT
-                            d.id,
-                            d.serial_number,
-                            d.last_ping as last_seen,
-                            d.approved,
-                            release_id = target_release_id as up_to_date,
-                            d.ip_address_id
-                        FROM device d
-                        JOIN tag_device td ON d.id = td.device_id
-                        JOIN tag t ON td.tag_id = t.id
-                        WHERE t.name != $1 AND d.archived = false
-                        LIMIT $2
-                "#, filter_value, limit)
-        .fetch_all(&state.pg_pool)
-        .await
-        .map_err(|err| {
-          error!("Failed to get devices {err}");
-          StatusCode::INTERNAL_SERVER_ERROR
-        })
-    }
-    ("tag", false) => {
-      sqlx::query_as!(LeanDevice, r#"SELECT
-                d.id,
-                d.serial_number,
-                d.last_ping as last_seen,
-                d.approved,
-                release_id = target_release_id as up_to_date,
-                d.ip_address_id
-                FROM device d
-                JOIN tag_device td ON d.id = td.device_id
-                JOIN tag t ON td.tag_id = t.id
-                WHERE t.name = $1 AND d.archived = false
-                LIMIT $2"#, filter_value, limit)
-        .fetch_all(&state.pg_pool)
-        .await
-        .map_err(|err| {
-          error!("Failed to get devices {err}");
-          StatusCode::INTERNAL_SERVER_ERROR
-        })
-    }
-    ("distro", false) => {
-      sqlx::query_as!(LeanDevice, r#"
-                SELECT d.id, d.serial_number, d.last_ping as last_seen, d.approved,
-                release_id = target_release_id as up_to_date, d.ip_address_id
-                FROM device d
-                LEFT JOIN release r ON r.id = d.release_id
-                LEFT JOIN distribution dist ON r.distribution_id = dist.id
-                WHERE dist.name = $1 AND d.archived = false
-                LIMIT $2"#, filter_value, limit)
-        .fetch_all(&state.pg_pool)
-        .await
-        .map_err(|err| {
-          error!("Failed to get devices {err}");
-          StatusCode::INTERNAL_SERVER_ERROR
-        })
-    }
-    ("distro", true) => {
-      sqlx::query_as!(LeanDevice, r#"
-                SELECT d.id, d.serial_number, d.last_ping as last_seen, d.approved,
-                release_id = target_release_id as up_to_date, d.ip_address_id
-                FROM device d
-                LEFT JOIN release r ON r.id = d.release_id
-                LEFT JOIN distribution dist ON r.distribution_id = dist.id
-                WHERE dist.name != $1 AND d.archived = false
-                ORDER BY d.id DESC
-                LIMIT $2"#, filter_value, limit)
-        .fetch_all(&state.pg_pool)
-        .await
-        .map_err(|err| {
-          error!("Failed to get devices {err}");
-          StatusCode::INTERNAL_SERVER_ERROR
-        })
-    }
-    ("release", false) => {
-      sqlx::query_as!(LeanDevice, r#"
-                SELECT d.id, d.serial_number, d.last_ping as last_seen, d.approved,
-                release_id = target_release_id as up_to_date, d.ip_address_id
-                FROM device d
-                LEFT JOIN release r ON r.id = d.release_id
-                WHERE r.version = $1 AND d.archived = false
-                LIMIT $2"#
-            , filter_value, limit)
-        .fetch_all(&state.pg_pool)
-        .await
-        .map_err(|err| {
-          error!("Failed to get devices {err}");
-          StatusCode::INTERNAL_SERVER_ERROR
-        })
-    }
-    ("release", true) => {
-      sqlx::query_as!(LeanDevice, r#"
-                SELECT d.id, d.serial_number, d.last_ping as last_seen, d.approved,
-                release_id = target_release_id as up_to_date, d.ip_address_id
-                FROM device d
-                LEFT JOIN release r ON r.id = d.release_id
-                WHERE r.version != $1 AND d.archived = false
-                ORDER BY d.id DESC
-                LIMIT $2"#
-            , filter_value, limit)
-        .fetch_all(&state.pg_pool)
-        .await
-        .map_err(|err| {
-          error!("Failed to get devices {err}");
-          StatusCode::INTERNAL_SERVER_ERROR
-        })
-    }
-    ("online", _) => {
-      let value = filter_value.parse::<bool>().unwrap_or(false);
-      let is_online = if reverse { !value } else { value };
-
-      let query = if is_online {
+) -> axum::response::Result<Json<RawDevice>, StatusCode> {
+    let device = sqlx::query_as!(
+        RawDevice,
         r#"
-                SELECT d.id, d.serial_number, d.last_ping as last_seen, d.approved,
-                release_id = target_release_id as up_to_date, d.ip_address_id
-                FROM device d
-                WHERE d.last_ping >= now() - INTERVAL '5 min'
-                AND d.archived = false
-                LIMIT $1"#
-      } else {
-        r#"
-                SELECT d.id, d.serial_number, d.last_ping as last_seen, d.approved,
-                release_id = target_release_id as up_to_date, d.ip_address_id
-                FROM device d
-                WHERE d.last_ping < now() - INTERVAL '5 min'
-                AND d.archived = false
-                LIMIT $1"#
-      };
-
-      sqlx::query_as::<_, LeanDevice>(query)
-        .bind(limit)
-        .fetch_all(&state.pg_pool)
-        .await
-        .map_err(|err| {
-          error!("Failed to get devices {err}");
-          StatusCode::INTERNAL_SERVER_ERROR
-        })
-    }
-    ("updated", _) => {
-      let value = filter_value.parse::<bool>().unwrap_or(false);
-      let is_updated = if reverse { !value } else { value };
-
-      let query = if is_updated {
-        r#"
-                SELECT d.id, d.serial_number, d.last_ping as last_seen, d.approved,
-                release_id = target_release_id as up_to_date, d.ip_address_id
-                FROM device d
-                WHERE release_id = target_release_id
-                AND d.archived = false
-                LIMIT $1"#
-      } else {
-        r#"
-                SELECT d.id, d.serial_number, d.last_ping as last_seen, d.approved,
-                release_id = target_release_id as up_to_date, d.ip_address_id
-                FROM device d
-                WHERE release_id != target_release_id
-                AND d.archived = false
-                LIMIT $1"#
-      };
-
-      sqlx::query_as::<_, LeanDevice>(query)
-        .bind(limit)
-        .fetch_all(&state.pg_pool)
-        .await
-        .map_err(|err| {
-          error!("Failed to get devices {err}");
-          StatusCode::INTERNAL_SERVER_ERROR
-        })
-    }
-    _ => Err(StatusCode::BAD_REQUEST),
-  }?;
-
-    Ok(Json(LeanResponse {
-        limit,
-        reverse,
-        devices,
-    }))
-}
-
-/// Query filter for device listing.
-#[derive(Deserialize, Debug)]
-pub struct DeviceFilter {
-    pub serial_number: Option<String>,
-    /// Filter by approved status. If None, only approved devices are included by default.
-    pub approved: Option<bool>,
-    /// Filter by archived status. If None, archived devices are excluded by default.
-    pub archived: Option<bool>,
-    #[deprecated(
-        since = "0.2.64",
-        note = "Since labels have been released, tags concept be in version 0.74"
-    )]
-    pub tag: Option<String>,
+        SELECT
+            d.*,
+            COALESCE(JSONB_OBJECT_AGG(l.name, dl.value) FILTER (WHERE l.name IS NOT NULL), '{}') as "labels!: SqlxJson<HashMap<String, String>>"
+        FROM device d
+        LEFT JOIN device_label dl ON dl.device_id = d.id
+        LEFT JOIN label l ON l.id = dl.label_id
+        WHERE
+            d.id = $1
+        GROUP BY d.id
+        "#,
+        device.id
+        )
+        .fetch_one(&state.pg_pool).await.map_err(|e| {
+                match e {
+                    sqlx::Error::RowNotFound => StatusCode::NOT_FOUND,
+                    _ => {
+                        error!("Failed to get device {e}");
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    }
+                }
+            })?;
+    Ok(Json(device))
 }
 
 #[utoipa::path(
     get,
     path = "/devices",
+    params(
+        DeviceFilter
+    ),
     responses(
         (status = StatusCode::OK, description = "List of devices retrieved successfully", body = Vec<Device>),
         (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to retrieve devices"),
@@ -336,21 +94,23 @@ pub async fn get_devices(
     Extension(state): Extension<State>,
     filter: Query<DeviceFilter>,
 ) -> axum::response::Result<Json<Vec<Device>>, StatusCode> {
+    #[allow(deprecated)]
     let devices = sqlx::query!(
         r#"SELECT
             d.id,
             d.serial_number,
             d.note,
             d.last_ping as last_seen,
+            CASE WHEN d.last_ping > NOW() - INTERVAL '3 minutes' THEN true ELSE false END as "online!",
             d.created_on,
             d.approved,
             d.token IS NOT NULL as has_token,
             d.release_id,
             d.target_release_id,
+            d.target_release_id_set_at,
             d.system_info,
             d.modem_id,
             d.ip_address_id,
-            d.labels,
             ip.id as "ip_id?",
             ip.ip_address as "ip_address?",
             ip.name as "ip_name?",
@@ -391,11 +151,12 @@ pub async fn get_devices(
             tr.created_at as "target_release_created_at?",
             tr.user_id as "target_release_user_id?",
             dn.network_score as "network_score?",
+            dn.download_speed_mbps as "network_download_speed_mbps?",
+            dn.upload_speed_mbps as "network_upload_speed_mbps?",
             dn.source as "network_source?",
-            dn.updated_at as "network_updated_at?"
+            dn.updated_at as "network_updated_at?",
+            COALESCE(JSONB_OBJECT_AGG(l.name, dl.value) FILTER (WHERE l.name IS NOT NULL), '{}') as "labels!: SqlxJson<HashMap<String, String>>"
         FROM device d
-        LEFT JOIN tag_device td ON d.id = td.device_id AND $4::text IS NOT NULL
-        LEFT JOIN tag t ON td.tag_id = t.id AND t.name = $4
         LEFT JOIN ip_address ip ON d.ip_address_id = ip.id
         LEFT JOIN modem m ON d.modem_id = m.id
         LEFT JOIN release r ON d.release_id = r.id
@@ -403,15 +164,51 @@ pub async fn get_devices(
         LEFT JOIN release tr ON d.target_release_id = tr.id
         LEFT JOIN distribution trd ON tr.distribution_id = trd.id
         LEFT JOIN device_network dn ON d.id = dn.device_id
+        LEFT JOIN device_label dl ON dl.device_id = d.id
+        LEFT JOIN label l ON l.id = dl.label_id
         WHERE ($1::text IS NULL OR d.serial_number = $1)
           AND ($2::boolean IS NULL OR d.approved = $2)
           AND (COALESCE($3, false) = true OR d.archived = false)
-          AND ($4::text IS NULL OR t.name IS NOT NULL)
-        ORDER BY d.serial_number"#,
+          AND (CARDINALITY($4::text[]) = 0 OR l.name || '=' || dl.value = ANY($4))
+          AND ($5::boolean IS NULL OR
+               ($5 = true AND d.last_ping >= now() - INTERVAL '3 minutes') OR
+               ($5 = false AND d.last_ping < now() - INTERVAL '3 minutes'))
+          AND ($6::boolean IS NULL OR
+               ($6 = true AND d.release_id != d.target_release_id) OR
+               ($6 = false AND d.release_id = d.target_release_id))
+          AND ($12::bigint IS NULL OR
+               d.target_release_id_set_at <= now() - make_interval(mins => $12::int))
+          AND (CARDINALITY($7::text[]) = 0 OR NOT EXISTS (
+              SELECT 1 FROM device_label edl
+              JOIN label el ON el.id = edl.label_id
+              WHERE edl.device_id = d.id
+              AND el.name || '=' || edl.value = ANY($7)
+          ))
+          AND ($10::text IS NULL OR $10 = '' OR (
+              POSITION(LOWER($10) IN LOWER(d.serial_number)) > 0 OR
+              POSITION(LOWER($10) IN LOWER(COALESCE(d.system_info->>'hostname', ''))) > 0 OR
+              POSITION(LOWER($10) IN LOWER(COALESCE(d.system_info->'device_tree'->>'model', ''))) > 0
+          ))
+          AND ($11::int IS NULL OR d.release_id = $11)
+          AND ($13::int IS NULL OR rd.id = $13)
+        GROUP BY d.id, ip.id, m.id, r.id, rd.id, tr.id, trd.id, dn.device_id
+        ORDER BY d.last_ping DESC NULLS LAST, d.serial_number
+        LIMIT $8
+        OFFSET $9
+        "#,
         filter.serial_number,
         filter.approved,
         filter.archived,
-        filter.tag
+        filter.labels.as_slice(),
+        filter.online,
+        filter.outdated,
+        filter.exclude_labels.as_slice(),
+        filter.limit.unwrap_or(100).clamp(1, 1000),
+        filter.offset.unwrap_or(0).max(0),
+        filter.search,
+        filter.release_id,
+        filter.outdated_minutes,
+        filter.distribution_id
     )
     .fetch_all(&state.pg_pool)
     .await
@@ -429,7 +226,7 @@ pub async fn get_devices(
                     _ => None,
                 };
 
-                Some(crate::ip_address::IpAddressInfo {
+                Some(models::ip_address::IpAddressInfo {
                     id: row.ip_id.unwrap(),
                     ip_address: row.ip_address.unwrap(),
                     name: row.ip_name,
@@ -474,6 +271,7 @@ pub async fn get_devices(
                     yanked: row.release_yanked.unwrap(),
                     created_at: row.release_created_at.unwrap(),
                     user_id: row.release_user_id,
+                    user_email: None,
                 })
             } else {
                 None
@@ -492,6 +290,7 @@ pub async fn get_devices(
                     yanked: row.target_release_yanked.unwrap(),
                     created_at: row.target_release_created_at.unwrap(),
                     user_id: row.target_release_user_id,
+                    user_email: None,
                 })
             } else {
                 None
@@ -500,6 +299,8 @@ pub async fn get_devices(
             let network = if row.network_score.is_some() {
                 Some(DeviceNetwork {
                     network_score: row.network_score,
+                    download_speed_mbps: row.network_download_speed_mbps,
+                    upload_speed_mbps: row.network_upload_speed_mbps,
                     source: row.network_source,
                     updated_at: row.network_updated_at,
                 })
@@ -512,11 +313,13 @@ pub async fn get_devices(
                 serial_number: row.serial_number,
                 note: row.note,
                 last_seen: row.last_seen,
+                online: row.online,
                 created_on: row.created_on,
                 approved: row.approved,
                 has_token: row.has_token,
                 release_id: row.release_id,
                 target_release_id: row.target_release_id,
+                target_release_id_set_at: row.target_release_id_set_at,
                 system_info: row.system_info,
                 modem_id: row.modem_id,
                 ip_address_id: row.ip_address_id,
@@ -525,50 +328,12 @@ pub async fn get_devices(
                 release,
                 target_release,
                 network,
-                labels: DeviceLabels(serde_json::from_value(row.labels).unwrap_or_default()),
+                labels: row.labels,
             }
         })
         .collect();
 
     Ok(Json(devices))
-}
-
-#[utoipa::path(
-    get,
-    path = "/devices/tags",
-    responses(
-        (status = 200, description = "List of all device tags", body = Vec<Tag>),
-        (status = 500, description = "Failed to retrieve tags", body = String),
-    ),
-    security(
-        ("auth_token" = [])
-    ),
-    tag = DEVICES_TAG
-)]
-#[deprecated(
-    since = "0.2.64",
-    note = "Since labels have been released, tags concept be in version 0.74"
-)]
-pub async fn get_tags(Extension(state): Extension<State>) -> Result<Json<Vec<Tag>>, StatusCode> {
-    let tags = sqlx::query_as!(
-        Tag,
-        r#"SELECT
-            t.id,
-            td.device_id as device,
-            t.name,
-            t.color
-        FROM tag t
-        JOIN tag_device td ON t.id = td.tag_id
-        ORDER BY t.id"#
-    )
-    .fetch_all(&state.pg_pool)
-    .await
-    .map_err(|err| {
-        error!("Failed to get tags {err}");
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
-
-    Ok(Json(tags))
 }
 
 #[utoipa::path(
@@ -608,58 +373,10 @@ pub async fn get_variables(
 
 #[utoipa::path(
     get,
-    path = "/devices/{device_id}/tags",
-    responses(
-        (status = 200, description = "List of tags for device", body = Vec<Tag>),
-        (status = 500, description = "Failed to retrieve tags", body = String),
-    ),
-    security(
-        ("auth_token" = [])
-    ),
-    tag = DEVICES_TAG
-)]
-#[deprecated(
-    since = "0.2.64",
-    note = "Since labels have been released, tags concept be in version 0.74"
-)]
-pub async fn get_tag_for_device(
-    Path(device_id): Path<String>,
-    Extension(state): Extension<State>,
-) -> Result<Json<Vec<Tag>>, StatusCode> {
-    debug!("Getting tags for device {}", device_id);
-    let tags = sqlx::query_as!(
-        Tag,
-        r#"SELECT
-            t.id,
-            td.device_id as device,
-            t.name,
-            t.color
-        FROM tag t
-        JOIN tag_device td ON t.id = td.tag_id
-        JOIN device d ON td.device_id = d.id
-        WHERE
-            CASE
-                WHEN $1 ~ '^[0-9]+$' AND length($1) <= 10 THEN
-                    d.id = $1::int4
-                ELSE
-                    d.serial_number = $1
-            END
-        ORDER BY t.id"#,
-        device_id
-    )
-    .fetch_all(&state.pg_pool)
-    .await
-    .map_err(|err| {
-        error!("Failed to get tags for device {err}");
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
-
-    Ok(Json(tags))
-}
-
-#[utoipa::path(
-    get,
     path = "/devices/{device_id}/health",
+    params(
+        ("device_id" = String, Path)
+    ),
     responses(
         (status = 200, description = "Device health status", body = Vec<DeviceHealth>),
         (status = 404, description = "Device not found", body = String),
@@ -682,7 +399,7 @@ pub async fn get_health_for_device(
         serial_number,
         last_ping,
         CASE
-        WHEN last_ping > NOW() - INTERVAL '5 minutes'
+        WHEN last_ping > NOW() - INTERVAL '3 minutes'
         THEN true
         ELSE false
         END AS is_healthy
@@ -711,129 +428,11 @@ pub async fn get_health_for_device(
 
 #[utoipa::path(
     delete,
-    path = "/devices/{device_id}/tags/{tag_id}",
-    responses(
-        (status = 204, description = "Tag deleted successfully"),
-        (status = 500, description = "Failed to delete tag", body = String),
-    ),
-    security(
-        ("auth_token" = [])
-    ),
-    tag = DEVICES_TAG
-)]
-#[deprecated(
-    since = "0.2.64",
-    note = "Since labels have been released, tags concept be in version 0.74"
-)]
-pub async fn delete_tag_from_device(
-    Path((device_id, tag_id)): Path<(i32, i32)>,
-    Extension(state): Extension<State>,
-) -> Result<StatusCode, StatusCode> {
-    let mut tx = state.pg_pool.begin().await.map_err(|err| {
-        error!("Failed to start transaction {err}");
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
-
-    sqlx::query!(
-        r#"DELETE FROM tag_device WHERE device_id = $1 AND tag_id = $2"#,
-        device_id,
-        tag_id
-    )
-    .execute(&mut *tx)
-    .await
-    .map_err(|err| {
-        error!("Failed to delete tag for device {err}");
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
-
-    sqlx::query!(
-        r#"INSERT INTO ledger (device_id, "class", "text") VALUES ($1, $2, $3)"#,
-        device_id,
-        "tag",
-        format!("Deleted tag from device.")
-    )
-    .execute(&mut *tx)
-    .await
-    .map_err(|err| {
-        error!("Failed to insert ledger entry for device {err}");
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
-
-    tx.commit().await.map_err(|err| {
-        error!("Failed to commit transaction {err}");
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
-
-    Ok(StatusCode::NO_CONTENT)
-}
-
-#[utoipa::path(
-    put,
-    path = "/devices/{device_id}/tags/{tag_id}",
-    responses(
-        (status = 201, description = "Tag added successfully"),
-        (status = 304, description = "Tag already exists"),
-        (status = 500, description = "Failed to add tag", body = String),
-    ),
-    security(
-        ("auth_token" = [])
-    ),
-    tag = DEVICES_TAG
-)]
-#[deprecated(
-    since = "0.2.64",
-    note = "Since labels have been released, tags concept be in version 0.74"
-)]
-pub async fn add_tag_to_device(
-    Path((device_id, tag_id)): Path<(i32, i32)>,
-    Extension(state): Extension<State>,
-) -> Result<StatusCode, StatusCode> {
-    let mut tx = state.pg_pool.begin().await.map_err(|err| {
-        error!("Failed to start transaction {err}");
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
-
-    let result = sqlx::query!(
-        r#"INSERT INTO tag_device (device_id, tag_id) VALUES ($1, $2)
-        ON CONFLICT (device_id, tag_id) DO NOTHING"#,
-        device_id,
-        tag_id
-    )
-    .execute(&mut *tx)
-    .await
-    .map_err(|err| {
-        error!("Failed to add tag to device {err}");
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
-
-    if result.rows_affected() == 0 {
-        return Ok(StatusCode::NOT_MODIFIED);
-    }
-
-    sqlx::query!(
-        r#"INSERT INTO ledger (device_id, "class", "text") VALUES ($1, $2, $3)"#,
-        device_id,
-        "tag",
-        format!("Added tag to device.")
-    )
-    .execute(&mut *tx)
-    .await
-    .map_err(|err| {
-        error!("Failed to insert ledger entry for device {err}");
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
-
-    tx.commit().await.map_err(|err| {
-        error!("Failed to commit transaction {err}");
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
-
-    Ok(StatusCode::CREATED)
-}
-
-#[utoipa::path(
-    delete,
     path = "/devices/{device_id}/variables/{variable_id}",
+    params(
+        ("device_id" = i32, Path),
+        ("variable_id" = i32, Path)
+    ),
     responses(
         (status = 204, description = "Variable deleted successfully"),
         (status = 500, description = "Failed to delete variable", body = String),
@@ -882,14 +481,16 @@ pub async fn delete_variable_from_device(
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
 
-    helpers::refresh_device(&state.pg_pool, device_id).await?;
-
     Ok(StatusCode::NO_CONTENT)
 }
 
 #[utoipa::path(
     put,
     path = "/devices/{device_id}/variables/{variable_id}",
+    params(
+        ("device_id" = i32, Path),
+        ("variable_id" = i32, Path)
+    ),
     request_body = NewVariable,
     responses(
         (status = 200, description = "Variable updated successfully"),
@@ -949,14 +550,15 @@ pub async fn update_variable_for_device(
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
 
-    helpers::refresh_device(&state.pg_pool, device_id).await?;
-
     Ok(StatusCode::NO_CONTENT)
 }
 
 #[utoipa::path(
     get,
     path = "/devices/{device_id}/variables",
+    params(
+        ("device_id" = i32, Path),
+    ),
     responses(
         (status = 200, description = "List of variables for device", body = Vec<Variable>),
         (status = 500, description = "Failed to retrieve variables", body = String),
@@ -995,6 +597,9 @@ pub async fn get_variables_for_device(
 #[utoipa::path(
     post,
     path = "/devices/{device_id}/variables",
+    params(
+        ("device_id" = i32, Path),
+    ),
     request_body = NewVariable,
     responses(
         (status = 201, description = "Variable added successfully"),
@@ -1053,14 +658,15 @@ pub async fn add_variable_to_device(
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
 
-    helpers::refresh_device(&state.pg_pool, device_id).await?;
-
     Ok(StatusCode::CREATED)
 }
 
 #[utoipa::path(
     put,
     path = "/devices/{device_id}/note",
+    params(
+        ("device_id" = i32, Path),
+    ),
     request_body = Note,
     responses(
         (status = 200, description = "Note updated successfully"),
@@ -1119,10 +725,12 @@ pub async fn update_note_for_device(
     Ok(StatusCode::NO_CONTENT)
 }
 
-#[allow(clippy::collapsible_else_if)]
 #[utoipa::path(
     get,
     path = "/devices/{device_id}/ledger",
+    params(
+        ("device_id" = i32, Path),
+    ),
     responses(
         (status = 200, description = "Device ledger entries", body = DeviceLedgerItemPaginated),
         (status = 400, description = "Invalid pagination parameters"),
@@ -1289,7 +897,8 @@ pub async fn get_ledger_for_device(
     Ok(Json(ledger_paginated))
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, IntoParams)]
+#[into_params(parameter_in = Query)]
 pub struct PaginationId {
     pub starting_after: Option<i32>,
     pub ending_before: Option<i32>,
@@ -1299,8 +908,12 @@ pub struct PaginationId {
 #[utoipa::path(
     get,
     path = "/devices/{device_id}/commands",
+    params(
+        ("device_id" = String, Path),
+        PaginationId
+    ),
     responses(
-        (status = StatusCode::OK, description = "Command successfully fetch from to the device"),
+        (status = StatusCode::OK, description = "Command successfully fetch from to the device", body = CommandsPaginated),
         (status = StatusCode::NOT_FOUND, description = "Device not found"),
         (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to fetch device commands"),
     ),
@@ -1309,8 +922,6 @@ pub struct PaginationId {
     ),
     tag = DEVICES_TAG
 )]
-#[allow(clippy::collapsible_else_if)]
-#[tracing::instrument]
 pub async fn get_all_commands_for_device(
     host: Host,
     Path(device_id): Path<String>,
@@ -1544,6 +1155,9 @@ pub async fn get_all_commands_for_device(
 #[utoipa::path(
     get,
     path = "/devices/{device_id}/release",
+    params(
+        ("device_id" = i32, Path),
+    ),
     responses(
         (status = 200, description = "Device release information", body = DeviceRelease),
         (status = 500, description = "Failed to retrieve device release", body = String),
@@ -1562,10 +1176,12 @@ pub async fn get_device_release(
         "
         SELECT release.*,
         distribution.name AS distribution_name,
-        distribution.architecture AS distribution_architecture
+        distribution.architecture AS distribution_architecture,
+        auth.users.email AS user_email
         FROM device
         LEFT JOIN release ON device.release_id = release.id
         JOIN distribution ON release.distribution_id = distribution.id
+        LEFT JOIN auth.users ON release.user_id = auth.users.id
         WHERE device.id = $1
         ",
         device_id
@@ -1583,10 +1199,12 @@ pub async fn get_device_release(
             "
         SELECT release.*,
         distribution.name AS distribution_name,
-        distribution.architecture AS distribution_architecture
+        distribution.architecture AS distribution_architecture,
+        auth.users.email AS user_email
         FROM device_release_upgrades
         JOIN release ON release.id = device_release_upgrades.previous_release_id
         JOIN distribution ON release.distribution_id = distribution.id
+        LEFT JOIN auth.users ON release.user_id = auth.users.id
         WHERE device_release_upgrades.device_id = $1
         AND device_release_upgrades.upgraded_release_id = $2
         ",
@@ -1608,10 +1226,12 @@ pub async fn get_device_release(
         "
         SELECT release.*,
         distribution.name AS distribution_name,
-        distribution.architecture AS distribution_architecture
+        distribution.architecture AS distribution_architecture,
+        auth.users.email AS user_email
         FROM device
         LEFT JOIN release ON device.target_release_id = release.id
         JOIN distribution ON release.distribution_id = distribution.id
+        LEFT JOIN auth.users ON release.user_id = auth.users.id
         WHERE device.id = $1
         ",
         device_id
@@ -1635,6 +1255,9 @@ pub async fn get_device_release(
 #[utoipa::path(
     post,
     path = "/devices/{device_id}/release",
+    params(
+        ("device_id" = i32, Path),
+    ),
     request_body = UpdateDeviceRelease,
     responses(
         (status = 200, description = "Device target release updated successfully"),
@@ -1649,6 +1272,7 @@ pub async fn get_device_release(
 pub async fn update_device_target_release(
     Path(device_id): Path<i32>,
     Extension(state): Extension<State>,
+    Extension(current_user): Extension<CurrentUser>,
     Json(device_release): Json<UpdateDeviceRelease>,
 ) -> axum::response::Result<StatusCode, StatusCode> {
     let target_release_id = device_release.target_release_id;
@@ -1669,7 +1293,7 @@ pub async fn update_device_target_release(
     }
 
     sqlx::query!(
-        "UPDATE device SET target_release_id = $1 WHERE id = $2",
+        "UPDATE device SET target_release_id = $1, target_release_id_set_at = NOW() WHERE id = $2",
         target_release_id,
         device_id
     )
@@ -1679,6 +1303,53 @@ pub async fn update_device_target_release(
         error!("Failed to update target release id for device {device_id}; {err}");
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
+
+    // Send Slack alert for direct device deployment
+    if let Some(deployment_slack_hook_url) = &state.config.deployment_slack_hook_url {
+        let user_email = sqlx::query_scalar!(
+            "SELECT email FROM auth.users WHERE id = $1",
+            current_user.user_id
+        )
+        .fetch_optional(&state.pg_pool)
+        .await
+        .ok()
+        .flatten()
+        .flatten();
+
+        let release_info = sqlx::query!(
+            "SELECT r.version, d.name as distribution_name, dev.serial_number
+             FROM release r
+             JOIN distribution d ON r.distribution_id = d.id
+             JOIN device dev ON dev.id = $2
+             WHERE r.id = $1",
+            target_release_id,
+            device_id
+        )
+        .fetch_optional(&state.pg_pool)
+        .await;
+
+        if let Ok(Some(info)) = release_info {
+            let triggered_by = user_email.as_deref().unwrap_or("Unknown");
+            let message = json!({
+                "blocks": [
+                    {
+                        "type": "section",
+                        "text": {
+                            "type": "mrkdwn",
+                            "text": format!(
+                                ":warning: *Direct Device Deployment - Risk of Drift*\n\n*Device:* {}\n*Target Version:* {} v{}\n*Triggered by:* {}\n\n_This deployment bypasses the canary rollout process._",
+                                info.serial_number,
+                                info.distribution_name,
+                                info.version,
+                                triggered_by
+                            )
+                        }
+                    }
+                ]
+            });
+            send_slack_notification(deployment_slack_hook_url, message).await;
+        }
+    }
 
     Ok(StatusCode::OK)
 }
@@ -1699,10 +1370,11 @@ pub async fn update_device_target_release(
 )]
 pub async fn update_devices_target_release(
     Extension(state): Extension<State>,
+    Extension(current_user): Extension<CurrentUser>,
     Json(devices_release): Json<UpdateDevicesRelease>,
 ) -> axum::response::Result<StatusCode, StatusCode> {
     let target_release_id = devices_release.target_release_id;
-    let release = Release::get_release_by_id(target_release_id, &state.pg_pool)
+    let release = get_release_by_id(target_release_id, &state.pg_pool)
         .await
         .map_err(|err| {
             error!("Failed to get target release: {err}");
@@ -1720,7 +1392,7 @@ pub async fn update_devices_target_release(
     }
 
     sqlx::query!(
-        "UPDATE device SET target_release_id = $1 WHERE id = ANY($2)",
+        "UPDATE device SET target_release_id = $1, target_release_id_set_at = NOW() WHERE id = ANY($2)",
         target_release_id,
         &devices_release.devices
     )
@@ -1731,12 +1403,49 @@ pub async fn update_devices_target_release(
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
 
+    // Send Slack alert for direct bulk device deployment
+    if let Some(deployment_slack_hook_url) = &state.config.deployment_slack_hook_url {
+        let user_email = sqlx::query_scalar!(
+            "SELECT email FROM auth.users WHERE id = $1",
+            current_user.user_id
+        )
+        .fetch_optional(&state.pg_pool)
+        .await
+        .ok()
+        .flatten()
+        .flatten();
+
+        let device_count = devices_release.devices.len();
+        let triggered_by = user_email.as_deref().unwrap_or("Unknown");
+        let message = json!({
+            "blocks": [
+                {
+                    "type": "section",
+                    "text": {
+                        "type": "mrkdwn",
+                        "text": format!(
+                            ":warning: *Direct Bulk Deployment - Risk of Drift*\n\n*Devices affected:* {}\n*Target Version:* {} v{}\n*Triggered by:* {}\n\n_This deployment bypasses the canary rollout process._",
+                            device_count,
+                            target_release.distribution_name,
+                            target_release.version,
+                            triggered_by
+                        )
+                    }
+                }
+            ]
+        });
+        send_slack_notification(deployment_slack_hook_url, message).await;
+    }
+
     Ok(StatusCode::OK)
 }
 
 #[utoipa::path(
     post,
     path = "/devices/{device_id}/commands",
+    params(
+        ("device_id" = String, Path),
+    ),
     responses(
         (status = StatusCode::CREATED, description = "Command successfully issue to device"),
         (status = StatusCode::NOT_FOUND, description = "Device not found"),
@@ -1822,8 +1531,12 @@ pub async fn issue_commands_to_device(
 #[utoipa::path(
     get,
     path = "/devices/{device_id}",
+    params(
+        ("device_id" = String, Path),
+    ),
     responses(
         (status = StatusCode::OK, description = "Return found device", body = Device),
+        (status = StatusCode::NOT_FOUND, description = "Device not found"),
         (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to retrieve device"),
     ),
     security(
@@ -1836,63 +1549,67 @@ pub async fn get_device_info(
     Extension(state): Extension<State>,
 ) -> axum::response::Result<Json<Device>, StatusCode> {
     let device_row = sqlx::query!(
-        "
+        r#"
         SELECT
         d.id,
         d.serial_number,
         d.note,
         d.last_ping as last_seen,
+        CASE WHEN d.last_ping > NOW() - INTERVAL '3 minutes' THEN true ELSE false END as "online!",
         d.created_on,
         d.approved,
         d.token IS NOT NULL as has_token,
         d.release_id,
         d.target_release_id,
+        d.target_release_id_set_at,
         d.system_info,
         d.modem_id,
         d.ip_address_id,
-        d.labels,
-        ip.id as \"ip_id?\",
-        ip.ip_address as \"ip_address?\",
-        ip.name as \"ip_name?\",
-        ip.continent as \"ip_continent?\",
-        ip.continent_code as \"ip_continent_code?\",
-        ip.country_code as \"ip_country_code?\",
-        ip.country as \"ip_country?\",
-        ip.region as \"ip_region?\",
-        ip.city as \"ip_city?\",
-        ip.isp as \"ip_isp?\",
-        ip.coordinates[0] as \"ip_longitude?\",
-        ip.coordinates[1] as \"ip_latitude?\",
-        ip.proxy as \"ip_proxy?\",
-        ip.hosting as \"ip_hosting?\",
-        ip.created_at as \"ip_created_at?\",
-        ip.updated_at as \"ip_updated_at?\",
-        m.id as \"modem_id_nested?\",
-        m.imei as \"modem_imei?\",
-        m.network_provider as \"modem_network_provider?\",
-        m.updated_at as \"modem_updated_at?\",
-        m.created_at as \"modem_created_at?\",
-        r.id as \"release_id_nested?\",
-        r.distribution_id as \"release_distribution_id?\",
-        rd.architecture as \"release_distribution_architecture?\",
-        rd.name as \"release_distribution_name?\",
-        r.version as \"release_version?\",
-        r.draft as \"release_draft?\",
-        r.yanked as \"release_yanked?\",
-        r.created_at as \"release_created_at?\",
-        r.user_id as \"release_user_id?\",
-        tr.id as \"target_release_id_nested?\",
-        tr.distribution_id as \"target_release_distribution_id?\",
-        trd.architecture as \"target_release_distribution_architecture?\",
-        trd.name as \"target_release_distribution_name?\",
-        tr.version as \"target_release_version?\",
-        tr.draft as \"target_release_draft?\",
-        tr.yanked as \"target_release_yanked?\",
-        tr.created_at as \"target_release_created_at?\",
-        tr.user_id as \"target_release_user_id?\",
-        dn.network_score as \"network_score?\",
-        dn.source as \"network_source?\",
-        dn.updated_at as \"network_updated_at?\"
+        ip.id as "ip_id?",
+        ip.ip_address as "ip_address?",
+        ip.name as "ip_name?",
+        ip.continent as "ip_continent?",
+        ip.continent_code as "ip_continent_code?",
+        ip.country_code as "ip_country_code?",
+        ip.country as "ip_country?",
+        ip.region as "ip_region?",
+        ip.city as "ip_city?",
+        ip.isp as "ip_isp?",
+        ip.coordinates[0] as "ip_longitude?",
+        ip.coordinates[1] as "ip_latitude?",
+        ip.proxy as "ip_proxy?",
+        ip.hosting as "ip_hosting?",
+        ip.created_at as "ip_created_at?",
+        ip.updated_at as "ip_updated_at?",
+        m.id as "modem_id_nested?",
+        m.imei as "modem_imei?",
+        m.network_provider as "modem_network_provider?",
+        m.updated_at as "modem_updated_at?",
+        m.created_at as "modem_created_at?",
+        r.id as "release_id_nested?",
+        r.distribution_id as "release_distribution_id?",
+        rd.architecture as "release_distribution_architecture?",
+        rd.name as "release_distribution_name?",
+        r.version as "release_version?",
+        r.draft as "release_draft?",
+        r.yanked as "release_yanked?",
+        r.created_at as "release_created_at?",
+        r.user_id as "release_user_id?",
+        tr.id as "target_release_id_nested?",
+        tr.distribution_id as "target_release_distribution_id?",
+        trd.architecture as "target_release_distribution_architecture?",
+        trd.name as "target_release_distribution_name?",
+        tr.version as "target_release_version?",
+        tr.draft as "target_release_draft?",
+        tr.yanked as "target_release_yanked?",
+        tr.created_at as "target_release_created_at?",
+        tr.user_id as "target_release_user_id?",
+        dn.network_score as "network_score?",
+        dn.download_speed_mbps as "network_download_speed_mbps?",
+        dn.upload_speed_mbps as "network_upload_speed_mbps?",
+        dn.source as "network_source?",
+        dn.updated_at as "network_updated_at?",
+        COALESCE(JSONB_OBJECT_AGG(l.name, dl.value) FILTER (WHERE l.name IS NOT NULL), '{}') as "labels!: SqlxJson<HashMap<String, String>>"
         FROM device d
         LEFT JOIN ip_address ip ON d.ip_address_id = ip.id
         LEFT JOIN modem m ON d.modem_id = m.id
@@ -1901,6 +1618,8 @@ pub async fn get_device_info(
         LEFT JOIN release tr ON d.target_release_id = tr.id
         LEFT JOIN distribution trd ON tr.distribution_id = trd.id
         LEFT JOIN device_network dn ON d.id = dn.device_id
+        LEFT JOIN device_label dl ON dl.device_id = d.id
+        LEFT JOIN label l ON l.id = dl.label_id
         WHERE
             CASE
                 WHEN $1 ~ '^[0-9]+$' AND length($1) <= 10 THEN
@@ -1908,17 +1627,21 @@ pub async fn get_device_info(
                 ELSE
                     d.serial_number = $1
             END
-        ",
+        GROUP BY d.id, ip.id, m.id, r.id, rd.id, tr.id, trd.id, dn.device_id
+        "#,
         device_id
     )
     .fetch_one(&state.pg_pool)
     .await
-    .map_err(|err| {
-        error!(
-            serial_number = device_id,
-            "Failed to fetch device info {err}"
-        );
-        StatusCode::INTERNAL_SERVER_ERROR
+    .map_err(|err| match err {
+        sqlx::Error::RowNotFound => StatusCode::NOT_FOUND,
+        _ => {
+            error!(
+                serial_number = device_id,
+                "Failed to fetch device info {err}"
+            );
+            StatusCode::INTERNAL_SERVER_ERROR
+        }
     })?;
 
     let ip_address = if device_row.ip_id.is_some() {
@@ -1927,7 +1650,7 @@ pub async fn get_device_info(
             _ => None,
         };
 
-        Some(crate::ip_address::IpAddressInfo {
+        Some(models::ip_address::IpAddressInfo {
             id: device_row.ip_id.unwrap(),
             ip_address: device_row.ip_address.unwrap(),
             name: device_row.ip_name,
@@ -1972,6 +1695,7 @@ pub async fn get_device_info(
             yanked: device_row.release_yanked.unwrap(),
             created_at: device_row.release_created_at.unwrap(),
             user_id: device_row.release_user_id,
+            user_email: None,
         })
     } else {
         None
@@ -1988,6 +1712,7 @@ pub async fn get_device_info(
             yanked: device_row.target_release_yanked.unwrap(),
             created_at: device_row.target_release_created_at.unwrap(),
             user_id: device_row.target_release_user_id,
+            user_email: None,
         })
     } else {
         None
@@ -1996,6 +1721,8 @@ pub async fn get_device_info(
     let network = if device_row.network_score.is_some() {
         Some(DeviceNetwork {
             network_score: device_row.network_score,
+            download_speed_mbps: device_row.network_download_speed_mbps,
+            upload_speed_mbps: device_row.network_upload_speed_mbps,
             source: device_row.network_source,
             updated_at: device_row.network_updated_at,
         })
@@ -2008,11 +1735,13 @@ pub async fn get_device_info(
         serial_number: device_row.serial_number,
         note: device_row.note,
         last_seen: device_row.last_seen,
+        online: device_row.online,
         created_on: device_row.created_on,
         approved: device_row.approved,
         has_token: device_row.has_token,
         release_id: device_row.release_id,
         target_release_id: device_row.target_release_id,
+        target_release_id_set_at: device_row.target_release_id_set_at,
         system_info: device_row.system_info,
         modem_id: device_row.modem_id,
         ip_address_id: device_row.ip_address_id,
@@ -2021,7 +1750,7 @@ pub async fn get_device_info(
         release,
         target_release,
         network,
-        labels: DeviceLabels(serde_json::from_value(device_row.labels).unwrap_or_default()),
+        labels: device_row.labels,
     };
 
     Ok(Json(device))
@@ -2030,6 +1759,9 @@ pub async fn get_device_info(
 #[utoipa::path(
     delete,
     path = "/devices/{device_id}",
+    params(
+        ("device_id" = i32, Path),
+    ),
     responses(
         (status = StatusCode::NO_CONTENT, description = "Successfully deleted the device"),
         (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to delete device"),
@@ -2048,13 +1780,18 @@ pub async fn delete_device(
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
 
-    sqlx::query!("UPDATE device SET archived = true WHERE id = $1", device_id)
-        .execute(&mut *tx)
-        .await
-        .map_err(|err| {
-            error!("Failed to archive device {err}");
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?;
+    sqlx::query!(
+        "UPDATE device 
+        SET archived = true
+        WHERE id = $1",
+        device_id
+    )
+    .execute(&mut *tx)
+    .await
+    .map_err(|err| {
+        error!("Failed to archive device {err}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
 
     tx.commit().await.map_err(|err| {
         error!("Failed to commit transaction {err}");
@@ -2072,6 +1809,9 @@ pub struct UpdateDeviceRequest {
 #[utoipa::path(
     patch,
     path = "/devices/{device_id}",
+    params(
+        ("device_id" = String, Path),
+    ),
     request_body = UpdateDeviceRequest,
     responses(
         (status = StatusCode::OK, description = "Device updated successfully"),
@@ -2096,26 +1836,89 @@ pub async fn update_device(
     }
 
     if let Some(labels) = payload.labels {
-        let labels_json = serde_json::to_value(&labels).map_err(|_| StatusCode::BAD_REQUEST)?;
-        let result = sqlx::query!(
-            "
-            UPDATE device
-            SET labels = $2
-            WHERE
-                CASE
-                    WHEN $1 ~ '^[0-9]+$' AND length($1) <= 10 THEN
-                        id = $1::int4
-                    ELSE
-                        serial_number = $1
-                END
-            ",
-            device_id,
-            labels_json
+        let mut tx = state.pg_pool.begin().await.map_err(|err| {
+            error!("Failed to start transaction {err}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+        let keys = labels.keys().map(|key| key.to_string()).collect::<Vec<_>>();
+        let values = labels.into_values().collect::<Vec<_>>();
+        // Ensure the labels exists
+        sqlx::query!(
+            r#"
+            INSERT INTO label (name)
+            SELECT * FROM UNNEST($1::text[])
+            ON CONFLICT (name) DO NOTHING
+            "#,
+            keys.as_slice()
         )
-        .execute(&state.pg_pool)
+        .execute(&mut *tx)
         .await
         .map_err(|err| {
-            error!("Failed to update device labels {err}");
+            error!("Failed to upsert labels {err}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+        // Remove previous labels on device
+        sqlx::query!(
+            r#"
+            DELETE FROM device_label
+            USING device d
+            WHERE 
+                d.id = device_label.device_id AND
+                CASE
+                    WHEN $1 ~ '^[0-9]+$' AND length($1) <= 10 THEN
+                        d.id = $1::int4
+                    ELSE
+                        d.serial_number = $1
+                END
+            "#,
+            device_id
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(|err| {
+            error!("Failed to remove previous device_labels on device {err}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+        let result = sqlx::query!(
+            r#"
+            WITH label_input AS (
+                SELECT *
+                FROM UNNEST($2::text[], $3::text[]) AS t(key, value)
+            ),
+            the_device AS (
+                SELECT d.id
+                FROM device d
+                WHERE 
+                    CASE
+                        WHEN $1 ~ '^[0-9]+$' AND length($1) <= 10 THEN
+                            id = $1::int4
+                        ELSE
+                            serial_number = $1
+                    END
+            )
+            INSERT INTO device_label (device_id, label_id, value)
+            SELECT
+                d.id,
+                l.id label_id,
+                i.value
+            FROM label_input i
+            INNER JOIN the_device d ON d.id IS NOT NULL
+            INNER JOIN label l ON l.name = i.key
+            ON CONFLICT (device_id, label_id)
+                DO UPDATE SET value = EXCLUDED.value
+            "#,
+            device_id,
+            keys.as_slice(),
+            values.as_slice(),
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(|err| {
+            error!("Failed to create or update device_labels {err}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+        tx.commit().await.map_err(|err| {
+            error!("Failed to commit transaction {err}");
             StatusCode::INTERNAL_SERVER_ERROR
         })?;
 
@@ -2128,10 +1931,59 @@ pub async fn update_device(
 }
 
 #[utoipa::path(
+    delete,
+    path = "/labels/{key}",
+    params(
+        ("key" = String, Path),
+    ),
+    responses(
+        (status = StatusCode::NO_CONTENT, description = "Label deleted from all devices"),
+        (status = StatusCode::FORBIDDEN, description = "Forbidden"),
+        (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to delete label"),
+    ),
+    security(
+        ("auth_token" = [])
+    ),
+    tag = DEVICES_TAG
+)]
+pub async fn delete_label(
+    Path(key): Path<String>,
+    Extension(state): Extension<State>,
+    Extension(current_user): Extension<CurrentUser>,
+) -> axum::response::Result<StatusCode, StatusCode> {
+    let allowed = authorization::check(current_user, "devices", "write");
+
+    if !allowed {
+        return Err(StatusCode::FORBIDDEN);
+    }
+
+    sqlx::query!(
+        r#"
+        DELETE FROM label
+        WHERE name = $1
+        "#,
+        key
+    )
+    .execute(&state.pg_pool)
+    .await
+    .map_err(|err| {
+        error!("Failed to delete label '{key}': {err}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[utoipa::path(
     post,
     path = "/devices/{device_id}/approval",
+    params(
+        ("device_id" = i32, Path),
+    ),
+    request_body(content = Option<ApproveDeviceBody>, content_type = "application/json"),
     responses(
-        (status = 200, description = "Device approved successfully"),
+        (status = 200, description = "Device approved successfully", body = bool),
+        (status = 404, description = "Release not found"),
         (status = 500, description = "Failed to approve device", body = String),
     ),
     security(
@@ -2142,7 +1994,25 @@ pub async fn update_device(
 pub async fn approve_device(
     Path(device_id): Path<i32>,
     Extension(state): Extension<State>,
-) -> axum::response::Result<Json<()>, StatusCode> {
+    body: Option<Json<ApproveDeviceBody>>,
+) -> axum::response::Result<Json<bool>, StatusCode> {
+    let target_release_id = body.and_then(|b| b.target_release_id);
+
+    if let Some(release_id) = target_release_id {
+        let releases = sqlx::query!("SELECT COUNT(*) FROM release WHERE id = $1", release_id)
+            .fetch_one(&state.pg_pool)
+            .await
+            .map_err(|err| {
+                error!("Failed to check if release exists: {err}");
+                StatusCode::INTERNAL_SERVER_ERROR
+            })?;
+
+        if releases.count == Some(0) {
+            error!("Release {release_id} not found");
+            return Err(StatusCode::NOT_FOUND);
+        }
+    }
+
     let mut tx = state.pg_pool.begin().await.map_err(|err| {
         error!("Failed to start transaction {err}");
         StatusCode::INTERNAL_SERVER_ERROR
@@ -2161,48 +2031,31 @@ pub async fn approve_device(
 
     let approved_serial_number = response.serial_number;
 
-    // get tag for trolley
-    let tag_name = "trolley";
-    let query = r#"
-            INSERT INTO tag (name)
-            VALUES ($1)
-            ON CONFLICT (name) DO UPDATE
-            SET name = EXCLUDED.name
-            RETURNING id;
-        "#;
-
-    // Execute the query and get the tag id
-    let row = sqlx::query(query)
-        .bind(tag_name) // Bind the 'trolley' name to the query
-        .fetch_one(&mut *tx)
+    if let Some(release_id) = target_release_id {
+        sqlx::query!(
+            "UPDATE device SET target_release_id = $1, target_release_id_set_at = NOW() WHERE id = $2",
+            release_id,
+            device_id
+        )
+        .execute(&mut *tx)
         .await
         .map_err(|err| {
-            error!("Failed to insert tag trolley for device {err}");
+            error!("Failed to set target release for device {device_id}: {err}");
             StatusCode::INTERNAL_SERVER_ERROR
         })?;
+    }
 
-    let tag_id: i32 = row.try_get("id").map_err(|err| {
-        error!("Failed to get tag id for device {err}");
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
-
-    sqlx::query!(
-        r#"INSERT INTO tag_device (device_id, tag_id) VALUES ($1, $2)"#,
-        device_id,
-        tag_id
-    )
-    .execute(&mut *tx)
-    .await
-    .map_err(|err| {
-        error!("Failed to insert tag entry for device {err}");
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
+    let ledger_text = if target_release_id.is_some() {
+        "Device approved and release assigned.".to_string()
+    } else {
+        "Device approved.".to_string()
+    };
 
     sqlx::query!(
         r#"INSERT INTO ledger (device_id, "class", "text") VALUES ($1, $2, $3)"#,
         device_id,
         "approved",
-        format!("Device approved.")
+        ledger_text
     )
     .execute(&mut *tx)
     .await
@@ -2223,14 +2076,17 @@ pub async fn approve_device(
     let guard = tx_message.lock().await;
     (*guard).send(msg).expect("failed to send");
 
-    Ok(Json(()))
+    Ok(Json(true))
 }
 
 #[utoipa::path(
     delete,
     path = "/devices/{device_id}/approval",
+    params(
+        ("device_id" = i32, Path),
+    ),
     responses(
-        (status = 200, description = "Device approval revoked successfully"),
+        (status = 200, description = "Device approval revoked successfully", body = bool),
         (status = 500, description = "Failed to revoke device approval", body = String),
     ),
     security(
@@ -2241,14 +2097,18 @@ pub async fn approve_device(
 pub async fn revoke_device(
     Path(device_id): Path<i32>,
     Extension(state): Extension<State>,
-) -> axum::response::Result<Json<()>, StatusCode> {
+) -> axum::response::Result<Json<bool>, StatusCode> {
     let mut tx = state.pg_pool.begin().await.map_err(|err| {
         error!("Failed to start transaction {err}");
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
 
     sqlx::query!(
-        r#"UPDATE device SET approved = false WHERE id = $1"#,
+        r#"UPDATE device 
+        SET approved = false,
+            release_id = NULL,
+            target_release_id = NULL
+        WHERE id = $1"#,
         device_id
     )
     .execute(&mut *tx)
@@ -2276,12 +2136,15 @@ pub async fn revoke_device(
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
 
-    Ok(Json(()))
+    Ok(Json(true))
 }
 
 #[utoipa::path(
     delete,
     path = "/devices/{device_id}/token",
+    params(
+        ("device_id" = i32, Path),
+    ),
     responses(
         (status = 200, description = "Device token deleted successfully"),
         (status = 500, description = "Failed to delete device token", body = String),
@@ -2332,6 +2195,9 @@ pub async fn delete_token(
 #[utoipa::path(
     get,
     path = "/devices/{serial_number}/network",
+    params(
+        ("serial_number" = String, Path),
+    ),
     responses(
         (status = StatusCode::OK, description = "Network retrieved successfully"),
         (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to retrieve network"),
@@ -2345,7 +2211,7 @@ pub async fn get_network_for_device(
     Path(serial_number): Path<String>,
     Extension(state): Extension<State>,
 ) -> axum::response::Result<Json<schema::Network>, StatusCode> {
-    let tags = sqlx::query_as!(
+    let network = sqlx::query_as!(
         schema::Network,
         r#"
         SELECT
@@ -2368,12 +2234,15 @@ pub async fn get_network_for_device(
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
 
-    Ok(Json(tags))
+    Ok(Json(network))
 }
 
 #[utoipa::path(
     put,
     path = "/devices/{serial_number}/network",
+    params(
+        ("serial_number" = String, Path),
+    ),
     responses(
         (status = StatusCode::OK, description = "Successfully updated network"),
         (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to update network"),
@@ -2405,7 +2274,10 @@ pub async fn update_device_network(
 
 #[utoipa::path(
     put,
-    path = "/devices/network/{network}",
+    path = "/devices/network/{network_id}",
+    params(
+        ("network_id" = i32, Path),
+    ),
     responses(
         (status = StatusCode::OK, description = "Successfully updated networks"),
         (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to update networks"),
@@ -2441,4 +2313,120 @@ pub async fn update_devices_network(
         })?;
 
     Ok(StatusCode::OK)
+}
+
+#[utoipa::path(
+    get,
+    path = "/labels",
+    responses(
+        (status = StatusCode::OK, description = "List of all labels with their values", body = Vec<LabelWithValues>),
+        (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to retrieve labels"),
+    ),
+    security(
+        ("auth_token" = [])
+    ),
+    tag = DEVICES_TAG
+)]
+pub async fn get_labels(
+    Extension(state): Extension<State>,
+) -> axum::response::Result<Json<Vec<LabelWithValues>>, StatusCode> {
+    let rows = sqlx::query!(
+        r#"
+        SELECT l.name as key, ARRAY_AGG(DISTINCT dl.value ORDER BY dl.value) as "values!"
+        FROM label l
+        INNER JOIN device_label dl ON dl.label_id = l.id
+        GROUP BY l.name
+        ORDER BY l.name
+        "#
+    )
+    .fetch_all(&state.pg_pool)
+    .await
+    .map_err(|err| {
+        error!("Failed to fetch labels: {err}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    let labels: Vec<LabelWithValues> = rows
+        .into_iter()
+        .map(|row| LabelWithValues {
+            key: row.key,
+            values: row.values,
+        })
+        .collect();
+
+    Ok(Json(labels))
+}
+
+#[derive(serde::Serialize, utoipa::ToSchema)]
+pub struct DeviceService {
+    pub id: i32,
+    pub release_id: i32,
+    pub package_id: Option<i32>,
+    pub service_name: String,
+    pub watchdog_sec: Option<i32>,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+}
+
+#[utoipa::path(
+    get,
+    path = "/devices/{device_id}/services",
+    params(
+        ("device_id" = String, Path, description = "Device ID or serial number"),
+    ),
+    responses(
+        (status = StatusCode::OK, description = "List of services for the device's current release", body = Vec<DeviceService>),
+        (status = StatusCode::NOT_FOUND, description = "Device not found or device has no release"),
+        (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to retrieve services"),
+    ),
+    security(
+        ("auth_token" = [])
+    ),
+    tag = DEVICES_TAG
+)]
+pub async fn get_services_for_device(
+    Path(device_id): Path<String>,
+    Extension(state): Extension<State>,
+) -> Result<Json<Vec<DeviceService>>, StatusCode> {
+    let device = sqlx::query!(
+        r#"
+        SELECT id, release_id
+        FROM device
+        WHERE
+            CASE
+                WHEN $1 ~ '^[0-9]+$' AND length($1) <= 10 THEN
+                    id = $1::int4
+                ELSE
+                    serial_number = $1
+            END
+        "#,
+        device_id
+    )
+    .fetch_optional(&state.pg_pool)
+    .await
+    .map_err(|err| {
+        error!("Failed to fetch device: {err}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    let device = device.ok_or(StatusCode::NOT_FOUND)?;
+    let release_id = device.release_id.ok_or(StatusCode::NOT_FOUND)?;
+
+    let services = sqlx::query_as!(
+        DeviceService,
+        r#"
+        SELECT id, release_id, package_id, service_name, watchdog_sec, created_at
+        FROM release_services
+        WHERE release_id = $1
+        ORDER BY service_name
+        "#,
+        release_id
+    )
+    .fetch_all(&state.pg_pool)
+    .await
+    .map_err(|err| {
+        error!("Failed to fetch services for device: {err}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    Ok(Json(services))
 }

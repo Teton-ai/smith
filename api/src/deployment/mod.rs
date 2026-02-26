@@ -1,27 +1,20 @@
+use std::collections::HashMap;
+
+use models::deployment::Deployment;
+use models::deployment::DeploymentRequest;
+use models::deployment::DeploymentStatus;
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 use sqlx::PgPool;
+use sqlx::types::Json as SqlxJson;
 use sqlx::types::chrono;
 use utoipa::ToSchema;
 
+use crate::config::Config;
+use crate::error::ApiError;
+use crate::slack::send_slack_notification;
+
 pub mod route;
-
-#[derive(sqlx::Type, Serialize, Deserialize, Debug, Clone, ToSchema, PartialEq)]
-#[sqlx(type_name = "deployment_status", rename_all = "snake_case")]
-pub enum DeploymentStatus {
-    InProgress,
-    Failed,
-    Canceled,
-    Done,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone, ToSchema)]
-pub struct Deployment {
-    pub id: i32,
-    pub release_id: i32,
-    pub status: DeploymentStatus,
-    pub updated_at: chrono::DateTime<chrono::Utc>,
-    pub created_at: chrono::DateTime<chrono::Utc>,
-}
 
 #[derive(Serialize, Deserialize, Debug, Clone, ToSchema)]
 pub struct DeploymentDeviceWithStatus {
@@ -31,238 +24,396 @@ pub struct DeploymentDeviceWithStatus {
     pub target_release_id: Option<i32>,
     pub last_ping: Option<chrono::DateTime<chrono::Utc>>,
     pub added_at: chrono::DateTime<chrono::Utc>,
+    #[schema(value_type = HashMap<String, String>)]
+    pub labels: SqlxJson<HashMap<String, String>>,
 }
 
-impl Deployment {
-    pub async fn get(release_id: i32, pg_pool: &PgPool) -> anyhow::Result<Option<Self>> {
-        Ok(sqlx::query_as!(
-            Self,
-            r#"
+pub async fn get_deployment(
+    release_id: i32,
+    pg_pool: &PgPool,
+) -> anyhow::Result<Option<Deployment>> {
+    Ok(sqlx::query_as!(
+        Deployment,
+        r#"
             SELECT id, release_id, status AS "status!: DeploymentStatus", updated_at, created_at
             FROM deployment WHERE release_id = $1
             "#,
-            release_id
-        )
-        .fetch_optional(pg_pool)
-        .await?)
+        release_id
+    )
+    .fetch_optional(pg_pool)
+    .await?)
+}
+
+pub async fn new_deployment(
+    release_id: i32,
+    request: Option<DeploymentRequest>,
+    pg_pool: &PgPool,
+    config: &Config,
+    user_email: Option<&str>,
+) -> Result<Deployment, ApiError> {
+    let mut tx = pg_pool.begin().await?;
+    // Get the distribution_id for this release
+    let release = sqlx::query!(
+        "SELECT distribution_id FROM release WHERE id = $1",
+        release_id
+    )
+    .fetch_one(&mut *tx)
+    .await?;
+
+    let deployment = sqlx::query_as!(
+        Deployment,
+        r#"
+        INSERT INTO deployment (release_id, status)
+        VALUES ($1, 'in_progress')
+        RETURNING id, release_id, status AS "status!: DeploymentStatus", updated_at, created_at
+        "#,
+        release_id
+    )
+    .fetch_one(&mut *tx)
+    .await?;
+
+    let labels_opt = request
+        .as_ref()
+        .and_then(|r| r.canary_device_labels.as_ref());
+    let ids_opt = request.as_ref().and_then(|r| r.canary_device_ids.as_ref());
+
+    if matches!(labels_opt, Some(l) if l.is_empty()) {
+        tx.rollback().await?;
+        return Err(ApiError::bad_request(
+            "canary_device_labels cannot be empty.",
+        ));
+    }
+    if matches!(ids_opt, Some(i) if i.is_empty()) {
+        tx.rollback().await?;
+        return Err(ApiError::bad_request("canary_device_ids cannot be empty."));
     }
 
-    pub async fn new(release_id: i32, pg_pool: &PgPool) -> anyhow::Result<Self> {
-        // Get the distribution_id for this release
-        let release = sqlx::query!(
-            "SELECT distribution_id FROM release WHERE id = $1",
-            release_id
-        )
-        .fetch_one(pg_pool)
-        .await?;
+    let has_labels = labels_opt.is_some_and(|l| !l.is_empty());
+    let has_ids = ids_opt.is_some_and(|i| !i.is_empty());
 
-        let deployment = sqlx::query_as!(
-            Self,
+    if has_labels && has_ids {
+        tx.rollback().await?;
+        return Err(ApiError::bad_request(
+            "Cannot specify both canary_device_labels and canary_device_ids.",
+        ));
+    }
+
+    let res = if has_ids {
+        let canary_device_ids = request
+            .as_ref()
+            .unwrap()
+            .canary_device_ids
+            .as_ref()
+            .unwrap();
+        sqlx::query!(
             r#"
-    INSERT INTO deployment (release_id, status)
-    VALUES ($1, 'in_progress')
-    RETURNING id, release_id, status AS "status!: DeploymentStatus", updated_at, created_at
-    "#,
-            release_id
+            WITH selected_devices AS (
+                SELECT d.id FROM device d
+                JOIN release r ON d.release_id = r.id
+                WHERE
+                    d.id = ANY($3)
+                    AND d.release_id = d.target_release_id
+                    AND d.last_ping > NOW() - INTERVAL '3 minutes'
+                    AND r.distribution_id = $1
+            )
+            INSERT INTO deployment_devices (deployment_id, device_id)
+            SELECT $2, id FROM selected_devices
+            "#,
+            release.distribution_id,
+            deployment.id,
+            canary_device_ids.as_slice()
         )
-        .fetch_one(pg_pool)
-        .await?;
-
-        let mut tx = pg_pool.begin().await?;
-
+        .execute(&mut *tx)
+        .await?
+    } else if has_labels {
+        let canary_device_labels = request
+            .as_ref()
+            .unwrap()
+            .canary_device_labels
+            .as_ref()
+            .unwrap();
+        sqlx::query!(
+            r#"
+            WITH selected_devices AS (
+                SELECT DISTINCT d.id FROM device d
+                JOIN release r ON d.release_id = r.id
+                LEFT JOIN device_label dl ON dl.device_id = d.id
+                LEFT JOIN label l ON l.id = dl.label_id
+                WHERE
+                    l.name || '=' || dl.value = ANY($3)
+                    AND d.release_id = d.target_release_id
+                    AND r.distribution_id = $1
+            )
+            INSERT INTO deployment_devices (deployment_id, device_id)
+            SELECT $2, id FROM selected_devices
+            "#,
+            release.distribution_id,
+            deployment.id,
+            canary_device_labels.as_slice()
+        )
+        .execute(&mut *tx)
+        .await?
+    } else {
         sqlx::query!(
             "
-WITH selected_devices AS (
-    SELECT d.id FROM device d
-    JOIN release r ON d.release_id = r.id
-    LEFT JOIN device_network dn ON d.id = dn.device_id
-    WHERE d.last_ping > NOW() - INTERVAL '5 minutes'
-    AND d.release_id = d.target_release_id
-    AND r.distribution_id = $1
-    ORDER BY
-        COALESCE(dn.network_score, 0) DESC,
-        d.last_ping DESC
-    LIMIT 10
-)
-INSERT INTO deployment_devices (deployment_id, device_id)
-SELECT $2, id FROM selected_devices
-",
+            WITH selected_devices AS (
+                SELECT d.id FROM device d
+                JOIN release r ON d.release_id = r.id
+                LEFT JOIN device_network dn ON d.id = dn.device_id
+                WHERE d.last_ping > NOW() - INTERVAL '3 minutes'
+                AND d.release_id = d.target_release_id
+                AND r.distribution_id = $1
+                ORDER BY
+                    COALESCE(dn.network_score, 0) DESC,
+                    d.last_ping DESC
+                LIMIT 10
+            )
+            INSERT INTO deployment_devices (deployment_id, device_id)
+            SELECT $2, id FROM selected_devices
+            ",
             release.distribution_id,
             deployment.id
         )
         .execute(&mut *tx)
-        .await?;
-
-        sqlx::query!(
-            "
-UPDATE device
-SET target_release_id = $1
-WHERE id IN (
-    SELECT device_id FROM deployment_devices WHERE deployment_id = $2
-)
-",
-            release_id,
-            deployment.id
-        )
-        .execute(&mut *tx)
-        .await?;
-
-        tx.commit().await?;
-
-        Ok(deployment)
+        .await?
+    };
+    let canary_count = res.rows_affected();
+    if canary_count == 0 {
+        tx.rollback().await?;
+        return Err(ApiError::bad_request(
+            "Canary release contains no devices, aborting.",
+        ));
     }
 
-    pub async fn check_done(release_id: i32, pg_pool: &PgPool) -> anyhow::Result<Self> {
-        let mut tx = pg_pool.begin().await?;
-
-        // First, get the deployment for the release_id
-        let deployment = sqlx::query!(
-        "SELECT id, release_id, status AS \"status!: DeploymentStatus\" FROM deployment WHERE release_id = $1",
-        release_id
-    )
-          .fetch_one(&mut *tx)
-          .await?;
-
-        if deployment.status == DeploymentStatus::Done {
-            let deployment_obj = sqlx::query_as!(
-        Self,
-        "SELECT id, release_id, status AS \"status!: DeploymentStatus\", updated_at, created_at
-         FROM deployment WHERE id = $1",
+    sqlx::query!(
+        "
+        UPDATE device
+        SET target_release_id = $1, target_release_id_set_at = NOW()
+        WHERE id IN (
+            SELECT device_id FROM deployment_devices WHERE deployment_id = $2
+        )
+        ",
+        release_id,
         deployment.id
     )
-            .fetch_one(&mut *tx)
-            .await?;
+    .execute(&mut *tx)
+    .await?;
 
-            tx.commit().await?;
-            return Ok(deployment_obj);
-        }
+    tx.commit().await?;
 
-        // Get the distribution_id for this release
-        let release = sqlx::query!(
-            "SELECT distribution_id FROM release WHERE id = $1",
-            release_id
-        )
-        .fetch_one(&mut *tx)
-        .await?;
-
-        let deployment_devices = sqlx::query!(
-            "SELECT device_id
-         FROM deployment_devices
-         WHERE deployment_id = $1",
-            deployment.id
-        )
-        .fetch_all(&mut *tx)
-        .await?;
-
-        let device_ids: Vec<i32> = deployment_devices.iter().map(|dd| dd.device_id).collect();
-
-        // If there are no devices to update, we can't mark as done
-        if device_ids.is_empty() {
-            let deployment_obj = sqlx::query_as!(
-            Self,
-            "SELECT id, release_id, status AS \"status!: DeploymentStatus\", updated_at, created_at
-             FROM deployment WHERE id = $1",
-            deployment.id
-        )
-            .fetch_one(&mut *tx)
-            .await?;
-
-            tx.commit().await?;
-            return Ok(deployment_obj);
-        }
-
-        // Check if all deployment devices have their release_id matching their target_release
-        // This counts devices where release_id != target_release_id
-        let mismatched_devices_count = sqlx::query_scalar!(
-            "SELECT COUNT(*)
-         FROM device
-         WHERE id = ANY($1) AND release_id != target_release_id",
-            &device_ids
-        )
-        .fetch_one(&mut *tx)
-        .await?;
-
-        // If any devices have mismatched release_id and target_release_id, return the current deployment without changes
-        if mismatched_devices_count.unwrap_or(0) > 0 {
-            let deployment_obj = sqlx::query_as!(
-            Self,
-            "SELECT id, release_id, status AS \"status!: DeploymentStatus\", updated_at, created_at
-             FROM deployment WHERE id = $1",
-            deployment.id
-        )
-            .fetch_one(&mut *tx)
-            .await?;
-
-            tx.commit().await?;
-            return Ok(deployment_obj);
-        }
-
-        // All devices are updated, update the deployment status to 'done'
-        let updated_deployment = sqlx::query_as!(
-            Self,
-            "
-        UPDATE deployment SET status = 'done'
-        WHERE release_id = $1
-        RETURNING id, release_id, status AS \"status!: DeploymentStatus\", updated_at, created_at
-        ",
-            release_id
-        )
-        .fetch_one(&mut *tx)
-        .await?;
-
-        // Update all devices within the same distribution to have target_release_id = release_id
-        sqlx::query!(
-            "UPDATE device
-         SET target_release_id = $1
-         WHERE device.release_id IN (
-            SELECT id FROM release WHERE distribution_id = $2
-         )",
-            release_id,
-            release.distribution_id
-        )
-        .execute(&mut *tx)
-        .await?;
-
-        // Commit the transaction
-        tx.commit().await?;
-        Ok(updated_deployment)
-    }
-
-    pub async fn get_devices(
-        release_id: i32,
-        pg_pool: &PgPool,
-    ) -> anyhow::Result<Vec<DeploymentDeviceWithStatus>> {
-        let deployment = sqlx::query!(
-            "SELECT id FROM deployment WHERE release_id = $1",
+    // Send Slack notification
+    if let Some(deployment_slack_hook_url) = &config.deployment_slack_hook_url {
+        let release_info = sqlx::query!(
+            "SELECT r.version, d.name as distribution_name
+             FROM release r
+             JOIN distribution d ON r.distribution_id = d.id
+             WHERE r.id = $1",
             release_id
         )
         .fetch_optional(pg_pool)
+        .await;
+
+        if let Ok(Some(info)) = release_info {
+            let triggered_by = user_email.unwrap_or("Unknown");
+            let message = json!({
+                "blocks": [
+                    {
+                        "type": "section",
+                        "text": {
+                            "type": "mrkdwn",
+                            "text": format!(
+                                ":rocket: *Deployment Started*\n\n*Distribution:* {}\n*Version:* {}\n*Canary devices:* {}\n*Triggered by:* {}",
+                                info.distribution_name,
+                                info.version,
+                                canary_count,
+                                triggered_by
+                            )
+                        }
+                    }
+                ]
+            });
+            send_slack_notification(deployment_slack_hook_url, message).await;
+        }
+    }
+
+    Ok(deployment)
+}
+
+pub async fn confirm_full_rollout(
+    release_id: i32,
+    pg_pool: &PgPool,
+    config: &Config,
+    user_email: Option<&str>,
+) -> anyhow::Result<Deployment> {
+    let mut tx = pg_pool.begin().await?;
+
+    let deployment = sqlx::query!(
+            "SELECT id, release_id, status AS \"status!: DeploymentStatus\" FROM deployment WHERE release_id = $1",
+            release_id
+        )
+        .fetch_one(&mut *tx)
         .await?;
 
-        let Some(deployment) = deployment else {
-            return Ok(Vec::new());
-        };
+    if deployment.status == DeploymentStatus::Done {
+        let deployment_obj = sqlx::query_as!(
+            Deployment,
+            "SELECT id, release_id, status AS \"status!: DeploymentStatus\", updated_at, created_at
+                 FROM deployment WHERE id = $1",
+            deployment.id
+        )
+        .fetch_one(&mut *tx)
+        .await?;
 
-        let devices = sqlx::query_as!(
-            DeploymentDeviceWithStatus,
-            r#"
+        tx.commit().await?;
+        return Ok(deployment_obj);
+    }
+
+    let release = sqlx::query!(
+        "SELECT distribution_id FROM release WHERE id = $1",
+        release_id
+    )
+    .fetch_one(&mut *tx)
+    .await?;
+
+    let deployment_devices = sqlx::query!(
+        "SELECT device_id
+             FROM deployment_devices
+             WHERE deployment_id = $1",
+        deployment.id
+    )
+    .fetch_all(&mut *tx)
+    .await?;
+
+    let device_ids: Vec<i32> = deployment_devices.iter().map(|dd| dd.device_id).collect();
+
+    if device_ids.is_empty() {
+        anyhow::bail!("No canary devices found in deployment");
+    }
+
+    let mismatched_devices_count = sqlx::query_scalar!(
+        "SELECT COUNT(*)
+             FROM device
+             WHERE id = ANY($1) AND release_id != target_release_id",
+        &device_ids
+    )
+    .fetch_one(&mut *tx)
+    .await?;
+
+    if mismatched_devices_count.unwrap_or(0) > 0 {
+        anyhow::bail!("Cannot confirm full rollout: canary devices have not completed updating");
+    }
+
+    let updated_deployment = sqlx::query_as!(
+            Deployment,
+            "UPDATE deployment SET status = 'done'
+             WHERE release_id = $1
+             RETURNING id, release_id, status AS \"status!: DeploymentStatus\", updated_at, created_at",
+            release_id
+        )
+        .fetch_one(&mut *tx)
+        .await?;
+
+    let device_count = sqlx::query_scalar!(
+        "SELECT COUNT(*)
+             FROM device
+             WHERE device.release_id IN (
+                SELECT id FROM release WHERE distribution_id = $1
+             )",
+        release.distribution_id
+    )
+    .fetch_one(&mut *tx)
+    .await?;
+
+    sqlx::query!(
+        "UPDATE device
+             SET target_release_id = $1, target_release_id_set_at = NOW()
+             WHERE device.release_id IN (
+                SELECT id FROM release WHERE distribution_id = $2
+             )",
+        release_id,
+        release.distribution_id
+    )
+    .execute(&mut *tx)
+    .await?;
+
+    tx.commit().await?;
+
+    // Send Slack notification
+    if let Some(deployment_slack_hook_url) = &config.deployment_slack_hook_url {
+        let release_info = sqlx::query!(
+            "SELECT r.version, d.name as distribution_name
+             FROM release r
+             JOIN distribution d ON r.distribution_id = d.id
+             WHERE r.id = $1",
+            release_id
+        )
+        .fetch_optional(pg_pool)
+        .await;
+
+        if let Ok(Some(info)) = release_info {
+            let confirmed_by = user_email.unwrap_or("Unknown");
+            let message = json!({
+                "blocks": [
+                    {
+                        "type": "section",
+                        "text": {
+                            "type": "mrkdwn",
+                            "text": format!(
+                                ":white_check_mark: *Full Rollout Confirmed*\n\n*Distribution:* {}\n*Version:* {}\n*Devices updated:* {}\n*Confirmed by:* {}",
+                                info.distribution_name,
+                                info.version,
+                                device_count.unwrap_or(0),
+                                confirmed_by
+                            )
+                        }
+                    }
+                ]
+            });
+            send_slack_notification(deployment_slack_hook_url, message).await;
+        }
+    }
+
+    Ok(updated_deployment)
+}
+
+pub async fn get_devices_in_deployment(
+    release_id: i32,
+    pg_pool: &PgPool,
+) -> anyhow::Result<Vec<DeploymentDeviceWithStatus>> {
+    let deployment = sqlx::query!(
+        "SELECT id FROM deployment WHERE release_id = $1",
+        release_id
+    )
+    .fetch_optional(pg_pool)
+    .await?;
+
+    let Some(deployment) = deployment else {
+        return Ok(Vec::new());
+    };
+
+    let devices = sqlx::query_as!(
+        DeploymentDeviceWithStatus,
+        r#"
             SELECT
                 d.id AS device_id,
                 d.serial_number,
                 d.release_id,
                 d.target_release_id,
                 d.last_ping,
-                dd.created_at AS added_at
+                dd.created_at AS added_at,
+                COALESCE(JSONB_OBJECT_AGG(l.name, dl.value) FILTER (WHERE l.name IS NOT NULL), '{}') as "labels!: SqlxJson<HashMap<String, String>>"
             FROM deployment_devices dd
             JOIN device d ON dd.device_id = d.id
+            LEFT JOIN device_label dl ON dl.device_id = d.id
+            LEFT JOIN label l ON l.id = dl.label_id
             WHERE dd.deployment_id = $1
+            GROUP BY d.id, d.serial_number, d.release_id, d.target_release_id, d.last_ping, dd.created_at
             ORDER BY dd.created_at ASC
             "#,
-            deployment.id
-        )
-        .fetch_all(pg_pool)
-        .await?;
+        deployment.id
+    )
+    .fetch_all(pg_pool)
+    .await?;
 
-        Ok(devices)
-    }
+    Ok(devices)
 }

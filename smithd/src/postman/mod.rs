@@ -64,6 +64,7 @@ impl Postman {
         self.network.set_hostname(self.hostname.clone());
 
         self.token = self.magic.get_token().await;
+        let mut system_info = SystemInfo::new().await;
 
         self.commander
             .insert_result(vec![
@@ -75,7 +76,7 @@ impl Postman {
                 SafeCommandResponse {
                     id: -2,
                     command: SafeCommandRx::UpdateSystemInfo {
-                        system_info: SystemInfo::new().await.to_value(),
+                        system_info: system_info.to_value(),
                     },
                     status: 0,
                 },
@@ -140,18 +141,23 @@ impl Postman {
                     }
                 }
                 _ = update_interval.tick() => {
-                    self.commander
-                        .insert_result(vec![
-                            // Keep the system info in sync.
-                            SafeCommandResponse {
-                                id: -2,
-                                command: SafeCommandRx::UpdateSystemInfo {
-                                    system_info: SystemInfo::new().await.to_value(),
+                    let new_system_info = SystemInfo::new().await;
+                    // Only update the system_info if it has actually changed
+                    if new_system_info != system_info {
+                        system_info = new_system_info.clone();
+                        self.commander
+                            .insert_result(vec![
+                                // Keep the system info in sync.
+                                SafeCommandResponse {
+                                    id: -2,
+                                    command: SafeCommandRx::UpdateSystemInfo {
+                                        system_info: new_system_info.to_value(),
+                                    },
+                                    status: 0,
                                 },
-                                status: 0,
-                            },
-                        ])
-                        .await;
+                            ])
+                            .await;
+                    }
                 }
                 _ = self.shutdown.token.cancelled() => {
                     break;

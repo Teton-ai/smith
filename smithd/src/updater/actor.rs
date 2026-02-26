@@ -1,13 +1,75 @@
+use crate::downloader::DownloaderHandle;
 use crate::magic::MagicHandle;
-use crate::shutdown::{ShutdownHandler, ShutdownSignals};
+use crate::shutdown::ShutdownSignals;
 use crate::utils::network::NetworkClient;
 use anyhow::Context;
 use anyhow::Result;
+use std::collections::HashMap;
 use tokio::process::Command;
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
-use tokio::time;
+use tokio::time::{self, Duration};
 use tracing::{error, info, warn};
+
+const MAX_INSTALL_RETRIES: u32 = 3;
+
+#[derive(Clone, Debug)]
+enum InstallFailureKind {
+    CorruptPackage,
+    SystemError,
+    Unknown,
+}
+
+impl std::fmt::Display for InstallFailureKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            InstallFailureKind::CorruptPackage => write!(f, "CorruptPackage"),
+            InstallFailureKind::SystemError => write!(f, "SystemError"),
+            InstallFailureKind::Unknown => write!(f, "Unknown"),
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+struct PackageFailure {
+    consecutive_failures: u32,
+    last_failure_kind: InstallFailureKind,
+}
+
+fn classify_install_failure(stderr: &str) -> InstallFailureKind {
+    let stderr_lower = stderr.to_lowercase();
+
+    let corrupt_patterns = [
+        "is not a debian format archive",
+        "archive is corrupt",
+        "unexpected end of file",
+        "could not read meta data",
+    ];
+
+    for pattern in &corrupt_patterns {
+        if stderr_lower.contains(pattern) {
+            return InstallFailureKind::CorruptPackage;
+        }
+    }
+
+    let system_patterns = [
+        "dpkg was interrupted",
+        "dependency problems",
+        "conflicts with",
+        "no space left on device",
+        "unable to access dpkg",
+        "unmet dependencies",
+        "broken packages",
+    ];
+
+    for pattern in &system_patterns {
+        if stderr_lower.contains(pattern) {
+            return InstallFailureKind::SystemError;
+        }
+    }
+
+    InstallFailureKind::Unknown
+}
 
 #[derive(Debug)]
 pub enum ActorMessage {
@@ -17,10 +79,21 @@ pub enum ActorMessage {
     StatusReport { rpc: oneshot::Sender<String> },
 }
 
+#[derive(Clone, Debug, PartialEq)]
 enum Status {
     Idle,
     Updating,
     Upgrading,
+}
+
+impl std::fmt::Display for Status {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Status::Idle => write!(f, "Idle"),
+            Status::Updating => write!(f, "Updating"),
+            Status::Upgrading => write!(f, "Upgrading"),
+        }
+    }
 }
 
 /// Updater Actor
@@ -32,6 +105,8 @@ pub struct Actor {
     network: NetworkClient,
     last_update: Option<Result<time::Instant>>,
     last_upgrade: Option<Result<time::Instant>>,
+    downloader: DownloaderHandle,
+    install_failures: HashMap<String, PackageFailure>,
 }
 
 impl Actor {
@@ -39,6 +114,7 @@ impl Actor {
         shutdown: ShutdownSignals,
         receiver: mpsc::Receiver<ActorMessage>,
         magic: MagicHandle,
+        downloader: DownloaderHandle,
     ) -> Self {
         let network = NetworkClient::new();
         Self {
@@ -49,19 +125,28 @@ impl Actor {
             status: Status::Idle,
             last_update: None,
             last_upgrade: None,
+            downloader,
+            install_failures: HashMap::new(),
         }
     }
 
     async fn run_dpkg_recovery_static() -> Result<()> {
-        info!("Running dpkg recovery using systemd-run");
+        info!("Running dpkg recovery using systemd-run with 5 minute timeout");
         let recovery_command = "systemd-run --unit=dpkg-fix --description='Finish broken configs' --property=Type=oneshot --no-ask-password dpkg --configure -a";
 
-        let output = Command::new("sh")
+        let recovery_future = Command::new("sh")
             .arg("-c")
             .arg(recovery_command)
-            .output()
-            .await
-            .with_context(|| "Failed to execute dpkg recovery command")?;
+            .kill_on_drop(true)
+            .output();
+
+        let output = match time::timeout(Duration::from_secs(300), recovery_future).await {
+            Ok(result) => result.with_context(|| "Failed to execute dpkg recovery command")?,
+            Err(_) => {
+                error!("dpkg recovery timed out after 5 minutes");
+                return Err(anyhow::anyhow!("dpkg recovery timed out"));
+            }
+        };
 
         if output.status.success() {
             info!("Dpkg recovery completed successfully");
@@ -70,6 +155,35 @@ impl Actor {
             let stderr = String::from_utf8_lossy(&output.stderr);
             Err(anyhow::anyhow!("Dpkg recovery failed: {}", stderr))
         }
+    }
+
+    /// Record an install failure for a package. Returns `true` if the `.deb` file
+    /// should be deleted (only for corrupt-package errors where re-download may help).
+    fn handle_install_failure(&mut self, package_name: &str, kind: InstallFailureKind) -> bool {
+        let entry = self
+            .install_failures
+            .entry(package_name.to_string())
+            .or_insert(PackageFailure {
+                consecutive_failures: 0,
+                last_failure_kind: kind.clone(),
+            });
+        entry.consecutive_failures += 1;
+        entry.last_failure_kind = kind.clone();
+
+        matches!(kind, InstallFailureKind::CorruptPackage)
+    }
+
+    fn should_skip_install(&self, package_name: &str) -> bool {
+        if let Some(failure) = self.install_failures.get(package_name)
+            && failure.consecutive_failures >= MAX_INSTALL_RETRIES
+        {
+            warn!(
+                "Skipping install of {} after {} consecutive failures (last: {})",
+                package_name, failure.consecutive_failures, failure.last_failure_kind
+            );
+            return true;
+        }
+        false
     }
 
     async fn handle_message(&mut self, msg: ActorMessage) {
@@ -88,6 +202,7 @@ impl Actor {
                     info!(
                         "Upgrading from release_id {release_id:?} to target_release_id {target_release_id:?}"
                     );
+                    self.install_failures.clear();
 
                     self.update().await;
 
@@ -105,7 +220,6 @@ impl Actor {
                 }
             }
             ActorMessage::StatusReport { rpc } => {
-                // take the instants and format them nicely with X seconds ago
                 let interval = |time: time::Instant| {
                     let duration = time.elapsed();
                     let seconds = duration.as_secs();
@@ -136,19 +250,25 @@ impl Actor {
                     None => "Never".to_string(),
                 };
 
-                let _rpc = rpc.send(format!(
-                    "Last Update: {} | Last Upgrade: {}",
-                    last_update_string, last_upgrade_string
-                ));
+                let status_string = format!(
+                    "Status: {} | Last Update: {} | Last Upgrade: {}",
+                    self.status, last_update_string, last_upgrade_string
+                );
+
+                let _rpc = rpc.send(status_string);
             }
         }
     }
 
+    #[tracing::instrument(skip(self))]
     async fn update(&mut self) {
         info!("Checking for updates");
         self.status = Status::Updating;
         let res = self.check_for_updates().await.map(|_| time::Instant::now());
-        info!("Check for updates result: {:?}", res);
+        match &res {
+            Ok(res) => info!("Check for updates result: {:?}", res),
+            Err(e) => warn!("Check for updates result: {:?}", e),
+        }
         self.last_update = Some(res);
         self.status = Status::Idle;
     }
@@ -162,14 +282,25 @@ impl Actor {
         self.status = Status::Idle;
     }
 
+    #[tracing::instrument(skip(self))]
     async fn check_for_updates(&self) -> Result<()> {
-        // apt update on check for updates
-        Command::new("sh")
+        // apt update on check for updates with timeout
+        info!("Running apt update with 5 minute timeout");
+        let apt_update_future = Command::new("sh")
             .arg("-c")
             .arg("apt update -y")
-            .output()
-            .await
-            .with_context(|| "Failed to run apt update")?;
+            .kill_on_drop(true)
+            .output();
+
+        match time::timeout(Duration::from_secs(300), apt_update_future).await {
+            Ok(result) => {
+                result.with_context(|| "Failed to run apt update")?;
+            }
+            Err(_) => {
+                error!("apt update timed out after 5 minutes");
+                return Err(anyhow::anyhow!("apt update timed out"));
+            }
+        }
 
         let target_release_id = self
             .magic
@@ -229,7 +360,7 @@ impl Actor {
                 up_to_date = false;
                 // we need to install the package
                 self.network
-                    .get_package(&target_package.file, &token)
+                    .get_package(&target_package.file, &self.downloader)
                     .await?;
             }
         }
@@ -241,7 +372,7 @@ impl Actor {
         Ok(())
     }
 
-    async fn upgrade_device(&self) -> Result<()> {
+    async fn upgrade_device(&mut self) -> Result<()> {
         // Check if previous update was successful
         match self.last_update {
             Some(Ok(time)) => {
@@ -292,6 +423,10 @@ impl Actor {
             let package_file = package.file;
             let package_version = package.version;
 
+            if self.should_skip_install(&package_name) {
+                continue;
+            }
+
             let path = std::env::current_dir()?;
             let packages_folder = path.join("packages");
             let package_file = packages_folder.join(&package_file);
@@ -339,22 +474,48 @@ impl Actor {
                     "sudo apt install {} -y --allow-downgrades",
                     package_file.display()
                 );
-                match Command::new("sh")
+
+                info!("Installing package {} with 5 minute timeout", package_name);
+                let install_future = Command::new("sh")
                     .arg("-c")
                     .arg(&install_command)
-                    .output()
-                    .await
-                {
-                    Ok(status) => {
+                    .kill_on_drop(true)
+                    .output();
+
+                match time::timeout(Duration::from_secs(300), install_future).await {
+                    Ok(Ok(status)) => {
                         if status.status.success() {
                             info!("Successfully installed package {}", package_name);
+                            self.install_failures.remove(&package_name);
                         } else {
+                            let stdout = String::from_utf8_lossy(&status.stdout);
                             let stderr = String::from_utf8_lossy(&status.stderr);
-                            error!("Failed to install package {}: {}", package_name, stderr);
+                            error!(
+                                "Failed to install package {}:\nstderr: {}\nstdout: {}",
+                                package_name, stderr, stdout
+                            );
 
-                            // Check if error is due to dpkg interruption requiring 'dpkg --configure -a'
-                            if stderr.contains("dpkg was interrupted")
-                                && stderr.contains("dpkg --configure -a")
+                            let combined_output = format!("{}\n{}", stderr, stdout);
+                            let kind = classify_install_failure(&combined_output);
+                            let should_delete = self.handle_install_failure(&package_name, kind);
+
+                            if should_delete {
+                                if let Err(e) = tokio::fs::remove_file(&package_file).await {
+                                    error!(
+                                        "Failed to remove package file {}: {}",
+                                        package_file.display(),
+                                        e
+                                    );
+                                } else {
+                                    info!(
+                                        "Removed package file {} so it will be re-downloaded",
+                                        package_file.display()
+                                    );
+                                }
+                            }
+
+                            if combined_output.contains("dpkg was interrupted")
+                                && combined_output.contains("dpkg --configure -a")
                             {
                                 info!(
                                     "Detected dpkg interruption for package {}, attempting recovery",
@@ -368,11 +529,19 @@ impl Actor {
                             }
                         }
                     }
-                    Err(e) => {
+                    Ok(Err(e)) => {
                         error!(
                             "Failed to execute install command for {}: {}",
                             package_name, e
                         );
+                        self.handle_install_failure(&package_name, InstallFailureKind::Unknown);
+                    }
+                    Err(_) => {
+                        error!(
+                            "apt install for package {} timed out after 5 minutes",
+                            package_name
+                        );
+                        self.handle_install_failure(&package_name, InstallFailureKind::Unknown);
                     }
                 }
             }
@@ -397,9 +566,7 @@ impl Actor {
     ///
     /// Returns `Ok` if all packages are, `Err` otherwise.
     async fn are_packages_up_to_date(&self) -> Result<()> {
-        let shutdown = ShutdownHandler::new();
-        let configuration = MagicHandle::new(shutdown.signals());
-        configuration.load(None).await;
+        let configuration = self.magic.clone();
 
         let magic_packages = configuration.get_packages().await;
 

@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            WITH selected_devices AS (\n                SELECT d.id FROM device d\n                JOIN release r ON d.release_id = r.id\n                LEFT JOIN device_network dn ON d.id = dn.device_id\n                WHERE d.last_ping > NOW() - INTERVAL '3 minutes'\n                AND d.release_id = d.target_release_id\n                AND r.distribution_id = $1\n                ORDER BY\n                    COALESCE(dn.network_score, 0) DESC,\n                    d.last_ping DESC\n                LIMIT 10\n            )\n            INSERT INTO deployment_devices (deployment_id, device_id)\n            SELECT $2, id FROM selected_devices\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "1b21499cb0182c12a12121aee06ba082559223389003189f79f3c305053fee7c"
+}

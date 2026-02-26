@@ -8,7 +8,6 @@ use axum::{
     middleware::Next,
     response::Response,
 };
-use jwks_client_rs::{JwksClient, source::WebSource};
 use reqwest::Url;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
@@ -47,27 +46,11 @@ pub async fn check(
         .and_then(|value| value.strip_prefix("Bearer "))
         .unwrap_or_default();
 
-    let url_string =
-        std::env::var("AUTH0_ISSUER").map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    let url = Url::parse(&url_string)
-        .unwrap()
-        .join(".well-known/jwks.json")
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    // Use the shared JwksClient from state
+    let audience = vec![state.config.auth0_audience.clone()];
 
-    let source: WebSource = WebSource::builder()
-        .build(url)
-        .expect("Failed to build WebSource");
-
-    let client: JwksClient<WebSource> = JwksClient::builder()
-        .time_to_live(Duration::from_secs(60))
-        .build(source);
-
-    // Step 3: Verify the token.
-    let audience = vec![
-        std::env::var("AUTH0_AUDIENCE").expect("error: failed to access AUTH0_AUDIENCE env var"),
-    ];
-
-    let claims = client
+    let claims = state
+        .jwks_client
         .decode::<Claims>(token, &audience)
         .await
         .map_err(|_| StatusCode::UNAUTHORIZED)?;
@@ -76,45 +59,73 @@ pub async fn check(
 
     let authorization = state.authorization.clone();
 
-    let current_user = match CurrentUser::id(&pool, &claims.sub).await {
-        Ok(user_id) => CurrentUser::build(&pool, &authorization, user_id).await,
-        Err(sqlx::Error::RowNotFound) => {
-            info!("Creating user for sub={}", claims.sub);
-            let issuer = Url::parse(
-                &std::env::var("AUTH0_ISSUER").map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?,
-            )
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-            let userinfo_url = issuer
-                .join("userinfo")
-                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-            let client_http = reqwest::Client::builder()
-                .timeout(Duration::from_secs(5))
-                .build()
-                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-            let userinfo: Auth0UserInfo = client_http
-                .get(userinfo_url)
-                .bearer_auth(token)
-                .send()
-                .await
-                .and_then(|r| r.error_for_status())
-                .map_err(|_| StatusCode::UNAUTHORIZED)?
-                .json()
-                .await
-                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-
-            info!(
-                "Provisioning user; email_present={}",
-                userinfo.email.is_some()
-            );
-            let user_id = CurrentUser::create(&pool, &claims.sub, Some(userinfo))
-                .await
-                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-
-            CurrentUser::build(&pool, &authorization, user_id).await
-        }
+    // Check if user exists and has email populated
+    let existing_user = match CurrentUser::lookup(&pool, &claims.sub).await {
+        Ok((user_id, has_email)) => Some((user_id, has_email)),
+        Err(sqlx::Error::RowNotFound) => None,
         Err(_) => return Err(StatusCode::INTERNAL_SERVER_ERROR),
-    }
-    .map_err(|_| StatusCode::UNAUTHORIZED)?;
+    };
+
+    // M2M tokens have sub claim ending with "@clients" - they can't call /userinfo
+    let is_m2m_token = claims.sub.ends_with("@clients");
+
+    let needs_userinfo = !is_m2m_token
+        && existing_user
+            .map(|(_, has_email)| !has_email)
+            .unwrap_or(true);
+
+    // Fetch userinfo from Auth0 if user is new or missing email
+    let userinfo = if needs_userinfo {
+        let issuer = Url::parse(&state.config.auth0_issuer)
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        let userinfo_url = issuer
+            .join("userinfo")
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        let client_http = reqwest::Client::builder()
+            .timeout(Duration::from_secs(5))
+            .build()
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        let userinfo: Auth0UserInfo = client_http
+            .get(userinfo_url)
+            .bearer_auth(token)
+            .send()
+            .await
+            .and_then(|r| r.error_for_status())
+            .map_err(|_| StatusCode::UNAUTHORIZED)?
+            .json()
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        Some(userinfo)
+    } else {
+        None
+    };
+
+    // Create or update user as needed
+    let user_id = match existing_user {
+        Some((user_id, has_email)) => {
+            // User exists, update email if missing and we have it
+            if !has_email
+                && let Some(ref info) = userinfo
+                && let Some(ref email) = info.email
+            {
+                info!("Updating email for user_id={}", user_id);
+                CurrentUser::update_email(&pool, user_id, email)
+                    .await
+                    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+            }
+            user_id
+        }
+        None => {
+            info!("Creating user for sub={}", claims.sub);
+            CurrentUser::create(&pool, &claims.sub, userinfo)
+                .await
+                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        }
+    };
+
+    let current_user = CurrentUser::build(&pool, &authorization, user_id)
+        .await
+        .map_err(|_| StatusCode::UNAUTHORIZED)?;
 
     request.extensions_mut().insert(current_user);
 

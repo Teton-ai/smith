@@ -1,11 +1,13 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 mod download;
+use crate::downloader::download::DownloadStats;
 use crate::magic::MagicHandle;
 use crate::shutdown::ShutdownSignals;
 use crate::utils::network::NetworkClient;
-use anyhow;
-use download::download_package;
+use anyhow::{self, Context};
+use download::download_file_mb;
+use tokio::sync::Mutex;
 use tokio::{
     sync::{mpsc, oneshot},
     time,
@@ -18,6 +20,7 @@ enum DownloaderMessage {
         remote_file: String,
         local_file: String,
         rate: f64,
+        rpc: Option<oneshot::Sender<anyhow::Result<DownloadStats>>>,
     },
     CheckStatus {
         rpc: oneshot::Sender<anyhow::Result<DownloadingStatus>>,
@@ -35,11 +38,12 @@ struct Downloader {
     shutdown: ShutdownSignals,
     receiver: mpsc::Receiver<DownloaderMessage>,
     magic: MagicHandle,
-    is_downloading: Arc<AtomicUsize>,
+    downloading_count: Arc<AtomicUsize>,
     network: NetworkClient,
     force_stop: Arc<AtomicBool>,
     last_download_status: Arc<AtomicBool>,
     timeout: u64,
+    download_lock: Arc<Mutex<()>>,
 }
 
 impl Downloader {
@@ -53,16 +57,18 @@ impl Downloader {
         let force_stop = Arc::new(AtomicBool::new(false));
         let is_downloading = Arc::new(AtomicUsize::new(0));
         let last_download_status = Arc::new(AtomicBool::new(false));
+        let download_lock = Arc::new(Mutex::new(()));
 
         Self {
             shutdown,
             receiver,
             magic,
             network,
-            is_downloading,
+            downloading_count: is_downloading,
             force_stop,
             timeout,
             last_download_status,
+            download_lock,
         }
     }
 
@@ -72,18 +78,23 @@ impl Downloader {
                 remote_file,
                 local_file,
                 rate,
+                rpc,
             } => {
-                self.is_downloading.fetch_add(1, Ordering::SeqCst);
+                self.downloading_count.fetch_add(1, Ordering::SeqCst);
 
                 let magic = self.magic.clone();
                 let force_stop = self.force_stop.clone();
-                let is_downloading = self.is_downloading.clone();
+                let is_downloading = self.downloading_count.clone();
                 let last_download_status = self.last_download_status.clone();
+                let download_lock = self.download_lock.clone();
 
                 tokio::spawn(async move {
+                    // Aqcuire global lock
+                    let _guard = download_lock.lock().await;
+
                     // Do the download
                     let result =
-                        download_package(magic, remote_file, local_file, rate, force_stop).await;
+                        download_file_mb(magic, remote_file, local_file, rate, force_stop).await;
 
                     if result.is_ok() {
                         last_download_status.store(true, Ordering::SeqCst);
@@ -93,12 +104,18 @@ impl Downloader {
 
                     // Reset status
                     is_downloading.fetch_sub(1, Ordering::SeqCst);
+
+                    if let Some(rpc) = rpc {
+                        let _ = rpc.send(result);
+                    }
+
+                    // Lock released when _gaurd dropped
                 });
             }
             DownloaderMessage::CheckStatus { rpc } => {
                 // Check if the thread is currently downloading
                 let mut status = DownloadingStatus::Failed;
-                if self.is_downloading.load(Ordering::SeqCst) > 0 {
+                if self.downloading_count.load(Ordering::SeqCst) > 0 {
                     status = DownloadingStatus::Downloading;
                 } else if self.last_download_status.load(Ordering::SeqCst) {
                     status = DownloadingStatus::Success;
@@ -127,16 +144,24 @@ impl Downloader {
                     let mut count = 1;
 
                     loop {
-                        if !self.is_downloading.load(Ordering::SeqCst) > 0 {
+                        let active_downloads = self.downloading_count.load(Ordering::SeqCst);
+
+                        if active_downloads == 0 {
+                            info!("All downloads stopped, exiting.");
                             break;
-                        } else {
-                            info!("Waiting for download task to finish");
-                            time::sleep(time::Duration::from_secs(1)).await;
-                            if count > self.timeout {
+                        }
+
+                        info!("Waiting for download task to finish");
+                        time::sleep(time::Duration::from_secs(1)).await;
+
+                        if count > self.timeout {
+                            info!("Download task did not finish in time. Forcing stop");
+                            if !self.force_stop.load(Ordering::SeqCst) {
                                 self.force_stop.store(true, Ordering::SeqCst);
                             }
-                            count += 1;
                         }
+                        count += 1;
+
                     }
                     info!("Download task shutting down gracefully");
                     break;
@@ -156,7 +181,7 @@ impl DownloaderHandle {
     pub fn new(shutdown: ShutdownSignals, magic: MagicHandle) -> Self {
         let (sender, receiver) = mpsc::channel(8);
 
-        let timeout = 60; // 60 second timeout
+        let timeout = 5; // 5 second timeout
 
         let mut actor = Downloader::new(shutdown, receiver, magic, timeout);
 
@@ -170,18 +195,60 @@ impl DownloaderHandle {
         remote_file: &str,
         local_file: &str,
         rate: f64,
-    ) -> anyhow::Result<String> {
+    ) -> anyhow::Result<()> {
         // unwrap because if this fails then we are in a bad state
         self.sender
             .send(DownloaderMessage::Download {
                 remote_file: remote_file.to_string(),
                 local_file: local_file.to_string(),
                 rate,
+                rpc: None,
             })
             .await
             .unwrap();
 
-        Ok("Download started, not waiting for result".to_string())
+        Ok(())
+    }
+
+    pub async fn download_blocking(
+        &self,
+        remote_file: &str,
+        local_file: &str,
+        rate: f64,
+    ) -> anyhow::Result<()> {
+        let (rpc, receiver) = oneshot::channel::<anyhow::Result<DownloadStats>>();
+
+        self.sender
+            .send(DownloaderMessage::Download {
+                remote_file: remote_file.to_string(),
+                local_file: local_file.to_string(),
+                rate,
+                rpc: Some(rpc),
+            })
+            .await
+            .unwrap();
+
+        // Get the stats
+        let stats = receiver.await.context("Download task died")??;
+
+        // Check if download was actually successful
+        if !stats.success {
+            return Err(anyhow::anyhow!(
+                "Download failed: {}",
+                stats
+                    .error_message
+                    .unwrap_or_else(|| "Unknown error".to_string())
+            ));
+        }
+
+        // Log success info
+        // TODO: check if this is actually going to log
+        info!(
+            "Downloaded {} bytes in {:.2}s at {:.2} MB/s",
+            stats.bytes_downloaded, stats.elapsed_seconds, stats.average_speed_mbps
+        );
+
+        Ok(())
     }
 
     pub async fn check_download_status(&self) -> anyhow::Result<DownloadingStatus> {

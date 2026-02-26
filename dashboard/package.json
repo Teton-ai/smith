@@ -1,32 +1,33 @@
 {
-  "name": "@teton/smith-dashboard",
-  "scripts": {
-    "dev": "next dev",
-    "build": "next build",
-    "start": "next start",
-    "lint": "next lint"
-  },
-  "dependencies": {
-    "@auth0/auth0-react": "^2.3.0",
-    "@types/leaflet": "^1.9.20",
-    "axios": "^1.10.0",
-    "leaflet": "^1.9.4",
-    "lucide-react": "^0.518.0",
-    "moment": "^2.30.1",
-    "next": "15.3.4",
-    "react": "^19.0.0",
-    "react-dom": "^19.0.0",
-    "react-leaflet": "^5.0.0"
-  },
-  "devDependencies": {
-    "@eslint/eslintrc": "^3",
-    "@tailwindcss/postcss": "^4",
-    "@types/node": "^20",
-    "@types/react": "^19",
-    "@types/react-dom": "^19",
-    "eslint": "^9",
-    "eslint-config-next": "15.3.4",
-    "tailwindcss": "^4",
-    "typescript": "^5"
-  }
+	"name": "@teton/smith-dashboard",
+	"scripts": {
+		"dev": "next dev",
+		"build": "next build",
+		"start": "next start",
+		"lint": "biome check --write",
+		"gen-api-client": "orval --config ./orval.config.ts"
+	},
+	"dependencies": {
+		"@auth0/auth0-react": "^2.3.0",
+		"@tanstack/react-query": "^5.90.12",
+		"@types/leaflet": "^1.9.20",
+		"axios": "^1.10.0",
+		"leaflet": "^1.9.4",
+		"lucide-react": "^0.518.0",
+		"moment": "^2.30.1",
+		"next": "^15.3.6",
+		"react": "^19.0.0",
+		"react-dom": "^19.0.0",
+		"react-leaflet": "^5.0.0"
+	},
+	"devDependencies": {
+		"@biomejs/biome": "2.3.9",
+		"@tailwindcss/postcss": "^4",
+		"@types/node": "^20",
+		"@types/react": "^19",
+		"@types/react-dom": "^19",
+		"orval": "^7.17.0",
+		"tailwindcss": "^4",
+		"typescript": "^5"
+	}
 }

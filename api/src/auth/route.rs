@@ -1,5 +1,4 @@
 use crate::State;
-use crate::device::Device;
 use axum::http::StatusCode;
 use axum::{Extension, Json};
 use serde::{Deserialize, Serialize};
@@ -31,19 +30,22 @@ pub struct DeviceAuthResponse {
     ),
     tag = AUTH_TAG
 )]
-#[tracing::instrument]
 #[deprecated(since = "0.2.66", note = "Since /device have been released")]
 pub async fn verify_token(
     Extension(state): Extension<State>,
     Json(body): Json<DeviceTokenForVerification>,
 ) -> axum::response::Result<Json<DeviceAuthResponse>, StatusCode> {
-    let device = Device::get_device_from_token(body.token, &state.pg_pool)
-        .await
-        .map_err(|err| {
-            error!("Failed to get device {err}");
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?
-        .ok_or(StatusCode::UNAUTHORIZED)?;
+    let device = sqlx::query!(
+        "SELECT serial_number, approved FROM device WHERE token IS NOT NULL AND token = $1",
+        body.token
+    )
+    .fetch_optional(&state.pg_pool)
+    .await
+    .map_err(|err| {
+        error!("Failed to get device {err}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?
+    .ok_or(StatusCode::UNAUTHORIZED)?;
 
     Ok(Json(DeviceAuthResponse {
         serial_number: device.serial_number,

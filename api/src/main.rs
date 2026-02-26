@@ -1,13 +1,16 @@
+use crate::auth::DebugJwksClient;
 use crate::event::PublicEvent;
+use crate::sentry::Sentry;
+use ::sentry::integrations::tower::{NewSentryLayer, SentryHttpLayer};
+use axum::body::Body;
 use axum::error_handling::HandleErrorLayer;
-use axum::extract::DefaultBodyLimit;
-use axum::http::StatusCode;
+use axum::extract::{DefaultBodyLimit, MatchedPath};
+use axum::http::{Request, StatusCode};
 use axum::response::Redirect;
 use axum::{Extension, Router, middleware, routing::get};
 use config::Config;
 use middlewares::authorization::AuthorizationConfig;
 use sqlx::postgres::{PgPool, PgPoolOptions};
-use std::borrow::Cow;
 use std::env;
 use std::fs::File;
 use std::future::ready;
@@ -19,6 +22,7 @@ use tokio::sync::{Mutex, broadcast};
 use tower::ServiceBuilder;
 use tower_http::cors::CorsLayer;
 use tower_http::decompression::RequestDecompressionLayer;
+use tower_http::trace::TraceLayer;
 use tracing::info;
 use tracing_subscriber::{EnvFilter, prelude::*};
 use utoipa::openapi::security::{Http, HttpAuthScheme, SecurityScheme};
@@ -26,19 +30,20 @@ use utoipa::{Modify, OpenApi};
 use utoipa_axum::{router::OpenApiRouter, routes};
 use utoipa_swagger_ui::SwaggerUi;
 
-mod asset;
 mod auth;
 mod command;
 mod config;
 mod dashboard;
-mod db;
 mod deployment;
 mod device;
 mod distribution;
+mod error;
 mod event;
 mod handlers;
 mod health;
+mod home;
 mod ip_address;
+mod logstream;
 mod metric;
 mod middlewares;
 mod modem;
@@ -46,6 +51,8 @@ pub mod network;
 mod package;
 mod release;
 mod rollout;
+mod sentry;
+pub mod slack;
 mod smith;
 mod storage;
 mod telemetry;
@@ -57,6 +64,7 @@ pub struct State {
     config: &'static Config,
     public_events: Arc<Mutex<Sender<PublicEvent>>>,
     authorization: Arc<AuthorizationConfig>,
+    jwks_client: DebugJwksClient,
 }
 
 fn main() {
@@ -78,36 +86,22 @@ fn main() {
         Config::new().expect("error: failed to construct config"),
     ));
 
-    if let Some(sentry_url) = &config.sentry_url {
-        // Sentry needs to be initialized outside of an async block.
-        // See https://docs.sentry.io/platforms/rust.
-        let _guard = sentry::init(sentry::ClientOptions {
-            dsn: Some(sentry_url.parse().expect("Invalid Sentry DSN")),
-            traces_sample_rate: 0.75,
-            release: sentry::release_name!(),
-            environment: match env::var("ENVIRONMENT") {
-                Ok(value) => Some(Cow::Owned(value)),
-                Err(_) => Some(Cow::Borrowed("development")),
-            },
-            ..Default::default()
-        });
-    }
-
     tracing_subscriber::registry()
-        .with(tracing_subscriber::fmt::layer())
-        .with(sentry_tracing::layer())
+        .with(
+            tracing_subscriber::fmt::layer()
+                .with_line_number(true)
+                .compact(),
+        )
         .with(EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")))
         .init();
 
-    // Corresponds to `#[tokio::main]`.
-    // See https://docs.rs/tokio-macros/latest/src/tokio_macros/lib.rs.html#225.
-    tokio::runtime::Builder::new_current_thread()
+    let _sentry_guard = Sentry::init(config);
+
+    tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
         .expect("error: failed to initialize tokio runtime")
-        .block_on(async {
-            _ = tokio::spawn(async move { start_main_server(config, authorization).await }).await;
-        });
+        .block_on(async { start_main_server(config, authorization).await });
 }
 
 struct SecurityAddon;
@@ -157,6 +151,7 @@ struct SmithApiDoc;
 
 async fn start_main_server(config: &'static Config, authorization: AuthorizationConfig) {
     info!("Starting Smith API v{}", env!("CARGO_PKG_VERSION"));
+
     // set up connection pool
     let pool = PgPoolOptions::new()
         .max_connections(100)
@@ -173,11 +168,18 @@ async fn start_main_server(config: &'static Config, authorization: Authorization
     let (tx_message, _rx_message) = broadcast::channel::<PublicEvent>(1);
     let tx_message = Arc::new(Mutex::new(tx_message));
 
+    let log_sessions = logstream::LogStreamSessions::new();
+
+    // Create JwksClient once at startup
+    let jwks_client =
+        DebugJwksClient::init(&config.auth0_issuer).expect("Failed to initialize JWKS client");
+
     let state = State {
         pg_pool: pool,
         config,
         public_events: tx_message,
         authorization: Arc::new(authorization),
+        jwks_client,
     };
 
     let recorder_handle = metric::setup_metrics_recorder();
@@ -186,7 +188,6 @@ async fn start_main_server(config: &'static Config, authorization: Authorization
 
     let (device_router, device_api) = OpenApiRouter::with_openapi(ApiDoc::openapi())
         .routes(routes!(device::route::get_device))
-        .route_layer(middleware::from_fn(device::Device::middleware))
         .split_for_parts();
     api_doc.merge(device_api);
 
@@ -198,7 +199,7 @@ async fn start_main_server(config: &'static Config, authorization: Authorization
 
     #[allow(deprecated)]
     let (protected_router, protected_api) = OpenApiRouter::with_openapi(ApiDoc::openapi())
-        .routes(routes!(dashboard::route::api))
+        .routes(routes!(dashboard::route::get_dashboard))
         .routes(routes!(auth::route::verify_token))
         .routes(routes!(
             network::route::get_networks,
@@ -214,11 +215,16 @@ async fn start_main_server(config: &'static Config, authorization: Authorization
             device::route::delete_device,
             device::route::update_device
         ))
+        .routes(routes!(
+            device::route::get_labels,
+            device::route::delete_label
+        ))
         .routes(routes!(device::route::get_health_for_device))
         .routes(routes!(
             package::route::get_packages,
             package::route::release_package
         ))
+        .routes(routes!(package::route::get_package_latest))
         .routes(routes!(modem::route::get_modem_list))
         .routes(routes!(modem::route::get_modem_by_id))
         .routes(routes!(
@@ -233,7 +239,6 @@ async fn start_main_server(config: &'static Config, authorization: Authorization
             distribution::route::get_distribution_releases,
             distribution::route::create_distribution_release,
         ))
-        .routes(routes!(distribution::route::get_distribution_devices))
         .routes(routes!(
             distribution::route::get_distribution_latest_release
         ))
@@ -256,6 +261,11 @@ async fn start_main_server(config: &'static Config, authorization: Authorization
             release::route::delete_package_for_release
         ))
         .routes(routes!(
+            release::route::get_release_services,
+            release::route::create_release_service
+        ))
+        .routes(routes!(release::route::delete_release_service))
+        .routes(routes!(
             device::route::get_network_for_device,
             device::route::update_device_network
         ))
@@ -264,23 +274,21 @@ async fn start_main_server(config: &'static Config, authorization: Authorization
             device::route::issue_commands_to_device,
             device::route::get_all_commands_for_device
         ))
+        .routes(routes!(device::route::get_services_for_device))
         .routes(routes!(rollout::route::api_rollout,))
+        .routes(routes!(rollout::route::get_distribution_rollouts))
         .routes(routes!(deployment::route::api_get_deployment_devices))
         .routes(routes!(
             deployment::route::api_release_deployment,
             deployment::route::api_get_release_deployment,
-            deployment::route::api_release_deployment_check_done
         ))
+        .routes(routes!(deployment::route::api_confirm_full_rollout))
         .nest_service(
             "/packages/:package_id",
             get(handlers::packages::get_package_by_id)
                 .delete(handlers::packages::delete_package_by_id),
         )
-        .routes(routes!(device::route::get_tag_for_device))
-        .routes(routes!(
-            device::route::delete_tag_from_device,
-            device::route::add_tag_to_device
-        ))
+        .routes(routes!(package::route::download_package))
         .routes(routes!(
             device::route::get_variables_for_device,
             device::route::add_variable_to_device
@@ -300,18 +308,12 @@ async fn start_main_server(config: &'static Config, authorization: Authorization
             device::route::revoke_device
         ))
         .routes(routes!(device::route::delete_token))
-        .routes(routes!(device::route::get_tags))
         .routes(routes!(device::route::update_devices_target_release))
         .routes(routes!(device::route::get_variables))
-        .routes(routes!(
-            handlers::tags::get_tags,
-            handlers::tags::create_tag
-        ))
         .routes(routes!(
             command::route::get_bundle_commands,
             command::route::issue_commands_to_devices
         ))
-        .routes(routes!(device::route::get_devices_new))
         .routes(routes!(event::route::sse_handler))
         .route_layer(middleware::from_fn(middlewares::authentication::check))
         // TODO: Check why we have this, not good for all routes
@@ -329,6 +331,7 @@ async fn start_main_server(config: &'static Config, authorization: Authorization
         .routes(routes!(smith::route::fetch_package))
         .routes(routes!(smith::route::list_release_packages))
         .routes(routes!(smith::route::test_file))
+        .routes(routes!(smith::route::test_upload))
         .split_for_parts();
 
     let smith_router = smith_router
@@ -341,19 +344,46 @@ async fn start_main_server(config: &'static Config, authorization: Authorization
         )
         .layer(DefaultBodyLimit::max(512000000));
 
+    let (ws_router, _ws_api) = OpenApiRouter::with_openapi(ApiDoc::openapi())
+        .routes(routes!(logstream::dashboard_logs_ws))
+        .routes(routes!(logstream::device_logs_ws))
+        .split_for_parts();
+
     let app = Router::new()
         .route("/", get(|| async { Redirect::temporary("/docs") }))
         .merge(public_router)
         .merge(device_router)
         .merge(protected_router)
         .merge(smith_router)
+        .merge(ws_router)
         .route("/metrics", get(move || ready(recorder_handle.render())))
         .route("/health", get(health::check))
         .merge(SwaggerUi::new("/docs").url("/openapi.json", api_doc))
         .merge(SwaggerUi::new("/smith/docs").url("/smith/openapi.json", smith_api))
         .layer(CorsLayer::permissive())
         .route_layer(middleware::from_fn(metric::track_metrics))
-        .layer(Extension(state));
+        .layer(middleware::from_fn(Sentry::capture_errors_middleware))
+        .layer(
+            ServiceBuilder::new()
+                .layer(NewSentryLayer::<Request<Body>>::new_from_top())
+                .layer(SentryHttpLayer::new().enable_transaction()),
+        )
+        .layer(
+            TraceLayer::new_for_http().make_span_with(|request: &Request<Body>| {
+                let path = if let Some(path) = request.extensions().get::<MatchedPath>() {
+                    path.as_str()
+                } else {
+                    request.uri().path()
+                };
+                tracing::info_span!(
+                    "http-request",
+                    "http.request.method" = %request.method(),
+                    "http.route" = path
+                )
+            }),
+        )
+        .layer(Extension(state))
+        .layer(Extension(log_sessions));
 
     let listener = TcpListener::bind("0.0.0.0:8080")
         .await

@@ -1,11 +1,64 @@
-use clap::{Parser, Subcommand, value_parser};
+use clap::{Args, Parser, Subcommand, value_parser};
 use clap_complete::Shell;
 
+use crate::commands::releases::ReleasesCommands;
+
 #[derive(Parser)]
-#[command(version, about, long_about = None)]
+#[command(name = "sm", version, about = "Smith CLI - Fleet management tool", long_about = None)]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Option<Commands>,
+}
+
+/// Common device selection arguments
+#[derive(Args, Debug, Clone)]
+pub struct DeviceSelector {
+    /// Device serial numbers or IDs. If omitted, shows all devices.
+    pub ids: Vec<String>,
+    /// Filter by labels (format: key=value). Can be used multiple times.
+    #[arg(short, long = "label", value_name = "KEY=VALUE")]
+    pub labels: Vec<String>,
+    /// Show only online devices (last seen < 5 minutes)
+    #[arg(long, conflicts_with = "offline")]
+    pub online: bool,
+    /// Show only offline devices (last seen >= 5 minutes)
+    #[arg(long, conflicts_with = "online")]
+    pub offline: bool,
+    /// Use partial matching for device IDs (matches serial number, hostname, or model)
+    #[arg(short, long)]
+    pub search: bool,
+}
+
+#[derive(Subcommand)]
+pub enum StatusResourceType {
+    /// Get smithd status for a device (runs 'smithd status' command)
+    ///
+    /// Shows comprehensive update status including:
+    /// - Update/upgrade status (whether the system is up-to-date)
+    /// - Installed package versions (currently running on the device)
+    /// - Target package versions (versions that should be running)
+    /// - Update status flag (true/false for each package indicating if it's updated)
+    #[command(visible_alias = "devices")]
+    #[command(visible_alias = "d")]
+    Device {
+        #[command(flatten)]
+        selector: DeviceSelector,
+        /// Don't wait for result, just queue the command and return immediately (faster, recommended for agents - use 'sm command <id>' to check results later)
+        #[arg(long, default_value = "false")]
+        nowait: bool,
+    },
+    /// Get systemd service status on a device (runs 'systemctl status <unit>')
+    #[command(visible_alias = "services")]
+    #[command(visible_alias = "svc")]
+    Service {
+        /// Service unit name (e.g., nginx, smithd, docker)
+        unit: String,
+        #[command(flatten)]
+        selector: DeviceSelector,
+        /// Don't wait for result, just queue the command and return immediately (faster, recommended for agents - use 'sm command <id>' to check results later)
+        #[arg(long, default_value = "false")]
+        nowait: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -33,17 +86,62 @@ pub enum DistroCommands {
     Releases,
 }
 
-#[derive(Subcommand, Debug)]
-pub enum DevicesCommands {
-    /// List the current distributions
-    Ls {
+#[derive(Subcommand)]
+pub enum GetResourceType {
+    /// Get device information
+    #[command(visible_alias = "devices")]
+    #[command(visible_alias = "d")]
+    Device {
+        #[command(flatten)]
+        selector: DeviceSelector,
+        #[arg(short, long, default_value = "false")]
+        json: bool,
+        /// Output format: wide, json, or custom field (e.g., serial_number, id, ip_address)
+        #[arg(short, long)]
+        output: Option<String>,
+    },
+    /// Get recent commands for device(s)
+    #[command(visible_alias = "cmds")]
+    Commands {
+        #[command(flatten)]
+        selector: DeviceSelector,
+        /// Number of commands to show per device
+        #[arg(long, default_value = "10")]
+        limit: u32,
         #[arg(short, long, default_value = "false")]
         json: bool,
     },
-    /// Test network speed for a device
-    TestNetwork {
-        /// Device serial number or ID
-        device: String,
+}
+
+#[derive(Subcommand)]
+pub enum RestartResourceType {
+    /// Restart devices
+    #[command(visible_alias = "devices")]
+    #[command(visible_alias = "d")]
+    Device {
+        #[command(flatten)]
+        selector: DeviceSelector,
+        /// Skip confirmation prompt
+        #[arg(short = 'y', long)]
+        yes: bool,
+        /// Don't wait for result, just queue the command and return immediately
+        #[arg(long, default_value = "false")]
+        nowait: bool,
+    },
+    /// Restart a systemd service on device(s) (runs 'systemctl restart <unit>')
+    #[command(visible_alias = "services")]
+    #[command(visible_alias = "svc")]
+    Service {
+        /// Service unit name (e.g., nginx, smithd, docker)
+        unit: String,
+        #[command(flatten)]
+        selector: DeviceSelector,
+        /// Skip confirmation prompt
+        #[arg(short = 'y', long)]
+        yes: bool,
+        /// Don't wait for result, just queue the command and return immediately
+        #[arg(long, default_value = "false")]
+        nowait: bool,
     },
 }
 
@@ -59,25 +157,56 @@ pub enum Commands {
         command: AuthCommands,
     },
 
-    /// Lists devices and information
-    Devices {
+    /// Get detailed information about a resource
+    Get {
         #[clap(subcommand)]
-        command: DevicesCommands,
+        resource: GetResourceType,
+    },
+
+    /// Restart devices
+    Restart {
+        #[clap(subcommand)]
+        resource: RestartResourceType,
+    },
+
+    /// Get status information for a resource (device or service)
+    Status {
+        #[clap(subcommand)]
+        resource: StatusResourceType,
+    },
+
+    /// Get logs for a device (runs 'journalctl -r -n 500')
+    Logs {
+        #[command(flatten)]
+        selector: DeviceSelector,
+        /// Don't wait for result, just queue the command and return immediately (faster, recommended for agents - use 'sm command <id>' to check results later)
+        #[arg(long, default_value = "false")]
+        nowait: bool,
+    },
+
+    /// Test network speed for device(s) (downloads 20MB test file)
+    TestNetwork {
+        #[command(flatten)]
+        selector: DeviceSelector,
+    },
+
+    /// Check command results by ID (format: device_id:command_id)
+    Command {
+        /// Command IDs to check in format device_id:command_id
+        ids: Vec<String>,
     },
 
     /// Lists distributions and information
-    #[command(alias = "distro")]
+    #[command(visible_alias = "distros")]
     Distributions {
         #[clap(subcommand)]
         command: DistroCommands,
     },
 
-    // Interact with a specific Release
-    Release {
-        release_number: String,
-
-        #[arg(short, long, default_value = "false")]
-        deploy: bool,
+    /// Commands related to releases
+    Releases {
+        #[clap(subcommand)]
+        command: ReleasesCommands,
     },
 
     /// Tunneling options into a device
@@ -102,5 +231,54 @@ pub enum Commands {
         /// Check for updates without installing
         #[arg(long)]
         check: bool,
+    },
+
+    /// Print all available commands in markdown format (useful for agents)
+    #[command(name = "agent-help")]
+    AgentHelp,
+
+    /// Run commands on devices with filters (async by default, use --wait to poll for results)
+    Run {
+        #[command(flatten)]
+        selector: DeviceSelector,
+        /// Skip confirmation prompt
+        #[arg(short = 'y', long)]
+        yes: bool,
+        /// Wait for command results (polls until completion)
+        #[arg(short, long, default_value = "false")]
+        wait: bool,
+        /// Command to execute on the devices (provide after -- or via stdin)
+        #[arg(last = true)]
+        command: Vec<String>,
+    },
+
+    /// Set labels on devices with filters
+    Label {
+        #[command(flatten)]
+        selector: DeviceSelector,
+        /// Specific device serial numbers or IDs to target
+        #[arg(short, long = "device")]
+        devices: Vec<String>,
+        /// Labels to set on the devices (format: key=value). Can be used multiple times.
+        #[arg(required = true, value_name = "KEY=VALUE")]
+        set_labels: Vec<String>,
+    },
+
+    /// Approve devices for fleet management
+    Approve {
+        #[command(flatten)]
+        selector: DeviceSelector,
+        /// Skip confirmation prompt
+        #[arg(short = 'y', long)]
+        yes: bool,
+    },
+
+    /// Revoke device approval
+    Revoke {
+        #[command(flatten)]
+        selector: DeviceSelector,
+        /// Skip confirmation prompt
+        #[arg(short = 'y', long)]
+        yes: bool,
     },
 }

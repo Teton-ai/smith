@@ -32,7 +32,7 @@ pub struct CreateSession {
 
 #[derive(Serialize, Deserialize, Default, Debug)]
 pub struct Package {
-    pub id: Option<i32>,
+    pub id: i32,
     pub name: String,
     pub architecture: Option<String>,
     pub version: String,
@@ -86,6 +86,19 @@ pub enum SafeCommandRx {
     TestNetwork {
         bytes_downloaded: usize,
         duration_ms: u64,
+        bytes_uploaded: Option<usize>,
+        upload_duration_ms: Option<u64>,
+        timed_out: bool,
+    },
+    LogStreamStarted {
+        session_id: String,
+    },
+    LogStreamStopped {
+        session_id: String,
+    },
+    LogStreamError {
+        session_id: String,
+        error: String,
     },
 }
 
@@ -125,6 +138,13 @@ pub enum SafeCommandTx {
     CheckOTAStatus,
     StartOTA,
     TestNetwork,
+    StreamLogs {
+        session_id: String,
+        service_name: String,
+    },
+    StopLogStream {
+        session_id: String,
+    },
 }
 
 // RESPONSE THAT IT GETS

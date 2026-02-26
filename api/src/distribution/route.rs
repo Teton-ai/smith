@@ -1,13 +1,16 @@
 use crate::State;
-use crate::device::{LeanDevice, LeanResponse};
-use crate::distribution::Distribution;
-use crate::release::Release;
+use crate::package::extract_services_from_deb;
+use crate::release::get_latest_distribution_release;
+use crate::storage::Storage;
 use crate::user::CurrentUser;
 use axum::extract::Path;
 use axum::http::StatusCode;
 use axum::{Extension, Json};
+use models::distribution::{Distribution, NewDistributionRelease};
+use models::release::Release;
 use serde::Deserialize;
-use tracing::error;
+use smith::utils::schema::Package;
+use tracing::{error, warn};
 
 const DISTRIBUTIONS_TAG: &str = "distributions";
 
@@ -107,6 +110,9 @@ pub async fn create_distribution(
 #[utoipa::path(
     get,
     path = "/distributions/{distribution_id}",
+    params(
+        ("distribution_id" = i32, Path),
+    ),
     responses(
         (status = StatusCode::OK, description = "Return found distribution", body = Distribution),
         (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to retrieve distribution"),
@@ -151,6 +157,9 @@ pub async fn get_distribution_by_id(
 #[utoipa::path(
     get,
     path = "/distributions/{distribution_id}/releases",
+    params(
+        ("distribution_id" = i32, Path),
+    ),
     responses(
         (status = StatusCode::OK, description = "List of releases from given distribution retrieved successfully", body = Vec<Release>),
         (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to distribution releases"),
@@ -169,9 +178,11 @@ pub async fn get_distribution_releases(
         r#"
         SELECT release.*,
         distribution.name AS distribution_name,
-        distribution.architecture AS distribution_architecture
+        distribution.architecture AS distribution_architecture,
+        auth.users.email AS user_email
         FROM release
         JOIN distribution ON release.distribution_id = distribution.id
+        LEFT JOIN auth.users ON release.user_id = auth.users.id
         WHERE distribution_id = $1
         ORDER BY release.created_at DESC"#,
         distribution_id
@@ -189,6 +200,9 @@ pub async fn get_distribution_releases(
 #[utoipa::path(
     get,
     path = "/distributions/{distribution_id}/releases/latest",
+    params(
+        ("distribution_id" = i32, Path),
+    ),
     responses(
         (status = StatusCode::OK, description = "Get the latest published release for the distribution", body = Release),
         (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to latest release"),
@@ -202,7 +216,7 @@ pub async fn get_distribution_latest_release(
     Path(distribution_id): Path<i32>,
     Extension(state): Extension<State>,
 ) -> axum::response::Result<Json<Release>, StatusCode> {
-    let release = Release::get_latest_distribution_release(distribution_id, &state.pg_pool)
+    let release = get_latest_distribution_release(distribution_id, &state.pg_pool)
         .await
         .map_err(|err| {
             error!("Failed to get latest release {err}");
@@ -212,15 +226,12 @@ pub async fn get_distribution_latest_release(
     Ok(Json(release))
 }
 
-#[derive(Debug, Deserialize, utoipa::ToSchema)]
-pub struct NewDistributionRelease {
-    pub version: String,
-    pub packages: Vec<i32>,
-}
-
 #[utoipa::path(
     post,
     path = "/distributions/{distribution_id}/releases",
+    params(
+        ("distribution_id" = i32, Path),
+    ),
     request_body = NewDistributionRelease,
     responses(
         (status = StatusCode::CREATED, description = "Distribution release created successfully", body = i32),
@@ -231,7 +242,6 @@ pub struct NewDistributionRelease {
     ),
     tag = DISTRIBUTIONS_TAG
 )]
-#[tracing::instrument]
 pub async fn create_distribution_release(
     Extension(state): Extension<State>,
     Extension(current_user): Extension<CurrentUser>,
@@ -293,12 +303,83 @@ pub async fn create_distribution_release(
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
 
+    // Extract services from packages in background (non-blocking)
+    let release_id = release.id;
+    let package_ids = distribution_release.packages.clone();
+    let pg_pool = state.pg_pool.clone();
+    let bucket_name = state.config.packages_bucket_name.clone();
+
+    tokio::spawn(async move {
+        let packages = match sqlx::query_as!(
+            Package,
+            "SELECT * FROM package WHERE id = ANY($1)",
+            &package_ids as &[i32]
+        )
+        .fetch_all(&pg_pool)
+        .await
+        {
+            Ok(p) => p,
+            Err(e) => {
+                warn!("Failed to fetch packages for service extraction: {}", e);
+                return;
+            }
+        };
+
+        for pkg in packages {
+            if !pkg.file.ends_with(".deb") {
+                continue;
+            }
+
+            let data = match Storage::download_from_s3(&bucket_name, &pkg.file).await {
+                Ok(d) => d,
+                Err(e) => {
+                    warn!(
+                        "Failed to download package {} for service extraction: {}",
+                        pkg.file, e
+                    );
+                    continue;
+                }
+            };
+
+            let services = match extract_services_from_deb(&data) {
+                Ok(s) => s,
+                Err(e) => {
+                    warn!(
+                        "Failed to extract services from package {}: {}",
+                        pkg.file, e
+                    );
+                    continue;
+                }
+            };
+
+            for service in services {
+                if let Err(e) = sqlx::query!(
+                    "INSERT INTO release_services (release_id, package_id, service_name, watchdog_sec)
+                     VALUES ($1, $2, $3, $4)
+                     ON CONFLICT (release_id, service_name) DO NOTHING",
+                    release_id,
+                    pkg.id,
+                    service.name,
+                    service.watchdog_sec
+                )
+                .execute(&pg_pool)
+                .await
+                {
+                    warn!("Failed to insert service {}: {}", service.name, e);
+                }
+            }
+        }
+    });
+
     Ok(Json(release.id))
 }
 
 #[utoipa::path(
     delete,
     path = "/distributions/{distribution_id}",
+    params(
+        ("distribution_id" = i32, Path),
+    ),
     responses(
         (status = StatusCode::NO_CONTENT, description = "Successfully deleted the distribution"),
         (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to delete distribution"),
@@ -321,42 +402,4 @@ pub async fn delete_distribution_by_id(
         })?;
 
     Ok(StatusCode::NO_CONTENT)
-}
-
-#[utoipa::path(
-    get,
-    path = "/distributions/{distribution_id}/devices",
-    responses(
-        (status = StatusCode::OK, description = "Get devices on this distribution", body = LeanDevice),
-        (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to delete distribution"),
-    ),
-    security(
-        ("auth_token" = [])
-    ),
-    tag = DISTRIBUTIONS_TAG
-)]
-#[deprecated(note = "We are moving to `/devices` endpoint and use release param as filter")]
-pub async fn get_distribution_devices(
-    Path(distribution_id): Path<i32>,
-    Extension(state): Extension<State>,
-) -> axum::response::Result<Json<LeanResponse>, StatusCode> {
-    let devices = sqlx::query_as!(
-        LeanDevice,
-        r#"
-        SELECT device.id, serial_number, last_ping as last_seen, approved, release_id = target_release_id as up_to_date, ip_address_id FROM device LEFT JOIN release on release_id = release.id where release.distribution_id = $1
-        "#,
-        distribution_id
-    )
-    .fetch_all(&state.pg_pool)
-    .await
-    .map_err(|err| {
-      error!("Failed to fetch devices for distribution {err}");
-      StatusCode::INTERNAL_SERVER_ERROR
-    })?;
-
-    Ok(Json(LeanResponse {
-        limit: 0,
-        reverse: false,
-        devices,
-    }))
 }

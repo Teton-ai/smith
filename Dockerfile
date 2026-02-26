@@ -1,5 +1,5 @@
-ARG RUST_VERSION=1.85.0
-FROM lukemathwalker/cargo-chef:0.1.71-rust-$RUST_VERSION AS chef
+ARG RUST_VERSION=1.91.0
+FROM lukemathwalker/cargo-chef:0.1.73-rust-$RUST_VERSION AS chef
 
 ENV SQLX_OFFLINE=true
 WORKDIR /app
@@ -20,13 +20,13 @@ COPY . .
 # Build our project
 RUN cargo build --release --package api
 
-FROM debian:12-slim AS runtime
+FROM debian:trixie-slim AS runtime
 
 RUN apt-get update -y \
-    && apt-get install -y --no-install-recommends openssl ca-certificates \
-    && apt-get autoremove -y \
-    && apt-get clean -y \
-    && rm -rf /var/lib/apt/lists/*
+  && apt-get install -y --no-install-recommends openssl ca-certificates \
+  && apt-get autoremove -y \
+  && apt-get clean -y \
+  && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /usr/local/bin
 

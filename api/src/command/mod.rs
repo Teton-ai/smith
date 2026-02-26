@@ -1,25 +1,10 @@
+use models::device::DeviceCommandResponse;
 use sentry::types::Uuid;
 use serde::{Deserialize, Serialize};
 use smith::utils::schema::SafeCommandRequest;
 use sqlx::types::chrono;
 
 pub mod route;
-
-#[derive(Debug, Serialize, Deserialize, Clone, utoipa::ToSchema)]
-pub struct DeviceCommandResponse {
-    pub device: i32,
-    pub serial_number: String,
-    pub cmd_id: i32,
-    pub issued_at: chrono::DateTime<chrono::Utc>,
-    pub cmd_data: serde_json::Value,
-    pub cancelled: bool,
-    pub fetched: bool,
-    pub fetched_at: Option<chrono::DateTime<chrono::Utc>>,
-    pub response_id: Option<i32>,
-    pub response_at: Option<chrono::DateTime<chrono::Utc>>,
-    pub response: Option<serde_json::Value>,
-    pub status: Option<i32>,
-}
 
 #[derive(Debug, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct BundleWithCommands {

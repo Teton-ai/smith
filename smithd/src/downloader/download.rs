@@ -1,19 +1,17 @@
 use crate::magic::MagicHandle;
-use crate::shutdown::ShutdownHandler;
 use anyhow;
 use futures::StreamExt;
 use governor::{Quota, RateLimiter};
-use reqwest::Client;
+use reqwest::{Client, Url};
 use std::num::NonZeroU32;
 use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use tokio::fs;
 use tokio::io::AsyncWriteExt;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 #[derive(Debug, Clone)]
-
 pub struct DownloadStats {
     pub bytes_downloaded: u64,
     pub elapsed_seconds: f64,
@@ -34,16 +32,15 @@ impl Default for DownloadStats {
     }
 }
 
-pub async fn download_package(
+pub async fn download_file_mb(
     magic: MagicHandle,
     remote_file: String,
     local_file: String,
     rate: f64,
     force_stop: Arc<AtomicBool>,
-) -> anyhow::Result<String> {
+) -> anyhow::Result<DownloadStats> {
     // Convert the MB rate to bytes/sec
-    let bytes_per_second = (rate * 1_000_000.0) as u64;
-    info!("Rate limit: {} bytes/sec", bytes_per_second);
+    let bytes_per_second = ((rate * 1_000_000.0).ceil() as u64).max(1);
 
     // Example: download at 1MB per second
     let result = download_file(
@@ -66,24 +63,28 @@ async fn download_file(
     bytes_per_second: u64,
     force_stop: Arc<AtomicBool>,
     recurse: Option<u32>,
-) -> anyhow::Result<String> {
+) -> anyhow::Result<DownloadStats> {
     let mut rec_track = 0;
     let mut stats = DownloadStats::default();
-    let shutdown = ShutdownHandler::new();
-    let configuration = MagicHandle::new(shutdown.signals());
-    configuration.load(None).await;
+    let configuration = magic.clone();
     let client = Client::new();
     let server_api_url = configuration.get_server().await;
+
+    // Use .part file for atomic downloads
+    let part_path = format!("{}.part", local_path);
+    let part_path_str = part_path.as_str();
 
     if let Some(r) = recurse {
         if r > 1 {
             // Break out of the recursion loop
-
             stats.error_message = Some("Downloaded 0 bytes too many times".to_owned());
 
-            let output = convert_stats_to_string(stats, local_path).await;
+            // Clean up .part file before giving up
+            let _ = tokio::fs::remove_file(part_path_str)
+                .await
+                .inspect_err(|e| warn!("Failed to clean up .part file: {}", e));
 
-            return Ok(output);
+            return Ok(stats.clone());
         } else {
             rec_track = r + 1
         }
@@ -95,29 +96,25 @@ async fn download_file(
     let url = if remote_path.is_empty() {
         format!("{}/download", &server_api_url)
     } else {
-        format!("{}/download/{}", &server_api_url, &remote_path)
+        let mut url = Url::parse(&format!("{}/download", &server_api_url))
+            .map_err(|e| anyhow::anyhow!("Invalid server URL: {}", e))?;
+        url.query_pairs_mut().append_pair("path", remote_path);
+        url.to_string()
     };
 
     // Create local file path if it does not exist
-    if let Some(parent) = Path::new(local_path).parent() {
-        if !parent.exists() {
-            fs::create_dir_all(parent).await?;
-        }
+    if let Some(parent) = Path::new(local_path).parent()
+        && !parent.exists()
+    {
+        fs::create_dir_all(parent).await?;
     }
 
-    // Check if file already exists and get its size for resuming
+    // Check if .part file already exists and get its size for resuming
     let mut downloaded: u64 = 0;
     let mut resume_download = false;
 
-    if let Ok(metadata) = tokio::fs::metadata(local_path).await {
+    if let Ok(metadata) = tokio::fs::metadata(part_path_str).await {
         downloaded = metadata.len();
-        if downloaded > 0 {
-            resume_download = true;
-            info!(
-                "Found existing partial file with {} bytes, attempting to resume",
-                downloaded
-            );
-        }
     }
 
     let initial_response = client
@@ -133,6 +130,26 @@ async fn download_file(
         ));
     }
 
+    // Get the etag for verification
+    let etag = initial_response
+        .headers()
+        .get("etag")
+        .and_then(|value| value.to_str().ok());
+
+    // Get the total content length of the object
+    let file_length = initial_response
+        .headers()
+        .get("x-file-size")
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.parse::<u64>().ok());
+
+    let content_length = match file_length {
+        Some(length) => length,
+        None => {
+            return Err(anyhow::anyhow!("x-file-size header missing or invalid"));
+        }
+    };
+
     // Extract the pre-signed URL from the Location header
     let presigned_url = match initial_response.headers().get("Location") {
         Some(location) => location
@@ -145,14 +162,74 @@ async fn download_file(
         }
     };
 
+    // Check if final file already exists and is complete
+    if let Ok(final_metadata) = tokio::fs::metadata(local_path).await
+        && final_metadata.len() == content_length
+        && let Ok(Some(stored)) = xattr::get(local_path, "user.etag")
+    {
+        let stored_etag = String::from_utf8_lossy(&stored);
+        if let Some(current_etag) = etag
+            && stored_etag.as_ref() == current_etag
+        {
+            info!("File already fully downloaded at {}", local_path);
+            stats.success = true;
+            stats.bytes_downloaded = content_length;
+            return Ok(stats);
+        }
+    }
+
     // Build get based on if some of the file has already been downloaded
     let mut request = client.get(presigned_url);
 
-    if resume_download && downloaded > 0 {
-        request = request.header("Range", format!("bytes={}-", downloaded));
-        info!("Requesting to resume from byte {}", downloaded);
+    if downloaded > 0
+        && let Some(stored) = xattr::get(part_path_str, "user.etag")?
+    {
+        let stored_etag = String::from_utf8_lossy(&stored);
+
+        match etag {
+            Some(etag) if stored_etag == etag => {
+                // Check if the .part file is complete (just needs finalization)
+                if downloaded == content_length {
+                    info!("Part file complete, finalizing: {}", local_path);
+                    tokio::fs::rename(part_path_str, local_path).await?;
+                    stats.success = true;
+                    stats.bytes_downloaded = downloaded;
+                    return Ok(stats);
+                }
+
+                if downloaded > content_length {
+                    // Different file somehow (this should never hit)
+                    resume_download = false;
+                    downloaded = 0;
+                } else {
+                    resume_download = true;
+                    info!("Resuming download from byte {}", downloaded);
+                    request = request.header("Range", format!("bytes={}-", downloaded));
+                }
+            }
+            Some(etag) => {
+                warn!(
+                    "ETag mismatch (local: {}, remote: {}), restarting download",
+                    stored_etag, etag
+                );
+                // Remove the existing .part file and start over
+                tokio::fs::remove_file(part_path_str).await?;
+
+                resume_download = false;
+                downloaded = 0;
+            }
+            None => {
+                // No stored ETag, cannot verify, restart download
+                warn!("No ETag provided by server, restarting download");
+                tokio::fs::remove_file(part_path_str).await?;
+
+                resume_download = false;
+                downloaded = 0;
+            }
+        }
     }
 
+    // Send the request to download the file
     let mut response = request.send().await?;
 
     let expected_status = if resume_download && downloaded > 0 {
@@ -163,8 +240,15 @@ async fn download_file(
 
     if response.status() != expected_status {
         if resume_download && response.status() == reqwest::StatusCode::OK {
-            info!("Server does not support resume, starting from beginning");
+            warn!("Server does not support resume, starting from beginning");
+
+            tokio::fs::remove_file(part_path_str).await?;
+
+            downloaded = 0;
+            resume_download = false;
+
             response = client.get(presigned_url).send().await?;
+
             if !response.status().is_success() {
                 return Err(anyhow::anyhow!(
                     "Failed to download file from pre-signed URL: {:?}",
@@ -179,55 +263,94 @@ async fn download_file(
         }
     }
 
-    // Get the total content length of the object
-    let content_length = response
-        .headers()
-        .get("Content-Length")
-        .and_then(|value| value.to_str().ok())
-        .and_then(|value| value.parse::<u64>().ok());
+    if resume_download && downloaded > 0 {
+        if let Some(content_range) = response.headers().get("content-range") {
+            let range_str = content_range.to_str().unwrap_or("");
+            // Should be like "bytes 5000-9999/1000"
+            if !range_str.starts_with(&format!("bytes {}-", downloaded)) {
+                warn!(
+                    "Server sent wrong range: {}, expected to start at {}. Restarting download.",
+                    range_str, downloaded
+                );
 
-    let content_length = if resume_download && downloaded > 0 {
-        downloaded + content_length.unwrap_or(0)
-    } else {
-        content_length.unwrap_or(0)
-    };
+                tokio::fs::remove_file(part_path_str).await?;
+                downloaded = 0;
+                resume_download = false;
 
-    // Open the file for writing
-    // let mut file = tokio::fs::File::create(local_path).await?;
+                // Request again without range header
+                response = client.get(presigned_url).send().await?;
+
+                if !response.status().is_success() {
+                    return Err(anyhow::anyhow!(
+                        "Failed to download file from pre-signed URL: {:?}",
+                        response.status()
+                    ));
+                }
+            }
+        } else {
+            warn!("No content-range header on 206 response, restarting download");
+            tokio::fs::remove_file(part_path_str).await?;
+            downloaded = 0;
+            resume_download = false;
+
+            // Request again without range header
+            response = client.get(presigned_url).send().await?;
+
+            if !response.status().is_success() {
+                return Err(anyhow::anyhow!(
+                    "Failed to download file from pre-signed URL: {:?}",
+                    response.status()
+                ));
+            }
+        }
+    }
+
+    // Open the .part file for writing
     let mut file = if resume_download && downloaded > 0 {
         tokio::fs::OpenOptions::new()
             .write(true)
             .append(true)
-            .open(local_path)
+            .open(part_path_str)
             .await?
     } else {
-        tokio::fs::File::create(local_path).await?
+        let f = tokio::fs::File::create(part_path_str).await?;
+        if let Some(etag) = etag {
+            xattr::set(part_path_str, "user.etag", etag.as_bytes())?;
+        }
+
+        f
     };
 
-    let quota = Quota::per_second(
-        NonZeroU32::new(bytes_per_second as u32).unwrap_or(NonZeroU32::new(1).unwrap()),
-    );
+    let bytes_per_second_u32 = (bytes_per_second.min(u32::MAX as u64)) as u32;
+    let quota = Quota::per_second(NonZeroU32::new(bytes_per_second_u32).unwrap());
 
     let limiter = RateLimiter::direct(quota);
     let mut stream = response.bytes_stream();
-    let mut downloaded: u64 = 0;
+    let mut session_downloaded: u64 = 0;
     let start = std::time::Instant::now();
 
     // Force rate limiter to start empty so we don't have a large burst when starting download
-    let max_burst = bytes_per_second as u32;
+    let max_burst = bytes_per_second_u32;
 
     match limiter.check_n(NonZeroU32::new(max_burst).unwrap()) {
         Ok(_) => (),
 
-        Err(e) => eprintln!("Rate limit exceeded: {}", e),
+        Err(e) => error!("Rate limit exceeded: {}", e),
     }
 
     while let Some(chunk_result) = stream.next().await {
         // Check if download should be forcefully stopped
         if force_stop.load(std::sync::atomic::Ordering::SeqCst) {
-            info!("Timeout interrupt - download stopping forcefully");
+            warn!("Timeout interrupt - download stopping forcefully");
             file.flush().await?;
-            break;
+            drop(file);
+
+            // Clean up .part file on force_stop
+            // let _ = tokio::fs::remove_file(part_path_str)
+            //     .await
+            //     .inspect_err(|e| warn!("Failed to clean up .part file: {}", e));
+
+            return Err(anyhow::anyhow!("Download interrupted by force_stop"));
         }
 
         match chunk_result {
@@ -236,58 +359,66 @@ async fn download_file(
 
                 // Wait for rate limiter
                 if let Err(e) = limiter.until_n_ready(chunk_size).await {
-                    eprintln!("Rate limit exceeded: {}", e);
+                    warn!("Rate limit exceeded: {}", e);
                 }
 
                 // Write chunk to file
                 file.write_all(&chunk).await?;
-                downloaded += chunk.len() as u64;
+                session_downloaded += chunk.len() as u64;
             }
 
             Err(e) => {
                 error!("Error downloading chunk: {}", e);
+                file.flush().await?;
+                drop(file);
+
+                // Clean up .part file on chunk error
+                // let _ = tokio::fs::remove_file(part_path_str)
+                //     .await
+                //     .inspect_err(|e| warn!("Failed to clean up .part file: {}", e));
+
                 return Err(anyhow::anyhow!("Download error: {}", e));
             }
         }
     }
 
     file.flush().await?;
+    drop(file);
 
     // Calculate and log final statistics
     let elapsed = start.elapsed().as_secs_f64();
 
     let avg_speed = if elapsed > 0.0 {
-        downloaded as f64 / elapsed
+        session_downloaded as f64 / elapsed
     } else {
         0.0
     };
 
-    stats.bytes_downloaded = downloaded;
+    stats.bytes_downloaded = session_downloaded;
     stats.elapsed_seconds = elapsed;
     stats.average_speed_mbps = avg_speed / 1_000_000.0;
 
-    match tokio::fs::metadata(local_path).await {
+    match tokio::fs::metadata(part_path_str).await {
         Ok(metadata) => {
             let file_size = metadata.len();
 
-            if file_size != downloaded || file_size != content_length {
-                error!(
-                    "Size mismatch: file on disk ({}), downloaded amount ({}), expected content length ({:?})",
-                    file_size, downloaded, content_length
-                );
+            if file_size != content_length {
+                // Clean up .part file on size mismatch
+                let _ = tokio::fs::remove_file(part_path_str)
+                    .await
+                    .inspect_err(|e| warn!("Failed to clean up .part file: {}", e));
 
                 return Err(anyhow::anyhow!(
                     "Size mismatch: file on disk ({}), downloaded amount ({}), expected content length ({:?})",
                     file_size,
-                    downloaded,
+                    session_downloaded,
                     content_length
                 ));
             } else if file_size == 0 {
-                // We know the file is completely busted here, try again 2x
-                error!("File did not install properly. Re-installing");
-                tokio::fs::remove_file(local_path).await?;
+                // We know the file is completely busted here, try again
+                error!("File did not download properly. Re-trying");
 
-                Box::pin(download_file(
+                return Box::pin(download_file(
                     magic,
                     local_path,
                     remote_path,
@@ -295,9 +426,16 @@ async fn download_file(
                     force_stop,
                     Some(rec_track),
                 ))
-                .await?;
+                .await;
             } else {
-                info!("Downloaded file verification passed");
+                info!("Downloaded file verification passed for {}", local_path);
+
+                // Atomically finalize - rename .part to final name
+                tokio::fs::rename(part_path_str, local_path)
+                    .await
+                    .map_err(|e| anyhow::anyhow!("Failed to finalize download: {}", e))?;
+
+                info!("Download finalized: {}", local_path);
                 stats.success = true;
             }
         }
@@ -310,21 +448,5 @@ async fn download_file(
         }
     }
 
-    let output = convert_stats_to_string(stats, local_path).await;
-
-    Ok(output)
-}
-
-async fn convert_stats_to_string(stats: DownloadStats, local_path: &str) -> String {
-    if stats.success {
-        format!(
-            "Download of {} succeeded - Downloaded file in {:.2} seconds at {:.2} MB/sec",
-            local_path, stats.elapsed_seconds, stats.average_speed_mbps
-        )
-    } else {
-        format!(
-            "Download of {} failed - {:?}",
-            local_path, stats.error_message
-        )
-    }
+    Ok(stats.clone())
 }

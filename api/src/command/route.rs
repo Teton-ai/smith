@@ -60,7 +60,6 @@ pub async fn available_commands() -> Result<Json<Vec<SafeCommandTx>>, StatusCode
     ),
     tag = COMMANDS_TAG
 )]
-#[tracing::instrument]
 pub async fn issue_commands_to_devices(
     Extension(state): Extension<State>,
     Json(bundle_commands): Json<BundleCommands>,
@@ -132,8 +131,6 @@ pub struct PaginationUuid {
     ),
     tag = COMMANDS_TAG
 )]
-#[allow(clippy::collapsible_else_if)]
-#[tracing::instrument]
 pub async fn get_bundle_commands(
     host: Host,
     Extension(state): Extension<State>,
@@ -148,7 +145,7 @@ pub async fn get_bundle_commands(
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
 
-    let limit = pagination.limit.unwrap_or(10).clamp(0, 10);
+    let limit = pagination.limit.unwrap_or(100).clamp(0, 100);
 
     let where_clause = if let Some(starting_after) = pagination.starting_after {
         format!(

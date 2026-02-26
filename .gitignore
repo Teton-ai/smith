@@ -7,3 +7,6 @@ fleet.sql
 volumes
 .idea
 .env
+
+schema.sql
+.DS_Store

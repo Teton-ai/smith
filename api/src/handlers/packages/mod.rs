@@ -10,7 +10,6 @@ use tracing::error;
 
 // TODO: I believe this whole stuff is legacy and not documented, check and delete
 
-#[tracing::instrument]
 pub async fn get_package_by_id(
     Path(package_id): Path<i32>,
     Extension(state): Extension<State>,
@@ -20,7 +19,6 @@ pub async fn get_package_by_id(
         .map(|json| json.into_response())
 }
 
-#[tracing::instrument]
 async fn get_package_info_by_id(
     Path(package_id): Path<i32>,
     Extension(state): Extension<State>,
@@ -40,7 +38,6 @@ async fn get_package_info_by_id(
     Ok(Json(package))
 }
 
-#[tracing::instrument]
 pub async fn delete_package_by_id(
     Path(package_id): Path<i32>,
     Extension(state): Extension<State>,

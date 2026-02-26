@@ -1,12 +1,9 @@
-use crate::magic::structure::ConfigPackage;
-use anyhow::{Context, Result, anyhow};
+use crate::{downloader::DownloaderHandle, magic::structure::ConfigPackage};
+use anyhow::{Context, Result};
 use flate2::{Compression, write::GzEncoder};
-use futures_util::StreamExt;
 use reqwest::{Response, StatusCode};
 use std::{env, io::Write, time::Duration};
-use tokio::io::AsyncWriteExt;
-use tokio::time;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 pub struct NetworkClient {
     hostname: String,
@@ -103,7 +100,23 @@ impl NetworkClient {
             .with_context(|| "Failed to Parse JSON respone")
     }
 
-    pub async fn get_package(&self, package_name: &str, token: &str) -> Result<()> {
+    async fn validate_package_file(path: &std::path::Path) -> Result<bool> {
+        // Check if file exists and has content
+        let metadata = match tokio::fs::metadata(path).await {
+            Ok(m) => m,
+            Err(_) => return Ok(false),
+        };
+
+        // Only reject obviously broken 0-byte files
+        // Files without etag may still be valid (downloaded before .part implementation)
+        Ok(metadata.len() > 0)
+    }
+
+    pub async fn get_package(
+        &self,
+        package_name: &str,
+        downloader: &DownloaderHandle,
+    ) -> Result<()> {
         let path = env::current_dir()?;
 
         let mut local_packages_folder = path.clone();
@@ -112,66 +125,34 @@ impl NetworkClient {
         let mut local_package_path = local_packages_folder.clone();
         local_package_path.push(package_name);
 
-        let mut local_package_path_tmp = local_package_path.clone();
-        local_package_path_tmp.set_extension("tmp");
-
         if local_package_path.exists() {
-            info!("Package already exists locally");
-            return Ok(());
-        } else {
-            info!("Package does not exist locally, fetching...");
+            // Validate existing file
+            if Self::validate_package_file(&local_package_path).await? {
+                info!(
+                    "Package {} already exists and is valid, using as-is (no download needed)",
+                    package_name
+                );
+                return Ok(());
+            } else {
+                warn!(
+                    "Package file {} exists but is 0 bytes (broken download), removing for re-download",
+                    package_name
+                );
+                tokio::fs::remove_file(&local_package_path)
+                    .await
+                    .inspect_err(|e| error!("Failed to remove invalid package file: {}", e))?;
+                info!("Removed 0-byte package, proceeding with download");
+            }
         }
 
-        let query = vec![("name", package_name)];
-        let url = format!("{}/package", self.hostname);
-        let stream = self
-            .client
-            .get(url)
-            .header("Authorization", format!("Bearer {}", token))
-            .timeout(Duration::from_secs(10 * 60))
-            .query(&query)
-            .send()
+        // File doesn't exist or was invalid and removed - proceed with download
+        info!("Fetching package: {}", package_name);
+
+        let remote_file = format!("packages/{}", package_name);
+        downloader
+            // steady download at 2MB/s lets play nice in these networks
+            .download_blocking(&remote_file, local_package_path.to_str().unwrap_or(""), 2.0)
             .await?;
-
-        if stream.status() != 200 {
-            return Err(anyhow!("Failed to get package"));
-        }
-
-        let mut response = stream.bytes_stream();
-
-        let start_time = time::Instant::now();
-
-        tokio::fs::create_dir_all(&local_packages_folder).await?;
-        let mut file = tokio::fs::File::create(&local_package_path_tmp).await?;
-        let mut total_bytes = 0u64;
-        while let Some(chunk) = response.next().await {
-            let data = chunk?;
-            total_bytes += data.len() as u64;
-            file.write_all(&data).await?;
-        }
-
-        file.flush().await?;
-
-        let download_duration = time::Instant::now() - start_time;
-
-        if total_bytes == 0 {
-            error!(
-                "Downloaded 0 bytes for package {} — deleting temp file",
-                package_name
-            );
-            tokio::fs::remove_file(&local_package_path_tmp).await.ok();
-            return Err(anyhow!(
-                "Package {} download failed: 0 bytes received",
-                package_name
-            ));
-        }
-
-        tokio::fs::rename(&local_package_path_tmp, &local_package_path).await?;
-
-        info!(
-            "Package {} downloaded in {:?} to {:?}",
-            package_name, download_duration, local_package_path
-        );
 
         Ok(())
     }
