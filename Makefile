@@ -1,5 +1,10 @@
-include .env
 export DOCKER_CLI_HINTS=false
+
+# Default values that can be overridden by environment variables or .env file
+POSTGRES_USER ?= postgres
+
+# Optionally include .env file if it exists (but don't fail if it doesn't)
+-include .env
 
 .DEFAULT_GOAL := up
 
@@ -37,7 +42,7 @@ gen-api-client:
 	cd dashboard && npm run gen-api-client
 
 seed:
-	psql postgres://postgres:postgres@localhost:5432/postgres -f seed.sql
+	psql postgres://postgres:postgres@localhost:5432/postgres -f scripts/seed.sql
 
 debug.smithd:
 	cargo build --release -p smith

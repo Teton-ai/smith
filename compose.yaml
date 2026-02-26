@@ -3,10 +3,12 @@ services:
   api:
     build:
       context: .
-      dockerfile: api.Dockerfile
+      dockerfile: api/api-dev.Dockerfile
     container_name: smith-api
     env_file:
       - .env
+    environment:
+      - DATABASE_URL=postgres://postgres:postgres@postgres:5432/postgres
     ports:
       - "8080:8080"
     volumes:
@@ -23,20 +25,26 @@ services:
       - backend
       - device-network
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
 
   postgres:
     container_name: smith-postgres
-    build:
-      dockerfile: postgres.Dockerfile
+    image: postgres:15
     env_file:
       - .env
     ports:
       - "5432:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
+      - ./scripts/init-db.sh:/docker-entrypoint-initdb.d/init-db.sh:ro
     networks:
       - backend
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
   bore:
     image: ekzhang/bore
@@ -52,7 +60,7 @@ services:
   device:
     build:
       context: .
-      dockerfile: device.Dockerfile
+      dockerfile: smithd/device.Dockerfile
       args:
         # Override with ubuntu:22.04 for x86_64 Linux development
         BASE_IMAGE: ${DEVICE_BASE_IMAGE:-nvcr.io/nvidia/l4t-base:r36.2.0}
