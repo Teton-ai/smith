@@ -6,21 +6,41 @@ use std::collections::HashMap;
 use std::time;
 use std::time::Duration;
 
+#[derive(Serialize, Deserialize, Default, Debug, Clone)]
+pub struct ServiceCheck {
+    pub id: i32,
+    pub name: String,
+}
+
+#[derive(Serialize, Deserialize, Default, Debug, Clone)]
+pub struct ServiceStatus {
+    pub id: i32,
+    pub active_state: String,
+    pub n_restarts: u32,
+}
+
 // POST That the device does
 #[derive(Serialize, Deserialize, Default, Debug)]
 pub struct HomePost {
     pub timestamp: Duration,
     pub responses: Vec<SafeCommandResponse>,
     pub release_id: Option<i32>,
+    #[serde(default)]
+    pub service_statuses: Vec<ServiceStatus>,
 }
 
 impl HomePost {
-    pub fn new(responses: Vec<SafeCommandResponse>, release_id: Option<i32>) -> Self {
+    pub fn new(
+        responses: Vec<SafeCommandResponse>,
+        release_id: Option<i32>,
+        service_statuses: Vec<ServiceStatus>,
+    ) -> Self {
         let timestamp = time::Instant::now().elapsed();
         Self {
             timestamp,
             responses,
             release_id,
+            service_statuses,
         }
     }
 }
@@ -153,6 +173,8 @@ pub struct HomePostResponse {
     pub timestamp: Duration,
     pub commands: Vec<SafeCommandRequest>,
     pub target_release_id: Option<i32>,
+    #[serde(default)]
+    pub services: Vec<ServiceCheck>,
 }
 
 #[derive(Serialize, Deserialize, Default, Debug)]

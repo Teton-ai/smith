@@ -5,7 +5,7 @@ use crate::shutdown::ShutdownSignals;
 use crate::utils::network::NetworkClient;
 use crate::utils::schema::{
     DeviceRegistration, DeviceRegistrationResponse, HomePost, HomePostResponse,
-    SafeCommandResponse, SafeCommandRx,
+    SafeCommandResponse, SafeCommandRx, ServiceCheck, ServiceStatus,
 };
 use crate::utils::system::SystemInfo;
 use anyhow::{Result, anyhow};
@@ -31,6 +31,7 @@ struct Postman {
     token: Option<String>,
     problems: Option<u32>,
     poll_mode: PollMode,
+    services_to_check: Vec<ServiceCheck>,
 }
 
 #[derive(Debug)]
@@ -57,6 +58,7 @@ impl Postman {
             hostname: "".to_owned(),
             problems: None,
             poll_mode: PollMode::Idle,
+            services_to_check: Vec::new(),
         }
     }
 
@@ -114,11 +116,13 @@ impl Postman {
 
                     let responses = self.commander.get_results().await;
                     let release_id = self.magic.get_release_id().await;
+                    let service_statuses = self.check_services().await;
 
-                    let ping_home_body = HomePost::new(responses, release_id);
+                    let ping_home_body = HomePost::new(responses, release_id, service_statuses);
 
                     let response = self.ping_home(ping_home_body).await;
                     let target_release_id = response.target_release_id;
+                    self.services_to_check = response.services;
                     self.magic.set_target_release_id(target_release_id).await;
 
                     let has_commands = !response.commands.is_empty();
@@ -167,6 +171,44 @@ impl Postman {
         }
 
         info!("Postman task shut down");
+    }
+
+    async fn check_services(&self) -> Vec<ServiceStatus> {
+        let mut statuses = Vec::new();
+        for service in &self.services_to_check {
+            match tokio::process::Command::new("systemctl")
+                .args(["show", &service.name, "--property=ActiveState,NRestarts"])
+                .output()
+                .await
+            {
+                Ok(output) => {
+                    let stdout = String::from_utf8_lossy(&output.stdout);
+                    let mut active_state = String::from("unknown");
+                    let mut n_restarts: u32 = 0;
+                    for line in stdout.lines() {
+                        if let Some(val) = line.strip_prefix("ActiveState=") {
+                            active_state = val.to_string();
+                        } else if let Some(val) = line.strip_prefix("NRestarts=") {
+                            n_restarts = val.parse().unwrap_or(0);
+                        }
+                    }
+                    statuses.push(ServiceStatus {
+                        id: service.id,
+                        active_state,
+                        n_restarts,
+                    });
+                }
+                Err(e) => {
+                    error!("Failed to check service {}: {}", service.name, e);
+                    statuses.push(ServiceStatus {
+                        id: service.id,
+                        active_state: "unknown".to_string(),
+                        n_restarts: 0,
+                    });
+                }
+            }
+        }
+        statuses
     }
 
     async fn ensure_token(&mut self) -> Result<(), anyhow::Error> {

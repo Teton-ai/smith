@@ -2365,6 +2365,9 @@ pub struct DeviceService {
     pub service_name: String,
     pub watchdog_sec: Option<i32>,
     pub created_at: chrono::DateTime<chrono::Utc>,
+    pub active_state: Option<String>,
+    pub n_restarts: Option<i32>,
+    pub checked_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 #[utoipa::path(
@@ -2414,12 +2417,24 @@ pub async fn get_services_for_device(
     let services = sqlx::query_as!(
         DeviceService,
         r#"
-        SELECT id, release_id, package_id, service_name, watchdog_sec, created_at
-        FROM release_services
-        WHERE release_id = $1
-        ORDER BY service_name
+        SELECT
+            rs.id,
+            rs.release_id,
+            rs.package_id,
+            rs.service_name,
+            rs.watchdog_sec,
+            rs.created_at,
+            dss.active_state,
+            dss.n_restarts,
+            dss.checked_at
+        FROM release_services rs
+        LEFT JOIN device_service_status dss
+            ON dss.release_service_id = rs.id AND dss.device_id = $2
+        WHERE rs.release_id = $1
+        ORDER BY rs.service_name
         "#,
-        release_id
+        release_id,
+        device.id
     )
     .fetch_all(&state.pg_pool)
     .await

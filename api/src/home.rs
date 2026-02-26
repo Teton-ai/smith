@@ -4,7 +4,9 @@ use serde_json::Value;
 use serde_json::json;
 use smith::utils::schema;
 use smith::utils::schema::SafeCommandTx::{UpdateNetwork, UpdateVariables};
-use smith::utils::schema::{HomePost, NetworkType, SafeCommandRequest, SafeCommandRx};
+use smith::utils::schema::{
+    HomePost, NetworkType, SafeCommandRequest, SafeCommandRx, ServiceStatus,
+};
 use sqlx::PgPool;
 use tracing::debug;
 use tracing::error;
@@ -229,6 +231,28 @@ pub async fn get_commands(
             }
         })
         .collect())
+}
+
+pub async fn save_service_statuses(
+    device_id: i32,
+    statuses: &[ServiceStatus],
+    pool: &PgPool,
+) -> Result<()> {
+    for status in statuses {
+        sqlx::query!(
+            "INSERT INTO device_service_status (device_id, release_service_id, active_state, n_restarts, checked_at)
+             VALUES ($1, $2, $3, $4, NOW())
+             ON CONFLICT (device_id, release_service_id)
+             DO UPDATE SET active_state = EXCLUDED.active_state, n_restarts = EXCLUDED.n_restarts, checked_at = NOW()",
+            device_id,
+            status.id,
+            status.active_state,
+            status.n_restarts as i32
+        )
+        .execute(pool)
+        .await?;
+    }
+    Ok(())
 }
 
 pub async fn add_commands(

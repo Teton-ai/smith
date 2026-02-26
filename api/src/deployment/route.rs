@@ -1,7 +1,7 @@
 use crate::State;
 use crate::deployment::{
-    Deployment, DeploymentDeviceWithStatus, confirm_full_rollout, get_deployment,
-    get_devices_in_deployment, new_deployment,
+    Deployment, DeploymentDeviceWithStatus, DeviceServiceHealth, confirm_full_rollout,
+    get_deployment, get_deployment_service_health, get_devices_in_deployment, new_deployment,
 };
 use crate::error::ApiError;
 use crate::user::CurrentUser;
@@ -147,4 +147,28 @@ pub async fn api_confirm_full_rollout(
     .await
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     Ok((StatusCode::OK, Json(deployment)))
+}
+
+#[utoipa::path(
+    get,
+    path = "/releases/{release_id}/deployment/service-health",
+    params(
+        ("release_id" = i32, Path),
+    ),
+    responses(
+        (status = StatusCode::OK, body = Vec<DeviceServiceHealth>),
+    ),
+    security(
+        ("auth_token" = [])
+    ),
+    tag = TAG
+)]
+pub async fn api_get_deployment_service_health(
+    Path(release_id): Path<i32>,
+    Extension(state): Extension<State>,
+) -> Result<(StatusCode, Json<Vec<DeviceServiceHealth>>), StatusCode> {
+    let health = get_deployment_service_health(release_id, &state.pg_pool)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    Ok((StatusCode::OK, Json(health)))
 }

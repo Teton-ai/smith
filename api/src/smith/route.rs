@@ -13,6 +13,7 @@ use axum::{Extension, Json};
 use serde::{Deserialize, Serialize};
 use smith::utils::schema::{
     DeviceRegistration, DeviceRegistrationResponse, HomePost, HomePostResponse, Package,
+    ServiceCheck,
 };
 use std::net::SocketAddr;
 use std::time::SystemTime;
@@ -65,14 +66,30 @@ pub async fn home(
     device: AuthedDevice,
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
     Extension(state): Extension<State>,
-    Json(payload): Json<HomePost>,
+    Json(mut payload): Json<HomePost>,
 ) -> (StatusCode, Json<HomePostResponse>) {
     let release_id = payload.release_id;
+    let service_statuses = std::mem::take(&mut payload.service_statuses);
     let _ = crate::home::save_responses(device.id, &device.serial_number, payload, &state.pg_pool)
         .await
         .inspect_err(|err| {
             error!("Error saving responses: {:?}", err);
         });
+
+    let target_release_id = get_target_release(device.id, &state.pg_pool).await;
+
+    let services = if let Some(rid) = target_release_id.or(release_id) {
+        sqlx::query_as!(
+            ServiceCheck,
+            "SELECT id, service_name as name FROM release_services WHERE release_id = $1 AND watchdog_sec IS NOT NULL",
+            rid
+        )
+        .fetch_all(&state.pg_pool)
+        .await
+        .unwrap_or_default()
+    } else {
+        Vec::new()
+    };
 
     let response = HomePostResponse {
         timestamp: SystemTime::now()
@@ -81,7 +98,8 @@ pub async fn home(
         commands: crate::home::get_commands(device.id, &device.serial_number, &state.pg_pool)
             .await
             .unwrap_or(Vec::new()),
-        target_release_id: get_target_release(device.id, &state.pg_pool).await,
+        target_release_id,
+        services,
     };
 
     let client_ip = Some(extract_client_ip(&headers, addr));
@@ -96,6 +114,14 @@ pub async fn home(
             .inspect_err(|err| {
                 error!("Error saving last ping with IP: {:?}", err);
             });
+        if !service_statuses.is_empty() {
+            let _ =
+                crate::home::save_service_statuses(device.id, &service_statuses, &state.pg_pool)
+                    .await
+                    .inspect_err(|err| {
+                        error!("Error saving service statuses: {:?}", err);
+                    });
+        }
     });
 
     (StatusCode::OK, Json(response))

@@ -202,12 +202,25 @@ export interface DeviceRelease {
 }
 
 export interface DeviceService {
+	active_state?: string;
+	checked_at?: string;
 	created_at: string;
 	id: number;
+	n_restarts?: number;
 	package_id?: number;
 	release_id: number;
 	service_name: string;
 	watchdog_sec?: number;
+}
+
+export interface DeviceServiceHealth {
+	active_state: string;
+	checked_at: string;
+	device_id: number;
+	n_restarts: number;
+	release_service_id: number;
+	serial_number: string;
+	service_name: string;
 }
 
 export interface DeviceTree {
@@ -13957,6 +13970,395 @@ export function useApiGetDeploymentDevices<
 	queryKey: DataTag<QueryKey, TData, TError>;
 } {
 	const queryOptions = useApiGetDeploymentDevicesQueryOptions(
+		releaseId,
+		options,
+	);
+
+	const query = useQuery(queryOptions, queryClient) as UseQueryResult<
+		TData,
+		TError
+	> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+	query.queryKey = queryOptions.queryKey;
+
+	return query;
+}
+
+export const useApiGetDeploymentServiceHealthHook = () => {
+	const apiGetDeploymentServiceHealth =
+		useClientMutator<DeviceServiceHealth[]>();
+
+	return useCallback(
+		(releaseId: number, signal?: AbortSignal) => {
+			return apiGetDeploymentServiceHealth({
+				url: `/releases/${releaseId}/deployment/service-health`,
+				method: "GET",
+				signal,
+			});
+		},
+		[apiGetDeploymentServiceHealth],
+	);
+};
+
+export const getApiGetDeploymentServiceHealthInfiniteQueryKey = (
+	releaseId?: number,
+) => {
+	return [
+		"infinite",
+		`/releases/${releaseId}/deployment/service-health`,
+	] as const;
+};
+
+export const getApiGetDeploymentServiceHealthQueryKey = (
+	releaseId?: number,
+) => {
+	return [`/releases/${releaseId}/deployment/service-health`] as const;
+};
+
+export const useApiGetDeploymentServiceHealthInfiniteQueryOptions = <
+	TData = InfiniteData<
+		Awaited<ReturnType<ReturnType<typeof useApiGetDeploymentServiceHealthHook>>>
+	>,
+	TError = unknown,
+>(
+	releaseId: number,
+	options?: {
+		query?: Partial<
+			UseInfiniteQueryOptions<
+				Awaited<
+					ReturnType<ReturnType<typeof useApiGetDeploymentServiceHealthHook>>
+				>,
+				TError,
+				TData
+			>
+		>;
+	},
+) => {
+	const { query: queryOptions } = options ?? {};
+
+	const queryKey =
+		queryOptions?.queryKey ??
+		getApiGetDeploymentServiceHealthInfiniteQueryKey(releaseId);
+
+	const apiGetDeploymentServiceHealth = useApiGetDeploymentServiceHealthHook();
+
+	const queryFn: QueryFunction<
+		Awaited<ReturnType<ReturnType<typeof useApiGetDeploymentServiceHealthHook>>>
+	> = ({ signal }) => apiGetDeploymentServiceHealth(releaseId, signal);
+
+	return {
+		queryKey,
+		queryFn,
+		enabled: !!releaseId,
+		...queryOptions,
+	} as UseInfiniteQueryOptions<
+		Awaited<
+			ReturnType<ReturnType<typeof useApiGetDeploymentServiceHealthHook>>
+		>,
+		TError,
+		TData
+	> & { queryKey: DataTag<QueryKey, TData, TError> };
+};
+
+export type ApiGetDeploymentServiceHealthInfiniteQueryResult = NonNullable<
+	Awaited<ReturnType<ReturnType<typeof useApiGetDeploymentServiceHealthHook>>>
+>;
+export type ApiGetDeploymentServiceHealthInfiniteQueryError = unknown;
+
+export function useApiGetDeploymentServiceHealthInfinite<
+	TData = InfiniteData<
+		Awaited<ReturnType<ReturnType<typeof useApiGetDeploymentServiceHealthHook>>>
+	>,
+	TError = unknown,
+>(
+	releaseId: number,
+	options: {
+		query: Partial<
+			UseInfiniteQueryOptions<
+				Awaited<
+					ReturnType<ReturnType<typeof useApiGetDeploymentServiceHealthHook>>
+				>,
+				TError,
+				TData
+			>
+		> &
+			Pick<
+				DefinedInitialDataOptions<
+					Awaited<
+						ReturnType<ReturnType<typeof useApiGetDeploymentServiceHealthHook>>
+					>,
+					TError,
+					Awaited<
+						ReturnType<ReturnType<typeof useApiGetDeploymentServiceHealthHook>>
+					>
+				>,
+				"initialData"
+			>;
+	},
+	queryClient?: QueryClient,
+): DefinedUseInfiniteQueryResult<TData, TError> & {
+	queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useApiGetDeploymentServiceHealthInfinite<
+	TData = InfiniteData<
+		Awaited<ReturnType<ReturnType<typeof useApiGetDeploymentServiceHealthHook>>>
+	>,
+	TError = unknown,
+>(
+	releaseId: number,
+	options?: {
+		query?: Partial<
+			UseInfiniteQueryOptions<
+				Awaited<
+					ReturnType<ReturnType<typeof useApiGetDeploymentServiceHealthHook>>
+				>,
+				TError,
+				TData
+			>
+		> &
+			Pick<
+				UndefinedInitialDataOptions<
+					Awaited<
+						ReturnType<ReturnType<typeof useApiGetDeploymentServiceHealthHook>>
+					>,
+					TError,
+					Awaited<
+						ReturnType<ReturnType<typeof useApiGetDeploymentServiceHealthHook>>
+					>
+				>,
+				"initialData"
+			>;
+	},
+	queryClient?: QueryClient,
+): UseInfiniteQueryResult<TData, TError> & {
+	queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useApiGetDeploymentServiceHealthInfinite<
+	TData = InfiniteData<
+		Awaited<ReturnType<ReturnType<typeof useApiGetDeploymentServiceHealthHook>>>
+	>,
+	TError = unknown,
+>(
+	releaseId: number,
+	options?: {
+		query?: Partial<
+			UseInfiniteQueryOptions<
+				Awaited<
+					ReturnType<ReturnType<typeof useApiGetDeploymentServiceHealthHook>>
+				>,
+				TError,
+				TData
+			>
+		>;
+	},
+	queryClient?: QueryClient,
+): UseInfiniteQueryResult<TData, TError> & {
+	queryKey: DataTag<QueryKey, TData, TError>;
+};
+
+export function useApiGetDeploymentServiceHealthInfinite<
+	TData = InfiniteData<
+		Awaited<ReturnType<ReturnType<typeof useApiGetDeploymentServiceHealthHook>>>
+	>,
+	TError = unknown,
+>(
+	releaseId: number,
+	options?: {
+		query?: Partial<
+			UseInfiniteQueryOptions<
+				Awaited<
+					ReturnType<ReturnType<typeof useApiGetDeploymentServiceHealthHook>>
+				>,
+				TError,
+				TData
+			>
+		>;
+	},
+	queryClient?: QueryClient,
+): UseInfiniteQueryResult<TData, TError> & {
+	queryKey: DataTag<QueryKey, TData, TError>;
+} {
+	const queryOptions = useApiGetDeploymentServiceHealthInfiniteQueryOptions(
+		releaseId,
+		options,
+	);
+
+	const query = useInfiniteQuery(
+		queryOptions,
+		queryClient,
+	) as UseInfiniteQueryResult<TData, TError> & {
+		queryKey: DataTag<QueryKey, TData, TError>;
+	};
+
+	query.queryKey = queryOptions.queryKey;
+
+	return query;
+}
+
+export const useApiGetDeploymentServiceHealthQueryOptions = <
+	TData = Awaited<
+		ReturnType<ReturnType<typeof useApiGetDeploymentServiceHealthHook>>
+	>,
+	TError = unknown,
+>(
+	releaseId: number,
+	options?: {
+		query?: Partial<
+			UseQueryOptions<
+				Awaited<
+					ReturnType<ReturnType<typeof useApiGetDeploymentServiceHealthHook>>
+				>,
+				TError,
+				TData
+			>
+		>;
+	},
+) => {
+	const { query: queryOptions } = options ?? {};
+
+	const queryKey =
+		queryOptions?.queryKey ??
+		getApiGetDeploymentServiceHealthQueryKey(releaseId);
+
+	const apiGetDeploymentServiceHealth = useApiGetDeploymentServiceHealthHook();
+
+	const queryFn: QueryFunction<
+		Awaited<ReturnType<ReturnType<typeof useApiGetDeploymentServiceHealthHook>>>
+	> = ({ signal }) => apiGetDeploymentServiceHealth(releaseId, signal);
+
+	return {
+		queryKey,
+		queryFn,
+		enabled: !!releaseId,
+		...queryOptions,
+	} as UseQueryOptions<
+		Awaited<
+			ReturnType<ReturnType<typeof useApiGetDeploymentServiceHealthHook>>
+		>,
+		TError,
+		TData
+	> & { queryKey: DataTag<QueryKey, TData, TError> };
+};
+
+export type ApiGetDeploymentServiceHealthQueryResult = NonNullable<
+	Awaited<ReturnType<ReturnType<typeof useApiGetDeploymentServiceHealthHook>>>
+>;
+export type ApiGetDeploymentServiceHealthQueryError = unknown;
+
+export function useApiGetDeploymentServiceHealth<
+	TData = Awaited<
+		ReturnType<ReturnType<typeof useApiGetDeploymentServiceHealthHook>>
+	>,
+	TError = unknown,
+>(
+	releaseId: number,
+	options: {
+		query: Partial<
+			UseQueryOptions<
+				Awaited<
+					ReturnType<ReturnType<typeof useApiGetDeploymentServiceHealthHook>>
+				>,
+				TError,
+				TData
+			>
+		> &
+			Pick<
+				DefinedInitialDataOptions<
+					Awaited<
+						ReturnType<ReturnType<typeof useApiGetDeploymentServiceHealthHook>>
+					>,
+					TError,
+					Awaited<
+						ReturnType<ReturnType<typeof useApiGetDeploymentServiceHealthHook>>
+					>
+				>,
+				"initialData"
+			>;
+	},
+	queryClient?: QueryClient,
+): DefinedUseQueryResult<TData, TError> & {
+	queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useApiGetDeploymentServiceHealth<
+	TData = Awaited<
+		ReturnType<ReturnType<typeof useApiGetDeploymentServiceHealthHook>>
+	>,
+	TError = unknown,
+>(
+	releaseId: number,
+	options?: {
+		query?: Partial<
+			UseQueryOptions<
+				Awaited<
+					ReturnType<ReturnType<typeof useApiGetDeploymentServiceHealthHook>>
+				>,
+				TError,
+				TData
+			>
+		> &
+			Pick<
+				UndefinedInitialDataOptions<
+					Awaited<
+						ReturnType<ReturnType<typeof useApiGetDeploymentServiceHealthHook>>
+					>,
+					TError,
+					Awaited<
+						ReturnType<ReturnType<typeof useApiGetDeploymentServiceHealthHook>>
+					>
+				>,
+				"initialData"
+			>;
+	},
+	queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+	queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useApiGetDeploymentServiceHealth<
+	TData = Awaited<
+		ReturnType<ReturnType<typeof useApiGetDeploymentServiceHealthHook>>
+	>,
+	TError = unknown,
+>(
+	releaseId: number,
+	options?: {
+		query?: Partial<
+			UseQueryOptions<
+				Awaited<
+					ReturnType<ReturnType<typeof useApiGetDeploymentServiceHealthHook>>
+				>,
+				TError,
+				TData
+			>
+		>;
+	},
+	queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+	queryKey: DataTag<QueryKey, TData, TError>;
+};
+
+export function useApiGetDeploymentServiceHealth<
+	TData = Awaited<
+		ReturnType<ReturnType<typeof useApiGetDeploymentServiceHealthHook>>
+	>,
+	TError = unknown,
+>(
+	releaseId: number,
+	options?: {
+		query?: Partial<
+			UseQueryOptions<
+				Awaited<
+					ReturnType<ReturnType<typeof useApiGetDeploymentServiceHealthHook>>
+				>,
+				TError,
+				TData
+			>
+		>;
+	},
+	queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+	queryKey: DataTag<QueryKey, TData, TError>;
+} {
+	const queryOptions = useApiGetDeploymentServiceHealthQueryOptions(
 		releaseId,
 		options,
 	);
