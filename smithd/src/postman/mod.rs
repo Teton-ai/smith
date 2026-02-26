@@ -15,6 +15,11 @@ use std::time::Duration;
 use tokio::{sync::mpsc, time};
 use tracing::{error, info, warn};
 
+enum PollMode {
+    Active { ticks_without_commands: u32 },
+    Idle,
+}
+
 struct Postman {
     shutdown: ShutdownSignals,
     police: PoliceHandle,
@@ -25,7 +30,7 @@ struct Postman {
     hostname: String,
     token: Option<String>,
     problems: Option<u32>,
-    idle_ticks_count: u32,
+    poll_mode: PollMode,
 }
 
 #[derive(Debug)]
@@ -51,7 +56,7 @@ impl Postman {
             token: None,
             hostname: "".to_owned(),
             problems: None,
-            idle_ticks_count: 0,
+            poll_mode: PollMode::Idle,
         }
     }
 
@@ -120,23 +125,19 @@ impl Postman {
                     self.commander.execute_api_batch(response.commands).await;
 
                     if has_commands {
-                        self.idle_ticks_count = 0;
-                        let current_period = keep_alive_interval.period();
-                        if current_period.as_secs() != ACTIVE_INTERVAL_SECS {
+                        if matches!(self.poll_mode, PollMode::Idle) {
                             info!("Switching to active polling mode (1 second interval)");
                             keep_alive_interval = time::interval(Duration::from_secs(ACTIVE_INTERVAL_SECS));
                             keep_alive_interval.reset();
                         }
-                    } else {
-                        self.idle_ticks_count += 1;
-                        if self.idle_ticks_count >= IDLE_THRESHOLD_TICKS {
-                            let current_period = keep_alive_interval.period();
-                            if current_period.as_secs() != IDLE_INTERVAL_SECS {
-                                info!("Switching to idle polling mode (20 second interval)");
-                                keep_alive_interval = time::interval(Duration::from_secs(IDLE_INTERVAL_SECS));
-                                keep_alive_interval.reset();
-                            }
-                            self.idle_ticks_count = 0;
+                        self.poll_mode = PollMode::Active { ticks_without_commands: 0 };
+                    } else if let PollMode::Active { ticks_without_commands } = &mut self.poll_mode {
+                        *ticks_without_commands += 1;
+                        if *ticks_without_commands >= IDLE_THRESHOLD_TICKS {
+                            info!("Switching to idle polling mode (20 second interval)");
+                            keep_alive_interval = time::interval(Duration::from_secs(IDLE_INTERVAL_SECS));
+                            keep_alive_interval.reset();
+                            self.poll_mode = PollMode::Idle;
                         }
                     }
                 }
