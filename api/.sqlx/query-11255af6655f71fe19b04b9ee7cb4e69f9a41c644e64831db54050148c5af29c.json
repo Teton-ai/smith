@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO device_service_status (device_id, release_service_id, active_state, n_restarts, checked_at)\n             VALUES ($1, $2, $3, $4, NOW())\n             ON CONFLICT (device_id, release_service_id)\n             DO UPDATE SET active_state = EXCLUDED.active_state, n_restarts = EXCLUDED.n_restarts, checked_at = NOW()",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Int4",
+        "Text",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "11255af6655f71fe19b04b9ee7cb4e69f9a41c644e64831db54050148c5af29c"
+}

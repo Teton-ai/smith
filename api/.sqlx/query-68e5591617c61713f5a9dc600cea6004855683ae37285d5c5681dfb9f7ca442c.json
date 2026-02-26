@@ -1,0 +1,71 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT\n            rs.id,\n            rs.release_id,\n            rs.package_id,\n            rs.service_name,\n            rs.watchdog_sec,\n            rs.created_at,\n            dss.active_state,\n            dss.n_restarts,\n            dss.checked_at\n        FROM release_services rs\n        LEFT JOIN device_service_status dss\n            ON dss.release_service_id = rs.id AND dss.device_id = $2\n        WHERE rs.release_id = $1\n        ORDER BY rs.service_name\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "release_id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 2,
+        "name": "package_id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 3,
+        "name": "service_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "watchdog_sec",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 5,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 6,
+        "name": "active_state",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "n_restarts",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 8,
+        "name": "checked_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      false,
+      true,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "68e5591617c61713f5a9dc600cea6004855683ae37285d5c5681dfb9f7ca442c"
+}
