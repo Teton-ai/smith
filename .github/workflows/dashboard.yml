@@ -3,7 +3,7 @@ name: dashboard
 on:
   push:
     tags:
-      - '*'
+      - "*"
 
 concurrency:
   group: dashboard-${{ github.ref }}
@@ -43,7 +43,6 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: ./dashboard
-          file: ./dashboard/Dockerfile
           push: true
           tags: |
             tetonai/smith-dashboard
@@ -56,6 +55,6 @@ jobs:
         uses: ravsamhq/notify-slack-action@v2
         with:
           status: ${{ job.status }}
-          notify_when: 'failure'
+          notify_when: "failure"
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SMITH_TEAM_SLACK_NOTIFICATIONS }}
