@@ -3,7 +3,7 @@ services:
   api:
     build:
       context: .
-      dockerfile: api.Dockerfile
+      dockerfile: api/dev.Dockerfile
     container_name: smith-api
     env_file:
       - .env
@@ -23,12 +23,12 @@ services:
       - backend
       - device-network
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
 
   postgres:
     container_name: smith-postgres
-    build:
-      dockerfile: postgres.Dockerfile
+    image: postgres:15
     env_file:
       - .env
     ports:
@@ -37,6 +37,11 @@ services:
       - postgres-data:/var/lib/postgresql/data
     networks:
       - backend
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
   bore:
     image: ekzhang/bore
@@ -52,7 +57,7 @@ services:
   device:
     build:
       context: .
-      dockerfile: device.Dockerfile
+      dockerfile: smithd/dev.Dockerfile
       args:
         # Override with ubuntu:22.04 for x86_64 Linux development
         BASE_IMAGE: ${DEVICE_BASE_IMAGE:-nvcr.io/nvidia/l4t-base:r36.2.0}
@@ -67,6 +72,23 @@ services:
       - api
       - bore
 
+  dashboard:
+    build:
+      context: ./dashboard
+      dockerfile: dev.Dockerfile
+    container_name: smith-dashboard
+    ports:
+      - "3000:3000"
+    volumes:
+      # Mount source code for hot reloading
+      - ./dashboard:/app
+      # Cache node_modules for faster rebuilds
+      - node_modules-cache:/app/node_modules
+    networks:
+      - backend
+    depends_on:
+      - api
+
 networks:
   backend:
   device-network:
@@ -78,3 +100,4 @@ volumes:
   cargo-git:
   target-cache:
   postgres-data:
+  node_modules-cache:
