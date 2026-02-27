@@ -12,6 +12,7 @@ interface ModalProps {
 	width?: string;
 	children: ReactNode;
 	footer?: ReactNode;
+	headerRight?: ReactNode;
 }
 
 export function Modal({
@@ -22,6 +23,7 @@ export function Modal({
 	width = "w-[520px]",
 	children,
 	footer,
+	headerRight,
 }: ModalProps) {
 	const [mounted, setMounted] = useState(false);
 	const [visible, setVisible] = useState(false);
@@ -73,12 +75,15 @@ export function Modal({
 							<p className="text-xs text-gray-500 mt-0.5">{subtitle}</p>
 						)}
 					</div>
-					<button
-						onClick={onClose}
-						className="text-gray-400 hover:text-gray-600 cursor-pointer"
-					>
-						<X className="w-5 h-5" />
-					</button>
+					<div className="flex items-center gap-3">
+						{headerRight}
+						<button
+							onClick={onClose}
+							className="text-gray-400 hover:text-gray-600 cursor-pointer"
+						>
+							<X className="w-5 h-5" />
+						</button>
+					</div>
 				</div>
 				<hr className="border-gray-200" />
 

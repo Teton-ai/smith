@@ -200,6 +200,7 @@ async fn start_main_server(config: &'static Config, authorization: Authorization
     #[allow(deprecated)]
     let (protected_router, protected_api) = OpenApiRouter::with_openapi(ApiDoc::openapi())
         .routes(routes!(dashboard::route::get_dashboard))
+        .routes(routes!(dashboard::route::get_registration_counts))
         .routes(routes!(auth::route::verify_token))
         .routes(routes!(
             network::route::get_networks,
