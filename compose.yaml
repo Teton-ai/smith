@@ -2,8 +2,8 @@ name: smith
 services:
   api:
     build:
-      context: ./api
-      dockerfile: dev.Dockerfile
+      context: .
+      dockerfile: api/dev.Dockerfile
     container_name: smith-api
     env_file:
       - .env

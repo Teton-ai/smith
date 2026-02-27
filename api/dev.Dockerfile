@@ -23,11 +23,11 @@ RUN apt-get update && apt-get install -y \
 COPY Cargo.toml Cargo.lock ./
 
 # Copy all workspace members
-COPY . ./api
-COPY ../smithd ./smithd
-COPY ../models ./models
-COPY ../updater ./updater
-COPY ../cli ./cli
+COPY api ./api
+COPY smithd ./smithd
+COPY models ./models
+COPY updater ./updater
+COPY cli ./cli
 
 # Pre-build dependencies with offline mode (no DB available during build)
 # At runtime, cargo-watch will use the live database for type checking
