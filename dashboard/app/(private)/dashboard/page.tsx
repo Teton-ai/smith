@@ -278,16 +278,23 @@ const AdminPanel = () => {
 									</ResponsiveContainer>
 								</div>
 							)}
-							<div className="flex items-center relative z-10">
-								<Cpu className="w-8 h-8 text-blue-500" />
-								<div className="ml-4">
-									<p className="text-sm font-medium text-gray-600">
-										Total Devices
-									</p>
-									<p className="text-2xl font-bold text-gray-900">
-										{dashboardQuery.data?.total_count || 0}
-									</p>
+							<div className="relative z-10">
+								<div className="flex items-center">
+									<Cpu className="w-8 h-8 text-blue-500" />
+									<div className="ml-4">
+										<p className="text-sm font-medium text-gray-600">
+											Total Devices
+										</p>
+										<p className="text-2xl font-bold text-gray-900">
+											{dashboardQuery.data?.total_count || 0}
+										</p>
+									</div>
 								</div>
+								{chartData.length > 1 && (
+									<p className="text-[10px] text-gray-400 mt-2">
+										New devices over time
+									</p>
+								)}
 							</div>
 						</button>
 
@@ -694,7 +701,8 @@ const AdminPanel = () => {
 			<Modal
 				open={chartOpen}
 				onClose={() => setChartOpen(false)}
-				title="Device Registrations"
+				title="New Devices"
+				subtitle={`New devices added per ${granularity === "quarterly" ? "quarter" : granularity === "yearly" ? "year" : "month"}`}
 				width="w-[700px]"
 				headerRight={
 					<div className="flex rounded-md border border-gray-200 text-xs">
@@ -769,7 +777,7 @@ const AdminPanel = () => {
 										}
 										return `${d.toLocaleString("default", { month: "long" })} ${d.getFullYear()}`;
 									}}
-									formatter={(value: number) => [value, "Devices"]}
+									formatter={(value: number) => [value, "New devices"]}
 								/>
 								<Area
 									type="monotone"
