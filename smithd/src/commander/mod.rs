@@ -88,6 +88,9 @@ impl CommandQueueExecutor {
             }
             SafeCommandTx::StartOTA => ota::start_ota(action.id, &self.handles.filemanager).await,
             SafeCommandTx::TestNetwork => network::test_network(action.id).await,
+            SafeCommandTx::ExtendedNetworkTest { duration_minutes } => {
+                network::extended_network_test(action.id, duration_minutes).await
+            }
             SafeCommandTx::StreamLogs {
                 session_id,
                 service_name,

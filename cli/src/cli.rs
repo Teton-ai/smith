@@ -114,6 +114,35 @@ pub enum GetResourceType {
 }
 
 #[derive(Subcommand)]
+pub enum TestNetworkCommands {
+    /// Run a quick network test on device(s) (downloads 20MB test file)
+    Quick {
+        #[command(flatten)]
+        selector: DeviceSelector,
+    },
+    /// Run an extended network test on devices matching labels
+    Extended {
+        /// Filter by labels (format: key=value). Can be used multiple times.
+        #[arg(short, long = "label", value_name = "KEY=VALUE", required = true)]
+        labels: Vec<String>,
+        /// Duration in minutes (3, 5, or 8)
+        #[arg(short, long, default_value = "3", value_parser = clap::value_parser!(u32).range(3..=8))]
+        duration: u32,
+        /// Poll for results (wait until completion)
+        #[arg(short, long)]
+        wait: bool,
+        /// Poll interval in seconds (default: 30)
+        #[arg(long, default_value = "30")]
+        poll_interval: u64,
+    },
+    /// Check status of an extended network test session
+    Status {
+        /// Session ID (UUID) returned from extended test
+        session_id: String,
+    },
+}
+
+#[derive(Subcommand)]
 pub enum RestartResourceType {
     /// Restart devices
     #[command(visible_alias = "devices")]
@@ -184,10 +213,10 @@ pub enum Commands {
         nowait: bool,
     },
 
-    /// Test network speed for device(s) (downloads 20MB test file)
+    /// Test network speed for device(s)
     TestNetwork {
-        #[command(flatten)]
-        selector: DeviceSelector,
+        #[clap(subcommand)]
+        command: TestNetworkCommands,
     },
 
     /// Check command results by ID (format: device_id:command_id)

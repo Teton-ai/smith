@@ -1,6 +1,7 @@
 "use client";
 
 import {
+	Activity,
 	Cpu,
 	FileText,
 	Globe,
@@ -22,6 +23,7 @@ const navigationItems = [
 	{ path: "/commands", label: "Commands", icon: Terminal },
 	{ path: "/ip-addresses", label: "IP Addresses", icon: Globe },
 	{ path: "/modems", label: "Modems", icon: Smartphone },
+	{ path: "/hackathon", label: "Network Analyzer", icon: Activity },
 ];
 
 const bottomItems = [
