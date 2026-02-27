@@ -238,6 +238,7 @@ pub async fn save_service_statuses(
     statuses: &[ServiceStatus],
     pool: &PgPool,
 ) -> Result<()> {
+    let mut tx = pool.begin().await?;
     for status in statuses {
         sqlx::query!(
             "INSERT INTO device_service_status (device_id, release_service_id, active_state, n_restarts, checked_at)
@@ -249,9 +250,10 @@ pub async fn save_service_statuses(
             status.active_state,
             status.n_restarts as i32
         )
-        .execute(pool)
+        .execute(&mut *tx)
         .await?;
     }
+    tx.commit().await?;
     Ok(())
 }
 
