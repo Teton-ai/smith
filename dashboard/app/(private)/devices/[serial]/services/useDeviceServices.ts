@@ -8,6 +8,9 @@ export interface DeviceService {
 	service_name: string;
 	watchdog_sec: number | null;
 	created_at: string;
+	active_state: string | null;
+	n_restarts: number | null;
+	checked_at: string | null;
 }
 
 export const useDeviceServices = (deviceId: string) => {
@@ -21,5 +24,6 @@ export const useDeviceServices = (deviceId: string) => {
 				method: "GET",
 			}),
 		enabled: !!deviceId,
+		refetchInterval: 30000,
 	});
 };

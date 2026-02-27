@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT COUNT(DISTINCT d.id)\n             FROM device d\n             WHERE d.id = ANY($1)\n             AND EXISTS (\n                 SELECT 1 FROM release_services rs\n                 WHERE rs.release_id = $2 AND rs.watchdog_sec IS NOT NULL\n                 AND NOT EXISTS (\n                     SELECT 1 FROM device_service_status dss\n                     WHERE dss.device_id = d.id\n                     AND dss.release_service_id = rs.id\n                     AND dss.active_state = 'active'\n                     AND dss.n_restarts = 0\n                 )\n             )",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4Array",
+        "Int4"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "db24d87fabfd721b7fb5d792616c7623c6584c669d0e38b1c8c6924cad908d94"
+}

@@ -97,34 +97,53 @@ const ServicesPage = () => {
 								</span>
 							</div>
 							<div className="divide-y divide-gray-100">
-								{services.map((service: DeviceService) => (
-									<div
-										key={service.id}
-										className={`flex items-center justify-between px-4 py-2.5 ${
-											selectedService === service.service_name
-												? "bg-blue-50 border-l-2 border-l-blue-500"
-												: "border-l-2 border-l-transparent"
-										}`}
-									>
-										<div className="min-w-0">
-											<div className="font-mono text-sm text-gray-900 truncate">
-												{service.service_name}
-											</div>
-											{service.watchdog_sec && (
-												<div className="text-xs text-gray-400 mt-0.5">
-													Watchdog: {service.watchdog_sec}s
-												</div>
-											)}
-										</div>
-										<button
-											onClick={() => handleSelectService(service.service_name)}
-											className="flex-shrink-0 p-1.5 rounded text-gray-400 hover:text-blue-500 hover:bg-blue-100 transition-colors cursor-pointer"
-											title="Stream logs"
+								{services.map((service: DeviceService) => {
+									const healthColor = service.active_state
+										? service.active_state === "active" &&
+											service.n_restarts === 0
+											? "bg-green-500"
+											: "bg-red-500"
+										: "bg-gray-300";
+									const healthTooltip = service.active_state
+										? `${service.active_state}, restarts: ${service.n_restarts}${service.checked_at ? `, checked: ${new Date(service.checked_at).toLocaleString()}` : ""}`
+										: "No health data";
+									return (
+										<div
+											key={service.id}
+											className={`flex items-center justify-between px-4 py-2.5 ${
+												selectedService === service.service_name
+													? "bg-blue-50 border-l-2 border-l-blue-500"
+													: "border-l-2 border-l-transparent"
+											}`}
 										>
-											<Play className="w-3.5 h-3.5" />
-										</button>
-									</div>
-								))}
+											<div className="flex items-center gap-2 min-w-0">
+												<span
+													className={`w-2 h-2 rounded-full flex-shrink-0 ${healthColor}`}
+													title={healthTooltip}
+												/>
+												<div className="min-w-0">
+													<div className="font-mono text-sm text-gray-900 truncate">
+														{service.service_name}
+													</div>
+													{service.watchdog_sec && (
+														<div className="text-xs text-gray-400 mt-0.5">
+															Watchdog: {service.watchdog_sec}s
+														</div>
+													)}
+												</div>
+											</div>
+											<button
+												onClick={() =>
+													handleSelectService(service.service_name)
+												}
+												className="flex-shrink-0 p-1.5 rounded text-gray-400 hover:text-blue-500 hover:bg-blue-100 transition-colors cursor-pointer"
+												title="Stream logs"
+											>
+												<Play className="w-3.5 h-3.5" />
+											</button>
+										</div>
+									);
+								})}
 							</div>
 						</div>
 					</div>

@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use chrono::{DateTime, Utc};
 use models::deployment::Deployment;
 use models::deployment::DeploymentRequest;
 use models::deployment::DeploymentStatus;
@@ -303,6 +304,44 @@ pub async fn confirm_full_rollout(
         anyhow::bail!("Cannot confirm full rollout: canary devices have not completed updating");
     }
 
+    // Check service health for watchdog services
+    let watchdog_service_count = sqlx::query_scalar!(
+        "SELECT COUNT(*) FROM release_services WHERE release_id = $1 AND watchdog_sec IS NOT NULL",
+        release_id
+    )
+    .fetch_one(&mut *tx)
+    .await?;
+
+    if watchdog_service_count.unwrap_or(0) > 0 {
+        let unhealthy_device_count = sqlx::query_scalar!(
+            "SELECT COUNT(DISTINCT d.id)
+             FROM device d
+             WHERE d.id = ANY($1)
+             AND EXISTS (
+                 SELECT 1 FROM release_services rs
+                 WHERE rs.release_id = $2 AND rs.watchdog_sec IS NOT NULL
+                 AND NOT EXISTS (
+                     SELECT 1 FROM device_service_status dss
+                     WHERE dss.device_id = d.id
+                     AND dss.release_service_id = rs.id
+                     AND dss.active_state = 'active'
+                     AND dss.n_restarts = 0
+                 )
+             )",
+            &device_ids,
+            release_id
+        )
+        .fetch_one(&mut *tx)
+        .await?;
+
+        if unhealthy_device_count.unwrap_or(0) > 0 {
+            anyhow::bail!(
+                "Cannot confirm full rollout: {} canary device(s) have unhealthy or unreported services",
+                unhealthy_device_count.unwrap_or(0)
+            );
+        }
+    }
+
     let updated_deployment = sqlx::query_as!(
             Deployment,
             "UPDATE deployment SET status = 'done'
@@ -416,4 +455,59 @@ pub async fn get_devices_in_deployment(
     .await?;
 
     Ok(devices)
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, ToSchema)]
+pub struct DeviceServiceHealth {
+    pub device_id: i32,
+    pub serial_number: String,
+    pub release_service_id: i32,
+    pub service_name: String,
+    pub active_state: String,
+    pub n_restarts: i32,
+    pub checked_at: DateTime<Utc>,
+}
+
+pub async fn get_deployment_service_health(
+    release_id: i32,
+    pg_pool: &PgPool,
+) -> anyhow::Result<Vec<DeviceServiceHealth>> {
+    let deployment = sqlx::query!(
+        "SELECT id FROM deployment WHERE release_id = $1",
+        release_id
+    )
+    .fetch_optional(pg_pool)
+    .await?;
+
+    let Some(deployment) = deployment else {
+        return Ok(Vec::new());
+    };
+
+    let health = sqlx::query_as!(
+        DeviceServiceHealth,
+        r#"
+        SELECT
+            d.id AS device_id,
+            d.serial_number,
+            dss.release_service_id,
+            rs.service_name,
+            dss.active_state,
+            dss.n_restarts,
+            dss.checked_at
+        FROM deployment_devices dd
+        JOIN device d ON dd.device_id = d.id
+        JOIN device_service_status dss ON dss.device_id = d.id
+        JOIN release_services rs ON rs.id = dss.release_service_id
+        WHERE dd.deployment_id = $1
+          AND rs.release_id = $2
+          AND rs.watchdog_sec IS NOT NULL
+        ORDER BY d.serial_number, rs.service_name
+        "#,
+        deployment.id,
+        release_id
+    )
+    .fetch_all(pg_pool)
+    .await?;
+
+    Ok(health)
 }

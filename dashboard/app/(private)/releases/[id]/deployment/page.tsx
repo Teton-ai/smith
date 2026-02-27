@@ -24,6 +24,10 @@ import {
 	useGetRelease,
 } from "@/app/api-client";
 import { Button } from "@/app/components/button";
+import {
+	type DeviceServiceHealth,
+	useDeploymentServiceHealth,
+} from "./useDeploymentServiceHealth";
 
 const DeploymentStatusPage = () => {
 	const params = useParams();
@@ -34,10 +38,25 @@ const DeploymentStatusPage = () => {
 	const { data: release, isLoading: releaseLoading } = useGetRelease(releaseId);
 
 	const { data: deployment, queryKey: deploymentQueryKey } =
-		useApiGetReleaseDeployment(releaseId);
+		useApiGetReleaseDeployment(releaseId, {
+			query: { refetchInterval: 5000 },
+		});
 
 	const { data: devices = [], queryKey: devicesQueryKey } =
-		useApiGetDeploymentDevices(releaseId);
+		useApiGetDeploymentDevices(releaseId, {
+			query: { refetchInterval: 5000 },
+		});
+
+	const { data: serviceHealth = [] } = useDeploymentServiceHealth(releaseId);
+
+	const serviceHealthByDevice = serviceHealth.reduce(
+		(acc, sh) => {
+			if (!acc[sh.device_id]) acc[sh.device_id] = [];
+			acc[sh.device_id].push(sh);
+			return acc;
+		},
+		{} as Record<number, DeviceServiceHealth[]>,
+	);
 
 	const loading = releaseLoading;
 
@@ -67,9 +86,22 @@ const DeploymentStatusPage = () => {
 		) {
 			return false;
 		}
-		return devices.every(
+		const allUpdated = devices.every(
 			(device) => device.release_id === device.target_release_id,
 		);
+		if (!allUpdated) return false;
+
+		// If there's service health data, ensure all services are healthy
+		if (serviceHealth.length > 0) {
+			return devices.every((device) => {
+				const health = serviceHealthByDevice[device.device_id];
+				if (!health || health.length === 0) return false;
+				return health.every(
+					(sh) => sh.active_state === "active" && sh.n_restarts === 0,
+				);
+			});
+		}
+		return true;
 	};
 
 	const confirmFullRolloutHook = useApiConfirmFullRollout({
@@ -394,6 +426,9 @@ const DeploymentStatusPage = () => {
 													Status
 												</th>
 												<th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+													Services
+												</th>
+												<th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
 													Last Ping
 												</th>
 												<th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -446,6 +481,40 @@ const DeploymentStatusPage = () => {
 																)}
 																{deviceStatus.label}
 															</span>
+														</td>
+														<td className="px-4 py-3 text-sm">
+															{(() => {
+																const health =
+																	serviceHealthByDevice[device.device_id];
+																if (!health || health.length === 0)
+																	return (
+																		<span className="text-xs text-gray-400">
+																			--
+																		</span>
+																	);
+																return (
+																	<div className="flex flex-wrap gap-1">
+																		{health.map((sh) => {
+																			const isHealthy =
+																				sh.active_state === "active" &&
+																				sh.n_restarts === 0;
+																			return (
+																				<span
+																					key={sh.release_service_id}
+																					className={`inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium ${
+																						isHealthy
+																							? "bg-green-100 text-green-700"
+																							: "bg-red-100 text-red-700"
+																					}`}
+																					title={`${sh.service_name}: ${sh.active_state}, restarts: ${sh.n_restarts}`}
+																				>
+																					{sh.service_name}
+																				</span>
+																			);
+																		})}
+																	</div>
+																);
+															})()}
 														</td>
 														<td className="px-4 py-3 text-sm text-gray-600">
 															{device.last_ping
