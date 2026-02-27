@@ -91,14 +91,12 @@ const DeploymentStatusPage = () => {
 		);
 		if (!allUpdated) return false;
 
-		// If there's service health data, ensure all services are healthy
+		// If there's service health data, ensure all services are active
 		if (serviceHealth.length > 0) {
 			return devices.every((device) => {
 				const health = serviceHealthByDevice[device.device_id];
 				if (!health || health.length === 0) return false;
-				return health.every(
-					(sh) => sh.active_state === "active" && sh.n_restarts === 0,
-				);
+				return health.every((sh) => sh.active_state === "active");
 			});
 		}
 		return true;
@@ -496,8 +494,7 @@ const DeploymentStatusPage = () => {
 																	<div className="flex flex-wrap gap-1">
 																		{health.map((sh) => {
 																			const isHealthy =
-																				sh.active_state === "active" &&
-																				sh.n_restarts === 0;
+																				sh.active_state === "active";
 																			return (
 																				<span
 																					key={sh.release_service_id}
@@ -509,6 +506,11 @@ const DeploymentStatusPage = () => {
 																					title={`${sh.service_name}: ${sh.active_state}, restarts: ${sh.n_restarts}`}
 																				>
 																					{sh.service_name}
+																					{sh.n_restarts > 0 && (
+																						<span className="ml-1 opacity-75">
+																							({sh.n_restarts})
+																						</span>
+																					)}
 																				</span>
 																			);
 																		})}

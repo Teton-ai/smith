@@ -325,7 +325,6 @@ pub async fn confirm_full_rollout(
                      WHERE dss.device_id = d.id
                      AND dss.release_service_id = rs.id
                      AND dss.active_state = 'active'
-                     AND dss.n_restarts = 0
                  )
              )",
             &device_ids,

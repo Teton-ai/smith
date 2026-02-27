@@ -99,8 +99,7 @@ const ServicesPage = () => {
 							<div className="divide-y divide-gray-100">
 								{services.map((service: DeviceService) => {
 									const healthColor = service.active_state
-										? service.active_state === "active" &&
-											service.n_restarts === 0
+										? service.active_state === "active"
 											? "bg-green-500"
 											: "bg-red-500"
 										: "bg-gray-300";
