@@ -11,9 +11,25 @@ import {
 	XCircle,
 } from "lucide-react";
 import Link from "next/link";
+import { useMemo, useState } from "react";
+import {
+	Area,
+	AreaChart,
+	CartesianGrid,
+	ResponsiveContainer,
+	Tooltip,
+	XAxis,
+	YAxis,
+} from "recharts";
+import { Modal } from "@/app/components/modal";
 import NetworkQualityIndicator from "@/app/components/NetworkQualityIndicator";
 import { useConfig } from "@/app/hooks/config";
-import { type Device, useGetDashboard, useGetDevices } from "../../api-client";
+import {
+	type Device,
+	useGetDashboard,
+	useGetDevices,
+	useGetRegistrationCounts,
+} from "../../api-client";
 
 const AdminPanel = () => {
 	const { config } = useConfig();
@@ -52,6 +68,49 @@ const AdminPanel = () => {
 			},
 			{ query: { refetchInterval: 5000 } },
 		);
+
+	const { data: registrationData } = useGetRegistrationCounts();
+
+	type Granularity = "monthly" | "quarterly" | "yearly";
+	const [granularity, setGranularity] = useState<Granularity>("monthly");
+	const [chartOpen, setChartOpen] = useState(false);
+
+	const chartData = useMemo(() => {
+		if (!registrationData) return [];
+
+		const now = new Date();
+		const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+		const currentQuarterStart = Math.floor(now.getMonth() / 3) * 3;
+		const currentQuarterKey = `${now.getFullYear()}-${String(currentQuarterStart + 1).padStart(2, "0")}-01`;
+		if (granularity === "monthly") {
+			return registrationData
+				.filter((item) => !item.date.startsWith(currentMonth))
+				.map((item) => ({ date: item.date, count: item.count }));
+		}
+
+		const buckets = new Map<string, number>();
+		for (const item of registrationData) {
+			const d = new Date(item.date);
+			let key: string;
+			if (granularity === "quarterly") {
+				const q = Math.floor(d.getMonth() / 3) * 3;
+				key = `${d.getFullYear()}-${String(q + 1).padStart(2, "0")}-01`;
+			} else {
+				key = `${d.getFullYear()}-01-01`;
+			}
+			buckets.set(key, (buckets.get(key) || 0) + item.count);
+		}
+
+		// Remove current incomplete period (except yearly)
+		if (granularity === "quarterly") {
+			buckets.delete(currentQuarterKey);
+		}
+
+		return Array.from(buckets.entries()).map(([date, count]) => ({
+			date,
+			count,
+		}));
+	}, [registrationData, granularity]);
 
 	const loading = dashboardQuery.isLoading || outdatedLoading || offlineLoading;
 
@@ -166,32 +225,6 @@ const AdminPanel = () => {
 					))
 				) : (
 					<>
-						<div className="bg-white rounded-lg border border-gray-200 p-6">
-							<div className="flex items-center">
-								<CheckCircle className="w-8 h-8 text-green-500" />
-								<div className="ml-4">
-									<p className="text-sm font-medium text-gray-600">Online</p>
-									<p className="text-2xl font-bold text-gray-900">
-										{dashboardQuery.data?.online_count || 0}
-									</p>
-								</div>
-							</div>
-						</div>
-
-						<div className="bg-white rounded-lg border border-gray-200 p-6">
-							<div className="flex items-center">
-								<Cpu className="w-8 h-8 text-blue-500" />
-								<div className="ml-4">
-									<p className="text-sm font-medium text-gray-600">
-										Total Devices
-									</p>
-									<p className="text-2xl font-bold text-gray-900">
-										{dashboardQuery.data?.total_count || 0}
-									</p>
-								</div>
-							</div>
-						</div>
-
 						<Link
 							href="/devices?approved=false"
 							className={`rounded-lg border p-6 transition-colors cursor-pointer ${
@@ -214,6 +247,79 @@ const AdminPanel = () => {
 								</div>
 							</div>
 						</Link>
+
+						<div className="bg-white rounded-lg border border-gray-200 p-6">
+							<div className="flex items-center">
+								<CheckCircle className="w-8 h-8 text-green-500" />
+								<div className="ml-4">
+									<p className="text-sm font-medium text-gray-600">Online</p>
+									<p className="text-2xl font-bold text-gray-900">
+										{dashboardQuery.data?.online_count || 0}
+									</p>
+								</div>
+							</div>
+						</div>
+
+						<button
+							type="button"
+							onClick={() => setChartOpen(true)}
+							className="group bg-white rounded-lg border border-gray-200 p-6 cursor-pointer hover:bg-gray-50 transition-colors text-left relative overflow-hidden"
+						>
+							{chartData.length > 1 && (
+								<div className="absolute inset-0 top-1/3">
+									<ResponsiveContainer width="100%" height="100%">
+										<AreaChart data={chartData}>
+											<defs>
+												<linearGradient
+													id="sparkline"
+													x1="0"
+													y1="0"
+													x2="0"
+													y2="1"
+												>
+													<stop
+														offset="5%"
+														stopColor="#3b82f6"
+														stopOpacity={0.15}
+													/>
+													<stop
+														offset="95%"
+														stopColor="#3b82f6"
+														stopOpacity={0.03}
+													/>
+												</linearGradient>
+											</defs>
+											<Area
+												type="monotone"
+												dataKey="count"
+												stroke="#3b82f6"
+												strokeWidth={1.5}
+												strokeOpacity={0.3}
+												fill="url(#sparkline)"
+											/>
+										</AreaChart>
+									</ResponsiveContainer>
+								</div>
+							)}
+							<div className="relative z-10">
+								<div className="flex items-center">
+									<Cpu className="w-8 h-8 text-blue-500" />
+									<div className="ml-4">
+										<p className="text-sm font-medium text-gray-600">
+											Total Devices
+										</p>
+										<p className="text-2xl font-bold text-gray-900">
+											{dashboardQuery.data?.total_count || 0}
+										</p>
+									</div>
+								</div>
+							</div>
+							{chartData.length > 1 && (
+								<span className="absolute bottom-2 right-3 text-[10px] text-gray-400 opacity-0 group-hover:opacity-100 transition-opacity z-10">
+									Click to view new devices over time
+								</span>
+							)}
+						</button>
 					</>
 				)}
 			</div>
@@ -591,6 +697,104 @@ const AdminPanel = () => {
 					</div>
 				</div>
 			)}
+			{/* Registration Chart Modal */}
+			<Modal
+				open={chartOpen}
+				onClose={() => setChartOpen(false)}
+				title="New Devices"
+				subtitle={`New devices added per ${granularity === "quarterly" ? "quarter" : granularity === "yearly" ? "year" : "month"}`}
+				width="w-[700px]"
+				headerRight={
+					<div className="flex rounded-md border border-gray-200 text-xs">
+						{(["monthly", "quarterly", "yearly"] as const).map((g) => (
+							<button
+								key={g}
+								type="button"
+								onClick={() => setGranularity(g)}
+								className={`px-2.5 py-1 capitalize cursor-pointer transition-colors ${
+									granularity === g
+										? "bg-blue-50 text-blue-700 font-medium"
+										: "text-gray-500 hover:bg-gray-50"
+								} ${g !== "monthly" ? "border-l border-gray-200" : ""}`}
+							>
+								{g}
+							</button>
+						))}
+					</div>
+				}
+			>
+				{chartData.length > 1 ? (
+					<div className="-mx-4">
+						<ResponsiveContainer width="100%" height={300}>
+							<AreaChart data={chartData} margin={{ left: -20, right: 10 }}>
+								<defs>
+									<linearGradient id="colorModal" x1="0" y1="0" x2="0" y2="1">
+										<stop offset="5%" stopColor="#3b82f6" stopOpacity={0.2} />
+										<stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
+									</linearGradient>
+								</defs>
+								<CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+								<XAxis
+									dataKey="date"
+									tick={{ fontSize: 11, fill: "#6b7280" }}
+									tickLine={false}
+									axisLine={{ stroke: "#e5e7eb" }}
+									tickFormatter={(value: string) => {
+										const d = new Date(value);
+										if (granularity === "yearly")
+											return d.getFullYear().toString();
+										if (granularity === "quarterly") {
+											const q = Math.floor(d.getMonth() / 3) + 1;
+											return `Q${q} ${d.getFullYear().toString().slice(2)}`;
+										}
+										return `${d.toLocaleString("default", { month: "short" })} ${d.getFullYear().toString().slice(2)}`;
+									}}
+									interval="preserveStartEnd"
+									minTickGap={50}
+								/>
+								<YAxis
+									tick={{ fontSize: 11, fill: "#6b7280" }}
+									tickLine={false}
+									axisLine={false}
+									allowDecimals={false}
+								/>
+								<Tooltip
+									contentStyle={{
+										borderRadius: "8px",
+										border: "1px solid #e5e7eb",
+										fontSize: "12px",
+										color: "#111827",
+									}}
+									labelStyle={{ color: "#374151", fontWeight: 500 }}
+									itemStyle={{ color: "#1d4ed8" }}
+									labelFormatter={(label: string) => {
+										const d = new Date(label);
+										if (granularity === "yearly")
+											return d.getFullYear().toString();
+										if (granularity === "quarterly") {
+											const q = Math.floor(d.getMonth() / 3) + 1;
+											return `Q${q} ${d.getFullYear()}`;
+										}
+										return `${d.toLocaleString("default", { month: "long" })} ${d.getFullYear()}`;
+									}}
+									formatter={(value: number) => [value, "New devices"]}
+								/>
+								<Area
+									type="monotone"
+									dataKey="count"
+									stroke="#3b82f6"
+									strokeWidth={2}
+									fill="url(#colorModal)"
+								/>
+							</AreaChart>
+						</ResponsiveContainer>
+					</div>
+				) : (
+					<p className="text-sm text-gray-500 text-center py-8">
+						Not enough data to display chart.
+					</p>
+				)}
+			</Modal>
 		</div>
 	);
 };
