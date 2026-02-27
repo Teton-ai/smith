@@ -1267,6 +1267,7 @@ async fn main() -> anyhow::Result<()> {
             },
             cli::Commands::Tunnel {
                 serial_number,
+                close,
                 overview_debug,
             } => {
                 let secrets = auth::get_secrets(&config)
@@ -1274,11 +1275,15 @@ async fn main() -> anyhow::Result<()> {
                     .with_context(|| "Error getting token")?
                     .with_context(|| "No Token found, please Login")?;
 
-                let pub_key = config.get_identity_pub_key().await?;
-
                 let api = SmithAPI::new(secrets, &config);
-
                 let device = api.get_device(serial_number.clone()).await?;
+
+                if close {
+                    api.close_tunnel(device.id as u64).await?;
+                    println!("CloseTunnel command sent to device");
+                    return Ok(());
+                }
+
                 if device.last_seen.is_none_or(|last_seen| {
                     chrono::Utc::now()
                         .signed_duration_since(last_seen)
@@ -1300,6 +1305,9 @@ async fn main() -> anyhow::Result<()> {
                     overview_debug
                 );
 
+                let pub_key = config.get_identity_pub_key().await?;
+                eprintln!("Debug: Public key being sent: {}", pub_key.trim());
+
                 let m = MultiProgress::new();
                 let pb2 = m.add(ProgressBar::new_spinner());
                 pb2.enable_steady_tick(Duration::from_millis(50));
@@ -1312,6 +1320,7 @@ async fn main() -> anyhow::Result<()> {
 
                 let (tx, rx) = oneshot::channel();
                 let username = config.current_tunnel_username();
+                eprintln!("Debug: Using username: {}", username);
                 let username_clone = username.clone();
                 let tunnel_openning_handler = tokio::spawn(async move {
                     api.open_tunnel(device.id as u64, pub_key, username_clone)
@@ -1338,13 +1347,14 @@ async fn main() -> anyhow::Result<()> {
                     }
 
                     pb2.finish_with_message(format!("{} {}", "Port:".bold(), port));
+                    api
                 });
 
                 let port = rx.await.unwrap() as u16;
 
                 println!("Opening tunnel to port {}", port);
 
-                tunnel_openning_handler.await.unwrap();
+                let api = tunnel_openning_handler.await.unwrap();
 
                 // Give the server a moment to set up the SSH tunnel
                 println!("Waiting for tunnel setup...");
@@ -1353,6 +1363,8 @@ async fn main() -> anyhow::Result<()> {
                 tokio::time::sleep(Duration::from_secs(10)).await;
 
                 let tunnel_server = config.current_tunnel_server();
+                eprintln!("Debug: Connecting to {}:{}", tunnel_server, port);
+                eprintln!("Debug: Using private key: {}", config.get_identity_file());
                 let mut ssh = Session::connect(
                     config.get_identity_file(),
                     username,
@@ -1368,6 +1380,11 @@ async fn main() -> anyhow::Result<()> {
 
                 println!("Exitcode: {:?}", ());
                 ssh.close().await?;
+
+                api.close_tunnel(device.id as u64)
+                    .await
+                    .inspect_err(|e| eprintln!("Warning: Failed to close tunnel on device: {e}"))?;
+
                 return Ok(());
             }
             Commands::Releases { command } => {
