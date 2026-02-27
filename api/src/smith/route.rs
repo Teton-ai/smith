@@ -86,6 +86,7 @@ pub async fn home(
         )
         .fetch_all(&state.pg_pool)
         .await
+        .inspect_err(|err| error!("Error fetching services for release: {:?}", err))
         .unwrap_or_default()
     } else {
         Vec::new()
