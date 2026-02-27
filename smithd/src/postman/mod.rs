@@ -174,64 +174,75 @@ impl Postman {
     }
 
     async fn check_services(&self) -> Vec<ServiceStatus> {
-        let mut statuses = Vec::new();
-        for service in &self.services_to_check {
-            let result = tokio::time::timeout(
-                std::time::Duration::from_secs(5),
-                tokio::process::Command::new("systemctl")
-                    .args(["show", &service.name, "--property=ActiveState,NRestarts"])
-                    .output(),
-            )
-            .await;
+        use futures::stream::{self, StreamExt};
 
-            match result {
-                Ok(Ok(output)) if output.status.success() => {
-                    let stdout = String::from_utf8_lossy(&output.stdout);
-                    let mut active_state = String::from("unknown");
-                    let mut n_restarts: u32 = 0;
-                    for line in stdout.lines() {
-                        if let Some(val) = line.strip_prefix("ActiveState=") {
-                            active_state = val.to_string();
-                        } else if let Some(val) = line.strip_prefix("NRestarts=") {
-                            n_restarts = val.parse().unwrap_or(0);
+        const MAX_CONCURRENT_PROBES: usize = 4;
+
+        let services = self.services_to_check.clone();
+        let statuses: Vec<ServiceStatus> = stream::iter(services)
+            .map(|service| async move {
+                let id = service.id;
+                let name = service.name;
+                let result = tokio::time::timeout(
+                    std::time::Duration::from_secs(5),
+                    tokio::process::Command::new("systemctl")
+                        .args(["show", &name, "--property=ActiveState,NRestarts"])
+                        .output(),
+                )
+                .await;
+
+                match result {
+                    Ok(Ok(output)) if output.status.success() => {
+                        let stdout = String::from_utf8_lossy(&output.stdout);
+                        let mut active_state = String::from("unknown");
+                        let mut n_restarts: u32 = 0;
+                        for line in stdout.lines() {
+                            if let Some(val) = line.strip_prefix("ActiveState=") {
+                                active_state = val.to_string();
+                            } else if let Some(val) = line.strip_prefix("NRestarts=") {
+                                n_restarts = val.parse().unwrap_or(0);
+                            }
+                        }
+                        ServiceStatus {
+                            id,
+                            active_state,
+                            n_restarts,
                         }
                     }
-                    statuses.push(ServiceStatus {
-                        id: service.id,
-                        active_state,
-                        n_restarts,
-                    });
+                    Ok(Ok(output)) => {
+                        let stderr = String::from_utf8_lossy(&output.stderr);
+                        error!(
+                            "systemctl exited with {} for service {}: {}",
+                            output.status, name, stderr
+                        );
+                        ServiceStatus {
+                            id,
+                            active_state: "unknown".to_string(),
+                            n_restarts: 0,
+                        }
+                    }
+                    Ok(Err(e)) => {
+                        error!("Failed to check service {}: {}", name, e);
+                        ServiceStatus {
+                            id,
+                            active_state: "unknown".to_string(),
+                            n_restarts: 0,
+                        }
+                    }
+                    Err(_) => {
+                        error!("Timeout checking service {}", name);
+                        ServiceStatus {
+                            id,
+                            active_state: "unknown".to_string(),
+                            n_restarts: 0,
+                        }
+                    }
                 }
-                Ok(Ok(output)) => {
-                    let stderr = String::from_utf8_lossy(&output.stderr);
-                    error!(
-                        "systemctl exited with {} for service {}: {}",
-                        output.status, service.name, stderr
-                    );
-                    statuses.push(ServiceStatus {
-                        id: service.id,
-                        active_state: "unknown".to_string(),
-                        n_restarts: 0,
-                    });
-                }
-                Ok(Err(e)) => {
-                    error!("Failed to check service {}: {}", service.name, e);
-                    statuses.push(ServiceStatus {
-                        id: service.id,
-                        active_state: "unknown".to_string(),
-                        n_restarts: 0,
-                    });
-                }
-                Err(_) => {
-                    error!("Timeout checking service {}", service.name);
-                    statuses.push(ServiceStatus {
-                        id: service.id,
-                        active_state: "unknown".to_string(),
-                        n_restarts: 0,
-                    });
-                }
-            }
-        }
+            })
+            .buffered(MAX_CONCURRENT_PROBES)
+            .collect()
+            .await;
+
         statuses
     }
 
