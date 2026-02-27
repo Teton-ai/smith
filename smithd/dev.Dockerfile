@@ -5,7 +5,7 @@
 # docker run -d --privileged device
 
 # Base image can be overridden for local development on x86_64 machines:
-#   docker build --build-arg BASE_IMAGE=ubuntu:22.04 -f smithd/device.Dockerfile .
+#   docker build --build-arg BASE_IMAGE=ubuntu:22.04 -f smithd/dev.Dockerfile .
 ARG BASE_IMAGE=nvcr.io/nvidia/l4t-base:r36.2.0
 
 FROM ${BASE_IMAGE} AS builder

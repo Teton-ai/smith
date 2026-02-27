@@ -2,8 +2,8 @@ name: smith
 services:
   api:
     build:
-      context: .
-      dockerfile: api/api-dev.Dockerfile
+      context: ./api
+      dockerfile: dev.Dockerfile
     container_name: smith-api
     env_file:
       - .env
@@ -58,7 +58,7 @@ services:
   device:
     build:
       context: .
-      dockerfile: smithd/device.Dockerfile
+      dockerfile: smithd/dev.Dockerfile
       args:
         # Override with ubuntu:22.04 for x86_64 Linux development
         BASE_IMAGE: ${DEVICE_BASE_IMAGE:-nvcr.io/nvidia/l4t-base:r36.2.0}
@@ -76,7 +76,7 @@ services:
   dashboard:
     build:
       context: ./dashboard
-      dockerfile: dashboard-dev.Dockerfile
+      dockerfile: dev.Dockerfile
     container_name: smith-dashboard
     env_file:
       - ./dashboard/.env

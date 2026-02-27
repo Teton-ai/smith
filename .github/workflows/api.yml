@@ -65,7 +65,7 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: .
-          file: api/api.Dockerfile
+          file: api/Dockerfile
           push: true
           tags: |
             tetonai/smith-api
