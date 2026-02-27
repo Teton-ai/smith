@@ -176,12 +176,16 @@ impl Postman {
     async fn check_services(&self) -> Vec<ServiceStatus> {
         let mut statuses = Vec::new();
         for service in &self.services_to_check {
-            match tokio::process::Command::new("systemctl")
-                .args(["show", &service.name, "--property=ActiveState,NRestarts"])
-                .output()
-                .await
-            {
-                Ok(output) => {
+            let result = tokio::time::timeout(
+                std::time::Duration::from_secs(5),
+                tokio::process::Command::new("systemctl")
+                    .args(["show", &service.name, "--property=ActiveState,NRestarts"])
+                    .output(),
+            )
+            .await;
+
+            match result {
+                Ok(Ok(output)) if output.status.success() => {
                     let stdout = String::from_utf8_lossy(&output.stdout);
                     let mut active_state = String::from("unknown");
                     let mut n_restarts: u32 = 0;
@@ -198,8 +202,28 @@ impl Postman {
                         n_restarts,
                     });
                 }
-                Err(e) => {
+                Ok(Ok(output)) => {
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    error!(
+                        "systemctl exited with {} for service {}: {}",
+                        output.status, service.name, stderr
+                    );
+                    statuses.push(ServiceStatus {
+                        id: service.id,
+                        active_state: "unknown".to_string(),
+                        n_restarts: 0,
+                    });
+                }
+                Ok(Err(e)) => {
                     error!("Failed to check service {}: {}", service.name, e);
+                    statuses.push(ServiceStatus {
+                        id: service.id,
+                        active_state: "unknown".to_string(),
+                        n_restarts: 0,
+                    });
+                }
+                Err(_) => {
+                    error!("Timeout checking service {}", service.name);
                     statuses.push(ServiceStatus {
                         id: service.id,
                         active_state: "unknown".to_string(),
