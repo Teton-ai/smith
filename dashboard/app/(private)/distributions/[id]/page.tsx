@@ -12,6 +12,7 @@ import {
 	Plus,
 	Tag,
 	User,
+	X,
 } from "lucide-react";
 import moment from "moment";
 import Link from "next/link";
@@ -35,6 +36,7 @@ const DistributionDetailPage = () => {
 	const [showCreateModal, setShowCreateModal] = useState(false);
 	const [selectedVersionOption, setSelectedVersionOption] =
 		useState<string>("");
+	const [customVersion, setCustomVersion] = useState("");
 	const [isReleaseCandidate, setIsReleaseCandidate] = useState(false);
 	const [creatingDraft, setCreatingDraft] = useState(false);
 
@@ -144,19 +146,31 @@ const DistributionDetailPage = () => {
 		];
 	};
 
+	const isValidSemver = (v: string) =>
+		/^\d+\.\d+\.\d+(-[a-zA-Z0-9]+(\.[a-zA-Z0-9]+)*)?$/.test(v);
+
+	const resolvedVersion =
+		selectedVersionOption === "custom"
+			? customVersion.trim()
+			: selectedVersionOption;
+
+	const canCreate =
+		resolvedVersion &&
+		(selectedVersionOption !== "custom" || isValidSemver(resolvedVersion));
+
 	const handleCreateDraft = async () => {
 		if (
 			creatingDraft ||
 			getDistributionReleasePackages.data == null ||
-			!selectedVersionOption
+			!canCreate
 		)
 			return;
 
 		setCreatingDraft(true);
 		try {
 			const finalVersion = isReleaseCandidate
-				? `${selectedVersionOption}-rc`
-				: selectedVersionOption;
+				? `${resolvedVersion}-rc`
+				: resolvedVersion;
 
 			const newRelease = await createDistributionReleaseHook.mutateAsync({
 				distributionId,
@@ -178,6 +192,7 @@ const DistributionDetailPage = () => {
 			setCreatingDraft(false);
 			setShowCreateModal(false);
 			setSelectedVersionOption("");
+			setCustomVersion("");
 			setIsReleaseCandidate(false);
 		}
 	};
@@ -190,6 +205,7 @@ const DistributionDetailPage = () => {
 				setSelectedVersionOption(options[0].version); // Default to first option (PATCH)
 			}
 			setIsReleaseCandidate(false);
+			setCustomVersion("");
 			setShowCreateModal(true);
 		}
 	};
@@ -249,6 +265,7 @@ const DistributionDetailPage = () => {
 				onClose={() => {
 					setShowCreateModal(false);
 					setSelectedVersionOption("");
+					setCustomVersion("");
 					setIsReleaseCandidate(false);
 				}}
 				title="Draft New Release"
@@ -262,6 +279,7 @@ const DistributionDetailPage = () => {
 							onClick={() => {
 								setShowCreateModal(false);
 								setSelectedVersionOption("");
+								setCustomVersion("");
 								setIsReleaseCandidate(false);
 							}}
 						>
@@ -270,7 +288,7 @@ const DistributionDetailPage = () => {
 						<Button
 							variant="success"
 							loading={creatingDraft}
-							disabled={!selectedVersionOption}
+							disabled={!canCreate}
 							onClick={handleCreateDraft}
 						>
 							{creatingDraft ? "Creating..." : "Create Draft"}
@@ -279,38 +297,102 @@ const DistributionDetailPage = () => {
 				}
 			>
 				<div className="space-y-3 mb-6">
-					{getVersionOptions().map((option) => (
-						<label
-							key={option.version}
-							className={`flex items-center p-3 border rounded-lg cursor-pointer transition-all duration-200 ${
-								selectedVersionOption === option.version
-									? "border-green-500 bg-green-50 shadow-sm"
-									: "border-gray-200 hover:border-gray-300 hover:bg-gray-50"
-							}`}
+					{selectedVersionOption === "custom" ? (
+						<div
+							key="custom"
+							className="p-3 border border-green-500 bg-green-50 rounded-lg shadow-sm animate-fade-slide-in"
 						>
-							<input
-								type="radio"
-								name="version"
-								value={option.version}
-								checked={selectedVersionOption === option.version}
-								onChange={(e) => setSelectedVersionOption(e.target.value)}
-								className="w-4 h-4 text-green-600 border-gray-300 focus:ring-green-500"
-							/>
-							<div className="ml-3 flex-1">
-								<div className="flex items-center space-x-3">
-									<span className="font-mono text-sm font-medium text-gray-900">
-										{option.version}
-									</span>
-									<span className="px-2 py-1 text-xs font-medium bg-gray-100 text-gray-700 rounded">
-										{option.type}
-									</span>
-								</div>
-								<p className="text-xs text-gray-600 mt-1">
-									{option.description}
-								</p>
+							<div className="flex items-center justify-between mb-2">
+								<span className="text-sm font-medium text-gray-900">
+									Custom Version
+								</span>
+								<button
+									type="button"
+									onClick={() => {
+										setCustomVersion("");
+										const options = getVersionOptions();
+										setSelectedVersionOption(
+											options.length > 0 ? options[0].version : "",
+										);
+									}}
+									className="text-gray-400 hover:text-gray-600 cursor-pointer"
+								>
+									<X className="w-4 h-4" />
+								</button>
 							</div>
-						</label>
-					))}
+							<input
+								type="text"
+								value={customVersion}
+								onChange={(e) => setCustomVersion(e.target.value)}
+								placeholder="0.0.0"
+								autoFocus
+								className={`w-full px-3 py-2 border rounded-lg text-sm font-mono text-gray-900 placeholder-gray-400 bg-white focus:outline-none focus:ring-2 ${
+									customVersion.trim() && !isValidSemver(customVersion.trim())
+										? "border-red-300 focus:ring-red-500"
+										: "border-gray-300 focus:ring-green-500"
+								}`}
+							/>
+							{customVersion.trim() && !isValidSemver(customVersion.trim()) && (
+								<p className="text-xs text-red-600 mt-1.5">
+									Must be a valid semver version (e.g. 1.2.3, 1.0.0-alpha.1)
+								</p>
+							)}
+							<p className="text-xs text-gray-500 mt-1.5">
+								Enter a valid semver version (e.g. 2.0.0-beta.1)
+							</p>
+						</div>
+					) : (
+						<div key="options" className="space-y-3 animate-fade-slide-in">
+							{getVersionOptions().map((option, i) => (
+								<label
+									key={option.version}
+									style={{
+										animationDelay: `${i * 50}ms`,
+										animationFillMode: "both",
+									}}
+									className={`flex items-center p-3 border rounded-lg cursor-pointer transition-all duration-200 animate-fade-slide-in ${
+										selectedVersionOption === option.version
+											? "border-green-500 bg-green-50 shadow-sm"
+											: "border-gray-200 hover:border-gray-300 hover:bg-gray-50"
+									}`}
+								>
+									<input
+										type="radio"
+										name="version"
+										value={option.version}
+										checked={selectedVersionOption === option.version}
+										onChange={(e) => setSelectedVersionOption(e.target.value)}
+										className="w-4 h-4 text-green-600 border-gray-300 focus:ring-green-500"
+									/>
+									<div className="ml-3 flex-1">
+										<div className="flex items-center space-x-3">
+											<span className="font-mono text-sm font-medium text-gray-900">
+												{option.version}
+											</span>
+											<span className="px-2 py-1 text-xs font-medium bg-gray-100 text-gray-700 rounded">
+												{option.type}
+											</span>
+										</div>
+										<p className="text-xs text-gray-600 mt-1">
+											{option.description}
+										</p>
+									</div>
+								</label>
+							))}
+
+							<button
+								type="button"
+								onClick={() => setSelectedVersionOption("custom")}
+								style={{
+									animationDelay: `${getVersionOptions().length * 50}ms`,
+									animationFillMode: "both",
+								}}
+								className="w-full flex items-center p-3 border border-dashed border-gray-300 rounded-lg text-sm text-gray-500 hover:border-gray-400 hover:text-gray-700 hover:bg-gray-50 cursor-pointer transition-all duration-200 animate-fade-slide-in"
+							>
+								<span className="ml-1">Use custom version...</span>
+							</button>
+						</div>
+					)}
 				</div>
 
 				<label className="flex items-center space-x-3 p-3 border border-gray-200 rounded-lg hover:bg-gray-50 cursor-pointer transition-colors">
@@ -331,8 +413,8 @@ const DistributionDetailPage = () => {
 						</div>
 						<p className="text-xs text-gray-600 mt-1">
 							Adds "-rc" suffix:{" "}
-							{selectedVersionOption
-								? `${selectedVersionOption}${isReleaseCandidate ? "-rc" : ""}`
+							{resolvedVersion
+								? `${resolvedVersion}${isReleaseCandidate ? "-rc" : ""}`
 								: "x.x.x"}
 						</p>
 					</div>
