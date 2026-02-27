@@ -225,6 +225,29 @@ const AdminPanel = () => {
 					))
 				) : (
 					<>
+						<Link
+							href="/devices?approved=false"
+							className={`rounded-lg border p-6 transition-colors cursor-pointer ${
+								unapprovedDevices.length > 0
+									? "bg-orange-50 border-orange-200 hover:bg-orange-100"
+									: "bg-white border-gray-200 hover:bg-gray-50"
+							}`}
+						>
+							<div className="flex items-center">
+								<ShieldCheck
+									className={`w-8 h-8 ${unapprovedDevices.length > 0 ? "text-orange-500" : "text-gray-400"}`}
+								/>
+								<div className="ml-4">
+									<p className="text-sm font-medium text-gray-600">
+										Pending Approval
+									</p>
+									<p className="text-2xl font-bold text-gray-900">
+										{unapprovedDevices.length}
+									</p>
+								</div>
+							</div>
+						</Link>
+
 						<div className="bg-white rounded-lg border border-gray-200 p-6">
 							<div className="flex items-center">
 								<CheckCircle className="w-8 h-8 text-green-500" />
@@ -240,7 +263,7 @@ const AdminPanel = () => {
 						<button
 							type="button"
 							onClick={() => setChartOpen(true)}
-							className="bg-white rounded-lg border border-gray-200 p-6 cursor-pointer hover:bg-gray-50 transition-colors text-left relative overflow-hidden"
+							className="group bg-white rounded-lg border border-gray-200 p-6 cursor-pointer hover:bg-gray-50 transition-colors text-left relative overflow-hidden"
 						>
 							{chartData.length > 1 && (
 								<div className="absolute inset-0 top-1/3">
@@ -290,36 +313,13 @@ const AdminPanel = () => {
 										</p>
 									</div>
 								</div>
-								{chartData.length > 1 && (
-									<p className="text-[10px] text-gray-400 mt-2">
-										New devices over time
-									</p>
-								)}
 							</div>
+							{chartData.length > 1 && (
+								<span className="absolute bottom-2 right-3 text-[10px] text-gray-400 opacity-0 group-hover:opacity-100 transition-opacity z-10">
+									Click to view new devices over time
+								</span>
+							)}
 						</button>
-
-						<Link
-							href="/devices?approved=false"
-							className={`rounded-lg border p-6 transition-colors cursor-pointer ${
-								unapprovedDevices.length > 0
-									? "bg-orange-50 border-orange-200 hover:bg-orange-100"
-									: "bg-white border-gray-200 hover:bg-gray-50"
-							}`}
-						>
-							<div className="flex items-center">
-								<ShieldCheck
-									className={`w-8 h-8 ${unapprovedDevices.length > 0 ? "text-orange-500" : "text-gray-400"}`}
-								/>
-								<div className="ml-4">
-									<p className="text-sm font-medium text-gray-600">
-										Pending Approval
-									</p>
-									<p className="text-2xl font-bold text-gray-900">
-										{unapprovedDevices.length}
-									</p>
-								</div>
-							</div>
-						</Link>
 					</>
 				)}
 			</div>
