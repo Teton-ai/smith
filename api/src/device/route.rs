@@ -2424,9 +2424,9 @@ pub async fn get_services_for_device(
             rs.service_name,
             rs.watchdog_sec,
             rs.created_at,
-            dss.active_state,
-            dss.n_restarts,
-            dss.checked_at
+            dss.active_state as "active_state?",
+            dss.n_restarts as "n_restarts?",
+            dss.checked_at as "checked_at?"
         FROM release_services rs
         LEFT JOIN device_service_status dss
             ON dss.release_service_id = rs.id AND dss.device_id = $2
