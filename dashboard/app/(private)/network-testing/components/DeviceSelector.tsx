@@ -4,6 +4,7 @@ import { Cpu, Loader2, Search, Tag, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { type Device, useGetDevices } from "@/app/api-client";
 import LabelAutocomplete from "@/app/components/LabelAutocomplete";
+import { Button } from "@/app/components/button";
 
 export type SelectionMode = "labels" | "devices";
 
@@ -94,28 +95,20 @@ export default function DeviceSelector({
 		<div className="space-y-4">
 			{/* Mode Selector */}
 			<div className="flex space-x-2">
-				<button
+				<Button
 					onClick={() => onModeChange("labels")}
-					className={`flex items-center space-x-2 px-4 py-2 rounded-lg border text-sm font-medium transition-colors ${
-						mode === "labels"
-							? "bg-indigo-600 text-white border-indigo-600"
-							: "bg-white text-gray-700 border-gray-200 hover:bg-gray-50"
-					}`}
+					variant={mode === "labels" ? "primary" : "secondary"}
+					icon={<Tag className="w-4 h-4" />}
 				>
-					<Tag className="w-4 h-4" />
-					<span>By Labels</span>
-				</button>
-				<button
+					By Labels
+				</Button>
+				<Button
 					onClick={() => onModeChange("devices")}
-					className={`flex items-center space-x-2 px-4 py-2 rounded-lg border text-sm font-medium transition-colors ${
-						mode === "devices"
-							? "bg-indigo-600 text-white border-indigo-600"
-							: "bg-white text-gray-700 border-gray-200 hover:bg-gray-50"
-					}`}
+					variant={mode === "devices" ? "primary" : "secondary"}
+					icon={<Cpu className="w-4 h-4" />}
 				>
-					<Cpu className="w-4 h-4" />
-					<span>By Devices</span>
-				</button>
+					By Devices
+				</Button>
 			</div>
 
 			{/* Labels Mode */}
@@ -130,12 +123,12 @@ export default function DeviceSelector({
 							{selectedLabels.map((label) => (
 								<span
 									key={label}
-									className="inline-flex items-center px-2.5 py-1 rounded-full text-sm bg-indigo-100 text-indigo-800"
+									className="inline-flex items-center px-2.5 py-1 rounded-full text-sm bg-blue-100 text-blue-800"
 								>
 									{label}
 									<button
 										onClick={() => handleRemoveLabel(label)}
-										className="ml-1.5 hover:text-indigo-600"
+										className="ml-1.5 hover:text-blue-600"
 									>
 										<X className="w-3.5 h-3.5" />
 									</button>
@@ -172,13 +165,13 @@ export default function DeviceSelector({
 							placeholder="Search by serial number..."
 							value={deviceSearchQuery}
 							onChange={(e) => setDeviceSearchQuery(e.target.value)}
-							className="w-full pl-10 pr-4 py-2 text-sm text-gray-900 placeholder-gray-400 bg-white border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+							className="w-full pl-10 pr-4 py-2 text-sm text-gray-900 placeholder-gray-400 bg-white border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
 						/>
 					</div>
 
 					{devicesLoading ? (
 						<div className="flex items-center justify-center py-8">
-							<Loader2 className="w-6 h-6 animate-spin text-indigo-600" />
+							<Loader2 className="w-6 h-6 animate-spin text-blue-600" />
 						</div>
 					) : (
 						<div className="max-h-64 overflow-y-auto border border-gray-200 rounded-lg">
@@ -195,7 +188,7 @@ export default function DeviceSelector({
 											onClick={() => handleToggleDevice(device.id)}
 											className={`w-full px-4 py-2 text-left text-sm border-b border-gray-100 last:border-b-0 transition-colors ${
 												isSelected
-													? "bg-indigo-100 text-indigo-900"
+													? "bg-blue-100 text-blue-900"
 													: "bg-white text-gray-900 hover:bg-gray-50"
 											}`}
 										>
@@ -205,7 +198,7 @@ export default function DeviceSelector({
 														type="checkbox"
 														checked={isSelected}
 														readOnly
-														className="w-4 h-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+														className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
 													/>
 													<span className="font-mono">
 														{device.serial_number}

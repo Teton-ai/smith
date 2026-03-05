@@ -170,9 +170,9 @@ export default function DeviceTable({
 			return <ChevronDown className="w-4 h-4 text-gray-300" />;
 		}
 		return sortDirection === "asc" ? (
-			<ChevronUp className="w-4 h-4 text-indigo-600" />
+			<ChevronUp className="w-4 h-4 text-blue-600" />
 		) : (
-			<ChevronDown className="w-4 h-4 text-indigo-600" />
+			<ChevronDown className="w-4 h-4 text-blue-600" />
 		);
 	};
 
@@ -247,7 +247,7 @@ export default function DeviceTable({
 									onClick={() => onSelectDevice(device)}
 									className={`cursor-pointer transition-colors ${
 										isSelected
-											? "bg-indigo-50 hover:bg-indigo-100"
+											? "bg-blue-50 hover:bg-blue-100"
 											: "hover:bg-gray-50"
 									}`}
 								>
