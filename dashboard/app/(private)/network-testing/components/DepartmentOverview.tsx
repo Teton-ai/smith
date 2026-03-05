@@ -1,14 +1,29 @@
 "use client";
 
-import { Activity, CheckCircle, Clock, Cpu, Loader2, StopCircle, TrendingDown, TrendingUp } from "lucide-react";
+import {
+	Activity,
+	CheckCircle,
+	Clock,
+	Cpu,
+	Loader2,
+	StopCircle,
+	TrendingDown,
+	TrendingUp,
+} from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { type ExtendedTestStatus, useCancelExtendedTest } from "../hooks/useExtendedTest";
+import {
+	type ExtendedTestStatus,
+	useCancelExtendedTest,
+} from "../hooks/useExtendedTest";
 
 interface DepartmentOverviewProps {
 	data: ExtendedTestStatus;
 }
 
-function getBandwidthHealthStyle(label: string): { color: string; bgColor: string } {
+function getBandwidthHealthStyle(label: string): {
+	color: string;
+	bgColor: string;
+} {
 	if (label === "Stable") {
 		return { color: "text-green-800", bgColor: "bg-green-100" };
 	}
@@ -20,11 +35,15 @@ function getBandwidthHealthStyle(label: string): { color: string; bgColor: strin
 
 function hasCompletedResults(data: ExtendedTestStatus): boolean {
 	return data.results.some(
-		(r) => r.status === "completed" && r.minute_stats && r.minute_stats.length > 0
+		(r) =>
+			r.status === "completed" && r.minute_stats && r.minute_stats.length > 0,
 	);
 }
 
-function calculateTimeRemaining(createdAt: string, durationMinutes: number): { remaining: number; elapsed: number; progress: number } {
+function calculateTimeRemaining(
+	createdAt: string,
+	durationMinutes: number,
+): { remaining: number; elapsed: number; progress: number } {
 	const startTime = new Date(createdAt).getTime();
 	const endTime = startTime + durationMinutes * 60 * 1000;
 	const now = Date.now();
@@ -52,16 +71,24 @@ export default function DepartmentOverview({ data }: DepartmentOverviewProps) {
 
 	const hasStats = useMemo(() => hasCompletedResults(data), [data]);
 	const agg = hasStats ? data.evaluation.aggregate : null;
-	const bandwidthHealth = agg ? getBandwidthHealthStyle(agg.bandwidth_health) : null;
-	const isRunning = data.status === "running" || data.status === "pending" || data.status === "partial";
-	const timeInfo = isRunning ? calculateTimeRemaining(data.created_at, data.duration_minutes) : null;
+	const bandwidthHealth = agg
+		? getBandwidthHealthStyle(agg.bandwidth_health)
+		: null;
+	const isRunning =
+		data.status === "running" ||
+		data.status === "pending" ||
+		data.status === "partial";
+	const timeInfo = isRunning
+		? calculateTimeRemaining(data.created_at, data.duration_minutes)
+		: null;
 
 	// Overtime = timer expired AND not all devices completed
 	const allDevicesCompleted = data.completed_count >= data.device_count;
 	const timerExpired = timeInfo && timeInfo.remaining < 0;
 	const overtimeSeconds = timerExpired ? Math.abs(timeInfo.remaining) : 0;
 	// Only show amber warning if overtime > 2 minutes
-	const isOvertime = timerExpired && !allDevicesCompleted && overtimeSeconds > 120;
+	const isOvertime =
+		timerExpired && !allDevicesCompleted && overtimeSeconds > 120;
 
 	// Update countdown every second while test is running
 	useEffect(() => {
@@ -78,17 +105,25 @@ export default function DepartmentOverview({ data }: DepartmentOverviewProps) {
 		<div className="bg-white rounded-lg border border-gray-200 p-6">
 			{/* Progress Banner for Running Tests */}
 			{isRunning && timeInfo && (
-				<div className={`mb-6 rounded-lg p-4 ${isOvertime ? "bg-amber-50 border border-amber-200" : "bg-blue-50 border border-blue-200"}`}>
+				<div
+					className={`mb-6 rounded-lg p-4 ${isOvertime ? "bg-amber-50 border border-amber-200" : "bg-blue-50 border border-blue-200"}`}
+				>
 					<div className="flex items-center justify-between mb-2">
 						<div className="flex items-center space-x-2">
-							<Loader2 className={`w-5 h-5 animate-spin ${isOvertime ? "text-amber-600" : "text-blue-600"}`} />
-							<span className={`font-medium ${isOvertime ? "text-amber-900" : "text-blue-900"}`}>
+							<Loader2
+								className={`w-5 h-5 animate-spin ${isOvertime ? "text-amber-600" : "text-blue-600"}`}
+							/>
+							<span
+								className={`font-medium ${isOvertime ? "text-amber-900" : "text-blue-900"}`}
+							>
 								{isOvertime ? "Test Running Over Time" : "Test in Progress"}
 							</span>
 						</div>
 						<div className="flex items-center space-x-3">
 							{timerExpired ? (
-								<span className={`text-sm ${isOvertime ? "text-amber-700" : "text-blue-700"}`}>
+								<span
+									className={`text-sm ${isOvertime ? "text-amber-700" : "text-blue-700"}`}
+								>
 									+{formatSeconds(overtimeSeconds)} overtime
 								</span>
 							) : (
@@ -114,15 +149,23 @@ export default function DepartmentOverview({ data }: DepartmentOverviewProps) {
 							</button>
 						</div>
 					</div>
-					<div className={`w-full rounded-full h-2 ${isOvertime ? "bg-amber-200" : "bg-blue-200"}`}>
+					<div
+						className={`w-full rounded-full h-2 ${isOvertime ? "bg-amber-200" : "bg-blue-200"}`}
+					>
 						<div
 							className={`h-2 rounded-full transition-all duration-1000 ${isOvertime ? "bg-amber-600" : "bg-blue-600"}`}
 							style={{ width: `${Math.min(100, timeInfo.progress)}%` }}
 						/>
 					</div>
-					<div className={`flex items-center justify-between mt-2 text-xs ${isOvertime ? "text-amber-600" : "text-blue-600"}`}>
-						<span>{data.completed_count} of {data.device_count} devices completed</span>
-						<span>{Math.round(Math.min(100, timeInfo.progress))}% complete</span>
+					<div
+						className={`flex items-center justify-between mt-2 text-xs ${isOvertime ? "text-amber-600" : "text-blue-600"}`}
+					>
+						<span>
+							{data.completed_count} of {data.device_count} devices completed
+						</span>
+						<span>
+							{Math.round(Math.min(100, timeInfo.progress))}% complete
+						</span>
 					</div>
 				</div>
 			)}
@@ -153,7 +196,9 @@ export default function DepartmentOverview({ data }: DepartmentOverviewProps) {
 						<Cpu className="w-4 h-4" />
 						<span>Devices Tested</span>
 					</div>
-					<div className="text-2xl font-bold text-gray-900">{data.device_count}</div>
+					<div className="text-2xl font-bold text-gray-900">
+						{data.device_count}
+					</div>
 					<div className="flex items-center space-x-1 text-sm">
 						<CheckCircle className="w-4 h-4 text-green-500" />
 						<span className="text-gray-600">{completionRate}% completed</span>
@@ -181,11 +226,10 @@ export default function DepartmentOverview({ data }: DepartmentOverviewProps) {
 						<span>Avg Download</span>
 					</div>
 					{agg ? (
-						<>
-							<div className="text-2xl font-bold text-gray-900">
-								{agg.average_download_mbps.toFixed(1)} <span className="text-sm font-normal">Mbps</span>
-							</div>
-						</>
+						<div className="text-2xl font-bold text-gray-900">
+							{agg.average_download_mbps.toFixed(1)}{" "}
+							<span className="text-sm font-normal">Mbps</span>
+						</div>
 					) : (
 						<div className="text-2xl font-bold text-gray-400">--</div>
 					)}
@@ -216,7 +260,8 @@ export default function DepartmentOverview({ data }: DepartmentOverviewProps) {
 								) : (
 									<TrendingUp className="w-4 h-4 mr-1 text-green-500" />
 								)}
-								{Math.abs(agg.bandwidth_health_trend_percent).toFixed(1)}% over test
+								{Math.abs(agg.bandwidth_health_trend_percent).toFixed(1)}% over
+								test
 							</div>
 						</>
 					) : (

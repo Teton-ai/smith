@@ -1,9 +1,12 @@
 "use client";
 
 import { AlertTriangle, Loader2, Play, Tag } from "lucide-react";
-import { type DongleInfo, useOnlineDevicesDongleCheck } from "../hooks/useExtendedTest";
-import { Modal } from "@/app/components/modal";
 import { Button } from "@/app/components/button";
+import { Modal } from "@/app/components/modal";
+import {
+	type DongleInfo,
+	useOnlineDevicesDongleCheck,
+} from "../hooks/useExtendedTest";
 
 interface StartTestModalProps {
 	isOpen: boolean;
@@ -27,7 +30,13 @@ function estimateDataUsageMB(durationMinutes: number): string {
 	return `${lowEstimate}-${highEstimate} MB`;
 }
 
-function DongleWarning({ dongleInfo, durationMinutes }: { dongleInfo: DongleInfo; durationMinutes: number }) {
+function DongleWarning({
+	dongleInfo,
+	durationMinutes,
+}: {
+	dongleInfo: DongleInfo;
+	durationMinutes: number;
+}) {
 	const { dongleDevices, totalOnlineDevices } = dongleInfo;
 
 	if (dongleDevices.length === 0) return null;
@@ -43,12 +52,13 @@ function DongleWarning({ dongleInfo, durationMinutes }: { dongleInfo: DongleInfo
 						Cellular Data Warning
 					</p>
 					<p className="text-sm text-amber-700 mt-1">
-						<strong>{dongleDevices.length}</strong> of {totalOnlineDevices} devices{" "}
-						{dongleDevices.length === 1 ? "is" : "are"} connected via cellular (dongle/LTE).
+						<strong>{dongleDevices.length}</strong> of {totalOnlineDevices}{" "}
+						devices {dongleDevices.length === 1 ? "is" : "are"} connected via
+						cellular (dongle/LTE).
 					</p>
 					<p className="text-sm text-amber-700 mt-1">
-						A {durationMinutes}-minute test may use approximately <strong>{dataEstimate}</strong> of
-						cellular data per device.
+						A {durationMinutes}-minute test may use approximately{" "}
+						<strong>{dataEstimate}</strong> of cellular data per device.
 					</p>
 					{dongleDevices.length <= 5 && (
 						<p className="text-xs text-amber-600 mt-2 font-mono">
@@ -73,16 +83,14 @@ export default function StartTestModal({
 	selectedDeviceCount = 0,
 	selectionMode = "labels",
 }: StartTestModalProps) {
-	const { data: dongleInfo, isLoading: dongleCheckLoading } = useOnlineDevicesDongleCheck();
+	const { data: dongleInfo, isLoading: dongleCheckLoading } =
+		useOnlineDevicesDongleCheck();
 
 	const hasDongleDevices = dongleInfo && dongleInfo.dongleDevices.length > 0;
 
 	const footer = (
 		<>
-			<Button 
-				onClick={onClose}
-				variant="secondary"
-			>
+			<Button onClick={onClose} variant="secondary">
 				Cancel
 			</Button>
 			<Button
@@ -92,7 +100,11 @@ export default function StartTestModal({
 				variant={hasDongleDevices ? "warning" : "primary"}
 				icon={isPending ? undefined : <Play className="w-4 h-4" />}
 			>
-				{isPending ? "Starting..." : (hasDongleDevices ? "Start Anyway" : "Start Test")}
+				{isPending
+					? "Starting..."
+					: hasDongleDevices
+						? "Start Anyway"
+						: "Start Test"}
 			</Button>
 		</>
 	);
@@ -109,8 +121,9 @@ export default function StartTestModal({
 				{/* Info Banner */}
 				<div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
 					<p className="text-sm text-blue-800">
-						This will run an extended network speed test on all online devices matching
-						your label filter to measure network performance under load.
+						This will run an extended network speed test on all online devices
+						matching your label filter to measure network performance under
+						load.
 					</p>
 				</div>
 
@@ -136,7 +149,8 @@ export default function StartTestModal({
 							</div>
 						) : selectionMode === "devices" && selectedDeviceCount > 0 ? (
 							<p className="text-sm text-gray-900">
-								{selectedDeviceCount} device{selectedDeviceCount !== 1 ? "s" : ""} selected
+								{selectedDeviceCount} device
+								{selectedDeviceCount !== 1 ? "s" : ""} selected
 							</p>
 						) : (
 							<p className="text-sm text-gray-500">All online devices</p>
@@ -151,7 +165,10 @@ export default function StartTestModal({
 						<span>Checking device connections...</span>
 					</div>
 				) : dongleInfo ? (
-					<DongleWarning dongleInfo={dongleInfo} durationMinutes={durationMinutes} />
+					<DongleWarning
+						dongleInfo={dongleInfo}
+						durationMinutes={durationMinutes}
+					/>
 				) : null}
 
 				{/* Duration Selector */}
@@ -172,7 +189,8 @@ export default function StartTestModal({
 						))}
 					</div>
 					<p className="mt-1 text-xs text-gray-500">
-						Longer tests provide more data points, but use more data and stress the connection longer
+						Longer tests provide more data points, but use more data and stress
+						the connection longer
 					</p>
 				</div>
 
@@ -180,7 +198,8 @@ export default function StartTestModal({
 				{isError && (
 					<div className="bg-red-50 border border-red-200 rounded-lg p-3">
 						<p className="text-sm text-red-800">
-							Failed to start test. Make sure there are online devices available.
+							Failed to start test. Make sure there are online devices
+							available.
 						</p>
 					</div>
 				)}

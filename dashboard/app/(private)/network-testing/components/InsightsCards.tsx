@@ -1,7 +1,10 @@
 "use client";
 
 import { Activity, Gauge, Wifi } from "lucide-react";
-import type { AggregateEvaluation, ExtendedTestStatus } from "../hooks/useExtendedTest";
+import type {
+	AggregateEvaluation,
+	ExtendedTestStatus,
+} from "../hooks/useExtendedTest";
 
 interface InsightsCardsProps {
 	data: ExtendedTestStatus;
@@ -13,12 +16,24 @@ function getBandwidthHealthStyle(label: string): {
 	borderColor: string;
 } {
 	if (label === "Stable") {
-		return { color: "text-green-700", bgColor: "bg-green-50", borderColor: "border-green-200" };
+		return {
+			color: "text-green-700",
+			bgColor: "bg-green-50",
+			borderColor: "border-green-200",
+		};
 	}
 	if (label === "Moderate Degradation") {
-		return { color: "text-yellow-700", bgColor: "bg-yellow-50", borderColor: "border-yellow-200" };
+		return {
+			color: "text-yellow-700",
+			bgColor: "bg-yellow-50",
+			borderColor: "border-yellow-200",
+		};
 	}
-	return { color: "text-red-700", bgColor: "bg-red-50", borderColor: "border-red-200" };
+	return {
+		color: "text-red-700",
+		bgColor: "bg-red-50",
+		borderColor: "border-red-200",
+	};
 }
 
 function getSpeedTierStyle(tier: string): {
@@ -27,12 +42,24 @@ function getSpeedTierStyle(tier: string): {
 	borderColor: string;
 } {
 	if (tier === "Fast") {
-		return { color: "text-green-700", bgColor: "bg-green-50", borderColor: "border-green-200" };
+		return {
+			color: "text-green-700",
+			bgColor: "bg-green-50",
+			borderColor: "border-green-200",
+		};
 	}
 	if (tier === "Moderate") {
-		return { color: "text-blue-700", bgColor: "bg-blue-50", borderColor: "border-blue-200" };
+		return {
+			color: "text-blue-700",
+			bgColor: "bg-blue-50",
+			borderColor: "border-blue-200",
+		};
 	}
-	return { color: "text-red-700", bgColor: "bg-red-50", borderColor: "border-red-200" };
+	return {
+		color: "text-red-700",
+		bgColor: "bg-red-50",
+		borderColor: "border-red-200",
+	};
 }
 
 function getCoverageQualityStyle(quality: string): {
@@ -41,17 +68,30 @@ function getCoverageQualityStyle(quality: string): {
 	borderColor: string;
 } {
 	if (quality === "Consistent") {
-		return { color: "text-green-700", bgColor: "bg-green-50", borderColor: "border-green-200" };
+		return {
+			color: "text-green-700",
+			bgColor: "bg-green-50",
+			borderColor: "border-green-200",
+		};
 	}
 	if (quality === "Variable") {
-		return { color: "text-yellow-700", bgColor: "bg-yellow-50", borderColor: "border-yellow-200" };
+		return {
+			color: "text-yellow-700",
+			bgColor: "bg-yellow-50",
+			borderColor: "border-yellow-200",
+		};
 	}
-	return { color: "text-red-700", bgColor: "bg-red-50", borderColor: "border-red-200" };
+	return {
+		color: "text-red-700",
+		bgColor: "bg-red-50",
+		borderColor: "border-red-200",
+	};
 }
 
 function hasCompletedResults(data: ExtendedTestStatus): boolean {
 	return data.results.some(
-		(r) => r.status === "completed" && r.minute_stats && r.minute_stats.length > 0
+		(r) =>
+			r.status === "completed" && r.minute_stats && r.minute_stats.length > 0,
 	);
 }
 
@@ -107,7 +147,9 @@ export default function InsightsCards({ data }: InsightsCardsProps) {
 			>
 				<div className="flex items-center space-x-2 mb-2">
 					<Activity className={`w-5 h-5 ${bandwidthStyle.color}`} />
-					<span className="text-sm font-medium text-gray-600">Bandwidth Health</span>
+					<span className="text-sm font-medium text-gray-600">
+						Bandwidth Health
+					</span>
 				</div>
 				<div className={`text-lg font-bold ${bandwidthStyle.color} mb-1`}>
 					{agg.bandwidth_health}
@@ -115,7 +157,8 @@ export default function InsightsCards({ data }: InsightsCardsProps) {
 				<p className="text-sm text-gray-600">{bandwidthDescription}</p>
 				<div className="mt-2 text-xs text-gray-500">
 					{agg.bandwidth_health_trend_percent >= 0 ? "+" : ""}
-					{agg.bandwidth_health_trend_percent.toFixed(1)}% change over test duration
+					{agg.bandwidth_health_trend_percent.toFixed(1)}% change over test
+					duration
 				</div>
 			</div>
 
@@ -139,7 +182,9 @@ export default function InsightsCards({ data }: InsightsCardsProps) {
 			>
 				<div className="flex items-center space-x-2 mb-2">
 					<Wifi className={`w-5 h-5 ${coverageStyle.color}`} />
-					<span className="text-sm font-medium text-gray-600">Coverage Quality</span>
+					<span className="text-sm font-medium text-gray-600">
+						Coverage Quality
+					</span>
 				</div>
 				<div className={`text-lg font-bold ${coverageStyle.color} mb-1`}>
 					{agg.coverage_quality}

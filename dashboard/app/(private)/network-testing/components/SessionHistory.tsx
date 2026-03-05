@@ -1,6 +1,13 @@
 "use client";
 
-import { Calendar, ChevronRight, Cpu, Loader2, Search, Tag } from "lucide-react";
+import {
+	Calendar,
+	ChevronRight,
+	Cpu,
+	Loader2,
+	Search,
+	Tag,
+} from "lucide-react";
 import { useMemo, useState } from "react";
 import {
 	type ExtendedTestSessionSummary,
@@ -35,7 +42,9 @@ interface SessionHistoryProps {
 	onSelectSession: (session: ExtendedTestSessionSummary) => void;
 }
 
-export default function SessionHistory({ onSelectSession }: SessionHistoryProps) {
+export default function SessionHistory({
+	onSelectSession,
+}: SessionHistoryProps) {
 	const [searchQuery, setSearchQuery] = useState("");
 	const { data: sessions, isLoading } = useExtendedTestSessions();
 
@@ -142,7 +151,9 @@ export default function SessionHistory({ onSelectSession }: SessionHistoryProps)
 				) : (
 					<div className="text-center py-8">
 						<Search className="w-8 h-8 text-gray-300 mx-auto mb-2" />
-						<p className="text-sm text-gray-500">No sessions match your search</p>
+						<p className="text-sm text-gray-500">
+							No sessions match your search
+						</p>
 					</div>
 				)}
 			</div>

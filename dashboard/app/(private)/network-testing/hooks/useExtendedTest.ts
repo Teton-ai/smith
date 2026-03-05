@@ -233,9 +233,10 @@ export const useOnlineDevicesDongleCheck = () => {
 			});
 
 			const dongleDevices = response.devices.filter((device) => {
-				const connectedStatuses = device.system_info?.connection_statuses?.filter(
-					(conn) => conn.connection_state === "connected"
-				);
+				const connectedStatuses =
+					device.system_info?.connection_statuses?.filter(
+						(conn) => conn.connection_state === "connected",
+					);
 				// Check if any connected interface is gsm (cellular/dongle)
 				return connectedStatuses?.some((conn) => conn.device_type === "gsm");
 			});

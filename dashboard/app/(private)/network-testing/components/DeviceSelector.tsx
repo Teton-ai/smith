@@ -3,8 +3,8 @@
 import { Cpu, Loader2, Search, Tag, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { type Device, useGetDevices } from "@/app/api-client";
-import LabelAutocomplete from "@/app/components/LabelAutocomplete";
 import { Button } from "@/app/components/button";
+import LabelAutocomplete from "@/app/components/LabelAutocomplete";
 
 export type SelectionMode = "labels" | "devices";
 
@@ -32,14 +32,14 @@ export default function DeviceSelector({
 	// Fetch online devices for manual selection
 	const { data: onlineDevices = [], isLoading: devicesLoading } = useGetDevices(
 		{ online: true },
-		{ query: { enabled: mode === "devices" } }
+		{ query: { enabled: mode === "devices" } },
 	);
 
 	// Fetch devices matching labels (for labels mode preview)
 	const { data: labelMatchDevices = [], isLoading: labelDevicesLoading } =
 		useGetDevices(
 			{ online: true, labels: selectedLabels },
-			{ query: { enabled: mode === "labels" && selectedLabels.length > 0 } }
+			{ query: { enabled: mode === "labels" && selectedLabels.length > 0 } },
 		);
 
 	// Filter devices for search in devices mode
@@ -47,7 +47,7 @@ export default function DeviceSelector({
 		if (!deviceSearchQuery) return onlineDevices;
 		const q = deviceSearchQuery.toLowerCase();
 		return onlineDevices.filter((d: Device) =>
-			d.serial_number.toLowerCase().includes(q)
+			d.serial_number.toLowerCase().includes(q),
 		);
 	}, [onlineDevices, deviceSearchQuery]);
 
@@ -64,7 +64,10 @@ export default function DeviceSelector({
 
 	// Notify parent of resolved devices only when the set actually changes
 	useEffect(() => {
-		const currentIds = resolvedDevices.map(d => d.id).sort().join(",");
+		const currentIds = resolvedDevices
+			.map((d) => d.id)
+			.sort()
+			.join(",");
 		if (currentIds !== prevDeviceIdsRef.current) {
 			prevDeviceIdsRef.current = currentIds;
 			onDevicesResolved(resolvedDevices);
@@ -204,23 +207,26 @@ export default function DeviceSelector({
 														{device.serial_number}
 													</span>
 												</div>
-												{device.labels && Object.keys(device.labels).length > 0 && (
-													<div className="flex gap-1">
-														{Object.entries(device.labels).slice(0, 2).map(([key, value]) => (
-															<span
-																key={`${key}=${value}`}
-																className="px-1.5 py-0.5 text-xs bg-gray-100 text-gray-600 rounded"
-															>
-																{key}={value}
-															</span>
-														))}
-														{Object.keys(device.labels).length > 2 && (
-															<span className="text-xs text-gray-400">
-																+{Object.keys(device.labels).length - 2}
-															</span>
-														)}
-													</div>
-												)}
+												{device.labels &&
+													Object.keys(device.labels).length > 0 && (
+														<div className="flex gap-1">
+															{Object.entries(device.labels)
+																.slice(0, 2)
+																.map(([key, value]) => (
+																	<span
+																		key={`${key}=${value}`}
+																		className="px-1.5 py-0.5 text-xs bg-gray-100 text-gray-600 rounded"
+																	>
+																		{key}={value}
+																	</span>
+																))}
+															{Object.keys(device.labels).length > 2 && (
+																<span className="text-xs text-gray-400">
+																	+{Object.keys(device.labels).length - 2}
+																</span>
+															)}
+														</div>
+													)}
 											</div>
 										</button>
 									);

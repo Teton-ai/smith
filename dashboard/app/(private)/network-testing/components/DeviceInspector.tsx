@@ -11,7 +11,12 @@ import {
 	XAxis,
 	YAxis,
 } from "recharts";
-import type { DeviceExtendedTestResult, NetworkDetails, PerDeviceEvaluation, WifiDetails } from "../hooks/useExtendedTest";
+import type {
+	DeviceExtendedTestResult,
+	NetworkDetails,
+	PerDeviceEvaluation,
+	WifiDetails,
+} from "../hooks/useExtendedTest";
 
 interface DeviceInspectorProps {
 	device: DeviceExtendedTestResult;
@@ -26,9 +31,13 @@ function getWifiDetails(details: NetworkDetails): WifiDetails | null {
 	return null;
 }
 
-export default function DeviceInspector({ device, evaluation, onClose }: DeviceInspectorProps) {
+export default function DeviceInspector({
+	device,
+	evaluation,
+	onClose,
+}: DeviceInspectorProps) {
 	const sortedMinuteStats = [...(device.minute_stats ?? [])].sort(
-		(a, b) => a.minute - b.minute
+		(a, b) => a.minute - b.minute,
 	);
 
 	const chartData = sortedMinuteStats.map((stat) => ({
@@ -55,11 +64,11 @@ export default function DeviceInspector({ device, evaluation, onClose }: DeviceI
 						<p className="text-xs text-gray-500">Device Inspector</p>
 					</div>
 				</div>
-			<button
-				onClick={onClose}
-				aria-label="Close device inspector"
-				className="p-1 rounded-md hover:bg-gray-100 transition-colors"
-			>
+				<button
+					onClick={onClose}
+					aria-label="Close device inspector"
+					className="p-1 rounded-md hover:bg-gray-100 transition-colors"
+				>
 					<X className="w-5 h-5 text-gray-400" />
 				</button>
 			</div>
@@ -98,7 +107,9 @@ export default function DeviceInspector({ device, evaluation, onClose }: DeviceI
 											borderRadius: "6px",
 											fontSize: "12px",
 										}}
-										formatter={(value: number | undefined) => value !== undefined ? `${value.toFixed(2)} Mbps` : ""}
+										formatter={(value: number | undefined) =>
+											value !== undefined ? `${value.toFixed(2)} Mbps` : ""
+										}
 									/>
 									<Legend wrapperStyle={{ fontSize: "12px" }} />
 									<Line
@@ -161,7 +172,9 @@ export default function DeviceInspector({ device, evaluation, onClose }: DeviceI
 										</p>
 									</div>
 									<div>
-										<span className="text-xs text-gray-500">Signal Strength</span>
+										<span className="text-xs text-gray-500">
+											Signal Strength
+										</span>
 										<div className="flex items-center space-x-1">
 											<Signal
 												className={`w-4 h-4 ${
@@ -185,7 +198,9 @@ export default function DeviceInspector({ device, evaluation, onClose }: DeviceI
 									</div>
 									{wifiDetails.channel_width_mhz && (
 										<div>
-											<span className="text-xs text-gray-500">Channel Width</span>
+											<span className="text-xs text-gray-500">
+												Channel Width
+											</span>
 											<p className="text-sm font-medium text-gray-900">
 												{wifiDetails.channel_width_mhz} MHz
 											</p>
@@ -221,33 +236,36 @@ export default function DeviceInspector({ device, evaluation, onClose }: DeviceI
 							<div
 								key={i}
 								className={`flex items-start space-x-2 p-3 rounded-lg ${
-									diagnosis.includes("healthy") || diagnosis.includes("consistent")
+									diagnosis.includes("healthy") ||
+									diagnosis.includes("consistent")
 										? "bg-green-50"
 										: diagnosis.includes("Weak") ||
-											  diagnosis.includes("dropped") ||
-											  diagnosis.includes("Slow")
+												diagnosis.includes("dropped") ||
+												diagnosis.includes("Slow")
 											? "bg-red-50"
 											: "bg-yellow-50"
 								}`}
 							>
 								<AlertTriangle
 									className={`w-4 h-4 mt-0.5 flex-shrink-0 ${
-										diagnosis.includes("healthy") || diagnosis.includes("consistent")
+										diagnosis.includes("healthy") ||
+										diagnosis.includes("consistent")
 											? "text-green-600"
 											: diagnosis.includes("Weak") ||
-												  diagnosis.includes("dropped") ||
-												  diagnosis.includes("Slow")
+													diagnosis.includes("dropped") ||
+													diagnosis.includes("Slow")
 												? "text-red-600"
 												: "text-yellow-600"
 									}`}
 								/>
 								<p
 									className={`text-sm ${
-										diagnosis.includes("healthy") || diagnosis.includes("consistent")
+										diagnosis.includes("healthy") ||
+										diagnosis.includes("consistent")
 											? "text-green-800"
 											: diagnosis.includes("Weak") ||
-												  diagnosis.includes("dropped") ||
-												  diagnosis.includes("Slow")
+													diagnosis.includes("dropped") ||
+													diagnosis.includes("Slow")
 												? "text-red-800"
 												: "text-yellow-800"
 									}`}
@@ -288,24 +306,24 @@ export default function DeviceInspector({ device, evaluation, onClose }: DeviceI
 								</thead>
 								<tbody className="divide-y divide-gray-200">
 									{sortedMinuteStats.map((stat) => (
-											<tr key={stat.minute}>
-												<td className="px-3 py-2 text-gray-900">{stat.minute}</td>
-												<td className="px-3 py-2 text-gray-600">
-													{stat.sample_count}
-												</td>
-												<td className="px-3 py-2 font-mono text-gray-900">
-													{stat.download.average_mbps.toFixed(2)} Mbps
-												</td>
-												<td className="px-3 py-2 font-mono text-gray-600">
-													{stat.download.std_dev.toFixed(2)}
-												</td>
-												<td className="px-3 py-2 font-mono text-gray-900">
-													{stat.upload
-														? `${stat.upload.average_mbps.toFixed(2)} Mbps`
-														: "-"}
-												</td>
-											</tr>
-										))}
+										<tr key={stat.minute}>
+											<td className="px-3 py-2 text-gray-900">{stat.minute}</td>
+											<td className="px-3 py-2 text-gray-600">
+												{stat.sample_count}
+											</td>
+											<td className="px-3 py-2 font-mono text-gray-900">
+												{stat.download.average_mbps.toFixed(2)} Mbps
+											</td>
+											<td className="px-3 py-2 font-mono text-gray-600">
+												{stat.download.std_dev.toFixed(2)}
+											</td>
+											<td className="px-3 py-2 font-mono text-gray-900">
+												{stat.upload
+													? `${stat.upload.average_mbps.toFixed(2)} Mbps`
+													: "-"}
+											</td>
+										</tr>
+									))}
 								</tbody>
 							</table>
 						</div>

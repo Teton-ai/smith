@@ -1,8 +1,20 @@
 "use client";
 
-import { ChevronDown, ChevronUp, Cpu, Loader2, TrendingDown, TrendingUp, Wifi } from "lucide-react";
+import {
+	ChevronDown,
+	ChevronUp,
+	Cpu,
+	Loader2,
+	TrendingDown,
+	TrendingUp,
+	Wifi,
+} from "lucide-react";
 import { useMemo, useState } from "react";
-import type { DeviceExtendedTestResult, ExtendedTestStatus, PerDeviceEvaluation } from "../hooks/useExtendedTest";
+import type {
+	DeviceExtendedTestResult,
+	ExtendedTestStatus,
+	PerDeviceEvaluation,
+} from "../hooks/useExtendedTest";
 
 interface DeviceTableProps {
 	data: ExtendedTestStatus;
@@ -10,9 +22,9 @@ interface DeviceTableProps {
 	selectedDeviceId: number | null;
 }
 
-function getEvaluation(
+function _getEvaluation(
 	evaluations: PerDeviceEvaluation[],
-	deviceId: number
+	deviceId: number,
 ): PerDeviceEvaluation | undefined {
 	return evaluations.find((e) => e.device_id === deviceId);
 }
@@ -24,7 +36,9 @@ interface DeviceWithStats extends DeviceExtendedTestResult {
 	stdDev: number;
 }
 
-function calculateDeviceStats(result: DeviceExtendedTestResult): DeviceWithStats {
+function calculateDeviceStats(
+	result: DeviceExtendedTestResult,
+): DeviceWithStats {
 	if (!result.minute_stats || result.minute_stats.length === 0) {
 		return {
 			...result,
@@ -35,13 +49,15 @@ function calculateDeviceStats(result: DeviceExtendedTestResult): DeviceWithStats
 		};
 	}
 
-	const downloadSpeeds = result.minute_stats.map((s) => s.download.average_mbps);
+	const downloadSpeeds = result.minute_stats.map(
+		(s) => s.download.average_mbps,
+	);
 	const avgDownload =
 		downloadSpeeds.reduce((a, b) => a + b, 0) / downloadSpeeds.length;
 
 	// Standard deviation
 	const variance =
-		downloadSpeeds.reduce((sum, val) => sum + Math.pow(val - avgDownload, 2), 0) /
+		downloadSpeeds.reduce((sum, val) => sum + (val - avgDownload) ** 2, 0) /
 		downloadSpeeds.length;
 	const stdDev = Math.sqrt(variance);
 
@@ -115,7 +131,7 @@ export default function DeviceTable({
 
 	const devicesWithStats = useMemo(
 		() => data.results.map(calculateDeviceStats),
-		[data.results]
+		[data.results],
 	);
 
 	const evaluationsByDeviceId = useMemo(() => {
@@ -191,7 +207,10 @@ export default function DeviceTable({
 									<SortIcon field="serial" />
 								</div>
 							</th>
-							<th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+							<th
+								scope="col"
+								className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
+							>
 								Network
 							</th>
 							<th
@@ -224,20 +243,23 @@ export default function DeviceTable({
 									<SortIcon field="trend" />
 								</div>
 							</th>
-							<th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+							<th
+								scope="col"
+								className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
+							>
 								Status
 							</th>
 						</tr>
 					</thead>
 					<tbody className="bg-white divide-y divide-gray-200">
-					{sortedDevices.map((device) => {
-						const evalEntry = evaluationsByDeviceId.get(device.device_id);
-						const apiLabel = evalEntry?.label;
-						const badge =
-							device.status === "completed" && apiLabel
-								? { label: apiLabel, ...getLabelStyle(apiLabel) }
-								: null;
-						const isSelected = selectedDeviceId === device.device_id;
+						{sortedDevices.map((device) => {
+							const evalEntry = evaluationsByDeviceId.get(device.device_id);
+							const apiLabel = evalEntry?.label;
+							const badge =
+								device.status === "completed" && apiLabel
+									? { label: apiLabel, ...getLabelStyle(apiLabel) }
+									: null;
+							const isSelected = selectedDeviceId === device.device_id;
 
 							return (
 								<tr
