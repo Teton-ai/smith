@@ -44,3 +44,5 @@ self_update = { version = "0.42.0", features = ["archive-zip", "compression-zip-
 serde_html_form = "0.2.8"
 cliclack = "0.3.7"
 regex = "1.12.2"
+reedline = "0.45"
+nu-ansi-term = "0.50"

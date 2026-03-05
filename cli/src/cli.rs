@@ -281,4 +281,7 @@ pub enum Commands {
         #[arg(short = 'y', long)]
         yes: bool,
     },
+
+    /// Enter interactive REPL mode with tab-completion and command history
+    Interactive,
 }
