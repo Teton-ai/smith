@@ -14,6 +14,8 @@ use tracing::{error, info};
 use utoipa::ToSchema;
 use uuid::Uuid;
 
+use super::evaluation::{Evaluation, evaluate};
+
 const NETWORKS_TAG: &str = "networks";
 const EXTENDED_TEST_TAG: &str = "extended-network-test";
 
@@ -243,6 +245,7 @@ pub struct ExtendedTestStatus {
     #[schema(value_type = String)]
     pub created_at: DateTime<Utc>,
     pub results: Vec<DeviceExtendedTestResult>,
+    pub evaluation: Evaluation,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -256,7 +259,7 @@ pub struct DeviceExtendedTestResult {
     pub network_info: Option<NetworkInfo>,
 }
 
-#[derive(Debug, Serialize, ToSchema)]
+#[derive(Debug, Serialize, Clone, ToSchema)]
 pub struct MinuteStats {
     pub minute: u8,
     pub sample_count: u32,
@@ -264,7 +267,7 @@ pub struct MinuteStats {
     pub upload: Option<SpeedStats>,
 }
 
-#[derive(Debug, Serialize, ToSchema)]
+#[derive(Debug, Serialize, Clone, ToSchema)]
 pub struct SpeedStats {
     pub average_mbps: f64,
     pub std_dev: f64,
@@ -624,6 +627,8 @@ pub async fn get_extended_test_status(
         "pending"
     };
 
+    let evaluation = evaluate(&results);
+
     let response = ExtendedTestStatus {
         session_id,
         status: overall_status.to_string(),
@@ -633,6 +638,7 @@ pub async fn get_extended_test_status(
         completed_count,
         created_at: session.created_at,
         results,
+        evaluation,
     };
 
     Ok(Json(response))

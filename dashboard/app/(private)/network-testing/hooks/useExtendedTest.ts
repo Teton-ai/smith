@@ -68,6 +68,27 @@ export interface DeviceExtendedTestResult {
 	network_info: NetworkInfo | null;
 }
 
+export interface AggregateEvaluation {
+	bandwidth_health: string;
+	bandwidth_health_trend_percent: number;
+	speed_tier: string;
+	average_download_mbps: number;
+	coefficient_of_variation: number;
+	coverage_quality: string;
+}
+
+export interface PerDeviceEvaluation {
+	device_id: number;
+	serial_number: string;
+	label: string;
+	diagnoses: string[];
+}
+
+export interface Evaluation {
+	aggregate: AggregateEvaluation;
+	per_device: PerDeviceEvaluation[];
+}
+
 export interface ExtendedTestStatus {
 	session_id: string;
 	status: string;
@@ -77,6 +98,7 @@ export interface ExtendedTestStatus {
 	completed_count: number;
 	created_at: string;
 	results: DeviceExtendedTestResult[];
+	evaluation: Evaluation;
 }
 
 export const useExtendedTestSessions = () => {

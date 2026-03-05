@@ -8,78 +8,20 @@ interface DepartmentOverviewProps {
 	data: ExtendedTestStatus;
 }
 
-function calculateAggregateStats(data: ExtendedTestStatus) {
-	const completedResults = data.results.filter(
-		(r) => r.status === "completed" && r.minute_stats && r.minute_stats.length > 0
-	);
-
-	if (completedResults.length === 0) {
-		return null;
+function getBandwidthHealthStyle(label: string): { color: string; bgColor: string } {
+	if (label === "Stable") {
+		return { color: "text-green-800", bgColor: "bg-green-100" };
 	}
-
-	// Aggregate download speeds across all devices
-	const allDownloadSpeeds: number[] = [];
-	const firstMinuteSpeeds: number[] = [];
-	const lastMinuteSpeeds: number[] = [];
-
-	for (const result of completedResults) {
-		if (!result.minute_stats) continue;
-
-		for (const stat of result.minute_stats) {
-			allDownloadSpeeds.push(stat.download.average_mbps);
-		}
-
-		// First and last minute for trend calculation
-		const sorted = [...result.minute_stats].sort((a, b) => a.minute - b.minute);
-		if (sorted.length > 0) {
-			firstMinuteSpeeds.push(sorted[0].download.average_mbps);
-			lastMinuteSpeeds.push(sorted[sorted.length - 1].download.average_mbps);
-		}
+	if (label === "Moderate Degradation") {
+		return { color: "text-yellow-800", bgColor: "bg-yellow-100" };
 	}
-
-	const avgDownload =
-		allDownloadSpeeds.reduce((a, b) => a + b, 0) / allDownloadSpeeds.length;
-	const minDownload = Math.min(...allDownloadSpeeds);
-	const maxDownload = Math.max(...allDownloadSpeeds);
-
-	// Calculate standard deviation
-	const variance =
-		allDownloadSpeeds.reduce((sum, val) => sum + Math.pow(val - avgDownload, 2), 0) /
-		allDownloadSpeeds.length;
-	const stdDev = Math.sqrt(variance);
-
-	// Calculate bandwidth trend (first minute vs last minute)
-	const avgFirstMinute =
-		firstMinuteSpeeds.reduce((a, b) => a + b, 0) / firstMinuteSpeeds.length;
-	const avgLastMinute =
-		lastMinuteSpeeds.reduce((a, b) => a + b, 0) / lastMinuteSpeeds.length;
-	const trendPercent =
-		avgFirstMinute > 0
-			? ((avgLastMinute - avgFirstMinute) / avgFirstMinute) * 100
-			: 0;
-
-	return {
-		avgDownload,
-		minDownload,
-		maxDownload,
-		stdDev,
-		trendPercent,
-		deviceCount: completedResults.length,
-	};
+	return { color: "text-red-800", bgColor: "bg-red-100" };
 }
 
-function getBandwidthHealth(trendPercent: number): {
-	label: string;
-	color: string;
-	bgColor: string;
-} {
-	if (trendPercent >= -10) {
-		return { label: "Stable", color: "text-green-800", bgColor: "bg-green-100" };
-	}
-	if (trendPercent >= -25) {
-		return { label: "Moderate Degradation", color: "text-yellow-800", bgColor: "bg-yellow-100" };
-	}
-	return { label: "Severe Degradation", color: "text-red-800", bgColor: "bg-red-100" };
+function hasCompletedResults(data: ExtendedTestStatus): boolean {
+	return data.results.some(
+		(r) => r.status === "completed" && r.minute_stats && r.minute_stats.length > 0
+	);
 }
 
 function calculateTimeRemaining(createdAt: string, durationMinutes: number): { remaining: number; elapsed: number; progress: number } {
@@ -102,13 +44,14 @@ function formatSeconds(seconds: number): string {
 export default function DepartmentOverview({ data }: DepartmentOverviewProps) {
 	const [, setTick] = useState(0);
 	const cancelMutation = useCancelExtendedTest();
-	const stats = calculateAggregateStats(data);
 	const completionRate =
 		data.device_count > 0
 			? Math.round((data.completed_count / data.device_count) * 100)
 			: 0;
 
-	const bandwidthHealth = stats ? getBandwidthHealth(stats.trendPercent) : null;
+	const hasStats = hasCompletedResults(data);
+	const agg = hasStats ? data.evaluation.aggregate : null;
+	const bandwidthHealth = agg ? getBandwidthHealthStyle(agg.bandwidth_health) : null;
 	const isRunning = data.status === "running" || data.status === "pending" || data.status === "partial";
 	const timeInfo = isRunning ? calculateTimeRemaining(data.created_at, data.duration_minutes) : null;
 
@@ -236,13 +179,10 @@ export default function DepartmentOverview({ data }: DepartmentOverviewProps) {
 						<Activity className="w-4 h-4" />
 						<span>Avg Download</span>
 					</div>
-					{stats ? (
+					{agg ? (
 						<>
 							<div className="text-2xl font-bold text-gray-900">
-								{stats.avgDownload.toFixed(1)} <span className="text-sm font-normal">Mbps</span>
-							</div>
-							<div className="text-sm text-gray-600">
-								Range: {stats.minDownload.toFixed(1)} - {stats.maxDownload.toFixed(1)} Mbps
+								{agg.average_download_mbps.toFixed(1)} <span className="text-sm font-normal">Mbps</span>
 							</div>
 						</>
 					) : (
@@ -253,29 +193,29 @@ export default function DepartmentOverview({ data }: DepartmentOverviewProps) {
 				{/* Bandwidth Health */}
 				<div className="space-y-1">
 					<div className="flex items-center space-x-2 text-gray-500 text-sm">
-						{stats && stats.trendPercent < 0 ? (
+						{agg && agg.bandwidth_health_trend_percent < 0 ? (
 							<TrendingDown className="w-4 h-4" />
 						) : (
 							<TrendingUp className="w-4 h-4" />
 						)}
 						<span>Bandwidth Health</span>
 					</div>
-					{stats && bandwidthHealth ? (
+					{agg && bandwidthHealth ? (
 						<>
 							<div className="text-2xl font-bold text-gray-900">
 								<span
 									className={`px-2 py-0.5 rounded text-sm font-medium ${bandwidthHealth.bgColor} ${bandwidthHealth.color}`}
 								>
-									{bandwidthHealth.label}
+									{agg.bandwidth_health}
 								</span>
 							</div>
 							<div className="flex items-center text-sm text-gray-600">
-								{stats.trendPercent < 0 ? (
+								{agg.bandwidth_health_trend_percent < 0 ? (
 									<TrendingDown className="w-4 h-4 mr-1 text-red-500" />
 								) : (
 									<TrendingUp className="w-4 h-4 mr-1 text-green-500" />
 								)}
-								{Math.abs(stats.trendPercent).toFixed(1)}% over test
+								{Math.abs(agg.bandwidth_health_trend_percent).toFixed(1)}% over test
 							</div>
 						</>
 					) : (

@@ -1,5 +1,3 @@
-use crate::magic::MagicHandle;
-use crate::shutdown::ShutdownHandler;
 use crate::utils::schema::{
     InterfaceType, Network, NetworkDetails, NetworkInfo, SafeCommandResponse, SafeCommandRx,
     SpeedSample,

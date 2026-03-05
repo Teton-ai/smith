@@ -11,10 +11,11 @@ import {
 	XAxis,
 	YAxis,
 } from "recharts";
-import type { DeviceExtendedTestResult, NetworkDetails, WifiDetails } from "../hooks/useExtendedTest";
+import type { DeviceExtendedTestResult, NetworkDetails, PerDeviceEvaluation, WifiDetails } from "../hooks/useExtendedTest";
 
 interface DeviceInspectorProps {
 	device: DeviceExtendedTestResult;
+	evaluation: PerDeviceEvaluation | undefined;
 	onClose: () => void;
 }
 
@@ -25,92 +26,7 @@ function getWifiDetails(details: NetworkDetails): WifiDetails | null {
 	return null;
 }
 
-function generateDiagnosis(device: DeviceExtendedTestResult): string[] {
-	const diagnoses: string[] = [];
-
-	if (!device.minute_stats || device.minute_stats.length === 0) {
-		return ["No data available for analysis"];
-	}
-
-	const downloadSpeeds = device.minute_stats.map((s) => s.download.average_mbps);
-	const avgDownload =
-		downloadSpeeds.reduce((a, b) => a + b, 0) / downloadSpeeds.length;
-
-	// Speed drop analysis
-	const sorted = [...device.minute_stats].sort((a, b) => a.minute - b.minute);
-	const firstMinute = sorted[0].download.average_mbps;
-	const lastMinute = sorted[sorted.length - 1].download.average_mbps;
-	const trendPercent =
-		firstMinute > 0 ? ((lastMinute - firstMinute) / firstMinute) * 100 : 0;
-
-	if (trendPercent < -30) {
-		diagnoses.push(
-			`Speed dropped ${Math.abs(trendPercent).toFixed(0)}% over test duration - possible thermal throttling or network congestion`
-		);
-	} else if (trendPercent < -20) {
-		diagnoses.push(
-			`Speed decreased ${Math.abs(trendPercent).toFixed(0)}% during test - may indicate bandwidth contention`
-		);
-	}
-
-	// Variance analysis
-	const variance =
-		downloadSpeeds.reduce((sum, val) => sum + Math.pow(val - avgDownload, 2), 0) /
-		downloadSpeeds.length;
-	const stdDev = Math.sqrt(variance);
-	const cv = (stdDev / avgDownload) * 100;
-
-	if (cv > 40) {
-		diagnoses.push(
-			"High variance suggests intermittent connection or wireless interference"
-		);
-	} else if (cv > 25) {
-		diagnoses.push("Moderate speed fluctuations detected");
-	}
-
-	// Upload vs Download analysis
-	const uploadSpeeds = device.minute_stats
-		.filter((s) => s.upload)
-		.map((s) => s.upload!.average_mbps);
-	if (uploadSpeeds.length > 0) {
-		const avgUpload =
-			uploadSpeeds.reduce((a, b) => a + b, 0) / uploadSpeeds.length;
-		if (avgDownload > avgUpload * 10) {
-			diagnoses.push(
-				"Upload significantly lower than download - typical for asymmetric connections"
-			);
-		}
-	}
-
-	// WiFi signal analysis
-	if (device.network_info) {
-		const wifi = getWifiDetails(device.network_info.details);
-		if (wifi) {
-			if (wifi.signal_dbm < -75) {
-				diagnoses.push(
-					`Weak WiFi signal (${wifi.signal_dbm} dBm) - consider moving device closer to access point`
-				);
-			} else if (wifi.signal_dbm < -65) {
-				diagnoses.push(
-					`Fair WiFi signal (${wifi.signal_dbm} dBm) - signal could be improved`
-				);
-			}
-		}
-	}
-
-	// Speed tier
-	if (avgDownload < 25) {
-		diagnoses.push("Slow connection speed may impact device operations");
-	}
-
-	if (diagnoses.length === 0) {
-		diagnoses.push("Connection appears healthy with consistent performance");
-	}
-
-	return diagnoses;
-}
-
-export default function DeviceInspector({ device, onClose }: DeviceInspectorProps) {
+export default function DeviceInspector({ device, evaluation, onClose }: DeviceInspectorProps) {
 	const chartData =
 		device.minute_stats
 			?.sort((a, b) => a.minute - b.minute)
@@ -121,7 +37,7 @@ export default function DeviceInspector({ device, onClose }: DeviceInspectorProp
 				downloadStdDev: stat.download.std_dev,
 			})) || [];
 
-	const diagnoses = generateDiagnosis(device);
+	const diagnoses = evaluation?.diagnoses ?? ["No data available for analysis"];
 	const wifiDetails = device.network_info
 		? getWifiDetails(device.network_info.details)
 		: null;

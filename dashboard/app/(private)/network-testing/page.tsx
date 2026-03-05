@@ -273,6 +273,9 @@ export default function HackathonPage() {
             {selectedDevice ? (
               <DeviceInspector
                 device={selectedDevice}
+                evaluation={sessionStatus.evaluation.per_device.find(
+                  (e) => e.device_id === selectedDevice.device_id
+                )}
                 onClose={() => setSelectedDevice(null)}
               />
             ) : (

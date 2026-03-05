@@ -2,12 +2,19 @@
 
 import { ChevronDown, ChevronUp, Cpu, Loader2, TrendingDown, TrendingUp, Wifi } from "lucide-react";
 import { useMemo, useState } from "react";
-import type { DeviceExtendedTestResult, ExtendedTestStatus } from "../hooks/useExtendedTest";
+import type { DeviceExtendedTestResult, ExtendedTestStatus, PerDeviceEvaluation } from "../hooks/useExtendedTest";
 
 interface DeviceTableProps {
 	data: ExtendedTestStatus;
 	onSelectDevice: (device: DeviceExtendedTestResult) => void;
 	selectedDeviceId: number | null;
+}
+
+function getEvaluation(
+	evaluations: PerDeviceEvaluation[],
+	deviceId: number
+): PerDeviceEvaluation | undefined {
+	return evaluations.find((e) => e.device_id === deviceId);
 }
 
 interface DeviceWithStats extends DeviceExtendedTestResult {
@@ -63,43 +70,21 @@ function calculateDeviceStats(result: DeviceExtendedTestResult): DeviceWithStats
 	};
 }
 
-// Speed tier thresholds (matching InsightsCards.tsx)
-function getSpeedTier(avgMbps: number): {
-	label: string;
-	color: string;
-	bgColor: string;
-} {
-	if (avgMbps >= 100) {
-		return { label: "Fast", color: "text-green-800", bgColor: "bg-green-100" };
+function getLabelStyle(label: string): { color: string; bgColor: string } {
+	switch (label) {
+		case "Degrading":
+			return { color: "text-orange-800", bgColor: "bg-orange-100" };
+		case "Variable":
+			return { color: "text-yellow-800", bgColor: "bg-yellow-100" };
+		case "Fast":
+			return { color: "text-green-800", bgColor: "bg-green-100" };
+		case "Moderate":
+			return { color: "text-blue-800", bgColor: "bg-blue-100" };
+		case "Slow":
+			return { color: "text-red-800", bgColor: "bg-red-100" };
+		default:
+			return { color: "text-gray-800", bgColor: "bg-gray-100" };
 	}
-	if (avgMbps >= 50) {
-		return { label: "Moderate", color: "text-blue-800", bgColor: "bg-blue-100" };
-	}
-	return { label: "Slow", color: "text-red-800", bgColor: "bg-red-100" };
-}
-
-function getStatusBadge(device: DeviceWithStats): {
-	label: string;
-	color: string;
-	bgColor: string;
-} | null {
-	if (device.status !== "completed") {
-		return null;
-	}
-
-	// Check for degradation first (takes priority)
-	if (device.trendPercent < -20) {
-		return { label: "Degrading", color: "text-orange-800", bgColor: "bg-orange-100" };
-	}
-
-	// High variance (stdDev > 30% of average)
-	const cvPercent = device.avgDownload > 0 ? (device.stdDev / device.avgDownload) * 100 : 0;
-	if (cvPercent > 30) {
-		return { label: "Variable", color: "text-yellow-800", bgColor: "bg-yellow-100" };
-	}
-
-	// Use absolute speed tiers: Fast >= 100, Moderate >= 50, Slow < 50
-	return getSpeedTier(device.avgDownload);
 }
 
 function getNetworkTypeIcon(device: DeviceExtendedTestResult) {
@@ -132,6 +117,14 @@ export default function DeviceTable({
 		() => data.results.map(calculateDeviceStats),
 		[data.results]
 	);
+
+	const evaluationsByDeviceId = useMemo(() => {
+		const map = new Map<number, PerDeviceEvaluation>();
+		for (const e of data.evaluation.per_device) {
+			map.set(e.device_id, e);
+		}
+		return map;
+	}, [data.evaluation.per_device]);
 
 	const sortedDevices = useMemo(() => {
 		return [...devicesWithStats].sort((a, b) => {
@@ -237,9 +230,14 @@ export default function DeviceTable({
 						</tr>
 					</thead>
 					<tbody className="bg-white divide-y divide-gray-200">
-						{sortedDevices.map((device) => {
-							const badge = getStatusBadge(device);
-							const isSelected = selectedDeviceId === device.device_id;
+					{sortedDevices.map((device) => {
+						const evalEntry = evaluationsByDeviceId.get(device.device_id);
+						const apiLabel = evalEntry?.label;
+						const badge =
+							device.status === "completed" && apiLabel
+								? { label: apiLabel, ...getLabelStyle(apiLabel) }
+								: null;
+						const isSelected = selectedDeviceId === device.device_id;
 
 							return (
 								<tr
