@@ -48,6 +48,7 @@ RUN apt-get update && apt-get install -y \
     dbus \
     curl \
     openssh-server \
+    iproute2 \
     && rm -rf /var/lib/apt/lists/*
 
 RUN mkdir -p /etc/smith
@@ -79,6 +80,14 @@ COPY --from=builder /build/target/debug/smith-updater /usr/bin/smith-updater
 # Copy systemd service files
 COPY smithd/debian/smithd.service /etc/systemd/system/smithd.service
 COPY updater/debian/smith-updater.service /etc/systemd/system/smith-updater.service
+
+# Copy network throttle script for simulating different network conditions
+COPY scripts/network-throttle.sh /app/network-throttle.sh
+RUN chmod +x /app/network-throttle.sh
+
+# Copy mock iw script to simulate WiFi (placed before real iw in PATH)
+COPY scripts/mock-iw.sh /usr/local/bin/iw
+RUN chmod +x /usr/local/bin/iw
 
 # Make binaries executable
 RUN chmod +x /usr/bin/smithd /usr/bin/smith-updater
