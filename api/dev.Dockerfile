@@ -30,9 +30,6 @@ COPY models ./models
 COPY updater ./updater
 COPY cli ./cli
 
-# Copy sqlx offline cache
-COPY .sqlx ./.sqlx
-
 # Pre-build dependencies with offline mode (no DB available during build)
 # At runtime, cargo-watch will use the live database for type checking
 RUN SQLX_OFFLINE=true cargo build --package api

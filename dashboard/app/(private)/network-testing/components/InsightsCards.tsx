@@ -36,23 +36,37 @@ function getBandwidthHealthStyle(label: string): {
 	};
 }
 
-function getSpeedTierStyle(tier: string): {
+function getSpeedTierStyle(tier: number): {
 	color: string;
 	bgColor: string;
 	borderColor: string;
 } {
-	if (tier === "Fast") {
+	if (tier === 5) {
 		return {
 			color: "text-green-700",
 			bgColor: "bg-green-50",
 			borderColor: "border-green-200",
 		};
 	}
-	if (tier === "Moderate") {
+	if (tier === 4) {
 		return {
 			color: "text-blue-700",
 			bgColor: "bg-blue-50",
 			borderColor: "border-blue-200",
+		};
+	}
+	if (tier === 3) {
+		return {
+			color: "text-yellow-700",
+			bgColor: "bg-yellow-50",
+			borderColor: "border-yellow-200",
+		};
+	}
+	if (tier === 2) {
+		return {
+			color: "text-orange-700",
+			bgColor: "bg-orange-50",
+			borderColor: "border-orange-200",
 		};
 	}
 	return {
@@ -126,9 +140,9 @@ export default function InsightsCards({ data }: InsightsCardsProps) {
 				: "Significant speed reduction detected - possible contention issue";
 
 	const speedDescription =
-		agg.speed_tier === "Fast"
+		agg.speed_tier >= 4
 			? "Excellent speeds suitable for all workloads"
-			: agg.speed_tier === "Moderate"
+			: agg.speed_tier === 3
 				? "Good speeds for most applications"
 				: "May experience issues with bandwidth-intensive tasks";
 
@@ -171,7 +185,7 @@ export default function InsightsCards({ data }: InsightsCardsProps) {
 					<span className="text-sm font-medium text-gray-600">Speed Tier</span>
 				</div>
 				<div className={`text-lg font-bold ${speedStyle.color} mb-1`}>
-					{agg.speed_tier} ({agg.average_download_mbps.toFixed(0)} Mbps)
+					{agg.speed_tier}/5 ({agg.average_download_mbps.toFixed(0)} Mbps)
 				</div>
 				<p className="text-sm text-gray-600">{speedDescription}</p>
 			</div>

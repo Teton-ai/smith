@@ -16,8 +16,8 @@ pub struct AggregateEvaluation {
     pub bandwidth_health: String,
     /// Percentage change from first to last minute average (negative = degradation)
     pub bandwidth_health_trend_percent: f64,
-    /// "Fast", "Moderate", or "Slow"
-    pub speed_tier: String,
+    /// 1–5 (1 = slowest, 5 = fastest), aligned with device_network.network_score
+    pub speed_tier: u8,
     pub average_download_mbps: f64,
     /// Coefficient of variation as a percentage (stdDev/mean * 100)
     pub coefficient_of_variation: f64,
@@ -59,7 +59,7 @@ fn compute_aggregate(results: &[DeviceExtendedTestResult]) -> AggregateEvaluatio
         return AggregateEvaluation {
             bandwidth_health: "Stable".to_string(),
             bandwidth_health_trend_percent: 0.0,
-            speed_tier: "Slow".to_string(),
+            speed_tier: 1,
             average_download_mbps: 0.0,
             coefficient_of_variation: 0.0,
             coverage_quality: "Consistent".to_string(),
@@ -123,7 +123,7 @@ fn compute_aggregate(results: &[DeviceExtendedTestResult]) -> AggregateEvaluatio
     AggregateEvaluation {
         bandwidth_health: bandwidth_health_label(trend_percent).to_string(),
         bandwidth_health_trend_percent: trend_percent,
-        speed_tier: speed_tier_label(overall_avg).to_string(),
+        speed_tier: speed_tier_score(overall_avg),
         average_download_mbps: overall_avg,
         coefficient_of_variation: cv,
         coverage_quality: coverage_quality_label(cv).to_string(),
@@ -196,7 +196,7 @@ fn compute_device_label(stats: &[MinuteStats]) -> String {
         return "Variable".to_string();
     }
 
-    speed_tier_label(avg).to_string()
+    speed_tier_label_str(speed_tier_score(avg)).to_string()
 }
 
 fn compute_device_diagnoses(
@@ -322,13 +322,25 @@ fn bandwidth_health_label(trend_percent: f64) -> &'static str {
     }
 }
 
-fn speed_tier_label(avg_mbps: f64) -> &'static str {
-    if avg_mbps >= 100.0 {
-        "Fast"
-    } else if avg_mbps >= 50.0 {
-        "Moderate"
+fn speed_tier_score(avg_mbps: f64) -> u8 {
+    if avg_mbps >= 50.0 {
+        5
+    } else if avg_mbps >= 25.0 {
+        4
+    } else if avg_mbps >= 10.0 {
+        3
+    } else if avg_mbps >= 5.0 {
+        2
     } else {
-        "Slow"
+        1
+    }
+}
+
+fn speed_tier_label_str(score: u8) -> &'static str {
+    match score {
+        4..=5 => "Fast",
+        3 => "Moderate",
+        _ => "Slow",
     }
 }
 

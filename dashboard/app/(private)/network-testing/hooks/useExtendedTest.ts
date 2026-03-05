@@ -71,7 +71,7 @@ export interface DeviceExtendedTestResult {
 export interface AggregateEvaluation {
 	bandwidth_health: string;
 	bandwidth_health_trend_percent: number;
-	speed_tier: string;
+	speed_tier: number;
 	average_download_mbps: number;
 	coefficient_of_variation: number;
 	coverage_quality: string;
