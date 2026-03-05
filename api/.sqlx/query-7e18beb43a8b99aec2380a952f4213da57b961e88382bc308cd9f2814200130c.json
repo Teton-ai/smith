@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        INSERT INTO command_queue (device_id, cmd, continue_on_error, canceled, bundle)\n        SELECT unnest($1::int[]), $2::jsonb, false, false, $3\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int4Array",
+        "Jsonb",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "7e18beb43a8b99aec2380a952f4213da57b961e88382bc308cd9f2814200130c"
+}
