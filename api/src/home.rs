@@ -155,6 +155,51 @@ pub async fn save_responses(
                         .await?;
                 }
             }
+            SafeCommandRx::ExtendedNetworkTest { ref samples, .. } => {
+                if !samples.is_empty() {
+                    let avg_download =
+                        samples.iter().map(|s| s.download_mbps).sum::<f64>() / samples.len() as f64;
+
+                    let upload_samples: Vec<f64> =
+                        samples.iter().filter_map(|s| s.upload_mbps).collect();
+                    let avg_upload = if upload_samples.is_empty() {
+                        None
+                    } else {
+                        Some(upload_samples.iter().sum::<f64>() / upload_samples.len() as f64)
+                    };
+
+                    let network_score = if avg_download >= 50.0 {
+                        5
+                    } else if avg_download >= 25.0 {
+                        4
+                    } else if avg_download >= 10.0 {
+                        3
+                    } else if avg_download >= 5.0 {
+                        2
+                    } else {
+                        1
+                    };
+
+                    sqlx::query!(
+                        "INSERT INTO device_network (device_id, network_score, download_speed_mbps, upload_speed_mbps, source, updated_at)
+                        VALUES ($1, $2, $3, $4, $5, NOW())
+                        ON CONFLICT (device_id)
+                        DO UPDATE SET
+                            network_score = EXCLUDED.network_score,
+                            download_speed_mbps = EXCLUDED.download_speed_mbps,
+                            upload_speed_mbps = EXCLUDED.upload_speed_mbps,
+                            source = EXCLUDED.source,
+                            updated_at = NOW()",
+                        device_id,
+                        network_score,
+                        avg_download,
+                        avg_upload,
+                        "extended_test"
+                    )
+                    .execute(pool)
+                    .await?;
+                }
+            }
             _ => {}
         }
         let _response_id = sqlx::query_scalar!(
