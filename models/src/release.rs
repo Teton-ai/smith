@@ -9,6 +9,7 @@ pub struct Release {
     pub version: String,
     pub draft: bool,
     pub yanked: bool,
+    pub release_candidate: bool,
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub user_id: Option<i32>,
     pub user_email: Option<String>,

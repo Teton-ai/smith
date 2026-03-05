@@ -177,6 +177,7 @@ const DistributionDetailPage = () => {
 				data: {
 					packages: getDistributionReleasePackages.data.map((p) => p.id),
 					version: finalVersion,
+					release_candidate: isReleaseCandidate,
 				},
 			});
 
@@ -478,6 +479,11 @@ const DistributionDetailPage = () => {
 													{release.draft && (
 														<span className="px-2 py-1 text-xs font-medium bg-yellow-100 text-yellow-800 rounded-full">
 															Draft
+														</span>
+													)}
+													{release.release_candidate && (
+														<span className="px-2 py-1 text-xs font-medium bg-orange-100 text-orange-700 rounded-full">
+															RC
 														</span>
 													)}
 													{release.yanked && (

@@ -254,10 +254,11 @@ pub async fn create_distribution_release(
     })?;
 
     let release = sqlx::query!(
-        "INSERT INTO release (distribution_id, version, user_id) VALUES ($1, $2, $3) RETURNING id",
+        "INSERT INTO release (distribution_id, version, user_id, release_candidate) VALUES ($1, $2, $3, $4) RETURNING id",
         distribution_id,
         distribution_release.version,
-        current_user.user_id
+        current_user.user_id,
+        distribution_release.release_candidate
     )
     .fetch_one(&mut *tx)
     .await

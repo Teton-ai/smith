@@ -286,6 +286,7 @@ async fn draft_release(config: crate::config::Config) -> anyhow::Result<()> {
             NewDistributionRelease {
                 version,
                 packages: packages.into_iter().map(|p| p.id).collect(),
+                release_candidate: as_rc,
             },
         )
         .await?;

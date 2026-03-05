@@ -40,16 +40,21 @@
       },
       {
         "ordinal": 7,
+        "name": "release_candidate",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 8,
         "name": "distribution_name",
         "type_info": "Text"
       },
       {
-        "ordinal": 8,
+        "ordinal": 9,
         "name": "distribution_architecture",
         "type_info": "Text"
       },
       {
-        "ordinal": 9,
+        "ordinal": 10,
         "name": "user_email",
         "type_info": "Varchar"
       }
@@ -65,6 +70,7 @@
       false,
       false,
       true,
+      false,
       false,
       false,
       true

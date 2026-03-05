@@ -270,11 +270,15 @@ pub async fn confirm_full_rollout(
     }
 
     let release = sqlx::query!(
-        "SELECT distribution_id FROM release WHERE id = $1",
+        "SELECT distribution_id, release_candidate FROM release WHERE id = $1",
         release_id
     )
     .fetch_one(&mut *tx)
     .await?;
+
+    if release.release_candidate {
+        anyhow::bail!("Cannot perform full rollout for a release candidate");
+    }
 
     let deployment_devices = sqlx::query!(
         "SELECT device_id

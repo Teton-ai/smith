@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT distribution_id, release_candidate FROM release WHERE id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "distribution_id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "release_candidate",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "7cc8f4b260c9d958f78bdc60818c449e36b8fc3492ee0666cf95ac0ebda7e224"
+}

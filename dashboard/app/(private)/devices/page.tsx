@@ -37,6 +37,7 @@ import {
 	useIssueCommandsToDevices,
 	useUpdateDevicesTargetRelease,
 } from "../../api-client";
+import { isStableRelease } from "../../utils/release";
 
 const Tooltip = ({
 	children,
@@ -259,7 +260,7 @@ const DevicesPage = () => {
 			{ id: number; latestRelease: Release; count: number }
 		> = {};
 		const sorted = [...allReleases]
-			.filter((r) => !r.draft && !r.yanked)
+			.filter((r) => isStableRelease(r))
 			.sort(
 				(a, b) =>
 					new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
