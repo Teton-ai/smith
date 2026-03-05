@@ -41,6 +41,7 @@ pub async fn run() {
     let commander = CommanderHandle::new(
         shutdown.signals(),
         Handles {
+            magic: configuration.clone(),
             tunnel: tunnel.clone(),
             updater: updater.clone(),
             downloader: downloader.clone(),

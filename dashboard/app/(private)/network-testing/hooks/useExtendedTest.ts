@@ -125,6 +125,7 @@ export const useExtendedTestStatus = (sessionId: string | null) => {
 
 export interface StartExtendedTestRequest {
 	label_filter: string;
+	serial_numbers?: string[];
 	duration_minutes: number;
 }
 

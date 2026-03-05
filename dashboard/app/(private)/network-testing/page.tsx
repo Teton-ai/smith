@@ -86,9 +86,14 @@ export default function HackathonPage() {
   const handleStartTest = async () => {
     const labelFilter =
       selectionMode === "labels" ? selectedLabels.join(",") : "";
+    const serialNumbers =
+      selectionMode === "devices"
+        ? resolvedDevices.map((d) => d.serial_number)
+        : undefined;
     try {
       const result = await startTestMutation.mutateAsync({
         label_filter: labelFilter,
+        serial_numbers: serialNumbers,
         duration_minutes: durationMinutes,
       });
       setShowStartModal(false);
@@ -131,9 +136,7 @@ export default function HackathonPage() {
         {/* Header */}
         <div className="flex items-center space-x-3">
           <Activity className="w-6 h-6 text-blue-600" />
-          <h1 className="text-2xl font-bold text-gray-900">
-            Network Analyzer Lol
-          </h1>
+          <h1 className="text-2xl font-bold text-gray-900">Network Test</h1>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">

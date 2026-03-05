@@ -213,6 +213,8 @@ pub async fn create_network(
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct StartExtendedTestRequest {
     pub label_filter: String,
+    #[serde(default)]
+    pub serial_numbers: Vec<String>,
     #[serde(default = "default_duration")]
     pub duration_minutes: u32,
 }
@@ -334,27 +336,58 @@ pub async fn start_extended_network_test(
         return Err(StatusCode::CONFLICT);
     }
 
-    // Note: label_filter is accepted for API compatibility but currently ignored
-    // All online devices are targeted regardless of label
-    let _label_filter = request.label_filter.as_str();
+    let label_filters: Vec<String> = request
+        .label_filter
+        .split(',')
+        .filter(|s| !s.is_empty())
+        .map(|s| s.trim().to_string())
+        .collect();
 
     let mut tx = state.pg_pool.begin().await.map_err(|err| {
         error!(error = %err, "Failed to start transaction");
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
 
-    // TEMP: Get all ONLINE devices for testing (ignores label filter)
-    // Online = last_ping within 5 minutes
-    let devices = sqlx::query!(
-        r#"
-        SELECT d.id, d.serial_number
-        FROM device d
-        WHERE d.archived = false
-          AND d.last_ping > NOW() - INTERVAL '5 minutes'
-        "#
-    )
-    .fetch_all(&mut *tx)
-    .await
+    let devices: Vec<(i32, String)> = if !request.serial_numbers.is_empty() {
+        sqlx::query_as(
+            r#"
+            SELECT d.id, d.serial_number
+            FROM device d
+            WHERE d.archived = false
+              AND d.last_ping > NOW() - INTERVAL '5 minutes'
+              AND d.serial_number = ANY($1)
+            "#,
+        )
+        .bind(&request.serial_numbers)
+        .fetch_all(&mut *tx)
+        .await
+    } else if label_filters.is_empty() {
+        sqlx::query_as(
+            r#"
+            SELECT d.id, d.serial_number
+            FROM device d
+            WHERE d.archived = false
+              AND d.last_ping > NOW() - INTERVAL '5 minutes'
+            "#,
+        )
+        .fetch_all(&mut *tx)
+        .await
+    } else {
+        sqlx::query_as(
+            r#"
+            SELECT d.id, d.serial_number
+            FROM device d
+            JOIN device_label dl ON dl.device_id = d.id
+            JOIN label l ON l.id = dl.label_id
+            WHERE d.archived = false
+              AND d.last_ping > NOW() - INTERVAL '5 minutes'
+              AND l.name || '=' || dl.value = ANY($1)
+            "#,
+        )
+        .bind(&label_filters)
+        .fetch_all(&mut *tx)
+        .await
+    }
     .map_err(|err| {
         error!("Failed to query devices: {err}");
         StatusCode::INTERNAL_SERVER_ERROR
@@ -385,8 +418,8 @@ pub async fn start_extended_network_test(
         }
     });
 
-    let device_ids: Vec<i32> = devices.iter().map(|d| d.id).collect();
-    let mut serial_numbers: Vec<String> = devices.iter().map(|d| d.serial_number.clone()).collect();
+    let device_ids: Vec<i32> = devices.iter().map(|d| d.0).collect();
+    let mut serial_numbers: Vec<String> = devices.iter().map(|d| d.1.clone()).collect();
     serial_numbers.sort();
 
     sqlx::query!(

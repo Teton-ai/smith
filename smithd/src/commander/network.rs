@@ -127,8 +127,8 @@ fn process_output(output: std::process::Output) -> (i32, SafeCommandRx) {
     (status_code, SafeCommandRx::WifiConnect { stdout, stderr })
 }
 
-pub(super) async fn test_network(id: i32) -> SafeCommandResponse {
-    let result = perform_network_test().await;
+pub(super) async fn test_network(id: i32, server: &str) -> SafeCommandResponse {
+    let result = perform_network_test(server).await;
     SafeCommandResponse {
         id,
         command: SafeCommandRx::TestNetwork {
@@ -157,8 +157,8 @@ struct NetworkTestResult {
     error: bool,
 }
 
-async fn perform_network_test() -> NetworkTestResult {
-    match perform_network_test_inner().await {
+async fn perform_network_test(server: &str) -> NetworkTestResult {
+    match perform_network_test_inner(server).await {
         Ok(result) => result,
         Err(e) => {
             tracing::error!("Network test failed: {}", e);
@@ -174,12 +174,7 @@ async fn perform_network_test() -> NetworkTestResult {
     }
 }
 
-async fn perform_network_test_inner() -> Result<NetworkTestResult> {
-    let shutdown = ShutdownHandler::new();
-    let configuration = MagicHandle::new(shutdown.signals());
-    configuration.load(None).await;
-
-    let server_api_url = configuration.get_server().await;
+async fn perform_network_test_inner(server_api_url: &str) -> Result<NetworkTestResult> {
     let download_url = format!("{}/network/test-file", server_api_url);
     let upload_url = format!("{}/network/test-upload", server_api_url);
 
@@ -295,8 +290,12 @@ async fn perform_network_test_inner() -> Result<NetworkTestResult> {
 
 // Extended network test implementation
 
-pub(super) async fn extended_network_test(id: i32, duration_minutes: u32) -> SafeCommandResponse {
-    let result = perform_extended_network_test(duration_minutes).await;
+pub(super) async fn extended_network_test(
+    id: i32,
+    duration_minutes: u32,
+    server: &str,
+) -> SafeCommandResponse {
+    let result = perform_extended_network_test(duration_minutes, server).await;
     let status = if result.error.is_some() { -1 } else { 0 };
     SafeCommandResponse {
         id,
@@ -317,7 +316,10 @@ struct ExtendedNetworkTestResult {
     error: Option<String>,
 }
 
-async fn perform_extended_network_test(duration_minutes: u32) -> ExtendedNetworkTestResult {
+async fn perform_extended_network_test(
+    duration_minutes: u32,
+    server: &str,
+) -> ExtendedNetworkTestResult {
     let start = Instant::now();
     let deadline = Duration::from_secs(duration_minutes as u64 * 60);
     let mut samples = Vec::new();
@@ -325,7 +327,7 @@ async fn perform_extended_network_test(duration_minutes: u32) -> ExtendedNetwork
     // Loop existing speedtest until duration reached
     while start.elapsed() < deadline {
         let sample_start = Utc::now();
-        let result = perform_network_test().await;
+        let result = perform_network_test(server).await;
 
         let download_mbps = calculate_mbps(result.bytes_downloaded, result.duration_ms);
         let upload_mbps = result

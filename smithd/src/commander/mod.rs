@@ -1,6 +1,7 @@
 use crate::downloader::DownloaderHandle;
 use crate::filemanager::FileManagerHandle;
 use crate::logstream::LogStreamHandle;
+use crate::magic::MagicHandle;
 use crate::shutdown::ShutdownSignals;
 use crate::tunnel::TunnelHandle;
 use crate::updater::UpdaterHandle;
@@ -19,6 +20,7 @@ mod upgrade;
 mod variable;
 
 pub struct Handles {
+    pub magic: MagicHandle,
     pub tunnel: TunnelHandle,
     pub updater: UpdaterHandle,
     pub downloader: DownloaderHandle,
@@ -87,9 +89,13 @@ impl CommandQueueExecutor {
                 ota::check_ota(action.id, &self.handles.downloader).await
             }
             SafeCommandTx::StartOTA => ota::start_ota(action.id, &self.handles.filemanager).await,
-            SafeCommandTx::TestNetwork => network::test_network(action.id).await,
+            SafeCommandTx::TestNetwork => {
+                let server = self.handles.magic.get_server().await;
+                network::test_network(action.id, &server).await
+            }
             SafeCommandTx::ExtendedNetworkTest { duration_minutes } => {
-                network::extended_network_test(action.id, duration_minutes).await
+                let server = self.handles.magic.get_server().await;
+                network::extended_network_test(action.id, duration_minutes, &server).await
             }
             SafeCommandTx::StreamLogs {
                 session_id,
