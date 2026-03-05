@@ -5,7 +5,6 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
-  SQLX_OFFLINE: "true"
 
 jobs:
   test:
@@ -25,6 +24,9 @@ jobs:
 
       - name: Install libdbus-1-dev and pkg-config
         run: sudo apt install libdbus-1-dev pkg-config
+
+      - name: SQLx offline
+        run: echo "SQLX_OFFLINE=true" > .env
 
       - name: Install SQLx CLI
         run: cargo install sqlx-cli --no-default-features --features native-tls,postgres --locked
