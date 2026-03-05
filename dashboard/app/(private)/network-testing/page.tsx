@@ -15,7 +15,6 @@ import InsightsCards from "./components/InsightsCards";
 import SessionHistory from "./components/SessionHistory";
 import StartTestModal from "./components/StartTestModal";
 import {
-  type DeviceExtendedTestResult,
   type ExtendedTestSessionSummary,
   useStartExtendedTest,
   useExtendedTestStatus,
@@ -50,8 +49,7 @@ export default function HackathonPage() {
   // Modal and test state
   const [showStartModal, setShowStartModal] = useState(false);
   const [durationMinutes, setDurationMinutes] = useState(3);
-  const [selectedDevice, setSelectedDevice] =
-    useState<DeviceExtendedTestResult | null>(null);
+  const [selectedDeviceId, setSelectedDeviceId] = useState<number | null>(null);
 
   // Get serial numbers from resolved devices
   const serialNumbers = resolvedDevices.map((d) => d.serial_number);
@@ -69,6 +67,10 @@ export default function HackathonPage() {
 
   const startTestMutation = useStartExtendedTest();
 
+  // Derive selected device from live session data to avoid stale object during polling
+  const selectedDevice =
+    sessionStatus?.results.find((d) => d.device_id === selectedDeviceId) ?? null;
+
   // Handle devices resolved from selector
   const handleDevicesResolved = useCallback((devices: Device[]) => {
     setResolvedDevices(devices);
@@ -77,7 +79,7 @@ export default function HackathonPage() {
   // Handle session selection from history or dropdown
   const handleSessionSelect = (session: ExtendedTestSessionSummary) => {
     setSelectedSessionId(session.session_id);
-    setSelectedDevice(null);
+    setSelectedDeviceId(null);
     setViewMode("results");
     router.replace(`/network-testing?session=${session.session_id}`);
   };
@@ -120,7 +122,7 @@ export default function HackathonPage() {
   const handleBackToLanding = () => {
     setViewMode("landing");
     setSelectedSessionId(null);
-    setSelectedDevice(null);
+    setSelectedDeviceId(null);
     router.replace("/network-testing");
   };
 
@@ -241,6 +243,7 @@ export default function HackathonPage() {
       <div className="flex items-center space-x-3">
         <button
           onClick={handleBackToLanding}
+          aria-label="Back to network test landing page"
           className="p-1 rounded-md hover:bg-gray-100 transition-colors"
         >
           <ArrowLeft className="w-5 h-5 text-gray-500" />
@@ -269,8 +272,8 @@ export default function HackathonPage() {
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             <DeviceTable
               data={sessionStatus}
-              onSelectDevice={setSelectedDevice}
-              selectedDeviceId={selectedDevice?.device_id ?? null}
+              onSelectDevice={(device) => setSelectedDeviceId(device.device_id)}
+              selectedDeviceId={selectedDeviceId}
             />
 
             {selectedDevice ? (
@@ -279,7 +282,7 @@ export default function HackathonPage() {
                 evaluation={sessionStatus.evaluation.per_device.find(
                   (e) => e.device_id === selectedDevice.device_id
                 )}
-                onClose={() => setSelectedDevice(null)}
+                onClose={() => setSelectedDeviceId(null)}
               />
             ) : (
               <div className="bg-white rounded-lg border border-gray-200 p-8 flex items-center justify-center min-h-[400px]">

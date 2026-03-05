@@ -154,7 +154,7 @@ export default function DeviceTable({
 			setSortDirection((prev) => (prev === "asc" ? "desc" : "asc"));
 		} else {
 			setSortField(field);
-			setSortDirection(field === "serial" ? "asc" : "asc");
+			setSortDirection("asc");
 		}
 	};
 

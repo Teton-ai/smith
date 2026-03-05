@@ -125,7 +125,7 @@ pub enum TestNetworkCommands {
         /// Filter by labels (format: key=value). Can be used multiple times.
         #[arg(short, long = "label", value_name = "KEY=VALUE", required = true)]
         labels: Vec<String>,
-        /// Duration in minutes (3, 5, or 8)
+        /// Duration in minutes (3-8)
         #[arg(short, long, default_value = "3", value_parser = clap::value_parser!(u32).range(3..=8))]
         duration: u32,
         /// Poll for results (wait until completion)

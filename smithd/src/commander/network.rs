@@ -6,7 +6,10 @@ use anyhow::{Context, Result};
 use chrono::Utc;
 use reqwest::Client;
 use std::time::{Duration, Instant};
-use tokio::{process::Command, time::timeout};
+use tokio::{
+    process::Command,
+    time::{sleep, timeout},
+};
 
 pub(super) async fn execute(id: i32, network: Network) -> SafeCommandResponse {
     let network_name = network.name;
@@ -324,6 +327,7 @@ async fn perform_extended_network_test(
 
     // Loop existing speedtest until duration reached
     while start.elapsed() < deadline {
+        let iter_start = Instant::now();
         let sample_start = Utc::now();
         let result = perform_network_test(server).await;
 
@@ -342,6 +346,12 @@ async fn perform_extended_network_test(
             duration_ms: result.duration_ms + result.upload_duration_ms.unwrap_or(0),
             timed_out: result.timed_out,
         });
+
+        // Back off at least 1 second between iterations to avoid tight loops on fast failures
+        let elapsed = iter_start.elapsed();
+        if elapsed < Duration::from_secs(1) {
+            sleep(Duration::from_secs(1) - elapsed).await;
+        }
     }
 
     // Collect network info once at end
@@ -420,19 +430,18 @@ async fn collect_wifi_info() -> Result<NetworkInfo> {
         return Err(anyhow::anyhow!("WiFi not connected"));
     }
 
-    let (ssid, signal_dbm, frequency_mhz, vht_mcs, vht_nss, channel_width_mhz) =
-        parse_iw_link(&link_stdout);
+    let info = parse_iw_link(&link_stdout);
 
     Ok(NetworkInfo {
         interface_type: InterfaceType::Wifi,
         interface_name,
         details: NetworkDetails::Wifi {
-            ssid,
-            signal_dbm,
-            frequency_mhz,
-            vht_mcs,
-            vht_nss,
-            channel_width_mhz,
+            ssid: info.ssid,
+            signal_dbm: info.signal_dbm,
+            frequency_mhz: info.frequency_mhz,
+            vht_mcs: info.vht_mcs,
+            vht_nss: info.vht_nss,
+            channel_width_mhz: info.channel_width_mhz,
         },
     })
 }
@@ -450,14 +459,14 @@ fn parse_iw_interface(output: &str) -> Result<String> {
     Err(anyhow::anyhow!("No wireless interface found"))
 }
 
-type IwLinkInfo = (
-    Option<String>,
-    Option<i32>,
-    Option<u32>,
-    Option<u8>,
-    Option<u8>,
-    Option<u8>,
-);
+struct IwLinkInfo {
+    ssid: Option<String>,
+    signal_dbm: Option<i32>,
+    frequency_mhz: Option<u32>,
+    vht_mcs: Option<u8>,
+    vht_nss: Option<u8>,
+    channel_width_mhz: Option<u8>,
+}
 
 fn parse_iw_link(output: &str) -> IwLinkInfo {
     let mut ssid = None;
@@ -471,28 +480,18 @@ fn parse_iw_link(output: &str) -> IwLinkInfo {
         let trimmed = line.trim();
 
         // SSID: VitaCare Living - Proctor
-        if trimmed.starts_with("SSID:") {
-            ssid = Some(
-                trimmed
-                    .strip_prefix("SSID:")
-                    .unwrap_or("")
-                    .trim()
-                    .to_string(),
-            );
+        if let Some(val) = trimmed.strip_prefix("SSID:") {
+            ssid = Some(val.trim().to_string());
         }
 
         // signal: -67 dBm
-        if trimmed.starts_with("signal:")
-            && let Some(sig_str) = trimmed.strip_prefix("signal:")
-        {
+        if let Some(sig_str) = trimmed.strip_prefix("signal:") {
             let sig_str = sig_str.trim().replace(" dBm", "");
             signal_dbm = sig_str.parse().ok();
         }
 
         // freq: 5240
-        if trimmed.starts_with("freq:")
-            && let Some(freq_str) = trimmed.strip_prefix("freq:")
-        {
+        if let Some(freq_str) = trimmed.strip_prefix("freq:") {
             frequency_mhz = freq_str.trim().parse().ok();
         }
 
@@ -531,14 +530,14 @@ fn parse_iw_link(output: &str) -> IwLinkInfo {
         }
     }
 
-    (
+    IwLinkInfo {
         ssid,
         signal_dbm,
         frequency_mhz,
         vht_mcs,
         vht_nss,
         channel_width_mhz,
-    )
+    }
 }
 
 async fn collect_ethernet_info() -> Result<NetworkInfo> {
@@ -603,22 +602,14 @@ fn parse_ethtool_output(output: &str) -> (Option<u32>, Option<String>, bool) {
         let trimmed = line.trim();
 
         // Speed: 1000Mb/s
-        if trimmed.starts_with("Speed:")
-            && let Some(speed_str) = trimmed.strip_prefix("Speed:")
-        {
+        if let Some(speed_str) = trimmed.strip_prefix("Speed:") {
             let speed_str = speed_str.trim().replace("Mb/s", "");
             speed_mbps = speed_str.parse().ok();
         }
 
         // Duplex: Full
-        if trimmed.starts_with("Duplex:") {
-            duplex = Some(
-                trimmed
-                    .strip_prefix("Duplex:")
-                    .unwrap_or("")
-                    .trim()
-                    .to_string(),
-            );
+        if let Some(val) = trimmed.strip_prefix("Duplex:") {
+            duplex = Some(val.trim().to_string());
         }
 
         // Link detected: yes

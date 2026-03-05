@@ -378,7 +378,7 @@ pub async fn start_extended_network_test(
     } else {
         sqlx::query_as(
             r#"
-            SELECT d.id, d.serial_number
+            SELECT DISTINCT d.id, d.serial_number
             FROM device d
             JOIN device_label dl ON dl.device_id = d.id
             JOIN label l ON l.id = dl.label_id
@@ -569,6 +569,7 @@ pub async fn get_extended_test_status(
     // Build results
     let mut results = Vec::new();
     let mut completed_count = 0;
+    let mut failed_count = 0;
     let mut canceled_count = 0;
 
     for row in &rows {
@@ -590,6 +591,7 @@ pub async fn get_extended_test_status(
 
                 ("completed".to_string(), Some(minute_stats), network_info)
             } else {
+                failed_count += 1;
                 ("failed".to_string(), None, None)
             }
         } else if row.canceled {
@@ -611,8 +613,8 @@ pub async fn get_extended_test_status(
     }
 
     let device_count = rows.len() as i32;
-    // Test is complete when all commands have either responded or been canceled
-    let all_resolved = completed_count + canceled_count == device_count;
+    // Test is complete when all commands have either responded (completed or failed) or been canceled
+    let all_resolved = completed_count + failed_count + canceled_count == device_count;
     let overall_status = if all_resolved {
         if canceled_count > 0 {
             "canceled" // At least some were canceled
@@ -935,11 +937,17 @@ pub async fn find_sessions_by_devices(
     Extension(state): Extension<State>,
 ) -> Result<Json<Vec<ExtendedTestSessionSummary>>, StatusCode> {
     // Parse and sort serial numbers, then compute hash
-    let mut serial_numbers: Vec<&str> = query.serial_numbers.split(',').map(|s| s.trim()).collect();
+    let mut serial_numbers: Vec<&str> = query
+        .serial_numbers
+        .split(',')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .collect();
     if serial_numbers.is_empty() {
         return Err(StatusCode::BAD_REQUEST);
     }
-    serial_numbers.sort();
+    serial_numbers.sort_unstable();
+    serial_numbers.dedup();
     let serial_numbers_str = serial_numbers.join(",");
 
     // Query sessions with matching device_set_hash (using PostgreSQL md5)
