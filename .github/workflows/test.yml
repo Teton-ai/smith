@@ -5,6 +5,7 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  SQLX_OFFLINE: "true"
 
 jobs:
   test:
@@ -41,8 +42,6 @@ jobs:
 
       - name: Check SQLx
         working-directory: api
-        env:
-          SQLX_OFFLINE: "true"
         run: cargo sqlx prepare --check
 
       - name: Run tests
