@@ -289,7 +289,7 @@ pub enum NetworkDetails {
         signal_quality: Option<i32>,
         access_technology: Option<String>,
     },
-    Unknown,
+    Unknown {},
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]

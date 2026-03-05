@@ -27,15 +27,16 @@ function getWifiDetails(details: NetworkDetails): WifiDetails | null {
 }
 
 export default function DeviceInspector({ device, evaluation, onClose }: DeviceInspectorProps) {
-	const chartData =
-		device.minute_stats
-			?.sort((a, b) => a.minute - b.minute)
-			.map((stat) => ({
-				minute: `Min ${stat.minute}`,
-				download: stat.download.average_mbps,
-				upload: stat.upload?.average_mbps ?? null,
-				downloadStdDev: stat.download.std_dev,
-			})) || [];
+	const sortedMinuteStats = [...(device.minute_stats ?? [])].sort(
+		(a, b) => a.minute - b.minute
+	);
+
+	const chartData = sortedMinuteStats.map((stat) => ({
+		minute: `Min ${stat.minute}`,
+		download: stat.download.average_mbps,
+		upload: stat.upload?.average_mbps ?? null,
+		downloadStdDev: stat.download.std_dev,
+	}));
 
 	const diagnoses = evaluation?.diagnoses ?? ["No data available for analysis"];
 	const wifiDetails = device.network_info
@@ -54,10 +55,11 @@ export default function DeviceInspector({ device, evaluation, onClose }: DeviceI
 						<p className="text-xs text-gray-500">Device Inspector</p>
 					</div>
 				</div>
-				<button
-					onClick={onClose}
-					className="p-1 rounded-md hover:bg-gray-100 transition-colors"
-				>
+			<button
+				onClick={onClose}
+				aria-label="Close device inspector"
+				className="p-1 rounded-md hover:bg-gray-100 transition-colors"
+			>
 					<X className="w-5 h-5 text-gray-400" />
 				</button>
 			</div>
@@ -258,7 +260,7 @@ export default function DeviceInspector({ device, evaluation, onClose }: DeviceI
 				</div>
 
 				{/* Statistics Table */}
-				{device.minute_stats && device.minute_stats.length > 0 && (
+				{sortedMinuteStats.length > 0 && (
 					<div>
 						<h4 className="text-sm font-medium text-gray-700 mb-3">
 							Per-Minute Statistics
@@ -285,9 +287,7 @@ export default function DeviceInspector({ device, evaluation, onClose }: DeviceI
 									</tr>
 								</thead>
 								<tbody className="divide-y divide-gray-200">
-									{device.minute_stats
-										.sort((a, b) => a.minute - b.minute)
-										.map((stat) => (
+									{sortedMinuteStats.map((stat) => (
 											<tr key={stat.minute}>
 												<td className="px-3 py-2 text-gray-900">{stat.minute}</td>
 												<td className="px-3 py-2 text-gray-600">

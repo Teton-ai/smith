@@ -1,7 +1,7 @@
 "use client";
 
 import { Activity, CheckCircle, Clock, Cpu, Loader2, StopCircle, TrendingDown, TrendingUp } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { type ExtendedTestStatus, useCancelExtendedTest } from "../hooks/useExtendedTest";
 
 interface DepartmentOverviewProps {
@@ -31,7 +31,8 @@ function calculateTimeRemaining(createdAt: string, durationMinutes: number): { r
 	const elapsed = Math.floor((now - startTime) / 1000);
 	// Allow negative remaining to calculate overtime
 	const remaining = Math.floor((endTime - now) / 1000);
-	const progress = Math.min(100, (elapsed / (durationMinutes * 60)) * 100);
+	const totalSeconds = Math.max(1, durationMinutes * 60);
+	const progress = Math.min(100, Math.max(0, (elapsed / totalSeconds) * 100));
 	return { remaining, elapsed, progress };
 }
 
@@ -49,7 +50,7 @@ export default function DepartmentOverview({ data }: DepartmentOverviewProps) {
 			? Math.round((data.completed_count / data.device_count) * 100)
 			: 0;
 
-	const hasStats = hasCompletedResults(data);
+	const hasStats = useMemo(() => hasCompletedResults(data), [data]);
 	const agg = hasStats ? data.evaluation.aggregate : null;
 	const bandwidthHealth = agg ? getBandwidthHealthStyle(agg.bandwidth_health) : null;
 	const isRunning = data.status === "running" || data.status === "pending" || data.status === "partial";

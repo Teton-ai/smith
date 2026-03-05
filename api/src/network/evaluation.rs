@@ -283,17 +283,17 @@ fn compute_device_diagnoses(
     }
 
     // WiFi signal analysis
-    if let Some(info) = network_info {
-        if let Some(signal_dbm) = get_wifi_signal_dbm(info) {
-            if signal_dbm < -75 {
-                diagnoses.push(format!(
-                    "Weak WiFi signal ({signal_dbm} dBm) - consider moving device closer to access point"
-                ));
-            } else if signal_dbm < -65 {
-                diagnoses.push(format!(
-                    "Fair WiFi signal ({signal_dbm} dBm) - signal could be improved"
-                ));
-            }
+    if let Some(info) = network_info
+        && let Some(signal_dbm) = get_wifi_signal_dbm(info)
+    {
+        if signal_dbm < -75 {
+            diagnoses.push(format!(
+                "Weak WiFi signal ({signal_dbm} dBm) - consider moving device closer to access point"
+            ));
+        } else if signal_dbm < -65 {
+            diagnoses.push(format!(
+                "Fair WiFi signal ({signal_dbm} dBm) - signal could be improved"
+            ));
         }
     }
 

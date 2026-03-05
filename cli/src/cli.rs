@@ -132,7 +132,7 @@ pub enum TestNetworkCommands {
         #[arg(short, long)]
         wait: bool,
         /// Poll interval in seconds (default: 30)
-        #[arg(long, default_value = "30")]
+        #[arg(long, default_value_t = 30, value_parser = clap::value_parser!(u64).range(1..))]
         poll_interval: u64,
     },
     /// Check status of an extended network test session

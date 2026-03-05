@@ -25,7 +25,7 @@ elif [[ "$NETWORK_THROTTLE" =~ ^[0-9]+$ ]]; then
     BANDWIDTH=$NETWORK_THROTTLE
 else
     echo "Invalid NETWORK_THROTTLE value: $NETWORK_THROTTLE"
-    exit 0
+    exit 1
 fi
 
 # Add random latency between 5-50ms

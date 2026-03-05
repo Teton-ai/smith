@@ -109,7 +109,10 @@ export default function HackathonPage() {
   // Handle view for selected devices
   const handleViewResults = () => {
     if (matchingSessions && matchingSessions.length > 0) {
-      handleSessionSelect(matchingSessions[0]);
+      const latest = [...matchingSessions].sort(
+        (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+      )[0];
+      handleSessionSelect(latest);
     }
   };
 

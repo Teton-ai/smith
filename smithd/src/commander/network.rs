@@ -450,16 +450,16 @@ fn parse_iw_interface(output: &str) -> Result<String> {
     Err(anyhow::anyhow!("No wireless interface found"))
 }
 
-fn parse_iw_link(
-    output: &str,
-) -> (
+type IwLinkInfo = (
     Option<String>,
     Option<i32>,
     Option<u32>,
     Option<u8>,
     Option<u8>,
     Option<u8>,
-) {
+);
+
+fn parse_iw_link(output: &str) -> IwLinkInfo {
     let mut ssid = None;
     let mut signal_dbm = None;
     let mut frequency_mhz = None;
@@ -482,18 +482,18 @@ fn parse_iw_link(
         }
 
         // signal: -67 dBm
-        if trimmed.starts_with("signal:") {
-            if let Some(sig_str) = trimmed.strip_prefix("signal:") {
-                let sig_str = sig_str.trim().replace(" dBm", "");
-                signal_dbm = sig_str.parse().ok();
-            }
+        if trimmed.starts_with("signal:")
+            && let Some(sig_str) = trimmed.strip_prefix("signal:")
+        {
+            let sig_str = sig_str.trim().replace(" dBm", "");
+            signal_dbm = sig_str.parse().ok();
         }
 
         // freq: 5240
-        if trimmed.starts_with("freq:") {
-            if let Some(freq_str) = trimmed.strip_prefix("freq:") {
-                frequency_mhz = freq_str.trim().parse().ok();
-            }
+        if trimmed.starts_with("freq:")
+            && let Some(freq_str) = trimmed.strip_prefix("freq:")
+        {
+            frequency_mhz = freq_str.trim().parse().ok();
         }
 
         // rx bitrate: 162.0 MBit/s VHT-MCS 4 40MHz VHT-NSS 2
@@ -552,11 +552,11 @@ async fn collect_ethernet_info() -> Result<NetworkInfo> {
             if name.starts_with("eth") || name.starts_with("en") {
                 // Check if it has carrier (is connected)
                 let carrier_path = format!("/sys/class/net/{}/carrier", name);
-                if let Ok(carrier) = tokio::fs::read_to_string(&carrier_path).await {
-                    if carrier.trim() == "1" {
-                        interface_name = Some(name);
-                        break;
-                    }
+                if let Ok(carrier) = tokio::fs::read_to_string(&carrier_path).await
+                    && carrier.trim() == "1"
+                {
+                    interface_name = Some(name);
+                    break;
                 }
             }
         }
@@ -603,11 +603,11 @@ fn parse_ethtool_output(output: &str) -> (Option<u32>, Option<String>, bool) {
         let trimmed = line.trim();
 
         // Speed: 1000Mb/s
-        if trimmed.starts_with("Speed:") {
-            if let Some(speed_str) = trimmed.strip_prefix("Speed:") {
-                let speed_str = speed_str.trim().replace("Mb/s", "");
-                speed_mbps = speed_str.parse().ok();
-            }
+        if trimmed.starts_with("Speed:")
+            && let Some(speed_str) = trimmed.strip_prefix("Speed:")
+        {
+            let speed_str = speed_str.trim().replace("Mb/s", "");
+            speed_mbps = speed_str.parse().ok();
         }
 
         // Duplex: Full
@@ -702,15 +702,15 @@ async fn collect_lte_info() -> Result<NetworkInfo> {
 fn parse_modem_index(output: &str) -> Result<u32> {
     // Parse output like: /org/freedesktop/ModemManager1/Modem/0 [Quectel] EC25
     for line in output.lines() {
-        if line.contains("/Modem/") {
-            if let Some(modem_part) = line.split("/Modem/").nth(1) {
-                if let Some(space_idx) = modem_part.find(' ') {
-                    if let Ok(idx) = modem_part[..space_idx].parse() {
-                        return Ok(idx);
-                    }
-                } else if let Ok(idx) = modem_part.trim().parse() {
+        if line.contains("/Modem/")
+            && let Some(modem_part) = line.split("/Modem/").nth(1)
+        {
+            if let Some(space_idx) = modem_part.find(' ') {
+                if let Ok(idx) = modem_part[..space_idx].parse() {
                     return Ok(idx);
                 }
+            } else if let Ok(idx) = modem_part.trim().parse() {
+                return Ok(idx);
             }
         }
     }
@@ -731,12 +731,12 @@ fn parse_mmcli_output(output: &str) -> (Option<String>, Option<i32>, Option<Stri
         }
 
         // signal quality: 75% (recent)
-        if trimmed.contains("signal quality:") {
-            if let Some(quality_part) = trimmed.split(':').nth(1) {
-                let cleaned = quality_part.trim().replace('%', "");
-                let quality_str = cleaned.split_whitespace().next().unwrap_or("");
-                signal_quality = quality_str.parse().ok();
-            }
+        if trimmed.contains("signal quality:")
+            && let Some(quality_part) = trimmed.split(':').nth(1)
+        {
+            let cleaned = quality_part.trim().replace('%', "");
+            let quality_str = cleaned.split_whitespace().next().unwrap_or("");
+            signal_quality = quality_str.parse().ok();
         }
 
         // access tech: lte
