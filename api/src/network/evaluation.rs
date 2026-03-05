@@ -82,11 +82,7 @@ fn compute_aggregate(results: &[DeviceExtendedTestResult]) -> AggregateEvaluatio
     let overall_avg = mean(&device_avg_speeds);
 
     // CV across device averages
-    let overall_variance = device_avg_speeds
-        .iter()
-        .map(|v| (v - overall_avg).powi(2))
-        .sum::<f64>()
-        / device_avg_speeds.len() as f64;
+    let overall_variance = variance(&device_avg_speeds);
     let cv = if overall_avg > 0.0 {
         (overall_variance.sqrt() / overall_avg) * 100.0
     } else {
@@ -167,12 +163,7 @@ fn compute_device_label(stats: &[MinuteStats]) -> String {
     let download_speeds: Vec<f64> = stats.iter().map(|s| s.download.average_mbps).collect();
     let avg = mean(&download_speeds);
 
-    let variance = download_speeds
-        .iter()
-        .map(|v| (v - avg).powi(2))
-        .sum::<f64>()
-        / download_speeds.len() as f64;
-    let std_dev = variance.sqrt();
+    let std_dev = variance(&download_speeds).sqrt();
 
     let first = stats
         .iter()
@@ -247,12 +238,7 @@ fn compute_device_diagnoses(
     }
 
     // Variance analysis
-    let variance = download_speeds
-        .iter()
-        .map(|v| (v - avg_download).powi(2))
-        .sum::<f64>()
-        / download_speeds.len() as f64;
-    let std_dev = variance.sqrt();
+    let std_dev = variance(&download_speeds).sqrt();
     let cv = if avg_download > 0.0 {
         (std_dev / avg_download) * 100.0
     } else {
@@ -316,6 +302,14 @@ fn mean(values: &[f64]) -> f64 {
         return 0.0;
     }
     values.iter().sum::<f64>() / values.len() as f64
+}
+
+fn variance(values: &[f64]) -> f64 {
+    if values.is_empty() {
+        return 0.0;
+    }
+    let avg = mean(values);
+    values.iter().map(|v| (v - avg).powi(2)).sum::<f64>() / values.len() as f64
 }
 
 fn bandwidth_health_label(trend_percent: f64) -> &'static str {

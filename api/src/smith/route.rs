@@ -360,7 +360,7 @@ pub async fn list_release_packages(
         (status = 200, description = "Returns a 20MB test file for network speed testing"),
     )
 )]
-pub async fn test_file() -> Response<Body> {
+pub async fn test_file() -> Result<Response<Body>, StatusCode> {
     const FILE_SIZE: usize = 20 * 1024 * 1024; // 20MB
     const CHUNK_SIZE: usize = 64 * 1024; // 64KB chunks
     const NUM_CHUNKS: usize = FILE_SIZE / CHUNK_SIZE;
@@ -377,7 +377,7 @@ pub async fn test_file() -> Response<Body> {
         .header("Content-Type", "application/octet-stream")
         .header("Content-Length", FILE_SIZE.to_string())
         .body(Body::from_stream(body_stream))
-        .unwrap()
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
 }
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
