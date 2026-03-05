@@ -27,6 +27,35 @@ Smith consists of five main components:
 
 Visit our [documentation](https://docs.smith.teton.ai) to get started with Smith.
 
+## Local Development
+
+**Prerequisites:** Docker
+
+```bash
+make init       # creates .env and dashboard/.env from templates
+make up         # starts all services (api, dashboard, postgres, bore, device)
+make migrate    # runs database migrations
+make seed       # seeds the database with test data
+```
+
+- API: `http://localhost:8080`
+- Dashboard: `http://localhost:3000`
+
+### Device options
+
+Set in `.env` or inline with `docker compose up`:
+
+| Variable | Default | Description |
+|---|---|---|
+| `DEVICE_BASE_IMAGE` | `nvcr.io/nvidia/l4t-base:r36.2.0` | Base image. Use `ubuntu:22.04` on x86_64. |
+| `DEVICE_REPLICAS` | `1` | Number of simulated devices |
+| `NETWORK_THROTTLE` | `random` | `none`, `random`, or a fixed Mbps value |
+| `GLOBAL_BANDWIDTH_LIMIT` | `100` | API egress cap in Mbps |
+
+```bash
+DEVICE_BASE_IMAGE=ubuntu:22.04 DEVICE_REPLICAS=3 NETWORK_THROTTLE=none docker compose up
+```
+
 ## Contributing
 
 We welcome contributions! Whether you're fixing bugs, adding features, or improving documentation, your help makes Smith better for everyone. Check out our issues or submit a PR.
