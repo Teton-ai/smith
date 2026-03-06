@@ -103,3 +103,13 @@ jobs:
           make_latest: true
         env:
           GITHUB_TOKEN: ${{ secrets.RELEASE_PR_TOKEN }}
+
+      - name: Notify infrastructure
+        if: |
+          startsWith(env.COMMIT_MSG, format('chore(release): v', env.VERSION))
+        run: |
+          gh api repos/Teton-ai/smith-infrastructure/dispatches \
+            -f event_type=smith-release \
+            -f "client_payload[version]=${{ env.VERSION }}"
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PR_TOKEN }}
