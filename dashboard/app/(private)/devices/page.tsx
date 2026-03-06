@@ -150,6 +150,7 @@ const DevicesPage = () => {
 	const [debouncedSearchTerm, setDebouncedSearchTerm] = useState("");
 	const [showOutdatedOnly, setShowOutdatedOnly] = useState(false);
 	const [showPendingApproval, setShowPendingApproval] = useState(false);
+	const [showServiceDown, setShowServiceDown] = useState(false);
 	const [labelFilters, setLabelFilters] = useState<string[]>([]);
 	const [onlineStatusFilter, setOnlineStatusFilter] = useState<
 		"all" | "online" | "offline"
@@ -224,6 +225,7 @@ const DevicesPage = () => {
 			search: debouncedSearchTerm.trim() || undefined,
 			outdated: showOutdatedOnly || undefined,
 			approved: showPendingApproval ? false : undefined,
+			service_not_running: showServiceDown || undefined,
 			release_id: releaseFilter,
 			distribution_id: distributionFilter,
 			limit: PAGE_SIZE,
@@ -478,6 +480,11 @@ const DevicesPage = () => {
 			setShowPendingApproval(true);
 		}
 
+		const serviceDownParam = searchParams.get("service_not_running");
+		if (serviceDownParam === "true") {
+			setShowServiceDown(true);
+		}
+
 		if (online) {
 			setOnlineStatusFilter(online as "all" | "online" | "offline");
 		}
@@ -617,6 +624,12 @@ const DevicesPage = () => {
 		setShowPendingApproval(newValue);
 		setSelectedDeviceIds(new Set());
 		updateURL({ approved: newValue ? "false" : undefined });
+	};
+
+	const handleServiceDownToggle = () => {
+		const newValue = !showServiceDown;
+		setShowServiceDown(newValue);
+		updateURL({ service_not_running: newValue ? "true" : undefined });
 	};
 
 	const handleApproveAndAssign = async () => {
@@ -835,6 +848,17 @@ const DevicesPage = () => {
 							onClick={handlePendingApprovalToggle}
 						>
 							Pending Approval
+						</Button>
+
+						{/* Service Not Running Filter */}
+						<Button
+							variant={showServiceDown ? "warning" : "secondary"}
+							className={
+								showServiceDown ? "bg-orange-600 hover:bg-orange-700" : ""
+							}
+							onClick={handleServiceDownToggle}
+						>
+							Service Down
 						</Button>
 
 						{/* Release Filter Dropdown */}

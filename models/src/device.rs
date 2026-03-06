@@ -74,6 +74,8 @@ pub struct DeviceFilter {
     pub release_id: Option<i32>,
     /// Filter by distribution ID. Only devices with a release from this distribution are included.
     pub distribution_id: Option<i32>,
+    /// Filter by service health. If true, only devices with at least one monitored service not in 'active' state.
+    pub service_not_running: Option<bool>,
 }
 
 #[derive(Debug, Serialize, Deserialize, utoipa::ToSchema, Clone)]
