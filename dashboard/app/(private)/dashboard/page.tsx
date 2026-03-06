@@ -1,6 +1,7 @@
 "use client";
 
 import {
+	Activity,
 	AlertTriangle,
 	CheckCircle,
 	ChevronRight,
@@ -30,6 +31,10 @@ import {
 	useGetDevices,
 	useGetRegistrationCounts,
 } from "../../api-client";
+import {
+	type UnhealthyServiceDevice,
+	useUnhealthyServices,
+} from "./useUnhealthyServices";
 
 const AdminPanel = () => {
 	const { config } = useConfig();
@@ -68,6 +73,8 @@ const AdminPanel = () => {
 			},
 			{ query: { refetchInterval: 5000 } },
 		);
+
+	const { data: unhealthyServices = [] } = useUnhealthyServices();
 
 	const { data: registrationData } = useGetRegistrationCounts();
 
@@ -113,6 +120,26 @@ const AdminPanel = () => {
 	}, [registrationData, granularity]);
 
 	const loading = dashboardQuery.isLoading || outdatedLoading || offlineLoading;
+
+	// Group unhealthy services by device
+	const unhealthyByDevice = useMemo(() => {
+		const map = new Map<
+			string,
+			{ serial_number: string; services: UnhealthyServiceDevice[] }
+		>();
+		for (const entry of unhealthyServices) {
+			const existing = map.get(entry.serial_number);
+			if (existing) {
+				existing.services.push(entry);
+			} else {
+				map.set(entry.serial_number, {
+					serial_number: entry.serial_number,
+					services: [entry],
+				});
+			}
+		}
+		return Array.from(map.values());
+	}, [unhealthyServices]);
 
 	const getDeviceName = (device: Device) => device.serial_number;
 
@@ -198,6 +225,7 @@ const AdminPanel = () => {
 		categorizeOffline(offlineDevices);
 	const hasAttentionDevices =
 		stuckUpdates.length > 0 ||
+		unhealthyByDevice.length > 0 ||
 		recentlyOffline.length > 0 ||
 		offlineWeek.length > 0 ||
 		offlineMonth.length > 0 ||
@@ -443,6 +471,53 @@ const AdminPanel = () => {
 							</div>
 						)}
 					</div>
+
+					{/* Unhealthy Services Section */}
+					{unhealthyByDevice.length > 0 && (
+						<div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+							<div className="bg-rose-50 px-4 py-3 border-b border-gray-200">
+								<h4 className="text-sm font-semibold text-rose-800 flex items-center">
+									<Activity className="w-4 h-4 mr-2" />
+									Service Not Running ({unhealthyByDevice.length})
+								</h4>
+							</div>
+							<div className="divide-y divide-gray-200">
+								{unhealthyByDevice.slice(0, 10).map((device) => (
+									<Link
+										key={device.serial_number}
+										className="block px-4 py-3 hover:bg-rose-50 cursor-pointer transition-colors"
+										href={`/devices/${device.serial_number}`}
+									>
+										<div className="flex items-center justify-between">
+											<div className="flex items-center space-x-3 flex-1">
+												<span className="font-mono text-sm text-gray-900">
+													{device.serial_number}
+												</span>
+											</div>
+											<div className="flex items-center space-x-3 text-sm">
+												<span className="text-rose-600 font-mono">
+													{device.services
+														.map((s) => s.service_name)
+														.join(", ")}
+												</span>
+												<ChevronRight className="w-4 h-4 text-gray-400 flex-shrink-0" />
+											</div>
+										</div>
+									</Link>
+								))}
+								{unhealthyByDevice.length > 10 && (
+									<div className="px-4 py-3 bg-gray-50">
+										<Link
+											href="/devices?service_not_running=true&online=online"
+											className="block text-sm text-blue-600 hover:text-blue-800 cursor-pointer"
+										>
+											View all {unhealthyByDevice.length} devices →
+										</Link>
+									</div>
+								)}
+							</div>
+						</div>
+					)}
 
 					{/* Recently Offline Section */}
 					{recentlyOffline.length > 0 && (

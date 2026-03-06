@@ -28,6 +28,23 @@ import { useInfiniteQuery, useMutation, useQuery } from "@tanstack/react-query";
 import { useCallback } from "react";
 
 import { useClientMutator } from "./api-client-mutator";
+export interface AggregateEvaluation {
+	average_download_mbps: number;
+	/** "Stable", "Moderate Degradation", or "Bandwidth Degrades Under Load" */
+	bandwidth_health: string;
+	/** Percentage change from first to last minute average (negative = degradation) */
+	bandwidth_health_trend_percent: number;
+	/** Coefficient of variation as a percentage (stdDev/mean * 100) */
+	coefficient_of_variation: number;
+	/** "Consistent", "Variable", or "Poor Coverage" */
+	coverage_quality: string;
+	/**
+	 * 1–5 (1 = slowest, 5 = fastest), aligned with device_network.network_score
+	 * @minimum 0
+	 */
+	speed_tier: number;
+}
+
 export interface ApproveDeviceBody {
 	target_release_id?: number;
 }
@@ -49,6 +66,11 @@ export interface BundleWithCommandsPaginated {
 	bundles: BundleWithCommands[];
 	next?: string;
 	previous?: string;
+}
+
+export interface CancelExtendedTestResponse {
+	canceled_count: number;
+	message: string;
 }
 
 export interface CommandsPaginated {
@@ -167,6 +189,20 @@ export interface DeviceCommandResponse {
 	status?: number;
 }
 
+export type DeviceExtendedTestResultMinuteStatsItem = {
+	[key: string]: unknown;
+};
+
+export type DeviceExtendedTestResultNetworkInfo = { [key: string]: unknown };
+
+export interface DeviceExtendedTestResult {
+	device_id: number;
+	minute_stats?: DeviceExtendedTestResultMinuteStatsItem[];
+	network_info?: DeviceExtendedTestResultNetworkInfo;
+	serial_number: string;
+	status: string;
+}
+
 export interface DeviceHealth {
 	id: number;
 	is_healthy?: boolean;
@@ -242,6 +278,32 @@ export interface DistributionRolloutStats {
 	pending_devices?: number;
 	total_devices?: number;
 	updated_devices?: number;
+}
+
+export interface Evaluation {
+	aggregate: AggregateEvaluation;
+	per_device: PerDeviceEvaluation[];
+}
+
+export interface ExtendedTestSessionSummary {
+	completed_count: number;
+	created_at: string;
+	device_count: number;
+	label_filter: string;
+	session_id: string;
+	status: string;
+}
+
+export interface ExtendedTestStatus {
+	completed_count: number;
+	created_at: string;
+	device_count: number;
+	duration_minutes: number;
+	evaluation: Evaluation;
+	label_filter: string;
+	results: DeviceExtendedTestResult[];
+	session_id: string;
+	status: string;
 }
 
 export interface IpAddressInfo {
@@ -326,6 +388,14 @@ export interface Package {
 	version: string;
 }
 
+export interface PerDeviceEvaluation {
+	device_id: number;
+	diagnoses: string[];
+	/** "Degrading", "Variable", "Fast", "Moderate", or "Slow" */
+	label: string;
+	serial_number: string;
+}
+
 export interface Proc {
 	stat: ProcStat;
 	version: string;
@@ -399,6 +469,19 @@ export interface Smith {
 	version: string;
 }
 
+export interface StartExtendedTestRequest {
+	/** @minimum 0 */
+	duration_minutes?: number;
+	label_filter: string;
+	serial_numbers?: string[];
+}
+
+export interface StartExtendedTestResponse {
+	device_count: number;
+	message: string;
+	session_id: string;
+}
+
 export interface SystemInfo {
 	connection_statuses?: ConnectionStatus[];
 	device_tree: DeviceTree;
@@ -407,6 +490,15 @@ export interface SystemInfo {
 	os_release: OsRelease;
 	proc: Proc;
 	smith: Smith;
+}
+
+export interface UnhealthyServiceDevice {
+	active_state: string;
+	checked_at: string;
+	device_id: number;
+	n_restarts: number;
+	serial_number: string;
+	service_name: string;
 }
 
 export interface UpdateDeviceRelease {
@@ -490,6 +582,10 @@ export type GetDevicesParams = {
 	 * Filter by distribution ID. Only devices with a release from this distribution are included.
 	 */
 	distribution_id?: number;
+	/**
+	 * Filter by service health. If true, only devices with at least one monitored service not in 'active' state.
+	 */
+	service_not_running?: boolean;
 };
 
 export type ApproveDeviceBody = null | ApproveDeviceBody;
@@ -498,6 +594,13 @@ export type GetAllCommandsForDeviceParams = {
 	starting_after?: number;
 	ending_before?: number;
 	limit?: number;
+};
+
+export type FindSessionsByDevicesParams = {
+	/**
+	 * Comma-separated list of device serial numbers
+	 */
+	serial_numbers: string;
 };
 
 export type GetNetworksParams = {
@@ -1850,6 +1953,304 @@ export function useGetRegistrationCounts<
 	queryKey: DataTag<QueryKey, TData, TError>;
 } {
 	const queryOptions = useGetRegistrationCountsQueryOptions(options);
+
+	const query = useQuery(queryOptions, queryClient) as UseQueryResult<
+		TData,
+		TError
+	> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+	query.queryKey = queryOptions.queryKey;
+
+	return query;
+}
+
+export const useGetUnhealthyServicesHook = () => {
+	const getUnhealthyServices = useClientMutator<UnhealthyServiceDevice[]>();
+
+	return useCallback(
+		(signal?: AbortSignal) => {
+			return getUnhealthyServices({
+				url: `/dashboard/unhealthy-services`,
+				method: "GET",
+				signal,
+			});
+		},
+		[getUnhealthyServices],
+	);
+};
+
+export const getGetUnhealthyServicesInfiniteQueryKey = () => {
+	return ["infinite", `/dashboard/unhealthy-services`] as const;
+};
+
+export const getGetUnhealthyServicesQueryKey = () => {
+	return [`/dashboard/unhealthy-services`] as const;
+};
+
+export const useGetUnhealthyServicesInfiniteQueryOptions = <
+	TData = InfiniteData<
+		Awaited<ReturnType<ReturnType<typeof useGetUnhealthyServicesHook>>>
+	>,
+	TError = void,
+>(options?: {
+	query?: Partial<
+		UseInfiniteQueryOptions<
+			Awaited<ReturnType<ReturnType<typeof useGetUnhealthyServicesHook>>>,
+			TError,
+			TData
+		>
+	>;
+}) => {
+	const { query: queryOptions } = options ?? {};
+
+	const queryKey =
+		queryOptions?.queryKey ?? getGetUnhealthyServicesInfiniteQueryKey();
+
+	const getUnhealthyServices = useGetUnhealthyServicesHook();
+
+	const queryFn: QueryFunction<
+		Awaited<ReturnType<ReturnType<typeof useGetUnhealthyServicesHook>>>
+	> = ({ signal }) => getUnhealthyServices(signal);
+
+	return { queryKey, queryFn, ...queryOptions } as UseInfiniteQueryOptions<
+		Awaited<ReturnType<ReturnType<typeof useGetUnhealthyServicesHook>>>,
+		TError,
+		TData
+	> & { queryKey: DataTag<QueryKey, TData, TError> };
+};
+
+export type GetUnhealthyServicesInfiniteQueryResult = NonNullable<
+	Awaited<ReturnType<ReturnType<typeof useGetUnhealthyServicesHook>>>
+>;
+export type GetUnhealthyServicesInfiniteQueryError = void;
+
+export function useGetUnhealthyServicesInfinite<
+	TData = InfiniteData<
+		Awaited<ReturnType<ReturnType<typeof useGetUnhealthyServicesHook>>>
+	>,
+	TError = void,
+>(
+	options: {
+		query: Partial<
+			UseInfiniteQueryOptions<
+				Awaited<ReturnType<ReturnType<typeof useGetUnhealthyServicesHook>>>,
+				TError,
+				TData
+			>
+		> &
+			Pick<
+				DefinedInitialDataOptions<
+					Awaited<ReturnType<ReturnType<typeof useGetUnhealthyServicesHook>>>,
+					TError,
+					Awaited<ReturnType<ReturnType<typeof useGetUnhealthyServicesHook>>>
+				>,
+				"initialData"
+			>;
+	},
+	queryClient?: QueryClient,
+): DefinedUseInfiniteQueryResult<TData, TError> & {
+	queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useGetUnhealthyServicesInfinite<
+	TData = InfiniteData<
+		Awaited<ReturnType<ReturnType<typeof useGetUnhealthyServicesHook>>>
+	>,
+	TError = void,
+>(
+	options?: {
+		query?: Partial<
+			UseInfiniteQueryOptions<
+				Awaited<ReturnType<ReturnType<typeof useGetUnhealthyServicesHook>>>,
+				TError,
+				TData
+			>
+		> &
+			Pick<
+				UndefinedInitialDataOptions<
+					Awaited<ReturnType<ReturnType<typeof useGetUnhealthyServicesHook>>>,
+					TError,
+					Awaited<ReturnType<ReturnType<typeof useGetUnhealthyServicesHook>>>
+				>,
+				"initialData"
+			>;
+	},
+	queryClient?: QueryClient,
+): UseInfiniteQueryResult<TData, TError> & {
+	queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useGetUnhealthyServicesInfinite<
+	TData = InfiniteData<
+		Awaited<ReturnType<ReturnType<typeof useGetUnhealthyServicesHook>>>
+	>,
+	TError = void,
+>(
+	options?: {
+		query?: Partial<
+			UseInfiniteQueryOptions<
+				Awaited<ReturnType<ReturnType<typeof useGetUnhealthyServicesHook>>>,
+				TError,
+				TData
+			>
+		>;
+	},
+	queryClient?: QueryClient,
+): UseInfiniteQueryResult<TData, TError> & {
+	queryKey: DataTag<QueryKey, TData, TError>;
+};
+
+export function useGetUnhealthyServicesInfinite<
+	TData = InfiniteData<
+		Awaited<ReturnType<ReturnType<typeof useGetUnhealthyServicesHook>>>
+	>,
+	TError = void,
+>(
+	options?: {
+		query?: Partial<
+			UseInfiniteQueryOptions<
+				Awaited<ReturnType<ReturnType<typeof useGetUnhealthyServicesHook>>>,
+				TError,
+				TData
+			>
+		>;
+	},
+	queryClient?: QueryClient,
+): UseInfiniteQueryResult<TData, TError> & {
+	queryKey: DataTag<QueryKey, TData, TError>;
+} {
+	const queryOptions = useGetUnhealthyServicesInfiniteQueryOptions(options);
+
+	const query = useInfiniteQuery(
+		queryOptions,
+		queryClient,
+	) as UseInfiniteQueryResult<TData, TError> & {
+		queryKey: DataTag<QueryKey, TData, TError>;
+	};
+
+	query.queryKey = queryOptions.queryKey;
+
+	return query;
+}
+
+export const useGetUnhealthyServicesQueryOptions = <
+	TData = Awaited<ReturnType<ReturnType<typeof useGetUnhealthyServicesHook>>>,
+	TError = void,
+>(options?: {
+	query?: Partial<
+		UseQueryOptions<
+			Awaited<ReturnType<ReturnType<typeof useGetUnhealthyServicesHook>>>,
+			TError,
+			TData
+		>
+	>;
+}) => {
+	const { query: queryOptions } = options ?? {};
+
+	const queryKey = queryOptions?.queryKey ?? getGetUnhealthyServicesQueryKey();
+
+	const getUnhealthyServices = useGetUnhealthyServicesHook();
+
+	const queryFn: QueryFunction<
+		Awaited<ReturnType<ReturnType<typeof useGetUnhealthyServicesHook>>>
+	> = ({ signal }) => getUnhealthyServices(signal);
+
+	return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+		Awaited<ReturnType<ReturnType<typeof useGetUnhealthyServicesHook>>>,
+		TError,
+		TData
+	> & { queryKey: DataTag<QueryKey, TData, TError> };
+};
+
+export type GetUnhealthyServicesQueryResult = NonNullable<
+	Awaited<ReturnType<ReturnType<typeof useGetUnhealthyServicesHook>>>
+>;
+export type GetUnhealthyServicesQueryError = void;
+
+export function useGetUnhealthyServices<
+	TData = Awaited<ReturnType<ReturnType<typeof useGetUnhealthyServicesHook>>>,
+	TError = void,
+>(
+	options: {
+		query: Partial<
+			UseQueryOptions<
+				Awaited<ReturnType<ReturnType<typeof useGetUnhealthyServicesHook>>>,
+				TError,
+				TData
+			>
+		> &
+			Pick<
+				DefinedInitialDataOptions<
+					Awaited<ReturnType<ReturnType<typeof useGetUnhealthyServicesHook>>>,
+					TError,
+					Awaited<ReturnType<ReturnType<typeof useGetUnhealthyServicesHook>>>
+				>,
+				"initialData"
+			>;
+	},
+	queryClient?: QueryClient,
+): DefinedUseQueryResult<TData, TError> & {
+	queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useGetUnhealthyServices<
+	TData = Awaited<ReturnType<ReturnType<typeof useGetUnhealthyServicesHook>>>,
+	TError = void,
+>(
+	options?: {
+		query?: Partial<
+			UseQueryOptions<
+				Awaited<ReturnType<ReturnType<typeof useGetUnhealthyServicesHook>>>,
+				TError,
+				TData
+			>
+		> &
+			Pick<
+				UndefinedInitialDataOptions<
+					Awaited<ReturnType<ReturnType<typeof useGetUnhealthyServicesHook>>>,
+					TError,
+					Awaited<ReturnType<ReturnType<typeof useGetUnhealthyServicesHook>>>
+				>,
+				"initialData"
+			>;
+	},
+	queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+	queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useGetUnhealthyServices<
+	TData = Awaited<ReturnType<ReturnType<typeof useGetUnhealthyServicesHook>>>,
+	TError = void,
+>(
+	options?: {
+		query?: Partial<
+			UseQueryOptions<
+				Awaited<ReturnType<ReturnType<typeof useGetUnhealthyServicesHook>>>,
+				TError,
+				TData
+			>
+		>;
+	},
+	queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+	queryKey: DataTag<QueryKey, TData, TError>;
+};
+
+export function useGetUnhealthyServices<
+	TData = Awaited<ReturnType<ReturnType<typeof useGetUnhealthyServicesHook>>>,
+	TError = void,
+>(
+	options?: {
+		query?: Partial<
+			UseQueryOptions<
+				Awaited<ReturnType<ReturnType<typeof useGetUnhealthyServicesHook>>>,
+				TError,
+				TData
+			>
+		>;
+	},
+	queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+	queryKey: DataTag<QueryKey, TData, TError>;
+} {
+	const queryOptions = useGetUnhealthyServicesQueryOptions(options);
 
 	const query = useQuery(queryOptions, queryClient) as UseQueryResult<
 		TData,
@@ -10862,6 +11263,1200 @@ export function useGetModemById<
 
 	return query;
 }
+
+export const useStartExtendedNetworkTestHook = () => {
+	const startExtendedNetworkTest =
+		useClientMutator<StartExtendedTestResponse>();
+
+	return useCallback(
+		(
+			startExtendedTestRequest: StartExtendedTestRequest,
+			signal?: AbortSignal,
+		) => {
+			return startExtendedNetworkTest({
+				url: `/network/extended-test`,
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				data: startExtendedTestRequest,
+				signal,
+			});
+		},
+		[startExtendedNetworkTest],
+	);
+};
+
+export const useStartExtendedNetworkTestMutationOptions = <
+	TError = void,
+	TContext = unknown,
+>(options?: {
+	mutation?: UseMutationOptions<
+		Awaited<ReturnType<ReturnType<typeof useStartExtendedNetworkTestHook>>>,
+		TError,
+		{ data: StartExtendedTestRequest },
+		TContext
+	>;
+}): UseMutationOptions<
+	Awaited<ReturnType<ReturnType<typeof useStartExtendedNetworkTestHook>>>,
+	TError,
+	{ data: StartExtendedTestRequest },
+	TContext
+> => {
+	const mutationKey = ["startExtendedNetworkTest"];
+	const { mutation: mutationOptions } = options
+		? options.mutation &&
+			"mutationKey" in options.mutation &&
+			options.mutation.mutationKey
+			? options
+			: { ...options, mutation: { ...options.mutation, mutationKey } }
+		: { mutation: { mutationKey } };
+
+	const startExtendedNetworkTest = useStartExtendedNetworkTestHook();
+
+	const mutationFn: MutationFunction<
+		Awaited<ReturnType<ReturnType<typeof useStartExtendedNetworkTestHook>>>,
+		{ data: StartExtendedTestRequest }
+	> = (props) => {
+		const { data } = props ?? {};
+
+		return startExtendedNetworkTest(data);
+	};
+
+	return { mutationFn, ...mutationOptions };
+};
+
+export type StartExtendedNetworkTestMutationResult = NonNullable<
+	Awaited<ReturnType<ReturnType<typeof useStartExtendedNetworkTestHook>>>
+>;
+export type StartExtendedNetworkTestMutationBody = StartExtendedTestRequest;
+export type StartExtendedNetworkTestMutationError = void;
+
+export const useStartExtendedNetworkTest = <TError = void, TContext = unknown>(
+	options?: {
+		mutation?: UseMutationOptions<
+			Awaited<ReturnType<ReturnType<typeof useStartExtendedNetworkTestHook>>>,
+			TError,
+			{ data: StartExtendedTestRequest },
+			TContext
+		>;
+	},
+	queryClient?: QueryClient,
+): UseMutationResult<
+	Awaited<ReturnType<ReturnType<typeof useStartExtendedNetworkTestHook>>>,
+	TError,
+	{ data: StartExtendedTestRequest },
+	TContext
+> => {
+	const mutationOptions = useStartExtendedNetworkTestMutationOptions(options);
+
+	return useMutation(mutationOptions, queryClient);
+};
+
+export const useListExtendedTestSessionsHook = () => {
+	const listExtendedTestSessions =
+		useClientMutator<ExtendedTestSessionSummary[]>();
+
+	return useCallback(
+		(signal?: AbortSignal) => {
+			return listExtendedTestSessions({
+				url: `/network/extended-test/sessions`,
+				method: "GET",
+				signal,
+			});
+		},
+		[listExtendedTestSessions],
+	);
+};
+
+export const getListExtendedTestSessionsInfiniteQueryKey = () => {
+	return ["infinite", `/network/extended-test/sessions`] as const;
+};
+
+export const getListExtendedTestSessionsQueryKey = () => {
+	return [`/network/extended-test/sessions`] as const;
+};
+
+export const useListExtendedTestSessionsInfiniteQueryOptions = <
+	TData = InfiniteData<
+		Awaited<ReturnType<ReturnType<typeof useListExtendedTestSessionsHook>>>
+	>,
+	TError = void,
+>(options?: {
+	query?: Partial<
+		UseInfiniteQueryOptions<
+			Awaited<ReturnType<ReturnType<typeof useListExtendedTestSessionsHook>>>,
+			TError,
+			TData
+		>
+	>;
+}) => {
+	const { query: queryOptions } = options ?? {};
+
+	const queryKey =
+		queryOptions?.queryKey ?? getListExtendedTestSessionsInfiniteQueryKey();
+
+	const listExtendedTestSessions = useListExtendedTestSessionsHook();
+
+	const queryFn: QueryFunction<
+		Awaited<ReturnType<ReturnType<typeof useListExtendedTestSessionsHook>>>
+	> = ({ signal }) => listExtendedTestSessions(signal);
+
+	return { queryKey, queryFn, ...queryOptions } as UseInfiniteQueryOptions<
+		Awaited<ReturnType<ReturnType<typeof useListExtendedTestSessionsHook>>>,
+		TError,
+		TData
+	> & { queryKey: DataTag<QueryKey, TData, TError> };
+};
+
+export type ListExtendedTestSessionsInfiniteQueryResult = NonNullable<
+	Awaited<ReturnType<ReturnType<typeof useListExtendedTestSessionsHook>>>
+>;
+export type ListExtendedTestSessionsInfiniteQueryError = void;
+
+export function useListExtendedTestSessionsInfinite<
+	TData = InfiniteData<
+		Awaited<ReturnType<ReturnType<typeof useListExtendedTestSessionsHook>>>
+	>,
+	TError = void,
+>(
+	options: {
+		query: Partial<
+			UseInfiniteQueryOptions<
+				Awaited<ReturnType<ReturnType<typeof useListExtendedTestSessionsHook>>>,
+				TError,
+				TData
+			>
+		> &
+			Pick<
+				DefinedInitialDataOptions<
+					Awaited<
+						ReturnType<ReturnType<typeof useListExtendedTestSessionsHook>>
+					>,
+					TError,
+					Awaited<
+						ReturnType<ReturnType<typeof useListExtendedTestSessionsHook>>
+					>
+				>,
+				"initialData"
+			>;
+	},
+	queryClient?: QueryClient,
+): DefinedUseInfiniteQueryResult<TData, TError> & {
+	queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useListExtendedTestSessionsInfinite<
+	TData = InfiniteData<
+		Awaited<ReturnType<ReturnType<typeof useListExtendedTestSessionsHook>>>
+	>,
+	TError = void,
+>(
+	options?: {
+		query?: Partial<
+			UseInfiniteQueryOptions<
+				Awaited<ReturnType<ReturnType<typeof useListExtendedTestSessionsHook>>>,
+				TError,
+				TData
+			>
+		> &
+			Pick<
+				UndefinedInitialDataOptions<
+					Awaited<
+						ReturnType<ReturnType<typeof useListExtendedTestSessionsHook>>
+					>,
+					TError,
+					Awaited<
+						ReturnType<ReturnType<typeof useListExtendedTestSessionsHook>>
+					>
+				>,
+				"initialData"
+			>;
+	},
+	queryClient?: QueryClient,
+): UseInfiniteQueryResult<TData, TError> & {
+	queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useListExtendedTestSessionsInfinite<
+	TData = InfiniteData<
+		Awaited<ReturnType<ReturnType<typeof useListExtendedTestSessionsHook>>>
+	>,
+	TError = void,
+>(
+	options?: {
+		query?: Partial<
+			UseInfiniteQueryOptions<
+				Awaited<ReturnType<ReturnType<typeof useListExtendedTestSessionsHook>>>,
+				TError,
+				TData
+			>
+		>;
+	},
+	queryClient?: QueryClient,
+): UseInfiniteQueryResult<TData, TError> & {
+	queryKey: DataTag<QueryKey, TData, TError>;
+};
+
+export function useListExtendedTestSessionsInfinite<
+	TData = InfiniteData<
+		Awaited<ReturnType<ReturnType<typeof useListExtendedTestSessionsHook>>>
+	>,
+	TError = void,
+>(
+	options?: {
+		query?: Partial<
+			UseInfiniteQueryOptions<
+				Awaited<ReturnType<ReturnType<typeof useListExtendedTestSessionsHook>>>,
+				TError,
+				TData
+			>
+		>;
+	},
+	queryClient?: QueryClient,
+): UseInfiniteQueryResult<TData, TError> & {
+	queryKey: DataTag<QueryKey, TData, TError>;
+} {
+	const queryOptions = useListExtendedTestSessionsInfiniteQueryOptions(options);
+
+	const query = useInfiniteQuery(
+		queryOptions,
+		queryClient,
+	) as UseInfiniteQueryResult<TData, TError> & {
+		queryKey: DataTag<QueryKey, TData, TError>;
+	};
+
+	query.queryKey = queryOptions.queryKey;
+
+	return query;
+}
+
+export const useListExtendedTestSessionsQueryOptions = <
+	TData = Awaited<
+		ReturnType<ReturnType<typeof useListExtendedTestSessionsHook>>
+	>,
+	TError = void,
+>(options?: {
+	query?: Partial<
+		UseQueryOptions<
+			Awaited<ReturnType<ReturnType<typeof useListExtendedTestSessionsHook>>>,
+			TError,
+			TData
+		>
+	>;
+}) => {
+	const { query: queryOptions } = options ?? {};
+
+	const queryKey =
+		queryOptions?.queryKey ?? getListExtendedTestSessionsQueryKey();
+
+	const listExtendedTestSessions = useListExtendedTestSessionsHook();
+
+	const queryFn: QueryFunction<
+		Awaited<ReturnType<ReturnType<typeof useListExtendedTestSessionsHook>>>
+	> = ({ signal }) => listExtendedTestSessions(signal);
+
+	return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+		Awaited<ReturnType<ReturnType<typeof useListExtendedTestSessionsHook>>>,
+		TError,
+		TData
+	> & { queryKey: DataTag<QueryKey, TData, TError> };
+};
+
+export type ListExtendedTestSessionsQueryResult = NonNullable<
+	Awaited<ReturnType<ReturnType<typeof useListExtendedTestSessionsHook>>>
+>;
+export type ListExtendedTestSessionsQueryError = void;
+
+export function useListExtendedTestSessions<
+	TData = Awaited<
+		ReturnType<ReturnType<typeof useListExtendedTestSessionsHook>>
+	>,
+	TError = void,
+>(
+	options: {
+		query: Partial<
+			UseQueryOptions<
+				Awaited<ReturnType<ReturnType<typeof useListExtendedTestSessionsHook>>>,
+				TError,
+				TData
+			>
+		> &
+			Pick<
+				DefinedInitialDataOptions<
+					Awaited<
+						ReturnType<ReturnType<typeof useListExtendedTestSessionsHook>>
+					>,
+					TError,
+					Awaited<
+						ReturnType<ReturnType<typeof useListExtendedTestSessionsHook>>
+					>
+				>,
+				"initialData"
+			>;
+	},
+	queryClient?: QueryClient,
+): DefinedUseQueryResult<TData, TError> & {
+	queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useListExtendedTestSessions<
+	TData = Awaited<
+		ReturnType<ReturnType<typeof useListExtendedTestSessionsHook>>
+	>,
+	TError = void,
+>(
+	options?: {
+		query?: Partial<
+			UseQueryOptions<
+				Awaited<ReturnType<ReturnType<typeof useListExtendedTestSessionsHook>>>,
+				TError,
+				TData
+			>
+		> &
+			Pick<
+				UndefinedInitialDataOptions<
+					Awaited<
+						ReturnType<ReturnType<typeof useListExtendedTestSessionsHook>>
+					>,
+					TError,
+					Awaited<
+						ReturnType<ReturnType<typeof useListExtendedTestSessionsHook>>
+					>
+				>,
+				"initialData"
+			>;
+	},
+	queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+	queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useListExtendedTestSessions<
+	TData = Awaited<
+		ReturnType<ReturnType<typeof useListExtendedTestSessionsHook>>
+	>,
+	TError = void,
+>(
+	options?: {
+		query?: Partial<
+			UseQueryOptions<
+				Awaited<ReturnType<ReturnType<typeof useListExtendedTestSessionsHook>>>,
+				TError,
+				TData
+			>
+		>;
+	},
+	queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+	queryKey: DataTag<QueryKey, TData, TError>;
+};
+
+export function useListExtendedTestSessions<
+	TData = Awaited<
+		ReturnType<ReturnType<typeof useListExtendedTestSessionsHook>>
+	>,
+	TError = void,
+>(
+	options?: {
+		query?: Partial<
+			UseQueryOptions<
+				Awaited<ReturnType<ReturnType<typeof useListExtendedTestSessionsHook>>>,
+				TError,
+				TData
+			>
+		>;
+	},
+	queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+	queryKey: DataTag<QueryKey, TData, TError>;
+} {
+	const queryOptions = useListExtendedTestSessionsQueryOptions(options);
+
+	const query = useQuery(queryOptions, queryClient) as UseQueryResult<
+		TData,
+		TError
+	> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+	query.queryKey = queryOptions.queryKey;
+
+	return query;
+}
+
+/**
+ * The serial numbers are hashed and compared against stored device_set_hash to find exact matches.
+ * @summary Find extended test sessions that were run for a specific set of devices
+ */
+export const useFindSessionsByDevicesHook = () => {
+	const findSessionsByDevices =
+		useClientMutator<ExtendedTestSessionSummary[]>();
+
+	return useCallback(
+		(params: FindSessionsByDevicesParams, signal?: AbortSignal) => {
+			return findSessionsByDevices({
+				url: `/network/extended-test/sessions/by-devices`,
+				method: "GET",
+				params,
+				signal,
+			});
+		},
+		[findSessionsByDevices],
+	);
+};
+
+export const getFindSessionsByDevicesInfiniteQueryKey = (
+	params?: FindSessionsByDevicesParams,
+) => {
+	return [
+		"infinite",
+		`/network/extended-test/sessions/by-devices`,
+		...(params ? [params] : []),
+	] as const;
+};
+
+export const getFindSessionsByDevicesQueryKey = (
+	params?: FindSessionsByDevicesParams,
+) => {
+	return [
+		`/network/extended-test/sessions/by-devices`,
+		...(params ? [params] : []),
+	] as const;
+};
+
+export const useFindSessionsByDevicesInfiniteQueryOptions = <
+	TData = InfiniteData<
+		Awaited<ReturnType<ReturnType<typeof useFindSessionsByDevicesHook>>>,
+		FindSessionsByDevicesParams["offset"]
+	>,
+	TError = void,
+>(
+	params: FindSessionsByDevicesParams,
+	options?: {
+		query?: Partial<
+			UseInfiniteQueryOptions<
+				Awaited<ReturnType<ReturnType<typeof useFindSessionsByDevicesHook>>>,
+				TError,
+				TData,
+				QueryKey,
+				FindSessionsByDevicesParams["offset"]
+			>
+		>;
+	},
+) => {
+	const { query: queryOptions } = options ?? {};
+
+	const queryKey =
+		queryOptions?.queryKey ?? getFindSessionsByDevicesInfiniteQueryKey(params);
+
+	const findSessionsByDevices = useFindSessionsByDevicesHook();
+
+	const queryFn: QueryFunction<
+		Awaited<ReturnType<ReturnType<typeof useFindSessionsByDevicesHook>>>,
+		QueryKey,
+		FindSessionsByDevicesParams["offset"]
+	> = ({ signal, pageParam }) =>
+		findSessionsByDevices(
+			{ ...params, offset: pageParam || params?.["offset"] },
+			signal,
+		);
+
+	return { queryKey, queryFn, ...queryOptions } as UseInfiniteQueryOptions<
+		Awaited<ReturnType<ReturnType<typeof useFindSessionsByDevicesHook>>>,
+		TError,
+		TData,
+		QueryKey,
+		FindSessionsByDevicesParams["offset"]
+	> & { queryKey: DataTag<QueryKey, TData, TError> };
+};
+
+export type FindSessionsByDevicesInfiniteQueryResult = NonNullable<
+	Awaited<ReturnType<ReturnType<typeof useFindSessionsByDevicesHook>>>
+>;
+export type FindSessionsByDevicesInfiniteQueryError = void;
+
+export function useFindSessionsByDevicesInfinite<
+	TData = InfiniteData<
+		Awaited<ReturnType<ReturnType<typeof useFindSessionsByDevicesHook>>>,
+		FindSessionsByDevicesParams["offset"]
+	>,
+	TError = void,
+>(
+	params: FindSessionsByDevicesParams,
+	options: {
+		query: Partial<
+			UseInfiniteQueryOptions<
+				Awaited<ReturnType<ReturnType<typeof useFindSessionsByDevicesHook>>>,
+				TError,
+				TData,
+				QueryKey,
+				FindSessionsByDevicesParams["offset"]
+			>
+		> &
+			Pick<
+				DefinedInitialDataOptions<
+					Awaited<ReturnType<ReturnType<typeof useFindSessionsByDevicesHook>>>,
+					TError,
+					Awaited<ReturnType<ReturnType<typeof useFindSessionsByDevicesHook>>>,
+					QueryKey
+				>,
+				"initialData"
+			>;
+	},
+	queryClient?: QueryClient,
+): DefinedUseInfiniteQueryResult<TData, TError> & {
+	queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useFindSessionsByDevicesInfinite<
+	TData = InfiniteData<
+		Awaited<ReturnType<ReturnType<typeof useFindSessionsByDevicesHook>>>,
+		FindSessionsByDevicesParams["offset"]
+	>,
+	TError = void,
+>(
+	params: FindSessionsByDevicesParams,
+	options?: {
+		query?: Partial<
+			UseInfiniteQueryOptions<
+				Awaited<ReturnType<ReturnType<typeof useFindSessionsByDevicesHook>>>,
+				TError,
+				TData,
+				QueryKey,
+				FindSessionsByDevicesParams["offset"]
+			>
+		> &
+			Pick<
+				UndefinedInitialDataOptions<
+					Awaited<ReturnType<ReturnType<typeof useFindSessionsByDevicesHook>>>,
+					TError,
+					Awaited<ReturnType<ReturnType<typeof useFindSessionsByDevicesHook>>>,
+					QueryKey
+				>,
+				"initialData"
+			>;
+	},
+	queryClient?: QueryClient,
+): UseInfiniteQueryResult<TData, TError> & {
+	queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useFindSessionsByDevicesInfinite<
+	TData = InfiniteData<
+		Awaited<ReturnType<ReturnType<typeof useFindSessionsByDevicesHook>>>,
+		FindSessionsByDevicesParams["offset"]
+	>,
+	TError = void,
+>(
+	params: FindSessionsByDevicesParams,
+	options?: {
+		query?: Partial<
+			UseInfiniteQueryOptions<
+				Awaited<ReturnType<ReturnType<typeof useFindSessionsByDevicesHook>>>,
+				TError,
+				TData,
+				QueryKey,
+				FindSessionsByDevicesParams["offset"]
+			>
+		>;
+	},
+	queryClient?: QueryClient,
+): UseInfiniteQueryResult<TData, TError> & {
+	queryKey: DataTag<QueryKey, TData, TError>;
+};
+/**
+ * @summary Find extended test sessions that were run for a specific set of devices
+ */
+
+export function useFindSessionsByDevicesInfinite<
+	TData = InfiniteData<
+		Awaited<ReturnType<ReturnType<typeof useFindSessionsByDevicesHook>>>,
+		FindSessionsByDevicesParams["offset"]
+	>,
+	TError = void,
+>(
+	params: FindSessionsByDevicesParams,
+	options?: {
+		query?: Partial<
+			UseInfiniteQueryOptions<
+				Awaited<ReturnType<ReturnType<typeof useFindSessionsByDevicesHook>>>,
+				TError,
+				TData,
+				QueryKey,
+				FindSessionsByDevicesParams["offset"]
+			>
+		>;
+	},
+	queryClient?: QueryClient,
+): UseInfiniteQueryResult<TData, TError> & {
+	queryKey: DataTag<QueryKey, TData, TError>;
+} {
+	const queryOptions = useFindSessionsByDevicesInfiniteQueryOptions(
+		params,
+		options,
+	);
+
+	const query = useInfiniteQuery(
+		queryOptions,
+		queryClient,
+	) as UseInfiniteQueryResult<TData, TError> & {
+		queryKey: DataTag<QueryKey, TData, TError>;
+	};
+
+	query.queryKey = queryOptions.queryKey;
+
+	return query;
+}
+
+export const useFindSessionsByDevicesQueryOptions = <
+	TData = Awaited<ReturnType<ReturnType<typeof useFindSessionsByDevicesHook>>>,
+	TError = void,
+>(
+	params: FindSessionsByDevicesParams,
+	options?: {
+		query?: Partial<
+			UseQueryOptions<
+				Awaited<ReturnType<ReturnType<typeof useFindSessionsByDevicesHook>>>,
+				TError,
+				TData
+			>
+		>;
+	},
+) => {
+	const { query: queryOptions } = options ?? {};
+
+	const queryKey =
+		queryOptions?.queryKey ?? getFindSessionsByDevicesQueryKey(params);
+
+	const findSessionsByDevices = useFindSessionsByDevicesHook();
+
+	const queryFn: QueryFunction<
+		Awaited<ReturnType<ReturnType<typeof useFindSessionsByDevicesHook>>>
+	> = ({ signal }) => findSessionsByDevices(params, signal);
+
+	return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+		Awaited<ReturnType<ReturnType<typeof useFindSessionsByDevicesHook>>>,
+		TError,
+		TData
+	> & { queryKey: DataTag<QueryKey, TData, TError> };
+};
+
+export type FindSessionsByDevicesQueryResult = NonNullable<
+	Awaited<ReturnType<ReturnType<typeof useFindSessionsByDevicesHook>>>
+>;
+export type FindSessionsByDevicesQueryError = void;
+
+export function useFindSessionsByDevices<
+	TData = Awaited<ReturnType<ReturnType<typeof useFindSessionsByDevicesHook>>>,
+	TError = void,
+>(
+	params: FindSessionsByDevicesParams,
+	options: {
+		query: Partial<
+			UseQueryOptions<
+				Awaited<ReturnType<ReturnType<typeof useFindSessionsByDevicesHook>>>,
+				TError,
+				TData
+			>
+		> &
+			Pick<
+				DefinedInitialDataOptions<
+					Awaited<ReturnType<ReturnType<typeof useFindSessionsByDevicesHook>>>,
+					TError,
+					Awaited<ReturnType<ReturnType<typeof useFindSessionsByDevicesHook>>>
+				>,
+				"initialData"
+			>;
+	},
+	queryClient?: QueryClient,
+): DefinedUseQueryResult<TData, TError> & {
+	queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useFindSessionsByDevices<
+	TData = Awaited<ReturnType<ReturnType<typeof useFindSessionsByDevicesHook>>>,
+	TError = void,
+>(
+	params: FindSessionsByDevicesParams,
+	options?: {
+		query?: Partial<
+			UseQueryOptions<
+				Awaited<ReturnType<ReturnType<typeof useFindSessionsByDevicesHook>>>,
+				TError,
+				TData
+			>
+		> &
+			Pick<
+				UndefinedInitialDataOptions<
+					Awaited<ReturnType<ReturnType<typeof useFindSessionsByDevicesHook>>>,
+					TError,
+					Awaited<ReturnType<ReturnType<typeof useFindSessionsByDevicesHook>>>
+				>,
+				"initialData"
+			>;
+	},
+	queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+	queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useFindSessionsByDevices<
+	TData = Awaited<ReturnType<ReturnType<typeof useFindSessionsByDevicesHook>>>,
+	TError = void,
+>(
+	params: FindSessionsByDevicesParams,
+	options?: {
+		query?: Partial<
+			UseQueryOptions<
+				Awaited<ReturnType<ReturnType<typeof useFindSessionsByDevicesHook>>>,
+				TError,
+				TData
+			>
+		>;
+	},
+	queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+	queryKey: DataTag<QueryKey, TData, TError>;
+};
+/**
+ * @summary Find extended test sessions that were run for a specific set of devices
+ */
+
+export function useFindSessionsByDevices<
+	TData = Awaited<ReturnType<ReturnType<typeof useFindSessionsByDevicesHook>>>,
+	TError = void,
+>(
+	params: FindSessionsByDevicesParams,
+	options?: {
+		query?: Partial<
+			UseQueryOptions<
+				Awaited<ReturnType<ReturnType<typeof useFindSessionsByDevicesHook>>>,
+				TError,
+				TData
+			>
+		>;
+	},
+	queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+	queryKey: DataTag<QueryKey, TData, TError>;
+} {
+	const queryOptions = useFindSessionsByDevicesQueryOptions(params, options);
+
+	const query = useQuery(queryOptions, queryClient) as UseQueryResult<
+		TData,
+		TError
+	> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+	query.queryKey = queryOptions.queryKey;
+
+	return query;
+}
+
+export const useGetExtendedTestStatusHook = () => {
+	const getExtendedTestStatus = useClientMutator<ExtendedTestStatus>();
+
+	return useCallback(
+		(sessionId: string, signal?: AbortSignal) => {
+			return getExtendedTestStatus({
+				url: `/network/extended-test/${sessionId}`,
+				method: "GET",
+				signal,
+			});
+		},
+		[getExtendedTestStatus],
+	);
+};
+
+export const getGetExtendedTestStatusInfiniteQueryKey = (
+	sessionId?: string,
+) => {
+	return ["infinite", `/network/extended-test/${sessionId}`] as const;
+};
+
+export const getGetExtendedTestStatusQueryKey = (sessionId?: string) => {
+	return [`/network/extended-test/${sessionId}`] as const;
+};
+
+export const useGetExtendedTestStatusInfiniteQueryOptions = <
+	TData = InfiniteData<
+		Awaited<ReturnType<ReturnType<typeof useGetExtendedTestStatusHook>>>
+	>,
+	TError = void,
+>(
+	sessionId: string,
+	options?: {
+		query?: Partial<
+			UseInfiniteQueryOptions<
+				Awaited<ReturnType<ReturnType<typeof useGetExtendedTestStatusHook>>>,
+				TError,
+				TData
+			>
+		>;
+	},
+) => {
+	const { query: queryOptions } = options ?? {};
+
+	const queryKey =
+		queryOptions?.queryKey ??
+		getGetExtendedTestStatusInfiniteQueryKey(sessionId);
+
+	const getExtendedTestStatus = useGetExtendedTestStatusHook();
+
+	const queryFn: QueryFunction<
+		Awaited<ReturnType<ReturnType<typeof useGetExtendedTestStatusHook>>>
+	> = ({ signal }) => getExtendedTestStatus(sessionId, signal);
+
+	return {
+		queryKey,
+		queryFn,
+		enabled: !!sessionId,
+		...queryOptions,
+	} as UseInfiniteQueryOptions<
+		Awaited<ReturnType<ReturnType<typeof useGetExtendedTestStatusHook>>>,
+		TError,
+		TData
+	> & { queryKey: DataTag<QueryKey, TData, TError> };
+};
+
+export type GetExtendedTestStatusInfiniteQueryResult = NonNullable<
+	Awaited<ReturnType<ReturnType<typeof useGetExtendedTestStatusHook>>>
+>;
+export type GetExtendedTestStatusInfiniteQueryError = void;
+
+export function useGetExtendedTestStatusInfinite<
+	TData = InfiniteData<
+		Awaited<ReturnType<ReturnType<typeof useGetExtendedTestStatusHook>>>
+	>,
+	TError = void,
+>(
+	sessionId: string,
+	options: {
+		query: Partial<
+			UseInfiniteQueryOptions<
+				Awaited<ReturnType<ReturnType<typeof useGetExtendedTestStatusHook>>>,
+				TError,
+				TData
+			>
+		> &
+			Pick<
+				DefinedInitialDataOptions<
+					Awaited<ReturnType<ReturnType<typeof useGetExtendedTestStatusHook>>>,
+					TError,
+					Awaited<ReturnType<ReturnType<typeof useGetExtendedTestStatusHook>>>
+				>,
+				"initialData"
+			>;
+	},
+	queryClient?: QueryClient,
+): DefinedUseInfiniteQueryResult<TData, TError> & {
+	queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useGetExtendedTestStatusInfinite<
+	TData = InfiniteData<
+		Awaited<ReturnType<ReturnType<typeof useGetExtendedTestStatusHook>>>
+	>,
+	TError = void,
+>(
+	sessionId: string,
+	options?: {
+		query?: Partial<
+			UseInfiniteQueryOptions<
+				Awaited<ReturnType<ReturnType<typeof useGetExtendedTestStatusHook>>>,
+				TError,
+				TData
+			>
+		> &
+			Pick<
+				UndefinedInitialDataOptions<
+					Awaited<ReturnType<ReturnType<typeof useGetExtendedTestStatusHook>>>,
+					TError,
+					Awaited<ReturnType<ReturnType<typeof useGetExtendedTestStatusHook>>>
+				>,
+				"initialData"
+			>;
+	},
+	queryClient?: QueryClient,
+): UseInfiniteQueryResult<TData, TError> & {
+	queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useGetExtendedTestStatusInfinite<
+	TData = InfiniteData<
+		Awaited<ReturnType<ReturnType<typeof useGetExtendedTestStatusHook>>>
+	>,
+	TError = void,
+>(
+	sessionId: string,
+	options?: {
+		query?: Partial<
+			UseInfiniteQueryOptions<
+				Awaited<ReturnType<ReturnType<typeof useGetExtendedTestStatusHook>>>,
+				TError,
+				TData
+			>
+		>;
+	},
+	queryClient?: QueryClient,
+): UseInfiniteQueryResult<TData, TError> & {
+	queryKey: DataTag<QueryKey, TData, TError>;
+};
+
+export function useGetExtendedTestStatusInfinite<
+	TData = InfiniteData<
+		Awaited<ReturnType<ReturnType<typeof useGetExtendedTestStatusHook>>>
+	>,
+	TError = void,
+>(
+	sessionId: string,
+	options?: {
+		query?: Partial<
+			UseInfiniteQueryOptions<
+				Awaited<ReturnType<ReturnType<typeof useGetExtendedTestStatusHook>>>,
+				TError,
+				TData
+			>
+		>;
+	},
+	queryClient?: QueryClient,
+): UseInfiniteQueryResult<TData, TError> & {
+	queryKey: DataTag<QueryKey, TData, TError>;
+} {
+	const queryOptions = useGetExtendedTestStatusInfiniteQueryOptions(
+		sessionId,
+		options,
+	);
+
+	const query = useInfiniteQuery(
+		queryOptions,
+		queryClient,
+	) as UseInfiniteQueryResult<TData, TError> & {
+		queryKey: DataTag<QueryKey, TData, TError>;
+	};
+
+	query.queryKey = queryOptions.queryKey;
+
+	return query;
+}
+
+export const useGetExtendedTestStatusQueryOptions = <
+	TData = Awaited<ReturnType<ReturnType<typeof useGetExtendedTestStatusHook>>>,
+	TError = void,
+>(
+	sessionId: string,
+	options?: {
+		query?: Partial<
+			UseQueryOptions<
+				Awaited<ReturnType<ReturnType<typeof useGetExtendedTestStatusHook>>>,
+				TError,
+				TData
+			>
+		>;
+	},
+) => {
+	const { query: queryOptions } = options ?? {};
+
+	const queryKey =
+		queryOptions?.queryKey ?? getGetExtendedTestStatusQueryKey(sessionId);
+
+	const getExtendedTestStatus = useGetExtendedTestStatusHook();
+
+	const queryFn: QueryFunction<
+		Awaited<ReturnType<ReturnType<typeof useGetExtendedTestStatusHook>>>
+	> = ({ signal }) => getExtendedTestStatus(sessionId, signal);
+
+	return {
+		queryKey,
+		queryFn,
+		enabled: !!sessionId,
+		...queryOptions,
+	} as UseQueryOptions<
+		Awaited<ReturnType<ReturnType<typeof useGetExtendedTestStatusHook>>>,
+		TError,
+		TData
+	> & { queryKey: DataTag<QueryKey, TData, TError> };
+};
+
+export type GetExtendedTestStatusQueryResult = NonNullable<
+	Awaited<ReturnType<ReturnType<typeof useGetExtendedTestStatusHook>>>
+>;
+export type GetExtendedTestStatusQueryError = void;
+
+export function useGetExtendedTestStatus<
+	TData = Awaited<ReturnType<ReturnType<typeof useGetExtendedTestStatusHook>>>,
+	TError = void,
+>(
+	sessionId: string,
+	options: {
+		query: Partial<
+			UseQueryOptions<
+				Awaited<ReturnType<ReturnType<typeof useGetExtendedTestStatusHook>>>,
+				TError,
+				TData
+			>
+		> &
+			Pick<
+				DefinedInitialDataOptions<
+					Awaited<ReturnType<ReturnType<typeof useGetExtendedTestStatusHook>>>,
+					TError,
+					Awaited<ReturnType<ReturnType<typeof useGetExtendedTestStatusHook>>>
+				>,
+				"initialData"
+			>;
+	},
+	queryClient?: QueryClient,
+): DefinedUseQueryResult<TData, TError> & {
+	queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useGetExtendedTestStatus<
+	TData = Awaited<ReturnType<ReturnType<typeof useGetExtendedTestStatusHook>>>,
+	TError = void,
+>(
+	sessionId: string,
+	options?: {
+		query?: Partial<
+			UseQueryOptions<
+				Awaited<ReturnType<ReturnType<typeof useGetExtendedTestStatusHook>>>,
+				TError,
+				TData
+			>
+		> &
+			Pick<
+				UndefinedInitialDataOptions<
+					Awaited<ReturnType<ReturnType<typeof useGetExtendedTestStatusHook>>>,
+					TError,
+					Awaited<ReturnType<ReturnType<typeof useGetExtendedTestStatusHook>>>
+				>,
+				"initialData"
+			>;
+	},
+	queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+	queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useGetExtendedTestStatus<
+	TData = Awaited<ReturnType<ReturnType<typeof useGetExtendedTestStatusHook>>>,
+	TError = void,
+>(
+	sessionId: string,
+	options?: {
+		query?: Partial<
+			UseQueryOptions<
+				Awaited<ReturnType<ReturnType<typeof useGetExtendedTestStatusHook>>>,
+				TError,
+				TData
+			>
+		>;
+	},
+	queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+	queryKey: DataTag<QueryKey, TData, TError>;
+};
+
+export function useGetExtendedTestStatus<
+	TData = Awaited<ReturnType<ReturnType<typeof useGetExtendedTestStatusHook>>>,
+	TError = void,
+>(
+	sessionId: string,
+	options?: {
+		query?: Partial<
+			UseQueryOptions<
+				Awaited<ReturnType<ReturnType<typeof useGetExtendedTestStatusHook>>>,
+				TError,
+				TData
+			>
+		>;
+	},
+	queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+	queryKey: DataTag<QueryKey, TData, TError>;
+} {
+	const queryOptions = useGetExtendedTestStatusQueryOptions(sessionId, options);
+
+	const query = useQuery(queryOptions, queryClient) as UseQueryResult<
+		TData,
+		TError
+	> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+	query.queryKey = queryOptions.queryKey;
+
+	return query;
+}
+
+/**
+ * Marks all pending commands as canceled, allowing the test to complete with current results.
+ * @summary Cancel a running extended network test
+ */
+export const useCancelExtendedTestHook = () => {
+	const cancelExtendedTest = useClientMutator<CancelExtendedTestResponse>();
+
+	return useCallback(
+		(sessionId: string, signal?: AbortSignal) => {
+			return cancelExtendedTest({
+				url: `/network/extended-test/${sessionId}/cancel`,
+				method: "POST",
+				signal,
+			});
+		},
+		[cancelExtendedTest],
+	);
+};
+
+export const useCancelExtendedTestMutationOptions = <
+	TError = void,
+	TContext = unknown,
+>(options?: {
+	mutation?: UseMutationOptions<
+		Awaited<ReturnType<ReturnType<typeof useCancelExtendedTestHook>>>,
+		TError,
+		{ sessionId: string },
+		TContext
+	>;
+}): UseMutationOptions<
+	Awaited<ReturnType<ReturnType<typeof useCancelExtendedTestHook>>>,
+	TError,
+	{ sessionId: string },
+	TContext
+> => {
+	const mutationKey = ["cancelExtendedTest"];
+	const { mutation: mutationOptions } = options
+		? options.mutation &&
+			"mutationKey" in options.mutation &&
+			options.mutation.mutationKey
+			? options
+			: { ...options, mutation: { ...options.mutation, mutationKey } }
+		: { mutation: { mutationKey } };
+
+	const cancelExtendedTest = useCancelExtendedTestHook();
+
+	const mutationFn: MutationFunction<
+		Awaited<ReturnType<ReturnType<typeof useCancelExtendedTestHook>>>,
+		{ sessionId: string }
+	> = (props) => {
+		const { sessionId } = props ?? {};
+
+		return cancelExtendedTest(sessionId);
+	};
+
+	return { mutationFn, ...mutationOptions };
+};
+
+export type CancelExtendedTestMutationResult = NonNullable<
+	Awaited<ReturnType<ReturnType<typeof useCancelExtendedTestHook>>>
+>;
+
+export type CancelExtendedTestMutationError = void;
+
+/**
+ * @summary Cancel a running extended network test
+ */
+export const useCancelExtendedTest = <TError = void, TContext = unknown>(
+	options?: {
+		mutation?: UseMutationOptions<
+			Awaited<ReturnType<ReturnType<typeof useCancelExtendedTestHook>>>,
+			TError,
+			{ sessionId: string },
+			TContext
+		>;
+	},
+	queryClient?: QueryClient,
+): UseMutationResult<
+	Awaited<ReturnType<ReturnType<typeof useCancelExtendedTestHook>>>,
+	TError,
+	{ sessionId: string },
+	TContext
+> => {
+	const mutationOptions = useCancelExtendedTestMutationOptions(options);
+
+	return useMutation(mutationOptions, queryClient);
+};
 
 export const useGetNetworksHook = () => {
 	const getNetworks = useClientMutator<void>();

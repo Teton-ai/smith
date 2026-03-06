@@ -193,6 +193,15 @@ pub async fn get_devices(
           ))
           AND ($11::int IS NULL OR d.release_id = $11)
           AND ($13::int IS NULL OR rd.id = $13)
+          AND ($14::boolean IS NULL OR
+               ($14 = true AND EXISTS (
+                   SELECT 1 FROM device_service_status dss
+                   JOIN release_services rs ON rs.id = dss.release_service_id
+                   WHERE dss.device_id = d.id
+                     AND rs.release_id = d.release_id
+                     AND rs.watchdog_sec IS NOT NULL
+                     AND dss.active_state != 'active'
+               )))
         GROUP BY d.id, ip.id, m.id, r.id, rd.id, tr.id, trd.id, dn.device_id
         ORDER BY d.last_ping DESC NULLS LAST, d.serial_number
         LIMIT $8
@@ -210,7 +219,8 @@ pub async fn get_devices(
         filter.search,
         filter.release_id,
         filter.outdated_minutes,
-        filter.distribution_id
+        filter.distribution_id,
+        filter.service_not_running
     )
     .fetch_all(&state.pg_pool)
     .await
