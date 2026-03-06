@@ -27,7 +27,7 @@
 		"@types/node": "^20",
 		"@types/react": "^19",
 		"@types/react-dom": "^19",
-		"orval": "^7.17.0",
+		"orval": "^8.5.2",
 		"tailwindcss": "^4",
 		"typescript": "^5"
 	}
