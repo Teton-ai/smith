@@ -13,4 +13,6 @@ pub struct Distribution {
 pub struct NewDistributionRelease {
     pub version: String,
     pub packages: Vec<i32>,
+    #[serde(default)]
+    pub release_candidate: bool,
 }

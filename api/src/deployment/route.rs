@@ -145,7 +145,13 @@ pub async fn api_confirm_full_rollout(
         user_email.as_deref(),
     )
     .await
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    .map_err(|err| {
+        if err.to_string().contains("release candidate") {
+            StatusCode::BAD_REQUEST
+        } else {
+            StatusCode::INTERNAL_SERVER_ERROR
+        }
+    })?;
     Ok((StatusCode::OK, Json(deployment)))
 }
 

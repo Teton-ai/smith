@@ -512,6 +512,11 @@ const ReleaseDetailPage = () => {
 											Draft
 										</span>
 									)}
+									{release.release_candidate && (
+										<span className="px-2 py-1 text-xs font-medium bg-orange-100 text-orange-700 rounded-full">
+											RC
+										</span>
+									)}
 									{release.yanked && (
 										<span className="px-2 py-1 text-xs font-medium bg-red-100 text-red-800 rounded-full">
 											Yanked

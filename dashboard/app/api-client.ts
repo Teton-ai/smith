@@ -299,6 +299,7 @@ export interface NewDistribution {
 
 export interface NewDistributionRelease {
 	packages: number[];
+	release_candidate?: boolean;
 	version: string;
 }
 
@@ -370,6 +371,7 @@ export interface Release {
 	distribution_name: string;
 	draft: boolean;
 	id: number;
+	release_candidate: boolean;
 	user_email?: string;
 	user_id?: number;
 	version: string;

@@ -41,6 +41,7 @@ pub async fn get_latest_distribution_release(
         WHERE distribution_id = $1
         AND draft = false
         AND yanked = FALSE
+        AND release_candidate = FALSE
         ORDER BY created_at DESC LIMIT 1
         ",
         distribution_id

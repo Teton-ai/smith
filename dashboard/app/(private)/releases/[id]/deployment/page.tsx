@@ -319,23 +319,34 @@ const DeploymentStatusPage = () => {
 													<p>
 														All canary devices have been successfully updated!
 													</p>
-													<div className="mt-4">
-														<Button
-															loading={confirmFullRolloutHook.isPending}
-															icon={
-																!confirmFullRolloutHook.isPending ? (
-																	<CheckCircle2 className="w-4 h-4" />
-																) : undefined
-															}
-															onClick={() => {
-																confirmFullRolloutHook.mutate({ releaseId });
-															}}
-														>
-															{confirmFullRolloutHook.isPending
-																? "Confirming..."
-																: "Confirm Full Rollout"}
-														</Button>
-													</div>
+													{release.release_candidate ? (
+														<div className="mt-4 p-3 bg-orange-50 border border-orange-200 rounded-lg">
+															<p className="text-sm text-orange-800">
+																<strong>Release Candidate:</strong> Full rollout
+																is not available for RC releases. Canary
+																deployment is complete — promote this to a
+																stable release to deploy to all devices.
+															</p>
+														</div>
+													) : (
+														<div className="mt-4">
+															<Button
+																loading={confirmFullRolloutHook.isPending}
+																icon={
+																	!confirmFullRolloutHook.isPending ? (
+																		<CheckCircle2 className="w-4 h-4" />
+																	) : undefined
+																}
+																onClick={() => {
+																	confirmFullRolloutHook.mutate({ releaseId });
+																}}
+															>
+																{confirmFullRolloutHook.isPending
+																	? "Confirming..."
+																	: "Confirm Full Rollout"}
+															</Button>
+														</div>
+													)}
 												</>
 											) : (
 												<>
@@ -374,20 +385,22 @@ const DeploymentStatusPage = () => {
 								</div>
 							</div>
 
-							{deployment.status === "InProgress" && !isCanaryComplete() && (
-								<div className="border border-gray-200 bg-gray-50 rounded-lg p-4">
-									<div className="flex items-center space-x-2 mb-3">
-										<Clock className="w-5 h-5 text-gray-600" />
-										<h3 className="font-semibold text-gray-900">
-											Phase 2: Full Rollout
-										</h3>
+							{deployment.status === "InProgress" &&
+								!isCanaryComplete() &&
+								!release.release_candidate && (
+									<div className="border border-gray-200 bg-gray-50 rounded-lg p-4">
+										<div className="flex items-center space-x-2 mb-3">
+											<Clock className="w-5 h-5 text-gray-600" />
+											<h3 className="font-semibold text-gray-900">
+												Phase 2: Full Rollout
+											</h3>
+										</div>
+										<p className="text-sm text-gray-700">
+											Waiting for canary deployment to complete. You will need
+											to manually confirm to proceed with full rollout.
+										</p>
 									</div>
-									<p className="text-sm text-gray-700">
-										Waiting for canary deployment to complete. You will need to
-										manually confirm to proceed with full rollout.
-									</p>
-								</div>
-							)}
+								)}
 						</div>
 
 						{deployment.status === "InProgress" && (
@@ -396,7 +409,9 @@ const DeploymentStatusPage = () => {
 									<strong>Note:</strong> This page will automatically refresh
 									every 5 seconds to show the latest status.{" "}
 									{isCanaryComplete()
-										? "Please confirm full rollout to proceed."
+										? release.release_candidate
+											? "RC canary deployment is complete."
+											: "Please confirm full rollout to proceed."
 										: "You can safely navigate away and return later."}
 								</p>
 							</div>
