@@ -204,8 +204,8 @@ pub async fn get_distribution_releases(
         ("distribution_id" = i32, Path),
     ),
     responses(
-        (status = StatusCode::OK, description = "Get the latest published release for the distribution", body = Release),
-        (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to latest release"),
+        (status = StatusCode::OK, description = "Get the latest deployed release for the distribution", body = Release),
+        (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to get latest deployed release"),
     ),
     security(
         ("auth_token" = [])

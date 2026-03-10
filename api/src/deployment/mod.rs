@@ -378,6 +378,14 @@ pub async fn confirm_full_rollout(
     .execute(&mut *tx)
     .await?;
 
+    sqlx::query!(
+        "UPDATE distribution SET latest_release_id = $1 WHERE id = $2",
+        release_id,
+        release.distribution_id
+    )
+    .execute(&mut *tx)
+    .await?;
+
     tx.commit().await?;
 
     // Send Slack notification

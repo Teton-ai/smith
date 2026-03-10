@@ -37,12 +37,9 @@ pub async fn get_latest_distribution_release(
         auth.users.email AS user_email
         FROM release
         JOIN distribution ON release.distribution_id = distribution.id
+            AND distribution.latest_release_id = release.id
         LEFT JOIN auth.users ON release.user_id = auth.users.id
         WHERE distribution_id = $1
-        AND draft = false
-        AND yanked = FALSE
-        AND release_candidate = FALSE
-        ORDER BY created_at DESC LIMIT 1
         ",
         distribution_id
     )
