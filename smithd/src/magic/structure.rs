@@ -9,8 +9,7 @@ use tracing::info;
 pub struct MagicFile {
     pub meta: ConfigMeta,
     pub tunnel: Option<ConfigTunnel>,
-    pub scheduler: Option<ConfigScheduler>,
-    #[serde(rename = "check")]
+#[serde(rename = "check")]
     pub checks: Option<Vec<ConfigCheck>>,
     #[serde(rename = "metric")]
     pub metrics: Option<Vec<ConfigMetric>>,
@@ -84,11 +83,6 @@ impl Default for ConfigTunnel {
     }
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug, Default)]
-pub struct ConfigScheduler {
-    pub app: Vec<String>,
-}
-
 impl MagicFile {
     pub fn autoload() -> Result<(Self, Option<PathBuf>)> {
         // check if a magic.toml exists in the current directory
@@ -117,7 +111,6 @@ impl MagicFile {
                     server: "bore".to_string(),
                     secret: "".to_string(),
                 }),
-                scheduler: None,
                 checks: None,
                 metrics: None,
                 packages: None,
