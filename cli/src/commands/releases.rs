@@ -170,9 +170,10 @@ async fn handle_releases_get(
             distribution_id = releases.first().map(|r| r.distribution_id);
         }
         let latest_release_id = if let Some(distribution_id) = distribution_id {
-            let latest_distro_release =
-                api.get_latest_distribution_release(distribution_id).await?;
-            Some(latest_distro_release.id)
+            api.get_latest_distribution_release(distribution_id)
+                .await
+                .ok()
+                .map(|r| r.id)
         } else {
             None
         };
@@ -189,7 +190,7 @@ async fn handle_releases_get(
                 meta = "Draft".to_string();
             }
             if Some(release.id) == latest_release_id {
-                meta = "Latest".to_string();
+                meta = "Deployed".to_string();
             }
             table.add_row(vec![
                 release.id.to_string(),

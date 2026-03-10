@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT release.*,\n        distribution.name AS distribution_name,\n        distribution.architecture AS distribution_architecture,\n        auth.users.email AS user_email\n        FROM release\n        JOIN distribution ON release.distribution_id = distribution.id\n        LEFT JOIN auth.users ON release.user_id = auth.users.id\n        WHERE distribution_id = $1\n        AND draft = false\n        AND yanked = FALSE\n        AND release_candidate = FALSE\n        ORDER BY created_at DESC LIMIT 1\n        ",
+  "query": "\n        SELECT release.*,\n        distribution.name AS distribution_name,\n        distribution.architecture AS distribution_architecture,\n        auth.users.email AS user_email\n        FROM release\n        JOIN distribution ON release.distribution_id = distribution.id\n            AND distribution.latest_release_id = release.id\n        LEFT JOIN auth.users ON release.user_id = auth.users.id\n        WHERE distribution_id = $1\n        ",
   "describe": {
     "columns": [
       {
@@ -78,5 +78,5 @@
       true
     ]
   },
-  "hash": "7d5bedcdcfdbaed051c7d0b85ec97da47569c9760caeefcb3791b2851bf0140a"
+  "hash": "9e5f9b908812511c516a68dbce44d761149f5f4762f92e129995bf9da1d9d6cc"
 }
