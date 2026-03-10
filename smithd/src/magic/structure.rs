@@ -9,8 +9,6 @@ use tracing::info;
 pub struct MagicFile {
     pub meta: ConfigMeta,
     pub tunnel: Option<ConfigTunnel>,
-#[serde(rename = "check")]
-    pub checks: Option<Vec<ConfigCheck>>,
     #[serde(rename = "metric")]
     pub metrics: Option<Vec<ConfigMetric>>,
     #[serde(rename = "package")]
@@ -24,12 +22,6 @@ pub struct ConfigMeta {
     pub release_id: Option<i32>,
     pub target_release_id: Option<i32>,
     pub token: Option<String>,
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug)]
-pub struct ConfigCheck {
-    pub name: String,
-    pub cmd: String,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -111,7 +103,6 @@ impl MagicFile {
                     server: "bore".to_string(),
                     secret: "".to_string(),
                 }),
-                checks: None,
                 metrics: None,
                 packages: None,
             })?;
@@ -143,10 +134,6 @@ impl MagicFile {
         file.write_all(string.as_bytes()).await?;
         info!("Wrote magic file to: {}", path);
         Ok(())
-    }
-
-    pub fn get_checks(&self) -> Vec<ConfigCheck> {
-        self.checks.clone().unwrap_or_default()
     }
 
     pub fn get_tunnel_details(&self) -> ConfigTunnel {
