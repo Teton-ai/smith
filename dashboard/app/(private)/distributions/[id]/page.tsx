@@ -2,10 +2,12 @@
 
 import {
 	ArrowLeft,
+	ArrowLeftRight,
 	Calendar,
 	ChevronRight,
 	Cpu,
 	HardDrive,
+	Minus,
 	Monitor,
 	Package,
 	Plus,
@@ -16,8 +18,9 @@ import {
 import moment from "moment";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import { useState } from "react";
+import React, { useCallback, useMemo, useState } from "react";
 import {
+	type Package as PackageType,
 	useCreateDistributionRelease,
 	useGetDistributionById,
 	useGetDistributionLatestRelease,
@@ -26,6 +29,122 @@ import {
 } from "@/app/api-client";
 import { Button } from "@/app/components/button";
 import { Modal } from "@/app/components/modal";
+import { SidePanel } from "@/app/components/side-panel";
+
+interface ReleaseRowProps {
+	release: {
+		id: number;
+		version: string;
+		draft: boolean;
+		release_candidate: boolean;
+		yanked: boolean;
+		created_at: string;
+		user_email: string | null;
+		user_id: number | null;
+	};
+	compareMode: boolean;
+	isSelected: boolean;
+	selectionLabel: string | null;
+	isDeployed: boolean;
+	onSelect: (id: number) => void;
+}
+
+const ReleaseRow = React.memo(function ReleaseRow({
+	release,
+	compareMode,
+	isSelected,
+	selectionLabel,
+	isDeployed,
+	onSelect,
+}: ReleaseRowProps) {
+	const row = (
+		<div className="flex items-center justify-between">
+			<div className="flex items-center space-x-3">
+				{compareMode ? (
+					<div
+						className={`w-8 h-8 rounded flex items-center justify-center text-xs font-bold ${
+							isSelected
+								? "bg-blue-500 text-white"
+								: "bg-gray-100 text-gray-400 border border-gray-300 border-dashed"
+						}`}
+					>
+						{selectionLabel ?? ""}
+					</div>
+				) : (
+					<div className="p-2 bg-gray-100 text-gray-600 rounded">
+						<Tag className="w-4 h-4" />
+					</div>
+				)}
+				<div>
+					<div className="flex items-center space-x-2">
+						<h4 className="font-medium text-gray-900">{release.version}</h4>
+						{isDeployed && (
+							<span className="px-2 py-1 text-xs font-medium bg-green-100 text-green-800 rounded-full">
+								Deployed
+							</span>
+						)}
+						{release.draft && (
+							<span className="px-2 py-1 text-xs font-medium bg-yellow-100 text-yellow-800 rounded-full">
+								Draft
+							</span>
+						)}
+						{release.release_candidate && (
+							<span className="px-2 py-1 text-xs font-medium bg-orange-100 text-orange-700 rounded-full">
+								RC
+							</span>
+						)}
+						{release.yanked && (
+							<span className="px-2 py-1 text-xs font-medium bg-red-100 text-red-800 rounded-full">
+								Yanked
+							</span>
+						)}
+					</div>
+					<div className="flex items-center space-x-3 mt-1 text-xs text-gray-500">
+						<div className="flex items-center space-x-1">
+							<Calendar className="w-3 h-3" />
+							<span>{moment(release.created_at).fromNow()}</span>
+						</div>
+						<div className="flex items-center space-x-1">
+							<User className="w-3 h-3" />
+							<span>
+								{release.user_email ||
+									(release.user_id ? `User #${release.user_id}` : "Unknown")}
+							</span>
+						</div>
+					</div>
+				</div>
+			</div>
+			{!compareMode && (
+				<div className="flex items-center space-x-4">
+					<ChevronRight className="w-4 h-4 text-gray-400" />
+				</div>
+			)}
+		</div>
+	);
+
+	if (compareMode) {
+		return (
+			<button
+				type="button"
+				className={`block w-full text-left p-4 cursor-pointer transition-colors ${
+					isSelected ? "bg-blue-50 hover:bg-blue-100" : "hover:bg-gray-50"
+				}`}
+				onClick={() => onSelect(release.id)}
+			>
+				{row}
+			</button>
+		);
+	}
+
+	return (
+		<Link
+			className="block p-4 hover:bg-gray-50 cursor-pointer transition-colors"
+			href={`/releases/${release.id}`}
+		>
+			{row}
+		</Link>
+	);
+});
 
 const DistributionDetailPage = () => {
 	const router = useRouter();
@@ -37,6 +156,8 @@ const DistributionDetailPage = () => {
 	const [customVersion, setCustomVersion] = useState("");
 	const [isReleaseCandidate, setIsReleaseCandidate] = useState(false);
 	const [creatingDraft, setCreatingDraft] = useState(false);
+	const [compareMode, setCompareMode] = useState(false);
+	const [compareSelection, setCompareSelection] = useState<number[]>([]);
 
 	const { data: distribution, isLoading: loading } =
 		useGetDistributionById(distributionId);
@@ -55,6 +176,75 @@ const DistributionDetailPage = () => {
 	);
 
 	const createDistributionReleaseHook = useCreateDistributionRelease();
+
+	const baseReleaseId = compareSelection[0] ?? null;
+	const targetReleaseId = compareSelection[1] ?? null;
+
+	const { data: baseComparePackages, isLoading: basePackagesLoading } =
+		useGetDistributionReleasePackages(baseReleaseId as number, {
+			query: { enabled: baseReleaseId != null },
+		});
+	const { data: targetComparePackages, isLoading: targetPackagesLoading } =
+		useGetDistributionReleasePackages(targetReleaseId as number, {
+			query: { enabled: targetReleaseId != null },
+		});
+
+	const compareLoading = basePackagesLoading || targetPackagesLoading;
+
+	const diff = useMemo(() => {
+		if (!baseComparePackages || !targetComparePackages) return null;
+
+		const baseByName = new Map<string, PackageType>();
+		for (const pkg of baseComparePackages) {
+			baseByName.set(pkg.name, pkg);
+		}
+
+		const targetByName = new Map<string, PackageType>();
+		for (const pkg of targetComparePackages) {
+			targetByName.set(pkg.name, pkg);
+		}
+
+		const added: PackageType[] = [];
+		const removed: PackageType[] = [];
+		const changed: { name: string; oldVersion: string; newVersion: string }[] =
+			[];
+		const unchanged: PackageType[] = [];
+
+		for (const [name, pkg] of targetByName) {
+			const basePkg = baseByName.get(name);
+			if (!basePkg) {
+				added.push(pkg);
+			} else if (basePkg.version !== pkg.version) {
+				changed.push({
+					name,
+					oldVersion: basePkg.version,
+					newVersion: pkg.version,
+				});
+			} else {
+				unchanged.push(pkg);
+			}
+		}
+
+		for (const [name, pkg] of baseByName) {
+			if (!targetByName.has(name)) {
+				removed.push(pkg);
+			}
+		}
+
+		return { added, removed, changed, unchanged };
+	}, [baseComparePackages, targetComparePackages]);
+
+	const toggleCompareSelection = useCallback((releaseId: number) => {
+		setCompareSelection((prev) => {
+			if (prev.includes(releaseId)) {
+				return prev.filter((id) => id !== releaseId);
+			}
+			if (prev.length >= 2) {
+				return [prev[1], releaseId];
+			}
+			return [...prev, releaseId];
+		});
+	}, []);
 
 	const getArchIcon = (architecture: string) => {
 		switch (architecture.toLowerCase()) {
@@ -86,10 +276,6 @@ const DistributionDetailPage = () => {
 			default:
 				return "bg-gray-100 text-gray-700";
 		}
-	};
-
-	const formatRelativeTime = (dateString: string) => {
-		return moment(dateString).fromNow();
 	};
 
 	// Get the latest non-yanked release to use as base (includes drafts)
@@ -421,15 +607,35 @@ const DistributionDetailPage = () => {
 						<h2 className="text-lg font-semibold text-gray-900">Releases</h2>
 						<span className="text-sm text-gray-500">({releases.length})</span>
 					</div>
-					{releases.length > 0 && (
-						<Button
-							variant="success"
-							icon={<Plus className="w-4 h-4" />}
-							onClick={openCreateModal}
-						>
-							Draft New Release
-						</Button>
-					)}
+					<div className="flex items-center space-x-2">
+						{releases.length >= 2 && (
+							<Button
+								variant={compareMode ? "primary" : "secondary"}
+								icon={
+									compareMode ? (
+										<X className="w-4 h-4" />
+									) : (
+										<ArrowLeftRight className="w-4 h-4" />
+									)
+								}
+								onClick={() => {
+									setCompareMode(!compareMode);
+									setCompareSelection([]);
+								}}
+							>
+								{compareMode ? "Exit Compare" : "Compare"}
+							</Button>
+						)}
+						{releases.length > 0 && (
+							<Button
+								variant="success"
+								icon={<Plus className="w-4 h-4" />}
+								onClick={openCreateModal}
+							>
+								Draft New Release
+							</Button>
+						)}
+					</div>
 				</div>
 
 				<div className="bg-white rounded border border-gray-200 overflow-hidden">
@@ -446,73 +652,226 @@ const DistributionDetailPage = () => {
 						</div>
 					) : (
 						<div className="divide-y divide-gray-200">
-							{releases.map((release) => (
-								<Link
-									key={release.id}
-									className="block p-4 hover:bg-gray-50 cursor-pointer transition-colors"
-									href={`/releases/${release.id}`}
-								>
-									<div className="flex items-center justify-between">
-										<div className="flex items-center space-x-3">
-											<div className="p-2 bg-gray-100 text-gray-600 rounded">
-												<Tag className="w-4 h-4" />
-											</div>
-											<div>
-												<div className="flex items-center space-x-2">
-													<h4 className="font-medium text-gray-900">
-														{release.version}
-													</h4>
-													{deployedRelease &&
-														deployedRelease.id === release.id && (
-															<span className="px-2 py-1 text-xs font-medium bg-green-100 text-green-800 rounded-full">
-																Deployed
-															</span>
-														)}
-													{release.draft && (
-														<span className="px-2 py-1 text-xs font-medium bg-yellow-100 text-yellow-800 rounded-full">
-															Draft
-														</span>
-													)}
-													{release.release_candidate && (
-														<span className="px-2 py-1 text-xs font-medium bg-orange-100 text-orange-700 rounded-full">
-															RC
-														</span>
-													)}
-													{release.yanked && (
-														<span className="px-2 py-1 text-xs font-medium bg-red-100 text-red-800 rounded-full">
-															Yanked
-														</span>
-													)}
-												</div>
-												<div className="flex items-center space-x-3 mt-1 text-xs text-gray-500">
-													<div className="flex items-center space-x-1">
-														<Calendar className="w-3 h-3" />
-														<span>
-															{formatRelativeTime(release.created_at)}
-														</span>
-													</div>
-													<div className="flex items-center space-x-1">
-														<User className="w-3 h-3" />
-														<span>
-															{release.user_email ||
-																(release.user_id
-																	? `User #${release.user_id}`
-																	: "Unknown")}
-														</span>
-													</div>
-												</div>
-											</div>
-										</div>
-										<div className="flex items-center space-x-4">
-											<ChevronRight className="w-4 h-4 text-gray-400" />
-										</div>
-									</div>
-								</Link>
-							))}
+							{compareMode && (
+								<div className="px-4 py-2 bg-blue-50 border-b border-blue-100 text-xs text-blue-700">
+									{compareSelection.length === 0
+										? "Select two releases to compare"
+										: compareSelection.length === 1
+											? "Select one more release"
+											: "Showing diff below — click a release to change selection"}
+								</div>
+							)}
+							{releases.map((release) => {
+								const selectionIndex = compareSelection.indexOf(release.id);
+								return (
+									<ReleaseRow
+										key={release.id}
+										release={release}
+										compareMode={compareMode}
+										isSelected={selectionIndex !== -1}
+										selectionLabel={
+											selectionIndex === 0
+												? "A"
+												: selectionIndex === 1
+													? "B"
+													: null
+										}
+										isDeployed={deployedRelease?.id === release.id}
+										onSelect={toggleCompareSelection}
+									/>
+								);
+							})}
 						</div>
 					)}
 				</div>
 			</div>
+
+			{/* Compare side panel */}
+			<SidePanel
+				open={compareMode && compareSelection.length === 2}
+				onClose={() => {
+					setCompareMode(false);
+					setCompareSelection([]);
+				}}
+				title="Compare Releases"
+				subtitle={
+					baseReleaseId && targetReleaseId
+						? `${releases.find((r) => r.id === baseReleaseId)?.version} → ${releases.find((r) => r.id === targetReleaseId)?.version}`
+						: undefined
+				}
+				headerRight={
+					diff ? (
+						<div className="flex items-center space-x-1">
+							{diff.added.length > 0 && (
+								<span className="px-1.5 py-0.5 text-xs font-medium bg-green-100 text-green-700 rounded">
+									+{diff.added.length}
+								</span>
+							)}
+							{diff.removed.length > 0 && (
+								<span className="px-1.5 py-0.5 text-xs font-medium bg-red-100 text-red-700 rounded">
+									-{diff.removed.length}
+								</span>
+							)}
+							{diff.changed.length > 0 && (
+								<span className="px-1.5 py-0.5 text-xs font-medium bg-amber-100 text-amber-700 rounded">
+									~{diff.changed.length}
+								</span>
+							)}
+						</div>
+					) : undefined
+				}
+			>
+				{compareLoading ? (
+					<div className="flex items-center justify-center py-12">
+						<div className="text-gray-500 text-sm">Loading packages...</div>
+					</div>
+				) : diff ? (
+					(() => {
+						let idx = 0;
+						const allEmpty =
+							diff.added.length === 0 &&
+							diff.removed.length === 0 &&
+							diff.changed.length === 0;
+
+						return (
+							<div className="space-y-1.5">
+								{allEmpty && (
+									<p className="text-sm text-gray-500 py-4 text-center animate-fade-slide-in">
+										No differences between these releases.
+									</p>
+								)}
+
+								{diff.added.length > 0 && (
+									<h4
+										style={{
+											animationDelay: `${idx++ * 30}ms`,
+											animationFillMode: "both",
+										}}
+										className="text-xs font-medium text-gray-400 uppercase tracking-wide pt-1 animate-fade-slide-in"
+									>
+										Added
+									</h4>
+								)}
+								{diff.added.map((pkg) => (
+									<div
+										key={`add-${pkg.name}`}
+										style={{
+											animationDelay: `${idx++ * 30}ms`,
+											animationFillMode: "both",
+										}}
+										className="flex items-center space-x-2 px-3 py-2 bg-green-50 border-l-2 border-green-500 rounded-r animate-fade-slide-in"
+									>
+										<Plus className="w-3.5 h-3.5 text-green-600 flex-shrink-0" />
+										<span className="text-sm font-medium text-gray-900">
+											{pkg.name}
+										</span>
+										<span className="text-xs font-mono text-gray-500">
+											{pkg.version}
+										</span>
+									</div>
+								))}
+
+								{diff.removed.length > 0 && (
+									<h4
+										style={{
+											animationDelay: `${idx++ * 30}ms`,
+											animationFillMode: "both",
+										}}
+										className="text-xs font-medium text-gray-400 uppercase tracking-wide pt-1 animate-fade-slide-in"
+									>
+										Removed
+									</h4>
+								)}
+								{diff.removed.map((pkg) => (
+									<div
+										key={`rm-${pkg.name}`}
+										style={{
+											animationDelay: `${idx++ * 30}ms`,
+											animationFillMode: "both",
+										}}
+										className="flex items-center space-x-2 px-3 py-2 bg-red-50 border-l-2 border-red-500 rounded-r animate-fade-slide-in"
+									>
+										<Minus className="w-3.5 h-3.5 text-red-600 flex-shrink-0" />
+										<span className="text-sm font-medium text-gray-900">
+											{pkg.name}
+										</span>
+										<span className="text-xs font-mono text-gray-500">
+											{pkg.version}
+										</span>
+									</div>
+								))}
+
+								{diff.changed.length > 0 && (
+									<h4
+										style={{
+											animationDelay: `${idx++ * 30}ms`,
+											animationFillMode: "both",
+										}}
+										className="text-xs font-medium text-gray-400 uppercase tracking-wide pt-1 animate-fade-slide-in"
+									>
+										Changed
+									</h4>
+								)}
+								{diff.changed.map((pkg) => (
+									<div
+										key={`chg-${pkg.name}`}
+										style={{
+											animationDelay: `${idx++ * 30}ms`,
+											animationFillMode: "both",
+										}}
+										className="flex items-center space-x-2 px-3 py-2 bg-amber-50 border-l-2 border-amber-500 rounded-r animate-fade-slide-in"
+									>
+										<span className="text-amber-600 flex-shrink-0 text-sm font-bold">
+											~
+										</span>
+										<span className="text-sm font-medium text-gray-900">
+											{pkg.name}
+										</span>
+										<span className="text-xs font-mono text-gray-500 line-through">
+											{pkg.oldVersion}
+										</span>
+										<span className="text-xs text-gray-400">→</span>
+										<span className="text-xs font-mono text-gray-900">
+											{pkg.newVersion}
+										</span>
+									</div>
+								))}
+
+								{diff.unchanged.length > 0 && (
+									<>
+										<h4
+											style={{
+												animationDelay: `${idx++ * 30}ms`,
+												animationFillMode: "both",
+											}}
+											className="text-xs font-medium text-gray-400 uppercase tracking-wide pt-1 animate-fade-slide-in"
+										>
+											Unchanged
+										</h4>
+										{diff.unchanged.map((pkg) => (
+											<div
+												key={`unch-${pkg.name}`}
+												style={{
+													animationDelay: `${idx++ * 30}ms`,
+													animationFillMode: "both",
+												}}
+												className="flex items-center space-x-2 px-3 py-2 bg-gray-50 border-l-2 border-gray-300 rounded-r animate-fade-slide-in"
+											>
+												<span className="text-sm text-gray-600">
+													{pkg.name}
+												</span>
+												<span className="text-xs font-mono text-gray-400">
+													{pkg.version}
+												</span>
+											</div>
+										))}
+									</>
+								)}
+							</div>
+						);
+					})()
+				) : null}
+			</SidePanel>
 		</div>
 	);
 };

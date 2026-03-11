@@ -100,7 +100,7 @@ const LocationMap: React.FC<LocationMapProps> = ({
 	const [lat, lng] = coordinates;
 
 	return (
-		<div className="h-64 w-full rounded-lg overflow-hidden border border-gray-200">
+		<div className="h-64 w-full rounded-lg overflow-hidden border border-gray-200 relative z-0">
 			<MapContainer
 				center={[lat, lng]}
 				zoom={10}
