@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(find /Users/alvaromolina/Documents/teton/smith -name \"*deploy*\" -type f 2>/dev/null | grep -v target | head -20)",
+      "Bash(grep -A 20 \"network_score\" /Users/alvaromolina/Documents/teton/smith/api/migrations/*.sql | head -50)",
+      "Bash(find /Users/alvaromolina/Documents/teton/smith -type f -path \"*docs*\" -name \"*deploy*\" -o -path \"*docs*\" -name \"*production*\" 2>/dev/null | grep -E \"\\\\.\\(md|toml\\)$\")"
+    ]
+  }
+}
