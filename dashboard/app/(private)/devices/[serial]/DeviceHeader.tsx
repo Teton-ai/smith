@@ -7,6 +7,7 @@ import {
 	Cpu,
 	ExternalLink,
 	GitBranch,
+	Power,
 	Router,
 	Signal,
 	Tag,
@@ -14,7 +15,9 @@ import {
 	Wifi,
 } from "lucide-react";
 import { useRef, useState } from "react";
-import type { Device } from "@/app/api-client";
+import { type Device, useIssueCommandsToDevices } from "@/app/api-client";
+import { Button } from "@/app/components/button";
+import { Modal } from "@/app/components/modal";
 import NetworkQualityIndicator from "@/app/components/NetworkQualityIndicator";
 import { useConfig } from "@/app/hooks/config";
 
@@ -86,9 +89,65 @@ interface DeviceHeaderProps {
 
 const DeviceHeader: React.FC<DeviceHeaderProps> = ({ device, serial }) => {
 	const [sshCopied, setSshCopied] = useState(false);
+	const [showRunModal, setShowRunModal] = useState(false);
+	const [showRebootModal, setShowRebootModal] = useState(false);
 	const [runCommand, setRunCommand] = useState("");
-	const [runCopied, setRunCopied] = useState(false);
 	const { config } = useConfig();
+
+	const { mutate: issueCommands, isPending: isIssuingCommands } =
+		useIssueCommandsToDevices({
+			mutation: {
+				onSuccess: () => {
+					setShowRunModal(false);
+					setRunCommand("");
+				},
+				onError: (error) => {
+					console.error("Failed to issue command:", error);
+				},
+			},
+		});
+
+	const { mutate: issueReboot, isPending: isRebooting } =
+		useIssueCommandsToDevices({
+			mutation: {
+				onSuccess: () => {
+					setShowRebootModal(false);
+				},
+				onError: (error) => {
+					console.error("Failed to reboot device:", error);
+				},
+			},
+		});
+
+	const handleRunCommand = () => {
+		if (!runCommand.trim() || !device?.id) return;
+		issueCommands({
+			data: {
+				devices: [device.id],
+				commands: [
+					{
+						command: { FreeForm: { cmd: runCommand } },
+						continue_on_error: false,
+					},
+				],
+			},
+		});
+	};
+
+	const handleReboot = () => {
+		if (!device?.id) return;
+		issueReboot({
+			data: {
+				devices: [device.id],
+				commands: [
+					{
+						command: "Restart",
+						continue_on_error: false,
+					},
+				],
+			},
+		});
+	};
 
 	const getGrafanaUrl = () => {
 		if (!config?.DEVICE_GRAFANA_URL) return null;
@@ -108,18 +167,6 @@ const DeviceHeader: React.FC<DeviceHeaderProps> = ({ device, serial }) => {
 			console.error("Failed to copy to clipboard:", err);
 		}
 	};
-
-	const handleRunCommand = async () => {
-		if (!runCommand.trim()) return;
-		const command = `sm run ${device?.serial_number || serial} -- ${runCommand}`;
-		try {
-			await navigator.clipboard.writeText(command);
-			setRunCopied(true);
-			setTimeout(() => setRunCopied(false), 2000);
-		} catch (err) {
-			console.error("Failed to copy to clipboard:", err);
-		}
-	};
 	if (!device) {
 		return (
 			<div className="bg-white rounded-lg border border-gray-200 p-4">
@@ -134,97 +181,6 @@ const DeviceHeader: React.FC<DeviceHeaderProps> = ({ device, serial }) => {
 						<div className="flex items-center space-x-4 mt-1 text-sm text-gray-600">
 							<span>Loading...</span>
 						</div>
-					</div>
-					<div className="flex-shrink-0 flex items-center space-x-3">
-						<div className="flex items-center space-x-2">
-							<input
-								type="text"
-								value={runCommand}
-								onChange={(e) => setRunCommand(e.target.value)}
-								onKeyDown={(e) => {
-									if (e.key === "Enter") {
-										handleRunCommand();
-									}
-								}}
-								placeholder="Enter command (e.g., ls -la)"
-								className="px-3 py-2 border border-gray-300 rounded-md text-sm text-gray-900 placeholder-gray-400 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent w-64"
-							/>
-							<Tooltip
-								content={
-									runCopied
-										? "Copied to clipboard!"
-										: `Copy command: sm run ${serial} -- ${runCommand || "<command>"}`
-								}
-							>
-								<button
-									onClick={handleRunCommand}
-									disabled={!runCommand.trim()}
-									className={`flex items-center space-x-2 px-3 py-2 rounded-md text-sm font-medium transition-colors ${
-										runCopied
-											? "bg-green-100 text-green-800 border border-green-200"
-											: runCommand.trim()
-												? "bg-purple-50 text-purple-700 border border-purple-200 hover:bg-purple-100 cursor-pointer"
-												: "bg-gray-100 text-gray-400 border border-gray-200 cursor-not-allowed"
-									}`}
-								>
-									{runCopied ? (
-										<>
-											<Check className="w-4 h-4" />
-											<span>Copied!</span>
-										</>
-									) : (
-										<>
-											<Terminal className="w-4 h-4" />
-											<Copy className="w-3 h-3" />
-											<span>Run</span>
-										</>
-									)}
-								</button>
-							</Tooltip>
-						</div>
-						<Tooltip
-							content={
-								sshCopied
-									? "Copied to clipboard!"
-									: `Copy SSH tunnel command: sm tunnel ${serial}`
-							}
-						>
-							<button
-								onClick={handleSshTunnel}
-								className={`flex items-center space-x-2 px-3 py-2 rounded-md text-sm font-medium transition-colors cursor-pointer ${
-									sshCopied
-										? "bg-green-100 text-green-800 border border-green-200"
-										: "bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100"
-								}`}
-							>
-								{sshCopied ? (
-									<>
-										<Check className="w-4 h-4" />
-										<span>Copied!</span>
-									</>
-								) : (
-									<>
-										<Terminal className="w-4 h-4" />
-										<Copy className="w-3 h-3" />
-										<span>SSH</span>
-									</>
-								)}
-							</button>
-						</Tooltip>
-						{getGrafanaUrl() && (
-							<Tooltip content="Open Grafana dashboard">
-								<a
-									href={getGrafanaUrl()!}
-									target="_blank"
-									rel="noopener noreferrer"
-									className="flex items-center space-x-2 px-3 py-2 rounded-md text-sm font-medium transition-colors cursor-pointer bg-orange-50 text-orange-700 border border-orange-200 hover:bg-orange-100"
-								>
-									<BarChart3 className="w-4 h-4" />
-									<ExternalLink className="w-3 h-3" />
-									<span>Grafana</span>
-								</a>
-							</Tooltip>
-						)}
 					</div>
 				</div>
 			</div>
@@ -467,52 +423,24 @@ const DeviceHeader: React.FC<DeviceHeaderProps> = ({ device, serial }) => {
 					</div>
 				</div>
 				<div className="flex-shrink-0 flex items-center space-x-3">
-					<div className="flex items-center space-x-2">
-						<input
-							type="text"
-							value={runCommand}
-							onChange={(e) => setRunCommand(e.target.value)}
-							onKeyDown={(e) => {
-								if (e.key === "Enter") {
-									handleRunCommand();
-								}
-							}}
-							placeholder="Enter command (e.g., ls -la)"
-							className="px-3 py-2 border border-gray-300 rounded-md text-sm text-gray-900 placeholder-gray-400 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent w-64"
-						/>
-						<Tooltip
-							content={
-								runCopied
-									? "Copied to clipboard!"
-									: `Copy command: sm run ${device?.serial_number || serial} -- ${runCommand || "<command>"}`
-							}
+					<Tooltip content="Run a command on this device">
+						<button
+							onClick={() => setShowRunModal(true)}
+							className="flex items-center space-x-2 px-3 py-2 rounded-md text-sm font-medium transition-colors cursor-pointer bg-purple-50 text-purple-700 border border-purple-200 hover:bg-purple-100"
 						>
-							<button
-								onClick={handleRunCommand}
-								disabled={!runCommand.trim()}
-								className={`flex items-center space-x-2 px-3 py-2 rounded-md text-sm font-medium transition-colors ${
-									runCopied
-										? "bg-green-100 text-green-800 border border-green-200"
-										: runCommand.trim()
-											? "bg-purple-50 text-purple-700 border border-purple-200 hover:bg-purple-100 cursor-pointer"
-											: "bg-gray-100 text-gray-400 border border-gray-200 cursor-not-allowed"
-								}`}
-							>
-								{runCopied ? (
-									<>
-										<Check className="w-4 h-4" />
-										<span>Copied!</span>
-									</>
-								) : (
-									<>
-										<Terminal className="w-4 h-4" />
-										<Copy className="w-3 h-3" />
-										<span>Run</span>
-									</>
-								)}
-							</button>
-						</Tooltip>
-					</div>
+							<Terminal className="w-4 h-4" />
+							<span>Run</span>
+						</button>
+					</Tooltip>
+					<Tooltip content="Reboot this device">
+						<button
+							onClick={() => setShowRebootModal(true)}
+							className="flex items-center space-x-2 px-3 py-2 rounded-md text-sm font-medium transition-colors cursor-pointer bg-red-50 text-red-700 border border-red-200 hover:bg-red-100"
+						>
+							<Power className="w-4 h-4" />
+							<span>Reboot</span>
+						</button>
+					</Tooltip>
 					<Tooltip
 						content={
 							sshCopied
@@ -558,6 +486,114 @@ const DeviceHeader: React.FC<DeviceHeaderProps> = ({ device, serial }) => {
 					)}
 				</div>
 			</div>
+
+			{/* Run Command Modal */}
+			<Modal
+				open={showRunModal}
+				onClose={() => {
+					setShowRunModal(false);
+					setRunCommand("");
+				}}
+				title="Run Command"
+				footer={
+					<>
+						<Button
+							variant="secondary"
+							disabled={isIssuingCommands}
+							onClick={() => {
+								setShowRunModal(false);
+								setRunCommand("");
+							}}
+						>
+							Cancel
+						</Button>
+						<Button
+							variant="purple"
+							loading={isIssuingCommands}
+							disabled={!runCommand.trim()}
+							onClick={handleRunCommand}
+						>
+							{isIssuingCommands ? "Sending..." : "Run Command"}
+						</Button>
+					</>
+				}
+			>
+				<div className="bg-purple-50 border border-purple-200 rounded-lg p-4 mb-4">
+					<div className="flex gap-3">
+						<Terminal className="w-5 h-5 text-purple-600 flex-shrink-0 mt-0.5" />
+						<div>
+							<p className="text-purple-800 font-medium">
+								Execute Command on {getDeviceName()}
+							</p>
+							<p className="text-purple-700 text-sm mt-1">
+								The command will be queued and executed on the device when it
+								checks in.
+							</p>
+						</div>
+					</div>
+				</div>
+
+				<div>
+					<label className="block text-sm font-medium text-gray-700 mb-2">
+						Command
+					</label>
+					<input
+						type="text"
+						value={runCommand}
+						onChange={(e) => setRunCommand(e.target.value)}
+						onKeyDown={(e) => {
+							if (e.key === "Enter" && runCommand.trim()) {
+								handleRunCommand();
+							}
+						}}
+						placeholder="e.g., ls -la /var/log"
+						className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-purple-500 focus:border-purple-500 text-gray-900 placeholder-gray-400"
+					/>
+					<p className="mt-1 text-xs text-gray-500">
+						Enter a shell command to execute on this device
+					</p>
+				</div>
+			</Modal>
+
+			{/* Reboot Confirmation Modal */}
+			<Modal
+				open={showRebootModal}
+				onClose={() => setShowRebootModal(false)}
+				title="Reboot Device"
+				footer={
+					<>
+						<Button
+							variant="secondary"
+							disabled={isRebooting}
+							onClick={() => setShowRebootModal(false)}
+						>
+							Cancel
+						</Button>
+						<Button
+							variant="danger"
+							loading={isRebooting}
+							onClick={handleReboot}
+						>
+							{isRebooting ? "Rebooting..." : "Reboot Device"}
+						</Button>
+					</>
+				}
+			>
+				<div className="bg-red-50 border border-red-200 rounded-lg p-4">
+					<div className="flex gap-3">
+						<Power className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
+						<div>
+							<p className="text-red-800 font-medium">
+								Reboot {getDeviceName()}
+							</p>
+							<p className="text-red-700 text-sm mt-1">
+								This will restart the device. It will be temporarily offline
+								until it comes back up.
+							</p>
+						</div>
+					</div>
+				</div>
+			</Modal>
 		</div>
 	);
 };
