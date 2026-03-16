@@ -285,7 +285,7 @@ pub async fn get_signed_package_link(
 ) -> Result<axum::response::Response<Body>, StatusCode> {
     let file_name = &params.name;
 
-    let response = storage::Storage::download_package_from_cdn(
+    let mut response = storage::Storage::download_package_from_cdn(
         &state.config.packages_bucket_name,
         Some(""),
         file_name,
@@ -298,6 +298,9 @@ pub async fn get_signed_package_link(
         error!("Failed to get signed link from CDN {:?}", err);
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
+
+    // Append redirect to response here
+    *response.status_mut() = StatusCode::FOUND;
 
     Ok(response)
 }
