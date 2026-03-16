@@ -261,7 +261,7 @@ pub async fn download_package(
 
 #[derive(Deserialize, Debug, IntoParams)]
 pub struct SignedDownloadParams {
-    path: String,
+    name: String,
 }
 
 #[utoipa::path(
@@ -283,69 +283,21 @@ pub async fn get_signed_package_link(
     Query(params): Query<SignedDownloadParams>,
     Extension(state): Extension<State>,
 ) -> Result<axum::response::Response<Body>, StatusCode> {
-    let file_path = &params.path;
+    let file_name = &params.name;
 
-    // Strip leading slash if present
-    let path = file_path.strip_prefix('/').unwrap_or(file_path.as_str());
-    // Split into bucket, directory path, and file name
-    let (bucket, dir_path, file_name) = if let Some(first_idx) = path.find('/') {
-        let bucket = &path[..first_idx];
-        let remaining_path = &path[first_idx + 1..];
-
-        if let Some(last_idx) = remaining_path.rfind('/') {
-            let dir_path = &remaining_path[..last_idx];
-            let file_name = &remaining_path[last_idx + 1..];
-            (bucket, dir_path, file_name)
-        } else {
-            (bucket, "", remaining_path)
-        }
-    } else {
-        (path, "", "")
-    };
-
-    if file_name.is_empty() || bucket.is_empty() {
-        error!("File name is empty in the requested path: {}", path);
-        return Err(StatusCode::BAD_REQUEST);
-    }
-
-    // Add more buckets here if needed
-    let response = match bucket.to_lowercase().as_str() {
-        // "packages" => &state.config.packages_bucket_name,
-        // "assets" => &state.config.assets_bucket_name,
-        "packages" => storage::Storage::download_package_from_cdn(
-            &state.config.packages_bucket_name,
-            Some(dir_path),
-            file_name,
-            &state.config.cloudfront.package_domain_name,
-            &state.config.cloudfront.package_key_pair_id,
-            &state.config.cloudfront.package_private_key,
-        )
-        .await
-        .map_err(|err| {
-            error!("Failed to get signed link from CDN {:?}", err);
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?,
-        // TODO: need to implement asset downloading or put
-        // ota stuff in packages bucket
-        //
-        // "assets" => storage::Storage::download_package_from_cdn(
-        //     &state.config.packages_bucket_name,
-        //     Some(dir_path),
-        //     file_name,
-        //     &state.config.cloudfront.package_domain_name,
-        //     &state.config.cloudfront.package_key_pair_id,
-        //     &state.config.cloudfront.package_private_key,
-        // )
-        // .await
-        // .map_err(|err| {
-        //     error!("Failed to get signed link from CDN {:?}", err);
-        //     StatusCode::INTERNAL_SERVER_ERROR
-        // })?,
-        _ => {
-            error!("Invalid bucket name requested: {}", bucket);
-            return Err(StatusCode::BAD_REQUEST);
-        }
-    };
+    let response = storage::Storage::download_package_from_cdn(
+        &state.config.packages_bucket_name,
+        Some(""),
+        file_name,
+        &state.config.cloudfront.package_domain_name,
+        &state.config.cloudfront.package_key_pair_id,
+        &state.config.cloudfront.package_private_key,
+    )
+    .await
+    .map_err(|err| {
+        error!("Failed to get signed link from CDN {:?}", err);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
 
     Ok(response)
 }
