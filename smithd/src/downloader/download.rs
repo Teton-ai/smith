@@ -67,8 +67,10 @@ async fn download_file(
     let mut rec_track = 0;
     let mut stats = DownloadStats::default();
     let configuration = magic.clone();
-    let client = Client::new();
     let server_api_url = configuration.get_server().await;
+    let client = Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()?;
 
     // Use .part file for atomic downloads
     let part_path = format!("{}.part", local_path);
@@ -123,7 +125,8 @@ async fn download_file(
         .send()
         .await?;
 
-    if !initial_response.status().is_success() && !initial_response.status().is_redirection() {
+    if initial_response.status() != reqwest::StatusCode::FOUND {
+        // if !initial_response.status().is_success() && !initial_response.status().is_redirection() {
         return Err(anyhow::anyhow!(
             "Failed to download file: {:?}",
             initial_response.status()
