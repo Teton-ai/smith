@@ -299,6 +299,7 @@ async fn start_main_server(config: &'static Config, authorization: Authorization
                 .delete(handlers::packages::delete_package_by_id),
         )
         .routes(routes!(package::route::download_package))
+        .routes(routes!(package::route::get_signed_package_link))
         .routes(routes!(
             device::route::get_variables_for_device,
             device::route::add_variable_to_device
