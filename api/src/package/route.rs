@@ -271,7 +271,7 @@ pub struct SignedDownloadParams {
         SignedDownloadParams
   ),
   responses(
-        (status = 200, description = "File download successful", content_type = "application/octet-stream"),
+        (status = 302, description = "Redirect to file stream", content_type = "application/octet-stream"),
         (status = 400, description = "Bad request"),
         (status = 500, description = "Internal server error")
   ),
