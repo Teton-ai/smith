@@ -1,6 +1,6 @@
-use crate::State;
 use crate::config::Config;
 use crate::package::Package;
+use crate::{State, storage};
 use axum::body::Body;
 use axum::extract::{Path, Query};
 use axum::http::StatusCode;
@@ -17,6 +17,7 @@ use std::error::Error;
 use std::io::{Cursor, Read};
 use tempfile::NamedTempFile;
 use tracing::{debug, error};
+use utoipa::IntoParams;
 
 const PACKAGES_TAG: &str = "packages";
 
@@ -256,4 +257,50 @@ pub async fn download_package(
     Query(params): Query<DownloadPackageQuery>,
 ) -> Result<Response, Response> {
     stream_package_from_s3(&params.name, state.config).await
+}
+
+#[derive(Deserialize, Debug, IntoParams)]
+pub struct SignedDownloadParams {
+    name: String,
+}
+
+#[utoipa::path(
+  get,
+  path = "/packages/download/signed",
+  params(
+        SignedDownloadParams
+  ),
+  responses(
+        (status = 302, description = "Redirect to file stream", content_type = "application/octet-stream"),
+        (status = 400, description = "Bad request"),
+        (status = 500, description = "Internal server error")
+  ),
+  security(
+        ("auth_token" = [])
+  ),
+)]
+pub async fn get_signed_package_link(
+    Query(params): Query<SignedDownloadParams>,
+    Extension(state): Extension<State>,
+) -> Result<axum::response::Response<Body>, StatusCode> {
+    let file_name = &params.name;
+
+    let mut response = storage::Storage::download_package_from_cdn(
+        &state.config.packages_bucket_name,
+        Some(""),
+        file_name,
+        &state.config.cloudfront.package_domain_name,
+        &state.config.cloudfront.package_key_pair_id,
+        &state.config.cloudfront.package_private_key,
+    )
+    .await
+    .map_err(|err| {
+        error!("Failed to get signed link from CDN {:?}", err);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    // Append redirect to response here
+    *response.status_mut() = StatusCode::FOUND;
+
+    Ok(response)
 }

@@ -1,99 +1,148 @@
 "use client";
 
-import { ArrowLeft, Check, Copy, Reply, Send } from "lucide-react";
+import { ArrowLeft, Send } from "lucide-react";
 import moment from "moment";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import {
+	CodeBlock,
+	getCommandStatus,
+	getStatusColor,
+	getTxLabel,
+	renderRxDetail,
+	renderTxDetail,
+} from "@/app/(private)/commands/shared";
 import {
 	type DeviceCommandResponse,
 	useGetAllCommandsForDevice,
 	useGetDeviceInfo,
 } from "@/app/api-client";
+import { Button } from "@/app/components/button";
 import DeviceHeader from "../DeviceHeader";
 
-const CommandsPage = () => {
-	const params = useParams();
-	const [copiedButtons, setCopiedButtons] = useState<Set<string>>(new Set());
+// ---------------------------------------------------------------------------
+// Right panel: full detail view
+// ---------------------------------------------------------------------------
 
-	const serial = params.serial as string;
+const ResponseDetail = ({ cmd }: { cmd: DeviceCommandResponse }) => {
+	const [showRaw, setShowRaw] = useState(false);
+	const status = getCommandStatus(cmd);
+	const { label: txLabel } = getTxLabel(cmd.cmd_data);
+
+	// biome-ignore lint/correctness/useExhaustiveDependencies: intentional reset on cmd change
+	useEffect(() => {
+		setShowRaw(false);
+	}, [cmd.cmd_id]);
+
+	return (
+		<div className="h-full flex flex-col overflow-hidden">
+			{/* Header */}
+			<div className="flex items-start justify-between px-5 py-4 border-b border-gray-200 shrink-0">
+				<div className="space-y-1">
+					<div className="flex items-center gap-2 flex-wrap">
+						<span className="font-semibold text-gray-900">{txLabel}</span>
+						<span
+							className={`px-2 py-0.5 text-xs font-medium rounded ${getStatusColor(status)}`}
+						>
+							{status}
+						</span>
+						{cmd.response != null && cmd.status != null && (
+							<span
+								className={`px-2 py-0.5 text-xs font-mono rounded ${cmd.status === 0 ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800"}`}
+							>
+								exit {cmd.status}
+							</span>
+						)}
+					</div>
+					<div className="flex items-center gap-2 text-xs text-gray-400 flex-wrap">
+						<span>Issued {moment(cmd.issued_at).fromNow()}</span>
+						<span>·</span>
+						{cmd.response_at ? (
+							<span>Responded {moment(cmd.response_at).fromNow()}</span>
+						) : (
+							<span className="text-yellow-500">Waiting for response…</span>
+						)}
+					</div>
+				</div>
+
+				{cmd.response != null && (
+					<Button
+						variant="secondary"
+						className="text-xs shrink-0 ml-4"
+						onClick={() => setShowRaw((v) => !v)}
+					>
+						{showRaw ? "Formatted" : "Raw JSON"}
+					</Button>
+				)}
+			</div>
+
+			{/* Scrollable body */}
+			<div className="flex-1 overflow-y-auto divide-y divide-gray-100">
+				{showRaw ? (
+					<div className="px-5 py-4">
+						<CodeBlock
+							label="raw TX"
+							content={JSON.stringify(cmd.cmd_data, null, 2)}
+						/>
+						<div className="mt-4">
+							<CodeBlock
+								label="raw RX"
+								content={JSON.stringify(cmd.response, null, 2)}
+							/>
+						</div>
+					</div>
+				) : (
+					<>
+						{/* Command sent */}
+						<div className="px-5 py-4">
+							<p className="text-xs font-medium uppercase tracking-wide text-blue-400 mb-3">
+								Sent
+							</p>
+							{renderTxDetail(cmd.cmd_data)}
+						</div>
+
+						{/* Response */}
+						<div className="px-5 py-4">
+							<p className="text-xs font-medium uppercase tracking-wide text-gray-400 mb-3">
+								Response
+							</p>
+							{renderRxDetail(cmd.response)}
+						</div>
+					</>
+				)}
+			</div>
+		</div>
+	);
+};
+
+// ---------------------------------------------------------------------------
+// Page
+// ---------------------------------------------------------------------------
+
+const CommandsPage = () => {
+	const { serial } = useParams<{ serial: string }>();
+	const [selectedId, setSelectedId] = useState<number | null>(null);
 
 	const { data: commandsData, isLoading: commandsLoading } =
 		useGetAllCommandsForDevice(serial, { limit: 500 });
 
 	const { data: device, isLoading: deviceLoading } = useGetDeviceInfo(serial);
 
-	const commands = commandsData?.commands || [];
+	const commands = commandsData?.commands ?? [];
 	const loading = commandsLoading || deviceLoading;
 
-	const getCommandDisplay = (cmd: DeviceCommandResponse) => {
-		if (typeof cmd.cmd_data === "string") {
-			return { type: cmd.cmd_data, content: null };
+	useEffect(() => {
+		if (commands.length > 0 && selectedId === null) {
+			setSelectedId(commands[0].cmd_id);
 		}
-		if (typeof cmd.cmd_data === "object" && cmd.cmd_data) {
-			const type = Object.keys(cmd.cmd_data)[0];
-			const content = (cmd.cmd_data as any)[type];
-			return { type, content };
-		}
-		return { type: "Unknown", content: null };
-	};
+	}, [commands, selectedId]);
 
-	const getResponseDisplay = (cmd: DeviceCommandResponse) => {
-		if (cmd.response == null) return { type: "None", content: null };
-		if (typeof cmd.response === "string") {
-			return { type: cmd.response, content: null };
-		}
-		if (typeof cmd.response === "object" && cmd.response) {
-			const type = Object.keys(cmd.response)[0];
-			const content = (cmd.response as any)[type];
-			return { type, content };
-		}
-		return { type: "Unknown", content: null };
-	};
-
-	const getCommandStatus = (cmd: DeviceCommandResponse) => {
-		if (cmd.cancelled) return "cancelled";
-		if (!cmd.fetched) return "pending";
-		if (!cmd.response_at) return "executing";
-		return cmd.status === 0 ? "success" : "failed";
-	};
-
-	const getStatusColor = (status: string) => {
-		switch (status) {
-			case "success":
-				return "bg-green-100 text-green-800";
-			case "failed":
-				return "bg-red-100 text-red-800";
-			case "executing":
-				return "bg-blue-100 text-blue-800";
-			case "cancelled":
-				return "bg-gray-100 text-gray-800";
-			case "pending":
-				return "bg-yellow-100 text-yellow-800";
-			default:
-				return "bg-gray-100 text-gray-800";
-		}
-	};
-
-	const copyToClipboard = (content: any, buttonId: string) => {
-		navigator.clipboard.writeText(JSON.stringify(content, null, 2));
-
-		// Show copied state
-		setCopiedButtons((prev) => new Set([...prev, buttonId]));
-
-		// Reset after 2 seconds
-		setTimeout(() => {
-			setCopiedButtons((prev) => {
-				const newSet = new Set(prev);
-				newSet.delete(buttonId);
-				return newSet;
-			});
-		}, 2000);
-	};
+	const selectedCmd = commands.find((c) => c.cmd_id === selectedId) ?? null;
 
 	return (
 		<div className="space-y-6">
-			{/* Header with Back Button */}
+			{/* Back link */}
 			<div className="flex items-center space-x-4">
 				<Link
 					href="/devices"
@@ -128,126 +177,74 @@ const CommandsPage = () => {
 				</nav>
 			</div>
 
-			{/* Commands Content */}
-			{loading ? (
-				<div className="p-6 text-gray-500">Loading...</div>
-			) : commands.length === 0 ? (
-				<div className="p-6 text-gray-500">No commands found</div>
-			) : (
-				<div className="space-y-3">
-					{commands.map((cmd) => {
-						const status = getCommandStatus(cmd);
-						const commandDisplay = getCommandDisplay(cmd);
-						const responseDisplay = getResponseDisplay(cmd);
+			{/* Main content */}
+			<div>
+				{loading ? (
+					<div className="p-6 text-gray-500 text-sm">Loading…</div>
+				) : commands.length === 0 ? (
+					<div className="flex flex-col items-center justify-center py-16 text-center">
+						<Send className="w-10 h-10 text-gray-300 mb-3" />
+						<p className="text-gray-500">No commands found</p>
+						<p className="text-sm text-gray-400 mt-1">
+							Run a command from the device header above
+						</p>
+					</div>
+				) : (
+					<div
+						className="flex border border-gray-200 rounded-lg overflow-hidden bg-white"
+						style={{ height: "calc(100vh - 340px)" }}
+					>
+						{/* Left: command list (1/3) */}
+						<div className="w-1/3 border-r border-gray-200 overflow-y-auto shrink-0">
+							{commands.map((cmd) => {
+								const status = getCommandStatus(cmd);
+								const { label, mono } = getTxLabel(cmd.cmd_data);
+								const isSelected = cmd.cmd_id === selectedId;
 
-						return (
-							<div
-								key={cmd.cmd_id}
-								className="border border-gray-200 rounded-lg p-4 bg-white"
-							>
-								{/* Header with command info */}
-								<div className="flex items-center space-x-3 mb-2">
-									<Send className="w-4 h-4 text-gray-500" />
-									<span className="font-medium text-gray-900">
-										{commandDisplay.type}
-									</span>
-									<span
-										className={`px-2 py-1 text-xs font-medium rounded ${getStatusColor(status)}`}
+								return (
+									<button
+										key={cmd.cmd_id}
+										type="button"
+										onClick={() => setSelectedId(cmd.cmd_id)}
+										className={`w-full text-left px-4 py-3 border-b border-gray-100 last:border-b-0 transition-colors cursor-pointer ${
+											isSelected
+												? "bg-blue-50 border-l-2 border-l-blue-500"
+												: "hover:bg-gray-50 border-l-2 border-l-transparent"
+										}`}
 									>
-										{status}
-									</span>
-								</div>
-
-								{/* Command and Response in side-by-side layout */}
-								<div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-									{/* Command Content */}
-									{commandDisplay.content && (
-										<div>
-											<div className="flex items-center space-x-2 mb-1">
-												<div className="text-xs font-medium text-gray-600">
-													Command
-												</div>
-												<span className="text-xs text-gray-500">
-													{moment(cmd.issued_at).fromNow()}
-												</span>
-											</div>
-											<div className="relative group">
-												<pre className="text-xs font-mono bg-gray-900 text-gray-100 p-2 rounded overflow-x-auto whitespace-pre-wrap">
-													{JSON.stringify(commandDisplay.content, null, 2)}
-												</pre>
-												<button
-													id={`copy-cmd-${cmd.cmd_id}`}
-													onClick={() =>
-														copyToClipboard(
-															commandDisplay.content,
-															`copy-cmd-${cmd.cmd_id}`,
-														)
-													}
-													className="absolute top-2 right-2 text-gray-400 hover:text-white hover:bg-gray-700 p-1 rounded transition-all opacity-0 group-hover:opacity-100 cursor-pointer"
-													title={
-														copiedButtons.has(`copy-cmd-${cmd.cmd_id}`)
-															? "Copied!"
-															: "Copy to clipboard"
-													}
-												>
-													{copiedButtons.has(`copy-cmd-${cmd.cmd_id}`) ? (
-														<Check className="w-3 h-3 text-green-400" />
-													) : (
-														<Copy className="w-3 h-3" />
-													)}
-												</button>
-											</div>
+										<div className="flex items-center justify-between gap-2">
+											<span
+												className={`text-sm truncate ${mono ? "font-mono" : "font-medium"} ${isSelected ? "text-blue-900" : "text-gray-900"}`}
+											>
+												{label}
+											</span>
+											<span
+												className={`px-2 py-0.5 text-xs font-medium rounded shrink-0 ${getStatusColor(status)}`}
+											>
+												{status}
+											</span>
 										</div>
-									)}
-
-									{/* Response Content */}
-									<div>
-										<div className="flex items-center space-x-2 mb-1">
-											<Reply className="w-3 h-3 text-gray-500" />
-											<div className="text-xs font-medium text-gray-600">
-												{responseDisplay.type}
-											</div>
-											{cmd.response_at && (
-												<span className="text-xs text-gray-500">
-													{moment(cmd.response_at).fromNow()}
-												</span>
-											)}
+										<div className="text-xs text-gray-400 mt-0.5">
+											{moment(cmd.issued_at).fromNow()}
 										</div>
-										{responseDisplay.content && (
-											<div className="relative group">
-												<pre className="text-xs font-mono bg-gray-900 text-gray-100 p-2 rounded overflow-x-auto whitespace-pre-wrap">
-													{JSON.stringify(responseDisplay.content, null, 2)}
-												</pre>
-												<button
-													id={`copy-resp-${cmd.cmd_id}`}
-													onClick={() =>
-														copyToClipboard(
-															responseDisplay.content,
-															`copy-resp-${cmd.cmd_id}`,
-														)
-													}
-													className="absolute top-2 right-2 text-gray-400 hover:text-white hover:bg-gray-700 p-1 rounded transition-all opacity-0 group-hover:opacity-100 cursor-pointer"
-													title={
-														copiedButtons.has(`copy-resp-${cmd.cmd_id}`)
-															? "Copied!"
-															: "Copy to clipboard"
-													}
-												>
-													{copiedButtons.has(`copy-resp-${cmd.cmd_id}`) ? (
-														<Check className="w-3 h-3 text-green-400" />
-													) : (
-														<Copy className="w-3 h-3" />
-													)}
-												</button>
-											</div>
-										)}
-									</div>
+									</button>
+								);
+							})}
+						</div>
+
+						{/* Right: detail (2/3) */}
+						<div className="flex-1 overflow-hidden">
+							{selectedCmd != null ? (
+								<ResponseDetail cmd={selectedCmd} />
+							) : (
+								<div className="flex items-center justify-center h-full text-gray-400 text-sm">
+									Select a command to see its output
 								</div>
-							</div>
-						);
-					})}
-				</div>
-			)}
+							)}
+						</div>
+					</div>
+				)}
+			</div>
 		</div>
 	);
 };
