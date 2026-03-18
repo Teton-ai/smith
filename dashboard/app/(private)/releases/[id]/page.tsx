@@ -162,9 +162,7 @@ const ReleaseDetailPage = () => {
 		);
 
 	// Devices with unhealthy services in this distribution
-	const {
-		data: unhealthyDevices = [],
-	} = useGetDevices(
+	const { data: unhealthyDevices = [] } = useGetDevices(
 		{
 			distribution_id: release?.distribution_id,
 			service_not_running: true,
@@ -172,9 +170,7 @@ const ReleaseDetailPage = () => {
 		{
 			query: {
 				enabled:
-					showDeployModal &&
-					deployStep === 2 &&
-					!!release?.distribution_id,
+					showDeployModal && deployStep === 2 && !!release?.distribution_id,
 			},
 		},
 	);

@@ -67,9 +67,7 @@ const DeploymentStatusPage = () => {
 	const alreadyPromoted = release?.release_candidate
 		? distributionReleases.find(
 				(r: Release) =>
-					!r.release_candidate &&
-					!r.yanked &&
-					r.version === baseVersion,
+					!r.release_candidate && !r.yanked && r.version === baseVersion,
 			)
 		: undefined;
 
@@ -358,6 +356,18 @@ const DeploymentStatusPage = () => {
 																is not available for RC releases. Promote this
 																to a stable release to deploy fleet-wide.
 															</p>
+															{alreadyPromoted && (
+																<p className="text-sm text-orange-700">
+																	A stable release for this version already
+																	exists:{" "}
+																	<Link
+																		href={`/releases/${alreadyPromoted.id}`}
+																		className="underline font-medium"
+																	>
+																		v{alreadyPromoted.version}
+																	</Link>
+																</p>
+															)}
 															<div className="flex items-end gap-2">
 																<div className="flex-1">
 																	<label className="block text-xs font-medium text-gray-700 mb-1">
@@ -365,9 +375,14 @@ const DeploymentStatusPage = () => {
 																	</label>
 																	<input
 																		type="text"
-																		placeholder={release.version.replace(/-rc.*$/, "")}
+																		placeholder={release.version.replace(
+																			/-rc.*$/,
+																			"",
+																		)}
 																		value={promoteVersion}
-																		onChange={(e) => setPromoteVersion(e.target.value)}
+																		onChange={(e) =>
+																			setPromoteVersion(e.target.value)
+																		}
 																		className="w-full px-2.5 py-1.5 text-sm bg-white text-gray-900 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500 placeholder:text-gray-400"
 																	/>
 																</div>

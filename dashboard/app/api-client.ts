@@ -15541,11 +15541,7 @@ export const usePromoteReleaseHook = () => {
 	const promoteRelease = useClientMutator<number>();
 
 	return useCallback(
-		(
-			releaseId: number,
-			data: PromoteReleaseRequest,
-			signal?: AbortSignal,
-		) => {
+		(releaseId: number, data: PromoteReleaseRequest, signal?: AbortSignal) => {
 			return promoteRelease({
 				url: `/releases/${releaseId}/promote`,
 				method: "POST",
