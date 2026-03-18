@@ -272,6 +272,7 @@ async fn start_main_server(config: &'static Config, authorization: Authorization
             release::route::create_release_service
         ))
         .routes(routes!(release::route::delete_release_service))
+        .routes(routes!(release::route::promote_release))
         .routes(routes!(
             device::route::get_network_for_device,
             device::route::update_device_network

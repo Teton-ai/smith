@@ -161,6 +161,25 @@ const ReleaseDetailPage = () => {
 			},
 		);
 
+	// Devices with unhealthy services in this distribution
+	const { data: unhealthyDevices = [] } = useGetDevices(
+		{
+			distribution_id: release?.distribution_id,
+			service_not_running: true,
+		},
+		{
+			query: {
+				enabled:
+					showDeployModal && deployStep === 2 && !!release?.distribution_id,
+			},
+		},
+	);
+
+	const unhealthyDeviceIds = useMemo(
+		() => new Set(unhealthyDevices.map((d: Device) => d.id)),
+		[unhealthyDevices],
+	);
+
 	const filteredEligibleDevices = useMemo(() => {
 		if (!deviceSearchQuery) return eligibleDevices;
 		const q = deviceSearchQuery.toLowerCase();
@@ -168,6 +187,33 @@ const ReleaseDetailPage = () => {
 			d.serial_number.toLowerCase().includes(q),
 		);
 	}, [eligibleDevices, deviceSearchQuery]);
+
+	const networkDotColor = (score?: number) => {
+		if (score == null) return "bg-gray-300";
+		if (score >= 4) return "bg-green-500";
+		if (score >= 2) return "bg-yellow-500";
+		return "bg-red-500";
+	};
+
+	const networkTooltip = (score?: number) => {
+		if (score == null) return "No network data";
+		return `Network score: ${score}/5`;
+	};
+
+	const renderDeviceIndicators = (device: Device) => (
+		<div className="flex items-center gap-1.5 flex-shrink-0">
+			<span
+				title={networkTooltip(device.network?.network_score)}
+				className={`inline-block w-2 h-2 rounded-full ${networkDotColor(device.network?.network_score)}`}
+			/>
+			{unhealthyDeviceIds.has(device.id) && (
+				<AlertTriangle
+					className="w-3 h-3 text-amber-500"
+					title="Unhealthy services"
+				/>
+			)}
+		</div>
+	);
 
 	const [mounted, setMounted] = useState(false);
 	useEffect(() => {
@@ -831,6 +877,7 @@ const ReleaseDetailPage = () => {
 															<span className="text-sm font-medium text-gray-900 truncate flex-shrink-0">
 																{device.serial_number}
 															</span>
+															{renderDeviceIndicators(device)}
 															{device.labels &&
 																Object.keys(device.labels).length > 0 && (
 																	<div className="flex flex-wrap gap-1 min-w-0">
@@ -950,6 +997,7 @@ const ReleaseDetailPage = () => {
 															<span className="text-sm font-mono text-gray-900 flex-shrink-0">
 																{device.serial_number}
 															</span>
+															{renderDeviceIndicators(device)}
 															{device.labels &&
 																Object.keys(device.labels).length > 0 && (
 																	<div className="flex flex-wrap gap-1 min-w-0">

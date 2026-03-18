@@ -142,6 +142,7 @@ pub async fn new_deployment(
                 LEFT JOIN label l ON l.id = dl.label_id
                 WHERE
                     l.name || '=' || dl.value = ANY($3)
+                    AND d.last_ping > NOW() - INTERVAL '3 minutes'
                     AND d.release_id = d.target_release_id
                     AND r.distribution_id = $1
             )
@@ -165,6 +166,15 @@ pub async fn new_deployment(
                 AND d.release_id = d.target_release_id
                 AND r.distribution_id = $1
                 ORDER BY
+                    -- Deprioritize devices with unhealthy watchdog services
+                    CASE WHEN EXISTS (
+                        SELECT 1 FROM device_service_status dss
+                        JOIN release_services rs ON rs.id = dss.release_service_id
+                        WHERE dss.device_id = d.id
+                          AND rs.release_id = d.release_id
+                          AND rs.watchdog_sec IS NOT NULL
+                          AND dss.active_state != 'active'
+                    ) THEN 1 ELSE 0 END ASC,
                     COALESCE(dn.network_score, 0) DESC,
                     d.last_ping DESC
                 LIMIT 10

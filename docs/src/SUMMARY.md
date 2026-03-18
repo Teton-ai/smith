@@ -18,6 +18,10 @@
   - [label](./cli/label.md)
   - [Other Commands](./cli/other.md)
 
+# Deployments
+
+- [Deployments](./deployment.md)
+
 # Integrations
 
 - [Integrations](integrations.md)
