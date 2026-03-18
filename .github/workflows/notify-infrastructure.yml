@@ -4,7 +4,6 @@ on:
   workflow_run:
     workflows: [api, dashboard]
     types: [completed]
-    branches: [main]
 
 permissions:
   contents: read
