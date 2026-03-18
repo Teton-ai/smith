@@ -4,6 +4,7 @@ on:
   workflow_run:
     workflows: [api, dashboard]
     types: [completed]
+    branches: [main]
 
 permissions:
   contents: read
@@ -12,44 +13,45 @@ permissions:
 jobs:
   notify:
     runs-on: ubuntu-latest
-    if: >-
-      github.event.workflow_run.conclusion == 'success' &&
-      startsWith(github.event.workflow_run.head_branch, 'v')
+    if: github.event.workflow_run.conclusion == 'success'
     steps:
-      - name: Get version from tag
+      - name: Get version from latest release
+        id: version
         run: |
-          TAG="${{ github.event.workflow_run.head_branch }}"
+          TAG=$(gh api repos/${{ github.repository }}/releases/latest --jq '.tag_name')
+          if [ -z "$TAG" ]; then
+            echo "No release found"
+            exit 1
+          fi
           VERSION="${TAG#v}"
           echo "VERSION=$VERSION" >> $GITHUB_ENV
           echo "TAG=$TAG" >> $GITHUB_ENV
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PR_TOKEN }}
 
       - name: Check both workflows succeeded
         id: check
         run: |
-          # Determine which workflow just completed, and check the other
-          COMPLETED="${{ github.event.workflow.name }}"
-          if [ "$COMPLETED" = "api" ]; then
-            OTHER="dashboard"
-          else
-            OTHER="api"
-          fi
+          COMMIT=$(gh api repos/${{ github.repository }}/git/ref/tags/${{ env.TAG }} --jq '.object.sha')
 
-          # Check if the other workflow has a successful run for this tag
-          RESULT=$(gh run list \
-            --repo "${{ github.repository }}" \
-            --workflow "$OTHER" \
-            --branch "${{ env.TAG }}" \
-            --status success \
-            --limit 1 \
-            --json conclusion \
-            --jq '.[0].conclusion // empty')
+          for WORKFLOW in api dashboard; do
+            RESULT=$(gh run list \
+              --repo "${{ github.repository }}" \
+              --workflow "$WORKFLOW" \
+              --commit "$COMMIT" \
+              --status success \
+              --limit 1 \
+              --json conclusion \
+              --jq '.[0].conclusion // empty')
 
-          if [ "$RESULT" = "success" ]; then
-            echo "ready=true" >> $GITHUB_OUTPUT
-          else
-            echo "ready=false" >> $GITHUB_OUTPUT
-            echo "Waiting for $OTHER workflow to complete for ${{ env.TAG }}"
-          fi
+            if [ "$RESULT" != "success" ]; then
+              echo "ready=false" >> $GITHUB_OUTPUT
+              echo "Waiting for $WORKFLOW workflow to complete for ${{ env.TAG }}"
+              exit 0
+            fi
+          done
+
+          echo "ready=true" >> $GITHUB_OUTPUT
         env:
           GH_TOKEN: ${{ secrets.RELEASE_PR_TOKEN }}
 
