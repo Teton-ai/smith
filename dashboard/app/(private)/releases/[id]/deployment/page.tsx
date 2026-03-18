@@ -13,15 +13,18 @@ import {
 } from "lucide-react";
 import moment from "moment";
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import {
 	type Deployment,
 	type DeploymentDeviceWithStatus,
+	type Release,
 	useApiConfirmFullRollout,
 	useApiGetDeploymentDevices,
 	useApiGetReleaseDeployment,
+	useGetDistributionReleases,
 	useGetRelease,
+	usePromoteRelease,
 } from "@/app/api-client";
 import { Button } from "@/app/components/button";
 import {
@@ -31,9 +34,11 @@ import {
 
 const DeploymentStatusPage = () => {
 	const params = useParams();
+	const router = useRouter();
 	const releaseId = parseInt(params.id as string);
 	const queryClient = useQueryClient();
 	const [elapsedTime, setElapsedTime] = useState(0);
+	const [promoteVersion, setPromoteVersion] = useState("");
 
 	const { data: release, isLoading: releaseLoading } = useGetRelease(releaseId);
 
@@ -48,6 +53,25 @@ const DeploymentStatusPage = () => {
 		});
 
 	const { data: serviceHealth = [] } = useDeploymentServiceHealth(releaseId);
+
+	const { data: distributionReleases = [] } = useGetDistributionReleases(
+		release?.distribution_id as number,
+		{
+			query: {
+				enabled: !!release?.distribution_id && release.release_candidate,
+			},
+		},
+	);
+
+	const baseVersion = release?.version?.replace(/-rc.*$/, "") ?? "";
+	const alreadyPromoted = release?.release_candidate
+		? distributionReleases.find(
+				(r: Release) =>
+					!r.release_candidate &&
+					!r.yanked &&
+					r.version === baseVersion,
+			)
+		: undefined;
 
 	const serviceHealthByDevice = serviceHealth.reduce(
 		(acc, sh) => {
@@ -107,6 +131,14 @@ const DeploymentStatusPage = () => {
 			onSuccess: () => {
 				queryClient.invalidateQueries({ queryKey: deploymentQueryKey });
 				queryClient.invalidateQueries({ queryKey: devicesQueryKey });
+			},
+		},
+	});
+
+	const promoteReleaseHook = usePromoteRelease({
+		mutation: {
+			onSuccess: (newReleaseId) => {
+				router.push(`/releases/${newReleaseId}`);
 			},
 		},
 	});
@@ -320,13 +352,45 @@ const DeploymentStatusPage = () => {
 														All canary devices have been successfully updated!
 													</p>
 													{release.release_candidate ? (
-														<div className="mt-4 p-3 bg-orange-50 border border-orange-200 rounded-lg">
+														<div className="mt-4 p-3 bg-orange-50 border border-orange-200 rounded-lg space-y-3">
 															<p className="text-sm text-orange-800">
 																<strong>Release Candidate:</strong> Full rollout
-																is not available for RC releases. Canary
-																deployment is complete — promote this to a
-																stable release to deploy to all devices.
+																is not available for RC releases. Promote this
+																to a stable release to deploy fleet-wide.
 															</p>
+															<div className="flex items-end gap-2">
+																<div className="flex-1">
+																	<label className="block text-xs font-medium text-gray-700 mb-1">
+																		New release version
+																	</label>
+																	<input
+																		type="text"
+																		placeholder={release.version.replace(/-rc.*$/, "")}
+																		value={promoteVersion}
+																		onChange={(e) => setPromoteVersion(e.target.value)}
+																		className="w-full px-2.5 py-1.5 text-sm bg-white text-gray-900 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500 placeholder:text-gray-400"
+																	/>
+																</div>
+																<Button
+																	loading={promoteReleaseHook.isPending}
+																	disabled={!promoteVersion.trim()}
+																	icon={
+																		!promoteReleaseHook.isPending ? (
+																			<Rocket className="w-4 h-4" />
+																		) : undefined
+																	}
+																	onClick={() => {
+																		promoteReleaseHook.mutate({
+																			releaseId,
+																			data: { version: promoteVersion.trim() },
+																		});
+																	}}
+																>
+																	{promoteReleaseHook.isPending
+																		? "Promoting..."
+																		: "Promote to Release"}
+																</Button>
+															</div>
 														</div>
 													) : (
 														<div className="mt-4">

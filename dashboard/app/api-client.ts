@@ -15533,6 +15533,97 @@ export const useApiConfirmFullRollout = <TError = void, TContext = unknown>(
 	return useMutation(mutationOptions, queryClient);
 };
 
+export interface PromoteReleaseRequest {
+	version: string;
+}
+
+export const usePromoteReleaseHook = () => {
+	const promoteRelease = useClientMutator<number>();
+
+	return useCallback(
+		(
+			releaseId: number,
+			data: PromoteReleaseRequest,
+			signal?: AbortSignal,
+		) => {
+			return promoteRelease({
+				url: `/releases/${releaseId}/promote`,
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				data,
+				signal,
+			});
+		},
+		[promoteRelease],
+	);
+};
+
+export const usePromoteReleaseMutationOptions = <
+	TError = unknown,
+	TContext = unknown,
+>(options?: {
+	mutation?: UseMutationOptions<
+		Awaited<ReturnType<ReturnType<typeof usePromoteReleaseHook>>>,
+		TError,
+		{ releaseId: number; data: PromoteReleaseRequest },
+		TContext
+	>;
+}): UseMutationOptions<
+	Awaited<ReturnType<ReturnType<typeof usePromoteReleaseHook>>>,
+	TError,
+	{ releaseId: number; data: PromoteReleaseRequest },
+	TContext
+> => {
+	const mutationKey = ["promoteRelease"];
+	const { mutation: mutationOptions } = options
+		? options.mutation &&
+			"mutationKey" in options.mutation &&
+			options.mutation.mutationKey
+			? options
+			: { ...options, mutation: { ...options.mutation, mutationKey } }
+		: { mutation: { mutationKey } };
+
+	const promoteRelease = usePromoteReleaseHook();
+
+	const mutationFn: MutationFunction<
+		Awaited<ReturnType<ReturnType<typeof usePromoteReleaseHook>>>,
+		{ releaseId: number; data: PromoteReleaseRequest }
+	> = (props) => {
+		const { releaseId, data } = props ?? {};
+
+		return promoteRelease(releaseId, data);
+	};
+
+	return { mutationFn, ...mutationOptions };
+};
+
+export type PromoteReleaseMutationResult = NonNullable<
+	Awaited<ReturnType<ReturnType<typeof usePromoteReleaseHook>>>
+>;
+export type PromoteReleaseMutationBody = PromoteReleaseRequest;
+export type PromoteReleaseMutationError = unknown;
+
+export const usePromoteRelease = <TError = unknown, TContext = unknown>(
+	options?: {
+		mutation?: UseMutationOptions<
+			Awaited<ReturnType<ReturnType<typeof usePromoteReleaseHook>>>,
+			TError,
+			{ releaseId: number; data: PromoteReleaseRequest },
+			TContext
+		>;
+	},
+	queryClient?: QueryClient,
+): UseMutationResult<
+	Awaited<ReturnType<ReturnType<typeof usePromoteReleaseHook>>>,
+	TError,
+	{ releaseId: number; data: PromoteReleaseRequest },
+	TContext
+> => {
+	const mutationOptions = usePromoteReleaseMutationOptions(options);
+
+	return useMutation(mutationOptions, queryClient);
+};
+
 export const useApiGetDeploymentDevicesHook = () => {
 	const apiGetDeploymentDevices =
 		useClientMutator<DeploymentDeviceWithStatus[]>();

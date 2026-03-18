@@ -2,6 +2,7 @@ use crate::State;
 use crate::package::{Package, extract_services_from_deb};
 use crate::release::{Release, get_release_by_id};
 use crate::storage::Storage;
+use crate::user::CurrentUser;
 use axum::extract::Path;
 use axum::http::StatusCode;
 use axum::{Extension, Json};
@@ -592,4 +593,109 @@ pub async fn delete_release_service(
     }
 
     Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Debug, Deserialize, utoipa::ToSchema)]
+pub struct PromoteReleaseRequest {
+    pub version: String,
+}
+
+#[utoipa::path(
+    post,
+    path = "/releases/{release_id}/promote",
+    params(
+        ("release_id" = i32, Path, description = "Release candidate ID to promote")
+    ),
+    request_body = PromoteReleaseRequest,
+    responses(
+        (status = StatusCode::CREATED, description = "New release created from RC", body = i32),
+        (status = StatusCode::BAD_REQUEST, description = "Release is not a release candidate"),
+        (status = StatusCode::NOT_FOUND, description = "Release not found"),
+        (status = StatusCode::CONFLICT, description = "Release is yanked"),
+        (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to promote release"),
+    ),
+    security(
+        ("auth_token" = [])
+    ),
+    tag = RELEASES_TAG
+)]
+pub async fn promote_release(
+    Path(release_id): Path<i32>,
+    Extension(state): Extension<State>,
+    Extension(current_user): Extension<CurrentUser>,
+    Json(req): Json<PromoteReleaseRequest>,
+) -> axum::response::Result<(StatusCode, Json<i32>), StatusCode> {
+    let source = get_release_by_id(release_id, &state.pg_pool)
+        .await
+        .map_err(|err| {
+            error!("Failed to get release: {err}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?
+        .ok_or_else(|| {
+            error!("Release {release_id} not found");
+            StatusCode::NOT_FOUND
+        })?;
+
+    if !source.release_candidate {
+        error!("Release {release_id} is not a release candidate");
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    if source.yanked {
+        error!("Release {release_id} is yanked");
+        return Err(StatusCode::CONFLICT);
+    }
+
+    let mut tx = state.pg_pool.begin().await.map_err(|err| {
+        error!("Failed to start transaction: {err}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    // Create a new non-RC release with the same distribution
+    let new_release = sqlx::query!(
+        "INSERT INTO release (distribution_id, version, user_id, release_candidate) VALUES ($1, $2, $3, false) RETURNING id",
+        source.distribution_id,
+        req.version,
+        current_user.user_id,
+    )
+    .fetch_one(&mut *tx)
+    .await
+    .map_err(|err| {
+        error!("Failed to create promoted release: {err}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    // Copy packages
+    sqlx::query!(
+        "INSERT INTO release_packages (release_id, package_id)
+         SELECT $1, package_id FROM release_packages WHERE release_id = $2",
+        new_release.id,
+        release_id,
+    )
+    .execute(&mut *tx)
+    .await
+    .map_err(|err| {
+        error!("Failed to copy packages: {err}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    // Copy services
+    sqlx::query!(
+        "INSERT INTO release_services (release_id, package_id, service_name, watchdog_sec)
+         SELECT $1, package_id, service_name, watchdog_sec FROM release_services WHERE release_id = $2",
+        new_release.id,
+        release_id,
+    )
+    .execute(&mut *tx)
+    .await
+    .map_err(|err| {
+        error!("Failed to copy services: {err}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    tx.commit().await.map_err(|err| {
+        error!("Failed to commit transaction: {err}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    Ok((StatusCode::CREATED, Json(new_release.id)))
 }
