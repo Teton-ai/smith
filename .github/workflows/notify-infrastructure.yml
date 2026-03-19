@@ -18,8 +18,10 @@ jobs:
         id: tag
         run: |
           SHA="${{ github.event.workflow_run.head_sha }}"
-          TAG=$(gh api repos/${{ github.repository }}/git/matching-refs/tags/v \
-            --jq --arg sha "$SHA" '[.[] | select(.object.sha == $sha)] | .[0].ref // empty')
+          # Find tag pointing to this commit
+          TAG=$(gh api "repos/${{ github.repository }}/git/matching-refs/tags/v" \
+            --jq "[.[] | select(.object.sha == \"$SHA\")] | .[0].ref // empty")
+          TAG="${TAG#refs/tags/}"
 
           if [ -z "$TAG" ]; then
             echo "No tag found for SHA $SHA, skipping"
@@ -27,11 +29,11 @@ jobs:
             exit 0
           fi
 
-          TAG="${TAG#refs/tags/}"
           VERSION="${TAG#v}"
           echo "found=true" >> $GITHUB_OUTPUT
           echo "VERSION=$VERSION" >> $GITHUB_ENV
           echo "TAG=$TAG" >> $GITHUB_ENV
+          echo "Found tag $TAG for SHA $SHA"
         env:
           GH_TOKEN: ${{ secrets.RELEASE_PR_TOKEN }}
 
@@ -39,18 +41,17 @@ jobs:
         if: steps.tag.outputs.found == 'true'
         id: check
         run: |
-          SHA="${{ github.event.workflow_run.head_sha }}"
+          TAG="${{ env.TAG }}"
           for WORKFLOW in api dashboard; do
             RESULT=$(gh run list \
               --repo "${{ github.repository }}" \
               --workflow "$WORKFLOW" \
-              --json headSha,conclusion \
-              --jq --arg sha "$SHA" \
-              '[.[] | select(.headSha == $sha and .conclusion == "success")] | length')
+              --json headBranch,conclusion \
+              --jq "[.[] | select(.headBranch == \"$TAG\" and .conclusion == \"success\")] | length")
 
             if [ "$RESULT" -eq 0 ]; then
               echo "ready=false" >> $GITHUB_OUTPUT
-              echo "Waiting for $WORKFLOW to complete for ${{ env.TAG }}"
+              echo "Waiting for $WORKFLOW to complete for $TAG"
               exit 0
             fi
           done
