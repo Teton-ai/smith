@@ -4,7 +4,7 @@
 import { ArrowLeft, Send } from "lucide-react";
 import moment from "moment";
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import {
 	CodeBlock,
@@ -123,6 +123,7 @@ const ResponseDetail = ({ cmd }: { cmd: DeviceCommandResponse }) => {
 
 const CommandsPage = () => {
 	const { serial } = useParams<{ serial: string }>();
+	const router = useRouter();
 	const [selectedId, setSelectedId] = useState<number | null>(null);
 
 	const { data: commandsData, isLoading: commandsLoading } =
@@ -145,13 +146,14 @@ const CommandsPage = () => {
 		<div className="flex-1 overflow-y-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
 			{/* Back link */}
 			<div className="flex items-center space-x-4">
-				<Link
-					href="/devices"
+				<button
+					type="button"
+					onClick={() => router.back()}
 					className="flex items-center space-x-2 text-gray-600 hover:text-gray-900 transition-colors"
 				>
 					<ArrowLeft className="w-4 h-4" />
 					<span className="text-sm font-medium">Back to Devices</span>
-				</Link>
+				</button>
 			</div>
 
 			{/* Device Header */}

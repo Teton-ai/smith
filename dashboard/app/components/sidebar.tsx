@@ -17,7 +17,7 @@ export interface NavItem {
 interface SidebarProps {
 	items: NavItem[];
 	bottomItems?: NavItem[];
-	bottomContent?: React.ReactNode;
+	bottomContent?: (expanded: boolean) => React.ReactNode;
 	mobileBottomContent?: React.ReactNode;
 	versionText?: string;
 	className?: string;
@@ -157,7 +157,7 @@ export default function Sidebar({
 								</Link>
 							);
 						})}
-						{bottomContent}
+						{bottomContent?.(expanded)}
 					</div>
 				)}
 			</aside>

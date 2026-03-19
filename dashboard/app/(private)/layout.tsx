@@ -73,7 +73,7 @@ export default function PrivateLayout({
 			<Sidebar
 				items={navigationItems}
 				bottomItems={bottomItems}
-				bottomContent={<Profile sidebar />}
+				bottomContent={(expanded) => <Profile sidebar expanded={expanded} />}
 				mobileBottomContent={<Profile sidebar expanded />}
 				versionText={apiVersion || undefined}
 			/>

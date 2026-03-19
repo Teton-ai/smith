@@ -3,7 +3,7 @@
 
 import { ArrowLeft, FileText, Play, Radio, X } from "lucide-react";
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { useState } from "react";
 import { useGetDeviceInfo } from "@/app/api-client";
 import DeviceHeader from "../DeviceHeader";
@@ -13,6 +13,7 @@ import { type DeviceService, useDeviceServices } from "./useDeviceServices";
 const ServicesPage = () => {
 	const params = useParams();
 	const serial = params.serial as string;
+	const router = useRouter();
 
 	const { data: device, isLoading: deviceLoading } = useGetDeviceInfo(serial);
 	const { data: services, isLoading: servicesLoading } =
@@ -38,13 +39,14 @@ const ServicesPage = () => {
 		<div className="flex-1 overflow-y-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
 			{/* Header with Back Button */}
 			<div className="flex items-center space-x-4">
-				<Link
-					href="/devices"
+				<button
+					type="button"
+					onClick={() => router.back()}
 					className="flex items-center space-x-2 text-gray-600 hover:text-gray-900 transition-colors"
 				>
 					<ArrowLeft className="w-4 h-4" />
 					<span className="text-sm font-medium">Back to Devices</span>
-				</Link>
+				</button>
 			</div>
 
 			{/* Device Header */}
