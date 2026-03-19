@@ -278,11 +278,11 @@ export const KVTable = ({
 }: {
 	rows: { key: string; value: string }[];
 }) => (
-	<dl className="space-y-1">
+	<dl className="space-y-2">
 		{rows.map(({ key, value }) => (
-			<div key={key} className="flex gap-3 text-sm">
-				<dt className="w-36 shrink-0 text-gray-400">{key}</dt>
-				<dd className="text-gray-900 font-mono break-all">{value}</dd>
+			<div key={key} className="text-sm">
+				<dt className="text-gray-400 break-all">{key}</dt>
+				<dd className="text-gray-900 font-mono break-all pl-2">{value}</dd>
 			</div>
 		))}
 	</dl>
