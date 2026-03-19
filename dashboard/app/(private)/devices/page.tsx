@@ -496,16 +496,18 @@ const DevicesPage = () => {
 
 	// Debounce search term
 	useEffect(() => {
+		if (!searchTerm) {
+			setDebouncedSearchTerm("");
+			setIsSearching(false);
+			return;
+		}
 		setIsSearching(true);
 		const timer = setTimeout(() => {
 			setDebouncedSearchTerm(searchTerm);
 			setIsSearching(false);
 		}, 300);
 
-		return () => {
-			clearTimeout(timer);
-			setIsSearching(false);
-		};
+		return () => clearTimeout(timer);
 	}, [searchTerm]);
 
 	// Sync URL parameters with component state
