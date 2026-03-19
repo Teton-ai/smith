@@ -321,7 +321,7 @@ checksum = "7f202df86484c868dbad7eaa557ef785d5c66295e41b460ef922eca0723b842c"
 
 [[package]]
 name = "api"
-version = "0.2.138"
+version = "0.2.139"
 dependencies = [
  "anyhow",
  "axum 0.7.9",
@@ -1161,7 +1161,7 @@ checksum = "c8d4a3bb8b1e0c1050499d1815f5ab16d04f0959b233085fb31653fbfc9d98f9"
 
 [[package]]
 name = "cli"
-version = "0.2.138"
+version = "0.2.139"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3338,7 +3338,7 @@ dependencies = [
 
 [[package]]
 name = "models"
-version = "0.2.138"
+version = "0.2.139"
 dependencies = [
  "axum 0.7.9",
  "chrono",
@@ -5511,7 +5511,7 @@ checksum = "b7c388c1b5e93756d0c740965c41e8822f866621d41acbdf6336a6a168f8840c"
 
 [[package]]
 name = "smith"
-version = "0.2.138"
+version = "0.2.139"
 dependencies = [
  "anyhow",
  "bore-cli",
@@ -5547,7 +5547,7 @@ dependencies = [
 
 [[package]]
 name = "smith-updater"
-version = "0.2.138"
+version = "0.2.139"
 dependencies = [
  "clap",
  "smith",
