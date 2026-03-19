@@ -260,29 +260,33 @@ pub async fn download_package(
 }
 
 #[derive(Deserialize, Debug, IntoParams)]
+#[into_params(parameter_in = Query)]
 pub struct SignedDownloadParams {
     name: String,
 }
 
 #[utoipa::path(
-  get,
-  path = "/packages/download/signed",
-  params(
+    get,
+    path = "/packages/download/signed",
+    params(
         SignedDownloadParams
-  ),
-  responses(
+    ),
+    responses(
         (status = 302, description = "Redirect to file stream", content_type = "application/octet-stream"),
         (status = 400, description = "Bad request"),
         (status = 500, description = "Internal server error")
-  ),
-  security(
+    ),
+    security(
         ("auth_token" = [])
-  ),
+    ),
+    tag = PACKAGES_TAG
 )]
 pub async fn get_signed_package_link(
     Query(params): Query<SignedDownloadParams>,
     Extension(state): Extension<State>,
 ) -> Result<axum::response::Response<Body>, StatusCode> {
+    tracing::info!("Made it here at least");
+
     let file_name = &params.name;
 
     let mut response = storage::Storage::download_package_from_cdn(
