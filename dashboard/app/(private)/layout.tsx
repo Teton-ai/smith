@@ -69,14 +69,17 @@ export default function PrivateLayout({
 	const apiVersion = useApiVersion();
 
 	return (
-		<Sidebar
-			items={navigationItems}
-			bottomItems={bottomItems}
-			bottomContent={<Profile sidebar />}
-			mobileBottomContent={<Profile sidebar expanded />}
-			versionText={apiVersion || undefined}
-		>
-			<div className="px-4 sm:px-6 lg:px-8 py-6">{children}</div>
-		</Sidebar>
+		<div className="flex h-screen overflow-hidden bg-gray-50">
+			<Sidebar
+				items={navigationItems}
+				bottomItems={bottomItems}
+				bottomContent={<Profile sidebar />}
+				mobileBottomContent={<Profile sidebar expanded />}
+				versionText={apiVersion || undefined}
+			/>
+			<main className="flex-1 min-w-0 overflow-y-auto mt-14 md:mt-0 flex flex-col">
+				{children}
+			</main>
+		</div>
 	);
 }

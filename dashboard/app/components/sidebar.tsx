@@ -20,13 +20,21 @@ interface SidebarProps {
 	bottomContent?: React.ReactNode;
 	mobileBottomContent?: React.ReactNode;
 	versionText?: string;
-	children: React.ReactNode;
 	className?: string;
 }
 
-function DesktopLabel({ children }: { children: React.ReactNode }) {
+function DesktopLabel({
+	children,
+	expanded,
+}: { children: React.ReactNode; expanded: boolean }) {
 	return (
-		<span className="text-sm font-medium whitespace-nowrap opacity-0 -translate-x-2 group-hover/sidebar:opacity-100 group-hover/sidebar:translate-x-0 transition-all duration-300 ease-out pointer-events-none group-hover/sidebar:pointer-events-auto delay-0 group-hover/sidebar:delay-500">
+		<span
+			className={`text-sm font-medium whitespace-nowrap transition-all duration-300 ease-out pointer-events-none ${
+				expanded
+					? "opacity-100 translate-x-0 pointer-events-auto"
+					: "opacity-0 -translate-x-2"
+			}`}
+		>
 			{children}
 		</span>
 	);
@@ -44,23 +52,28 @@ export default function Sidebar({
 	bottomContent,
 	mobileBottomContent,
 	versionText,
-	children,
 	className,
 }: SidebarProps) {
 	const pathname = usePathname();
 	const [mobileOpen, setMobileOpen] = useState(false);
+	const [expanded, setExpanded] = useState(false);
 
 	const isActive = (path: string) => pathname.startsWith(path);
 
 	return (
-		<div className={`flex min-h-screen ${className || "bg-gray-50"}`}>
+		<>
 			{/* Desktop sidebar */}
-			<aside className="hidden md:flex flex-col fixed inset-y-0 left-0 z-40 bg-white border-r border-gray-200 w-16 hover:w-56 transition-all duration-300 ease-in-out group/sidebar delay-0 hover:delay-500">
+			<aside
+				className={`hidden md:flex flex-col shrink-0 h-screen border-r border-gray-200 transition-all duration-300 ease-in-out ${
+					expanded ? "w-56" : "w-16"
+				} ${className || "bg-white"}`}
+			>
 				{/* Logo */}
 				<div className="flex items-center h-16 px-4 shrink-0">
-					<Link
-						className="flex items-center cursor-pointer hover:opacity-80 transition-opacity duration-200"
-						href="/dashboard"
+					<button
+						onClick={() => setExpanded((e) => !e)}
+						className="flex items-center cursor-pointer hover:opacity-80 transition-opacity duration-200 focus:outline-none"
+						aria-label={expanded ? "Collapse sidebar" : "Expand sidebar"}
 					>
 						<Image
 							src="/logo.png"
@@ -76,9 +89,15 @@ export default function Sidebar({
 								maxHeight: "32px",
 							}}
 						/>
-					</Link>
+					</button>
 					{versionText && (
-						<span className="ml-3 text-[11px] text-gray-400 font-mono whitespace-nowrap opacity-0 -translate-x-2 group-hover/sidebar:opacity-100 group-hover/sidebar:translate-x-0 transition-all duration-300 ease-out delay-0 group-hover/sidebar:delay-500">
+						<span
+							className={`ml-3 text-[11px] text-gray-400 font-mono whitespace-nowrap transition-all duration-300 ease-out ${
+								expanded
+									? "opacity-100 translate-x-0"
+									: "opacity-0 -translate-x-2"
+							}`}
+						>
 							v{versionText}
 						</span>
 					)}
@@ -111,7 +130,7 @@ export default function Sidebar({
 								<div className="flex items-center justify-center w-12 shrink-0">
 									<Icon className="w-[18px] h-[18px] transition-transform duration-200 group-hover/item:scale-110" />
 								</div>
-								<DesktopLabel>{item.label}</DesktopLabel>
+								<DesktopLabel expanded={expanded}>{item.label}</DesktopLabel>
 							</Link>
 						);
 					})}
@@ -134,7 +153,7 @@ export default function Sidebar({
 									<div className="flex items-center justify-center w-12 shrink-0">
 										<Icon className="w-[18px] h-[18px] transition-transform duration-200 group-hover/item:scale-110" />
 									</div>
-									<DesktopLabel>{item.label}</DesktopLabel>
+									<DesktopLabel expanded={expanded}>{item.label}</DesktopLabel>
 								</Link>
 							);
 						})}
@@ -259,8 +278,6 @@ export default function Sidebar({
 				</div>
 			)}
 
-			{/* Main content */}
-			<main className="flex-1 md:ml-16 mt-14 md:mt-0">{children}</main>
-		</div>
+		</>
 	);
 }

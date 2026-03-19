@@ -293,12 +293,10 @@ const CommandsPage = () => {
 	}
 
 	return (
-		<div
-			className="flex border border-gray-200 rounded-lg overflow-hidden bg-white"
-			style={{ height: "calc(100vh - 180px)" }}
-		>
+		<div className="flex-1 overflow-hidden p-4 sm:p-6 flex flex-col">
+		<div className="flex-1 overflow-hidden flex border border-gray-200 bg-white rounded-lg">
 			{/* Left: bundle list (1/3) */}
-			<div className="w-1/3 border-r border-gray-200 shrink-0 flex flex-col overflow-hidden">
+			<div className="w-1/5 border-r border-gray-200 shrink-0 flex flex-col overflow-hidden">
 				<div className="flex-1 overflow-y-auto">
 					{bundles.map((bundle) => {
 						const stats = getBundleStats(bundle.responses);
@@ -374,8 +372,8 @@ const CommandsPage = () => {
 				)}
 			</div>
 
-			{/* Right: bundle detail (2/3) */}
-			<div className="flex-1 overflow-hidden">
+		{/* Right: bundle detail (2/3) */}
+		<div className="w-4/5 overflow-hidden">
 				{selectedBundle != null ? (
 					<BundleDetail bundle={selectedBundle} />
 				) : (
@@ -384,6 +382,7 @@ const CommandsPage = () => {
 					</div>
 				)}
 			</div>
+		</div>
 		</div>
 	);
 };

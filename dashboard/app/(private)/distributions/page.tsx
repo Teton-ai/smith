@@ -1,5 +1,6 @@
 "use client";
 
+
 import {
 	ChevronRight,
 	Cpu,
@@ -107,7 +108,7 @@ const DistributionsPage = () => {
 	}
 
 	return (
-		<div className="space-y-6">
+		<div className="flex-1 overflow-y-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
 			{/* Search and Distribution Count */}
 			<div className="flex flex-col sm:flex-row sm:items-center sm:justify-between">
 				<div className="flex items-center space-x-4">

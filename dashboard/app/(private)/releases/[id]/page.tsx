@@ -1,5 +1,6 @@
 "use client";
 
+
 import { useQueryClient } from "@tanstack/react-query";
 import {
 	AlertTriangle,
@@ -497,7 +498,7 @@ const ReleaseDetailPage = () => {
 	}
 
 	return (
-		<>
+		<div className="flex-1 overflow-y-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
 			{/* Toast Notification */}
 			{mounted &&
 				toast &&
@@ -521,8 +522,7 @@ const ReleaseDetailPage = () => {
 					document.body,
 				)}
 
-			<div className="space-y-6">
-				{/* Header with Back Button */}
+		{/* Header with Back Button */}
 				<div className="flex items-center space-x-4">
 					<Link
 						href={
@@ -1572,8 +1572,7 @@ const ReleaseDetailPage = () => {
 						</div>
 					</div>
 				</div>
-			</div>
-		</>
+		</div>
 	);
 };
 
