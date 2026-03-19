@@ -20,6 +20,7 @@ import {
 	XCircle,
 } from "lucide-react";
 import moment from "moment";
+import { useAuth0 } from "@auth0/auth0-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/app/components/button";
@@ -144,6 +145,7 @@ const LoadingSkeleton = () => (
 const PAGE_SIZE = 100;
 
 const DevicesPage = () => {
+	const { isAuthenticated } = useAuth0();
 	const router = useRouter();
 	const searchParams = useSearchParams();
 	const queryClient = useQueryClient();
@@ -166,6 +168,7 @@ const DevicesPage = () => {
 	const [showReleaseDropdown, setShowReleaseDropdown] = useState(false);
 	const [releaseSearchQuery, setReleaseSearchQuery] = useState("");
 	const releaseDropdownRef = useRef<HTMLDivElement>(null);
+	const sentinelRef = useRef<HTMLDivElement>(null);
 
 	// Bulk deploy state
 	const [selectedDeviceIds, setSelectedDeviceIds] = useState<Set<number>>(
@@ -233,6 +236,7 @@ const DevicesPage = () => {
 		},
 		{
 			query: {
+				enabled: isAuthenticated,
 				initialPageParam: 0,
 				getNextPageParam: (lastPage, allPages) => {
 					if (!lastPage || lastPage.length < PAGE_SIZE) return undefined;
@@ -252,6 +256,28 @@ const DevicesPage = () => {
 				),
 		[devicesData],
 	);
+
+
+
+	// Infinite scroll: trigger fetchNextPage whenever the sentinel is visible
+	// and there are more pages to load. Re-runs when hasNextPage changes so
+	// that if the sentinel is already in view after the first page loads, we
+	// still kick off the next fetch.
+	useEffect(() => {
+		const sentinel = sentinelRef.current;
+		if (!sentinel || !hasNextPage || isFetchingNextPage) return;
+
+		const observer = new IntersectionObserver(
+			(entries) => {
+				if (entries[0].isIntersecting) {
+					fetchNextPage();
+				}
+			},
+			{ threshold: 0.1 },
+		);
+		observer.observe(sentinel);
+		return () => observer.disconnect();
+	}, [hasNextPage, isFetchingNextPage, fetchNextPage]);
 
 	// Fetch all releases
 	const { data: allReleases = [] } = useGetReleases();
@@ -753,7 +779,7 @@ const DevicesPage = () => {
 	};
 
 	return (
-		<div className="flex-1 overflow-y-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
+		<div className="flex flex-col flex-1 min-h-0 overflow-hidden">
 			{/* Toast Notification */}
 			{toast && (
 				<div
@@ -781,6 +807,7 @@ const DevicesPage = () => {
 			)}
 
 			{/* Search and Filters */}
+			<div className="px-4 sm:px-6 lg:px-8 pt-6 pb-3 shrink-0">
 			<div className="flex flex-col space-y-3">
 				<div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
 					<div className="flex flex-wrap items-center gap-3">
@@ -1060,10 +1087,12 @@ const DevicesPage = () => {
 					</div>
 				</div>
 			</div>
+			</div>
 
-			{/* Device List */}
+			{/* Device List — scrollable */}
+			<div className="flex-1 overflow-y-auto px-4 sm:px-6 lg:px-8 pb-6 min-h-0">
 			<div className="border border-gray-200 rounded-lg overflow-hidden bg-white">
-				<div className="bg-gray-50 px-4 py-3 border-b border-gray-200">
+				<div className="sticky top-0 z-10 bg-gray-50 px-4 py-3 border-b border-gray-200">
 					<div className="grid grid-cols-[auto_2fr_2fr_2fr_1fr_1fr] gap-4 text-xs font-medium text-gray-500 uppercase tracking-wide items-center">
 						<div className="w-6 flex items-center justify-center">
 							<button
@@ -1300,24 +1329,15 @@ const DevicesPage = () => {
 								</div>
 							</div>
 						))}
-						{/* Load More Button */}
-						{hasNextPage && (
-							<div className="border-t border-gray-200">
-								<Button
-									variant="ghost"
-									loading={isFetchingNextPage}
-									onClick={() => fetchNextPage()}
-									className="w-full py-2 px-4 text-sm font-medium text-blue-600 bg-blue-50 rounded-md hover:bg-blue-100"
-								>
-									{isFetchingNextPage ? "Loading more..." : "Load more devices"}
-								</Button>
-							</div>
-						)}
-					</div>
-				)}
-			</div>
+					{/* Infinite scroll sentinel */}
+					<div ref={sentinelRef} />
+					{isFetchingNextPage && <LoadingSkeleton />}
+				</div>
+			)}
+		</div>
+		</div>
 
-			{/* Bulk Action Bar */}
+		{/* Bulk Action Bar */}
 			{selectedDeviceIds.size > 0 && (
 				<div className="fixed bottom-0 left-0 right-0 bg-white border-t shadow-lg p-4 flex items-center justify-between z-40">
 					<span className="text-gray-700">

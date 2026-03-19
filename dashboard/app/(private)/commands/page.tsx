@@ -142,16 +142,16 @@ const BundleDetail = ({ bundle }: { bundle: BundleWithCommands }) => {
 		bundle.responses[0]?.cmd_id ?? -1,
 	);
 
+	// If the selected device isn't in this bundle (e.g. bundle just changed),
+	// sync state to the first response immediately to avoid a stale highlight.
 	const firstResponseId = bundle.responses[0]?.cmd_id ?? -1;
-
-	// Reset device selection when bundle changes
-	// biome-ignore lint/correctness/useExhaustiveDependencies: intentional reset on bundle change
-	useEffect(() => {
+	const responseInBundle = bundle.responses.find(
+		(r) => r.cmd_id === selectedDeviceId,
+	);
+	if (!responseInBundle && selectedDeviceId !== firstResponseId) {
 		setSelectedDeviceId(firstResponseId);
-	}, [bundle.uuid]);
-
-	const selectedResponse =
-		bundle.responses.find((r) => r.cmd_id === selectedDeviceId) ?? null;
+	}
+	const selectedResponse = responseInBundle ?? bundle.responses[0] ?? null;
 	const firstCommand = bundle.responses[0];
 
 	return (

@@ -77,7 +77,7 @@ export default function PrivateLayout({
 				mobileBottomContent={<Profile sidebar expanded />}
 				versionText={apiVersion || undefined}
 			/>
-			<main className="flex-1 min-w-0 overflow-y-auto mt-14 md:mt-0 flex flex-col">
+			<main className="flex-1 min-w-0 overflow-hidden mt-14 md:mt-0 flex flex-col">
 				{children}
 			</main>
 		</div>
