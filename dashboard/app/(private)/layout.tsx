@@ -1,5 +1,6 @@
 "use client";
 
+import { useAuth0 } from "@auth0/auth0-react";
 import {
 	Activity,
 	Cpu,
@@ -98,8 +99,20 @@ export default function PrivateLayout({
 }: Readonly<{
 	children: React.ReactNode;
 }>) {
+	const { isAuthenticated, isLoading } = useAuth0();
+	const router = useRouter();
 	const apiVersion = useApiVersion();
 	useKeyboardNav();
+
+	useEffect(() => {
+		if (!isLoading && !isAuthenticated) {
+			router.push("/");
+		}
+	}, [isLoading, isAuthenticated, router]);
+
+	if (isLoading || !isAuthenticated) {
+		return null;
+	}
 
 	return (
 		<div className="flex h-screen overflow-hidden bg-gray-50">
