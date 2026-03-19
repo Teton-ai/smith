@@ -1,6 +1,5 @@
 "use client";
 
-
 import { Check, Search, Signal, Smartphone, X } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";

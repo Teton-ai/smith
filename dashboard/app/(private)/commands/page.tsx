@@ -294,95 +294,95 @@ const CommandsPage = () => {
 
 	return (
 		<div className="flex-1 overflow-hidden p-4 sm:p-6 flex flex-col">
-		<div className="flex-1 overflow-hidden flex border border-gray-200 bg-white rounded-lg">
-			{/* Left: bundle list (1/3) */}
-			<div className="w-1/5 border-r border-gray-200 shrink-0 flex flex-col overflow-hidden">
-				<div className="flex-1 overflow-y-auto">
-					{bundles.map((bundle) => {
-						const stats = getBundleStats(bundle.responses);
-						const firstCommand = bundle.responses[0];
-						const { label: commandLabel } = firstCommand
-							? getTxLabel(firstCommand.cmd_data)
-							: { label: "Unknown Command" };
-						const isSelected = bundle.uuid === selectedUuid;
+			<div className="flex-1 overflow-hidden flex border border-gray-200 bg-white rounded-lg">
+				{/* Left: bundle list (1/3) */}
+				<div className="w-1/5 border-r border-gray-200 shrink-0 flex flex-col overflow-hidden">
+					<div className="flex-1 overflow-y-auto">
+						{bundles.map((bundle) => {
+							const stats = getBundleStats(bundle.responses);
+							const firstCommand = bundle.responses[0];
+							const { label: commandLabel } = firstCommand
+								? getTxLabel(firstCommand.cmd_data)
+								: { label: "Unknown Command" };
+							const isSelected = bundle.uuid === selectedUuid;
 
-						return (
-							<button
-								key={bundle.uuid}
-								type="button"
-								onClick={() => setSelectedUuid(bundle.uuid)}
-								className={`w-full text-left px-4 py-3 border-b border-gray-100 last:border-b-0 transition-colors cursor-pointer ${
-									isSelected
-										? "bg-blue-50 border-l-2 border-l-blue-500"
-										: "hover:bg-gray-50 border-l-2 border-l-transparent"
-								}`}
-							>
-								<div className="flex items-center gap-2 mb-1">
-									<Terminal
-										className={`w-3.5 h-3.5 shrink-0 ${isSelected ? "text-blue-500" : "text-purple-500"}`}
-									/>
-									<span
-										className={`text-sm font-medium truncate ${isSelected ? "text-blue-900" : "text-gray-900"}`}
-									>
-										{commandLabel}
-									</span>
-								</div>
-								<div className="flex items-center justify-between gap-2">
-									<div className="flex items-center gap-1.5 flex-wrap">
-										{stats.success > 0 && (
-											<span className="px-1.5 py-0.5 rounded-full bg-green-100 text-green-800 text-xs">
-												{stats.success} ok
-											</span>
-										)}
-										{stats.failed > 0 && (
-											<span className="px-1.5 py-0.5 rounded-full bg-red-100 text-red-800 text-xs">
-												{stats.failed} failed
-											</span>
-										)}
-										{stats.pending > 0 && (
-											<span className="px-1.5 py-0.5 rounded-full bg-yellow-100 text-yellow-800 text-xs">
-												{stats.pending} pending
-											</span>
-										)}
-										{stats.executing > 0 && (
-											<span className="px-1.5 py-0.5 rounded-full bg-blue-100 text-blue-800 text-xs">
-												{stats.executing} executing
-											</span>
-										)}
+							return (
+								<button
+									key={bundle.uuid}
+									type="button"
+									onClick={() => setSelectedUuid(bundle.uuid)}
+									className={`w-full text-left px-4 py-3 border-b border-gray-100 last:border-b-0 transition-colors cursor-pointer ${
+										isSelected
+											? "bg-blue-50 border-l-2 border-l-blue-500"
+											: "hover:bg-gray-50 border-l-2 border-l-transparent"
+									}`}
+								>
+									<div className="flex items-center gap-2 mb-1">
+										<Terminal
+											className={`w-3.5 h-3.5 shrink-0 ${isSelected ? "text-blue-500" : "text-purple-500"}`}
+										/>
+										<span
+											className={`text-sm font-medium truncate ${isSelected ? "text-blue-900" : "text-gray-900"}`}
+										>
+											{commandLabel}
+										</span>
 									</div>
-									<span className="text-xs text-gray-400 shrink-0">
-										{moment(bundle.created_on).fromNow()}
-									</span>
-								</div>
-							</button>
-						);
-					})}
+									<div className="flex items-center justify-between gap-2">
+										<div className="flex items-center gap-1.5 flex-wrap">
+											{stats.success > 0 && (
+												<span className="px-1.5 py-0.5 rounded-full bg-green-100 text-green-800 text-xs">
+													{stats.success} ok
+												</span>
+											)}
+											{stats.failed > 0 && (
+												<span className="px-1.5 py-0.5 rounded-full bg-red-100 text-red-800 text-xs">
+													{stats.failed} failed
+												</span>
+											)}
+											{stats.pending > 0 && (
+												<span className="px-1.5 py-0.5 rounded-full bg-yellow-100 text-yellow-800 text-xs">
+													{stats.pending} pending
+												</span>
+											)}
+											{stats.executing > 0 && (
+												<span className="px-1.5 py-0.5 rounded-full bg-blue-100 text-blue-800 text-xs">
+													{stats.executing} executing
+												</span>
+											)}
+										</div>
+										<span className="text-xs text-gray-400 shrink-0">
+											{moment(bundle.created_on).fromNow()}
+										</span>
+									</div>
+								</button>
+							);
+						})}
+					</div>
+					{hasNextPage && (
+						<div className="border-t border-gray-200 shrink-0">
+							<Button
+								variant="ghost"
+								loading={isFetchingNextPage}
+								onClick={() => fetchNextPage()}
+								className="w-full py-2 px-4 text-sm font-medium text-blue-600 bg-blue-50 rounded-none hover:bg-blue-100"
+							>
+								{isFetchingNextPage ? "Loading more…" : "Load more"}
+							</Button>
+						</div>
+					)}
 				</div>
-				{hasNextPage && (
-					<div className="border-t border-gray-200 shrink-0">
-						<Button
-							variant="ghost"
-							loading={isFetchingNextPage}
-							onClick={() => fetchNextPage()}
-							className="w-full py-2 px-4 text-sm font-medium text-blue-600 bg-blue-50 rounded-none hover:bg-blue-100"
-						>
-							{isFetchingNextPage ? "Loading more…" : "Load more"}
-						</Button>
-					</div>
-				)}
-			</div>
 
-		{/* Right: bundle detail (2/3) */}
-		<div className="w-4/5 overflow-hidden">
-				{selectedBundle != null ? (
-					<BundleDetail bundle={selectedBundle} />
-				) : (
-					<div className="flex items-center justify-center h-full text-gray-400 text-sm">
-						Select a bundle to see its details
-					</div>
-				)}
+				{/* Right: bundle detail (2/3) */}
+				<div className="w-4/5 overflow-hidden">
+					{selectedBundle != null ? (
+						<BundleDetail bundle={selectedBundle} />
+					) : (
+						<div className="flex items-center justify-center h-full text-gray-400 text-sm">
+							Select a bundle to see its details
+						</div>
+					)}
+				</div>
 			</div>
-		</div>
 		</div>
 	);
 };

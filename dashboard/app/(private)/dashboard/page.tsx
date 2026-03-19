@@ -1,6 +1,5 @@
 "use client";
 
-
 import {
 	Activity,
 	AlertTriangle,

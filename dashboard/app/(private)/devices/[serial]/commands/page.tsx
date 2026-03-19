@@ -1,6 +1,5 @@
 "use client";
 
-
 import { ArrowLeft, Send } from "lucide-react";
 import moment from "moment";
 import Link from "next/link";
@@ -193,7 +192,7 @@ const CommandsPage = () => {
 						</p>
 					</div>
 				) : (
-				<div className="flex border border-gray-200 rounded-lg overflow-hidden bg-white min-h-[500px]">
+					<div className="flex border border-gray-200 rounded-lg overflow-hidden bg-white min-h-[500px]">
 						{/* Left: command list (1/3) */}
 						<div className="w-1/3 border-r border-gray-200 overflow-y-auto shrink-0">
 							{commands.map((cmd) => {

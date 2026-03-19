@@ -1,6 +1,5 @@
 "use client";
 
-
 import { useQueryClient } from "@tanstack/react-query";
 import { Check, Edit2, Globe, Search, Shield, Wifi, X } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";

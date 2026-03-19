@@ -1,6 +1,5 @@
 "use client";
 
-
 import { ArrowLeft, FileText, Play, Radio, X } from "lucide-react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
