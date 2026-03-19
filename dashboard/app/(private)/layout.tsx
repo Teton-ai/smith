@@ -1,5 +1,6 @@
 "use client";
 
+import { useAuth0 } from "@auth0/auth0-react";
 import {
 	Activity,
 	Cpu,
@@ -10,6 +11,7 @@ import {
 	Smartphone,
 	Terminal,
 } from "lucide-react";
+import { useRouter } from "next/navigation";
 import type React from "react";
 import { useEffect, useState } from "react";
 import Profile from "@/app/components/profile";
@@ -18,8 +20,13 @@ import { useConfig } from "@/app/hooks/config";
 
 const navigationItems = [
 	{ path: "/dashboard", label: "Dashboard", icon: Home },
-	{ path: "/devices", label: "Devices", icon: Cpu },
-	{ path: "/distributions", label: "Distributions", icon: Layers },
+	{ path: "/devices", label: "Devices", icon: Cpu, shortcut: "S" },
+	{
+		path: "/distributions",
+		label: "Distributions",
+		icon: Layers,
+		shortcut: "D",
+	},
 	{ path: "/commands", label: "Commands", icon: Terminal },
 	{ path: "/ip-addresses", label: "IP Addresses", icon: Globe },
 	{ path: "/modems", label: "Modems", icon: Smartphone },
@@ -61,22 +68,64 @@ function useApiVersion() {
 	return version;
 }
 
+const keyboardShortcuts: Record<string, string> = {
+	s: "/devices",
+	d: "/distributions",
+};
+
+function useKeyboardNav() {
+	const router = useRouter();
+	useEffect(() => {
+		function handleKeyDown(e: KeyboardEvent) {
+			if (e.ctrlKey || e.metaKey || e.altKey) return;
+			const target = e.target as HTMLElement;
+			if (
+				target.tagName === "INPUT" ||
+				target.tagName === "TEXTAREA" ||
+				target.tagName === "SELECT" ||
+				target.isContentEditable
+			)
+				return;
+			const path = keyboardShortcuts[e.key];
+			if (path) router.push(path);
+		}
+		document.addEventListener("keydown", handleKeyDown);
+		return () => document.removeEventListener("keydown", handleKeyDown);
+	}, [router]);
+}
+
 export default function PrivateLayout({
 	children,
 }: Readonly<{
 	children: React.ReactNode;
 }>) {
+	const { isAuthenticated, isLoading } = useAuth0();
+	const router = useRouter();
 	const apiVersion = useApiVersion();
+	useKeyboardNav();
+
+	useEffect(() => {
+		if (!isLoading && !isAuthenticated) {
+			router.push("/");
+		}
+	}, [isLoading, isAuthenticated, router]);
+
+	if (isLoading || !isAuthenticated) {
+		return null;
+	}
 
 	return (
-		<Sidebar
-			items={navigationItems}
-			bottomItems={bottomItems}
-			bottomContent={<Profile sidebar />}
-			mobileBottomContent={<Profile sidebar expanded />}
-			versionText={apiVersion || undefined}
-		>
-			<div className="px-4 sm:px-6 lg:px-8 py-6">{children}</div>
-		</Sidebar>
+		<div className="flex h-screen overflow-hidden bg-gray-50">
+			<Sidebar
+				items={navigationItems}
+				bottomItems={bottomItems}
+				bottomContent={(expanded) => <Profile sidebar expanded={expanded} />}
+				mobileBottomContent={<Profile sidebar expanded />}
+				versionText={apiVersion || undefined}
+			/>
+			<main className="flex-1 min-w-0 overflow-hidden mt-14 md:mt-0 flex flex-col">
+				{children}
+			</main>
+		</div>
 	);
 }

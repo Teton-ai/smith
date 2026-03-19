@@ -139,7 +139,7 @@ export default function HackathonPage() {
 	// Landing view - device selection + history
 	if (viewMode === "landing") {
 		return (
-			<div className="space-y-6">
+			<div className="flex-1 overflow-y-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
 				{/* Header */}
 				<div className="flex items-center space-x-3">
 					<Activity className="w-6 h-6 text-blue-600" />
@@ -240,7 +240,7 @@ export default function HackathonPage() {
 
 	// Results view - show test details
 	return (
-		<div className="space-y-6">
+		<div className="flex-1 overflow-y-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
 			{/* Header */}
 			<div className="flex items-center space-x-3">
 				<button

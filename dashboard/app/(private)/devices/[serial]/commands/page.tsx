@@ -3,7 +3,7 @@
 import { ArrowLeft, Send } from "lucide-react";
 import moment from "moment";
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import {
 	CodeBlock,
@@ -122,6 +122,7 @@ const ResponseDetail = ({ cmd }: { cmd: DeviceCommandResponse }) => {
 
 const CommandsPage = () => {
 	const { serial } = useParams<{ serial: string }>();
+	const router = useRouter();
 	const [selectedId, setSelectedId] = useState<number | null>(null);
 
 	const { data: commandsData, isLoading: commandsLoading } =
@@ -141,16 +142,17 @@ const CommandsPage = () => {
 	const selectedCmd = commands.find((c) => c.cmd_id === selectedId) ?? null;
 
 	return (
-		<div className="space-y-6">
+		<div className="flex-1 overflow-y-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
 			{/* Back link */}
 			<div className="flex items-center space-x-4">
-				<Link
-					href="/devices"
+				<button
+					type="button"
+					onClick={() => router.back()}
 					className="flex items-center space-x-2 text-gray-600 hover:text-gray-900 transition-colors"
 				>
 					<ArrowLeft className="w-4 h-4" />
 					<span className="text-sm font-medium">Back to Devices</span>
-				</Link>
+				</button>
 			</div>
 
 			{/* Device Header */}
@@ -190,10 +192,7 @@ const CommandsPage = () => {
 						</p>
 					</div>
 				) : (
-					<div
-						className="flex border border-gray-200 rounded-lg overflow-hidden bg-white"
-						style={{ height: "calc(100vh - 340px)" }}
-					>
+					<div className="flex border border-gray-200 rounded-lg overflow-hidden bg-white min-h-[500px]">
 						{/* Left: command list (1/3) */}
 						<div className="w-1/3 border-r border-gray-200 overflow-y-auto shrink-0">
 							{commands.map((cmd) => {

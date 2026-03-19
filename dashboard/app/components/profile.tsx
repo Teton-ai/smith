@@ -11,16 +11,9 @@ interface ProfileProps {
 }
 
 export default function Profile({ sidebar, expanded }: ProfileProps) {
-	const { user, isAuthenticated, isLoading, logout } = useAuth0();
+	const { user, logout } = useAuth0();
 	const [isOpen, setIsOpen] = useState(false);
 	const dropdownRef = useRef(null);
-
-	// Logout if user is undefined after loading completes
-	useEffect(() => {
-		if (!isLoading && !user) {
-			logout({ logoutParams: { returnTo: window.location.origin } });
-		}
-	}, [isLoading, user, logout]);
 
 	// Close dropdown when clicking outside
 	useEffect(() => {
@@ -35,24 +28,6 @@ export default function Profile({ sidebar, expanded }: ProfileProps) {
 			document.removeEventListener("mousedown", handleClickOutside);
 		};
 	}, []);
-
-	if (isLoading) {
-		return (
-			<div
-				className={
-					sidebar
-						? "flex items-center h-10 px-4"
-						: "flex items-center space-x-2"
-				}
-			>
-				<div className="w-8 h-8 bg-gray-200 rounded-full animate-pulse shrink-0" />
-			</div>
-		);
-	}
-
-	if (!isAuthenticated || !user) {
-		return null;
-	}
 
 	const handleLogout = () => {
 		logout({ logoutParams: { returnTo: window.location.origin } });
