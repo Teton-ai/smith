@@ -12,32 +12,45 @@ permissions:
 jobs:
   notify:
     runs-on: ubuntu-latest
-    if: >-
-      github.event.workflow_run.conclusion == 'success' &&
-      startsWith(github.event.workflow_run.head_branch, 'v')
+    if: github.event.workflow_run.conclusion == 'success'
     steps:
-      - name: Get version from tag
+      - name: Get tag for commit
+        id: tag
         run: |
-          TAG="${{ github.event.workflow_run.head_branch }}"
+          SHA="${{ github.event.workflow_run.head_sha }}"
+          TAG=$(gh api repos/${{ github.repository }}/git/matching-refs/tags/v \
+            --jq --arg sha "$SHA" '[.[] | select(.object.sha == $sha)] | .[0].ref // empty')
+
+          if [ -z "$TAG" ]; then
+            echo "No tag found for SHA $SHA, skipping"
+            echo "found=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          TAG="${TAG#refs/tags/}"
           VERSION="${TAG#v}"
+          echo "found=true" >> $GITHUB_OUTPUT
           echo "VERSION=$VERSION" >> $GITHUB_ENV
           echo "TAG=$TAG" >> $GITHUB_ENV
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PR_TOKEN }}
 
       - name: Check both workflows succeeded
+        if: steps.tag.outputs.found == 'true'
         id: check
         run: |
-          TAG="${{ env.TAG }}"
+          SHA="${{ github.event.workflow_run.head_sha }}"
           for WORKFLOW in api dashboard; do
             RESULT=$(gh run list \
               --repo "${{ github.repository }}" \
               --workflow "$WORKFLOW" \
-              --json headBranch,conclusion \
-              --jq --arg tag "$TAG" \
-              '[.[] | select(.headBranch == $tag and .conclusion == "success")] | length')
+              --json headSha,conclusion \
+              --jq --arg sha "$SHA" \
+              '[.[] | select(.headSha == $sha and .conclusion == "success")] | length')
 
             if [ "$RESULT" -eq 0 ]; then
               echo "ready=false" >> $GITHUB_OUTPUT
-              echo "Waiting for $WORKFLOW to complete for $TAG"
+              echo "Waiting for $WORKFLOW to complete for ${{ env.TAG }}"
               exit 0
             fi
           done
