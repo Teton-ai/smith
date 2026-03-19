@@ -26,30 +26,22 @@ jobs:
       - name: Check both workflows succeeded
         id: check
         run: |
-          # Determine which workflow just completed, and check the other
-          COMPLETED="${{ github.event.workflow.name }}"
-          if [ "$COMPLETED" = "api" ]; then
-            OTHER="dashboard"
-          else
-            OTHER="api"
-          fi
+          TAG="${{ env.TAG }}"
+          for WORKFLOW in api dashboard; do
+            RESULT=$(gh run list \
+              --repo "${{ github.repository }}" \
+              --workflow "$WORKFLOW" \
+              --json headBranch,conclusion \
+              --jq --arg tag "$TAG" \
+              '[.[] | select(.headBranch == $tag and .conclusion == "success")] | length')
 
-          # Check if the other workflow has a successful run for this tag
-          RESULT=$(gh run list \
-            --repo "${{ github.repository }}" \
-            --workflow "$OTHER" \
-            --branch "${{ env.TAG }}" \
-            --status success \
-            --limit 1 \
-            --json conclusion \
-            --jq '.[0].conclusion // empty')
-
-          if [ "$RESULT" = "success" ]; then
-            echo "ready=true" >> $GITHUB_OUTPUT
-          else
-            echo "ready=false" >> $GITHUB_OUTPUT
-            echo "Waiting for $OTHER workflow to complete for ${{ env.TAG }}"
-          fi
+            if [ "$RESULT" -eq 0 ]; then
+              echo "ready=false" >> $GITHUB_OUTPUT
+              echo "Waiting for $WORKFLOW to complete for $TAG"
+              exit 0
+            fi
+          done
+          echo "ready=true" >> $GITHUB_OUTPUT
         env:
           GH_TOKEN: ${{ secrets.RELEASE_PR_TOKEN }}
 
