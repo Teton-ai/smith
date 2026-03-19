@@ -10,6 +10,7 @@ import {
 	Smartphone,
 	Terminal,
 } from "lucide-react";
+import { useRouter } from "next/navigation";
 import type React from "react";
 import { useEffect, useState } from "react";
 import Profile from "@/app/components/profile";
@@ -18,8 +19,13 @@ import { useConfig } from "@/app/hooks/config";
 
 const navigationItems = [
 	{ path: "/dashboard", label: "Dashboard", icon: Home },
-	{ path: "/devices", label: "Devices", icon: Cpu },
-	{ path: "/distributions", label: "Distributions", icon: Layers },
+	{ path: "/devices", label: "Devices", icon: Cpu, shortcut: "S" },
+	{
+		path: "/distributions",
+		label: "Distributions",
+		icon: Layers,
+		shortcut: "D",
+	},
 	{ path: "/commands", label: "Commands", icon: Terminal },
 	{ path: "/ip-addresses", label: "IP Addresses", icon: Globe },
 	{ path: "/modems", label: "Modems", icon: Smartphone },
@@ -61,12 +67,39 @@ function useApiVersion() {
 	return version;
 }
 
+const keyboardShortcuts: Record<string, string> = {
+	s: "/devices",
+	d: "/distributions",
+};
+
+function useKeyboardNav() {
+	const router = useRouter();
+	useEffect(() => {
+		function handleKeyDown(e: KeyboardEvent) {
+			if (e.ctrlKey || e.metaKey || e.altKey) return;
+			const target = e.target as HTMLElement;
+			if (
+				target.tagName === "INPUT" ||
+				target.tagName === "TEXTAREA" ||
+				target.tagName === "SELECT" ||
+				target.isContentEditable
+			)
+				return;
+			const path = keyboardShortcuts[e.key];
+			if (path) router.push(path);
+		}
+		document.addEventListener("keydown", handleKeyDown);
+		return () => document.removeEventListener("keydown", handleKeyDown);
+	}, [router]);
+}
+
 export default function PrivateLayout({
 	children,
 }: Readonly<{
 	children: React.ReactNode;
 }>) {
 	const apiVersion = useApiVersion();
+	useKeyboardNav();
 
 	return (
 		<div className="flex h-screen overflow-hidden bg-gray-50">

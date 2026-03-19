@@ -1,6 +1,6 @@
 "use client";
 
-
+import { useAuth0 } from "@auth0/auth0-react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
 	AlertTriangle,
@@ -20,7 +20,6 @@ import {
 	XCircle,
 } from "lucide-react";
 import moment from "moment";
-import { useAuth0 } from "@auth0/auth0-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/app/components/button";
@@ -169,6 +168,7 @@ const DevicesPage = () => {
 	const [releaseSearchQuery, setReleaseSearchQuery] = useState("");
 	const releaseDropdownRef = useRef<HTMLDivElement>(null);
 	const sentinelRef = useRef<HTMLDivElement>(null);
+	const searchInputRef = useRef<HTMLInputElement>(null);
 
 	// Bulk deploy state
 	const [selectedDeviceIds, setSelectedDeviceIds] = useState<Set<number>>(
@@ -256,8 +256,6 @@ const DevicesPage = () => {
 				),
 		[devicesData],
 	);
-
-
 
 	// Infinite scroll: trigger fetchNextPage whenever the sentinel is visible
 	// and there are more pages to load. Re-runs when hasNextPage changes so
@@ -475,6 +473,26 @@ const DevicesPage = () => {
 			},
 		});
 	};
+
+	// Focus search on '/' keypress
+	useEffect(() => {
+		function handleKeyDown(e: KeyboardEvent) {
+			if (e.key !== "/") return;
+			if (e.ctrlKey || e.metaKey || e.altKey) return;
+			const target = e.target as HTMLElement;
+			if (
+				target.tagName === "INPUT" ||
+				target.tagName === "TEXTAREA" ||
+				target.tagName === "SELECT" ||
+				target.isContentEditable
+			)
+				return;
+			e.preventDefault();
+			searchInputRef.current?.focus();
+		}
+		document.addEventListener("keydown", handleKeyDown);
+		return () => document.removeEventListener("keydown", handleKeyDown);
+	}, []);
 
 	// Debounce search term
 	useEffect(() => {
@@ -808,536 +826,559 @@ const DevicesPage = () => {
 
 			{/* Search and Filters */}
 			<div className="px-4 sm:px-6 lg:px-8 pt-6 pb-3 shrink-0">
-			<div className="flex flex-col space-y-3">
-				<div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-					<div className="flex flex-wrap items-center gap-3">
-						<div className="relative">
-							<Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
-							<input
-								type="text"
-								placeholder="Search devices..."
-								value={searchTerm}
-								onChange={(e) => setSearchTerm(e.target.value)}
-								className="pl-10 pr-10 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm text-gray-900 placeholder-gray-400"
-							/>
-							{isSearching && (
-								<Loader2 className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4 animate-spin" />
-							)}
-						</div>
-
-						{/* Online Status Filter */}
-						<div className="flex space-x-1">
-							<Button
-								variant={onlineStatusFilter === "all" ? "primary" : "secondary"}
-								onClick={() => handleOnlineStatusChange("all")}
-							>
-								All
-							</Button>
-							<Button
-								variant={
-									onlineStatusFilter === "online" ? "success" : "secondary"
-								}
-								onClick={() => handleOnlineStatusChange("online")}
-							>
-								Online
-							</Button>
-							<Button
-								variant={
-									onlineStatusFilter === "offline" ? "secondary" : "secondary"
-								}
-								className={
-									onlineStatusFilter === "offline"
-										? "bg-gray-600 hover:bg-gray-700 text-white"
-										: ""
-								}
-								onClick={() => handleOnlineStatusChange("offline")}
-							>
-								Offline
-							</Button>
-						</div>
-
-						{/* Outdated Filter */}
-						<Button
-							variant={showOutdatedOnly ? "warning" : "secondary"}
-							className={
-								showOutdatedOnly ? "bg-orange-600 hover:bg-orange-700" : ""
-							}
-							onClick={handleOutdatedToggle}
-						>
-							Outdated
-						</Button>
-
-						{/* Pending Approval Filter */}
-						<Button
-							variant={showPendingApproval ? "warning" : "secondary"}
-							className={
-								showPendingApproval ? "bg-orange-600 hover:bg-orange-700" : ""
-							}
-							onClick={handlePendingApprovalToggle}
-						>
-							Pending Approval
-						</Button>
-
-						{/* Service Not Running Filter */}
-						<Button
-							variant={showServiceDown ? "warning" : "secondary"}
-							className={
-								showServiceDown ? "bg-orange-600 hover:bg-orange-700" : ""
-							}
-							onClick={handleServiceDownToggle}
-						>
-							Service Down
-						</Button>
-
-						{/* Release Filter Dropdown */}
-						<div className="relative" ref={releaseDropdownRef}>
-							<button
-								onClick={() => setShowReleaseDropdown(!showReleaseDropdown)}
-								className={`flex items-center space-x-2 px-3 py-2 text-sm rounded-md transition-colors cursor-pointer ${
-									releaseFilter != null || distributionFilter != null
-										? "bg-purple-600 text-white"
-										: "bg-gray-100 text-gray-700 hover:bg-gray-200"
-								}`}
-							>
-								<GitBranch className="w-4 h-4" />
-								<span>
-									{selectedRelease
-										? `${selectedRelease.distribution_name} ${selectedRelease.version}`
-										: selectedDistributionName
-											? `${selectedDistributionName} (all)`
-											: "Release"}
-								</span>
-								<ChevronDown
-									className={`w-4 h-4 transition-transform ${showReleaseDropdown ? "rotate-180" : ""}`}
+				<div className="flex flex-col space-y-3">
+					<div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+						<div className="flex flex-wrap items-center gap-3">
+							<div className="relative">
+								<Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+								<input
+									ref={searchInputRef}
+									type="text"
+									placeholder="Search devices..."
+									value={searchTerm}
+									onChange={(e) => setSearchTerm(e.target.value)}
+									className="pl-10 pr-10 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm text-gray-900 placeholder-gray-400"
 								/>
-							</button>
+								{isSearching ? (
+									<Loader2 className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4 animate-spin" />
+								) : (
+									!searchTerm && (
+										<kbd className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 text-xs border border-gray-300 rounded px-1 py-0.5 font-mono leading-none pointer-events-none">
+											/
+										</kbd>
+									)
+								)}
+							</div>
 
-							{showReleaseDropdown && (
-								<div className="absolute top-full left-0 mt-1 w-72 bg-white border border-gray-200 rounded-md shadow-lg z-50">
-									{/* Search input */}
-									<div className="p-2 border-b border-gray-200">
-										<div className="relative">
-											<Search className="absolute left-2.5 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
-											<input
-												type="text"
-												placeholder="Search releases..."
-												value={releaseSearchQuery}
-												onChange={(e) => setReleaseSearchQuery(e.target.value)}
-												className="w-full pl-8 pr-3 py-1.5 text-sm border border-gray-200 rounded focus:ring-1 focus:ring-purple-500 focus:border-purple-500 text-gray-900 placeholder-gray-400"
-												onClick={(e) => e.stopPropagation()}
-											/>
-										</div>
-									</div>
+							{/* Online Status Filter */}
+							<div className="flex space-x-1">
+								<Button
+									variant={
+										onlineStatusFilter === "all" ? "primary" : "secondary"
+									}
+									onClick={() => handleOnlineStatusChange("all")}
+								>
+									All
+								</Button>
+								<Button
+									variant={
+										onlineStatusFilter === "online" ? "success" : "secondary"
+									}
+									onClick={() => handleOnlineStatusChange("online")}
+								>
+									Online
+								</Button>
+								<Button
+									variant={
+										onlineStatusFilter === "offline" ? "secondary" : "secondary"
+									}
+									className={
+										onlineStatusFilter === "offline"
+											? "bg-gray-600 hover:bg-gray-700 text-white"
+											: ""
+									}
+									onClick={() => handleOnlineStatusChange("offline")}
+								>
+									Offline
+								</Button>
+							</div>
 
-									<div className="max-h-64 overflow-y-auto">
-										{(releaseFilter != null || distributionFilter != null) && (
-											<button
-												onClick={() => {
-													setReleaseFilter(undefined);
-													setDistributionFilter(undefined);
-													setShowReleaseDropdown(false);
-													setReleaseSearchQuery("");
-													updateURL({
-														release_id: undefined,
-														distribution_id: undefined,
-													});
-												}}
-												className="w-full px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 border-b border-gray-200 flex items-center space-x-2 cursor-pointer"
-											>
-												<X className="w-4 h-4 text-gray-400" />
-												<span>Clear filter</span>
-											</button>
-										)}
-										{sortedDistributions.length === 0 ? (
-											<div className="px-3 py-4 text-sm text-gray-500 text-center">
-												No releases available
+							{/* Outdated Filter */}
+							<Button
+								variant={showOutdatedOnly ? "warning" : "secondary"}
+								className={
+									showOutdatedOnly ? "bg-orange-600 hover:bg-orange-700" : ""
+								}
+								onClick={handleOutdatedToggle}
+							>
+								Outdated
+							</Button>
+
+							{/* Pending Approval Filter */}
+							<Button
+								variant={showPendingApproval ? "warning" : "secondary"}
+								className={
+									showPendingApproval ? "bg-orange-600 hover:bg-orange-700" : ""
+								}
+								onClick={handlePendingApprovalToggle}
+							>
+								Pending Approval
+							</Button>
+
+							{/* Service Not Running Filter */}
+							<Button
+								variant={showServiceDown ? "warning" : "secondary"}
+								className={
+									showServiceDown ? "bg-orange-600 hover:bg-orange-700" : ""
+								}
+								onClick={handleServiceDownToggle}
+							>
+								Service Down
+							</Button>
+
+							{/* Release Filter Dropdown */}
+							<div className="relative" ref={releaseDropdownRef}>
+								<button
+									onClick={() => setShowReleaseDropdown(!showReleaseDropdown)}
+									className={`flex items-center space-x-2 px-3 py-2 text-sm rounded-md transition-colors cursor-pointer ${
+										releaseFilter != null || distributionFilter != null
+											? "bg-purple-600 text-white"
+											: "bg-gray-100 text-gray-700 hover:bg-gray-200"
+									}`}
+								>
+									<GitBranch className="w-4 h-4" />
+									<span>
+										{selectedRelease
+											? `${selectedRelease.distribution_name} ${selectedRelease.version}`
+											: selectedDistributionName
+												? `${selectedDistributionName} (all)`
+												: "Release"}
+									</span>
+									<ChevronDown
+										className={`w-4 h-4 transition-transform ${showReleaseDropdown ? "rotate-180" : ""}`}
+									/>
+								</button>
+
+								{showReleaseDropdown && (
+									<div className="absolute top-full left-0 mt-1 w-72 bg-white border border-gray-200 rounded-md shadow-lg z-50">
+										{/* Search input */}
+										<div className="p-2 border-b border-gray-200">
+											<div className="relative">
+												<Search className="absolute left-2.5 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
+												<input
+													type="text"
+													placeholder="Search releases..."
+													value={releaseSearchQuery}
+													onChange={(e) =>
+														setReleaseSearchQuery(e.target.value)
+													}
+													className="w-full pl-8 pr-3 py-1.5 text-sm border border-gray-200 rounded focus:ring-1 focus:ring-purple-500 focus:border-purple-500 text-gray-900 placeholder-gray-400"
+													onClick={(e) => e.stopPropagation()}
+												/>
 											</div>
-										) : (
-											sortedDistributions.map((dist) => {
-												const filteredReleases = dist.releases.filter(
-													(release) =>
+										</div>
+
+										<div className="max-h-64 overflow-y-auto">
+											{(releaseFilter != null ||
+												distributionFilter != null) && (
+												<button
+													onClick={() => {
+														setReleaseFilter(undefined);
+														setDistributionFilter(undefined);
+														setShowReleaseDropdown(false);
+														setReleaseSearchQuery("");
+														updateURL({
+															release_id: undefined,
+															distribution_id: undefined,
+														});
+													}}
+													className="w-full px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 border-b border-gray-200 flex items-center space-x-2 cursor-pointer"
+												>
+													<X className="w-4 h-4 text-gray-400" />
+													<span>Clear filter</span>
+												</button>
+											)}
+											{sortedDistributions.length === 0 ? (
+												<div className="px-3 py-4 text-sm text-gray-500 text-center">
+													No releases available
+												</div>
+											) : (
+												sortedDistributions.map((dist) => {
+													const filteredReleases = dist.releases.filter(
+														(release) =>
+															releaseSearchQuery === "" ||
+															release.version
+																.toLowerCase()
+																.includes(releaseSearchQuery.toLowerCase()) ||
+															dist.name
+																.toLowerCase()
+																.includes(releaseSearchQuery.toLowerCase()),
+													);
+
+													const distMatchesSearch =
 														releaseSearchQuery === "" ||
-														release.version
-															.toLowerCase()
-															.includes(releaseSearchQuery.toLowerCase()) ||
 														dist.name
 															.toLowerCase()
-															.includes(releaseSearchQuery.toLowerCase()),
-												);
+															.includes(releaseSearchQuery.toLowerCase());
 
-												const distMatchesSearch =
-													releaseSearchQuery === "" ||
-													dist.name
-														.toLowerCase()
-														.includes(releaseSearchQuery.toLowerCase());
+													if (
+														filteredReleases.length === 0 &&
+														!distMatchesSearch
+													)
+														return null;
 
-												if (filteredReleases.length === 0 && !distMatchesSearch)
-													return null;
+													const isExpanded =
+														expandedDistributions.has(dist.id) ||
+														releaseSearchQuery !== "";
 
-												const isExpanded =
-													expandedDistributions.has(dist.id) ||
-													releaseSearchQuery !== "";
-
-												return (
-													<div key={dist.name}>
-														<div className="flex items-center">
-															<button
-																onClick={(e) => {
-																	e.stopPropagation();
-																	setExpandedDistributions((prev) => {
-																		const next = new Set(prev);
-																		if (next.has(dist.id)) {
-																			next.delete(dist.id);
-																		} else {
-																			next.add(dist.id);
-																		}
-																		return next;
-																	});
-																}}
-																className="px-2 py-2 text-gray-400 hover:text-gray-600 cursor-pointer"
-															>
-																<ChevronDown
-																	className={`w-4 h-4 transition-transform ${isExpanded ? "rotate-0" : "-rotate-90"}`}
-																/>
-															</button>
-															<button
-																onClick={() =>
-																	handleDistributionFilterChange(dist.id)
-																}
-																className={`flex-1 px-2 py-2 text-left text-sm font-medium flex items-center justify-between cursor-pointer transition-colors ${
-																	distributionFilter === dist.id
-																		? "bg-purple-50 text-purple-700"
-																		: "text-gray-700 hover:bg-gray-50"
-																}`}
-															>
-																<span>{dist.name}</span>
-																<span className="text-xs text-gray-400">
-																	{dist.releases.length} release
-																	{dist.releases.length !== 1 ? "s" : ""}
-																</span>
-															</button>
-														</div>
-														{isExpanded && (
-															<div className="border-l-2 border-gray-100 ml-4">
-																{filteredReleases.map((release) => (
-																	<button
-																		key={release.id}
-																		onClick={() =>
-																			handleReleaseFilterChange(release.id)
-																		}
-																		className={`w-full px-3 py-2 text-left text-sm hover:bg-gray-50 flex items-center justify-between cursor-pointer ${
-																			releaseFilter === release.id
-																				? "bg-purple-50 text-purple-700"
-																				: "text-gray-700"
-																		}`}
-																	>
-																		<div className="flex items-center space-x-2">
-																			<Tag className="w-3 h-3 text-gray-400" />
-																			<span className="font-mono">
-																				{release.version}
-																			</span>
-																		</div>
-																		<div className="flex items-center space-x-2">
-																			{release.draft && (
-																				<span className="px-1.5 py-0.5 text-xs bg-yellow-100 text-yellow-700 rounded">
-																					Draft
-																				</span>
-																			)}
-																			{release.yanked && (
-																				<span className="px-1.5 py-0.5 text-xs bg-red-100 text-red-700 rounded">
-																					Yanked
-																				</span>
-																			)}
-																		</div>
-																	</button>
-																))}
+													return (
+														<div key={dist.name}>
+															<div className="flex items-center">
+																<button
+																	onClick={(e) => {
+																		e.stopPropagation();
+																		setExpandedDistributions((prev) => {
+																			const next = new Set(prev);
+																			if (next.has(dist.id)) {
+																				next.delete(dist.id);
+																			} else {
+																				next.add(dist.id);
+																			}
+																			return next;
+																		});
+																	}}
+																	className="px-2 py-2 text-gray-400 hover:text-gray-600 cursor-pointer"
+																>
+																	<ChevronDown
+																		className={`w-4 h-4 transition-transform ${isExpanded ? "rotate-0" : "-rotate-90"}`}
+																	/>
+																</button>
+																<button
+																	onClick={() =>
+																		handleDistributionFilterChange(dist.id)
+																	}
+																	className={`flex-1 px-2 py-2 text-left text-sm font-medium flex items-center justify-between cursor-pointer transition-colors ${
+																		distributionFilter === dist.id
+																			? "bg-purple-50 text-purple-700"
+																			: "text-gray-700 hover:bg-gray-50"
+																	}`}
+																>
+																	<span>{dist.name}</span>
+																	<span className="text-xs text-gray-400">
+																		{dist.releases.length} release
+																		{dist.releases.length !== 1 ? "s" : ""}
+																	</span>
+																</button>
 															</div>
-														)}
-													</div>
-												);
-											})
-										)}
+															{isExpanded && (
+																<div className="border-l-2 border-gray-100 ml-4">
+																	{filteredReleases.map((release) => (
+																		<button
+																			key={release.id}
+																			onClick={() =>
+																				handleReleaseFilterChange(release.id)
+																			}
+																			className={`w-full px-3 py-2 text-left text-sm hover:bg-gray-50 flex items-center justify-between cursor-pointer ${
+																				releaseFilter === release.id
+																					? "bg-purple-50 text-purple-700"
+																					: "text-gray-700"
+																			}`}
+																		>
+																			<div className="flex items-center space-x-2">
+																				<Tag className="w-3 h-3 text-gray-400" />
+																				<span className="font-mono">
+																					{release.version}
+																				</span>
+																			</div>
+																			<div className="flex items-center space-x-2">
+																				{release.draft && (
+																					<span className="px-1.5 py-0.5 text-xs bg-yellow-100 text-yellow-700 rounded">
+																						Draft
+																					</span>
+																				)}
+																				{release.yanked && (
+																					<span className="px-1.5 py-0.5 text-xs bg-red-100 text-red-700 rounded">
+																						Yanked
+																					</span>
+																				)}
+																			</div>
+																		</button>
+																	))}
+																</div>
+															)}
+														</div>
+													);
+												})
+											)}
+										</div>
 									</div>
-								</div>
-							)}
-						</div>
+								)}
+							</div>
 
-						{/* Label Filter Input */}
-						<LabelAutocomplete
-							onSelect={addLabelFilter}
-							existingFilters={labelFilters}
-						/>
+							{/* Label Filter Input */}
+							<LabelAutocomplete
+								onSelect={addLabelFilter}
+								existingFilters={labelFilters}
+							/>
 
-						{/* Active Label Filters - inline */}
-						{labelFilters.length > 0 &&
-							labelFilters.map((filter) => (
-								<div
-									key={filter}
-									className="flex items-center space-x-1 px-2 py-1 text-sm bg-gray-100 text-gray-700 rounded border border-gray-200"
-								>
-									<code className="font-mono text-xs">{filter}</code>
-									<button
-										onClick={() => removeLabelFilter(filter)}
-										className="text-gray-600 hover:text-gray-800 font-bold cursor-pointer"
+							{/* Active Label Filters - inline */}
+							{labelFilters.length > 0 &&
+								labelFilters.map((filter) => (
+									<div
+										key={filter}
+										className="flex items-center space-x-1 px-2 py-1 text-sm bg-gray-100 text-gray-700 rounded border border-gray-200"
 									>
-										×
-									</button>
-								</div>
-							))}
+										<code className="font-mono text-xs">{filter}</code>
+										<button
+											onClick={() => removeLabelFilter(filter)}
+											className="text-gray-600 hover:text-gray-800 font-bold cursor-pointer"
+										>
+											×
+										</button>
+									</div>
+								))}
+						</div>
 					</div>
 				</div>
-			</div>
 			</div>
 
 			{/* Device List — scrollable */}
 			<div className="flex-1 overflow-y-auto px-4 sm:px-6 lg:px-8 pb-6 min-h-0">
-			<div className="border border-gray-200 rounded-lg overflow-hidden bg-white">
-				<div className="sticky top-0 z-10 bg-gray-50 px-4 py-3 border-b border-gray-200">
-					<div className="grid grid-cols-[auto_2fr_2fr_2fr_1fr_1fr] gap-4 text-xs font-medium text-gray-500 uppercase tracking-wide items-center">
-						<div className="w-6 flex items-center justify-center">
-							<button
-								onClick={() => {
-									if (
+				<div className="border border-gray-200 rounded-lg overflow-hidden bg-white">
+					<div className="sticky top-0 z-10 bg-gray-50 px-4 py-3 border-b border-gray-200">
+						<div className="grid grid-cols-[auto_2fr_2fr_2fr_1fr_1fr] gap-4 text-xs font-medium text-gray-500 uppercase tracking-wide items-center">
+							<div className="w-6 flex items-center justify-center">
+								<button
+									onClick={() => {
+										if (
+											selectedDeviceIds.size > 0 &&
+											selectedDeviceIds.size === filteredDevices.length
+										) {
+											setSelectedDeviceIds(new Set());
+										} else {
+											setSelectedDeviceIds(
+												new Set(filteredDevices.map((d) => d.id)),
+											);
+										}
+									}}
+									className={`w-5 h-5 rounded-full flex items-center justify-center transition-colors cursor-pointer ${
 										selectedDeviceIds.size > 0 &&
 										selectedDeviceIds.size === filteredDevices.length
-									) {
-										setSelectedDeviceIds(new Set());
-									} else {
-										setSelectedDeviceIds(
-											new Set(filteredDevices.map((d) => d.id)),
-										);
-									}
-								}}
-								className={`w-5 h-5 rounded-full flex items-center justify-center transition-colors cursor-pointer ${
-									selectedDeviceIds.size > 0 &&
-									selectedDeviceIds.size === filteredDevices.length
-										? "bg-blue-600"
-										: selectedDeviceIds.size > 0
-											? "bg-blue-400"
-											: "border-2 border-gray-300 hover:border-gray-400"
-								}`}
-							>
-								{selectedDeviceIds.size > 0 && (
-									<svg
-										className="w-3 h-3 text-white"
-										fill="none"
-										viewBox="0 0 24 24"
-										stroke="currentColor"
-									>
-										<path
-											strokeLinecap="round"
-											strokeLinejoin="round"
-											strokeWidth={2}
-											d={
-												selectedDeviceIds.size === filteredDevices.length
-													? "M5 13l4 4L19 7"
-													: "M20 12H4"
-											}
-										/>
-									</svg>
-								)}
-							</button>
-						</div>
-						<div>Device</div>
-						<div>Labels</div>
-						<div>Location</div>
-						<div>OS</div>
-						<div>Release</div>
-					</div>
-				</div>
-
-				{loading ? (
-					<LoadingSkeleton />
-				) : (
-					<div className="divide-y divide-gray-200">
-						{filteredDevices.map((device) => (
-							<div
-								key={device.id}
-								className="block px-4 py-3 hover:bg-gray-50 cursor-pointer transition-colors"
-								onClick={() => router.push(`/devices/${device.serial_number}`)}
-							>
-								<div className="grid grid-cols-[auto_2fr_2fr_2fr_1fr_1fr] gap-4 items-center">
-									<div className="w-6 flex items-center justify-center">
-										<button
-											onClick={(e) => {
-												e.stopPropagation();
-												const newSet = new Set(selectedDeviceIds);
-												if (selectedDeviceIds.has(device.id)) {
-													newSet.delete(device.id);
-												} else {
-													newSet.add(device.id);
-												}
-												setSelectedDeviceIds(newSet);
-											}}
-											className={`w-5 h-5 rounded-full flex items-center justify-center transition-colors cursor-pointer ${
-												selectedDeviceIds.has(device.id)
-													? "bg-blue-600"
-													: "border-2 border-gray-300 hover:border-gray-400"
-											}`}
+											? "bg-blue-600"
+											: selectedDeviceIds.size > 0
+												? "bg-blue-400"
+												: "border-2 border-gray-300 hover:border-gray-400"
+									}`}
+								>
+									{selectedDeviceIds.size > 0 && (
+										<svg
+											className="w-3 h-3 text-white"
+											fill="none"
+											viewBox="0 0 24 24"
+											stroke="currentColor"
 										>
-											{selectedDeviceIds.has(device.id) && (
-												<svg
-													className="w-3 h-3 text-white"
-													fill="none"
-													viewBox="0 0 24 24"
-													stroke="currentColor"
-												>
-													<path
-														strokeLinecap="round"
-														strokeLinejoin="round"
-														strokeWidth={2}
-														d="M5 13l4 4L19 7"
-													/>
-												</svg>
-											)}
-										</button>
-									</div>
-									<div>
-										<div className="flex items-center space-x-3">
-											<Cpu className="w-4 h-4 text-gray-400 flex-shrink-0" />
-											<div className="min-w-0 flex-1">
-												<div className="flex items-center space-x-2">
-													<Tooltip content={getStatusTooltip(device)}>
-														<div className="flex-shrink-0 cursor-help">
-															<NetworkQualityIndicator
-																isOnline={getDeviceStatus(device) === "online"}
-																networkScore={device.network?.network_score}
-															/>
+											<path
+												strokeLinecap="round"
+												strokeLinejoin="round"
+												strokeWidth={2}
+												d={
+													selectedDeviceIds.size === filteredDevices.length
+														? "M5 13l4 4L19 7"
+														: "M20 12H4"
+												}
+											/>
+										</svg>
+									)}
+								</button>
+							</div>
+							<div>Device</div>
+							<div>Labels</div>
+							<div>Location</div>
+							<div>OS</div>
+							<div>Release</div>
+						</div>
+					</div>
+
+					{loading ? (
+						<LoadingSkeleton />
+					) : (
+						<div className="divide-y divide-gray-200">
+							{filteredDevices.map((device) => (
+								<div
+									key={device.id}
+									className="block px-4 py-3 hover:bg-gray-50 cursor-pointer transition-colors"
+									onClick={() =>
+										router.push(`/devices/${device.serial_number}`)
+									}
+								>
+									<div className="grid grid-cols-[auto_2fr_2fr_2fr_1fr_1fr] gap-4 items-center">
+										<div className="w-6 flex items-center justify-center">
+											<button
+												onClick={(e) => {
+													e.stopPropagation();
+													const newSet = new Set(selectedDeviceIds);
+													if (selectedDeviceIds.has(device.id)) {
+														newSet.delete(device.id);
+													} else {
+														newSet.add(device.id);
+													}
+													setSelectedDeviceIds(newSet);
+												}}
+												className={`w-5 h-5 rounded-full flex items-center justify-center transition-colors cursor-pointer ${
+													selectedDeviceIds.has(device.id)
+														? "bg-blue-600"
+														: "border-2 border-gray-300 hover:border-gray-400"
+												}`}
+											>
+												{selectedDeviceIds.has(device.id) && (
+													<svg
+														className="w-3 h-3 text-white"
+														fill="none"
+														viewBox="0 0 24 24"
+														stroke="currentColor"
+													>
+														<path
+															strokeLinecap="round"
+															strokeLinejoin="round"
+															strokeWidth={2}
+															d="M5 13l4 4L19 7"
+														/>
+													</svg>
+												)}
+											</button>
+										</div>
+										<div>
+											<div className="flex items-center space-x-3">
+												<Cpu className="w-4 h-4 text-gray-400 flex-shrink-0" />
+												<div className="min-w-0 flex-1">
+													<div className="flex items-center space-x-2">
+														<Tooltip content={getStatusTooltip(device)}>
+															<div className="flex-shrink-0 cursor-help">
+																<NetworkQualityIndicator
+																	isOnline={
+																		getDeviceStatus(device) === "online"
+																	}
+																	networkScore={device.network?.network_score}
+																/>
+															</div>
+														</Tooltip>
+														<div className="flex items-center space-x-2 min-w-0 flex-1">
+															<div className="text-sm font-medium text-gray-900 truncate">
+																{getDeviceName(device)}
+															</div>
+															{hasUpdatePending(device) && (
+																<Tooltip
+																	content={`Update pending: Release ${device.release_id} → ${device.target_release_id}`}
+																>
+																	<span className="px-1.5 py-0.5 text-xs font-medium bg-orange-100 text-orange-800 rounded-full cursor-help flex-shrink-0">
+																		Outdated
+																	</span>
+																</Tooltip>
+															)}
 														</div>
-													</Tooltip>
-													<div className="flex items-center space-x-2 min-w-0 flex-1">
-														<div className="text-sm font-medium text-gray-900 truncate">
-															{getDeviceName(device)}
-														</div>
-														{hasUpdatePending(device) && (
-															<Tooltip
-																content={`Update pending: Release ${device.release_id} → ${device.target_release_id}`}
-															>
-																<span className="px-1.5 py-0.5 text-xs font-medium bg-orange-100 text-orange-800 rounded-full cursor-help flex-shrink-0">
-																	Outdated
-																</span>
-															</Tooltip>
-														)}
 													</div>
 												</div>
 											</div>
 										</div>
-									</div>
 
-									<div>
-										{device.labels && Object.keys(device.labels).length > 0 ? (
-											<div className="flex flex-wrap gap-1">
-												{Object.entries(device.labels).map(([key, value]) => {
-													const filter = `${key}=${value}`;
-													const isFiltered = labelFilters.includes(filter);
+										<div>
+											{device.labels &&
+											Object.keys(device.labels).length > 0 ? (
+												<div className="flex flex-wrap gap-1">
+													{Object.entries(device.labels).map(([key, value]) => {
+														const filter = `${key}=${value}`;
+														const isFiltered = labelFilters.includes(filter);
+														return (
+															<code
+																key={key}
+																onClick={(e) => {
+																	e.stopPropagation();
+																	if (isFiltered) {
+																		removeLabelFilter(filter);
+																	} else {
+																		const newFilters = [
+																			...labelFilters,
+																			filter,
+																		];
+																		setLabelFilters(newFilters);
+																		const labelsString = newFilters.join(",");
+																		updateURL({ labels: labelsString });
+																	}
+																}}
+																className={`px-1.5 py-0.5 text-xs font-mono rounded border cursor-pointer transition-colors ${
+																	isFiltered
+																		? "bg-blue-100 text-blue-800 border-blue-300"
+																		: "bg-gray-100 text-gray-700 border-gray-200 hover:bg-gray-200"
+																}`}
+															>
+																{key}={value}
+															</code>
+														);
+													})}
+												</div>
+											) : (
+												<span className="text-xs text-gray-400">-</span>
+											)}
+										</div>
+
+										<div>
+											{(() => {
+												const ipInfo = getIpLocationInfo(device);
+												if (!ipInfo) {
 													return (
-														<code
-															key={key}
-															onClick={(e) => {
-																e.stopPropagation();
-																if (isFiltered) {
-																	removeLabelFilter(filter);
-																} else {
-																	const newFilters = [...labelFilters, filter];
-																	setLabelFilters(newFilters);
-																	const labelsString = newFilters.join(",");
-																	updateURL({ labels: labelsString });
-																}
-															}}
-															className={`px-1.5 py-0.5 text-xs font-mono rounded border cursor-pointer transition-colors ${
-																isFiltered
-																	? "bg-blue-100 text-blue-800 border-blue-300"
-																	: "bg-gray-100 text-gray-700 border-gray-200 hover:bg-gray-200"
-															}`}
-														>
-															{key}={value}
-														</code>
+														<div className="text-sm text-gray-400">
+															No location data
+														</div>
 													);
-												})}
-											</div>
-										) : (
-											<span className="text-xs text-gray-400">-</span>
-										)}
-									</div>
+												}
 
-									<div>
-										{(() => {
-											const ipInfo = getIpLocationInfo(device);
-											if (!ipInfo) {
+												const locationParts = [];
+												if (ipInfo.name) locationParts.push(ipInfo.name);
+												if (ipInfo.city) locationParts.push(ipInfo.city);
+												if (ipInfo.country) locationParts.push(ipInfo.country);
+
 												return (
-													<div className="text-sm text-gray-400">
-														No location data
+													<div className="flex items-center space-x-2">
+														{ipInfo.country_code && (
+															<img
+																src={getFlagUrl(ipInfo.country_code)}
+																alt={ipInfo.country || "Country flag"}
+																className="w-4 h-3 flex-shrink-0 rounded-sm"
+																onError={(e) => {
+																	(e.target as HTMLImageElement).style.display =
+																		"none";
+																}}
+															/>
+														)}
+														<div className="text-sm text-gray-600 truncate">
+															{locationParts.join(", ") || "Unknown location"}
+														</div>
 													</div>
 												);
-											}
+											})()}
+										</div>
 
-											const locationParts = [];
-											if (ipInfo.name) locationParts.push(ipInfo.name);
-											if (ipInfo.city) locationParts.push(ipInfo.city);
-											if (ipInfo.country) locationParts.push(ipInfo.country);
+										<div className="text-sm text-gray-600">
+											{getOSVersion(device)}
+										</div>
 
-											return (
-												<div className="flex items-center space-x-2">
-													{ipInfo.country_code && (
-														<img
-															src={getFlagUrl(ipInfo.country_code)}
-															alt={ipInfo.country || "Country flag"}
-															className="w-4 h-3 flex-shrink-0 rounded-sm"
-															onError={(e) => {
-																(e.target as HTMLImageElement).style.display =
-																	"none";
-															}}
-														/>
-													)}
-													<div className="text-sm text-gray-600 truncate">
-														{locationParts.join(", ") || "Unknown location"}
+										<div>
+											{getReleaseInfo(device) ? (
+												<div className="flex flex-col space-y-1">
+													<div className="flex items-center space-x-1">
+														<GitBranch className="w-3 h-3 text-gray-400" />
+														<span className="text-xs font-mono text-gray-600">
+															{getReleaseInfo(device)!.distribution}
+														</span>
+													</div>
+													<div className="flex items-center space-x-1">
+														<Tag className="w-3 h-3 text-gray-400" />
+														<span className="text-xs font-mono text-gray-600">
+															{getReleaseInfo(device)!.version}
+														</span>
 													</div>
 												</div>
-											);
-										})()}
-									</div>
-
-									<div className="text-sm text-gray-600">
-										{getOSVersion(device)}
-									</div>
-
-									<div>
-										{getReleaseInfo(device) ? (
-											<div className="flex flex-col space-y-1">
+											) : (
 												<div className="flex items-center space-x-1">
 													<GitBranch className="w-3 h-3 text-gray-400" />
-													<span className="text-xs font-mono text-gray-600">
-														{getReleaseInfo(device)!.distribution}
+													<span className="text-xs text-gray-500">
+														No Release
 													</span>
 												</div>
-												<div className="flex items-center space-x-1">
-													<Tag className="w-3 h-3 text-gray-400" />
-													<span className="text-xs font-mono text-gray-600">
-														{getReleaseInfo(device)!.version}
-													</span>
-												</div>
-											</div>
-										) : (
-											<div className="flex items-center space-x-1">
-												<GitBranch className="w-3 h-3 text-gray-400" />
-												<span className="text-xs text-gray-500">
-													No Release
-												</span>
-											</div>
-										)}
+											)}
+										</div>
 									</div>
 								</div>
-							</div>
-						))}
-					{/* Infinite scroll sentinel */}
-					<div ref={sentinelRef} />
-					{isFetchingNextPage && <LoadingSkeleton />}
+							))}
+							{/* Infinite scroll sentinel */}
+							<div ref={sentinelRef} />
+							{isFetchingNextPage && <LoadingSkeleton />}
+						</div>
+					)}
 				</div>
-			)}
-		</div>
-		</div>
+			</div>
 
-		{/* Bulk Action Bar */}
+			{/* Bulk Action Bar */}
 			{selectedDeviceIds.size > 0 && (
 				<div className="fixed bottom-0 left-0 right-0 bg-white border-t shadow-lg p-4 flex items-center justify-between z-40">
 					<span className="text-gray-700">

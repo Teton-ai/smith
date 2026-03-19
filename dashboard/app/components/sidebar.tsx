@@ -12,6 +12,7 @@ export interface NavItem {
 	label: string;
 	icon: React.ComponentType<{ className?: string }>;
 	external?: boolean;
+	shortcut?: string;
 }
 
 interface SidebarProps {
@@ -26,7 +27,10 @@ interface SidebarProps {
 function DesktopLabel({
 	children,
 	expanded,
-}: { children: React.ReactNode; expanded: boolean }) {
+}: {
+	children: React.ReactNode;
+	expanded: boolean;
+}) {
 	return (
 		<span
 			className={`text-sm font-medium whitespace-nowrap transition-all duration-300 ease-out pointer-events-none ${
@@ -130,7 +134,16 @@ export default function Sidebar({
 								<div className="flex items-center justify-center w-12 shrink-0">
 									<Icon className="w-[18px] h-[18px] transition-transform duration-200 group-hover/item:scale-110" />
 								</div>
-								<DesktopLabel expanded={expanded}>{item.label}</DesktopLabel>
+								<DesktopLabel expanded={expanded}>
+									<span className="flex items-center justify-between gap-2 w-full pr-2">
+										{item.label}
+										{item.shortcut && (
+											<kbd className="text-[10px] border border-gray-200 rounded px-1 py-0.5 font-mono leading-none text-gray-400 bg-gray-50">
+												{item.shortcut}
+											</kbd>
+										)}
+									</span>
+								</DesktopLabel>
 							</Link>
 						);
 					})}
@@ -244,7 +257,16 @@ export default function Sidebar({
 										<div className="flex items-center justify-center w-12 shrink-0">
 											<Icon className="w-[18px] h-[18px]" />
 										</div>
-										<MobileLabel>{item.label}</MobileLabel>
+										<MobileLabel>
+											<span className="flex items-center justify-between gap-2 w-full pr-2">
+												{item.label}
+												{item.shortcut && (
+													<kbd className="text-[10px] border border-gray-200 rounded px-1 py-0.5 font-mono leading-none text-gray-400 bg-gray-50">
+														{item.shortcut}
+													</kbd>
+												)}
+											</span>
+										</MobileLabel>
 									</Link>
 								);
 							})}
@@ -277,7 +299,6 @@ export default function Sidebar({
 					</aside>
 				</div>
 			)}
-
 		</>
 	);
 }
