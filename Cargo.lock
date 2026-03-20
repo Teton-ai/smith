@@ -321,7 +321,7 @@ checksum = "7f202df86484c868dbad7eaa557ef785d5c66295e41b460ef922eca0723b842c"
 
 [[package]]
 name = "api"
-version = "0.2.140"
+version = "0.2.141"
 dependencies = [
  "anyhow",
  "axum 0.7.9",
@@ -1161,7 +1161,7 @@ checksum = "c8d4a3bb8b1e0c1050499d1815f5ab16d04f0959b233085fb31653fbfc9d98f9"
 
 [[package]]
 name = "cli"
-version = "0.2.140"
+version = "0.2.141"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3338,7 +3338,7 @@ dependencies = [
 
 [[package]]
 name = "models"
-version = "0.2.140"
+version = "0.2.141"
 dependencies = [
  "axum 0.7.9",
  "chrono",
@@ -5511,7 +5511,7 @@ checksum = "b7c388c1b5e93756d0c740965c41e8822f866621d41acbdf6336a6a168f8840c"
 
 [[package]]
 name = "smith"
-version = "0.2.140"
+version = "0.2.141"
 dependencies = [
  "anyhow",
  "bore-cli",
@@ -5547,7 +5547,7 @@ dependencies = [
 
 [[package]]
 name = "smith-updater"
-version = "0.2.140"
+version = "0.2.141"
 dependencies = [
  "clap",
  "smith",
@@ -7644,18 +7644,18 @@ dependencies = [
 
 [[package]]
 name = "zerocopy"
-version = "0.8.42"
+version = "0.8.47"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f2578b716f8a7a858b7f02d5bd870c14bf4ddbbcf3a4c05414ba6503640505e3"
+checksum = "efbb2a062be311f2ba113ce66f697a4dc589f85e78a4aea276200804cea0ed87"
 dependencies = [
  "zerocopy-derive",
 ]
 
 [[package]]
 name = "zerocopy-derive"
-version = "0.8.42"
+version = "0.8.47"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7e6cc098ea4d3bd6246687de65af3f920c430e236bee1e3bf2e441463f08a02f"
+checksum = "0e8bc7269b54418e7aeeef514aa68f8690b8c0489a06b0136e5f57c4c5ccab89"
 dependencies = [
  "proc-macro2",
  "quote",
