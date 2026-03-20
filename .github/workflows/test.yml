@@ -8,14 +8,36 @@ env:
   SQLX_OFFLINE: "true"
 
 jobs:
-  test:
+  fmt:
+    if: ${{ !startsWith(github.head_ref, 'chore/release-v') }}
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Install Rust Toolchain via rust-toolchain.toml
+      - name: Install Rust Toolchain
+        uses: dsherret/rust-toolchain-file@v1
+
+      - name: Check formatting
+        run: cargo fmt -- --check
+
+      - name: Report Status
+        if: always()
+        uses: ravsamhq/notify-slack-action@v2
+        with:
+          status: ${{ job.status }}
+          notify_when: 'failure'
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SMITH_TEAM_SLACK_NOTIFICATIONS }}
+
+  clippy:
+    if: ${{ !startsWith(github.head_ref, 'chore/release-v') }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Install Rust Toolchain
         uses: dsherret/rust-toolchain-file@v1
 
       - name: Set up cargo cache
@@ -24,28 +46,98 @@ jobs:
           cache-all-crates: true
 
       - name: Install libdbus-1-dev and pkg-config
-        run: sudo apt install libdbus-1-dev pkg-config
-
-      - name: Install SQLx CLI
-        run: cargo install sqlx-cli --no-default-features --features native-tls,postgres --locked
-
-      - name: Setup Biome
-        uses: biomejs/setup-biome@v2
-        with:
-          version: 2.3.9
-
-      - name: Check formatting
-        run: cargo fmt -- --check
+        run: sudo apt-get install -y libdbus-1-dev pkg-config
 
       - name: Check linting
         run: cargo clippy --all-features -- -Dwarnings
+
+      - name: Report Status
+        if: always()
+        uses: ravsamhq/notify-slack-action@v2
+        with:
+          status: ${{ job.status }}
+          notify_when: 'failure'
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SMITH_TEAM_SLACK_NOTIFICATIONS }}
+
+  test:
+    if: ${{ !startsWith(github.head_ref, 'chore/release-v') }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Install Rust Toolchain
+        uses: dsherret/rust-toolchain-file@v1
+
+      - name: Set up cargo cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          cache-all-crates: true
+
+      - name: Install libdbus-1-dev and pkg-config
+        run: sudo apt-get install -y libdbus-1-dev pkg-config
+
+      - name: Run tests
+        run: cargo test --workspace
+
+      - name: Report Status
+        if: always()
+        uses: ravsamhq/notify-slack-action@v2
+        with:
+          status: ${{ job.status }}
+          notify_when: 'failure'
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SMITH_TEAM_SLACK_NOTIFICATIONS }}
+
+  sqlx:
+    if: ${{ !startsWith(github.head_ref, 'chore/release-v') }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Install Rust Toolchain
+        uses: dsherret/rust-toolchain-file@v1
+
+      - name: Set up cargo cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          cache-all-crates: true
+
+      - name: Install libdbus-1-dev and pkg-config
+        run: sudo apt-get install -y libdbus-1-dev pkg-config
+
+      - name: Install cargo-binstall
+        uses: cargo-bins/cargo-binstall@main
+
+      - name: Install SQLx CLI
+        run: cargo binstall sqlx-cli@~0.7 --no-confirm --no-symlinks
 
       - name: Check SQLx
         working-directory: api
         run: cargo sqlx prepare --check
 
-      - name: Run tests
-        run: cargo test --workspace
+      - name: Report Status
+        if: always()
+        uses: ravsamhq/notify-slack-action@v2
+        with:
+          status: ${{ job.status }}
+          notify_when: 'failure'
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SMITH_TEAM_SLACK_NOTIFICATIONS }}
+
+  dashboard:
+    if: ${{ !startsWith(github.head_ref, 'chore/release-v') }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Biome
+        uses: biomejs/setup-biome@v2
+        with:
+          version: 2.3.9
 
       - name: Dashboard linting
         working-directory: ./dashboard
