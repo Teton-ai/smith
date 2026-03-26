@@ -313,13 +313,7 @@ export const renderTxDetail = (cmd_data: unknown) => {
 	switch (parsed.variant) {
 		case "FreeForm": {
 			const p = (parsed.tx as CmdTxFreeForm).FreeForm;
-			return (
-				<CodeBlock
-					label="command"
-					content={p.cmd}
-					labelClassName="text-blue-400"
-				/>
-			);
+			return <CodeBlock label="command" content={p.cmd} />;
 		}
 		case "OpenTunnel": {
 			const p = (parsed.tx as CmdTxOpenTunnel).OpenTunnel;

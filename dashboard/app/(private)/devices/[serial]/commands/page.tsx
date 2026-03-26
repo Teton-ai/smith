@@ -1,10 +1,10 @@
 "use client";
 
-import { ArrowLeft, Send } from "lucide-react";
+import { ArrowLeft, Loader2, Send } from "lucide-react";
 import moment from "moment";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
 	CodeBlock,
 	getCommandStatus,
@@ -14,12 +14,16 @@ import {
 	renderTxDetail,
 } from "@/app/(private)/commands/shared";
 import {
+	type CommandsPaginated,
 	type DeviceCommandResponse,
-	useGetAllCommandsForDevice,
+	useGetAllCommandsForDeviceInfinite,
 	useGetDeviceInfo,
 } from "@/app/api-client";
+import { useClientMutator } from "@/app/api-client-mutator";
 import { Button } from "@/app/components/button";
 import DeviceHeader from "../DeviceHeader";
+
+const PAGE_SIZE = 50;
 
 // ---------------------------------------------------------------------------
 // Right panel: full detail view
@@ -38,24 +42,33 @@ const ResponseDetail = ({ cmd }: { cmd: DeviceCommandResponse }) => {
 	return (
 		<div className="h-full flex flex-col overflow-hidden">
 			{/* Header */}
-			<div className="flex items-start justify-between px-5 py-4 border-b border-gray-200 shrink-0">
-				<div className="space-y-1">
-					<div className="flex items-center gap-2 flex-wrap">
-						<span className="font-semibold text-gray-900">{txLabel}</span>
+			<div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 shrink-0">
+				<div className="flex items-center gap-2 flex-wrap">
+					<span className="text-sm font-medium text-gray-900">{txLabel}</span>
+					<span
+						className={`px-2 py-0.5 text-xs font-medium rounded ${getStatusColor(status)}`}
+					>
+						{status}
+					</span>
+					{cmd.response != null && cmd.status != null && (
 						<span
-							className={`px-2 py-0.5 text-xs font-medium rounded ${getStatusColor(status)}`}
+							className={`px-2 py-0.5 text-xs font-mono rounded ${cmd.status === 0 ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800"}`}
 						>
-							{status}
+							exit {cmd.status}
 						</span>
-						{cmd.response != null && cmd.status != null && (
-							<span
-								className={`px-2 py-0.5 text-xs font-mono rounded ${cmd.status === 0 ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800"}`}
-							>
-								exit {cmd.status}
-							</span>
-						)}
-					</div>
-					<div className="flex items-center gap-2 text-xs text-gray-400 flex-wrap">
+					)}
+				</div>
+				<div className="flex items-center gap-3">
+					{cmd.response != null && (
+						<Button
+							variant="secondary"
+							className="text-xs shrink-0"
+							onClick={() => setShowRaw((v) => !v)}
+						>
+							{showRaw ? "Formatted" : "Raw JSON"}
+						</Button>
+					)}
+					<div className="flex items-center gap-2 text-xs text-gray-400">
 						<span>Issued {moment(cmd.issued_at).fromNow()}</span>
 						<span>·</span>
 						{cmd.response_at ? (
@@ -65,22 +78,12 @@ const ResponseDetail = ({ cmd }: { cmd: DeviceCommandResponse }) => {
 						)}
 					</div>
 				</div>
-
-				{cmd.response != null && (
-					<Button
-						variant="secondary"
-						className="text-xs shrink-0 ml-4"
-						onClick={() => setShowRaw((v) => !v)}
-					>
-						{showRaw ? "Formatted" : "Raw JSON"}
-					</Button>
-				)}
 			</div>
 
 			{/* Scrollable body */}
-			<div className="flex-1 overflow-y-auto divide-y divide-gray-100">
+			<div className="flex-1 overflow-y-auto px-4 py-3">
 				{showRaw ? (
-					<div className="px-5 py-4">
+					<>
 						<CodeBlock
 							label="raw TX"
 							content={JSON.stringify(cmd.cmd_data, null, 2)}
@@ -91,24 +94,19 @@ const ResponseDetail = ({ cmd }: { cmd: DeviceCommandResponse }) => {
 								content={JSON.stringify(cmd.response, null, 2)}
 							/>
 						</div>
-					</div>
+					</>
 				) : (
 					<>
-						{/* Command sent */}
-						<div className="px-5 py-4">
-							<p className="text-xs font-medium uppercase tracking-wide text-blue-400 mb-3">
+						<div className="mb-4">
+							<p className="text-xs font-medium uppercase tracking-wide text-gray-400 mb-3">
 								Sent
 							</p>
 							{renderTxDetail(cmd.cmd_data)}
 						</div>
-
-						{/* Response */}
-						<div className="px-5 py-4">
-							<p className="text-xs font-medium uppercase tracking-wide text-gray-400 mb-3">
-								Response
-							</p>
-							{renderRxDetail(cmd.response)}
-						</div>
+						<p className="text-xs font-medium uppercase tracking-wide text-gray-400 mb-3">
+							Response
+						</p>
+						{renderRxDetail(cmd.response)}
 					</>
 				)}
 			</div>
@@ -124,13 +122,56 @@ const CommandsPage = () => {
 	const { serial } = useParams<{ serial: string }>();
 	const router = useRouter();
 	const [selectedId, setSelectedId] = useState<number | null>(null);
+	const scrollRef = useRef<HTMLDivElement>(null);
+	const fetcher = useClientMutator<CommandsPaginated>();
 
-	const { data: commandsData, isLoading: commandsLoading } =
-		useGetAllCommandsForDevice(serial, { limit: 500 });
+	const {
+		data: commandsData,
+		isLoading: commandsLoading,
+		fetchNextPage,
+		hasNextPage,
+		isFetchingNextPage,
+	} = useGetAllCommandsForDeviceInfinite(serial, undefined, {
+		query: {
+			initialPageParam: undefined as number | undefined,
+			getNextPageParam: (lastPage) => {
+				if (!lastPage?.next) return undefined;
+				const url = new URL(lastPage.next);
+				const val = url.searchParams.get("starting_after");
+				return val ? Number(val) : undefined;
+			},
+			queryFn: ({ signal, pageParam }) =>
+				fetcher({
+					url: `/devices/${serial}/commands`,
+					method: "GET",
+					params: pageParam
+						? { starting_after: pageParam, limit: PAGE_SIZE }
+						: { limit: PAGE_SIZE },
+					signal,
+				}),
+			refetchInterval: 5000,
+		},
+	});
 
 	const { data: device, isLoading: deviceLoading } = useGetDeviceInfo(serial);
 
-	const commands = commandsData?.commands ?? [];
+	const handleScroll = useCallback(() => {
+		const el = scrollRef.current;
+		if (!el || !hasNextPage || isFetchingNextPage) return;
+		if (el.scrollHeight - el.scrollTop - el.clientHeight < 600) {
+			fetchNextPage();
+		}
+	}, [hasNextPage, isFetchingNextPage, fetchNextPage]);
+
+	const commands = useMemo(() => {
+		const all = (commandsData?.pages ?? []).flatMap((p) => p?.commands ?? []);
+		const seen = new Set<number>();
+		return all.filter((c) => {
+			if (seen.has(c.cmd_id)) return false;
+			seen.add(c.cmd_id);
+			return true;
+		});
+	}, [commandsData]);
 	const loading = commandsLoading || deviceLoading;
 
 	useEffect(() => {
@@ -142,9 +183,9 @@ const CommandsPage = () => {
 	const selectedCmd = commands.find((c) => c.cmd_id === selectedId) ?? null;
 
 	return (
-		<div className="flex-1 overflow-y-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
+		<div className="flex-1 overflow-hidden flex flex-col px-4 sm:px-6 lg:px-8 py-6">
 			{/* Back link */}
-			<div className="flex items-center space-x-4">
+			<div className="flex items-center space-x-4 mb-6">
 				<button
 					type="button"
 					onClick={() => router.back()}
@@ -156,10 +197,14 @@ const CommandsPage = () => {
 			</div>
 
 			{/* Device Header */}
-			{device != null && <DeviceHeader device={device} serial={serial} />}
+			{device != null && (
+				<div className="mb-6">
+					<DeviceHeader device={device} serial={serial} />
+				</div>
+			)}
 
 			{/* Tabs */}
-			<div className="border-b border-gray-200">
+			<div className="border-b border-gray-200 mb-6">
 				<nav className="-mb-px flex space-x-8">
 					<Link
 						href={`/devices/${serial}`}
@@ -180,58 +225,71 @@ const CommandsPage = () => {
 			</div>
 
 			{/* Main content */}
-			<div>
+			<div className="flex-1 overflow-hidden">
 				{loading ? (
-					<div className="p-6 text-gray-500 text-sm">Loading…</div>
+					<div className="flex items-center justify-center py-12">
+						<Loader2 className="w-6 h-6 animate-spin text-gray-400" />
+					</div>
 				) : commands.length === 0 ? (
-					<div className="flex flex-col items-center justify-center py-16 text-center">
-						<Send className="w-10 h-10 text-gray-300 mb-3" />
+					<div className="text-center py-12 bg-white border border-gray-200 rounded-lg">
+						<Send className="w-12 h-12 text-gray-300 mx-auto mb-3" />
 						<p className="text-gray-500">No commands found</p>
 						<p className="text-sm text-gray-400 mt-1">
 							Run a command from the device header above
 						</p>
 					</div>
 				) : (
-					<div className="flex border border-gray-200 rounded-lg overflow-hidden bg-white min-h-[500px]">
-						{/* Left: command list (1/3) */}
-						<div className="w-1/3 border-r border-gray-200 overflow-y-auto shrink-0">
-							{commands.map((cmd) => {
-								const status = getCommandStatus(cmd);
-								const { label, mono } = getTxLabel(cmd.cmd_data);
-								const isSelected = cmd.cmd_id === selectedId;
+					<div className="flex border border-gray-200 rounded-lg overflow-hidden bg-white h-full">
+						{/* Left: command list */}
+						<div className="w-1/3 border-r border-gray-200 shrink-0 flex flex-col overflow-hidden">
+							<div
+								ref={scrollRef}
+								onScroll={handleScroll}
+								className="flex-1 overflow-y-auto"
+							>
+								{commands.map((cmd) => {
+									const status = getCommandStatus(cmd);
+									const { label, mono } = getTxLabel(cmd.cmd_data);
+									const isSelected = cmd.cmd_id === selectedId;
 
-								return (
-									<button
-										key={cmd.cmd_id}
-										type="button"
-										onClick={() => setSelectedId(cmd.cmd_id)}
-										className={`w-full text-left px-4 py-3 border-b border-gray-100 last:border-b-0 transition-colors cursor-pointer ${
-											isSelected
-												? "bg-blue-50 border-l-2 border-l-blue-500"
-												: "hover:bg-gray-50 border-l-2 border-l-transparent"
-										}`}
-									>
-										<div className="flex items-center justify-between gap-2">
-											<span
-												className={`text-sm truncate ${mono ? "font-mono" : "font-medium"} ${isSelected ? "text-blue-900" : "text-gray-900"}`}
-											>
-												{label}
-											</span>
-											<span
-												className={`px-2 py-0.5 text-xs font-medium rounded shrink-0 ${getStatusColor(status)}`}
-											>
-												{status}
-											</span>
-										</div>
-										<div className="text-xs text-gray-400 mt-0.5">
-											{moment(cmd.issued_at).fromNow()}
-										</div>
-									</button>
-								);
-							})}
+									return (
+										<button
+											key={cmd.cmd_id}
+											type="button"
+											onClick={() => setSelectedId(cmd.cmd_id)}
+											className={`w-full text-left px-4 py-3 border-b border-gray-100 last:border-b-0 transition-colors cursor-pointer ${
+												isSelected
+													? "bg-blue-50 border-l-2 border-l-blue-500"
+													: "hover:bg-gray-50 border-l-2 border-l-transparent"
+											}`}
+										>
+											<div className="flex items-center justify-between gap-2">
+												<span
+													className={`text-sm truncate ${mono ? "font-mono" : "font-medium"} ${isSelected ? "text-blue-900" : "text-gray-900"}`}
+												>
+													{label}
+												</span>
+												<span
+													className={`px-2 py-0.5 text-xs font-medium rounded shrink-0 ${getStatusColor(status)}`}
+												>
+													{status}
+												</span>
+											</div>
+											<div className="text-xs text-gray-400 mt-0.5">
+												{moment(cmd.issued_at).fromNow()}
+											</div>
+										</button>
+									);
+								})}
+							</div>
+							{isFetchingNextPage && (
+								<div className="flex items-center justify-center py-3 border-t border-gray-200 shrink-0">
+									<Loader2 className="w-4 h-4 animate-spin text-gray-400" />
+								</div>
+							)}
 						</div>
 
-						{/* Right: detail (2/3) */}
+						{/* Right: detail */}
 						<div className="flex-1 overflow-hidden">
 							{selectedCmd != null ? (
 								<ResponseDetail cmd={selectedCmd} />

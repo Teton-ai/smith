@@ -3,7 +3,7 @@
 import { Loader2, Send, Terminal } from "lucide-react";
 import moment from "moment";
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
 	type BundleWithCommands,
 	type BundleWithCommandsPaginated,
@@ -21,7 +21,7 @@ import {
 	renderTxDetail,
 } from "./shared";
 
-const PAGE_SIZE = 100;
+const PAGE_SIZE = 50;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -159,7 +159,7 @@ const BundleDetail = ({ bundle }: { bundle: BundleWithCommands }) => {
 			{/* TX section — same for all devices */}
 			{firstCommand && (
 				<div className="px-5 py-4 bg-gray-50 border-b border-gray-200 shrink-0">
-					<p className="text-xs font-medium uppercase tracking-wide text-blue-400 mb-3">
+					<p className="text-xs font-medium uppercase tracking-wide text-gray-400 mb-3">
 						Sent
 					</p>
 					{renderTxDetail(firstCommand.cmd_data)}
@@ -257,11 +257,25 @@ const CommandsPage = () => {
 	});
 
 	const [selectedUuid, setSelectedUuid] = useState<string | null>(null);
+	const scrollRef = useRef<HTMLDivElement>(null);
 
-	const bundles = useMemo(
-		() => (bundleData?.pages ?? []).flatMap((p) => p?.bundles ?? []),
-		[bundleData],
-	);
+	const handleScroll = useCallback(() => {
+		const el = scrollRef.current;
+		if (!el || !hasNextPage || isFetchingNextPage) return;
+		if (el.scrollHeight - el.scrollTop - el.clientHeight < 600) {
+			fetchNextPage();
+		}
+	}, [hasNextPage, isFetchingNextPage, fetchNextPage]);
+
+	const bundles = useMemo(() => {
+		const all = (bundleData?.pages ?? []).flatMap((p) => p?.bundles ?? []);
+		const seen = new Set<string>();
+		return all.filter((b) => {
+			if (seen.has(b.uuid)) return false;
+			seen.add(b.uuid);
+			return true;
+		});
+	}, [bundleData]);
 
 	// Auto-select first bundle
 	useEffect(() => {
@@ -297,7 +311,11 @@ const CommandsPage = () => {
 			<div className="flex-1 overflow-hidden flex border border-gray-200 bg-white rounded-lg">
 				{/* Left: bundle list (1/3) */}
 				<div className="w-1/5 border-r border-gray-200 shrink-0 flex flex-col overflow-hidden">
-					<div className="flex-1 overflow-y-auto">
+					<div
+						ref={scrollRef}
+						onScroll={handleScroll}
+						className="flex-1 overflow-y-auto"
+					>
 						{bundles.map((bundle) => {
 							const stats = getBundleStats(bundle.responses);
 							const firstCommand = bundle.responses[0];
@@ -358,16 +376,9 @@ const CommandsPage = () => {
 							);
 						})}
 					</div>
-					{hasNextPage && (
-						<div className="border-t border-gray-200 shrink-0">
-							<Button
-								variant="ghost"
-								loading={isFetchingNextPage}
-								onClick={() => fetchNextPage()}
-								className="w-full py-2 px-4 text-sm font-medium text-blue-600 bg-blue-50 rounded-none hover:bg-blue-100"
-							>
-								{isFetchingNextPage ? "Loading more…" : "Load more"}
-							</Button>
+					{isFetchingNextPage && (
+						<div className="flex items-center justify-center py-3 border-t border-gray-200 shrink-0">
+							<Loader2 className="w-4 h-4 animate-spin text-gray-400" />
 						</div>
 					)}
 				</div>
