@@ -1,7 +1,7 @@
 use models::device::DeviceCommandResponse;
 use sentry::types::Uuid;
 use serde::{Deserialize, Serialize};
-use smith::utils::schema::SafeCommandRequest;
+use smith::utils::schema::SafeCommandTx;
 use sqlx::types::chrono;
 
 pub mod route;
@@ -22,10 +22,17 @@ pub struct BundleWithCommandsPaginated {
 }
 
 #[derive(Debug, Deserialize, utoipa::ToSchema)]
+pub struct BundleCommandInput {
+    pub command: SafeCommandTx,
+    #[serde(default)]
+    pub continue_on_error: bool,
+}
+
+#[derive(Debug, Deserialize, utoipa::ToSchema)]
 pub struct BundleCommands {
     pub devices: Vec<i32>,
     #[schema(value_type = Vec<Object>)]
-    pub commands: Vec<SafeCommandRequest>,
+    pub commands: Vec<BundleCommandInput>,
 }
 
 #[derive(Debug, Serialize, Deserialize, sqlx::FromRow)]
