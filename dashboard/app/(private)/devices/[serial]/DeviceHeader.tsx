@@ -126,6 +126,7 @@ const DeviceHeader: React.FC<DeviceHeaderProps> = ({ device, serial }) => {
 				devices: [device.id],
 				commands: [
 					{
+						id: -1,
 						command: { FreeForm: { cmd: runCommand } },
 						continue_on_error: false,
 					},
@@ -141,6 +142,7 @@ const DeviceHeader: React.FC<DeviceHeaderProps> = ({ device, serial }) => {
 				devices: [device.id],
 				commands: [
 					{
+						id: -1,
 						command: "Restart",
 						continue_on_error: false,
 					},
