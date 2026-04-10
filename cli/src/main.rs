@@ -1408,23 +1408,6 @@ async fn main() -> anyhow::Result<()> {
                     bail!("This device is offline. Last ping was {}", last_ping);
                 }
 
-                println!(
-                    "Creating tunnel for device [{}] {} {}",
-                    device.id,
-                    &serial_number.bold(),
-                    override_user.as_deref().unwrap_or("")
-                );
-
-                let m = MultiProgress::new();
-                let pb2 = m.add(ProgressBar::new_spinner());
-                pb2.enable_steady_tick(Duration::from_millis(50));
-                pb2.set_style(
-                    ProgressStyle::with_template("{spinner:.blue} {msg}")
-                        .unwrap()
-                        .tick_strings(&["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]),
-                );
-                pb2.set_message("Sending request to smith");
-
                 let (tx, rx) = oneshot::channel();
                 let username = override_user
                     .as_deref()
@@ -1433,6 +1416,24 @@ async fn main() -> anyhow::Result<()> {
                     .map(String::from)
                     .unwrap_or_else(|| config.current_tunnel_username());
                 let username_clone = username.clone();
+
+                println!(
+                    "Creating tunnel for device [{}] {} (user: {})",
+                    device.id,
+                    &serial_number.bold(),
+                    username_clone.clone()
+                );
+
+                let m = MultiProgress::new();
+                let pb2 = m.add(ProgressBar::new_spinner());
+                pb2.enable_steady_tick(Duration::from_millis(50));
+                pb2.set_style(
+                    ProgressStyle::with_template("{spinner:.blue} {msg}")
+                        .unwrap()
+                        .tick_strings(&["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏", "✔"]),
+                );
+                pb2.set_message("Sending request to smith");
+
                 let tunnel_openning_handler = tokio::spawn(async move {
                     api.open_tunnel(device.id as u64, pub_key, username_clone)
                         .await
