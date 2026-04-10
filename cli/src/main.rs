@@ -1409,10 +1409,10 @@ async fn main() -> anyhow::Result<()> {
                 }
 
                 println!(
-                    "Creating tunnel for device [{}] {} {:?}",
+                    "Creating tunnel for device [{}] {} {}",
                     device.id,
                     &serial_number.bold(),
-                    override_user
+                    override_user.as_deref().unwrap_or("")
                 );
 
                 let m = MultiProgress::new();
@@ -1426,11 +1426,12 @@ async fn main() -> anyhow::Result<()> {
                 pb2.set_message("Sending request to smith");
 
                 let (tx, rx) = oneshot::channel();
-                let username = if !override_user.is_empty() {
-                    override_user.to_string()
-                } else {
-                    config.current_tunnel_username()
-                };
+                let username = override_user
+                    .as_deref()
+                    .map(|u| u.trim())
+                    .filter(|u| !u.is_empty())
+                    .map(String::from)
+                    .unwrap_or_else(|| config.current_tunnel_username());
                 let username_clone = username.clone();
                 let tunnel_openning_handler = tokio::spawn(async move {
                     api.open_tunnel(device.id as u64, pub_key, username_clone)
