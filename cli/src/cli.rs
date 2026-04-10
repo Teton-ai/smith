@@ -243,9 +243,9 @@ pub enum Commands {
         /// Device serial number to tunnel into
         serial_number: String,
 
-        /// Setup for overview debug
+        /// Change the default user for the tunnel
         #[arg(long)]
-        overview_debug: bool,
+        override_user: Option<String>,
     },
 
     /// Generate shell completion scripts

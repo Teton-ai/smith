@@ -1382,7 +1382,7 @@ async fn main() -> anyhow::Result<()> {
             },
             cli::Commands::Tunnel {
                 serial_number,
-                overview_debug,
+                override_user,
             } => {
                 let secrets = auth::get_secrets(&config)
                     .await
@@ -1408,11 +1408,20 @@ async fn main() -> anyhow::Result<()> {
                     bail!("This device is offline. Last ping was {}", last_ping);
                 }
 
+                let (tx, rx) = oneshot::channel();
+                let username = override_user
+                    .as_deref()
+                    .map(|u| u.trim())
+                    .filter(|u| !u.is_empty())
+                    .map(String::from)
+                    .unwrap_or_else(|| config.current_tunnel_username());
+                let username_clone = username.clone();
+
                 println!(
-                    "Creating tunnel for device [{}] {} {:?}",
+                    "Creating tunnel for device [{}] {} (user: {})",
                     device.id,
                     &serial_number.bold(),
-                    overview_debug
+                    username_clone.clone()
                 );
 
                 let m = MultiProgress::new();
@@ -1421,13 +1430,10 @@ async fn main() -> anyhow::Result<()> {
                 pb2.set_style(
                     ProgressStyle::with_template("{spinner:.blue} {msg}")
                         .unwrap()
-                        .tick_strings(&["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]),
+                        .tick_strings(&["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏", "✔"]),
                 );
                 pb2.set_message("Sending request to smith");
 
-                let (tx, rx) = oneshot::channel();
-                let username = config.current_tunnel_username();
-                let username_clone = username.clone();
                 let tunnel_openning_handler = tokio::spawn(async move {
                     api.open_tunnel(device.id as u64, pub_key, username_clone)
                         .await
