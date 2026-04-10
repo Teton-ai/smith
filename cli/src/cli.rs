@@ -245,7 +245,7 @@ pub enum Commands {
 
         /// Setup for overview debug
         #[arg(long)]
-        overview_debug: bool,
+        override_user: String,
     },
 
     /// Generate shell completion scripts
