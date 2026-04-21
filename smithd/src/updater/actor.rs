@@ -353,7 +353,8 @@ impl Actor {
         }
 
         if blobs_ready {
-           tokio::fs::write(&release_cache, content).await?;
+            info!("Creating version cache file");
+            tokio::fs::write(&release_cache, content).await?;
         }
 
         Ok(())
@@ -391,11 +392,13 @@ impl Actor {
             .await
             .with_context(|| "Failed to get Target Release ID")?;
 
-        info!("Current release id: {:?}", current_release_id);
-        self.ensure_release_cache(current_release_id).await?;
+        self.ensure_release_cache(current_release_id)
+            .await
+            .with_context(|| "Failed to ensure current release cache")?;
 
-        info!("Target release id: {:?}", target_release_id);
-        self.ensure_release_cache(target_release_id).await?;
+        self.ensure_release_cache(target_release_id)
+            .await
+            .with_context(|| "Failed to ensure target release cache")?;
 
         Ok(())
     }
