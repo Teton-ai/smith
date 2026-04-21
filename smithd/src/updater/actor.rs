@@ -653,6 +653,27 @@ impl Actor {
         self.are_packages_up_to_date().await
     }
 
+    async fn clean_up_old_packages(&self) -> Result<()> {
+        // for now we are gonna delete packages in /packages
+        // TODO: lets improve on the caching mechanism later
+        let mut entries = tokio::fs::read_dir(&self.packages_dir).await?;
+        let mut bytes_freed: u64 = 0;
+        while let Some(entry) = entries.next_entry().await? {
+            let path = entry.path();
+            if path.is_file() && path.extension().and_then(|e| e.to_str()) == Some("deb") {
+                let size = entry.metadata().await.map(|m| m.len()).unwrap_or(0);
+                if let Err(e) = tokio::fs::remove_file(&path).await {
+                    error!("Failed to remove old package {}: {}", path.display(), e);
+                } else {
+                    bytes_freed += size;
+                }
+            }
+        }
+
+        info!("Cleaned up old packages, freed {} MB", bytes_freed / 1024 / 1024);
+        Ok(())
+    }
+
     /// Checks whether packages are up to date.
     ///
     /// Returns `Ok` if all packages are, `Err` otherwise.
