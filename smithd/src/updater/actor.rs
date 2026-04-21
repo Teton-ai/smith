@@ -6,6 +6,7 @@ use crate::utils::network::NetworkClient;
 use anyhow::Context;
 use anyhow::Result;
 use std::collections::HashMap;
+use std::fmt::Write;
 use std::path::Path;
 use std::path::PathBuf;
 use tokio::process::Command;
@@ -13,7 +14,6 @@ use tokio::sync::mpsc;
 use tokio::sync::oneshot;
 use tokio::time::{self, Duration};
 use tracing::{error, info, warn};
-use std::fmt::Write;
 
 const MAX_INSTALL_RETRIES: u32 = 3;
 
@@ -111,7 +111,7 @@ pub struct Actor {
     last_upgrade: Option<Result<time::Instant>>,
     downloader: DownloaderHandle,
     install_failures: HashMap<String, PackageFailure>,
-    packages_dir: PathBuf
+    packages_dir: PathBuf,
 }
 
 impl Actor {
@@ -137,7 +137,7 @@ impl Actor {
             last_upgrade: None,
             downloader,
             install_failures: HashMap::new(),
-            packages_dir
+            packages_dir,
         }
     }
 
@@ -317,7 +317,9 @@ impl Actor {
         }
 
         let remote = format!("packages/{}", package.file);
-        let download_to = blob_path.to_str().ok_or(anyhow::anyhow!("Failed to unwrap blob path"))?;
+        let download_to = blob_path
+            .to_str()
+            .ok_or(anyhow::anyhow!("Failed to unwrap blob path"))?;
 
         info!(?remote, "downloading");
         self.downloader
@@ -345,10 +347,11 @@ impl Actor {
         Ok(true)
     }
 
-    async fn ensure_release_cache(&self, release_id: i32) -> Result<()>{
+    async fn ensure_release_cache(&self, release_id: i32) -> Result<()> {
         info!("ensuring release cache for release_id: {release_id}");
 
-        let release_cache = self.packages_dir
+        let release_cache = self
+            .packages_dir
             .join("versions")
             .join(release_id.to_string());
 
@@ -357,11 +360,10 @@ impl Actor {
             return Ok(());
         }
 
-        let token = self.magic.get_token()
-            .await
-            .unwrap_or_default();
+        let token = self.magic.get_token().await.unwrap_or_default();
 
-        let release_packages = self.network
+        let release_packages = self
+            .network
             .get_release_packages(release_id, &token)
             .await
             .with_context(|| "failed to fetch release packages manifest")?;
@@ -376,16 +378,17 @@ impl Actor {
 
             if self.blob_is_valid(&blob_path).await? {
                 info!("blob present in cache");
-                writeln!(manifest,
+                writeln!(
+                    manifest,
                     "{} {} {}",
                     package.name, package.version, package.file
                 )?;
                 continue;
             }
 
-            self.fetch_blob(package, &blob_path).await.with_context(|| {
-                format!("fetching blob for package {}", package.file)
-            })?;
+            self.fetch_blob(package, &blob_path)
+                .await
+                .with_context(|| format!("fetching blob for package {}", package.file))?;
             all_cached = false;
         }
 
@@ -393,7 +396,10 @@ impl Actor {
             self.write_manifest(&release_cache, &manifest).await?;
             info!(release_id, "release cache ready");
         } else {
-            info!(release_id, "blobs being fetched; manifest write deferred to next call");
+            info!(
+                release_id,
+                "blobs being fetched; manifest write deferred to next call"
+            );
         }
 
         Ok(())
@@ -467,9 +473,11 @@ impl Actor {
             .await
             .with_context(|| "Failed to get Target Release ID")?;
 
-
         let blobs = self.packages_dir.join("blobs");
-        let release_cache = self.packages_dir.join("versions").join(target_release_id.to_string());
+        let release_cache = self
+            .packages_dir
+            .join("versions")
+            .join(target_release_id.to_string());
 
         // read the file from release cache
         let content = tokio::fs::read(&release_cache).await?;
@@ -481,9 +489,18 @@ impl Actor {
             .map(|line| {
                 let mut parts = line.splitn(3, ' ');
                 Ok::<_, anyhow::Error>(ConfigPackage {
-                    name: parts.next().ok_or_else(|| anyhow::anyhow!("missing name"))?.to_string(),
-                    version: parts.next().ok_or_else(|| anyhow::anyhow!("missing version"))?.to_string(),
-                    file: parts.next().ok_or_else(|| anyhow::anyhow!("missing file"))?.to_string(),
+                    name: parts
+                        .next()
+                        .ok_or_else(|| anyhow::anyhow!("missing name"))?
+                        .to_string(),
+                    version: parts
+                        .next()
+                        .ok_or_else(|| anyhow::anyhow!("missing version"))?
+                        .to_string(),
+                    file: parts
+                        .next()
+                        .ok_or_else(|| anyhow::anyhow!("missing file"))?
+                        .to_string(),
                 })
             })
             .collect::<Result<_, _>>()?;
@@ -672,7 +689,10 @@ impl Actor {
             }
         }
 
-        info!("Cleaned up old packages, freed {} MB", bytes_freed / 1024 / 1024);
+        info!(
+            "Cleaned up old packages, freed {} MB",
+            bytes_freed / 1024 / 1024
+        );
         Ok(())
     }
 
@@ -686,7 +706,10 @@ impl Actor {
             .await
             .with_context(|| "Failed to get Target Release ID")?;
 
-        let release_cache = self.packages_dir.join("versions").join(target_release_id.to_string());
+        let release_cache = self
+            .packages_dir
+            .join("versions")
+            .join(target_release_id.to_string());
 
         // read the file from release cache
         let content = tokio::fs::read(&release_cache).await?;
@@ -698,9 +721,18 @@ impl Actor {
             .map(|line| {
                 let mut parts = line.splitn(3, ' ');
                 Ok::<_, anyhow::Error>(ConfigPackage {
-                    name: parts.next().ok_or_else(|| anyhow::anyhow!("missing name"))?.to_string(),
-                    version: parts.next().ok_or_else(|| anyhow::anyhow!("missing version"))?.to_string(),
-                    file: parts.next().ok_or_else(|| anyhow::anyhow!("missing file"))?.to_string(),
+                    name: parts
+                        .next()
+                        .ok_or_else(|| anyhow::anyhow!("missing name"))?
+                        .to_string(),
+                    version: parts
+                        .next()
+                        .ok_or_else(|| anyhow::anyhow!("missing version"))?
+                        .to_string(),
+                    file: parts
+                        .next()
+                        .ok_or_else(|| anyhow::anyhow!("missing file"))?
+                        .to_string(),
                 })
             })
             .collect::<Result<_, _>>()?;
