@@ -330,12 +330,15 @@ impl Actor {
             }
 
             info!("{blob_path:?} does not exist in cache");
+            if let Some(parent) = blob_path.parent() {
+                tokio::fs::create_dir_all(parent).await?;
+            }
 
             // TODO: remove when we stop using /packages
             let potential_old_place = packages.join(&package.file);
             if potential_old_place.exists() {
                 warn!("{potential_old_place:?} File Found in old /packages, moving");
-                std::fs::rename(&potential_old_place, &blob_path)?;
+                tokio::fs::rename(&potential_old_place, &blob_path).await?;
                 continue
             };
 
