@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use crate::dbus::SmithDbusProxy;
 use crate::magic::MagicHandle;
 use crate::magic::structure::ConfigPackage;
@@ -32,7 +34,7 @@ pub async fn status() -> Result<()> {
         .with_context(|| "Failed to get Target Release ID")?;
 
     //if this unwrap fails, there's no point continuing
-    let smith_home = std::env::current_dir().unwrap();
+    let smith_home = PathBuf::from("/etc/smith");
     let packages_dir = smith_home.join("packages");
     let release_cache = packages_dir.join("versions").join(target_release_id.to_string());
 
