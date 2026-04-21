@@ -6,11 +6,14 @@ use crate::utils::network::NetworkClient;
 use anyhow::Context;
 use anyhow::Result;
 use std::collections::HashMap;
+use std::path::Path;
+use std::path::PathBuf;
 use tokio::process::Command;
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
 use tokio::time::{self, Duration};
 use tracing::{error, info, warn};
+use std::fmt::Write;
 
 const MAX_INSTALL_RETRIES: u32 = 3;
 
@@ -108,6 +111,7 @@ pub struct Actor {
     last_upgrade: Option<Result<time::Instant>>,
     downloader: DownloaderHandle,
     install_failures: HashMap<String, PackageFailure>,
+    packages_dir: PathBuf
 }
 
 impl Actor {
@@ -118,6 +122,11 @@ impl Actor {
         downloader: DownloaderHandle,
     ) -> Self {
         let network = NetworkClient::new();
+
+        //if this unwrap fails, there's no point continuing
+        let smith_home = std::env::current_dir().unwrap();
+        let packages_dir = smith_home.join("packages");
+
         Self {
             shutdown,
             receiver,
@@ -128,6 +137,7 @@ impl Actor {
             last_upgrade: None,
             downloader,
             install_failures: HashMap::new(),
+            packages_dir
         }
     }
 
@@ -283,83 +293,107 @@ impl Actor {
         self.status = Status::Idle;
     }
 
-    async fn ensure_release_cache(&self, release_id: i32) -> Result<()>{
-        info!("Ensuring release cache for release_id: {release_id}");
+    async fn write_manifest(&self, path: &Path, contents: &str) -> Result<()> {
+        if let Some(parent) = path.parent() {
+            tokio::fs::create_dir_all(parent).await?;
+        }
+        tokio::fs::write(path, contents)
+            .await
+            .with_context(|| format!("writing manifest to {}", path.display()))?;
+        Ok(())
+    }
 
-        let smith_home = std::env::current_dir()?;
-        let packages = smith_home.join("packages");
-
-        let release_cache = packages.join("versions").join(release_id.to_string());
-
-        if release_cache.exists() {
-            return Ok(())
+    async fn fetch_blob(&self, package: &ConfigPackage, blob_path: &Path) -> Result<()> {
+        if let Some(parent) = blob_path.parent() {
+            tokio::fs::create_dir_all(parent).await?;
         }
 
-        let token = self.magic.get_token().await.unwrap_or_default();
+        // TODO: remove when legacy /packages layout is fully migrated.
+        let legacy_path = self.packages_dir.join(&package.file);
+        if legacy_path.exists() {
+            warn!(?legacy_path, ?blob_path, "migrating from legacy layout");
+            tokio::fs::rename(&legacy_path, blob_path).await?;
+            return Ok(());
+        }
 
-        let release_packages = self
-            .network
-            .get_release_packages(release_id, &token)
+        let remote = format!("packages/{}", package.file);
+        let download_to = blob_path.to_str().ok_or(anyhow::anyhow!("Failed to unwrap blob path"))?;
+
+        info!(?remote, "downloading");
+        self.downloader
+            // 2 MB/s keeps us friendly on constrained networks.
+            .download_blocking(&remote, download_to, 2.0)
             .await?;
 
-        // ensure all files exist in /packages/blobs
-        let blobs = packages.join("blobs");
+        Ok(())
+    }
 
-        let mut blobs_ready = true;
-        let mut content = String::new();
+    /// Returns Ok(true) if the blob exists and looks usable.
+    /// Removes zero-byte files as a side effect so they'll be re-downloaded.
+    async fn blob_is_valid(&self, blob_path: &Path) -> Result<bool> {
+        if !blob_path.exists() {
+            return Ok(false);
+        }
+        let metadata = tokio::fs::metadata(blob_path)
+            .await
+            .with_context(|| format!("stat {}", blob_path.display()))?;
+        if metadata.len() == 0 {
+            warn!(?blob_path, "zero-byte blob, removing for re-download");
+            tokio::fs::remove_file(blob_path).await?;
+            return Ok(false);
+        }
+        Ok(true)
+    }
 
-        for package in release_packages {
-            info!("Processing package: {}", package.file);
+    async fn ensure_release_cache(&self, release_id: i32) -> Result<()>{
+        info!("ensuring release cache for release_id: {release_id}");
 
-            let blob_path = blobs.join(&package.file);
+        let release_cache = self.packages_dir
+            .join("versions")
+            .join(release_id.to_string());
 
-            if blob_path.exists() {
-                // Only reject obviously broken 0-byte files
-                // Files without etag may still be valid (downloaded before .part implementation)
-                let metadata = tokio::fs::metadata(&blob_path).await?;
-
-                if metadata.len() == 0 {
-                    error!("{blob_path:?} is a 0-byte file, removing, to be donwloaded again");
-                    tokio::fs::remove_file(&blob_path).await?;
-                } else {
-                    // everything should be fine
-                    info!("exists in cache: {blob_path:?} ");
-                    content.push_str(&format!("{} {} {}\n", package.name, package.version, package.file));
-                    continue
-                }
-            }
-
-            info!("{blob_path:?} does not exist in cache");
-            if let Some(parent) = blob_path.parent() {
-                tokio::fs::create_dir_all(parent).await?;
-            }
-
-            // TODO: remove when we stop using /packages
-            let potential_old_place = packages.join(&package.file);
-            if potential_old_place.exists() {
-                warn!("{potential_old_place:?} File Found in old /packages, moving");
-                tokio::fs::rename(&potential_old_place, &blob_path).await?;
-                blobs_ready = false;
-                continue
-            };
-
-            let remote_file = format!("packages/{}", &package.file);
-            info!("Fetching from server: {remote_file:?}");
-            self.downloader
-                // steady download at 2MB/s lets play nice in these networks
-                .download_blocking(&remote_file, blob_path.to_str().ok_or(anyhow::anyhow!("Failed to unwrap blob path"))?, 2.0)
-                .await?;
-
-            blobs_ready = false;
+        if release_cache.exists() {
+            info!("release cache exists, skipping download");
+            return Ok(());
         }
 
+        let token = self.magic.get_token()
+            .await
+            .unwrap_or_default();
 
-        if blobs_ready {
-            if let Some(parent) = release_cache.parent() {
-                tokio::fs::create_dir_all(parent).await?;
+        let release_packages = self.network
+            .get_release_packages(release_id, &token)
+            .await
+            .with_context(|| "failed to fetch release packages manifest")?;
+
+        let blobs = self.packages_dir.join("blobs");
+        let mut manifest = String::new();
+        let mut all_cached = true;
+
+        for package in &release_packages {
+            info!("Processing package: {}", package.file);
+            let blob_path = blobs.join(&package.file);
+
+            if self.blob_is_valid(&blob_path).await? {
+                info!("blob present in cache");
+                writeln!(manifest,
+                    "{} {} {}",
+                    package.name, package.version, package.file
+                )?;
+                continue;
             }
-            info!("Creating version cache file");
-            tokio::fs::write(&release_cache, content).await?;
+
+            self.fetch_blob(package, &blob_path).await.with_context(|| {
+                format!("fetching blob for package {}", package.file)
+            })?;
+            all_cached = false;
+        }
+
+        if all_cached {
+            self.write_manifest(&release_cache, &manifest).await?;
+            info!(release_id, "release cache ready");
+        } else {
+            info!(release_id, "blobs being fetched; manifest write deferred to next call");
         }
 
         Ok(())
@@ -433,10 +467,9 @@ impl Actor {
             .await
             .with_context(|| "Failed to get Target Release ID")?;
 
-        let smith_home = std::env::current_dir()?;
-        let packages = smith_home.join("packages");
-        let blobs = packages.join("blobs");
-        let release_cache = packages.join("versions").join(target_release_id.to_string());
+
+        let blobs = self.packages_dir.join("blobs");
+        let release_cache = self.packages_dir.join("versions").join(target_release_id.to_string());
 
         // read the file from release cache
         let content = tokio::fs::read(&release_cache).await?;
