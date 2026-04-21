@@ -304,10 +304,10 @@ impl Actor {
 
         // ensure all files exist in /packages/blobs
         let blobs = packages.join("blobs");
+
         let mut blobs_ready = true;
-
-
         let mut content = String::new();
+
         for package in release_packages {
             info!("Processing package: {}", package.file);
 
@@ -339,6 +339,7 @@ impl Actor {
             if potential_old_place.exists() {
                 warn!("{potential_old_place:?} File Found in old /packages, moving");
                 tokio::fs::rename(&potential_old_place, &blob_path).await?;
+                blobs_ready = false;
                 continue
             };
 
@@ -352,7 +353,11 @@ impl Actor {
             blobs_ready = false;
         }
 
+
         if blobs_ready {
+            if let Some(parent) = release_cache.parent() {
+                tokio::fs::create_dir_all(parent).await?;
+            }
             info!("Creating version cache file");
             tokio::fs::write(&release_cache, content).await?;
         }
