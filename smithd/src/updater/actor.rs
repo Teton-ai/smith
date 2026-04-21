@@ -650,7 +650,9 @@ impl Actor {
             }
         }
 
-        self.are_packages_up_to_date().await
+        self.are_packages_up_to_date().await?;
+
+        self.clean_up_old_packages().await
     }
 
     async fn clean_up_old_packages(&self) -> Result<()> {
