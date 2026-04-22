@@ -39,15 +39,13 @@ pub struct ConfigPackage {
 }
 
 impl ConfigPackage {
-    // TODO: use this function more
     pub async fn get_system_version(&self) -> Result<String> {
         let name = &self.name;
         let output = tokio::process::Command::new("dpkg")
             .arg("-l")
             .arg(name)
             .output()
-            .await
-            .unwrap();
+            .await?;
 
         let stdout = String::from_utf8_lossy(&output.stdout);
         let lines: Vec<&str> = stdout.lines().collect();
@@ -141,14 +139,6 @@ impl MagicFile {
             Some(tunnel) => tunnel.clone(),
             None => ConfigTunnel::default(),
         }
-    }
-
-    pub fn get_packages(&self) -> Vec<ConfigPackage> {
-        self.packages.clone().unwrap_or_default()
-    }
-
-    pub fn set_packages(&mut self, packages: Vec<ConfigPackage>) {
-        self.packages = Some(packages);
     }
 
     pub fn get_server(&self) -> String {
