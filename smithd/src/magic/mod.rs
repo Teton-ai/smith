@@ -20,12 +20,6 @@ enum MagicMessage {
     GetTunnelDetails {
         sender: oneshot::Sender<structure::ConfigTunnel>,
     },
-    GetPackages {
-        sender: oneshot::Sender<Vec<structure::ConfigPackage>>,
-    },
-    SetPackages {
-        packages: Vec<structure::ConfigPackage>,
-    },
     GetServer {
         sender: oneshot::Sender<String>,
     },
@@ -78,14 +72,6 @@ impl Magic {
                     _ = sender.send(conf.get_tunnel_details());
                 } else {
                     _ = sender.send(structure::ConfigTunnel::default());
-                }
-            }
-            MagicMessage::GetPackages { sender } => {
-                debug!("Getting Magic Packages");
-                if let Some(conf) = &self.configuration {
-                    _ = sender.send(conf.get_packages());
-                } else {
-                    _ = sender.send(vec![]);
                 }
             }
             MagicMessage::GetServer { sender } => {
@@ -141,20 +127,6 @@ impl Magic {
                     }
                     debug!("Setting Magic Target Release Id");
                     conf.set_target_release_id(target_release_id);
-                    match &self.path {
-                        Some(path) => {
-                            _ = conf.write_to_file(path.to_str().unwrap()).await;
-                        }
-                        None => {
-                            warn!("No path to write to");
-                        }
-                    }
-                }
-            }
-            MagicMessage::SetPackages { packages } => {
-                debug!("Setting Magic Packages");
-                if let Some(conf) = &mut self.configuration {
-                    conf.set_packages(packages);
                     match &self.path {
                         Some(path) => {
                             _ = conf.write_to_file(path.to_str().unwrap()).await;
@@ -257,18 +229,6 @@ impl MagicHandle {
         let msg = MagicMessage::GetTunnelDetails { sender };
         _ = self.sender.send(msg).await;
         receiver.await.unwrap()
-    }
-
-    pub async fn get_packages(&self) -> Vec<structure::ConfigPackage> {
-        let (sender, receiver) = oneshot::channel();
-        let msg = MagicMessage::GetPackages { sender };
-        _ = self.sender.send(msg).await;
-        receiver.await.unwrap()
-    }
-
-    pub async fn set_packages(&self, packages: Vec<structure::ConfigPackage>) {
-        let msg = MagicMessage::SetPackages { packages };
-        _ = self.sender.send(msg).await;
     }
 
     pub async fn get_server(&self) -> String {

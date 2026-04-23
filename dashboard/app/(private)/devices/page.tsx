@@ -462,6 +462,7 @@ const DevicesPage = () => {
 				devices: Array.from(selectedDeviceIds),
 				commands: [
 					{
+						id: -1,
 						command: { FreeForm: { cmd: freeFormCommand } },
 						continue_on_error: false,
 					},

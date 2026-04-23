@@ -1,10 +1,14 @@
 use crate::downloader::DownloaderHandle;
 use crate::magic::MagicHandle;
+use crate::magic::structure::ConfigPackage;
 use crate::shutdown::ShutdownSignals;
 use crate::utils::network::NetworkClient;
 use anyhow::Context;
 use anyhow::Result;
 use std::collections::HashMap;
+use std::fmt::Write;
+use std::path::Path;
+use std::path::PathBuf;
 use tokio::process::Command;
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
@@ -75,7 +79,7 @@ fn classify_install_failure(stderr: &str) -> InstallFailureKind {
 pub enum ActorMessage {
     Update,
     Upgrade,
-    Checking,
+    Check,
     StatusReport { rpc: oneshot::Sender<String> },
 }
 
@@ -107,6 +111,7 @@ pub struct Actor {
     last_upgrade: Option<Result<time::Instant>>,
     downloader: DownloaderHandle,
     install_failures: HashMap<String, PackageFailure>,
+    packages_dir: PathBuf,
 }
 
 impl Actor {
@@ -117,6 +122,11 @@ impl Actor {
         downloader: DownloaderHandle,
     ) -> Self {
         let network = NetworkClient::new();
+
+        //if this unwrap fails, there's no point continuing
+        let smith_home = std::env::current_dir().unwrap();
+        let packages_dir = smith_home.join("packages");
+
         Self {
             shutdown,
             receiver,
@@ -127,6 +137,7 @@ impl Actor {
             last_upgrade: None,
             downloader,
             install_failures: HashMap::new(),
+            packages_dir,
         }
     }
 
@@ -194,7 +205,7 @@ impl Actor {
             ActorMessage::Upgrade => {
                 self.upgrade().await;
             }
-            ActorMessage::Checking => {
+            ActorMessage::Check => {
                 let release_id = self.magic.get_release_id().await;
                 let target_release_id = self.magic.get_target_release_id().await;
 
@@ -282,6 +293,118 @@ impl Actor {
         self.status = Status::Idle;
     }
 
+    async fn write_manifest(&self, path: &Path, contents: &str) -> Result<()> {
+        if let Some(parent) = path.parent() {
+            tokio::fs::create_dir_all(parent).await?;
+        }
+        tokio::fs::write(path, contents)
+            .await
+            .with_context(|| format!("writing manifest to {}", path.display()))?;
+        Ok(())
+    }
+
+    async fn fetch_blob(&self, package: &ConfigPackage, blob_path: &Path) -> Result<()> {
+        if let Some(parent) = blob_path.parent() {
+            tokio::fs::create_dir_all(parent).await?;
+        }
+
+        // TODO: remove when legacy /packages layout is fully migrated.
+        let legacy_path = self.packages_dir.join(&package.file);
+        if legacy_path.exists() {
+            warn!(?legacy_path, ?blob_path, "migrating from legacy layout");
+            tokio::fs::rename(&legacy_path, blob_path).await?;
+            return Ok(());
+        }
+
+        let remote = format!("packages/{}", package.file);
+        let download_to = blob_path
+            .to_str()
+            .ok_or(anyhow::anyhow!("Failed to unwrap blob path"))?;
+
+        info!(?remote, "downloading");
+        self.downloader
+            // 2 MB/s keeps us friendly on constrained networks.
+            .download_blocking(&remote, download_to, 2.0)
+            .await?;
+
+        Ok(())
+    }
+
+    /// Returns Ok(true) if the blob exists and looks usable.
+    /// Removes zero-byte files as a side effect so they'll be re-downloaded.
+    async fn blob_is_valid(&self, blob_path: &Path) -> Result<bool> {
+        if !blob_path.exists() {
+            return Ok(false);
+        }
+        let metadata = tokio::fs::metadata(blob_path)
+            .await
+            .with_context(|| format!("stat {}", blob_path.display()))?;
+        if metadata.len() == 0 {
+            warn!(?blob_path, "zero-byte blob, removing for re-download");
+            tokio::fs::remove_file(blob_path).await?;
+            return Ok(false);
+        }
+        Ok(true)
+    }
+
+    async fn ensure_release_cache(&self, release_id: i32) -> Result<()> {
+        info!("ensuring release cache for release_id: {release_id}");
+
+        let release_cache = self
+            .packages_dir
+            .join("versions")
+            .join(release_id.to_string());
+
+        if release_cache.exists() {
+            info!("release cache exists, skipping download");
+            return Ok(());
+        }
+
+        let token = self.magic.get_token().await.unwrap_or_default();
+
+        let release_packages = self
+            .network
+            .get_release_packages(release_id, &token)
+            .await
+            .with_context(|| "failed to fetch release packages manifest")?;
+
+        let blobs = self.packages_dir.join("blobs");
+        let mut manifest = String::new();
+        let mut all_cached = true;
+
+        for package in &release_packages {
+            info!("Processing package: {}", package.file);
+            let blob_path = blobs.join(&package.file);
+
+            if self.blob_is_valid(&blob_path).await? {
+                info!("blob present in cache");
+                writeln!(
+                    manifest,
+                    "{} {} {}",
+                    package.name, package.version, package.file
+                )?;
+                continue;
+            }
+
+            self.fetch_blob(package, &blob_path)
+                .await
+                .with_context(|| format!("fetching blob for package {}", package.file))?;
+            all_cached = false;
+        }
+
+        if all_cached {
+            self.write_manifest(&release_cache, &manifest).await?;
+            info!(release_id, "release cache ready");
+        } else {
+            info!(
+                release_id,
+                "blobs being fetched; manifest write deferred to next call"
+            );
+        }
+
+        Ok(())
+    }
+
     #[tracing::instrument(skip(self))]
     async fn check_for_updates(&self) -> Result<()> {
         // apt update on check for updates with timeout
@@ -302,72 +425,25 @@ impl Actor {
             }
         }
 
+        let current_release_id = self
+            .magic
+            .get_release_id()
+            .await
+            .with_context(|| "Failed to get Current Release ID")?;
+
         let target_release_id = self
             .magic
             .get_target_release_id()
             .await
             .with_context(|| "Failed to get Target Release ID")?;
 
-        let token = self.magic.get_token().await.unwrap_or_default();
+        self.ensure_release_cache(current_release_id)
+            .await
+            .with_context(|| "Failed to ensure current release cache")?;
 
-        info!("Checking for updates");
-        info!("Target release id: {:?}", target_release_id);
-
-        // get current configured packages
-        let local_packages = self.magic.get_packages().await;
-
-        // ask postman for the packages of the target release
-        let target_packages = self
-            .network
-            .get_release_packages(target_release_id, &token)
-            .await?;
-
-        info!("== Current packages ==");
-        for package in local_packages.iter() {
-            info!(
-                "Local: {} {} {}",
-                package.name, package.version, package.file
-            );
-        }
-        info!("++ Release packages ++");
-        for package in target_packages.iter() {
-            info!(
-                "Remote: {} {} {}",
-                package.name, package.version, package.file
-            );
-        }
-
-        let mut up_to_date = true;
-        // compare the packages and check if we need to update
-        for target_package in target_packages.iter() {
-            let package_not_on_magic_file = !local_packages.contains(target_package);
-            let package_not_installed = tokio::process::Command::new("dpkg")
-                .arg("-l")
-                .arg(&target_package.name)
-                .output()
-                .await
-                .map(|output| !output.status.success())
-                .unwrap_or(true);
-
-            // check if the package exists in the packages directory
-            let package_file = &target_package.file;
-            let path = std::env::current_dir()?;
-            let package_file_path = path.join("packages").join(package_file);
-            let package_not_in_path = !package_file_path.exists();
-
-            if package_not_on_magic_file || package_not_installed || package_not_in_path {
-                info!("Package {} is not installed", target_package.name);
-                up_to_date = false;
-                // we need to install the package
-                self.network
-                    .get_package(&target_package.file, &self.downloader)
-                    .await?;
-            }
-        }
-
-        if !up_to_date {
-            self.magic.set_packages(target_packages).await;
-        }
+        self.ensure_release_cache(target_release_id)
+            .await
+            .with_context(|| "Failed to ensure target release cache")?;
 
         Ok(())
     }
@@ -391,18 +467,52 @@ impl Actor {
             }
         }
 
-        let packages_from_magic = self.magic.get_packages().await;
+        let target_release_id = self
+            .magic
+            .get_target_release_id()
+            .await
+            .with_context(|| "Failed to get Target Release ID")?;
+
+        let blobs = self.packages_dir.join("blobs");
+        let release_cache = self
+            .packages_dir
+            .join("versions")
+            .join(target_release_id.to_string());
+
+        // read the file from release cache
+        let content = tokio::fs::read(&release_cache).await?;
+        let content = std::str::from_utf8(&content)?;
+
+        let packages: Vec<ConfigPackage> = content
+            .lines()
+            .filter(|line| !line.trim().is_empty())
+            .map(|line| {
+                let mut parts = line.splitn(3, ' ');
+                Ok::<_, anyhow::Error>(ConfigPackage {
+                    name: parts
+                        .next()
+                        .ok_or_else(|| anyhow::anyhow!("missing name"))?
+                        .to_string(),
+                    version: parts
+                        .next()
+                        .ok_or_else(|| anyhow::anyhow!("missing version"))?
+                        .to_string(),
+                    file: parts
+                        .next()
+                        .ok_or_else(|| anyhow::anyhow!("missing file"))?
+                        .to_string(),
+                })
+            })
+            .collect::<Result<_, _>>()?;
 
         // check if all packages are available locally
-        for package in packages_from_magic.iter() {
+        for package in &packages {
             info!("Checking package: {}", package.name);
             let package_name = &package.name;
             let package_file = &package.file;
 
             // check if package is available locally
-            let path = std::env::current_dir()?;
-            let packages_folder = path.join("packages");
-            let package_file = packages_folder.join(package_file);
+            let package_file = blobs.join(package_file);
 
             if package_file.exists() {
                 info!("Package {} exists locally", package_name);
@@ -418,7 +528,7 @@ impl Actor {
 
         // now install packages
         let mut update_smith = false;
-        for package in packages_from_magic.into_iter() {
+        for package in packages {
             let package_name = package.name;
             let package_file = package.file;
             let package_version = package.version;
@@ -427,9 +537,7 @@ impl Actor {
                 continue;
             }
 
-            let path = std::env::current_dir()?;
-            let packages_folder = path.join("packages");
-            let package_file = packages_folder.join(&package_file);
+            let package_file = blobs.join(package_file);
 
             // check if version on system is the one we should be running
             let output = match Command::new("dpkg")
@@ -559,19 +667,78 @@ impl Actor {
             }
         }
 
-        self.are_packages_up_to_date().await
+        self.are_packages_up_to_date().await?;
+
+        self.clean_up_old_packages().await
+    }
+
+    async fn clean_up_old_packages(&self) -> Result<()> {
+        // for now we are gonna delete packages in /packages
+        // TODO: lets improve on the caching mechanism later
+        let mut entries = tokio::fs::read_dir(&self.packages_dir).await?;
+        let mut bytes_freed: u64 = 0;
+        while let Some(entry) = entries.next_entry().await? {
+            let path = entry.path();
+            if path.is_file() && path.extension().and_then(|e| e.to_str()) == Some("deb") {
+                let size = entry.metadata().await.map(|m| m.len()).unwrap_or(0);
+                if let Err(e) = tokio::fs::remove_file(&path).await {
+                    error!("Failed to remove old package {}: {}", path.display(), e);
+                } else {
+                    bytes_freed += size;
+                }
+            }
+        }
+
+        info!(
+            "Cleaned up old packages, freed {} MB",
+            bytes_freed / 1024 / 1024
+        );
+        Ok(())
     }
 
     /// Checks whether packages are up to date.
     ///
     /// Returns `Ok` if all packages are, `Err` otherwise.
     async fn are_packages_up_to_date(&self) -> Result<()> {
-        let configuration = self.magic.clone();
+        let target_release_id = self
+            .magic
+            .get_target_release_id()
+            .await
+            .with_context(|| "Failed to get Target Release ID")?;
 
-        let magic_packages = configuration.get_packages().await;
+        let release_cache = self
+            .packages_dir
+            .join("versions")
+            .join(target_release_id.to_string());
+
+        // read the file from release cache
+        let content = tokio::fs::read(&release_cache).await?;
+        let content = std::str::from_utf8(&content)?;
+
+        let packages: Vec<ConfigPackage> = content
+            .lines()
+            .filter(|line| !line.trim().is_empty())
+            .map(|line| {
+                let mut parts = line.splitn(3, ' ');
+                Ok::<_, anyhow::Error>(ConfigPackage {
+                    name: parts
+                        .next()
+                        .ok_or_else(|| anyhow::anyhow!("missing name"))?
+                        .to_string(),
+                    version: parts
+                        .next()
+                        .ok_or_else(|| anyhow::anyhow!("missing version"))?
+                        .to_string(),
+                    file: parts
+                        .next()
+                        .ok_or_else(|| anyhow::anyhow!("missing file"))?
+                        .to_string(),
+                })
+            })
+            .collect::<Result<_, _>>()?;
 
         // check the system version of the packages in the magic file
-        for package in magic_packages {
+        for package in packages {
             let installed_version = package.get_system_version().await?;
             let magic_toml_version = package.version;
 
@@ -600,7 +767,7 @@ impl Actor {
                     self.handle_message(msg).await;
                 }
                 _ = update_check_interval.tick() => {
-                    self.handle_message(ActorMessage::Checking).await;
+                    self.handle_message(ActorMessage::Check).await;
                 }
                 _ = self.shutdown.token.cancelled() => {
                     info!("Updater waiting for tasks to finish");

@@ -9,7 +9,7 @@ license.workspace = true
 
 [dependencies]
 smith = { path = "../smithd" }
-
+anyhow.workspace = true
 tokio = { version = "1.40" }
 tracing = "0.1.40"
 tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
