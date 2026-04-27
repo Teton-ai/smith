@@ -11,7 +11,7 @@ use std::collections::HashMap;
 use std::net::IpAddr;
 use std::time::Duration;
 use thiserror::Error;
-use tracing::{debug, error, warn};
+use tracing::{debug, error, info, warn};
 
 pub mod route;
 
@@ -196,8 +196,8 @@ async fn update_ip_geolocation(
                         if api_response.status == "success" {
                             // Update the database with geolocation data using sqlx::query for POINT support
                             let query = r#"
-                                UPDATE ip_address 
-                                SET 
+                                UPDATE ip_address
+                                SET
                                     continent = $2,
                                     continent_code = $3,
                                     country_code = $4,
@@ -205,10 +205,10 @@ async fn update_ip_geolocation(
                                     region = $6,
                                     city = $7,
                                     isp = $8,
-                                    coordinates = CASE 
-                                        WHEN $9::float8 IS NOT NULL AND $10::float8 IS NOT NULL 
-                                        THEN point($9, $10) 
-                                        ELSE NULL 
+                                    coordinates = CASE
+                                        WHEN $9::float8 IS NOT NULL AND $10::float8 IS NOT NULL
+                                        THEN point($9, $10)
+                                        ELSE NULL
                                     END,
                                     proxy = $11,
                                     hosting = $12,
@@ -374,6 +374,7 @@ pub async fn register_device(
         match result.token {
             Some(_) => {
                 tx.rollback().await?;
+                info!("Device {} is already registered, and has a token", result.serial_number);
                 return Err(RegistrationError::NotNullTokenError);
             }
             None => {
@@ -474,11 +475,11 @@ pub async fn save_last_ping_with_ip(
                     let existing_record = sqlx::query!(
                         r#"
                             SELECT id,
-                                   CASE 
-                                       WHEN updated_at < NOW() - INTERVAL '24 hours' THEN true 
-                                       ELSE false 
+                                   CASE
+                                       WHEN updated_at < NOW() - INTERVAL '24 hours' THEN true
+                                       ELSE false
                                    END as needs_update
-                            FROM ip_address 
+                            FROM ip_address
                             WHERE ip_address = $1
                             "#,
                         ip_network
