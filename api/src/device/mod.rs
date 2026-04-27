@@ -374,7 +374,10 @@ pub async fn register_device(
         match result.token {
             Some(_) => {
                 tx.rollback().await?;
-                info!("Device {} is already registered, and has a token", result.serial_number);
+                info!(
+                    "Device {} is already registered, and has a token",
+                    result.serial_number
+                );
                 return Err(RegistrationError::NotNullTokenError);
             }
             None => {
