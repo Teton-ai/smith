@@ -125,6 +125,7 @@ fn print_markdown_help() {
 }
 
 fn update(_check: bool) -> Result<(), anyhow::Error> {
+
     let updater = self_update::backends::github::Update::configure()
         .repo_owner("teton-ai")
         .repo_name("smith")
@@ -151,44 +152,56 @@ fn update(_check: bool) -> Result<(), anyhow::Error> {
     Ok(())
 }
 
-fn check_and_update_if_needed() -> Result<(), anyhow::Error> {
+fn maybe_show_update_notice() {
+    let last_check_file = config::Config::get_last_update_check_file();
+    let Ok(contents) = std::fs::read_to_string(&last_check_file) else {
+        return;
+    };
+    let mut lines = contents.trim().lines();
+    let _timestamp = lines.next();
+    let Some(latest) = lines.next() else {
+        return;
+    };
+    let current = self_update::cargo_crate_version!();
+    if latest != current {
+        println!(
+            "A new version {} is available! Run 'sm update' to update.",
+            latest
+        );
+    }
+}
+
+async fn check_for_updates_in_background() {
     let last_check_file = config::Config::get_last_update_check_file();
 
     let should_check = std::fs::read_to_string(&last_check_file)
         .ok()
-        .and_then(|contents| contents.trim().parse::<i64>().ok())
-        .and_then(|timestamp| chrono::DateTime::from_timestamp(timestamp, 0))
-        .map(|last_check| {
-            let now = chrono::Utc::now();
-            let duration = now.signed_duration_since(last_check);
-            duration.num_hours() >= 24
-        })
+        .and_then(|c| c.trim().lines().next()?.parse::<i64>().ok())
+        .and_then(|ts| chrono::DateTime::from_timestamp(ts, 0))
+        .map(|last| chrono::Utc::now().signed_duration_since(last).num_hours() >= 24)
         .unwrap_or(true);
 
-    if should_check {
-        let current_version = self_update::cargo_crate_version!();
-        let updater = self_update::backends::github::Update::configure()
+    if !should_check {
+        return;
+    }
+
+    let current_version = self_update::cargo_crate_version!();
+    let result = tokio::task::spawn_blocking(move || {
+        self_update::backends::github::Update::configure()
             .repo_owner("teton-ai")
             .repo_name("smith")
             .bin_name("sm")
             .show_download_progress(false)
             .current_version(current_version)
-            .build()?;
+            .build()
+            .and_then(|u| u.get_latest_release())
+    })
+    .await;
 
-        if let Ok(status) = updater.get_latest_release()
-            && status.version != current_version
-        {
-            println!(
-                "A new version {} is available! Run 'sm update' to update.",
-                status.version
-            );
-        }
-
-        let now = chrono::Utc::now().timestamp();
-        std::fs::write(&last_check_file, now.to_string())?;
+    if let Ok(Ok(release)) = result {
+        let ts = chrono::Utc::now().timestamp();
+        let _ = std::fs::write(&last_check_file, format!("{}\n{}", ts, release.version));
     }
-
-    Ok(())
 }
 
 fn parse_label_filters(
@@ -358,10 +371,11 @@ async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
     if !matches!(cli.command, Some(Commands::Update { .. })) {
-        let _ = tokio::task::spawn_blocking(check_and_update_if_needed)
-            .await
-            .ok();
+        maybe_show_update_notice();
     }
+
+    tokio::spawn(check_for_updates_in_background());
+
     let mut config = match config::Config::load().await {
         Ok(config) => config,
         Err(err) => {
