@@ -24,6 +24,9 @@ pub struct DeviceSelector {
     /// Show only offline devices (last seen >= 5 minutes)
     #[arg(long, conflicts_with = "online")]
     pub offline: bool,
+    /// Show only outdated devices (release_id != target_release_id)
+    #[arg(long)]
+    pub outdated: bool,
     /// Use partial matching for device IDs (matches serial number, hostname, or model)
     #[arg(short, long)]
     pub search: bool,
