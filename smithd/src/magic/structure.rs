@@ -11,8 +11,6 @@ pub struct MagicFile {
     pub tunnel: Option<ConfigTunnel>,
     #[serde(rename = "metric")]
     pub metrics: Option<Vec<ConfigMetric>>,
-    #[serde(rename = "package")]
-    pub packages: Option<Vec<ConfigPackage>>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -102,7 +100,6 @@ impl MagicFile {
                     secret: "".to_string(),
                 }),
                 metrics: None,
-                packages: None,
             })?;
             std::fs::write(magic_in_cwd, string)?;
             Self::load_from_path(magic_in_cwd.to_str().unwrap())
