@@ -1,7 +1,6 @@
 "use client";
 
 import { Loader2, Send, Terminal } from "lucide-react";
-import moment from "moment";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -12,6 +11,7 @@ import {
 } from "@/app/api-client";
 import { useClientMutator } from "@/app/api-client-mutator";
 import { Button } from "@/app/components/button";
+import { RelativeTime } from "@/app/components/RelativeTime";
 import {
 	CodeBlock,
 	getCommandStatus,
@@ -99,7 +99,9 @@ const DeviceResponseDetail = ({
 					)}
 					<div className="text-xs text-gray-400">
 						{response.response_at ? (
-							<span>Responded {moment(response.response_at).fromNow()}</span>
+							<span>
+								Responded <RelativeTime date={response.response_at} />
+							</span>
 						) : (
 							<span className="text-yellow-500">Waiting for response…</span>
 						)}
@@ -197,9 +199,11 @@ const BundleDetail = ({ bundle }: { bundle: BundleWithCommands }) => {
 									</span>
 								</div>
 								<div className="text-xs text-gray-400 mt-0.5">
-									{response.response_at
-										? moment(response.response_at).fromNow()
-										: "Waiting…"}
+									{response.response_at ? (
+										<RelativeTime date={response.response_at} />
+									) : (
+										"Waiting…"
+									)}
 								</div>
 							</button>
 						);
@@ -368,9 +372,10 @@ const CommandsPage = () => {
 												</span>
 											)}
 										</div>
-										<span className="text-xs text-gray-400 shrink-0">
-											{moment(bundle.created_on).fromNow()}
-										</span>
+										<RelativeTime
+											date={bundle.created_on}
+											className="text-xs text-gray-400 shrink-0"
+										/>
 									</div>
 								</button>
 							);

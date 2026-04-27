@@ -1,7 +1,6 @@
 "use client";
 
 import { ArrowLeft, Loader2, Send } from "lucide-react";
-import moment from "moment";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -21,6 +20,7 @@ import {
 } from "@/app/api-client";
 import { useClientMutator } from "@/app/api-client-mutator";
 import { Button } from "@/app/components/button";
+import { RelativeTime } from "@/app/components/RelativeTime";
 import DeviceHeader from "../DeviceHeader";
 
 const PAGE_SIZE = 50;
@@ -69,10 +69,14 @@ const ResponseDetail = ({ cmd }: { cmd: DeviceCommandResponse }) => {
 						</Button>
 					)}
 					<div className="flex items-center gap-2 text-xs text-gray-400">
-						<span>Issued {moment(cmd.issued_at).fromNow()}</span>
+						<span>
+							Issued <RelativeTime date={cmd.issued_at} />
+						</span>
 						<span>·</span>
 						{cmd.response_at ? (
-							<span>Responded {moment(cmd.response_at).fromNow()}</span>
+							<span>
+								Responded <RelativeTime date={cmd.response_at} />
+							</span>
 						) : (
 							<span className="text-yellow-500">Waiting for response…</span>
 						)}
@@ -276,7 +280,7 @@ const CommandsPage = () => {
 												</span>
 											</div>
 											<div className="text-xs text-gray-400 mt-0.5">
-												{moment(cmd.issued_at).fromNow()}
+												<RelativeTime date={cmd.issued_at} />
 											</div>
 										</button>
 									);

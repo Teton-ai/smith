@@ -24,7 +24,6 @@ import {
 	XCircle,
 	Zap,
 } from "lucide-react";
-import moment from "moment";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
@@ -48,6 +47,7 @@ import {
 import { Button, IconButton } from "@/app/components/button";
 import LabelAutocomplete from "@/app/components/LabelAutocomplete";
 import { Modal } from "@/app/components/modal";
+import { RelativeTime } from "@/app/components/RelativeTime";
 
 const ReleaseDetailPage = () => {
 	const router = useRouter();
@@ -226,10 +226,6 @@ const ReleaseDetailPage = () => {
 			return () => clearTimeout(timer);
 		}
 	}, [toast]);
-
-	const formatRelativeTime = (dateString: string) => {
-		return moment(dateString).fromNow();
-	};
 
 	const getArchColor = (architecture: string) => {
 		switch (architecture.toLowerCase()) {
@@ -577,7 +573,9 @@ const ReleaseDetailPage = () => {
 							<div className="flex items-center space-x-4 mt-1 text-sm text-gray-600">
 								<div className="flex items-center space-x-1">
 									<Calendar className="w-4 h-4" />
-									<span>Created {formatRelativeTime(release.created_at)}</span>
+									<span>
+										Created <RelativeTime date={release.created_at} />
+									</span>
 								</div>
 								{distribution && (
 									<div className="flex items-center space-x-2">

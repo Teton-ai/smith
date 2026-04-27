@@ -19,13 +19,13 @@ import {
 	X,
 	XCircle,
 } from "lucide-react";
-import moment from "moment";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/app/components/button";
 import LabelAutocomplete from "@/app/components/LabelAutocomplete";
 import { Modal } from "@/app/components/modal";
 import NetworkQualityIndicator from "@/app/components/NetworkQualityIndicator";
+import { RelativeTime } from "@/app/components/RelativeTime";
 import {
 	type Device,
 	type DistributionRolloutStats,
@@ -194,10 +194,6 @@ const DevicesPage = () => {
 		message: string;
 		type: "success" | "error";
 	} | null>(null);
-
-	const formatRelativeTime = (dateString: string) => {
-		return moment(dateString).fromNow();
-	};
 
 	// Toast auto-dismiss
 	useEffect(() => {
@@ -1635,9 +1631,7 @@ const DevicesPage = () => {
 													<div className="flex items-center space-x-3 mt-1.5 text-xs text-gray-500">
 														<div className="flex items-center space-x-1">
 															<Calendar className="w-3 h-3" />
-															<span>
-																{formatRelativeTime(release.created_at)}
-															</span>
+															<RelativeTime date={release.created_at} />
 														</div>
 														<div className="flex items-center space-x-1">
 															<User className="w-3 h-3" />
@@ -1806,7 +1800,7 @@ const DevicesPage = () => {
 												<p className="font-medium text-gray-900">{distName}</p>
 												<p className="text-xs text-gray-500 mt-0.5">
 													Latest: {latestRelease.version} ·{" "}
-													{formatRelativeTime(latestRelease.created_at)} ·{" "}
+													<RelativeTime date={latestRelease.created_at} /> ·{" "}
 													{count} release{count !== 1 ? "s" : ""}
 												</p>
 											</div>

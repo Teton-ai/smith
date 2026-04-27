@@ -15,7 +15,6 @@ import {
 	User,
 	X,
 } from "lucide-react";
-import moment from "moment";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import React, { useCallback, useMemo, useState } from "react";
@@ -29,6 +28,7 @@ import {
 } from "@/app/api-client";
 import { Button } from "@/app/components/button";
 import { Modal } from "@/app/components/modal";
+import { RelativeTime } from "@/app/components/RelativeTime";
 import { SidePanel } from "@/app/components/side-panel";
 
 interface ReleaseRowProps {
@@ -102,7 +102,7 @@ const ReleaseRow = React.memo(function ReleaseRow({
 					<div className="flex items-center space-x-3 mt-1 text-xs text-gray-500">
 						<div className="flex items-center space-x-1">
 							<Calendar className="w-3 h-3" />
-							<span>{moment(release.created_at).fromNow()}</span>
+							<RelativeTime date={release.created_at} />
 						</div>
 						<div className="flex items-center space-x-1">
 							<User className="w-3 h-3" />

@@ -27,6 +27,7 @@ import {
 	usePromoteRelease,
 } from "@/app/api-client";
 import { Button } from "@/app/components/button";
+import { RelativeTime } from "@/app/components/RelativeTime";
 import {
 	type DeviceServiceHealth,
 	useDeploymentServiceHealth,
@@ -269,7 +270,9 @@ const DeploymentStatusPage = () => {
 						<div className="mb-6 flex items-center space-x-6 text-sm text-gray-600">
 							<div className="flex items-center space-x-2">
 								<Clock className="w-4 h-4" />
-								<span>Started {moment(deployment.created_at).fromNow()}</span>
+								<span>
+									Started <RelativeTime date={deployment.created_at} />
+								</span>
 							</div>
 							{deployment.status === "InProgress" && (
 								<div className="flex items-center space-x-2">
@@ -613,12 +616,14 @@ const DeploymentStatusPage = () => {
 															})()}
 														</td>
 														<td className="px-4 py-3 text-sm text-gray-600">
-															{device.last_ping
-																? moment(device.last_ping).fromNow()
-																: "Never"}
+															{device.last_ping ? (
+																<RelativeTime date={device.last_ping} />
+															) : (
+																"Never"
+															)}
 														</td>
 														<td className="px-4 py-3 text-sm text-gray-600">
-															{moment(device.added_at).fromNow()}
+															<RelativeTime date={device.added_at} />
 														</td>
 													</tr>
 												);
