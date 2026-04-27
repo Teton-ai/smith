@@ -23,6 +23,19 @@ function isChunkLoadError(reason: unknown): boolean {
 	);
 }
 
+// Resource-level 404s on hashed build assets. These fire as plain `error`
+// events on the <link>/<script> element itself and only reach window in the
+// capture phase — so we register the listener with { capture: true }.
+function isStaleNextAssetError(target: EventTarget | null): boolean {
+	if (!(target instanceof Element)) return false;
+	let url: string | undefined;
+	if (target instanceof HTMLLinkElement) url = target.href;
+	else if (target instanceof HTMLScriptElement) url = target.src;
+	else return false;
+	if (!url) return false;
+	return url.includes("/_next/static/");
+}
+
 function reloadOnce() {
 	try {
 		const last = Number(sessionStorage.getItem(RELOAD_KEY) ?? 0);
@@ -34,16 +47,20 @@ function reloadOnce() {
 
 export function ChunkErrorReload() {
 	useEffect(() => {
-		const onError = (e: ErrorEvent) => {
-			if (isChunkLoadError(e.error ?? e.message)) reloadOnce();
+		const onError = (e: Event) => {
+			if (e instanceof ErrorEvent && isChunkLoadError(e.error ?? e.message)) {
+				reloadOnce();
+				return;
+			}
+			if (isStaleNextAssetError(e.target)) reloadOnce();
 		};
 		const onRejection = (e: PromiseRejectionEvent) => {
 			if (isChunkLoadError(e.reason)) reloadOnce();
 		};
-		window.addEventListener("error", onError);
+		window.addEventListener("error", onError, true);
 		window.addEventListener("unhandledrejection", onRejection);
 		return () => {
-			window.removeEventListener("error", onError);
+			window.removeEventListener("error", onError, true);
 			window.removeEventListener("unhandledrejection", onRejection);
 		};
 	}, []);
