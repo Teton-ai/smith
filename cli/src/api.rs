@@ -653,6 +653,26 @@ impl SmithAPI {
         Ok((device_id, last_command.cmd_id as u64))
     }
 
+    pub async fn send_bundle(
+        &self,
+        device_ids: Vec<i32>,
+        cmd: schema::SafeCommandRequest,
+    ) -> Result<()> {
+        let client = Client::new();
+        let body = serde_json::json!({
+            "devices": device_ids,
+            "commands": [cmd],
+        });
+        client
+            .post(format!("{}/commands/bundles", self.domain))
+            .header("Authorization", format!("Bearer {}", &self.bearer_token))
+            .json(&body)
+            .send()
+            .await?
+            .error_for_status()?;
+        Ok(())
+    }
+
     pub async fn approve_device(&self, device_id: u64) -> Result<()> {
         let client = Client::new();
 

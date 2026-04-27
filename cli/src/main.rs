@@ -19,6 +19,7 @@ use clap_complete::generate;
 use colored::Colorize;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use models::device::{Device, DeviceFilter};
+use smith::utils::schema;
 use std::{
     collections::HashSet,
     io::{self, IsTerminal, Read},
@@ -125,7 +126,6 @@ fn print_markdown_help() {
 }
 
 fn update(_check: bool) -> Result<(), anyhow::Error> {
-
     let updater = self_update::backends::github::Update::configure()
         .repo_owner("teton-ai")
         .repo_name("smith")
@@ -892,31 +892,22 @@ async fn main() -> anyhow::Result<()> {
 
                     println!("\n{} restart commands...", "Sending".bold());
 
-                    let mut command_ids = Vec::new();
+                    let device_ids: Vec<i32> = target_devices.iter().map(|d| d.id).collect();
+                    api.send_bundle(
+                        device_ids,
+                        schema::SafeCommandRequest {
+                            id: 0,
+                            command: schema::SafeCommandTx::Restart,
+                            continue_on_error: false,
+                        },
+                    )
+                    .await?;
                     for device in &target_devices {
-                        let device_id = device.id;
-                        let serial_number = &device.serial_number;
-
-                        match api.send_restart_command(device_id as u64).await {
-                            Ok((dev_id, cmd_id)) => {
-                                command_ids.push((dev_id, cmd_id, serial_number.to_string()));
-                                println!(
-                                    "  {} [{}] - Restart queued: {}:{}",
-                                    serial_number.bright_green(),
-                                    dev_id,
-                                    dev_id,
-                                    cmd_id
-                                );
-                            }
-                            Err(e) => {
-                                println!(
-                                    "  {} [{}] - Failed: {}",
-                                    serial_number.red(),
-                                    device_id,
-                                    e
-                                );
-                            }
-                        }
+                        println!(
+                            "  {} [{}] - Restart queued",
+                            device.serial_number.bright_green(),
+                            device.id,
+                        );
                     }
 
                     if nowait {
@@ -1634,23 +1625,34 @@ async fn main() -> anyhow::Result<()> {
 
                 println!();
 
-                let mut command_ids = Vec::new();
+                let device_ids: Vec<i32> = target_devices.iter().map(|d| d.id).collect();
+                api.send_bundle(
+                    device_ids,
+                    schema::SafeCommandRequest {
+                        id: 0,
+                        command: schema::SafeCommandTx::FreeForm {
+                            cmd: cmd_string.clone(),
+                        },
+                        continue_on_error: false,
+                    },
+                )
+                .await?;
 
+                tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
+                let mut command_ids = Vec::new();
                 for device in &target_devices {
                     let device_id = device.id;
                     let serial_number = &device.serial_number;
-
-                    match api
-                        .send_custom_command(device_id as u64, cmd_string.clone())
-                        .await
-                    {
-                        Ok((dev_id, cmd_id)) => {
-                            command_ids.push((dev_id, cmd_id, serial_number.to_string()));
+                    match api.get_last_command(device_id as u64).await {
+                        Ok(last) => {
+                            let cmd_id = last.cmd_id as u64;
+                            command_ids.push((device_id as u64, cmd_id, serial_number.to_string()));
                             println!(
                                 "  {} [{}] - Command queued: {}:{}",
                                 serial_number.bright_green(),
-                                dev_id,
-                                dev_id,
+                                device_id,
+                                device_id,
                                 cmd_id
                             );
                         }
