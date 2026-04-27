@@ -425,21 +425,19 @@ impl Actor {
             }
         }
 
-        let current_release_id = self
-            .magic
-            .get_release_id()
-            .await
-            .with_context(|| "Failed to get Current Release ID")?;
+        if let Some(current_release_id) = self.magic.get_release_id().await {
+            self.ensure_release_cache(current_release_id)
+                .await
+                .with_context(|| "Failed to ensure current release cache")?;
+        } else {
+            error!("No current release ID, skipping current release cache check");
+        }
 
         let target_release_id = self
             .magic
             .get_target_release_id()
             .await
             .with_context(|| "Failed to get Target Release ID")?;
-
-        self.ensure_release_cache(current_release_id)
-            .await
-            .with_context(|| "Failed to ensure current release cache")?;
 
         self.ensure_release_cache(target_release_id)
             .await
