@@ -1,6 +1,7 @@
 pub mod structure;
 
 use crate::shutdown::ShutdownSignals;
+use anyhow::Result;
 use std::path::PathBuf;
 use tokio::sync::{mpsc, oneshot};
 use tracing::{debug, error, info, warn};
@@ -27,13 +28,13 @@ enum MagicMessage {
         rpc: oneshot::Sender<Option<i32>>,
     },
     SetReleaseId {
-        release_id: Option<i32>,
+        release_id: i32,
     },
     GetTargetReleaseId {
         rpc: oneshot::Sender<Option<i32>>,
     },
     SetTargetReleaseId {
-        target_release_id: Option<i32>,
+        target_release_id: i32,
     },
     GetToken {
         rpc: oneshot::Sender<Option<String>>,
@@ -94,11 +95,11 @@ impl Magic {
             }
             MagicMessage::SetReleaseId { release_id } => {
                 if let Some(conf) = &mut self.configuration {
-                    let current_release_id = conf.meta.release_id;
-                    if current_release_id == release_id {
+                    if let Some(current_release_id) = conf.meta.release_id
+                        && current_release_id == release_id
+                    {
                         return;
                     }
-                    debug!("Setting Magic Release Id");
                     conf.set_release_id(release_id);
                     match &self.path {
                         Some(path) => {
@@ -121,11 +122,11 @@ impl Magic {
             }
             MagicMessage::SetTargetReleaseId { target_release_id } => {
                 if let Some(conf) = &mut self.configuration {
-                    let current_target_release_id = conf.meta.target_release_id;
-                    if current_target_release_id == target_release_id {
+                    if let Some(current_target_release_id) = conf.meta.target_release_id
+                        && current_target_release_id == target_release_id
+                    {
                         return;
                     }
-                    debug!("Setting Magic Target Release Id");
                     conf.set_target_release_id(target_release_id);
                     match &self.path {
                         Some(path) => {
@@ -200,26 +201,28 @@ impl MagicHandle {
         done.await.unwrap();
     }
 
-    pub async fn get_release_id(&self) -> Option<i32> {
+    pub async fn get_release_id(&self) -> Result<i32> {
         let (rpc, fut) = oneshot::channel();
         let msg = MagicMessage::GetReleaseId { rpc };
         _ = self.sender.send(msg).await;
-        fut.await.unwrap()
+        fut.await?
+            .ok_or(anyhow::anyhow!("no, valid target release id"))
     }
 
-    pub async fn set_release_id(&self, release_id: Option<i32>) {
+    pub async fn set_release_id(&self, release_id: i32) {
         let msg = MagicMessage::SetReleaseId { release_id };
         _ = self.sender.send(msg).await;
     }
 
-    pub async fn get_target_release_id(&self) -> Option<i32> {
+    pub async fn get_target_release_id(&self) -> Result<i32> {
         let (rpc, fut) = oneshot::channel();
         let msg = MagicMessage::GetTargetReleaseId { rpc };
         _ = self.sender.send(msg).await;
-        fut.await.unwrap()
+        fut.await?
+            .ok_or(anyhow::anyhow!("no, valid target release id"))
     }
 
-    pub async fn set_target_release_id(&self, target_release_id: Option<i32>) {
+    pub async fn set_target_release_id(&self, target_release_id: i32) {
         let msg = MagicMessage::SetTargetReleaseId { target_release_id };
         _ = self.sender.send(msg).await;
     }

@@ -206,13 +206,10 @@ impl Actor {
                 self.upgrade().await;
             }
             ActorMessage::Check => {
-                let release_id = self.magic.get_release_id().await;
-                let target_release_id = self.magic.get_target_release_id().await;
+                let release_id = self.magic.get_release_id().await.ok();
+                let target_release_id = self.magic.get_target_release_id().await.ok();
 
                 if release_id != target_release_id {
-                    info!(
-                        "Upgrading from release_id {release_id:?} to target_release_id {target_release_id:?}"
-                    );
                     self.install_failures.clear();
 
                     self.update().await;
@@ -222,12 +219,6 @@ impl Actor {
                     }
 
                     self.upgrade().await;
-
-                    if matches!(self.last_upgrade, Some(Err(_)) | None) {
-                        return;
-                    }
-
-                    self.magic.set_release_id(target_release_id).await;
                 }
             }
             ActorMessage::StatusReport { rpc } => {
@@ -276,10 +267,7 @@ impl Actor {
         info!("Checking for updates");
         self.status = Status::Updating;
         let res = self.check_for_updates().await.map(|_| time::Instant::now());
-        match &res {
-            Ok(res) => info!("Check for updates result: {:?}", res),
-            Err(e) => warn!("Check for updates result: {:?}", e),
-        }
+        info!("Updating result: {:?}", res);
         self.last_update = Some(res);
         self.status = Status::Idle;
     }
@@ -288,7 +276,7 @@ impl Actor {
         info!("Upgrading device");
         self.status = Status::Upgrading;
         let res = self.upgrade_device().await.map(|_| time::Instant::now());
-        info!("Upgrading result: {:?}, changing to app mode", res);
+        info!("Upgrading result: {:?}", res);
         self.last_upgrade = Some(res);
         self.status = Status::Idle;
     }
@@ -425,13 +413,15 @@ impl Actor {
             }
         }
 
-        if let Some(current_release_id) = self.magic.get_release_id().await {
-            self.ensure_release_cache(current_release_id)
-                .await
-                .with_context(|| "Failed to ensure current release cache")?;
-        } else {
-            error!("No current release ID, skipping current release cache check");
-        }
+        let current_release_id = self
+            .magic
+            .get_release_id()
+            .await
+            .with_context(|| "Failed to get Target Release ID")?;
+
+        self.ensure_release_cache(current_release_id)
+            .await
+            .with_context(|| "Failed to ensure target release cache")?;
 
         let target_release_id = self
             .magic
@@ -666,6 +656,8 @@ impl Actor {
         }
 
         self.are_packages_up_to_date().await?;
+
+        self.magic.set_release_id(target_release_id).await;
 
         self.clean_up_old_packages().await
     }

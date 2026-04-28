@@ -115,15 +115,19 @@ impl Postman {
                     }
 
                     let responses = self.commander.get_results().await;
-                    let release_id = self.magic.get_release_id().await;
+                    let release_id = self.magic.get_release_id().await.ok();
                     let service_statuses = self.check_services().await;
 
                     let ping_home_body = HomePost::new(responses, release_id, service_statuses);
 
                     let response = self.ping_home(ping_home_body).await;
+
                     let target_release_id = response.target_release_id;
                     self.services_to_check = response.services;
-                    self.magic.set_target_release_id(target_release_id).await;
+
+                    if let Some(target_release_id) = target_release_id {
+                        self.magic.set_target_release_id(target_release_id).await;
+                    }
 
                     let has_commands = !response.commands.is_empty();
                     self.commander.execute_api_batch(response.commands).await;
