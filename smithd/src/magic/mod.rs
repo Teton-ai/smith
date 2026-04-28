@@ -95,11 +95,10 @@ impl Magic {
             }
             MagicMessage::SetReleaseId { release_id } => {
                 if let Some(conf) = &mut self.configuration {
-                    if let Some(current_release_id) = conf.meta.release_id {
-                        if current_release_id == release_id {
+                    if let Some(current_release_id) = conf.meta.release_id
+                        && current_release_id == release_id {
                             return;
                         }
-                    }
                     conf.set_release_id(release_id);
                     match &self.path {
                         Some(path) => {
@@ -122,11 +121,10 @@ impl Magic {
             }
             MagicMessage::SetTargetReleaseId { target_release_id } => {
                 if let Some(conf) = &mut self.configuration {
-                    if let Some(current_target_release_id) = conf.meta.target_release_id {
-                        if current_target_release_id == target_release_id {
+                    if let Some(current_target_release_id) = conf.meta.target_release_id
+                        && current_target_release_id == target_release_id {
                             return;
                         }
-                    }
                     conf.set_target_release_id(target_release_id);
                     match &self.path {
                         Some(path) => {

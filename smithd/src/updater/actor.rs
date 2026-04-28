@@ -219,10 +219,6 @@ impl Actor {
                     }
 
                     self.upgrade().await;
-
-                    if matches!(self.last_upgrade, Some(Err(_)) | None) {
-                        return;
-                    }
                 }
             }
             ActorMessage::StatusReport { rpc } => {
