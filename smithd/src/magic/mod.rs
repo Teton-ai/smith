@@ -1,10 +1,10 @@
 pub mod structure;
 
 use crate::shutdown::ShutdownSignals;
+use anyhow::Result;
 use std::path::PathBuf;
 use tokio::sync::{mpsc, oneshot};
 use tracing::{debug, error, info, warn};
-use anyhow::Result;
 
 struct Magic {
     shutdown: ShutdownSignals,
@@ -205,7 +205,8 @@ impl MagicHandle {
         let (rpc, fut) = oneshot::channel();
         let msg = MagicMessage::GetReleaseId { rpc };
         _ = self.sender.send(msg).await;
-        fut.await?.ok_or(anyhow::anyhow!("no, valid target release id"))
+        fut.await?
+            .ok_or(anyhow::anyhow!("no, valid target release id"))
     }
 
     pub async fn set_release_id(&self, release_id: i32) {
@@ -217,7 +218,8 @@ impl MagicHandle {
         let (rpc, fut) = oneshot::channel();
         let msg = MagicMessage::GetTargetReleaseId { rpc };
         _ = self.sender.send(msg).await;
-        fut.await?.ok_or(anyhow::anyhow!("no, valid target release id"))
+        fut.await?
+            .ok_or(anyhow::anyhow!("no, valid target release id"))
     }
 
     pub async fn set_target_release_id(&self, target_release_id: i32) {
