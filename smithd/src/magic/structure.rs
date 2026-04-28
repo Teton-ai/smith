@@ -146,16 +146,17 @@ impl MagicFile {
         self.meta.release_id
     }
 
-    pub fn set_release_id(&mut self, release_id: Option<i32>) {
-        self.meta.release_id = release_id;
+    pub fn set_release_id(&mut self, release_id: i32) {
+        info!("Setting release id: {}", release_id);
+        self.meta.release_id = Some(release_id);
     }
 
     pub fn get_target_release_id(&self) -> Option<i32> {
         self.meta.target_release_id
     }
 
-    pub fn set_target_release_id(&mut self, target_release_id: Option<i32>) {
-        self.meta.target_release_id = target_release_id;
+    pub fn set_target_release_id(&mut self, target_release_id: i32) {
+        self.meta.target_release_id = Some(target_release_id);
     }
 
     pub fn get_token(&self) -> Option<String> {
