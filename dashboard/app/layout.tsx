@@ -2,6 +2,7 @@
 
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
+import { ChunkErrorReload } from "./components/chunk-error-reload";
 import Auth0ProviderWrapper from "./providers/auth0-provider";
 import QueryProvider from "./providers/query-provider";
 
@@ -28,6 +29,7 @@ export default function RootLayout({
 			<body
 				className={`${geistSans.variable} ${geistMono.variable} antialiased`}
 			>
+				<ChunkErrorReload />
 				<QueryProvider>
 					<Auth0ProviderWrapper>{children}</Auth0ProviderWrapper>
 				</QueryProvider>
