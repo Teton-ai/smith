@@ -25,8 +25,7 @@ export const useClientMutator = <T>() => {
 				"access_denied",
 				"invalid_grant",
 			];
-			const errorCode =
-				(err as { error?: string } | null)?.error ?? "";
+			const errorCode = (err as { error?: string } | null)?.error ?? "";
 			if (unrecoverableAuthErrors.includes(errorCode) && !isLoggingOut) {
 				isLoggingOut = true;
 				logout({
