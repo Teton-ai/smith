@@ -413,15 +413,21 @@ impl Actor {
             }
         }
 
-        let current_release_id = self
-            .magic
-            .get_release_id()
-            .await
-            .with_context(|| "Failed to get Target Release ID")?;
-
-        self.ensure_release_cache(current_release_id)
-            .await
-            .with_context(|| "Failed to ensure target release cache")?;
+        // TODO: take a look at this once we clean up the smith install flow
+        // on new devices
+        match self.magic.get_release_id().await {
+            Ok(current_release_id) => {
+                self.ensure_release_cache(current_release_id)
+                    .await
+                    .with_context(|| "Failed to ensure current release cache")?;
+            }
+            Err(err) => {
+                warn!(
+                    error = ?err,
+                    "Skipping current release cache warm-up because current release id is unavailable"
+                );
+            }
+        }
 
         let target_release_id = self
             .magic
