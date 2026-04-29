@@ -19,7 +19,15 @@ export const useClientMutator = <T>() => {
 		try {
 			token = await getAccessTokenSilently();
 		} catch (err) {
-			if (!isLoggingOut) {
+			const unrecoverableAuthErrors = [
+				"login_required",
+				"consent_required",
+				"access_denied",
+				"invalid_grant",
+			];
+			const errorCode =
+				(err as { error?: string } | null)?.error ?? "";
+			if (unrecoverableAuthErrors.includes(errorCode) && !isLoggingOut) {
 				isLoggingOut = true;
 				logout({
 					logoutParams: {
