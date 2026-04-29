@@ -63,6 +63,7 @@ export default function RootLayout({
 		<html lang="en">
 			<head>
 				<script
+					// biome-ignore lint/security/noDangerouslySetInnerHtml: hardcoded constant, no user input — must be inline so listeners register at parse time
 					dangerouslySetInnerHTML={{ __html: CHUNK_ERROR_RELOAD_SCRIPT }}
 				/>
 				<link rel="icon" href="/logo.png" type="image/png" />
