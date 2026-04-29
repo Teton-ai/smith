@@ -2,8 +2,12 @@ import { useAuth0 } from "@auth0/auth0-react";
 import axios, { type AxiosRequestConfig } from "axios";
 import { useConfig } from "./hooks/config";
 
+// Guards against many concurrent in-flight requests all triggering logout
+// when the refresh token expires.
+let isLoggingOut = false;
+
 export const useClientMutator = <T>() => {
-	const { isAuthenticated, getAccessTokenSilently } = useAuth0();
+	const { isAuthenticated, getAccessTokenSilently, logout } = useAuth0();
 	const { config } = useConfig();
 
 	const fetcher = async (req: AxiosRequestConfig): Promise<T> => {
@@ -11,7 +15,22 @@ export const useClientMutator = <T>() => {
 			throw new Error("User not authenticated");
 		}
 
-		const token = await getAccessTokenSilently();
+		let token: string;
+		try {
+			token = await getAccessTokenSilently();
+		} catch (err) {
+			if (!isLoggingOut) {
+				isLoggingOut = true;
+				logout({
+					logoutParams: {
+						returnTo:
+							typeof window !== "undefined" ? window.location.origin : "",
+					},
+				});
+			}
+			throw err;
+		}
+
 		const res = await axios({
 			...req,
 			paramsSerializer: {
