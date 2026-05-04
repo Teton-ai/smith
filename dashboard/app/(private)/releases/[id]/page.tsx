@@ -69,10 +69,12 @@ const ReleaseDetailPage = () => {
 		"automatic" | "labels" | "devices"
 	>("automatic");
 	const [canaryLabels, setCanaryLabels] = useState<string[]>([]);
-	const [canaryDeviceIds, setCanaryDeviceIds] = useState<Set<number>>(
-		new Set(),
+	const [canaryDeviceIds, setCanaryDeviceIds] = useState<Map<number, Device>>(
+		new Map(),
 	);
 	const [deviceSearchQuery, setDeviceSearchQuery] = useState("");
+	const [debouncedDeviceSearchQuery, setDebouncedDeviceSearchQuery] =
+		useState("");
 	const [deployStep, setDeployStep] = useState<1 | 2>(1);
 	const [showYankModal, setShowYankModal] = useState(false);
 	const [yanking, setYanking] = useState(false);
@@ -131,6 +133,8 @@ const ReleaseDetailPage = () => {
 				distribution_id: release?.distribution_id,
 				online: true,
 				outdated: false,
+				search: debouncedDeviceSearchQuery.trim() || undefined,
+				limit: 1000,
 			},
 			{
 				query: {
@@ -180,14 +184,6 @@ const ReleaseDetailPage = () => {
 		[unhealthyDevices],
 	);
 
-	const filteredEligibleDevices = useMemo(() => {
-		if (!deviceSearchQuery) return eligibleDevices;
-		const q = deviceSearchQuery.toLowerCase();
-		return eligibleDevices.filter((d: Device) =>
-			d.serial_number.toLowerCase().includes(q),
-		);
-	}, [eligibleDevices, deviceSearchQuery]);
-
 	const networkDotColor = (score?: number) => {
 		if (score == null) return "bg-gray-300";
 		if (score >= 4) return "bg-green-500";
@@ -226,6 +222,13 @@ const ReleaseDetailPage = () => {
 			return () => clearTimeout(timer);
 		}
 	}, [toast]);
+
+	useEffect(() => {
+		const timer = setTimeout(() => {
+			setDebouncedDeviceSearchQuery(deviceSearchQuery);
+		}, 300);
+		return () => clearTimeout(timer);
+	}, [deviceSearchQuery]);
 
 	const getArchColor = (architecture: string) => {
 		switch (architecture.toLowerCase()) {
@@ -411,7 +414,7 @@ const ReleaseDetailPage = () => {
 	const handleOpenDeployModal = () => {
 		setCanaryMode("automatic");
 		setCanaryLabels([]);
-		setCanaryDeviceIds(new Set());
+		setCanaryDeviceIds(new Map());
 		setDeviceSearchQuery("");
 		setDeployStep(1);
 		setShowDeployModal(true);
@@ -426,7 +429,7 @@ const ReleaseDetailPage = () => {
 		if (canaryMode === "labels" && canaryLabels.length > 0) {
 			data = { canary_device_labels: canaryLabels };
 		} else if (canaryMode === "devices" && canaryDeviceIds.size > 0) {
-			data = { canary_device_ids: Array.from(canaryDeviceIds) };
+			data = { canary_device_ids: Array.from(canaryDeviceIds.keys()) };
 		}
 
 		setDeploying(true);
@@ -821,23 +824,23 @@ const ReleaseDetailPage = () => {
 											<div className="p-4 text-center text-sm text-gray-500">
 												Loading devices...
 											</div>
-										) : filteredEligibleDevices.length === 0 ? (
+										) : eligibleDevices.length === 0 ? (
 											<div className="p-4 text-center text-sm text-gray-500">
 												No eligible devices found
 											</div>
 										) : (
-											filteredEligibleDevices.map((device: Device) => {
+											eligibleDevices.map((device: Device) => {
 												const isSelected = canaryDeviceIds.has(device.id);
 												return (
 													<div
 														key={device.id}
 														onClick={() =>
 															setCanaryDeviceIds((prev) => {
-																const next = new Set(prev);
+																const next = new Map(prev);
 																if (next.has(device.id)) {
 																	next.delete(device.id);
 																} else {
-																	next.add(device.id);
+																	next.set(device.id, device);
 																}
 																return next;
 															})
@@ -982,9 +985,8 @@ const ReleaseDetailPage = () => {
 											canary update
 										</h4>
 										<div className="border border-gray-200 rounded-md bg-white overflow-y-auto flex-1">
-											{eligibleDevices
-												.filter((d: Device) => canaryDeviceIds.has(d.id))
-												.map((device: Device) => (
+											{Array.from(canaryDeviceIds.values()).map(
+												(device: Device) => (
 													<div
 														key={device.id}
 														className="flex items-center gap-2 px-3 py-2.5 border-b border-gray-100 last:border-b-0"
@@ -1011,7 +1013,7 @@ const ReleaseDetailPage = () => {
 														<button
 															onClick={() =>
 																setCanaryDeviceIds((prev) => {
-																	const next = new Set(prev);
+																	const next = new Map(prev);
 																	next.delete(device.id);
 																	return next;
 																})
@@ -1021,7 +1023,8 @@ const ReleaseDetailPage = () => {
 															<X className="w-3.5 h-3.5" />
 														</button>
 													</div>
-												))}
+												),
+											)}
 										</div>
 									</>
 								))}
