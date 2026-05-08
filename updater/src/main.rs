@@ -22,7 +22,7 @@ async fn find_latest_smith_deb(packages_dir: &Path) -> anyhow::Result<(PathBuf, 
             continue;
         }
         let filename = path.file_name().and_then(|n| n.to_str()).unwrap_or_default();
-        if !filename.starts_with("smith") {
+        if !filename.starts_with("smith_") {
             continue;
         }
         if let Ok(meta) = entry.metadata().await {
@@ -88,6 +88,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .join(target_release_id.to_string());
 
     let (package_file, smith_package) = if release_cache.exists() {
+        info!("Using versions file: {}", release_cache.display());
         let content = tokio::fs::read(&release_cache).await?;
         let content = std::str::from_utf8(&content)?;
 
@@ -119,18 +120,37 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .with_context(|| "No smith package found in release")?;
 
         let package_file = blobs.join(&smith_package.file);
+        info!(
+            "Found smith package: version={} file={}",
+            smith_package.version,
+            package_file.display()
+        );
         (package_file, smith_package)
     } else {
-        warn!("Versions file not found, scanning {:?} for latest smith .deb", packages_dir);
-        find_latest_smith_deb(&packages_dir).await?
+        warn!(
+            "Versions file not found at {} — last resort: scanning {} for smith .deb",
+            release_cache.display(),
+            packages_dir.display()
+        );
+        let (file, package) = find_latest_smith_deb(&packages_dir).await?;
+        warn!(
+            "Last resort selected: version={} file={}",
+            package.version,
+            file.display()
+        );
+        (file, package)
     };
     let package_version = &smith_package.version;
 
     let installed_version = smith_package.get_system_version().await;
     let package_installed = matches!(installed_version, Ok(ref v) if v == package_version);
+    info!(
+        "Installed version: {:?}, target: {}, up to date: {}",
+        installed_version, package_version, package_installed
+    );
 
     if !package_installed {
-        info!("Installing package: smith");
+        info!("Installing smith {}", package_version);
         let install_command = format!(
             "sudo apt install {} -y --allow-downgrades",
             package_file.display()
