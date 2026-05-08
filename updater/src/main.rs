@@ -21,7 +21,10 @@ async fn find_latest_smith_deb(packages_dir: &Path) -> anyhow::Result<(PathBuf, 
         if path.extension().and_then(|e| e.to_str()) != Some("deb") {
             continue;
         }
-        let filename = path.file_name().and_then(|n| n.to_str()).unwrap_or_default();
+        let filename = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or_default();
         if !filename.starts_with("smith_") {
             continue;
         }
