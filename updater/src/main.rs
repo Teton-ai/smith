@@ -28,11 +28,10 @@ async fn find_latest_smith_deb(packages_dir: &Path) -> anyhow::Result<(PathBuf, 
         if !filename.starts_with("smith_") {
             continue;
         }
-        if let Ok(meta) = entry.metadata().await {
-            if let Ok(mtime) = meta.modified() {
+        if let Ok(meta) = entry.metadata().await
+            && let Ok(mtime) = meta.modified() {
                 candidates.push((path, mtime));
             }
-        }
     }
 
     candidates.sort_by_key(|(_, mtime)| *mtime);
