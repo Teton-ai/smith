@@ -10,17 +10,18 @@
 				var KEY = "__chunkErrorReloadAt",
 					COOLDOWN = 30000;
 				function reloadOnce() {
+					var last;
 					try {
-						var last = Number(sessionStorage.getItem(KEY) || 0);
+						last = Number(sessionStorage.getItem(KEY) || 0);
 						if (Date.now() - last < COOLDOWN) return;
 						sessionStorage.setItem(KEY, String(Date.now()));
-					} catch (e) {}
+					} catch (_e) {}
 					location.reload();
 				}
 				function isChunkLoadError(r) {
 					if (!r) return false;
 					if (r.name === "ChunkLoadError") return true;
-					var m = (r && r.message) || String(r);
+					var m = r?.message || String(r);
 					return (
 						/Loading (CSS )?chunk \S+ failed/i.test(m) ||
 						/Failed to fetch dynamically imported module/i.test(m) ||
@@ -40,7 +41,7 @@
 				addEventListener(
 					"error",
 					(e) => {
-						if (e && e.error && isChunkLoadError(e.error)) {
+						if (e?.error && isChunkLoadError(e.error)) {
 							reloadOnce();
 							return;
 						}
