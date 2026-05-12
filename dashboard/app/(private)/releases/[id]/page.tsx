@@ -1,5 +1,3 @@
-"use client";
-
 import { useQueryClient } from "@tanstack/react-query";
 import {
 	AlertTriangle,
@@ -24,10 +22,9 @@ import {
 	XCircle,
 	Zap,
 } from "lucide-react";
-import Link from "next/link";
-import { useParams, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
+import { Link, useNavigate, useParams } from "react-router";
 import {
 	type DeploymentRequest,
 	type Device,
@@ -50,7 +47,7 @@ import { Modal } from "@/app/components/modal";
 import { RelativeTime } from "@/app/components/RelativeTime";
 
 const ReleaseDetailPage = () => {
-	const router = useRouter();
+	const navigate = useNavigate();
 	const params = useParams();
 	const releaseId = parseInt(params.id as string);
 	const queryClient = useQueryClient();
@@ -436,7 +433,7 @@ const ReleaseDetailPage = () => {
 		try {
 			await releaseDeploymentHook.mutateAsync({ releaseId, data });
 			setShowDeployModal(false);
-			router.push(`/releases/${releaseId}/deployment`);
+			navigate(`/releases/${releaseId}/deployment`);
 		} catch (error: any) {
 			console.error("Failed to deploy release:", error);
 			alert(`Failed to deploy release: ${error?.message || "Unknown error"}`);
@@ -523,7 +520,7 @@ const ReleaseDetailPage = () => {
 			{/* Header with Back Button */}
 			<div className="flex items-center space-x-4">
 				<Link
-					href={
+					to={
 						distribution
 							? `/distributions/${distribution.id}`
 							: "/distributions"
@@ -595,7 +592,7 @@ const ReleaseDetailPage = () => {
 					</div>
 					<div className="flex items-center space-x-3">
 						<Link
-							href={`/devices?release_id=${release.id}`}
+							to={`/devices?release_id=${release.id}`}
 							className="flex items-center space-x-2 px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-md hover:bg-gray-200 transition-colors cursor-pointer"
 						>
 							<Cpu className="w-4 h-4" />
@@ -622,7 +619,7 @@ const ReleaseDetailPage = () => {
 									</Button>
 									{existingDeployment?.status === "InProgress" ? (
 										<Link
-											href={`/releases/${releaseId}/deployment`}
+											to={`/releases/${releaseId}/deployment`}
 											className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700 transition-colors cursor-pointer"
 										>
 											<Loader2 className="w-4 h-4 animate-spin" />

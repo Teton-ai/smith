@@ -22,7 +22,7 @@ const fetchConfig = async (): Promise<Config> => {
 	if (configCache) return configCache;
 
 	if (!configPromise) {
-		configPromise = fetch("/api/config")
+		configPromise = fetch("/config.json")
 			.then((res) => res.json())
 			.then((data: ConfigResponse) => {
 				configCache = data.env;

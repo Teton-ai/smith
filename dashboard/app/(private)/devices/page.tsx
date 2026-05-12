@@ -1,5 +1,3 @@
-"use client";
-
 import { useAuth0 } from "@auth0/auth0-react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
@@ -19,8 +17,8 @@ import {
 	X,
 	XCircle,
 } from "lucide-react";
-import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useNavigate, useSearchParams } from "react-router";
 import { Button } from "@/app/components/button";
 import LabelAutocomplete from "@/app/components/LabelAutocomplete";
 import { Modal } from "@/app/components/modal";
@@ -145,8 +143,8 @@ const PAGE_SIZE = 100;
 
 const DevicesPage = () => {
 	const { isAuthenticated } = useAuth0();
-	const router = useRouter();
-	const searchParams = useSearchParams();
+	const navigate = useNavigate();
+	const [searchParams] = useSearchParams();
 	const queryClient = useQueryClient();
 	const [searchTerm, setSearchTerm] = useState("");
 	const [debouncedSearchTerm, setDebouncedSearchTerm] = useState("");
@@ -567,7 +565,7 @@ const DevicesPage = () => {
 
 		const search = current.toString();
 		const query = search ? `?${search}` : "";
-		router.replace(`/devices${query}`);
+		navigate(`/devices${query}`, { replace: true });
 	};
 
 	const getDeviceStatus = (device: Device) => {
@@ -1186,9 +1184,7 @@ const DevicesPage = () => {
 								<div
 									key={device.id}
 									className="block px-4 py-3 hover:bg-gray-50 cursor-pointer transition-colors"
-									onClick={() =>
-										router.push(`/devices/${device.serial_number}`)
-									}
+									onClick={() => navigate(`/devices/${device.serial_number}`)}
 								>
 									<div className="grid grid-cols-[auto_2fr_2fr_2fr_1fr_1fr] gap-4 items-center">
 										<div className="w-6 flex items-center justify-center">

@@ -1,9 +1,6 @@
-"use client";
-
 import { ArrowLeft, FileText, Play, Radio, X } from "lucide-react";
-import Link from "next/link";
-import { useParams, useRouter } from "next/navigation";
 import { useState } from "react";
+import { Link, useNavigate, useParams } from "react-router";
 import { useGetDeviceInfo } from "@/app/api-client";
 import DeviceHeader from "../DeviceHeader";
 import LogViewer from "./LogViewer";
@@ -12,7 +9,7 @@ import { type DeviceService, useDeviceServices } from "./useDeviceServices";
 const ServicesPage = () => {
 	const params = useParams();
 	const serial = params.serial as string;
-	const router = useRouter();
+	const navigate = useNavigate();
 
 	const { data: device, isLoading: deviceLoading } = useGetDeviceInfo(serial);
 	const { data: services, isLoading: servicesLoading } =
@@ -40,7 +37,7 @@ const ServicesPage = () => {
 			<div className="flex items-center space-x-4">
 				<button
 					type="button"
-					onClick={() => router.back()}
+					onClick={() => navigate(-1)}
 					className="flex items-center space-x-2 text-gray-600 hover:text-gray-900 transition-colors"
 				>
 					<ArrowLeft className="w-4 h-4" />
@@ -55,13 +52,13 @@ const ServicesPage = () => {
 			<div className="border-b border-gray-200">
 				<nav className="-mb-px flex space-x-8">
 					<Link
-						href={`/devices/${serial}`}
+						to={`/devices/${serial}`}
 						className="block py-2 px-1 border-b-2 border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 font-medium text-sm transition-colors cursor-pointer"
 					>
 						Overview
 					</Link>
 					<Link
-						href={`/devices/${serial}/commands`}
+						to={`/devices/${serial}/commands`}
 						className="block py-2 px-1 border-b-2 border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 font-medium text-sm transition-colors cursor-pointer"
 					>
 						Commands

@@ -1,8 +1,6 @@
-"use client";
-
 import { Loader2, Send, Terminal } from "lucide-react";
-import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Link } from "react-router";
 import {
 	type BundleWithCommands,
 	type BundleWithCommandsPaginated,
@@ -69,7 +67,7 @@ const DeviceResponseDetail = ({
 			<div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 shrink-0">
 				<div className="flex items-center gap-2 flex-wrap">
 					<Link
-						href={`/devices/${response.serial_number}/commands`}
+						to={`/devices/${response.serial_number}/commands`}
 						className="text-sm font-mono font-medium text-blue-600 hover:underline"
 					>
 						{response.serial_number}

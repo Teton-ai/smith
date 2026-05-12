@@ -13,12 +13,10 @@
 # testing
 /coverage
 
-# next.js
-/.next/
-/out/
-
-# production
-/build
+# build output
+/dist
+/dist-ssr
+*.local
 
 # .env
 .env*
@@ -33,10 +31,8 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
-
-# vercel
-.vercel
+logs
+*.log
 
 # typescript
 *.tsbuildinfo
-next-env.d.ts

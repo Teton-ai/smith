@@ -1,5 +1,3 @@
-"use client";
-
 import {
 	ArrowLeft,
 	ChevronRight,
@@ -14,25 +12,23 @@ import {
 	WifiOff,
 	XCircle,
 } from "lucide-react";
-import dynamic from "next/dynamic";
-import Link from "next/link";
-import { useParams, useRouter } from "next/navigation";
+import { lazy, Suspense } from "react";
+import { Link, useNavigate, useParams } from "react-router";
 import { useGetDeviceInfo } from "@/app/api-client";
 import DeviceHeader from "./DeviceHeader";
 
-const LocationMap = dynamic(() => import("./LocationMap"), {
-	ssr: false,
-	loading: () => (
-		<div className="h-64 bg-gray-100 rounded-lg flex items-center justify-center">
-			Loading map...
-		</div>
-	),
-});
+const LocationMap = lazy(() => import("./LocationMap"));
+
+const MapFallback = () => (
+	<div className="h-64 bg-gray-100 rounded-lg flex items-center justify-center">
+		Loading map...
+	</div>
+);
 
 const DeviceDetailPage = () => {
 	const params = useParams();
 	const serial = params.serial as string;
-	const router = useRouter();
+	const navigate = useNavigate();
 	const { data: device, isLoading: loading } = useGetDeviceInfo(serial);
 
 	const getFlagUrl = (countryCode: string) => {
@@ -94,7 +90,7 @@ const DeviceDetailPage = () => {
 			<div className="flex items-center space-x-4">
 				<button
 					type="button"
-					onClick={() => router.back()}
+					onClick={() => navigate(-1)}
 					className="flex items-center space-x-2 text-gray-600 hover:text-gray-900 transition-colors"
 				>
 					<ArrowLeft className="w-4 h-4" />
@@ -112,13 +108,13 @@ const DeviceDetailPage = () => {
 						Overview
 					</button>
 					<Link
-						href={`/devices/${serial}/commands`}
+						to={`/devices/${serial}/commands`}
 						className="block py-2 px-1 border-b-2 border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 font-medium text-sm transition-colors cursor-pointer"
 					>
 						Commands
 					</Link>
 					<Link
-						href={`/devices/${serial}/services`}
+						to={`/devices/${serial}/services`}
 						className="block py-2 px-1 border-b-2 border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 font-medium text-sm transition-colors cursor-pointer"
 					>
 						Services
@@ -201,7 +197,7 @@ const DeviceDetailPage = () => {
 									Distribution
 								</span>
 								<Link
-									href={`/distributions/${device.release?.distribution_id}`}
+									to={`/distributions/${device.release?.distribution_id}`}
 									className="block font-mono text-sm text-blue-600 hover:text-blue-800 hover:underline cursor-pointer transition-colors"
 								>
 									{device.release.distribution_name}
@@ -217,7 +213,7 @@ const DeviceDetailPage = () => {
 									Current Release
 								</span>
 								<Link
-									href={`/releases/${device.release?.id}`}
+									to={`/releases/${device.release?.id}`}
 									className="block font-mono text-sm text-blue-600 hover:text-blue-800 hover:underline cursor-pointer transition-colors"
 								>
 									{device.release.version}
@@ -236,7 +232,7 @@ const DeviceDetailPage = () => {
 										</span>
 										<span className="font-mono text-sm text-gray-900">
 											<Link
-												href={`/distributions/${device.target_release.distribution_id}`}
+												to={`/distributions/${device.target_release.distribution_id}`}
 												className="block font-mono text-sm text-blue-600 hover:text-blue-800 hover:underline cursor-pointer transition-colors"
 											>
 												{device.target_release.distribution_name}
@@ -252,7 +248,7 @@ const DeviceDetailPage = () => {
 										</span>
 										<span className="font-mono text-sm text-gray-900">
 											<Link
-												href={`/releases/${device.target_release?.id}`}
+												to={`/releases/${device.target_release?.id}`}
 												className="block font-mono text-sm text-blue-600 hover:text-blue-800 hover:underline cursor-pointer transition-colors"
 											>
 												{device.target_release.version}
@@ -513,11 +509,13 @@ const DeviceDetailPage = () => {
 					{device.ip_address ? (
 						<div className="space-y-4">
 							{/* Map */}
-							<LocationMap
-								countryCode={device.ip_address.country_code}
-								city={device.ip_address.city}
-								country={device.ip_address.country}
-							/>
+							<Suspense fallback={<MapFallback />}>
+								<LocationMap
+									countryCode={device.ip_address.country_code}
+									city={device.ip_address.city}
+									country={device.ip_address.country}
+								/>
+							</Suspense>
 
 							{/* Location Details */}
 							<div className="space-y-3">

@@ -1,7 +1,5 @@
-"use client";
-
-import { redirect } from "next/navigation";
+import { Navigate } from "react-router";
 
 export default function ComponentsIndex() {
-	redirect("/components/buttons");
+	return <Navigate to="/components/buttons" replace />;
 }

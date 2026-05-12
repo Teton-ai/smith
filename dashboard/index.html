@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="UTF-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+		<link rel="icon" href="/logo.png" type="image/png" />
+		<title>Smith</title>
+		<script>
+			(() => {
+				var KEY = "__chunkErrorReloadAt",
+					COOLDOWN = 30000;
+				function reloadOnce() {
+					try {
+						var last = Number(sessionStorage.getItem(KEY) || 0);
+						if (Date.now() - last < COOLDOWN) return;
+						sessionStorage.setItem(KEY, String(Date.now()));
+					} catch (e) {}
+					location.reload();
+				}
+				function isChunkLoadError(r) {
+					if (!r) return false;
+					if (r.name === "ChunkLoadError") return true;
+					var m = (r && r.message) || String(r);
+					return (
+						/Loading (CSS )?chunk \S+ failed/i.test(m) ||
+						/Failed to fetch dynamically imported module/i.test(m) ||
+						/Importing a module script failed/i.test(m)
+					);
+				}
+				function isStaleAsset(t) {
+					if (!t || !t.tagName) return false;
+					var u =
+						t.tagName === "LINK"
+							? t.href
+							: t.tagName === "SCRIPT"
+								? t.src
+								: null;
+					return !!u && u.indexOf("/assets/") !== -1;
+				}
+				addEventListener(
+					"error",
+					(e) => {
+						if (e && e.error && isChunkLoadError(e.error)) {
+							reloadOnce();
+							return;
+						}
+						if (
+							e &&
+							typeof e.message === "string" &&
+							isChunkLoadError({ message: e.message })
+						) {
+							reloadOnce();
+							return;
+						}
+						if (e && isStaleAsset(e.target)) reloadOnce();
+					},
+					true,
+				);
+				addEventListener("unhandledrejection", (e) => {
+					if (e && isChunkLoadError(e.reason)) reloadOnce();
+				});
+			})();
+		</script>
+	</head>
+	<body class="antialiased">
+		<div id="root"></div>
+		<script type="module" src="/src/main.tsx"></script>
+	</body>
+</html>

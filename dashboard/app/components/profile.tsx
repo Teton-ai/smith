@@ -1,8 +1,5 @@
-"use client";
-
 import { useAuth0 } from "@auth0/auth0-react";
 import { ChevronDown, ChevronRight, LogOut, User } from "lucide-react";
-import Image from "next/image";
 import { useEffect, useRef, useState } from "react";
 
 interface ProfileProps {
@@ -42,7 +39,7 @@ export default function Profile({ sidebar, expanded }: ProfileProps) {
 				>
 					<div className="flex items-center justify-center w-12 shrink-0">
 						{user.picture ? (
-							<Image
+							<img
 								src={user.picture}
 								alt={user.name || "User"}
 								width={28}
@@ -77,7 +74,7 @@ export default function Profile({ sidebar, expanded }: ProfileProps) {
 						<div className="p-4 border-b border-gray-200">
 							<div className="flex items-center space-x-3">
 								{user.picture ? (
-									<Image
+									<img
 										src={user.picture}
 										alt={user.name || "User"}
 										width={40}
@@ -120,7 +117,7 @@ export default function Profile({ sidebar, expanded }: ProfileProps) {
 				className="flex items-center space-x-2 p-2 rounded-md text-gray-400 hover:text-gray-500 hover:bg-gray-50 transition-colors cursor-pointer"
 			>
 				{user.picture ? (
-					<Image
+					<img
 						src={user.picture}
 						alt={user.name || "User"}
 						width={32}

@@ -1,5 +1,3 @@
-"use client";
-
 import { useAuth0 } from "@auth0/auth0-react";
 import {
 	Activity,
@@ -11,9 +9,8 @@ import {
 	Smartphone,
 	Terminal,
 } from "lucide-react";
-import { useRouter } from "next/navigation";
-import type React from "react";
 import { useEffect, useState } from "react";
+import { Outlet, useNavigate } from "react-router";
 import Profile from "@/app/components/profile";
 import Sidebar from "@/app/components/sidebar";
 import { useConfig } from "@/app/hooks/config";
@@ -74,7 +71,7 @@ const keyboardShortcuts: Record<string, string> = {
 };
 
 function useKeyboardNav() {
-	const router = useRouter();
+	const navigate = useNavigate();
 	useEffect(() => {
 		function handleKeyDown(e: KeyboardEvent) {
 			if (e.ctrlKey || e.metaKey || e.altKey) return;
@@ -87,28 +84,24 @@ function useKeyboardNav() {
 			)
 				return;
 			const path = keyboardShortcuts[e.key];
-			if (path) router.push(path);
+			if (path) navigate(path);
 		}
 		document.addEventListener("keydown", handleKeyDown);
 		return () => document.removeEventListener("keydown", handleKeyDown);
-	}, [router]);
+	}, [navigate]);
 }
 
-export default function PrivateLayout({
-	children,
-}: Readonly<{
-	children: React.ReactNode;
-}>) {
+export default function PrivateLayout() {
 	const { isAuthenticated, isLoading } = useAuth0();
-	const router = useRouter();
+	const navigate = useNavigate();
 	const apiVersion = useApiVersion();
 	useKeyboardNav();
 
 	useEffect(() => {
 		if (!isLoading && !isAuthenticated) {
-			router.push("/");
+			navigate("/");
 		}
-	}, [isLoading, isAuthenticated, router]);
+	}, [isLoading, isAuthenticated, navigate]);
 
 	if (isLoading || !isAuthenticated) {
 		return null;
@@ -124,7 +117,7 @@ export default function PrivateLayout({
 				versionText={apiVersion || undefined}
 			/>
 			<main className="flex-1 min-w-0 overflow-hidden mt-14 md:mt-0 flex flex-col">
-				{children}
+				<Outlet />
 			</main>
 		</div>
 	);
