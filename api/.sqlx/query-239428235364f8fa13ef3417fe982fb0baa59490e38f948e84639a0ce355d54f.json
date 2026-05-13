@@ -81,7 +81,7 @@
       {
         "ordinal": 15,
         "name": "ip_address_id",
-        "type_info": "Int4"
+        "type_info": "Int8"
       },
       {
         "ordinal": 16,

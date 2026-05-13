@@ -15,7 +15,7 @@ const IP_ADDRESS_TAG: &str = "ip_address";
     get,
     path = "/ip_address/{ip_address_id}",
     params(
-        ("ip_address_id" = i32, Path),
+        ("ip_address_id" = i64, Path),
     ),
     responses(
         (status = 200, description = "IP address information retrieved successfully", body = IpAddressInfo),
@@ -31,7 +31,7 @@ const IP_ADDRESS_TAG: &str = "ip_address";
 pub async fn get_ip_address_info(
     Extension(state): Extension<State>,
     Extension(current_user): Extension<CurrentUser>,
-    Path(ip_address_id): Path<i32>,
+    Path(ip_address_id): Path<i64>,
 ) -> axum::response::Result<Json<IpAddressInfo>, StatusCode> {
     let allowed = authorization::check(current_user, "devices", "read");
 
@@ -211,7 +211,7 @@ pub async fn get_ip_addresses(
     put,
     path = "/ip_address/{ip_address_id}",
     params(
-        ("ip_address_id" = i32, Path),
+        ("ip_address_id" = i64, Path),
     ),
     request_body = UpdateIpAddressRequest,
     responses(
@@ -228,7 +228,7 @@ pub async fn get_ip_addresses(
 pub async fn update_ip_address(
     Extension(state): Extension<State>,
     Extension(current_user): Extension<CurrentUser>,
-    Path(ip_address_id): Path<i32>,
+    Path(ip_address_id): Path<i64>,
     Json(request): Json<UpdateIpAddressRequest>,
 ) -> Result<Json<IpAddressInfo>, StatusCode> {
     let allowed = authorization::check(current_user, "devices", "write");

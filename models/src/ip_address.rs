@@ -4,7 +4,7 @@ use utoipa::ToSchema;
 
 #[derive(Serialize, Deserialize, ToSchema, Debug)]
 pub struct IpAddressInfo {
-    pub id: i32,
+    pub id: i64,
     #[schema(value_type = String, example = "192.168.1.1")]
     pub ip_address: IpNetwork,
     pub name: Option<String>,
