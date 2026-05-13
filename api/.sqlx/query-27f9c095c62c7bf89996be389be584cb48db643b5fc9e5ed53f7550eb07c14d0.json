@@ -71,12 +71,12 @@
       {
         "ordinal": 13,
         "name": "ip_address_id",
-        "type_info": "Int4"
+        "type_info": "Int8"
       },
       {
         "ordinal": 14,
         "name": "ip_id?",
-        "type_info": "Int4"
+        "type_info": "Int8"
       },
       {
         "ordinal": 15,
