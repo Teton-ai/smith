@@ -460,39 +460,45 @@ pub async fn save_last_ping_with_ip(
         Some(ip) => {
             let ip_network: ipnetwork::IpNetwork = ip.into();
 
-            // Insert IP address if it doesn't exist, or get existing ID
-            let insert_result = sqlx::query!(
-                    "INSERT INTO ip_address (ip_address, created_at) VALUES ($1, NOW()) ON CONFLICT (ip_address) DO NOTHING RETURNING id",
-                    ip_network
-                )
-                .fetch_optional(&mut *tx)
-                .await?;
+            // SELECT first to avoid burning an IDENTITY sequence value on every ping —
+            // ON CONFLICT DO NOTHING still advances the sequence on conflict.
+            let existing = sqlx::query!(
+                r#"
+                    SELECT id,
+                           CASE
+                               WHEN updated_at < NOW() - INTERVAL '24 hours' THEN true
+                               ELSE false
+                           END as needs_update
+                    FROM ip_address
+                    WHERE ip_address = $1
+                "#,
+                ip_network
+            )
+            .fetch_optional(&mut *tx)
+            .await?;
 
-            let (ip_id, should_update_geolocation) = match insert_result {
-                Some(record) => {
-                    // New IP was inserted, mark for geolocation update
-                    (record.id, true)
-                }
+            let (ip_id, should_update_geolocation) = match existing {
+                Some(record) => (record.id, record.needs_update.unwrap_or(false)),
                 None => {
-                    // IP already exists, get ID and check if geolocation needs updating
-                    let existing_record = sqlx::query!(
-                        r#"
-                            SELECT id,
-                                   CASE
-                                       WHEN updated_at < NOW() - INTERVAL '24 hours' THEN true
-                                       ELSE false
-                                   END as needs_update
-                            FROM ip_address
-                            WHERE ip_address = $1
-                            "#,
+                    let inserted = sqlx::query!(
+                        "INSERT INTO ip_address (ip_address, created_at) VALUES ($1, NOW()) ON CONFLICT (ip_address) DO NOTHING RETURNING id",
                         ip_network
                     )
-                    .fetch_one(&mut *tx)
+                    .fetch_optional(&mut *tx)
                     .await?;
-                    (
-                        existing_record.id,
-                        existing_record.needs_update.unwrap_or(false),
-                    )
+                    match inserted {
+                        Some(record) => (record.id, true),
+                        None => {
+                            // Concurrent insert won the race; fetch the now-existing row.
+                            let row = sqlx::query!(
+                                "SELECT id FROM ip_address WHERE ip_address = $1",
+                                ip_network
+                            )
+                            .fetch_one(&mut *tx)
+                            .await?;
+                            (row.id, true)
+                        }
+                    }
                 }
             };
 
