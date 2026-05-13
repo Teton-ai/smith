@@ -37,7 +37,7 @@ pub struct RawDevice {
     pub network_id: Option<i32>,
     pub modem_id: Option<i32>,
     pub archived: bool,
-    pub ip_address_id: Option<i32>,
+    pub ip_address_id: Option<i64>,
 }
 
 fn serialize_token_presence<S>(token: &Option<String>, serializer: S) -> Result<S::Ok, S::Error>
@@ -141,7 +141,7 @@ pub struct LabelWithValues {
 
 async fn update_ip_geolocation(
     ip_address: IpAddr,
-    ip_id: i32,
+    ip_id: i64,
     api_key: &str,
     pool: &PgPool,
 ) -> anyhow::Result<()> {

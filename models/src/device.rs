@@ -33,7 +33,7 @@ pub struct Device {
     #[schema(value_type = Option<SystemInfo>)]
     pub system_info: Option<Value>,
     pub modem_id: Option<i32>,
-    pub ip_address_id: Option<i32>,
+    pub ip_address_id: Option<i64>,
     pub ip_address: Option<IpAddressInfo>,
     pub modem: Option<Modem>,
     pub release: Option<Release>,
