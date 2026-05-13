@@ -205,6 +205,7 @@ pub async fn get_distribution_releases(
     ),
     responses(
         (status = StatusCode::OK, description = "Get the latest deployed release for the distribution", body = Release),
+        (status = StatusCode::NOT_FOUND, description = "No deployed release for the distribution"),
         (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to get latest deployed release"),
     ),
     security(
@@ -221,7 +222,8 @@ pub async fn get_distribution_latest_release(
         .map_err(|err| {
             error!("Failed to get latest release {err}");
             StatusCode::INTERNAL_SERVER_ERROR
-        })?;
+        })?
+        .ok_or(StatusCode::NOT_FOUND)?;
 
     Ok(Json(release))
 }

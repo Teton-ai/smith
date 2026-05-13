@@ -27,7 +27,7 @@ pub async fn get_release_by_id(
 pub async fn get_latest_distribution_release(
     distribution_id: i32,
     pg_pool: &sqlx::PgPool,
-) -> Result<Release, sqlx::Error> {
+) -> Result<Option<Release>, sqlx::Error> {
     sqlx::query_as!(
         Release,
         "
@@ -43,6 +43,6 @@ pub async fn get_latest_distribution_release(
         ",
         distribution_id
     )
-    .fetch_one(pg_pool)
+    .fetch_optional(pg_pool)
     .await
 }
