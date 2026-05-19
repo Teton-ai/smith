@@ -1,9 +1,6 @@
-"use client";
-
 import { useAuth0 } from "@auth0/auth0-react";
-import Image from "next/image";
-import { useRouter } from "next/navigation";
 import { useEffect } from "react";
+import { useNavigate } from "react-router";
 
 const LoginPage = () => {
 	const { isLoading, error, loginWithPopup } = useAuth0();
@@ -29,7 +26,7 @@ const LoginPage = () => {
 				<div className="bg-white border border-gray-200 rounded-lg p-8 shadow-sm">
 					<div className="flex flex-col items-center space-y-6">
 						<div className="flex flex-col items-center space-y-4">
-							<Image
+							<img
 								src="/logo.png"
 								alt="Smith Logo"
 								width={100}
@@ -61,13 +58,13 @@ const LoginPage = () => {
 
 export default function Home() {
 	const { isLoading, isAuthenticated } = useAuth0();
-	const router = useRouter();
+	const navigate = useNavigate();
 
 	useEffect(() => {
 		if (!isLoading && isAuthenticated) {
-			router.push("/dashboard");
+			navigate("/dashboard");
 		}
-	}, [isLoading, isAuthenticated, router]);
+	}, [isLoading, isAuthenticated, navigate]);
 
 	if (!isLoading && isAuthenticated) {
 		return null; // or a loading spinner while redirecting

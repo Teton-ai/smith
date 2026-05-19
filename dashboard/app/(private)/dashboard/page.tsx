@@ -1,5 +1,3 @@
-"use client";
-
 import {
 	Activity,
 	AlertTriangle,
@@ -11,8 +9,8 @@ import {
 	ShieldCheck,
 	XCircle,
 } from "lucide-react";
-import Link from "next/link";
 import { useMemo, useState } from "react";
+import { Link } from "react-router";
 import {
 	Area,
 	AreaChart,
@@ -254,7 +252,7 @@ const AdminPanel = () => {
 				) : (
 					<>
 						<Link
-							href="/devices?approved=false"
+							to="/devices?approved=false"
 							className={`rounded-lg border p-6 transition-colors cursor-pointer ${
 								unapprovedDevices.length > 0
 									? "bg-orange-50 border-orange-200 hover:bg-orange-100"
@@ -411,7 +409,7 @@ const AdminPanel = () => {
 										<Link
 											key={device.id}
 											className="block px-4 py-3 hover:bg-purple-50 cursor-pointer transition-colors"
-											href={`/devices/${device.serial_number}`}
+											to={`/devices/${device.serial_number}`}
 										>
 											<div className="flex items-center justify-between">
 												<div className="flex items-center space-x-3 flex-1">
@@ -461,7 +459,7 @@ const AdminPanel = () => {
 								{stuckUpdates.length > 10 && (
 									<div className="px-4 py-3 bg-gray-50">
 										<Link
-											href="/devices?outdated=true"
+											to="/devices?outdated=true"
 											className="block text-sm text-blue-600 hover:text-blue-800 cursor-pointer"
 										>
 											View all {stuckUpdates.length} devices →
@@ -486,7 +484,7 @@ const AdminPanel = () => {
 									<Link
 										key={device.serial_number}
 										className="block px-4 py-3 hover:bg-rose-50 cursor-pointer transition-colors"
-										href={`/devices/${device.serial_number}`}
+										to={`/devices/${device.serial_number}`}
 									>
 										<div className="flex items-center justify-between">
 											<div className="flex items-center space-x-3 flex-1">
@@ -508,7 +506,7 @@ const AdminPanel = () => {
 								{unhealthyByDevice.length > 10 && (
 									<div className="px-4 py-3 bg-gray-50">
 										<Link
-											href="/devices?service_not_running=true&online=online"
+											to="/devices?service_not_running=true&online=online"
 											className="block text-sm text-blue-600 hover:text-blue-800 cursor-pointer"
 										>
 											View all {unhealthyByDevice.length} devices →
@@ -534,7 +532,7 @@ const AdminPanel = () => {
 										<Link
 											key={device.id}
 											className="block px-4 py-3 hover:bg-yellow-50 cursor-pointer transition-colors"
-											href={`/devices/${device.serial_number}`}
+											to={`/devices/${device.serial_number}`}
 										>
 											<div className="flex items-center justify-between">
 												<div className="flex items-center space-x-3 flex-1">
@@ -568,7 +566,7 @@ const AdminPanel = () => {
 								{recentlyOffline.length > 10 && (
 									<div className="px-4 py-3 bg-gray-50">
 										<Link
-											href="/devices"
+											to="/devices"
 											className="block text-sm text-blue-600 hover:text-blue-800 cursor-pointer"
 										>
 											View all {recentlyOffline.length} devices →
@@ -594,7 +592,7 @@ const AdminPanel = () => {
 										<Link
 											key={device.id}
 											className="block px-4 py-3 hover:bg-orange-50 cursor-pointer transition-colors"
-											href={`/devices/${device.serial_number}`}
+											to={`/devices/${device.serial_number}`}
 										>
 											<div className="flex items-center justify-between">
 												<div className="flex items-center space-x-3 flex-1">
@@ -628,7 +626,7 @@ const AdminPanel = () => {
 								{offlineWeek.length > 10 && (
 									<div className="px-4 py-3 bg-gray-50">
 										<Link
-											href="/devices"
+											to="/devices"
 											className="block text-sm text-blue-600 hover:text-blue-800 cursor-pointer"
 										>
 											View all {offlineWeek.length} devices →
@@ -654,7 +652,7 @@ const AdminPanel = () => {
 										<Link
 											key={device.id}
 											className="block px-4 py-3 hover:bg-red-50 cursor-pointer transition-colors"
-											href={`/devices/${device.serial_number}`}
+											to={`/devices/${device.serial_number}`}
 										>
 											<div className="flex items-center justify-between">
 												<div className="flex items-center space-x-3 flex-1">
@@ -688,7 +686,7 @@ const AdminPanel = () => {
 								{offlineMonth.length > 10 && (
 									<div className="px-4 py-3 bg-gray-50">
 										<Link
-											href="/devices"
+											to="/devices"
 											className="block text-sm text-blue-600 hover:text-blue-800 cursor-pointer"
 										>
 											View all {offlineMonth.length} devices →
@@ -714,7 +712,7 @@ const AdminPanel = () => {
 										<Link
 											key={device.id}
 											className="block px-4 py-3 hover:bg-gray-50 cursor-pointer transition-colors"
-											href={`/devices/${device.serial_number}`}
+											to={`/devices/${device.serial_number}`}
 										>
 											<div className="flex items-center justify-between">
 												<div className="flex items-center space-x-3 flex-1">
@@ -744,7 +742,7 @@ const AdminPanel = () => {
 								{neverSeen.length > 10 && (
 									<div className="px-4 py-3 bg-gray-50">
 										<Link
-											href="/devices"
+											to="/devices"
 											className="block text-sm text-blue-600 hover:text-blue-800 cursor-pointer"
 										>
 											View all {neverSeen.length} devices →

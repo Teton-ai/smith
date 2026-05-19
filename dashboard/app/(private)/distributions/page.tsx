@@ -1,5 +1,3 @@
-"use client";
-
 import {
 	ChevronRight,
 	Cpu,
@@ -11,8 +9,8 @@ import {
 	Package,
 	Search,
 } from "lucide-react";
-import Link from "next/link";
 import { useState } from "react";
+import { Link } from "react-router";
 import {
 	type DistributionRolloutStats,
 	useGetDistributionRollouts,
@@ -159,7 +157,7 @@ const DistributionsPage = () => {
 							<Link
 								key={distribution.id}
 								className="block px-4 py-3 hover:bg-gray-50 cursor-pointer transition-colors"
-								href={`/distributions/${distribution.id}`}
+								to={`/distributions/${distribution.id}`}
 							>
 								<div className="flex items-center justify-between">
 									<div className="flex items-center space-x-3">

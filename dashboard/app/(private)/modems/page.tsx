@@ -1,8 +1,6 @@
-"use client";
-
 import { Check, Search, Signal, Smartphone, X } from "lucide-react";
-import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
+import { useNavigate, useSearchParams } from "react-router";
 import { useGetModemList } from "../../api-client";
 
 const ModemSkeleton = () => (
@@ -42,8 +40,8 @@ const LoadingSkeleton = () => (
 );
 
 const ModemsPage = () => {
-	const router = useRouter();
-	const searchParams = useSearchParams();
+	const navigate = useNavigate();
+	const [searchParams] = useSearchParams();
 	const [searchTerm, setSearchTerm] = useState("");
 	const [toast, setToast] = useState<{
 		message: string;
@@ -97,7 +95,7 @@ const ModemsPage = () => {
 		} else {
 			params.delete("search");
 		}
-		router.push(`/modems?${params.toString()}`, { scroll: false });
+		navigate(`/modems?${params.toString()}`, { preventScrollReset: true });
 	};
 
 	const handleSearchChange = (value: string) => {

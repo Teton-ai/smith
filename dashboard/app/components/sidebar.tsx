@@ -1,11 +1,7 @@
-"use client";
-
 import { Menu, X } from "lucide-react";
-import Image from "next/image";
-import Link from "next/link";
-import { usePathname } from "next/navigation";
 import type React from "react";
 import { useState } from "react";
+import { Link, useLocation } from "react-router";
 
 export interface NavItem {
 	path: string;
@@ -58,7 +54,7 @@ export default function Sidebar({
 	versionText,
 	className,
 }: SidebarProps) {
-	const pathname = usePathname();
+	const { pathname } = useLocation();
 	const [mobileOpen, setMobileOpen] = useState(false);
 	const [expanded, setExpanded] = useState(false);
 
@@ -79,7 +75,7 @@ export default function Sidebar({
 						className="flex items-center cursor-pointer hover:opacity-80 transition-opacity duration-200 focus:outline-none"
 						aria-label={expanded ? "Collapse sidebar" : "Expand sidebar"}
 					>
-						<Image
+						<img
 							src="/logo.png"
 							alt="Smith Logo"
 							width={32}
@@ -115,7 +111,7 @@ export default function Sidebar({
 						return (
 							<Link
 								key={item.path}
-								href={item.path}
+								to={item.path}
 								className={`flex items-center h-10 rounded-md transition-all duration-200 cursor-pointer relative group/item ${
 									active
 										? "bg-indigo-50 text-indigo-700"
@@ -154,19 +150,29 @@ export default function Sidebar({
 					<div className="shrink-0 border-t border-gray-200 px-2 py-3 space-y-1">
 						{bottomItems.map((item) => {
 							const Icon = item.icon;
-							return (
-								<Link
-									key={item.path}
-									href={item.path}
-									{...(item.external
-										? { target: "_blank", rel: "noopener noreferrer" }
-										: {})}
-									className="flex items-center h-10 rounded-md text-gray-600 hover:bg-gray-100 hover:text-gray-900 transition-colors duration-200 cursor-pointer group/item"
-								>
+							const className =
+								"flex items-center h-10 rounded-md text-gray-600 hover:bg-gray-100 hover:text-gray-900 transition-colors duration-200 cursor-pointer group/item";
+							const inner = (
+								<>
 									<div className="flex items-center justify-center w-12 shrink-0">
 										<Icon className="w-[18px] h-[18px] transition-transform duration-200 group-hover/item:scale-110" />
 									</div>
 									<DesktopLabel expanded={expanded}>{item.label}</DesktopLabel>
+								</>
+							);
+							return item.external ? (
+								<a
+									key={item.path}
+									href={item.path}
+									target="_blank"
+									rel="noopener noreferrer"
+									className={className}
+								>
+									{inner}
+								</a>
+							) : (
+								<Link key={item.path} to={item.path} className={className}>
+									{inner}
 								</Link>
 							);
 						})}
@@ -183,8 +189,8 @@ export default function Sidebar({
 				>
 					<Menu className="w-5 h-5" />
 				</button>
-				<Link href="/dashboard" className="ml-3">
-					<Image
+				<Link to="/dashboard" className="ml-3">
+					<img
 						src="/logo.png"
 						alt="Smith Logo"
 						width={28}
@@ -217,10 +223,10 @@ export default function Sidebar({
 						<div className="flex items-center h-16 px-4 shrink-0">
 							<Link
 								className="flex items-center cursor-pointer"
-								href="/dashboard"
+								to="/dashboard"
 								onClick={() => setMobileOpen(false)}
 							>
-								<Image
+								<img
 									src="/logo.png"
 									alt="Smith Logo"
 									width={32}
@@ -243,7 +249,7 @@ export default function Sidebar({
 								return (
 									<Link
 										key={item.path}
-										href={item.path}
+										to={item.path}
 										onClick={() => setMobileOpen(false)}
 										className={`flex items-center h-10 rounded-md transition-colors duration-200 cursor-pointer relative ${
 											active
@@ -277,19 +283,29 @@ export default function Sidebar({
 							<div className="shrink-0 border-t border-gray-200 px-2 py-3 space-y-1">
 								{bottomItems.map((item) => {
 									const Icon = item.icon;
-									return (
-										<Link
-											key={item.path}
-											href={item.path}
-											{...(item.external
-												? { target: "_blank", rel: "noopener noreferrer" }
-												: {})}
-											className="flex items-center h-10 rounded-md text-gray-600 hover:bg-gray-100 hover:text-gray-900 transition-colors duration-200 cursor-pointer"
-										>
+									const className =
+										"flex items-center h-10 rounded-md text-gray-600 hover:bg-gray-100 hover:text-gray-900 transition-colors duration-200 cursor-pointer";
+									const inner = (
+										<>
 											<div className="flex items-center justify-center w-12 shrink-0">
 												<Icon className="w-[18px] h-[18px]" />
 											</div>
 											<MobileLabel>{item.label}</MobileLabel>
+										</>
+									);
+									return item.external ? (
+										<a
+											key={item.path}
+											href={item.path}
+											target="_blank"
+											rel="noopener noreferrer"
+											className={className}
+										>
+											{inner}
+										</a>
+									) : (
+										<Link key={item.path} to={item.path} className={className}>
+											{inner}
 										</Link>
 									);
 								})}

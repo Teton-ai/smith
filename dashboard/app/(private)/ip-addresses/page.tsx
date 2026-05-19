@@ -1,9 +1,7 @@
-"use client";
-
 import { useQueryClient } from "@tanstack/react-query";
 import { Check, Edit2, Globe, Search, Shield, Wifi, X } from "lucide-react";
-import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
+import { useNavigate, useSearchParams } from "react-router";
 import {
 	type IpAddressInfo,
 	useGetIpAddresses,
@@ -50,8 +48,8 @@ const LoadingSkeleton = () => (
 );
 
 const IpAddressesPage = () => {
-	const router = useRouter();
-	const searchParams = useSearchParams();
+	const navigate = useNavigate();
+	const [searchParams] = useSearchParams();
 	const queryClient = useQueryClient();
 	const [searchTerm, setSearchTerm] = useState("");
 	const [editingId, setEditingId] = useState<number | null>(null);
@@ -126,7 +124,9 @@ const IpAddressesPage = () => {
 		} else {
 			params.delete("search");
 		}
-		router.push(`/ip-addresses?${params.toString()}`, { scroll: false });
+		navigate(`/ip-addresses?${params.toString()}`, {
+			preventScrollReset: true,
+		});
 	};
 
 	const handleSearchChange = (value: string) => {

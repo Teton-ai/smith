@@ -1,8 +1,6 @@
-"use client";
-
 import { Activity, ArrowLeft, Loader2, Play } from "lucide-react";
-import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useState } from "react";
+import { useNavigate, useSearchParams } from "react-router";
 import type { Device } from "@/app/api-client";
 import { Button } from "@/app/components/button";
 import DepartmentOverview from "./components/DepartmentOverview";
@@ -24,8 +22,8 @@ import {
 type ViewMode = "landing" | "results";
 
 export default function HackathonPage() {
-	const router = useRouter();
-	const searchParams = useSearchParams();
+	const navigate = useNavigate();
+	const [searchParams] = useSearchParams();
 
 	// URL params for deep linking
 	const sessionFromUrl = searchParams.get("session");
@@ -82,7 +80,9 @@ export default function HackathonPage() {
 		setSelectedSessionId(session.session_id);
 		setSelectedDeviceId(null);
 		setViewMode("results");
-		router.replace(`/network-testing?session=${session.session_id}`);
+		navigate(`/network-testing?session=${session.session_id}`, {
+			replace: true,
+		});
 	};
 
 	// Handle start test
@@ -102,7 +102,9 @@ export default function HackathonPage() {
 			setShowStartModal(false);
 			setSelectedSessionId(result.session_id);
 			setViewMode("results");
-			router.replace(`/network-testing?session=${result.session_id}`);
+			navigate(`/network-testing?session=${result.session_id}`, {
+				replace: true,
+			});
 			refetchMatchingSessions();
 		} catch (error) {
 			console.error("Failed to start test:", error);
@@ -125,7 +127,7 @@ export default function HackathonPage() {
 		setViewMode("landing");
 		setSelectedSessionId(null);
 		setSelectedDeviceId(null);
-		router.replace("/network-testing");
+		navigate("/network-testing", { replace: true });
 	};
 
 	const _isTestRunning =

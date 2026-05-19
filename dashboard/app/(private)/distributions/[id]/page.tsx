@@ -1,5 +1,3 @@
-"use client";
-
 import {
 	ArrowLeft,
 	ArrowLeftRight,
@@ -15,9 +13,8 @@ import {
 	User,
 	X,
 } from "lucide-react";
-import Link from "next/link";
-import { useParams, useRouter } from "next/navigation";
 import React, { useCallback, useMemo, useState } from "react";
+import { Link, useNavigate, useParams } from "react-router";
 import {
 	type Package as PackageType,
 	useCreateDistributionRelease,
@@ -139,7 +136,7 @@ const ReleaseRow = React.memo(function ReleaseRow({
 	return (
 		<Link
 			className="block p-4 hover:bg-gray-50 cursor-pointer transition-colors"
-			href={`/releases/${release.id}`}
+			to={`/releases/${release.id}`}
 		>
 			{row}
 		</Link>
@@ -147,7 +144,7 @@ const ReleaseRow = React.memo(function ReleaseRow({
 });
 
 const DistributionDetailPage = () => {
-	const router = useRouter();
+	const navigate = useNavigate();
 	const params = useParams();
 	const distributionId = parseInt(params.id as string);
 	const [showCreateModal, setShowCreateModal] = useState(false);
@@ -359,7 +356,7 @@ const DistributionDetailPage = () => {
 			});
 
 			if (newRelease) {
-				router.push(`/releases/${newRelease}`);
+				navigate(`/releases/${newRelease}`);
 			}
 		} catch (error: any) {
 			console.error("Failed to create draft release:", error);
@@ -401,7 +398,7 @@ const DistributionDetailPage = () => {
 			{/* Header with Back Button */}
 			<div className="flex items-center space-x-4">
 				<Link
-					href="/distributions"
+					to="/distributions"
 					className="flex items-center space-x-2 text-gray-600 hover:text-gray-900 transition-colors cursor-pointer"
 				>
 					<ArrowLeft className="w-4 h-4" />

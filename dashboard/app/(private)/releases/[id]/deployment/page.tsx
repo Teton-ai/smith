@@ -1,5 +1,3 @@
-"use client";
-
 import { useQueryClient } from "@tanstack/react-query";
 import {
 	Activity,
@@ -12,9 +10,8 @@ import {
 	XCircle,
 } from "lucide-react";
 import moment from "moment";
-import Link from "next/link";
-import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
+import { Link, useNavigate, useParams } from "react-router";
 import {
 	type Deployment,
 	type DeploymentDeviceWithStatus,
@@ -35,7 +32,7 @@ import {
 
 const DeploymentStatusPage = () => {
 	const params = useParams();
-	const router = useRouter();
+	const navigate = useNavigate();
 	const releaseId = parseInt(params.id as string);
 	const queryClient = useQueryClient();
 	const [elapsedTime, setElapsedTime] = useState(0);
@@ -137,7 +134,7 @@ const DeploymentStatusPage = () => {
 	const promoteReleaseHook = usePromoteRelease({
 		mutation: {
 			onSuccess: (newReleaseId) => {
-				router.push(`/releases/${newReleaseId}`);
+				navigate(`/releases/${newReleaseId}`);
 			},
 		},
 	});
@@ -232,7 +229,7 @@ const DeploymentStatusPage = () => {
 		<div className="flex-1 overflow-y-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
 			<div className="flex items-center space-x-4">
 				<Link
-					href={`/releases/${releaseId}`}
+					to={`/releases/${releaseId}`}
 					className="flex items-center space-x-2 text-gray-600 hover:text-gray-900 transition-colors"
 				>
 					<ArrowLeft className="w-4 h-4" />
@@ -364,7 +361,7 @@ const DeploymentStatusPage = () => {
 																	A stable release for this version already
 																	exists:{" "}
 																	<Link
-																		href={`/releases/${alreadyPromoted.id}`}
+																		to={`/releases/${alreadyPromoted.id}`}
 																		className="underline font-medium"
 																	>
 																		v{alreadyPromoted.version}

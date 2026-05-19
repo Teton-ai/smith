@@ -1,5 +1,3 @@
-"use client";
-
 import {
 	AppWindow,
 	Layers,
@@ -8,7 +6,7 @@ import {
 	SlidersHorizontal,
 	Type,
 } from "lucide-react";
-import type React from "react";
+import { Outlet } from "react-router";
 import Sidebar from "@/app/components/sidebar";
 
 const componentPages = [
@@ -20,14 +18,13 @@ const componentPages = [
 	{ path: "/components/controls", label: "Controls", icon: AppWindow },
 ];
 
-export default function ComponentsLayout({
-	children,
-}: {
-	children: React.ReactNode;
-}) {
+export default function ComponentsLayout() {
 	return (
-		<Sidebar items={componentPages} className="bg-white">
-			{children}
-		</Sidebar>
+		<div className="flex h-screen overflow-hidden bg-gray-50">
+			<Sidebar items={componentPages} className="bg-white" />
+			<main className="flex-1 min-w-0 overflow-auto mt-14 md:mt-0">
+				<Outlet />
+			</main>
+		</div>
 	);
 }
