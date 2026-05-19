@@ -1,0 +1,7 @@
+ALTER TABLE device DROP CONSTRAINT IF EXISTS fk_ip_address;
+
+ALTER TABLE ip_address ALTER COLUMN id SET DATA TYPE BIGINT;
+ALTER TABLE device ALTER COLUMN ip_address_id SET DATA TYPE BIGINT;
+
+ALTER TABLE device ADD CONSTRAINT fk_ip_address
+    FOREIGN KEY (ip_address_id) REFERENCES ip_address(id);
