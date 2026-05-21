@@ -1,6 +1,6 @@
-import { Menu, X } from "lucide-react";
+import { Menu, Search, X } from "lucide-react";
 import type React from "react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useLocation } from "react-router";
 
 export interface NavItem {
@@ -18,6 +18,59 @@ interface SidebarProps {
 	mobileBottomContent?: React.ReactNode;
 	versionText?: string;
 	className?: string;
+	onSearch?: () => void;
+}
+
+function useIsMac() {
+	const [isMac, setIsMac] = useState(false);
+	useEffect(() => {
+		setIsMac(/Mac|iPhone|iPad/i.test(navigator.userAgent));
+	}, []);
+	return isMac;
+}
+
+function SearchTrigger({
+	onClick,
+	expanded,
+}: {
+	onClick: () => void;
+	expanded: boolean;
+}) {
+	const isMac = useIsMac();
+	return (
+		<button
+			onClick={onClick}
+			aria-label="Open command palette"
+			className="w-full flex items-center h-10 rounded-md text-gray-600 hover:bg-gray-100 hover:text-gray-900 transition-colors duration-200 cursor-pointer group/item"
+		>
+			<div className="flex items-center justify-center w-12 shrink-0">
+				<Search className="w-[18px] h-[18px] transition-transform duration-200 group-hover/item:scale-110" />
+			</div>
+			<DesktopLabel expanded={expanded}>
+				<span className="flex items-center justify-between gap-2 w-full pr-2">
+					Search
+					<kbd className="text-[10px] border border-gray-200 rounded px-1 py-0.5 font-mono leading-none text-gray-400 bg-gray-50">
+						{isMac ? "⌘K" : "Ctrl K"}
+					</kbd>
+				</span>
+			</DesktopLabel>
+		</button>
+	);
+}
+
+function MobileSearchTrigger({ onClick }: { onClick: () => void }) {
+	return (
+		<button
+			onClick={onClick}
+			aria-label="Open command palette"
+			className="w-full flex items-center h-10 rounded-md text-gray-600 hover:bg-gray-100 hover:text-gray-900 transition-colors duration-200 cursor-pointer"
+		>
+			<div className="flex items-center justify-center w-12 shrink-0">
+				<Search className="w-[18px] h-[18px]" />
+			</div>
+			<MobileLabel>Search</MobileLabel>
+		</button>
+	);
 }
 
 function DesktopLabel({
@@ -53,6 +106,7 @@ export default function Sidebar({
 	mobileBottomContent,
 	versionText,
 	className,
+	onSearch,
 }: SidebarProps) {
 	const { pathname } = useLocation();
 	const [mobileOpen, setMobileOpen] = useState(false);
@@ -105,6 +159,7 @@ export default function Sidebar({
 
 				{/* Nav items */}
 				<nav className="flex-1 px-2 py-4 space-y-1">
+					{onSearch && <SearchTrigger onClick={onSearch} expanded={expanded} />}
 					{items.map((item, index) => {
 						const Icon = item.icon;
 						const active = isActive(item.path);
@@ -243,6 +298,14 @@ export default function Sidebar({
 
 						{/* Nav items */}
 						<nav className="flex-1 px-2 py-4 space-y-1">
+							{onSearch && (
+								<MobileSearchTrigger
+									onClick={() => {
+										setMobileOpen(false);
+										onSearch();
+									}}
+								/>
+							)}
 							{items.map((item) => {
 								const Icon = item.icon;
 								const active = isActive(item.path);

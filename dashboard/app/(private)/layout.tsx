@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Outlet, useNavigate } from "react-router";
+import { CommandPalette } from "@/app/components/command-palette";
 import Profile from "@/app/components/profile";
 import Sidebar from "@/app/components/sidebar";
 import { useConfig } from "@/app/hooks/config";
@@ -91,11 +92,27 @@ function useKeyboardNav() {
 	}, [navigate]);
 }
 
+function useCommandPalette() {
+	const [open, setOpen] = useState(false);
+	useEffect(() => {
+		function handleKeyDown(e: KeyboardEvent) {
+			if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+				e.preventDefault();
+				setOpen((o) => !o);
+			}
+		}
+		document.addEventListener("keydown", handleKeyDown);
+		return () => document.removeEventListener("keydown", handleKeyDown);
+	}, []);
+	return { open, setOpen };
+}
+
 export default function PrivateLayout() {
 	const { isAuthenticated, isLoading } = useAuth0();
 	const navigate = useNavigate();
 	const apiVersion = useApiVersion();
 	useKeyboardNav();
+	const palette = useCommandPalette();
 
 	useEffect(() => {
 		if (!isLoading && !isAuthenticated) {
@@ -115,10 +132,15 @@ export default function PrivateLayout() {
 				bottomContent={(expanded) => <Profile sidebar expanded={expanded} />}
 				mobileBottomContent={<Profile sidebar expanded />}
 				versionText={apiVersion || undefined}
+				onSearch={() => palette.setOpen(true)}
 			/>
 			<main className="flex-1 min-w-0 overflow-hidden mt-14 md:mt-0 flex flex-col">
 				<Outlet />
 			</main>
+			<CommandPalette
+				open={palette.open}
+				onClose={() => palette.setOpen(false)}
+			/>
 		</div>
 	);
 }
