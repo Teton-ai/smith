@@ -9,6 +9,7 @@ export interface NavItem {
 	icon: React.ComponentType<{ className?: string }>;
 	external?: boolean;
 	shortcut?: string;
+	onClick?: () => void;
 }
 
 interface SidebarProps {
@@ -162,21 +163,15 @@ export default function Sidebar({
 					{onSearch && <SearchTrigger onClick={onSearch} expanded={expanded} />}
 					{items.map((item, index) => {
 						const Icon = item.icon;
-						const active = isActive(item.path);
-						return (
-							<Link
-								key={item.path}
-								to={item.path}
-								className={`flex items-center h-10 rounded-md transition-all duration-200 cursor-pointer relative group/item ${
-									active
-										? "bg-indigo-50 text-indigo-700"
-										: "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
-								}`}
-								style={{
-									transitionDelay: `${index * 20}ms`,
-								}}
-							>
-								{/* Active accent */}
+						const active = item.onClick ? false : isActive(item.path);
+						const itemClass = `flex items-center h-10 rounded-md transition-all duration-200 cursor-pointer relative group/item w-full text-left ${
+							active
+								? "bg-indigo-50 text-indigo-700"
+								: "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
+						}`;
+						const itemStyle = { transitionDelay: `${index * 20}ms` };
+						const inner = (
+							<>
 								<div
 									className={`absolute left-0 top-1 bottom-1 w-[3px] rounded-r-full bg-indigo-600 transition-all duration-300 ease-out ${
 										active ? "opacity-100 scale-y-100" : "opacity-0 scale-y-0"
@@ -195,6 +190,29 @@ export default function Sidebar({
 										)}
 									</span>
 								</DesktopLabel>
+							</>
+						);
+						if (item.onClick) {
+							return (
+								<button
+									type="button"
+									key={item.path}
+									onClick={item.onClick}
+									className={itemClass}
+									style={itemStyle}
+								>
+									{inner}
+								</button>
+							);
+						}
+						return (
+							<Link
+								key={item.path}
+								to={item.path}
+								className={itemClass}
+								style={itemStyle}
+							>
+								{inner}
 							</Link>
 						);
 					})}
@@ -308,18 +326,14 @@ export default function Sidebar({
 							)}
 							{items.map((item) => {
 								const Icon = item.icon;
-								const active = isActive(item.path);
-								return (
-									<Link
-										key={item.path}
-										to={item.path}
-										onClick={() => setMobileOpen(false)}
-										className={`flex items-center h-10 rounded-md transition-colors duration-200 cursor-pointer relative ${
-											active
-												? "bg-indigo-50 text-indigo-700"
-												: "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
-										}`}
-									>
+								const active = item.onClick ? false : isActive(item.path);
+								const itemClass = `flex items-center h-10 rounded-md transition-colors duration-200 cursor-pointer relative w-full text-left ${
+									active
+										? "bg-indigo-50 text-indigo-700"
+										: "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
+								}`;
+								const inner = (
+									<>
 										{active && (
 											<div className="absolute left-0 top-1 bottom-1 w-[3px] rounded-r-full bg-indigo-600" />
 										)}
@@ -336,6 +350,31 @@ export default function Sidebar({
 												)}
 											</span>
 										</MobileLabel>
+									</>
+								);
+								if (item.onClick) {
+									return (
+										<button
+											type="button"
+											key={item.path}
+											onClick={() => {
+												setMobileOpen(false);
+												item.onClick?.();
+											}}
+											className={itemClass}
+										>
+											{inner}
+										</button>
+									);
+								}
+								return (
+									<Link
+										key={item.path}
+										to={item.path}
+										onClick={() => setMobileOpen(false)}
+										className={itemClass}
+									>
+										{inner}
 									</Link>
 								);
 							})}

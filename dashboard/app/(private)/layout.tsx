@@ -11,12 +11,12 @@ import {
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Outlet, useNavigate } from "react-router";
-import { CommandPalette } from "@/app/components/command-palette";
+import { CommandPalette } from "@/app/components/CommandPalette";
 import Profile from "@/app/components/profile";
-import Sidebar from "@/app/components/sidebar";
+import Sidebar, { type NavItem } from "@/app/components/sidebar";
 import { useConfig } from "@/app/hooks/config";
 
-const navigationItems = [
+const navigationItems: NavItem[] = [
 	{ path: "/dashboard", label: "Dashboard", icon: Home },
 	{ path: "/devices", label: "Devices", icon: Cpu, shortcut: "S" },
 	{
@@ -92,27 +92,26 @@ function useKeyboardNav() {
 	}, [navigate]);
 }
 
-function useCommandPalette() {
-	const [open, setOpen] = useState(false);
+function useCommandPaletteShortcut(open: () => void) {
 	useEffect(() => {
 		function handleKeyDown(e: KeyboardEvent) {
 			if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
 				e.preventDefault();
-				setOpen((o) => !o);
+				open();
 			}
 		}
 		document.addEventListener("keydown", handleKeyDown);
 		return () => document.removeEventListener("keydown", handleKeyDown);
-	}, []);
-	return { open, setOpen };
+	}, [open]);
 }
 
 export default function PrivateLayout() {
 	const { isAuthenticated, isLoading } = useAuth0();
 	const navigate = useNavigate();
 	const apiVersion = useApiVersion();
+	const [paletteOpen, setPaletteOpen] = useState(false);
 	useKeyboardNav();
-	const palette = useCommandPalette();
+	useCommandPaletteShortcut(() => setPaletteOpen(true));
 
 	useEffect(() => {
 		if (!isLoading && !isAuthenticated) {
@@ -132,14 +131,14 @@ export default function PrivateLayout() {
 				bottomContent={(expanded) => <Profile sidebar expanded={expanded} />}
 				mobileBottomContent={<Profile sidebar expanded />}
 				versionText={apiVersion || undefined}
-				onSearch={() => palette.setOpen(true)}
+				onSearch={() => setPaletteOpen(true)}
 			/>
 			<main className="flex-1 min-w-0 overflow-hidden mt-14 md:mt-0 flex flex-col">
 				<Outlet />
 			</main>
 			<CommandPalette
-				open={palette.open}
-				onClose={() => palette.setOpen(false)}
+				open={paletteOpen}
+				onClose={() => setPaletteOpen(false)}
 			/>
 		</div>
 	);

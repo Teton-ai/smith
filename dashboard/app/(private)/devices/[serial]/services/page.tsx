@@ -1,6 +1,6 @@
 import { ArrowLeft, FileText, Play, Radio, X } from "lucide-react";
-import { useState } from "react";
-import { Link, useNavigate, useParams } from "react-router";
+import { useEffect, useState } from "react";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router";
 import { useGetDeviceInfo } from "@/app/api-client";
 import DeviceHeader from "../DeviceHeader";
 import LogViewer from "./LogViewer";
@@ -10,25 +10,42 @@ const ServicesPage = () => {
 	const params = useParams();
 	const serial = params.serial as string;
 	const navigate = useNavigate();
+	const [searchParams, setSearchParams] = useSearchParams();
 
 	const { data: device, isLoading: deviceLoading } = useGetDeviceInfo(serial);
 	const { data: services, isLoading: servicesLoading } =
 		useDeviceServices(serial);
 
-	const [selectedService, setSelectedService] = useState<string | null>(null);
+	const [selectedService, setSelectedService] = useState<string | null>(
+		searchParams.get("service"),
+	);
 	const [connectionStatus, setConnectionStatus] = useState<
 		"connecting" | "connected" | "disconnected"
 	>("connecting");
+
+	useEffect(() => {
+		const fromUrl = searchParams.get("service");
+		if (fromUrl && fromUrl !== selectedService) {
+			setConnectionStatus("connecting");
+			setSelectedService(fromUrl);
+		}
+	}, [searchParams, selectedService]);
 
 	const loading = deviceLoading || servicesLoading;
 
 	const handleSelectService = (serviceName: string) => {
 		setConnectionStatus("connecting");
 		setSelectedService(serviceName);
+		const next = new URLSearchParams(searchParams);
+		next.set("service", serviceName);
+		setSearchParams(next, { replace: true });
 	};
 
 	const handleCloseLogs = () => {
 		setSelectedService(null);
+		const next = new URLSearchParams(searchParams);
+		next.delete("service");
+		setSearchParams(next, { replace: true });
 	};
 
 	return (
