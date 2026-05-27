@@ -63,9 +63,17 @@ impl NetworkClient {
 
         let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
         let json = serde_json::to_vec(&message).unwrap_or_default();
+        let uncompressed = json.len();
         encoder.write_all(&json)?;
 
         let compressed_data = encoder.finish()?;
+
+        tracing::debug!(
+            endpoint,
+            uncompressed_bytes = uncompressed,
+            compressed_bytes = compressed_data.len(),
+            "sending compressed POST"
+        );
 
         let request = client
             .post(&url)
