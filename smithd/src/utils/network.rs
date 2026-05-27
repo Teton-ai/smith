@@ -67,13 +67,7 @@ impl NetworkClient {
         encoder.write_all(&json)?;
 
         let compressed_data = encoder.finish()?;
-
-        tracing::debug!(
-            endpoint,
-            uncompressed_bytes = uncompressed,
-            compressed_bytes = compressed_data.len(),
-            "sending compressed POST"
-        );
+        let compressed = compressed_data.len();
 
         let request = client
             .post(&url)
@@ -85,6 +79,15 @@ impl NetworkClient {
             .await?;
 
         let status_code = request.status();
+        let response_content_length = request.content_length();
+
+        tracing::debug!(
+            endpoint,
+            uncompressed_bytes = uncompressed,
+            compressed_bytes = compressed,
+            response_bytes = response_content_length,
+            "compressed POST"
+        );
 
         Ok((status_code, request))
     }
