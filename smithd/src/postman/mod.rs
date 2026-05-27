@@ -153,6 +153,7 @@ impl Postman {
                     let new_system_info = SystemInfo::new().await;
                     // Only update the system_info if it has actually changed
                     if new_system_info != system_info {
+                        info!("system info is different");
                         system_info = new_system_info.clone();
                         self.commander
                             .insert_result(vec![
