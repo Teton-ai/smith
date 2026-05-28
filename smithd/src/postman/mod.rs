@@ -1,6 +1,7 @@
 use crate::commander::CommanderHandle;
 use crate::magic::MagicHandle;
 use crate::police::PoliceHandle;
+use crate::session::{RefreshOutcome, SessionHandle};
 use crate::shutdown::ShutdownSignals;
 use crate::utils::network::NetworkClient;
 use crate::utils::schema::{
@@ -26,6 +27,7 @@ struct Postman {
     receiver: mpsc::Receiver<PostmanMessage>,
     commander: CommanderHandle,
     magic: MagicHandle,
+    session: SessionHandle,
     network: NetworkClient,
     hostname: String,
     token: Option<String>,
@@ -44,6 +46,7 @@ impl Postman {
         receiver: mpsc::Receiver<PostmanMessage>,
         commander: CommanderHandle,
         magic: MagicHandle,
+        session: SessionHandle,
     ) -> Self {
         let network = NetworkClient::default();
 
@@ -54,6 +57,7 @@ impl Postman {
             commander,
             network,
             magic,
+            session,
             token: None,
             hostname: "".to_owned(),
             problems: None,
@@ -274,7 +278,14 @@ impl Postman {
     }
 
     async fn ping_home(&mut self, message: HomePost) -> HomePostResponse {
-        let token = self.token.clone().unwrap_or_default();
+        // Prefer the short-lived JWT from session; fall back to the opaque
+        // token (which is also what session returns when no JWT is cached).
+        let token = self
+            .session
+            .bearer_token()
+            .await
+            .or_else(|| self.token.clone())
+            .unwrap_or_default();
 
         let result = self
             .network
@@ -292,8 +303,23 @@ impl Postman {
                     response.json().await.unwrap_or_default()
                 }
                 StatusCode::UNAUTHORIZED => {
-                    warn!("Token expired, we are going to delete the token");
-                    self.unregister_device().await;
+                    // Standard access/refresh-token flow: the bearer (probably
+                    // an expired JWT) was rejected. Try to mint a new JWT from
+                    // the opaque "refresh" token. Only unregister if the
+                    // opaque token itself is also rejected.
+                    warn!("Got 401 on /home; attempting JWT refresh");
+                    match self.session.force_refresh().await {
+                        RefreshOutcome::Refreshed => {
+                            info!("Refreshed JWT after 401; next ping will retry");
+                        }
+                        RefreshOutcome::Unauthorized => {
+                            warn!("Opaque token rejected by /auth/session; unregistering device");
+                            self.unregister_device().await;
+                        }
+                        RefreshOutcome::Transient => {
+                            warn!("JWT refresh failed transiently; keeping token");
+                        }
+                    }
                     HomePostResponse::default()
                 }
                 _ => {
@@ -350,9 +376,10 @@ impl PostmanHandle {
         police: PoliceHandle,
         commander: CommanderHandle,
         magic: MagicHandle,
+        session: SessionHandle,
     ) -> Self {
         let (_sender, receiver) = mpsc::channel(8);
-        let mut actor = Postman::new(shutdown, police, receiver, commander, magic);
+        let mut actor = Postman::new(shutdown, police, receiver, commander, magic, session);
         tokio::spawn(async move { actor.run().await });
 
         Self { _sender }

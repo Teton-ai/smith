@@ -1,4 +1,4 @@
-use crate::auth::DebugJwksClient;
+use crate::auth::{DebugJwksClient, DeviceJwtSigner};
 use crate::event::PublicEvent;
 use crate::sentry::Sentry;
 use ::sentry::integrations::tower::{NewSentryLayer, SentryHttpLayer};
@@ -65,6 +65,7 @@ pub struct State {
     public_events: Arc<Mutex<Sender<PublicEvent>>>,
     authorization: Arc<AuthorizationConfig>,
     jwks_client: DebugJwksClient,
+    device_jwt_signer: DeviceJwtSigner,
 }
 
 fn main() {
@@ -174,12 +175,20 @@ async fn start_main_server(config: &'static Config, authorization: Authorization
     let jwks_client =
         DebugJwksClient::init(&config.auth0_issuer).expect("Failed to initialize JWKS client");
 
+    let device_jwt_signer = DeviceJwtSigner::new(
+        &config.device_jwt_private_key_pem,
+        config.device_jwt_issuer.clone(),
+        config.device_jwt_ttl_seconds,
+    )
+    .expect("Failed to initialize device JWT signer");
+
     let state = State {
         pg_pool: pool,
         config,
         public_events: tx_message,
         authorization: Arc::new(authorization),
         jwks_client,
+        device_jwt_signer,
     };
 
     let recorder_handle = metric::setup_metrics_recorder();
@@ -344,6 +353,7 @@ async fn start_main_server(config: &'static Config, authorization: Authorization
         .routes(routes!(smith::route::list_release_packages))
         .routes(routes!(smith::route::test_file))
         .routes(routes!(smith::route::test_upload))
+        .routes(routes!(auth::route::session))
         .split_for_parts();
 
     let smith_router = smith_router
@@ -370,6 +380,7 @@ async fn start_main_server(config: &'static Config, authorization: Authorization
         .merge(ws_router)
         .route("/metrics", get(move || ready(recorder_handle.render())))
         .route("/health", get(health::check))
+        .route("/.well-known/jwks.json", get(auth::route::jwks_well_known))
         .merge(SwaggerUi::new("/docs").url("/openapi.json", api_doc))
         .merge(SwaggerUi::new("/smith/docs").url("/smith/openapi.json", smith_api))
         .layer(CorsLayer::permissive())

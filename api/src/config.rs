@@ -70,6 +70,13 @@ pub struct Config {
     pub cloudfront: CloudFrontConfig,
     /// Labels to exclude from dashboard stats, format: "key=value,key2=value2"
     pub dashboard_excluded_labels: Vec<String>,
+    /// Ed25519 private key (PKCS8 PEM) used to sign device JWTs.
+    /// Generate with: `openssl genpkey -algorithm Ed25519 -out device_jwt.pem`
+    pub device_jwt_private_key_pem: String,
+    /// `iss` claim written into device JWTs and verified on incoming JWTs.
+    pub device_jwt_issuer: String,
+    /// Lifetime of issued device JWTs.
+    pub device_jwt_ttl_seconds: u64,
 }
 
 impl Config {
@@ -95,6 +102,14 @@ impl Config {
                 .ok()
                 .map(|s| s.split(',').map(|l| l.trim().to_string()).collect())
                 .unwrap_or_default(),
+            device_jwt_private_key_pem: env::var("DEVICE_JWT_PRIVATE_KEY_PEM")
+                .context("DEVICE_JWT_PRIVATE_KEY_PEM is required.")?,
+            device_jwt_issuer: env::var("DEVICE_JWT_ISSUER")
+                .unwrap_or_else(|_| "smith-api".to_string()),
+            device_jwt_ttl_seconds: env::var("DEVICE_JWT_TTL_SECONDS")
+                .ok()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(3600),
         })
     }
 }
