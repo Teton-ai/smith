@@ -18,6 +18,10 @@ chrono = { workspace = true }
 dotenvy = "0.15.7"
 futures = "0.3.30"
 jwks_client_rs = "0.5"
+jsonwebtoken = "9.3"
+ed25519-dalek = { version = "2.1.1", features = ["pkcs8", "pem"] }
+base64 = "0.22"
+sha2 = "0.10"
 oauth2 = "4.4.2"
 reqwest = { version = "0.12.8", features = ["json"] }
 sentry = { version = "0.45.0", features = ["tower-axum-matched-path", "panic"] }

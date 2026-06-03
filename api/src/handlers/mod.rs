@@ -27,7 +27,6 @@ where
     type Rejection = Response;
 
     async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
-        // Extract the authorization token.
         let TypedHeader(Authorization(bearer)) =
             TypedHeader::<Authorization<Bearer>>::from_request_parts(parts, state)
                 .await
@@ -39,6 +38,22 @@ where
             .await
             .map_err(|err| err.into_response())?;
 
+        let token = bearer.token();
+
+        // Try the token as a device JWT first; if it isn't a valid one, fall
+        // back to the opaque-token lookup below.
+        if let Ok(claims) = state.device_jwt_signer.verify(token) {
+            let id = claims
+                .sub
+                .parse::<i32>()
+                .map_err(|_| StatusCode::UNAUTHORIZED.into_response())?;
+
+            return Ok(AuthedDevice {
+                id,
+                serial_number: claims.serial,
+            });
+        }
+
         let device = sqlx::query!(
             r#"
             SELECT
@@ -49,7 +64,7 @@ where
                 token IS NOT NULL AND
                 token = $1
             "#,
-            bearer.token()
+            token
         )
         .fetch_optional(&state.pg_pool)
         .await

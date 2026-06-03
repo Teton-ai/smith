@@ -8,6 +8,7 @@ pub mod logstream;
 pub mod magic;
 pub mod police;
 pub mod postman;
+pub mod session;
 pub mod shutdown;
 pub mod tunnel;
 pub mod updater;

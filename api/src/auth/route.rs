@@ -1,5 +1,8 @@
 use crate::State;
+use crate::handlers::AuthedDevice;
 use axum::http::StatusCode;
+use axum::http::header::CACHE_CONTROL;
+use axum::response::{IntoResponse, Response};
 use axum::{Extension, Json};
 use serde::{Deserialize, Serialize};
 use tracing::error;
@@ -51,4 +54,55 @@ pub async fn verify_token(
         serial_number: device.serial_number,
         authorized: device.approved,
     }))
+}
+
+#[derive(Debug, Serialize, utoipa::ToSchema)]
+pub struct DeviceSessionResponse {
+    /// Signed JWT to use as the bearer for subsequent requests.
+    pub token: String,
+    /// Lifetime in seconds. Clients should refresh well before this elapses.
+    pub expires_in: u64,
+    pub token_type: &'static str,
+}
+
+#[utoipa::path(
+    get,
+    path = "/auth/session",
+    responses(
+        (status = StatusCode::OK, description = "Mint a short-lived device JWT", body = DeviceSessionResponse),
+        (status = StatusCode::UNAUTHORIZED, description = "Caller is not an authenticated device"),
+        (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to mint JWT"),
+    ),
+    security(
+        ("device_token" = [])
+    ),
+    tag = AUTH_TAG
+)]
+pub async fn session(
+    Extension(state): Extension<State>,
+    device: AuthedDevice,
+) -> Result<Json<DeviceSessionResponse>, StatusCode> {
+    let token = state
+        .device_jwt_signer
+        .mint(device.id, &device.serial_number)
+        .map_err(|err| {
+            error!(
+                "Failed to mint device JWT for device {}: {err:?}",
+                device.id
+            );
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+
+    Ok(Json(DeviceSessionResponse {
+        token,
+        expires_in: state.device_jwt_signer.ttl_seconds(),
+        token_type: "Bearer",
+    }))
+}
+
+/// `/.well-known/jwks.json` — public Ed25519 verification key for device JWTs.
+/// Consumed by the TS api (and any other verifier) for offline signature checks.
+pub async fn jwks_well_known(Extension(state): Extension<State>) -> Response {
+    let body = state.device_jwt_signer.jwks();
+    ([(CACHE_CONTROL, "public, max-age=3600")], Json(body)).into_response()
 }

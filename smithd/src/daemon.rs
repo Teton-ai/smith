@@ -6,6 +6,7 @@ use crate::logstream::LogStreamHandle;
 use crate::magic::MagicHandle;
 use crate::police::PoliceHandle;
 use crate::postman::PostmanHandle;
+use crate::session::SessionHandle;
 use crate::shutdown::ShutdownHandler;
 use crate::tunnel::TunnelHandle;
 use crate::updater::UpdaterHandle;
@@ -20,6 +21,8 @@ pub async fn run() {
     let configuration = MagicHandle::new(shutdown.signals());
 
     configuration.load(None).await;
+
+    let session = SessionHandle::new(shutdown.signals(), configuration.clone());
 
     let tunnel = TunnelHandle::new(shutdown.signals(), configuration.clone());
 
@@ -54,6 +57,7 @@ pub async fn run() {
         police.clone(),
         commander.clone(),
         configuration.clone(),
+        session.clone(),
     );
 
     let _dbus = DbusHandle::new(
