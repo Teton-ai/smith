@@ -19,12 +19,6 @@ pub struct AuthedDevice {
     pub serial_number: String,
 }
 
-/// Heuristic: a JWT has exactly two dots and base64url segments.
-/// Opaque device tokens are random hex/base64 without dots.
-fn looks_like_jwt(token: &str) -> bool {
-    token.bytes().filter(|&b| b == b'.').count() == 2
-}
-
 #[async_trait]
 impl<S> FromRequestParts<S> for AuthedDevice
 where
@@ -46,10 +40,14 @@ where
 
         let token = bearer.token();
 
-        if looks_like_jwt(token)
-            && let Ok(claims) = state.device_jwt_signer.verify(token)
-            && let Ok(id) = claims.sub.parse::<i32>()
-        {
+        // Try the token as a device JWT first; if it isn't a valid one, fall
+        // back to the opaque-token lookup below.
+        if let Ok(claims) = state.device_jwt_signer.verify(token) {
+            let id = claims
+                .sub
+                .parse::<i32>()
+                .map_err(|_| StatusCode::UNAUTHORIZED.into_response())?;
+
             return Ok(AuthedDevice {
                 id,
                 serial_number: claims.serial,
