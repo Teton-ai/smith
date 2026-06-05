@@ -1,6 +1,7 @@
 use crate::downloader::DownloaderHandle;
 use crate::magic::MagicHandle;
 use crate::magic::structure::ConfigPackage;
+use crate::session::SessionHandle;
 use crate::shutdown::ShutdownSignals;
 use crate::utils::network::NetworkClient;
 use anyhow::Context;
@@ -105,6 +106,7 @@ pub struct Actor {
     shutdown: ShutdownSignals,
     receiver: mpsc::Receiver<ActorMessage>,
     magic: MagicHandle,
+    session: SessionHandle,
     status: Status,
     network: NetworkClient,
     last_update: Option<Result<time::Instant>>,
@@ -120,6 +122,7 @@ impl Actor {
         receiver: mpsc::Receiver<ActorMessage>,
         magic: MagicHandle,
         downloader: DownloaderHandle,
+        session: SessionHandle,
     ) -> Self {
         let network = NetworkClient::new();
 
@@ -131,6 +134,7 @@ impl Actor {
             shutdown,
             receiver,
             magic,
+            session,
             network,
             status: Status::Idle,
             last_update: None,
@@ -348,7 +352,9 @@ impl Actor {
             return Ok(());
         }
 
-        let token = self.magic.get_token().await.unwrap_or_default();
+        // Prefer the short-lived device JWT; falls back to the opaque token when
+        // no valid JWT is cached (see SessionHandle::bearer_token).
+        let token = self.session.bearer_token().await.unwrap_or_default();
 
         let release_packages = self
             .network

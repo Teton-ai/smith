@@ -1,4 +1,5 @@
 use crate::magic::MagicHandle;
+use crate::session::SessionHandle;
 use crate::shutdown::ShutdownSignals;
 use anyhow::Result;
 use futures_util::{SinkExt, StreamExt};
@@ -43,6 +44,7 @@ pub struct Actor {
     receiver: mpsc::Receiver<ActorMessage>,
     sender: mpsc::Sender<ActorMessage>,
     magic: MagicHandle,
+    session: SessionHandle,
     streams: HashMap<String, LogStream>,
 }
 
@@ -52,12 +54,14 @@ impl Actor {
         receiver: mpsc::Receiver<ActorMessage>,
         sender: mpsc::Sender<ActorMessage>,
         magic: MagicHandle,
+        session: SessionHandle,
     ) -> Self {
         Self {
             shutdown,
             receiver,
             sender,
             magic,
+            session,
             streams: HashMap::new(),
         }
     }
@@ -70,9 +74,11 @@ impl Actor {
             ));
         }
 
+        // Prefer the short-lived device JWT; falls back to the opaque token when
+        // no valid JWT is cached (see SessionHandle::bearer_token).
         let token = self
-            .magic
-            .get_token()
+            .session
+            .bearer_token()
             .await
             .ok_or_else(|| anyhow::anyhow!("No device token available"))?;
 

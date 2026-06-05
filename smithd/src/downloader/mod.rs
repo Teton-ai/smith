@@ -3,6 +3,7 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 mod download;
 use crate::downloader::download::DownloadStats;
 use crate::magic::MagicHandle;
+use crate::session::SessionHandle;
 use crate::shutdown::ShutdownSignals;
 use crate::utils::network::NetworkClient;
 use anyhow::{self, Context};
@@ -38,6 +39,7 @@ struct Downloader {
     shutdown: ShutdownSignals,
     receiver: mpsc::Receiver<DownloaderMessage>,
     magic: MagicHandle,
+    session: SessionHandle,
     downloading_count: Arc<AtomicUsize>,
     network: NetworkClient,
     force_stop: Arc<AtomicBool>,
@@ -51,6 +53,7 @@ impl Downloader {
         shutdown: ShutdownSignals,
         receiver: mpsc::Receiver<DownloaderMessage>,
         magic: MagicHandle,
+        session: SessionHandle,
         timeout: u64,
     ) -> Self {
         let network = NetworkClient::new();
@@ -63,6 +66,7 @@ impl Downloader {
             shutdown,
             receiver,
             magic,
+            session,
             network,
             downloading_count: is_downloading,
             force_stop,
@@ -83,6 +87,7 @@ impl Downloader {
                 self.downloading_count.fetch_add(1, Ordering::SeqCst);
 
                 let magic = self.magic.clone();
+                let session = self.session.clone();
                 let force_stop = self.force_stop.clone();
                 let is_downloading = self.downloading_count.clone();
                 let last_download_status = self.last_download_status.clone();
@@ -94,7 +99,8 @@ impl Downloader {
 
                     // Do the download
                     let result =
-                        download_file_mb(magic, remote_file, local_file, rate, force_stop).await;
+                        download_file_mb(magic, session, remote_file, local_file, rate, force_stop)
+                            .await;
 
                     if result.is_ok() {
                         last_download_status.store(true, Ordering::SeqCst);
@@ -178,12 +184,12 @@ pub struct DownloaderHandle {
 }
 
 impl DownloaderHandle {
-    pub fn new(shutdown: ShutdownSignals, magic: MagicHandle) -> Self {
+    pub fn new(shutdown: ShutdownSignals, magic: MagicHandle, session: SessionHandle) -> Self {
         let (sender, receiver) = mpsc::channel(8);
 
         let timeout = 5; // 5 second timeout
 
-        let mut actor = Downloader::new(shutdown, receiver, magic, timeout);
+        let mut actor = Downloader::new(shutdown, receiver, magic, session, timeout);
 
         tokio::spawn(async move { actor.run().await });
 
