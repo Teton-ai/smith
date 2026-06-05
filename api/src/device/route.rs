@@ -1002,7 +1002,7 @@ pub async fn get_all_commands_for_device(
             LEFT JOIN device d ON cq.device_id = d.id
             WHERE cq.device_id = $1
                 AND cq.id < $2
-            ORDER BY cq.created_at DESC
+            ORDER BY cq.id DESC
             LIMIT $3::int"#,
             device_id,
             starting_after,
@@ -1031,7 +1031,7 @@ pub async fn get_all_commands_for_device(
             LEFT JOIN device d ON cq.device_id = d.id
             WHERE cq.device_id = $1
                 AND cq.id > $2
-            ORDER BY cq.created_at ASC
+            ORDER BY cq.id ASC
             LIMIT $3::int"#,
             device_id,
             ending_before,
@@ -1059,7 +1059,7 @@ pub async fn get_all_commands_for_device(
             LEFT JOIN command_response cr ON cq.id = cr.command_id
             LEFT JOIN device d ON cq.device_id = d.id
             WHERE cq.device_id = $1
-            ORDER BY cq.created_at DESC
+            ORDER BY cq.id DESC
             LIMIT $2::int"#,
             device_id,
             limit
@@ -1072,8 +1072,10 @@ pub async fn get_all_commands_for_device(
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
 
-    // Sort by timestamp (most recent first).
-    commands.sort_by(|a, b| b.issued_at.cmp(&a.issued_at));
+    // Most recent first. The queue id is serial and monotonic with insertion,
+    // so it is a unique, stable ordering key even within a bundle (whose rows
+    // all share the same created_at).
+    commands.sort_by(|a, b| b.cmd_id.cmp(&a.cmd_id));
 
     let first_id = commands.first().map(|c| c.cmd_id);
     let last_id = commands.last().map(|c| c.cmd_id);

@@ -9,13 +9,20 @@ import {
 	GitBranch,
 	Power,
 	Router,
+	ScrollText,
 	Signal,
 	Tag,
 	Terminal,
 	Wifi,
 } from "lucide-react";
 import { useRef, useState } from "react";
-import { type Device, useIssueCommandsToDevices } from "@/app/api-client";
+import {
+	type BundleCommands,
+	type CommandRecipe,
+	type Device,
+	useGetRecipes,
+	useIssueCommandsToDevices,
+} from "@/app/api-client";
 import { Button } from "@/app/components/button";
 import { Modal } from "@/app/components/modal";
 import NetworkQualityIndicator from "@/app/components/NetworkQualityIndicator";
@@ -91,8 +98,41 @@ const DeviceHeader: React.FC<DeviceHeaderProps> = ({ device, serial }) => {
 	const [sshCopied, setSshCopied] = useState(false);
 	const [showRunModal, setShowRunModal] = useState(false);
 	const [showRebootModal, setShowRebootModal] = useState(false);
+	const [showRecipeModal, setShowRecipeModal] = useState(false);
+	const [selectedRecipeId, setSelectedRecipeId] = useState<number | null>(null);
+	const [recipeTriggered, setRecipeTriggered] = useState(false);
 	const [runCommand, setRunCommand] = useState("");
 	const { config } = useConfig();
+
+	const { data: recipesData } = useGetRecipes();
+	const recipes: CommandRecipe[] = Array.isArray(recipesData)
+		? (recipesData as CommandRecipe[])
+		: [];
+
+	const { mutate: triggerRecipe, isPending: isTriggeringRecipe } =
+		useIssueCommandsToDevices({
+			mutation: {
+				onSuccess: () => setRecipeTriggered(true),
+			},
+		});
+
+	const closeRecipeModal = () => {
+		setShowRecipeModal(false);
+		setSelectedRecipeId(null);
+		setRecipeTriggered(false);
+	};
+
+	const handleTriggerRecipe = () => {
+		const recipe = recipes.find((r) => r.id === selectedRecipeId);
+		if (!recipe || !device?.id) return;
+		// Triggering a recipe is just issuing a command bundle with its commands.
+		triggerRecipe({
+			data: {
+				devices: [device.id],
+				commands: recipe.commands as unknown as BundleCommands["commands"],
+			},
+		});
+	};
 
 	const { mutate: issueCommands, isPending: isIssuingCommands } =
 		useIssueCommandsToDevices({
@@ -434,6 +474,15 @@ const DeviceHeader: React.FC<DeviceHeaderProps> = ({ device, serial }) => {
 							<span>Run</span>
 						</button>
 					</Tooltip>
+					<Tooltip content="Apply a recipe to this device">
+						<button
+							onClick={() => setShowRecipeModal(true)}
+							className="flex items-center space-x-2 px-3 py-2 rounded-md text-sm font-medium transition-colors cursor-pointer bg-purple-50 text-purple-700 border border-purple-200 hover:bg-purple-100"
+						>
+							<ScrollText className="w-4 h-4" />
+							<span>Recipe</span>
+						</button>
+					</Tooltip>
 					<Tooltip content="Reboot this device">
 						<button
 							onClick={() => setShowRebootModal(true)}
@@ -595,6 +644,72 @@ const DeviceHeader: React.FC<DeviceHeaderProps> = ({ device, serial }) => {
 						</div>
 					</div>
 				</div>
+			</Modal>
+
+			{/* Apply Recipe Modal */}
+			<Modal
+				open={showRecipeModal}
+				onClose={closeRecipeModal}
+				title="Apply Recipe"
+				subtitle={`Trigger a recipe onto ${getDeviceName()}`}
+				footer={
+					recipeTriggered ? (
+						<Button variant="primary" onClick={closeRecipeModal}>
+							Done
+						</Button>
+					) : (
+						<>
+							<Button variant="secondary" onClick={closeRecipeModal}>
+								Cancel
+							</Button>
+							<Button
+								variant="purple"
+								loading={isTriggeringRecipe}
+								disabled={selectedRecipeId == null}
+								onClick={handleTriggerRecipe}
+							>
+								{isTriggeringRecipe ? "Triggering..." : "Trigger Recipe"}
+							</Button>
+						</>
+					)
+				}
+			>
+				{recipeTriggered ? (
+					<div className="bg-green-50 border border-green-200 text-green-800 text-sm rounded-lg p-4">
+						Recipe triggered. The commands are queued and will run when the
+						device checks in.
+					</div>
+				) : recipes.length === 0 ? (
+					<p className="text-sm text-gray-500">
+						No recipes yet. Create one on the Recipes page.
+					</p>
+				) : (
+					<div className="space-y-2 max-h-72 overflow-y-auto">
+						{recipes.map((r) => (
+							<label
+								key={r.id}
+								className="flex items-start gap-3 px-3 py-2 border border-gray-200 rounded-md cursor-pointer hover:bg-gray-50"
+							>
+								<input
+									type="radio"
+									name="recipe"
+									className="mt-1"
+									checked={selectedRecipeId === r.id}
+									onChange={() => setSelectedRecipeId(r.id)}
+								/>
+								<div className="min-w-0">
+									<p className="text-sm font-medium text-gray-900">{r.name}</p>
+									{r.description && (
+										<p className="text-xs text-gray-500">{r.description}</p>
+									)}
+									<p className="text-xs text-gray-400 mt-0.5">
+										{Array.isArray(r.commands) ? r.commands.length : 0} commands
+									</p>
+								</div>
+							</label>
+						))}
+					</div>
+				)}
 			</Modal>
 		</div>
 	);

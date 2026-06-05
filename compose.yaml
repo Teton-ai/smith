@@ -59,30 +59,30 @@ services:
       - backend
       - device-network
 
-  device:
-    build:
-      context: .
-      dockerfile: smithd/dev.Dockerfile
-      args:
-        # Override with ubuntu:22.04 for x86_64 Linux development
-        BASE_IMAGE: ${DEVICE_BASE_IMAGE:-nvcr.io/nvidia/l4t-base:r36.2.0}
-    privileged: true
-    cap_add:
-      - NET_ADMIN
-    volumes:
-      - ./scripts/network-throttle.sh:/app/network-throttle.sh:ro
-    environment:
-      - RUST_LOG=INFO
-      - NETWORK_THROTTLE=${NETWORK_THROTTLE:-random}
-    entrypoint: ["/bin/bash", "-c", "/app/network-throttle.sh && cd /etc/smith && exec /usr/bin/smithd"]
-    init: true
-    deploy:
-      replicas: ${DEVICE_REPLICAS:-1}
-    networks:
-      - device-network
-    depends_on:
-      - api
-      - bore
+  # device:
+  #   build:
+  #     context: .
+  #     dockerfile: smithd/dev.Dockerfile
+  #     args:
+  #       # Override with ubuntu:22.04 for x86_64 Linux development
+  #       BASE_IMAGE: ${DEVICE_BASE_IMAGE:-nvcr.io/nvidia/l4t-base:r36.2.0}
+  #   privileged: true
+  #   cap_add:
+  #     - NET_ADMIN
+  #   volumes:
+  #     - ./scripts/network-throttle.sh:/app/network-throttle.sh:ro
+  #   environment:
+  #     - RUST_LOG=INFO
+  #     - NETWORK_THROTTLE=${NETWORK_THROTTLE:-random}
+  #   entrypoint: ["/bin/bash", "-c", "/app/network-throttle.sh && cd /etc/smith && exec /usr/bin/smithd"]
+  #   init: true
+  #   deploy:
+  #     replicas: ${DEVICE_REPLICAS:-1}
+  #   networks:
+  #     - device-network
+  #   depends_on:
+  #     - api
+  #     - bore
 
   dashboard:
     build:
