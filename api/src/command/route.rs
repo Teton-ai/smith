@@ -1,10 +1,10 @@
 use crate::State;
 use crate::command::{
     BundleCommands, BundleWithCommands, BundleWithCommandsPaginated,
-    BundleWithRawResponsesExplicit, DeviceCommandResponse,
+    BundleWithRawResponsesExplicit, CommandRecipe, DeviceCommandResponse, RecipeInput,
 };
 use axum::Json;
-use axum::extract::{Host, Query};
+use axum::extract::{Host, Path, Query};
 use axum::{Extension, http::StatusCode, response::Result};
 use sentry::types::Uuid;
 use serde::Deserialize;
@@ -224,13 +224,17 @@ pub async fn get_bundle_commands(
     let mut bundles: Vec<BundleWithCommands> = Vec::new();
 
     for (uuid, created_on) in map_responses.keys() {
+        let mut responses = map_responses
+            .get(&(*uuid, *created_on))
+            .expect("error: failed to get device command responses for (UUID, creation date)")
+            .clone();
+        // Keep commands in the order they were issued (queue id is serial), so
+        // the displayed order matches how the bundle/recipe was defined.
+        responses.sort_by_key(|response| response.cmd_id);
         bundles.push(BundleWithCommands {
             uuid: *uuid,
             created_on: *created_on,
-            responses: map_responses
-                .get(&(*uuid, *created_on))
-                .expect("error: failed to get device command responses for (UUID, creation date)")
-                .clone(),
+            responses,
         });
     }
 
@@ -322,4 +326,171 @@ pub async fn get_bundle_commands(
     };
 
     Ok(Json(bundles_paginated))
+}
+
+#[utoipa::path(
+    get,
+    path = "/commands/recipes",
+    responses(
+        (status = 200, description = "List of command recipes", body = Vec<CommandRecipe>),
+        (status = 500, description = "Failed to retrieve recipes"),
+    ),
+    security(
+        ("auth_token" = [])
+    ),
+    tag = COMMANDS_TAG
+)]
+pub async fn get_recipes(
+    Extension(state): Extension<State>,
+) -> Result<Json<Vec<CommandRecipe>>, StatusCode> {
+    let recipes = sqlx::query_as::<_, CommandRecipe>(
+        r#"SELECT id, name, description, commands, created_at, updated_at
+        FROM command_recipes
+        ORDER BY name"#,
+    )
+    .fetch_all(&state.pg_pool)
+    .await
+    .map_err(|err| {
+        error!("Failed to get recipes {err}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    Ok(Json(recipes))
+}
+
+#[utoipa::path(
+    post,
+    path = "/commands/recipes",
+    request_body = RecipeInput,
+    responses(
+        (status = 201, description = "Recipe created successfully"),
+        (status = 409, description = "A recipe with that name already exists"),
+        (status = 500, description = "Failed to create recipe"),
+    ),
+    security(
+        ("auth_token" = [])
+    ),
+    tag = COMMANDS_TAG
+)]
+pub async fn create_recipe(
+    Extension(state): Extension<State>,
+    Json(recipe): Json<RecipeInput>,
+) -> Result<StatusCode, StatusCode> {
+    let commands = serde_json::to_value(&recipe.commands).map_err(|err| {
+        error!("Failed to serialize recipe commands into JSON {err}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    sqlx::query(
+        r#"INSERT INTO command_recipes (name, description, commands)
+        VALUES ($1, $2, $3::jsonb)"#,
+    )
+    .bind(&recipe.name)
+    .bind(&recipe.description)
+    .bind(&commands)
+    .execute(&state.pg_pool)
+    .await
+    .map_err(|err| {
+        if let sqlx::Error::Database(db_err) = &err
+            && db_err.is_unique_violation()
+        {
+            return StatusCode::CONFLICT;
+        }
+        error!("Failed to create recipe {err}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    Ok(StatusCode::CREATED)
+}
+
+#[utoipa::path(
+    put,
+    path = "/commands/recipes/{recipe_id}",
+    params(
+        ("recipe_id" = i32, Path),
+    ),
+    request_body = RecipeInput,
+    responses(
+        (status = 204, description = "Recipe updated successfully"),
+        (status = 404, description = "Recipe not found"),
+        (status = 409, description = "A recipe with that name already exists"),
+        (status = 500, description = "Failed to update recipe"),
+    ),
+    security(
+        ("auth_token" = [])
+    ),
+    tag = COMMANDS_TAG
+)]
+pub async fn update_recipe(
+    Extension(state): Extension<State>,
+    Path(recipe_id): Path<i32>,
+    Json(recipe): Json<RecipeInput>,
+) -> Result<StatusCode, StatusCode> {
+    let commands = serde_json::to_value(&recipe.commands).map_err(|err| {
+        error!("Failed to serialize recipe commands into JSON {err}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    let result = sqlx::query(
+        r#"UPDATE command_recipes
+        SET name = $1, description = $2, commands = $3::jsonb, updated_at = now()
+        WHERE id = $4"#,
+    )
+    .bind(&recipe.name)
+    .bind(&recipe.description)
+    .bind(&commands)
+    .bind(recipe_id)
+    .execute(&state.pg_pool)
+    .await
+    .map_err(|err| {
+        if let sqlx::Error::Database(db_err) = &err
+            && db_err.is_unique_violation()
+        {
+            return StatusCode::CONFLICT;
+        }
+        error!("Failed to update recipe {err}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    if result.rows_affected() == 0 {
+        return Err(StatusCode::NOT_FOUND);
+    }
+
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[utoipa::path(
+    delete,
+    path = "/commands/recipes/{recipe_id}",
+    params(
+        ("recipe_id" = i32, Path),
+    ),
+    responses(
+        (status = 204, description = "Recipe deleted successfully"),
+        (status = 404, description = "Recipe not found"),
+        (status = 500, description = "Failed to delete recipe"),
+    ),
+    security(
+        ("auth_token" = [])
+    ),
+    tag = COMMANDS_TAG
+)]
+pub async fn delete_recipe(
+    Extension(state): Extension<State>,
+    Path(recipe_id): Path<i32>,
+) -> Result<StatusCode, StatusCode> {
+    let result = sqlx::query(r#"DELETE FROM command_recipes WHERE id = $1"#)
+        .bind(recipe_id)
+        .execute(&state.pg_pool)
+        .await
+        .map_err(|err| {
+            error!("Failed to delete recipe {err}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+
+    if result.rows_affected() == 0 {
+        return Err(StatusCode::NOT_FOUND);
+    }
+
+    Ok(StatusCode::NO_CONTENT)
 }

@@ -60,6 +60,17 @@ export type SafeCommandTx =
 	| CmdTxStreamLogs
 	| CmdTxStopLogStream;
 
+// TX command variants that carry no parameters (unit variants).
+export const SIMPLE_COMMANDS = [
+	"Ping",
+	"Upgrade",
+	"Restart",
+	"CloseTunnel",
+	"CheckOTAStatus",
+	"StartOTA",
+	"TestNetwork",
+] as const;
+
 // ---------------------------------------------------------------------------
 // SafeCommandRx types (mirrors smithd/src/utils/schema.rs)
 // ---------------------------------------------------------------------------
@@ -297,16 +308,7 @@ export const renderTxDetail = (cmd_data: unknown) => {
 	if (parsed == null)
 		return <p className="text-sm text-gray-400 italic">Unknown command</p>;
 
-	const unitVariants = [
-		"Ping",
-		"Upgrade",
-		"Restart",
-		"CloseTunnel",
-		"CheckOTAStatus",
-		"StartOTA",
-		"TestNetwork",
-	];
-	if (unitVariants.includes(parsed.variant)) {
+	if ((SIMPLE_COMMANDS as readonly string[]).includes(parsed.variant)) {
 		return <p className="text-sm text-gray-400 italic">No parameters</p>;
 	}
 

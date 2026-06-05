@@ -46,32 +46,23 @@ const getBundleStats = (responses: DeviceCommandResponse[]) => {
 };
 
 // ---------------------------------------------------------------------------
-// Device response detail (right-right panel)
+// Single command result (TX + response) for one device
 // ---------------------------------------------------------------------------
 
-const DeviceResponseDetail = ({
-	response,
-}: {
-	response: DeviceCommandResponse;
-}) => {
+const CommandResult = ({ response }: { response: DeviceCommandResponse }) => {
 	const [showRaw, setShowRaw] = useState(false);
 	const status = getCommandStatus(response);
-
-	// biome-ignore lint/correctness/useExhaustiveDependencies: intentional reset on response change
-	useEffect(() => {
-		setShowRaw(false);
-	}, [response.cmd_id]);
+	const { label, mono } = getTxLabel(response.cmd_data);
 
 	return (
-		<div className="h-full flex flex-col overflow-hidden">
-			<div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 shrink-0">
-				<div className="flex items-center gap-2 flex-wrap">
-					<Link
-						to={`/devices/${response.serial_number}/commands`}
-						className="text-sm font-mono font-medium text-blue-600 hover:underline"
+		<div className="border-b border-gray-100 last:border-b-0">
+			<div className="flex items-center justify-between gap-3 px-5 py-3 bg-gray-50">
+				<div className="flex items-center gap-2 flex-wrap min-w-0">
+					<span
+						className={`text-sm font-medium text-gray-900 truncate ${mono ? "font-mono" : ""}`}
 					>
-						{response.serial_number}
-					</Link>
+						{label}
+					</span>
 					<span
 						className={`px-2 py-0.5 text-xs font-medium rounded ${getStatusColor(status)}`}
 					>
@@ -85,11 +76,11 @@ const DeviceResponseDetail = ({
 						</span>
 					)}
 				</div>
-				<div className="flex items-center gap-3">
+				<div className="flex items-center gap-3 shrink-0">
 					{response.response != null && (
 						<Button
 							variant="secondary"
-							className="text-xs shrink-0"
+							className="text-xs"
 							onClick={() => setShowRaw((v) => !v)}
 						>
 							{showRaw ? "Formatted" : "Raw JSON"}
@@ -97,35 +88,39 @@ const DeviceResponseDetail = ({
 					)}
 					<div className="text-xs text-gray-400">
 						{response.response_at ? (
-							<span>
-								Responded <RelativeTime date={response.response_at} />
-							</span>
+							<RelativeTime date={response.response_at} />
 						) : (
-							<span className="text-yellow-500">Waiting for response…</span>
+							<span className="text-yellow-500">Waiting…</span>
 						)}
 					</div>
 				</div>
 			</div>
-			<div className="flex-1 overflow-y-auto px-4 py-3">
+			<div className="px-5 py-3 space-y-3">
 				{showRaw ? (
 					<>
 						<CodeBlock
 							label="raw TX"
 							content={JSON.stringify(response.cmd_data, null, 2)}
 						/>
-						<div className="mt-4">
-							<CodeBlock
-								label="raw RX"
-								content={JSON.stringify(response.response, null, 2)}
-							/>
-						</div>
+						<CodeBlock
+							label="raw RX"
+							content={JSON.stringify(response.response, null, 2)}
+						/>
 					</>
 				) : (
 					<>
-						<p className="text-xs font-medium uppercase tracking-wide text-gray-400 mb-3">
-							Response
-						</p>
-						{renderRxDetail(response.response)}
+						<div>
+							<p className="text-xs font-medium uppercase tracking-wide text-gray-400 mb-2">
+								Sent
+							</p>
+							{renderTxDetail(response.cmd_data)}
+						</div>
+						<div>
+							<p className="text-xs font-medium uppercase tracking-wide text-gray-400 mb-2">
+								Response
+							</p>
+							{renderRxDetail(response.response)}
+						</div>
 					</>
 				)}
 			</div>
@@ -134,90 +129,124 @@ const DeviceResponseDetail = ({
 };
 
 // ---------------------------------------------------------------------------
-// Bundle detail (right panel): TX once + nested device split
+// Bundle detail (right panel): device list + that device's commands in order
 // ---------------------------------------------------------------------------
 
 const BundleDetail = ({ bundle }: { bundle: BundleWithCommands }) => {
-	const [selectedDeviceId, setSelectedDeviceId] = useState<number>(
-		bundle.responses[0]?.cmd_id ?? -1,
+	// A bundle can contain multiple commands per device (e.g. a recipe), so
+	// group responses by device and keep each device's commands in issue order.
+	const devices = useMemo(() => {
+		const byDevice = new Map<
+			number,
+			{ device: number; serial: string; commands: DeviceCommandResponse[] }
+		>();
+		for (const response of bundle.responses) {
+			const entry = byDevice.get(response.device) ?? {
+				device: response.device,
+				serial: response.serial_number,
+				commands: [],
+			};
+			entry.commands.push(response);
+			byDevice.set(response.device, entry);
+		}
+		const list = Array.from(byDevice.values());
+		for (const entry of list) {
+			entry.commands.sort((a, b) => a.cmd_id - b.cmd_id);
+		}
+		return list;
+	}, [bundle]);
+
+	const [selectedDevice, setSelectedDevice] = useState<number>(
+		devices[0]?.device ?? -1,
 	);
 
 	// If the selected device isn't in this bundle (e.g. bundle just changed),
-	// sync state to the first response immediately to avoid a stale highlight.
-	const firstResponseId = bundle.responses[0]?.cmd_id ?? -1;
-	const responseInBundle = bundle.responses.find(
-		(r) => r.cmd_id === selectedDeviceId,
-	);
-	if (!responseInBundle && selectedDeviceId !== firstResponseId) {
-		setSelectedDeviceId(firstResponseId);
+	// sync to the first device immediately to avoid a stale highlight.
+	const firstDevice = devices[0]?.device ?? -1;
+	const deviceInBundle = devices.find((d) => d.device === selectedDevice);
+	if (!deviceInBundle && selectedDevice !== firstDevice) {
+		setSelectedDevice(firstDevice);
 	}
-	const selectedResponse = responseInBundle ?? bundle.responses[0] ?? null;
-	const firstCommand = bundle.responses[0];
+	const selected = deviceInBundle ?? devices[0] ?? null;
 
 	return (
-		<div className="h-full flex flex-col overflow-hidden">
-			{/* TX section — same for all devices */}
-			{firstCommand && (
-				<div className="px-5 py-4 bg-gray-50 border-b border-gray-200 shrink-0">
-					<p className="text-xs font-medium uppercase tracking-wide text-gray-400 mb-3">
-						Sent
-					</p>
-					{renderTxDetail(firstCommand.cmd_data)}
-				</div>
-			)}
+		<div className="flex h-full overflow-hidden">
+			{/* Device list */}
+			<div className="w-2/5 border-r border-gray-200 overflow-y-auto shrink-0">
+				{devices.map((d) => {
+					const stats = getBundleStats(d.commands);
+					const isSelected = d.device === selectedDevice;
+					return (
+						<button
+							key={d.device}
+							type="button"
+							onClick={() => setSelectedDevice(d.device)}
+							className={`w-full text-left px-4 py-3 border-b border-gray-100 last:border-b-0 transition-colors cursor-pointer ${
+								isSelected
+									? "bg-blue-50 border-l-2 border-l-blue-500"
+									: "hover:bg-gray-50 border-l-2 border-l-transparent"
+							}`}
+						>
+							<div className="flex items-center justify-between gap-2 mb-1">
+								<span
+									className={`text-sm font-mono truncate ${isSelected ? "text-blue-900" : "text-gray-900"}`}
+								>
+									{d.serial}
+								</span>
+								<span className="text-xs text-gray-400 shrink-0">
+									{d.commands.length} {d.commands.length === 1 ? "cmd" : "cmds"}
+								</span>
+							</div>
+							<div className="flex items-center gap-1.5 flex-wrap">
+								{stats.success > 0 && (
+									<span className="px-1.5 py-0.5 rounded-full bg-green-100 text-green-800 text-xs">
+										{stats.success} ok
+									</span>
+								)}
+								{stats.failed > 0 && (
+									<span className="px-1.5 py-0.5 rounded-full bg-red-100 text-red-800 text-xs">
+										{stats.failed} failed
+									</span>
+								)}
+								{stats.pending > 0 && (
+									<span className="px-1.5 py-0.5 rounded-full bg-yellow-100 text-yellow-800 text-xs">
+										{stats.pending} pending
+									</span>
+								)}
+								{stats.executing > 0 && (
+									<span className="px-1.5 py-0.5 rounded-full bg-blue-100 text-blue-800 text-xs">
+										{stats.executing} executing
+									</span>
+								)}
+							</div>
+						</button>
+					);
+				})}
+			</div>
 
-			{/* Nested split: device list | device response */}
-			<div className="flex flex-1 overflow-hidden border-t border-gray-200">
-				{/* Device list */}
-				<div className="w-2/5 border-r border-gray-200 overflow-y-auto shrink-0">
-					{bundle.responses.map((response) => {
-						const status = getCommandStatus(response);
-						const isSelected = response.cmd_id === selectedDeviceId;
-						return (
-							<button
-								key={response.cmd_id}
-								type="button"
-								onClick={() => setSelectedDeviceId(response.cmd_id)}
-								className={`w-full text-left px-4 py-3 border-b border-gray-100 last:border-b-0 transition-colors cursor-pointer ${
-									isSelected
-										? "bg-blue-50 border-l-2 border-l-blue-500"
-										: "hover:bg-gray-50 border-l-2 border-l-transparent"
-								}`}
+			{/* Selected device's commands, in order */}
+			<div className="flex-1 flex flex-col overflow-hidden">
+				{selected != null ? (
+					<>
+						<div className="px-5 py-3 border-b border-gray-200 shrink-0">
+							<Link
+								to={`/devices/${selected.serial}/commands`}
+								className="text-sm font-mono font-medium text-blue-600 hover:underline"
 							>
-								<div className="flex items-center justify-between gap-2">
-									<span
-										className={`text-sm font-mono truncate ${isSelected ? "text-blue-900" : "text-gray-900"}`}
-									>
-										{response.serial_number}
-									</span>
-									<span
-										className={`px-2 py-0.5 text-xs font-medium rounded shrink-0 ${getStatusColor(status)}`}
-									>
-										{status}
-									</span>
-								</div>
-								<div className="text-xs text-gray-400 mt-0.5">
-									{response.response_at ? (
-										<RelativeTime date={response.response_at} />
-									) : (
-										"Waiting…"
-									)}
-								</div>
-							</button>
-						);
-					})}
-				</div>
-
-				{/* Device response */}
-				<div className="flex-1 overflow-hidden">
-					{selectedResponse != null ? (
-						<DeviceResponseDetail response={selectedResponse} />
-					) : (
-						<div className="flex items-center justify-center h-full text-gray-400 text-sm">
-							Select a device to see its response
+								{selected.serial}
+							</Link>
 						</div>
-					)}
-				</div>
+						<div className="flex-1 overflow-y-auto">
+							{selected.commands.map((c) => (
+								<CommandResult key={c.cmd_id} response={c} />
+							))}
+						</div>
+					</>
+				) : (
+					<div className="flex items-center justify-center h-full text-gray-400 text-sm">
+						Select a device to see its responses
+					</div>
+				)}
 			</div>
 		</div>
 	);

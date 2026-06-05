@@ -6,6 +6,7 @@ import {
 	Globe,
 	Home,
 	Layers,
+	ScrollText,
 	Smartphone,
 	Terminal,
 } from "lucide-react";
@@ -26,6 +27,7 @@ const navigationItems: NavItem[] = [
 		shortcut: "D",
 	},
 	{ path: "/commands", label: "Commands", icon: Terminal },
+	{ path: "/recipes", label: "Recipes", icon: ScrollText },
 	{ path: "/ip-addresses", label: "IP Addresses", icon: Globe },
 	{ path: "/modems", label: "Modems", icon: Smartphone },
 	{ path: "/network-testing", label: "Network Analyzer", icon: Activity },

@@ -28,6 +28,28 @@ pub struct BundleCommands {
     pub commands: Vec<SafeCommandRequest>,
 }
 
+/// A reusable, named bundle of commands. Users save a recipe once and can then
+/// replay the same set of commands against any device(s) without re-entering them.
+#[derive(Debug, Serialize, sqlx::FromRow, utoipa::ToSchema)]
+pub struct CommandRecipe {
+    pub id: i32,
+    pub name: String,
+    pub description: Option<String>,
+    #[schema(value_type = Vec<Object>)]
+    pub commands: serde_json::Value,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub updated_at: chrono::DateTime<chrono::Utc>,
+}
+
+/// Request body for both creating and updating a recipe.
+#[derive(Debug, Deserialize, utoipa::ToSchema)]
+pub struct RecipeInput {
+    pub name: String,
+    pub description: Option<String>,
+    #[schema(value_type = Vec<Object>)]
+    pub commands: Vec<SafeCommandRequest>,
+}
+
 #[derive(Debug, Serialize, Deserialize, sqlx::FromRow)]
 pub struct BundleWithRawResponsesExplicit {
     pub uuid: Uuid,
