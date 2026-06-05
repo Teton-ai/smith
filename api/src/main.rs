@@ -335,6 +335,7 @@ async fn start_main_server(config: &'static Config, authorization: Authorization
             command::route::get_bundle_commands,
             command::route::issue_commands_to_devices
         ))
+        .routes(routes!(command::route::get_bundle))
         .routes(routes!(
             command::route::get_recipes,
             command::route::create_recipe,

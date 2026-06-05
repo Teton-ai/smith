@@ -1,7 +1,8 @@
 use crate::State;
 use crate::command::{
-    BundleCommands, BundleWithCommands, BundleWithCommandsPaginated,
-    BundleWithRawResponsesExplicit, CommandRecipe, DeviceCommandResponse, RecipeInput,
+    BundleCommands, BundleReceipt, BundleWithCommands, BundleWithCommandsPaginated,
+    BundleWithRawResponsesExplicit, CommandRecipe, DeviceCommandResponse, QueuedCommand,
+    RecipeInput,
 };
 use axum::Json;
 use axum::extract::{Host, Path, Query};
@@ -52,7 +53,7 @@ pub async fn available_commands() -> Result<Json<Vec<SafeCommandTx>>, StatusCode
     path = "/commands/bundles",
     request_body = BundleCommands,
     responses(
-        (status = 201, description = "Commands issued successfully"),
+        (status = 201, description = "Commands issued successfully", body = BundleReceipt),
         (status = 500, description = "Failed to issue commands", body = String),
     ),
     security(
@@ -63,7 +64,7 @@ pub async fn available_commands() -> Result<Json<Vec<SafeCommandTx>>, StatusCode
 pub async fn issue_commands_to_devices(
     Extension(state): Extension<State>,
     Json(bundle_commands): Json<BundleCommands>,
-) -> Result<StatusCode, StatusCode> {
+) -> Result<(StatusCode, Json<BundleReceipt>), StatusCode> {
     let mut tx = state.pg_pool.begin().await.map_err(|err| {
         error!("Failed to start transaction {err}");
         StatusCode::INTERNAL_SERVER_ERROR
@@ -77,9 +78,15 @@ pub async fn issue_commands_to_devices(
             StatusCode::INTERNAL_SERVER_ERROR
         })?;
 
+    let mut queued =
+        Vec::with_capacity(bundle_commands.devices.len() * bundle_commands.commands.len());
     for device_id in &bundle_commands.devices {
         for command in &bundle_commands.commands {
-            sqlx::query!(
+            let cmd = serde_json::to_value(command.command.clone()).map_err(|err| {
+                error!("Failed to serialize command into JSON {err}");
+                StatusCode::INTERNAL_SERVER_ERROR
+            })?;
+            let row = sqlx::query!(
                 r#"INSERT INTO command_queue (device_id, cmd, continue_on_error, canceled, bundle)
                 VALUES (
                     $1,
@@ -87,19 +94,24 @@ pub async fn issue_commands_to_devices(
                     $3,
                     false,
                     $4
-                )"#,
+                )
+                RETURNING id"#,
                 device_id,
-                serde_json::to_value(command.command.clone())
-                    .expect("error: failed to serialize command into JSON"),
+                cmd,
                 command.continue_on_error,
                 bundle_id.uuid
             )
-            .execute(&mut *tx)
+            .fetch_one(&mut *tx)
             .await
             .map_err(|err| {
                 error!("Failed to insert command for device {err}");
                 StatusCode::INTERNAL_SERVER_ERROR
             })?;
+
+            queued.push(QueuedCommand {
+                device: *device_id,
+                cmd_id: row.id,
+            });
         }
     }
 
@@ -108,7 +120,13 @@ pub async fn issue_commands_to_devices(
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
 
-    Ok(StatusCode::CREATED)
+    Ok((
+        StatusCode::CREATED,
+        Json(BundleReceipt {
+            uuid: bundle_id.uuid,
+            commands: queued,
+        }),
+    ))
 }
 
 #[derive(Deserialize, Debug)]
@@ -326,6 +344,85 @@ pub async fn get_bundle_commands(
     };
 
     Ok(Json(bundles_paginated))
+}
+
+#[utoipa::path(
+    get,
+    path = "/commands/bundles/{uuid}",
+    params(
+        ("uuid" = String, Path),
+    ),
+    responses(
+        (status = 200, description = "A single command bundle with its commands", body = BundleWithCommands),
+        (status = 404, description = "Bundle not found"),
+        (status = 500, description = "Failed to retrieve bundle"),
+    ),
+    security(
+        ("auth_token" = [])
+    ),
+    tag = COMMANDS_TAG
+)]
+pub async fn get_bundle(
+    Extension(state): Extension<State>,
+    Path(uuid): Path<Uuid>,
+) -> Result<Json<BundleWithCommands>, StatusCode> {
+    let rows: Vec<BundleWithRawResponsesExplicit> = sqlx::query_as(
+        r#"SELECT
+            b.uuid,
+            b.created_on,
+            cq.device_id as device,
+            d.serial_number as serial_number,
+            cq.id as cmd_id,
+            cq.created_at as issued_at,
+            cq.cmd as cmd_data,
+            cq.canceled as cancelled,
+            cq.fetched as fetched,
+            cq.fetched_at as fetched_at,
+            cr.id as response_id,
+            cr.created_at as response_at,
+            cr.response as response,
+            cr.status as status
+        FROM command_bundles b
+        LEFT JOIN command_queue cq ON b.uuid = cq.bundle
+        LEFT JOIN command_response cr ON cq.id = cr.command_id
+        LEFT JOIN device d ON cq.device_id = d.id
+        WHERE b.uuid = $1
+        ORDER BY cq.id;"#,
+    )
+    .bind(uuid)
+    .fetch_all(&state.pg_pool)
+    .await
+    .map_err(|err| {
+        error!("Failed to get bundle {err}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    let first = rows.first().ok_or(StatusCode::NOT_FOUND)?;
+    let created_on = first.created_on;
+
+    let responses = rows
+        .into_iter()
+        .map(|raw| DeviceCommandResponse {
+            device: raw.device,
+            serial_number: raw.serial_number,
+            cmd_id: raw.cmd_id,
+            issued_at: raw.issued_at,
+            cmd_data: raw.cmd_data,
+            cancelled: raw.cancelled,
+            fetched: raw.fetched,
+            fetched_at: raw.fetched_at,
+            response_id: raw.response_id,
+            response_at: raw.response_at,
+            response: raw.response,
+            status: raw.status,
+        })
+        .collect();
+
+    Ok(Json(BundleWithCommands {
+        uuid,
+        created_on,
+        responses,
+    }))
 }
 
 #[utoipa::path(

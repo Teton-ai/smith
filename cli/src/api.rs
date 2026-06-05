@@ -7,9 +7,40 @@ use models::{
     release::{Release, UpdateRelease},
 };
 use reqwest::{Client, Response};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use smith::utils::schema::{self, Package};
 use std::collections::HashMap;
+
+/// A saved, named set of commands (`GET /commands/recipes`).
+#[derive(Debug, Deserialize, Serialize)]
+pub struct CommandRecipe {
+    pub id: i32,
+    pub name: String,
+    pub description: Option<String>,
+    pub commands: serde_json::Value,
+}
+
+/// One command queued by issuing a bundle, returned in the bundle receipt.
+#[derive(Debug, Deserialize)]
+pub struct QueuedCommand {
+    pub device: i32,
+    pub cmd_id: i32,
+}
+
+/// Response of `POST /commands/bundles`: the bundle id plus every queued command,
+/// so results can be polled without guessing which command is ours.
+#[derive(Debug, Deserialize)]
+pub struct BundleReceipt {
+    pub uuid: String,
+    pub commands: Vec<QueuedCommand>,
+}
+
+/// A single bundle with the current state of all its commands
+/// (`GET /commands/bundles/{uuid}`).
+#[derive(Debug, Deserialize)]
+pub struct BundleWithCommands {
+    pub responses: Vec<DeviceCommandResponse>,
+}
 
 #[derive(Debug, Deserialize)]
 pub struct StartExtendedTestResponse {
@@ -608,21 +639,49 @@ impl SmithAPI {
     pub async fn send_bundle(
         &self,
         device_ids: Vec<i32>,
-        cmd: schema::SafeCommandRequest,
-    ) -> Result<()> {
+        commands: Vec<schema::SafeCommandRequest>,
+    ) -> Result<BundleReceipt> {
         let client = Client::new();
         let body = serde_json::json!({
             "devices": device_ids,
-            "commands": [cmd],
+            "commands": commands,
         });
-        client
+        let receipt = client
             .post(format!("{}/commands/bundles", self.domain))
             .header("Authorization", format!("Bearer {}", &self.bearer_token))
             .json(&body)
             .send()
             .await?
-            .error_for_status()?;
-        Ok(())
+            .error_for_status()?
+            .json()
+            .await?;
+        Ok(receipt)
+    }
+
+    pub async fn get_bundle(&self, uuid: &str) -> Result<BundleWithCommands> {
+        let client = Client::new();
+        let bundle = client
+            .get(format!("{}/commands/bundles/{uuid}", self.domain))
+            .header("Authorization", format!("Bearer {}", &self.bearer_token))
+            .send()
+            .await?
+            .error_for_status()?
+            .json()
+            .await?;
+        Ok(bundle)
+    }
+
+    pub async fn get_recipes(&self) -> Result<Vec<CommandRecipe>> {
+        let client = Client::new();
+        let recipes = client
+            .get(format!("{}/commands/recipes", self.domain))
+            .header("Authorization", format!("Bearer {}", &self.bearer_token))
+            .send()
+            .await?
+            .error_for_status()?
+            .json()
+            .await?;
+        Ok(recipes)
     }
 
     pub async fn approve_device(&self, device_id: u64) -> Result<()> {

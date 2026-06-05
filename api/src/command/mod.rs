@@ -28,6 +28,23 @@ pub struct BundleCommands {
     pub commands: Vec<SafeCommandRequest>,
 }
 
+/// One queued command produced when issuing a bundle, identifying the row in
+/// `command_queue` so the caller can track its result without guessing.
+#[derive(Debug, Serialize, utoipa::ToSchema)]
+pub struct QueuedCommand {
+    pub device: i32,
+    pub cmd_id: i32,
+}
+
+/// Returned by `POST /commands/bundles`. Gives the caller the bundle `uuid` and
+/// the id of every command it just queued, so results can be polled precisely.
+#[derive(Debug, Serialize, utoipa::ToSchema)]
+pub struct BundleReceipt {
+    #[schema(value_type = String)]
+    pub uuid: Uuid,
+    pub commands: Vec<QueuedCommand>,
+}
+
 /// A reusable, named bundle of commands. Users save a recipe once and can then
 /// replay the same set of commands against any device(s) without re-entering them.
 #[derive(Debug, Serialize, sqlx::FromRow, utoipa::ToSchema)]
