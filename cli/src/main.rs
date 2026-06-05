@@ -435,12 +435,20 @@ async fn issue_bundle(
         .map(|q| (serial_of(q.device), q.cmd_id, String::new()))
         .collect();
 
+    let mut consecutive_errors = 0;
     while !completed.iter().all(|&c| c) {
         // One request returns the state of every command in the bundle.
         let bundle = match api.get_bundle(&receipt.uuid).await {
-            Ok(bundle) => bundle,
-            Err(_) => {
-                thread::sleep(Duration::from_secs(1));
+            Ok(bundle) => {
+                consecutive_errors = 0;
+                bundle
+            }
+            Err(e) => {
+                consecutive_errors += 1;
+                if consecutive_errors >= 5 {
+                    return Err(e).context("Gave up polling bundle after repeated failures");
+                }
+                tokio::time::sleep(Duration::from_secs(1)).await;
                 continue;
             }
         };
@@ -456,6 +464,19 @@ async fn issue_bundle(
             let Some(response) = by_cmd.get(command_id) else {
                 continue;
             };
+
+            // A cancelled command is terminal: it will never produce a response.
+            if response.cancelled {
+                results[idx].2 = String::from("(cancelled)");
+                pb.finish_with_message(format!(
+                    "{} [{}:{}] Cancelled",
+                    serial.yellow(),
+                    device_id,
+                    command_id
+                ));
+                completed[idx] = true;
+                continue;
+            }
 
             if response.fetched {
                 pb.set_message(format!(
@@ -481,7 +502,7 @@ async fn issue_bundle(
         }
 
         if !completed.iter().all(|&c| c) {
-            thread::sleep(Duration::from_secs(1));
+            tokio::time::sleep(Duration::from_secs(1)).await;
         }
     }
 
@@ -988,10 +1009,10 @@ async fn main() -> anyhow::Result<()> {
                                 recipe.name.bright_cyan(),
                                 recipe.id
                             );
-                            if let Some(desc) = &recipe.description {
-                                if !desc.is_empty() {
-                                    println!("  {}", desc.dimmed());
-                                }
+                            if let Some(desc) = &recipe.description
+                                && !desc.is_empty()
+                            {
+                                println!("  {}", desc.dimmed());
                             }
                             match recipe.commands.as_array() {
                                 Some(cmds) if !cmds.is_empty() => {

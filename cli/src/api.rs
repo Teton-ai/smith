@@ -1,46 +1,16 @@
 use anyhow::Result;
 use chrono::{DateTime, Utc};
 use models::{
+    command::{BundleReceipt, BundleWithCommands, CommandRecipe},
     deployment::{Deployment, DeploymentRequest},
     device::{CommandsPaginated, Device, DeviceCommandResponse, DeviceFilter},
     distribution::{Distribution, NewDistributionRelease},
     release::{Release, UpdateRelease},
 };
 use reqwest::{Client, Response};
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use smith::utils::schema::{self, Package};
 use std::collections::HashMap;
-
-/// A saved, named set of commands (`GET /commands/recipes`).
-#[derive(Debug, Deserialize, Serialize)]
-pub struct CommandRecipe {
-    pub id: i32,
-    pub name: String,
-    pub description: Option<String>,
-    pub commands: serde_json::Value,
-}
-
-/// One command queued by issuing a bundle, returned in the bundle receipt.
-#[derive(Debug, Deserialize)]
-pub struct QueuedCommand {
-    pub device: i32,
-    pub cmd_id: i32,
-}
-
-/// Response of `POST /commands/bundles`: the bundle id plus every queued command,
-/// so results can be polled without guessing which command is ours.
-#[derive(Debug, Deserialize)]
-pub struct BundleReceipt {
-    pub uuid: String,
-    pub commands: Vec<QueuedCommand>,
-}
-
-/// A single bundle with the current state of all its commands
-/// (`GET /commands/bundles/{uuid}`).
-#[derive(Debug, Deserialize)]
-pub struct BundleWithCommands {
-    pub responses: Vec<DeviceCommandResponse>,
-}
 
 #[derive(Debug, Deserialize)]
 pub struct StartExtendedTestResponse {
@@ -658,7 +628,7 @@ impl SmithAPI {
         Ok(receipt)
     }
 
-    pub async fn get_bundle(&self, uuid: &str) -> Result<BundleWithCommands> {
+    pub async fn get_bundle(&self, uuid: impl std::fmt::Display) -> Result<BundleWithCommands> {
         let client = Client::new();
         let bundle = client
             .get(format!("{}/commands/bundles/{uuid}", self.domain))

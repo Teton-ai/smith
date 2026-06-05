@@ -1,12 +1,12 @@
 use crate::State;
 use crate::command::{
-    BundleCommands, BundleReceipt, BundleWithCommands, BundleWithCommandsPaginated,
-    BundleWithRawResponsesExplicit, CommandRecipe, DeviceCommandResponse, QueuedCommand,
-    RecipeInput,
+    BundleCommands, BundleWithCommandsPaginated, BundleWithRawResponsesExplicit, RecipeInput,
 };
 use axum::Json;
 use axum::extract::{Host, Path, Query};
 use axum::{Extension, http::StatusCode, response::Result};
+use models::command::{BundleReceipt, BundleWithCommands, CommandRecipe, QueuedCommand};
+use models::device::DeviceCommandResponse;
 use sentry::types::Uuid;
 use serde::Deserialize;
 use smith::utils::schema::SafeCommandTx;
@@ -54,6 +54,7 @@ pub async fn available_commands() -> Result<Json<Vec<SafeCommandTx>>, StatusCode
     request_body = BundleCommands,
     responses(
         (status = 201, description = "Commands issued successfully", body = BundleReceipt),
+        (status = 400, description = "Empty devices or commands"),
         (status = 500, description = "Failed to issue commands", body = String),
     ),
     security(
@@ -65,6 +66,12 @@ pub async fn issue_commands_to_devices(
     Extension(state): Extension<State>,
     Json(bundle_commands): Json<BundleCommands>,
 ) -> Result<(StatusCode, Json<BundleReceipt>), StatusCode> {
+    // Never create a bundle with nothing queued: it would leave an orphan
+    // `command_bundles` row that `get_bundle` cannot reconstruct.
+    if bundle_commands.devices.is_empty() || bundle_commands.commands.is_empty() {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+
     let mut tx = state.pg_pool.begin().await.map_err(|err| {
         error!("Failed to start transaction {err}");
         StatusCode::INTERNAL_SERVER_ERROR
