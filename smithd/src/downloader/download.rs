@@ -1,4 +1,5 @@
 use crate::magic::MagicHandle;
+use crate::session::SessionHandle;
 use anyhow;
 use futures::StreamExt;
 use governor::{Quota, RateLimiter};
@@ -34,6 +35,7 @@ impl Default for DownloadStats {
 
 pub async fn download_file_mb(
     magic: MagicHandle,
+    session: SessionHandle,
     remote_file: String,
     local_file: String,
     rate: f64,
@@ -45,6 +47,7 @@ pub async fn download_file_mb(
     // Example: download at 1MB per second
     let result = download_file(
         magic,
+        session,
         local_file.as_str(),
         remote_file.as_str(),
         bytes_per_second,
@@ -58,6 +61,7 @@ pub async fn download_file_mb(
 
 async fn download_file(
     magic: MagicHandle,
+    session: SessionHandle,
     local_path: &str,
     remote_path: &str,
     bytes_per_second: u64,
@@ -90,8 +94,9 @@ async fn download_file(
         }
     }
 
-    let token = magic.get_token().await;
-    let token = token.unwrap_or_default();
+    // Prefer the short-lived device JWT; falls back to the opaque token when no
+    // valid JWT is cached (see SessionHandle::bearer_token).
+    let token = session.bearer_token().await.unwrap_or_default();
 
     let url = if remote_path.is_empty() {
         format!("{}/download", &server_api_url)
@@ -420,6 +425,7 @@ async fn download_file(
 
                 return Box::pin(download_file(
                     magic,
+                    session,
                     local_path,
                     remote_path,
                     bytes_per_second,

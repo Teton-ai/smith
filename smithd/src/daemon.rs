@@ -28,17 +28,20 @@ pub async fn run() {
 
     let police = PoliceHandle::new(shutdown.signals());
 
-    let downloader = DownloaderHandle::new(shutdown.signals(), configuration.clone());
+    let downloader =
+        DownloaderHandle::new(shutdown.signals(), configuration.clone(), session.clone());
 
     let updater = UpdaterHandle::new(
         shutdown.signals(),
         configuration.clone(),
         downloader.clone(),
+        session.clone(),
     );
 
     let filemanager = FileManagerHandle::new(shutdown.signals(), configuration.clone());
 
-    let logstream = LogStreamHandle::new(shutdown.signals(), configuration.clone());
+    let logstream =
+        LogStreamHandle::new(shutdown.signals(), configuration.clone(), session.clone());
 
     let commander = CommanderHandle::new(
         shutdown.signals(),

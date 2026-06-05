@@ -1,5 +1,6 @@
 use super::actor::{Actor, ActorMessage};
 use crate::magic::MagicHandle;
+use crate::session::SessionHandle;
 use crate::shutdown::ShutdownSignals;
 use anyhow::Result;
 use tokio::sync::{mpsc, oneshot};
@@ -10,9 +11,9 @@ pub struct LogStreamHandle {
 }
 
 impl LogStreamHandle {
-    pub fn new(shutdown: ShutdownSignals, magic: MagicHandle) -> Self {
+    pub fn new(shutdown: ShutdownSignals, magic: MagicHandle, session: SessionHandle) -> Self {
         let (sender, receiver) = mpsc::channel(8);
-        let mut actor = Actor::new(shutdown, receiver, sender.clone(), magic);
+        let mut actor = Actor::new(shutdown, receiver, sender.clone(), magic, session);
         tokio::spawn(async move { actor.run().await });
 
         Self { sender }
