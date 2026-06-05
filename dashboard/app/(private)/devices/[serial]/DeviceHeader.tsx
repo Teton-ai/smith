@@ -17,7 +17,6 @@ import {
 } from "lucide-react";
 import { useRef, useState } from "react";
 import {
-	type BundleCommands,
 	type CommandRecipe,
 	type Device,
 	useGetRecipes,
@@ -101,10 +100,11 @@ const DeviceHeader: React.FC<DeviceHeaderProps> = ({ device, serial }) => {
 	const [showRecipeModal, setShowRecipeModal] = useState(false);
 	const [selectedRecipeId, setSelectedRecipeId] = useState<number | null>(null);
 	const [recipeTriggered, setRecipeTriggered] = useState(false);
+	const [recipeError, setRecipeError] = useState<string | null>(null);
 	const [runCommand, setRunCommand] = useState("");
 	const { config } = useConfig();
 
-	const { data: recipesData } = useGetRecipes();
+	const { data: recipesData, isLoading: isLoadingRecipes } = useGetRecipes();
 	const recipes: CommandRecipe[] = Array.isArray(recipesData)
 		? (recipesData as CommandRecipe[])
 		: [];
@@ -112,24 +112,32 @@ const DeviceHeader: React.FC<DeviceHeaderProps> = ({ device, serial }) => {
 	const { mutate: triggerRecipe, isPending: isTriggeringRecipe } =
 		useIssueCommandsToDevices({
 			mutation: {
-				onSuccess: () => setRecipeTriggered(true),
+				onSuccess: () => {
+					setRecipeError(null);
+					setRecipeTriggered(true);
+				},
+				onError: () =>
+					setRecipeError("Failed to trigger recipe. Please try again."),
 			},
 		});
 
 	const closeRecipeModal = () => {
+		if (isTriggeringRecipe) return;
 		setShowRecipeModal(false);
 		setSelectedRecipeId(null);
 		setRecipeTriggered(false);
+		setRecipeError(null);
 	};
 
 	const handleTriggerRecipe = () => {
 		const recipe = recipes.find((r) => r.id === selectedRecipeId);
 		if (!recipe || !device?.id) return;
 		// Triggering a recipe is just issuing a command bundle with its commands.
+		setRecipeError(null);
 		triggerRecipe({
 			data: {
 				devices: [device.id],
-				commands: recipe.commands as unknown as BundleCommands["commands"],
+				commands: recipe.commands,
 			},
 		});
 	};
@@ -659,7 +667,11 @@ const DeviceHeader: React.FC<DeviceHeaderProps> = ({ device, serial }) => {
 						</Button>
 					) : (
 						<>
-							<Button variant="secondary" onClick={closeRecipeModal}>
+							<Button
+								variant="secondary"
+								onClick={closeRecipeModal}
+								disabled={isTriggeringRecipe}
+							>
 								Cancel
 							</Button>
 							<Button
@@ -679,12 +691,19 @@ const DeviceHeader: React.FC<DeviceHeaderProps> = ({ device, serial }) => {
 						Recipe triggered. The commands are queued and will run when the
 						device checks in.
 					</div>
+				) : isLoadingRecipes ? (
+					<p className="text-sm text-gray-500">Loading recipes...</p>
 				) : recipes.length === 0 ? (
 					<p className="text-sm text-gray-500">
 						No recipes yet. Create one on the Recipes page.
 					</p>
 				) : (
 					<div className="space-y-2 max-h-72 overflow-y-auto">
+						{recipeError && (
+							<div className="bg-red-50 border border-red-200 text-red-800 text-sm rounded-lg p-3">
+								{recipeError}
+							</div>
+						)}
 						{recipes.map((r) => (
 							<label
 								key={r.id}

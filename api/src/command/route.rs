@@ -391,10 +391,10 @@ pub async fn create_recipe(
     .execute(&state.pg_pool)
     .await
     .map_err(|err| {
-        if let sqlx::Error::Database(db_err) = &err {
-            if db_err.is_unique_violation() {
-                return StatusCode::CONFLICT;
-            }
+        if let sqlx::Error::Database(db_err) = &err
+            && db_err.is_unique_violation()
+        {
+            return StatusCode::CONFLICT;
         }
         error!("Failed to create recipe {err}");
         StatusCode::INTERNAL_SERVER_ERROR
@@ -443,10 +443,10 @@ pub async fn update_recipe(
     .execute(&state.pg_pool)
     .await
     .map_err(|err| {
-        if let sqlx::Error::Database(db_err) = &err {
-            if db_err.is_unique_violation() {
-                return StatusCode::CONFLICT;
-            }
+        if let sqlx::Error::Database(db_err) = &err
+            && db_err.is_unique_violation()
+        {
+            return StatusCode::CONFLICT;
         }
         error!("Failed to update recipe {err}");
         StatusCode::INTERNAL_SERVER_ERROR

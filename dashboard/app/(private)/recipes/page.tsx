@@ -3,8 +3,8 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { Plus, ScrollText, Search, Send, Trash2, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
+import { SIMPLE_COMMANDS } from "@/app/(private)/commands/shared";
 import {
-	type BundleCommands,
 	type CommandRecipe,
 	type Device,
 	getGetRecipesQueryKey,
@@ -29,17 +29,6 @@ import { RelativeTime } from "@/app/components/RelativeTime";
 function asArray<T>(data: unknown): T[] {
 	return Array.isArray(data) ? (data as T[]) : [];
 }
-
-// Commands a user can put in a recipe. Mirrors the API's available_commands.
-const SIMPLE_COMMANDS = [
-	"Ping",
-	"Upgrade",
-	"Restart",
-	"CloseTunnel",
-	"CheckOTAStatus",
-	"StartOTA",
-	"TestNetwork",
-] as const;
 
 const COMMAND_OPTIONS = [
 	...SIMPLE_COMMANDS,
@@ -93,13 +82,13 @@ function buildCommand(ec: EditableCommand): unknown {
 				DownloadOTA: {
 					tools: ec.tools,
 					payload: ec.payload,
-					rate: Number(ec.rate) || 0,
+					rate: Number(ec.rate),
 				},
 			};
 		case "ExtendedNetworkTest":
 			return {
 				ExtendedNetworkTest: {
-					duration_minutes: Number(ec.duration_minutes) || 0,
+					duration_minutes: Number(ec.duration_minutes),
 				},
 			};
 		default:
@@ -141,12 +130,23 @@ function commandsFromRecipe(recipe: CommandRecipe | null): EditableCommand[] {
 	return parsed.length > 0 ? parsed : [emptyCommand()];
 }
 
+const isFiniteNumber = (v: string): boolean =>
+	v.trim().length > 0 && Number.isFinite(Number(v));
+
 function commandIsValid(ec: EditableCommand): boolean {
 	switch (ec.variant) {
 		case "FreeForm":
 			return ec.cmd.trim().length > 0;
 		case "DownloadOTA":
-			return ec.tools.trim().length > 0 && ec.payload.trim().length > 0;
+			return (
+				ec.tools.trim().length > 0 &&
+				ec.payload.trim().length > 0 &&
+				isFiniteNumber(ec.rate)
+			);
+		case "ExtendedNetworkTest":
+			return (
+				isFiniteNumber(ec.duration_minutes) && Number(ec.duration_minutes) > 0
+			);
 		default:
 			return true;
 	}
@@ -193,6 +193,7 @@ function CommandRow({
 				<button
 					type="button"
 					onClick={onRemove}
+					aria-label="Remove command"
 					className="text-gray-400 hover:text-red-600 cursor-pointer p-1"
 					title="Remove command"
 				>
@@ -510,6 +511,7 @@ function TriggerModal({
 	});
 
 	const close = () => {
+		if (triggerMut.isPending) return;
 		setSearch("");
 		setSelected(new Set());
 		setDone(false);
@@ -531,7 +533,7 @@ function TriggerModal({
 		triggerMut.mutate({
 			data: {
 				devices: Array.from(selected),
-				commands: recipe.commands as unknown as BundleCommands["commands"],
+				commands: recipe.commands,
 			},
 		});
 	};
@@ -549,7 +551,11 @@ function TriggerModal({
 					</Button>
 				) : (
 					<>
-						<Button variant="secondary" onClick={close}>
+						<Button
+							variant="secondary"
+							onClick={close}
+							disabled={triggerMut.isPending}
+						>
 							Cancel
 						</Button>
 						<Button

@@ -28,6 +28,8 @@ pub struct BundleCommands {
     pub commands: Vec<SafeCommandRequest>,
 }
 
+/// A reusable, named bundle of commands. Users save a recipe once and can then
+/// replay the same set of commands against any device(s) without re-entering them.
 #[derive(Debug, Serialize, sqlx::FromRow, utoipa::ToSchema)]
 pub struct CommandRecipe {
     pub id: i32,
