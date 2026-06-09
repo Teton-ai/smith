@@ -21,7 +21,7 @@ use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use models::device::{Device, DeviceFilter};
 use smith::utils::schema;
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     io::{self, IsTerminal, Read},
     thread,
     time::Duration,
@@ -364,6 +364,161 @@ async fn resolve_target_devices(
     };
 
     resolve_devices_from_selector(api, &selector).await
+}
+
+/// Issue a bundle of commands to the given (already resolved, deduplicated, and
+/// confirmed) devices, then optionally poll the bundle until every command
+/// completes. The bundle receipt tells us exactly which `command_queue` rows we
+/// created, so tracking is precise even with multiple commands per device.
+async fn issue_bundle(
+    api: &SmithAPI,
+    devices: &[Device],
+    commands: Vec<schema::SafeCommandRequest>,
+    wait: bool,
+) -> anyhow::Result<()> {
+    let device_ids: Vec<i32> = devices.iter().map(|d| d.id).collect();
+    let receipt = api.send_bundle(device_ids, commands).await?;
+
+    let serials: HashMap<i32, String> = devices
+        .iter()
+        .map(|d| (d.id, d.serial_number.clone()))
+        .collect();
+    let serial_of = |device: i32| -> String {
+        serials
+            .get(&device)
+            .cloned()
+            .unwrap_or_else(|| device.to_string())
+    };
+
+    for queued in &receipt.commands {
+        println!(
+            "  {} [{}] - Command queued: {}:{}",
+            serial_of(queued.device).bright_green(),
+            queued.device,
+            queued.device,
+            queued.cmd_id
+        );
+    }
+
+    if !wait {
+        println!(
+            "\n{} Commands sent. Use 'sm command <device_id>:<command_id>' to check status.",
+            "Note:".bold()
+        );
+        return Ok(());
+    }
+
+    println!("\n{} for results...", "Waiting".bold());
+
+    let m = MultiProgress::new();
+    let mut progress_bars = Vec::new();
+    for queued in &receipt.commands {
+        let serial = serial_of(queued.device);
+        let pb = m.add(ProgressBar::new_spinner());
+        pb.enable_steady_tick(Duration::from_millis(50));
+        pb.set_style(
+            ProgressStyle::with_template("{spinner:.blue} {msg}")
+                .unwrap()
+                .tick_strings(&["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]),
+        );
+        pb.set_message(format!(
+            "{} [{}:{}] Waiting...",
+            serial, queued.device, queued.cmd_id
+        ));
+        progress_bars.push((pb, queued.device, queued.cmd_id, serial));
+    }
+
+    let mut completed = vec![false; receipt.commands.len()];
+    let mut results: Vec<(String, i32, String)> = receipt
+        .commands
+        .iter()
+        .map(|q| (serial_of(q.device), q.cmd_id, String::new()))
+        .collect();
+
+    let mut consecutive_errors = 0;
+    while !completed.iter().all(|&c| c) {
+        // One request returns the state of every command in the bundle.
+        let bundle = match api.get_bundle(&receipt.uuid).await {
+            Ok(bundle) => {
+                consecutive_errors = 0;
+                bundle
+            }
+            Err(e) => {
+                consecutive_errors += 1;
+                if consecutive_errors >= 5 {
+                    return Err(e).context("Gave up polling bundle after repeated failures");
+                }
+                tokio::time::sleep(Duration::from_secs(1)).await;
+                continue;
+            }
+        };
+
+        let by_cmd: HashMap<i32, &models::device::DeviceCommandResponse> =
+            bundle.responses.iter().map(|r| (r.cmd_id, r)).collect();
+
+        for (idx, (pb, device_id, command_id, serial)) in progress_bars.iter().enumerate() {
+            if completed[idx] {
+                continue;
+            }
+
+            let Some(response) = by_cmd.get(command_id) else {
+                continue;
+            };
+
+            // A cancelled command is terminal: it will never produce a response.
+            if response.cancelled {
+                results[idx].2 = String::from("(cancelled)");
+                pb.finish_with_message(format!(
+                    "{} [{}:{}] Cancelled",
+                    serial.yellow(),
+                    device_id,
+                    command_id
+                ));
+                completed[idx] = true;
+                continue;
+            }
+
+            if response.fetched {
+                pb.set_message(format!(
+                    "{} [{}:{}] Fetched by device",
+                    serial, device_id, command_id
+                ));
+            }
+
+            if let Some(output) = &response.response {
+                let output = output["FreeForm"]["stdout"]
+                    .as_str()
+                    .map(|s| s.to_string())
+                    .unwrap_or_else(|| String::from("(no output)"));
+                results[idx].2 = output;
+                pb.finish_with_message(format!(
+                    "{} [{}:{}] Completed ✓",
+                    serial.bright_green(),
+                    device_id,
+                    command_id
+                ));
+                completed[idx] = true;
+            }
+        }
+
+        if !completed.iter().all(|&c| c) {
+            tokio::time::sleep(Duration::from_secs(1)).await;
+        }
+    }
+
+    println!("\n{}", "Results:".bold());
+    for (serial, cmd_id, output) in results {
+        println!(
+            "\n{} {} (cmd {}):",
+            "Device:".bold(),
+            serial.bright_cyan(),
+            cmd_id
+        );
+        println!("{}", output);
+        println!("{}", "---".dimmed());
+    }
+
+    Ok(())
 }
 
 #[tokio::main(flavor = "current_thread")]
@@ -791,6 +946,103 @@ async fn main() -> anyhow::Result<()> {
                         table.print();
                     }
                 }
+                GetResourceType::Recipe { name, json } => {
+                    let secrets = auth::get_secrets(&config)
+                        .await
+                        .with_context(|| "Error getting token")?
+                        .with_context(|| "No Token found, please Login")?;
+
+                    let api = SmithAPI::new(secrets, &config);
+
+                    let mut recipes = api.get_recipes().await?;
+
+                    if let Some(key) = &name {
+                        recipes.retain(|r| {
+                            r.name == *key
+                                || key.parse::<i32>().map(|id| r.id == id).unwrap_or(false)
+                        });
+                        if recipes.is_empty() {
+                            println!("No recipe found matching '{}'", key);
+                            return Ok(());
+                        }
+                    }
+
+                    if json {
+                        println!("{}", serde_json::to_string_pretty(&recipes)?);
+                        return Ok(());
+                    }
+
+                    if recipes.is_empty() {
+                        println!("{}", "No recipes found".dimmed());
+                        return Ok(());
+                    }
+
+                    // Short description of a stored command (its `command` field).
+                    let describe = |c: &serde_json::Value| -> String {
+                        let cmd = &c["command"];
+                        if let Some(s) = cmd.as_str() {
+                            s.to_string()
+                        } else if let Some(obj) = cmd.as_object() {
+                            if let Some(freeform) = obj.get("FreeForm") {
+                                freeform
+                                    .get("cmd")
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("FreeForm")
+                                    .to_string()
+                            } else {
+                                obj.keys()
+                                    .next()
+                                    .cloned()
+                                    .unwrap_or_else(|| "Unknown".to_string())
+                            }
+                        } else {
+                            "Unknown".to_string()
+                        }
+                    };
+
+                    // Detail view when a specific recipe was requested, table otherwise.
+                    if name.is_some() {
+                        for recipe in &recipes {
+                            println!(
+                                "{} {} ({})",
+                                "Recipe:".bold(),
+                                recipe.name.bright_cyan(),
+                                recipe.id
+                            );
+                            if let Some(desc) = &recipe.description
+                                && !desc.is_empty()
+                            {
+                                println!("  {}", desc.dimmed());
+                            }
+                            match recipe.commands.as_array() {
+                                Some(cmds) if !cmds.is_empty() => {
+                                    for (i, c) in cmds.iter().enumerate() {
+                                        println!("  {}. {}", i + 1, describe(c));
+                                    }
+                                }
+                                _ => println!("  {}", "No commands".dimmed()),
+                            }
+                            println!();
+                        }
+                    } else {
+                        let mut table = TablePrint::new_with_headers(vec![
+                            "ID",
+                            "Name",
+                            "Commands",
+                            "Description",
+                        ]);
+                        for recipe in &recipes {
+                            let count = recipe.commands.as_array().map(|a| a.len()).unwrap_or(0);
+                            table.add_row(vec![
+                                recipe.id.to_string(),
+                                recipe.name.clone(),
+                                count.to_string(),
+                                recipe.description.clone().unwrap_or_default(),
+                            ]);
+                        }
+                        table.print();
+                    }
+                }
             },
             Commands::Restart { resource } => match resource {
                 RestartResourceType::Device {
@@ -895,11 +1147,11 @@ async fn main() -> anyhow::Result<()> {
                     let device_ids: Vec<i32> = target_devices.iter().map(|d| d.id).collect();
                     api.send_bundle(
                         device_ids,
-                        schema::SafeCommandRequest {
+                        vec![schema::SafeCommandRequest {
                             id: 0,
                             command: schema::SafeCommandTx::Restart,
                             continue_on_error: false,
-                        },
+                        }],
                     )
                     .await?;
                     for device in &target_devices {
@@ -1513,6 +1765,7 @@ async fn main() -> anyhow::Result<()> {
                 selector,
                 yes,
                 wait,
+                recipe,
                 command,
             } => {
                 let secrets = auth::get_secrets(&config)
@@ -1522,42 +1775,77 @@ async fn main() -> anyhow::Result<()> {
 
                 let api = SmithAPI::new(secrets, &config);
 
-                // Determine command source: args after -- OR stdin
+                // Build the command list and a human label, from either a saved
+                // recipe or a free-form command (args after -- or stdin).
                 let cmd_from_stdin;
-                let cmd_string = if !command.is_empty() {
-                    // Command provided via args after --, validate that -- was actually present
-                    if !std::env::args().any(|arg| arg == "--") {
-                        bail!(
-                            "error: command must be provided either:\n  - as arguments after '--' (e.g., sm run 1234 -- echo hello)\n  - via stdin (e.g., echo 'sleep 1' | sm run 1234)"
-                        );
-                    }
+                let (commands, label) = if let Some(key) = recipe {
                     cmd_from_stdin = false;
-                    command.join(" ")
+                    let recipe = api
+                        .get_recipes()
+                        .await?
+                        .into_iter()
+                        .find(|r| {
+                            r.name == key
+                                || key.parse::<i32>().map(|id| r.id == id).unwrap_or(false)
+                        })
+                        .ok_or_else(|| anyhow::anyhow!("No recipe found matching '{}'", key))?;
+
+                    let commands: Vec<schema::SafeCommandRequest> =
+                        serde_json::from_value(recipe.commands).with_context(|| {
+                            format!("Recipe '{}' has invalid commands", recipe.name)
+                        })?;
+
+                    if commands.is_empty() {
+                        bail!("Recipe '{}' has no commands", recipe.name);
+                    }
+
+                    let label = format!("recipe '{}' ({} command(s))", recipe.name, commands.len());
+                    (commands, label)
                 } else {
-                    // No args after --, try to read from stdin
-                    // First check if stdin is a TTY to avoid blocking
-                    if io::stdin().is_terminal() {
-                        bail!(
-                            "error: command must be provided either:\n  - as arguments after '--' (e.g., sm run 1234 -- echo hello)\n  - via stdin (e.g., echo 'sleep 1' | sm run 1234)"
-                        );
-                    }
+                    let cmd_string = if !command.is_empty() {
+                        // Command provided via args after --, validate that -- was actually present
+                        if !std::env::args().any(|arg| arg == "--") {
+                            bail!(
+                                "error: command must be provided either:\n  - as arguments after '--' (e.g., sm run 1234 -- echo hello)\n  - via stdin (e.g., echo 'sleep 1' | sm run 1234)\n  - or run a recipe with --recipe <name>"
+                            );
+                        }
+                        cmd_from_stdin = false;
+                        command.join(" ")
+                    } else {
+                        // No args after --, try to read from stdin
+                        // First check if stdin is a TTY to avoid blocking
+                        if io::stdin().is_terminal() {
+                            bail!(
+                                "error: command must be provided either:\n  - as arguments after '--' (e.g., sm run 1234 -- echo hello)\n  - via stdin (e.g., echo 'sleep 1' | sm run 1234)\n  - or run a recipe with --recipe <name>"
+                            );
+                        }
 
-                    let mut buffer = String::new();
-                    let bytes_read = io::stdin()
-                        .read_to_string(&mut buffer)
-                        .context("Failed to read command from stdin")?;
+                        let mut buffer = String::new();
+                        let bytes_read = io::stdin()
+                            .read_to_string(&mut buffer)
+                            .context("Failed to read command from stdin")?;
 
-                    let trimmed = buffer.trim();
+                        let trimmed = buffer.trim();
 
-                    if bytes_read == 0 || trimmed.is_empty() {
-                        // No stdin data available
-                        bail!(
-                            "error: command must be provided either:\n  - as arguments after '--' (e.g., sm run 1234 -- echo hello)\n  - via stdin (e.g., echo 'sleep 1' | sm run 1234)"
-                        );
-                    }
+                        if bytes_read == 0 || trimmed.is_empty() {
+                            // No stdin data available
+                            bail!(
+                                "error: command must be provided either:\n  - as arguments after '--' (e.g., sm run 1234 -- echo hello)\n  - via stdin (e.g., echo 'sleep 1' | sm run 1234)\n  - or run a recipe with --recipe <name>"
+                            );
+                        }
 
-                    cmd_from_stdin = true;
-                    trimmed.to_string()
+                        cmd_from_stdin = true;
+                        trimmed.to_string()
+                    };
+
+                    let commands = vec![schema::SafeCommandRequest {
+                        id: 0,
+                        command: schema::SafeCommandTx::FreeForm {
+                            cmd: cmd_string.clone(),
+                        },
+                        continue_on_error: false,
+                    }];
+                    (commands, format!("command '{}'", cmd_string))
                 };
 
                 let target_devices = resolve_target_devices(
@@ -1586,11 +1874,7 @@ async fn main() -> anyhow::Result<()> {
                 let total_count = target_devices.len();
                 let preview_count = 10.min(total_count);
 
-                println!(
-                    "Running command '{}' on {} device(s):",
-                    cmd_string.bold(),
-                    total_count
-                );
+                println!("Running {} on {} device(s):", label.bold(), total_count);
 
                 for device in target_devices.iter().take(preview_count) {
                     println!("  - {}", device.serial_number);
@@ -1625,134 +1909,7 @@ async fn main() -> anyhow::Result<()> {
 
                 println!();
 
-                let device_ids: Vec<i32> = target_devices.iter().map(|d| d.id).collect();
-                api.send_bundle(
-                    device_ids,
-                    schema::SafeCommandRequest {
-                        id: 0,
-                        command: schema::SafeCommandTx::FreeForm {
-                            cmd: cmd_string.clone(),
-                        },
-                        continue_on_error: false,
-                    },
-                )
-                .await?;
-
-                tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-
-                let mut command_ids = Vec::new();
-                for device in &target_devices {
-                    let device_id = device.id;
-                    let serial_number = &device.serial_number;
-                    match api.get_last_command(device_id as u64).await {
-                        Ok(last) => {
-                            let cmd_id = last.cmd_id as u64;
-                            command_ids.push((device_id as u64, cmd_id, serial_number.to_string()));
-                            println!(
-                                "  {} [{}] - Command queued: {}:{}",
-                                serial_number.bright_green(),
-                                device_id,
-                                device_id,
-                                cmd_id
-                            );
-                        }
-                        Err(e) => {
-                            println!("  {} [{}] - Failed: {}", serial_number.red(), device_id, e);
-                        }
-                    }
-                }
-
-                if !wait {
-                    println!(
-                        "\n{} Commands sent. Use 'sm command <device_id>:<command_id>' to check status.",
-                        "Note:".bold()
-                    );
-                    return Ok(());
-                }
-
-                println!("\n{} for results...", "Waiting".bold());
-
-                let m = MultiProgress::new();
-                let mut progress_bars = Vec::new();
-
-                for (device_id, command_id, serial_number) in &command_ids {
-                    let pb = m.add(ProgressBar::new_spinner());
-                    pb.enable_steady_tick(Duration::from_millis(50));
-                    pb.set_style(
-                        ProgressStyle::with_template("{spinner:.blue} {msg}")
-                            .unwrap()
-                            .tick_strings(&["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]),
-                    );
-                    pb.set_message(format!(
-                        "{} [{}:{}] Waiting...",
-                        serial_number, device_id, command_id
-                    ));
-                    progress_bars.push((pb, *device_id, *command_id, serial_number.clone()));
-                }
-
-                let mut completed = vec![false; command_ids.len()];
-                let mut results: Vec<(String, String)> =
-                    vec![(String::new(), String::new()); command_ids.len()];
-
-                while !completed.iter().all(|&c| c) {
-                    for (idx, (pb, device_id, command_id, serial_number)) in
-                        progress_bars.iter().enumerate()
-                    {
-                        if completed[idx] {
-                            continue;
-                        }
-
-                        match api.get_device_command(*device_id, *command_id).await {
-                            Ok(response) => {
-                                if response.fetched && !completed[idx] {
-                                    pb.set_message(format!(
-                                        "{} [{}:{}] Fetched by device",
-                                        serial_number, device_id, command_id
-                                    ));
-                                }
-
-                                if let Some(response) = response.response {
-                                    let output = if let Some(stdout) =
-                                        response["FreeForm"]["stdout"].as_str()
-                                    {
-                                        stdout.to_string()
-                                    } else {
-                                        String::from("(no output)")
-                                    };
-                                    results[idx] = (serial_number.clone(), output);
-                                    pb.finish_with_message(format!(
-                                        "{} [{}:{}] Completed ✓",
-                                        serial_number.bright_green(),
-                                        device_id,
-                                        command_id
-                                    ));
-                                    completed[idx] = true;
-                                }
-                            }
-                            Err(e) => {
-                                results[idx] = (serial_number.clone(), format!("Error: {}", e));
-                                pb.finish_with_message(format!(
-                                    "{} [{}:{}] Failed ✗",
-                                    serial_number.red(),
-                                    device_id,
-                                    command_id
-                                ));
-                                completed[idx] = true;
-                            }
-                        }
-                    }
-
-                    if !completed.iter().all(|&c| c) {
-                        thread::sleep(Duration::from_secs(1));
-                    }
-                }
-
-                println!("\n{}", "Results:".bold());
-                for (serial_number, output) in results {
-                    println!("\n{} {}:", "Device:".bold(), serial_number.bright_cyan());
-                    println!("{}", output);
-                    println!("{}", "---".dimmed());
-                }
+                issue_bundle(&api, &target_devices, commands, wait).await?;
             }
             Commands::Label {
                 selector,

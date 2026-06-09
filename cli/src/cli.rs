@@ -111,6 +111,14 @@ pub enum GetResourceType {
         #[arg(short, long, default_value = "false")]
         json: bool,
     },
+    /// Get saved command recipes
+    #[command(visible_alias = "recipes")]
+    Recipe {
+        /// Recipe name or id to show. Omit to list all recipes.
+        name: Option<String>,
+        #[arg(short, long, default_value = "false")]
+        json: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -276,6 +284,9 @@ pub enum Commands {
         /// Wait for command results (polls until completion)
         #[arg(short, long, default_value = "false")]
         wait: bool,
+        /// Run a saved recipe by name or id instead of a free-form command
+        #[arg(short, long, conflicts_with = "command")]
+        recipe: Option<String>,
         /// Command to execute on the devices (provide after -- or via stdin)
         #[arg(last = true)]
         command: Vec<String>,
