@@ -354,6 +354,9 @@ async fn write_file_atomic(path: &Path, contents: &str, mode: u32) -> Result<()>
         tmp.write_all(contents.as_bytes())?;
         tmp.as_file()
             .set_permissions(std::fs::Permissions::from_mode(mode))?;
+        // Flush data + metadata to disk before the atomic rename, so a crash
+        // can't leave a renamed-but-empty file at `path`.
+        tmp.as_file().sync_all()?;
         tmp.persist(&path)?;
         Ok(())
     })
