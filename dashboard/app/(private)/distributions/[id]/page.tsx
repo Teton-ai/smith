@@ -27,6 +27,7 @@ import { Button } from "@/app/components/button";
 import { Modal } from "@/app/components/modal";
 import { RelativeTime } from "@/app/components/RelativeTime";
 import { SidePanel } from "@/app/components/side-panel";
+import { isStableRelease } from "@/app/utils/release";
 
 interface ReleaseRowProps {
 	release: {
@@ -165,8 +166,8 @@ const DistributionDetailPage = () => {
 	const { data: deployedRelease } =
 		useGetDistributionLatestRelease(distributionId);
 
-	// Use the most recent non-yanked release as the base for new drafts
-	const baseRelease = releases.find((r) => !r.yanked) || releases[0];
+	// Use the most recent stable release as the base for new drafts
+	const baseRelease = releases.find(isStableRelease) || releases[0];
 	const getDistributionReleasePackages = useGetDistributionReleasePackages(
 		baseRelease?.id as number,
 		{ query: { enabled: baseRelease?.id != null } },
@@ -275,14 +276,8 @@ const DistributionDetailPage = () => {
 		}
 	};
 
-	// Get the latest non-yanked release to use as base (includes drafts)
-	const getLatestRelease = () => {
-		return releases.find((release) => !release.yanked) || releases[0];
-	};
-
 	// Parse version and generate options
 	const getVersionOptions = () => {
-		const baseRelease = getLatestRelease();
 		if (!baseRelease) return [];
 
 		const version = baseRelease.version;
@@ -373,8 +368,7 @@ const DistributionDetailPage = () => {
 	};
 
 	const openCreateModal = () => {
-		const latestRelease = getLatestRelease();
-		if (latestRelease) {
+		if (baseRelease) {
 			const options = getVersionOptions();
 			if (options.length > 0) {
 				setSelectedVersionOption(options[0].version); // Default to first option (PATCH)
@@ -444,7 +438,7 @@ const DistributionDetailPage = () => {
 					setIsReleaseCandidate(false);
 				}}
 				title="Draft New Release"
-				subtitle={`Based on ${getLatestRelease()?.version} by ${getLatestRelease()?.user_email || (getLatestRelease()?.user_id ? `User #${getLatestRelease()?.user_id}` : "Unknown")}${getLatestRelease()?.draft ? " (draft)" : ""}`}
+				subtitle={`Based on ${baseRelease?.version} by ${baseRelease?.user_email || (baseRelease?.user_id ? `User #${baseRelease.user_id}` : "Unknown")}${baseRelease?.draft ? " (draft)" : ""}`}
 				width="w-[480px]"
 				footer={
 					<>
