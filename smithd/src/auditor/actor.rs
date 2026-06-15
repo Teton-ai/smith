@@ -9,6 +9,10 @@ use tracing::{error, info, warn};
 /// Run a full audit every 12 hours.
 const AUDIT_INTERVAL_SECS: u64 = 12 * 60 * 60;
 
+/// Hard cap on each compliance probe subprocess so a hung command can't block
+/// audit processing or delay actor shutdown indefinitely.
+const PROBE_TIMEOUT: Duration = Duration::from_secs(5);
+
 /// Synthetic command id for autonomously-reported audits (daemon start and the
 /// periodic timer), following the negative-id convention the postman uses for
 /// unsolicited device state.
@@ -101,12 +105,15 @@ pub async fn run_audit_checks() -> (Option<bool>, Option<bool>) {
 /// True if any block device is a LUKS/crypt mapping. `None` if lsblk can't be
 /// run or its output can't be parsed.
 async fn check_disk_encrypted() -> Option<bool> {
-    let output = Command::new("lsblk")
-        .args(["-J", "-o", "TYPE"])
-        .output()
-        .await
-        .inspect_err(|e| error!("Failed to run lsblk: {e}"))
-        .ok()?;
+    let output = time::timeout(
+        PROBE_TIMEOUT,
+        Command::new("lsblk").args(["-J", "-o", "TYPE"]).output(),
+    )
+    .await
+    .inspect_err(|_| error!("lsblk timed out after {PROBE_TIMEOUT:?}"))
+    .ok()?
+    .inspect_err(|e| error!("Failed to run lsblk: {e}"))
+    .ok()?;
 
     if !output.status.success() {
         warn!("lsblk exited with status {:?}", output.status);
@@ -138,10 +145,10 @@ fn json_has_crypt(value: &serde_json::Value) -> bool {
 /// True if sshd has password authentication disabled and public-key
 /// authentication enabled. `None` if `sshd -T` can't be run.
 async fn check_password_auth_disabled() -> Option<bool> {
-    let output = Command::new("sshd")
-        .arg("-T")
-        .output()
+    let output = time::timeout(PROBE_TIMEOUT, Command::new("sshd").arg("-T").output())
         .await
+        .inspect_err(|_| error!("sshd -T timed out after {PROBE_TIMEOUT:?}"))
+        .ok()?
         .inspect_err(|e| error!("Failed to run sshd -T: {e}"))
         .ok()?;
 
