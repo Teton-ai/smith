@@ -45,6 +45,7 @@ pub async fn available_commands() -> Result<Json<Vec<SafeCommandTx>>, StatusCode
         SafeCommandTx::CheckOTAStatus,
         SafeCommandTx::StartOTA,
         SafeCommandTx::TestNetwork,
+        SafeCommandTx::RunAudit,
     ]))
 }
 

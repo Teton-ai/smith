@@ -2465,3 +2465,73 @@ pub async fn get_services_for_device(
 
     Ok(Json(services))
 }
+
+#[derive(serde::Serialize, utoipa::ToSchema)]
+pub struct DeviceAudit {
+    /// Whether a LUKS/crypt volume was detected. `None` if never reported.
+    pub disk_encrypted: Option<bool>,
+    /// Whether SSH password login is disabled. `None` if never reported.
+    pub password_access_disabled: Option<bool>,
+    /// Derived server-side: the device is on its target release.
+    pub running_latest_release: bool,
+    /// When the device last reported an audit. `None` if it never has.
+    pub checked_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+#[utoipa::path(
+    get,
+    path = "/devices/{device_id}/audit",
+    params(
+        ("device_id" = String, Path, description = "Device ID or serial number"),
+    ),
+    responses(
+        (status = StatusCode::OK, description = "Latest audit snapshot for the device", body = DeviceAudit),
+        (status = StatusCode::NOT_FOUND, description = "Device not found"),
+        (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to retrieve audit"),
+    ),
+    security(
+        ("auth_token" = [])
+    ),
+    tag = DEVICES_TAG
+)]
+pub async fn get_audit_for_device(
+    Path(device_id): Path<String>,
+    Extension(state): Extension<State>,
+) -> Result<Json<DeviceAudit>, StatusCode> {
+    // `running_latest_release` is known server-side, so it's derived here rather
+    // than reported by the device: a device is up to date when it has no pending
+    // target release (target is null or already equals the running release).
+    let audit = sqlx::query!(
+        r#"
+        SELECT
+            da.disk_encrypted,
+            da.password_access_disabled,
+            da.checked_at as "checked_at?",
+            COALESCE(d.target_release_id IS NULL OR d.release_id = d.target_release_id, false) as "running_latest_release!"
+        FROM device d
+        LEFT JOIN device_audit da ON da.device_id = d.id
+        WHERE
+            CASE
+                WHEN $1 ~ '^[0-9]+$' AND length($1) <= 10 THEN
+                    d.id = $1::int4
+                ELSE
+                    d.serial_number = $1
+            END
+        "#,
+        device_id
+    )
+    .fetch_optional(&state.pg_pool)
+    .await
+    .map_err(|err| {
+        error!("Failed to fetch audit for device: {err}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?
+    .ok_or(StatusCode::NOT_FOUND)?;
+
+    Ok(Json(DeviceAudit {
+        disk_encrypted: audit.disk_encrypted,
+        password_access_disabled: audit.password_access_disabled,
+        running_latest_release: audit.running_latest_release,
+        checked_at: audit.checked_at,
+    }))
+}

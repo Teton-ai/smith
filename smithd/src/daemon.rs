@@ -1,3 +1,4 @@
+use crate::auditor::AuditorHandle;
 use crate::commander::{CommanderHandle, Handles};
 use crate::dbus::DbusHandle;
 use crate::downloader::DownloaderHandle;
@@ -22,14 +23,14 @@ pub async fn run() {
 
     configuration.load(None).await;
 
+    let session = SessionHandle::new(shutdown.signals(), configuration.clone());
+
     // Kill shared-password SSH logins on every boot (self-heals if the config
     // gets reset by an OS update or someone flips it back). A failure here must
     // not stop the daemon from starting.
     if let Err(err) = crate::utils::files::disable_ssh_password_auth().await {
         tracing::error!("Failed to disable SSH password auth: {err:#}");
     }
-
-    let session = SessionHandle::new(shutdown.signals(), configuration.clone());
 
     let tunnel = TunnelHandle::new(shutdown.signals(), configuration.clone());
 
@@ -61,6 +62,11 @@ pub async fn run() {
             logstream: logstream.clone(),
         },
     );
+
+    // The auditor stages its results on the commander, so it must be created
+    // after it. Audit on boot, once SSH hardening has been (re)applied above.
+    let auditor = AuditorHandle::new(shutdown.signals(), commander.clone());
+    auditor.run_audit().await;
 
     let _postman = PostmanHandle::new(
         shutdown.signals(),
