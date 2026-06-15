@@ -1,3 +1,4 @@
+use crate::auditor::run_audit_checks;
 use crate::downloader::DownloaderHandle;
 use crate::filemanager::FileManagerHandle;
 use crate::logstream::LogStreamHandle;
@@ -106,6 +107,17 @@ impl CommandQueueExecutor {
             }
             SafeCommandTx::StopLogStream { session_id } => {
                 logs::stop_stream(action.id, &self.handles.logstream, session_id).await
+            }
+            SafeCommandTx::RunAudit => {
+                let (disk_encrypted, password_access_disabled) = run_audit_checks().await;
+                SafeCommandResponse {
+                    id: action.id,
+                    command: SafeCommandRx::AuditReport {
+                        disk_encrypted,
+                        password_access_disabled,
+                    },
+                    status: 0,
+                }
             }
         }
     }

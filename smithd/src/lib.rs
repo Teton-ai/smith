@@ -1,3 +1,4 @@
+pub mod auditor;
 pub mod commander;
 pub mod control;
 pub mod daemon;

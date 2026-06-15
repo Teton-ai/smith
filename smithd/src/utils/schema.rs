@@ -127,6 +127,10 @@ pub enum SafeCommandRx {
         session_id: String,
         error: String,
     },
+    AuditReport {
+        disk_encrypted: Option<bool>,
+        password_access_disabled: Option<bool>,
+    },
 }
 
 #[derive(Serialize, Deserialize, Default, Debug)]
@@ -175,6 +179,7 @@ pub enum SafeCommandTx {
     StopLogStream {
         session_id: String,
     },
+    RunAudit,
 }
 
 // RESPONSE THAT IT GETS

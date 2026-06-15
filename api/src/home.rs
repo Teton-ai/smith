@@ -200,6 +200,26 @@ pub async fn save_responses(
                     .await?;
                 }
             }
+            SafeCommandRx::AuditReport {
+                disk_encrypted,
+                password_access_disabled,
+            } => {
+                sqlx::query!(
+                    r#"
+        INSERT INTO device_audit (device_id, disk_encrypted, password_access_disabled, checked_at)
+        VALUES ($1, $2, $3, NOW())
+        ON CONFLICT (device_id) DO UPDATE SET
+            disk_encrypted = EXCLUDED.disk_encrypted,
+            password_access_disabled = EXCLUDED.password_access_disabled,
+            checked_at = EXCLUDED.checked_at
+        "#,
+                    device_id,
+                    disk_encrypted,
+                    password_access_disabled,
+                )
+                .execute(pool)
+                .await?;
+            }
             _ => {}
         }
         let _response_id = sqlx::query_scalar!(

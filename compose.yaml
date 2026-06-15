@@ -19,6 +19,7 @@ services:
       - ./cli:/app/cli
       - ./models:/app/models
       - ./smithd:/app/smithd
+      - ./updater:/app/updater
       # Cache cargo registry and build artifacts for faster rebuilds
       - cargo-registry:/usr/local/cargo/registry
       - cargo-git:/usr/local/cargo/git
