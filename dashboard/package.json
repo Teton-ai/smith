@@ -32,7 +32,7 @@
 		"@types/react": "^19",
 		"@types/react-dom": "^19",
 		"@vitejs/plugin-react": "^4.3.4",
-		"orval": "8.9.1",
+		"orval": "8.17.0",
 		"tailwindcss": "^4",
 		"typescript": "^5",
 		"vite": "^6.0.0"
