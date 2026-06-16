@@ -21,7 +21,7 @@ import {
 	type Device,
 	useGetRecipes,
 	useIssueCommandsToDevices,
-	useTriggerRecipe
+	useTriggerRecipe,
 } from "@/app/api-client";
 import { Modal } from "@/app/components/modal";
 import NetworkQualityIndicator from "@/app/components/NetworkQualityIndicator";
