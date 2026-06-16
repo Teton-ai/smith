@@ -7,7 +7,7 @@
 		"build": "vite build",
 		"preview": "vite preview",
 		"lint": "biome check --write",
-		"gen-api-client": "orval --config ./orval.config.ts"
+		"gen-api-client": "orval --config ./orval.config.ts && biome check --write app/api-client.ts"
 	},
 	"dependencies": {
 		"@auth0/auth0-react": "^2.3.0",
@@ -32,7 +32,7 @@
 		"@types/react": "^19",
 		"@types/react-dom": "^19",
 		"@vitejs/plugin-react": "^4.3.4",
-		"orval": "^8.5.2",
+		"orval": "8.17.0",
 		"tailwindcss": "^4",
 		"typescript": "^5",
 		"vite": "^6.0.0"

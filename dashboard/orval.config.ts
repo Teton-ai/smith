@@ -41,11 +41,11 @@ export default defineConfig({
 		},
 		output: {
 			client: "react-query",
+			httpClient: "axios",
 			target: "./app/api-client.ts",
 			override: {
 				query: {
 					useInfinite: true,
-					useInfiniteQueryParam: "offset",
 				},
 				mutator: {
 					path: "./app/api-client-mutator.ts",

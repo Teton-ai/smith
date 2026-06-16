@@ -412,7 +412,7 @@ pub struct ReleaseService {
 }
 
 #[derive(Debug, Deserialize, utoipa::ToSchema)]
-pub struct CreateReleaseService {
+pub struct ReleaseServiceInput {
     pub service_name: String,
     pub watchdog_sec: Option<i32>,
 }
@@ -471,7 +471,7 @@ pub async fn get_release_services(
     params(
         ("release_id" = i32, Path, description = "Release ID")
     ),
-    request_body = CreateReleaseService,
+    request_body = ReleaseServiceInput,
     responses(
         (status = StatusCode::CREATED, description = "Service added to release successfully", body = ReleaseService),
         (status = StatusCode::NOT_FOUND, description = "Release not found"),
@@ -486,7 +486,7 @@ pub async fn get_release_services(
 pub async fn create_release_service(
     Path(release_id): Path<i32>,
     Extension(state): Extension<State>,
-    Json(service): Json<CreateReleaseService>,
+    Json(service): Json<ReleaseServiceInput>,
 ) -> axum::response::Result<(StatusCode, Json<ReleaseService>), StatusCode> {
     // Verify release exists and is in draft mode
     let release = get_release_by_id(release_id, &state.pg_pool)
