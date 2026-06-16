@@ -1475,8 +1475,13 @@ pub async fn update_devices_target_release(
 pub async fn issue_commands_to_device(
     Path(device_id): Path<String>,
     Extension(state): Extension<State>,
+    Extension(current_user): Extension<CurrentUser>,
     Json(commands): Json<Vec<SafeCommandRequest>>,
 ) -> axum::response::Result<StatusCode, StatusCode> {
+    if !authorization::authorize_commands(&current_user, &commands) {
+        return Err(StatusCode::FORBIDDEN);
+    }
+
     let mut tx = state.pg_pool.begin().await.map_err(|err| {
         error!("Failed to start transaction {err}");
         StatusCode::INTERNAL_SERVER_ERROR

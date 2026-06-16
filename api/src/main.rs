@@ -343,6 +343,7 @@ async fn start_main_server(config: &'static Config, authorization: Authorization
             command::route::update_recipe,
             command::route::delete_recipe
         ))
+        .routes(routes!(command::route::trigger_recipe))
         .routes(routes!(event::route::sse_handler))
         .route_layer(middleware::from_fn(middlewares::authentication::check))
         // TODO: Check why we have this, not good for all routes

@@ -1,7 +1,10 @@
 use crate::State;
 use crate::command::{
     BundleCommands, BundleWithCommandsPaginated, BundleWithRawResponsesExplicit, RecipeInput,
+    TriggerRecipeInput,
 };
+use crate::middlewares::authorization;
+use crate::user::CurrentUser;
 use axum::Json;
 use axum::extract::{Host, Path, Query};
 use axum::{Extension, http::StatusCode, response::Result};
@@ -9,9 +12,78 @@ use models::command::{BundleReceipt, BundleWithCommands, CommandRecipe, QueuedCo
 use models::device::DeviceCommandResponse;
 use sentry::types::Uuid;
 use serde::Deserialize;
-use smith::utils::schema::SafeCommandTx;
+use smith::utils::schema::{SafeCommandRequest, SafeCommandTx};
+use sqlx::PgPool;
 use std::collections::HashMap;
 use tracing::error;
+
+/// Queue `commands` against every device in `devices` as a single bundle.
+/// Shared by raw bundle issuing and recipe triggering so both produce identical
+/// `command_bundles` / `command_queue` rows and the same receipt shape.
+async fn queue_commands_bundle(
+    pg_pool: &PgPool,
+    devices: &[i32],
+    commands: &[SafeCommandRequest],
+) -> Result<BundleReceipt, StatusCode> {
+    let mut tx = pg_pool.begin().await.map_err(|err| {
+        error!("Failed to start transaction {err}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    let bundle_id = sqlx::query!(r#"INSERT INTO command_bundles DEFAULT VALUES RETURNING uuid"#)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(|err| {
+            error!("Failed to insert command bundle {err}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+
+    let mut queued = Vec::with_capacity(devices.len() * commands.len());
+    for device_id in devices {
+        for command in commands {
+            let cmd = serde_json::to_value(command.command.clone()).map_err(|err| {
+                error!("Failed to serialize command into JSON {err}");
+                StatusCode::INTERNAL_SERVER_ERROR
+            })?;
+            let row = sqlx::query!(
+                r#"INSERT INTO command_queue (device_id, cmd, continue_on_error, canceled, bundle)
+                VALUES (
+                    $1,
+                    $2::jsonb,
+                    $3,
+                    false,
+                    $4
+                )
+                RETURNING id"#,
+                device_id,
+                cmd,
+                command.continue_on_error,
+                bundle_id.uuid
+            )
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(|err| {
+                error!("Failed to insert command for device {err}");
+                StatusCode::INTERNAL_SERVER_ERROR
+            })?;
+
+            queued.push(QueuedCommand {
+                device: *device_id,
+                cmd_id: row.id,
+            });
+        }
+    }
+
+    tx.commit().await.map_err(|err| {
+        error!("Failed to commit transaction {err}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    Ok(BundleReceipt {
+        uuid: bundle_id.uuid,
+        commands: queued,
+    })
+}
 
 const COMMANDS_TAG: &str = "commands";
 
@@ -65,6 +137,7 @@ pub async fn available_commands() -> Result<Json<Vec<SafeCommandTx>>, StatusCode
 )]
 pub async fn issue_commands_to_devices(
     Extension(state): Extension<State>,
+    Extension(current_user): Extension<CurrentUser>,
     Json(bundle_commands): Json<BundleCommands>,
 ) -> Result<(StatusCode, Json<BundleReceipt>), StatusCode> {
     // Never create a bundle with nothing queued: it would leave an orphan
@@ -73,68 +146,20 @@ pub async fn issue_commands_to_devices(
         return Err(StatusCode::BAD_REQUEST);
     }
 
-    let mut tx = state.pg_pool.begin().await.map_err(|err| {
-        error!("Failed to start transaction {err}");
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
-
-    let bundle_id = sqlx::query!(r#"INSERT INTO command_bundles DEFAULT VALUES RETURNING uuid"#)
-        .fetch_one(&mut *tx)
-        .await
-        .map_err(|err| {
-            error!("Failed to insert command bundle {err}");
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?;
-
-    let mut queued =
-        Vec::with_capacity(bundle_commands.devices.len() * bundle_commands.commands.len());
-    for device_id in &bundle_commands.devices {
-        for command in &bundle_commands.commands {
-            let cmd = serde_json::to_value(command.command.clone()).map_err(|err| {
-                error!("Failed to serialize command into JSON {err}");
-                StatusCode::INTERNAL_SERVER_ERROR
-            })?;
-            let row = sqlx::query!(
-                r#"INSERT INTO command_queue (device_id, cmd, continue_on_error, canceled, bundle)
-                VALUES (
-                    $1,
-                    $2::jsonb,
-                    $3,
-                    false,
-                    $4
-                )
-                RETURNING id"#,
-                device_id,
-                cmd,
-                command.continue_on_error,
-                bundle_id.uuid
-            )
-            .fetch_one(&mut *tx)
-            .await
-            .map_err(|err| {
-                error!("Failed to insert command for device {err}");
-                StatusCode::INTERNAL_SERVER_ERROR
-            })?;
-
-            queued.push(QueuedCommand {
-                device: *device_id,
-                cmd_id: row.id,
-            });
-        }
+    // Gate each command kind by the caller's permissions (e.g. freeform,
+    // tunnel). Recipes go through `trigger_recipe`, which is gated separately.
+    if !authorization::authorize_commands(&current_user, &bundle_commands.commands) {
+        return Err(StatusCode::FORBIDDEN);
     }
 
-    tx.commit().await.map_err(|err| {
-        error!("Failed to commit transaction {err}");
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
+    let receipt = queue_commands_bundle(
+        &state.pg_pool,
+        &bundle_commands.devices,
+        &bundle_commands.commands,
+    )
+    .await?;
 
-    Ok((
-        StatusCode::CREATED,
-        Json(BundleReceipt {
-            uuid: bundle_id.uuid,
-            commands: queued,
-        }),
-    ))
+    Ok((StatusCode::CREATED, Json(receipt)))
 }
 
 #[derive(Deserialize, Debug)]
@@ -479,8 +504,15 @@ pub async fn get_recipes(
 )]
 pub async fn create_recipe(
     Extension(state): Extension<State>,
+    Extension(current_user): Extension<CurrentUser>,
     Json(recipe): Json<RecipeInput>,
 ) -> Result<StatusCode, StatusCode> {
+    // Recipe contents are trusted at trigger time, so authoring them is a
+    // privileged action even though triggering them is not.
+    if !authorization::check(current_user, "recipes", "write") {
+        return Err(StatusCode::FORBIDDEN);
+    }
+
     let commands = serde_json::to_value(&recipe.commands).map_err(|err| {
         error!("Failed to serialize recipe commands into JSON {err}");
         StatusCode::INTERNAL_SERVER_ERROR
@@ -528,9 +560,14 @@ pub async fn create_recipe(
 )]
 pub async fn update_recipe(
     Extension(state): Extension<State>,
+    Extension(current_user): Extension<CurrentUser>,
     Path(recipe_id): Path<i32>,
     Json(recipe): Json<RecipeInput>,
 ) -> Result<StatusCode, StatusCode> {
+    if !authorization::check(current_user, "recipes", "write") {
+        return Err(StatusCode::FORBIDDEN);
+    }
+
     let commands = serde_json::to_value(&recipe.commands).map_err(|err| {
         error!("Failed to serialize recipe commands into JSON {err}");
         StatusCode::INTERNAL_SERVER_ERROR
@@ -582,8 +619,13 @@ pub async fn update_recipe(
 )]
 pub async fn delete_recipe(
     Extension(state): Extension<State>,
+    Extension(current_user): Extension<CurrentUser>,
     Path(recipe_id): Path<i32>,
 ) -> Result<StatusCode, StatusCode> {
+    if !authorization::check(current_user, "recipes", "write") {
+        return Err(StatusCode::FORBIDDEN);
+    }
+
     let result = sqlx::query(r#"DELETE FROM command_recipes WHERE id = $1"#)
         .bind(recipe_id)
         .execute(&state.pg_pool)
@@ -598,4 +640,65 @@ pub async fn delete_recipe(
     }
 
     Ok(StatusCode::NO_CONTENT)
+}
+
+#[utoipa::path(
+    post,
+    path = "/commands/recipes/{recipe_id}/trigger",
+    params(
+        ("recipe_id" = i32, Path),
+    ),
+    request_body = TriggerRecipeInput,
+    responses(
+        (status = 201, description = "Recipe triggered successfully", body = BundleReceipt),
+        (status = 400, description = "No devices supplied"),
+        (status = 403, description = "Not allowed to trigger recipes"),
+        (status = 404, description = "Recipe not found"),
+        (status = 500, description = "Failed to trigger recipe"),
+    ),
+    security(
+        ("auth_token" = [])
+    ),
+    tag = COMMANDS_TAG
+)]
+pub async fn trigger_recipe(
+    Extension(state): Extension<State>,
+    Extension(current_user): Extension<CurrentUser>,
+    Path(recipe_id): Path<i32>,
+    Json(input): Json<TriggerRecipeInput>,
+) -> Result<(StatusCode, Json<BundleReceipt>), StatusCode> {
+    // Triggering only needs `recipes:trigger`; the recipe's commands are NOT
+    // re-checked against the caller's command permissions. The recipe is a
+    // vetted artifact (authoring needs `recipes:write`), so a user who can only
+    // trigger recipes can run one that contains freeform/tunnel steps without
+    // being able to issue those commands directly.
+    if !authorization::check(current_user, "recipes", "trigger") {
+        return Err(StatusCode::FORBIDDEN);
+    }
+
+    if input.devices.is_empty() {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+
+    let recipe = sqlx::query!(
+        r#"SELECT commands FROM command_recipes WHERE id = $1"#,
+        recipe_id
+    )
+    .fetch_optional(&state.pg_pool)
+    .await
+    .map_err(|err| {
+        error!("Failed to load recipe {err}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?
+    .ok_or(StatusCode::NOT_FOUND)?;
+
+    let commands: Vec<SafeCommandRequest> =
+        serde_json::from_value(recipe.commands).map_err(|err| {
+            error!("Failed to deserialize recipe commands {err}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+
+    let receipt = queue_commands_bundle(&state.pg_pool, &input.devices, &commands).await?;
+
+    Ok((StatusCode::CREATED, Json(receipt)))
 }

@@ -29,6 +29,13 @@ pub struct RecipeInput {
     pub commands: Vec<SafeCommandRequest>,
 }
 
+/// Request body for triggering a recipe: the devices to run it against. The
+/// commands come from the stored recipe, not the caller.
+#[derive(Debug, Deserialize, utoipa::ToSchema)]
+pub struct TriggerRecipeInput {
+    pub devices: Vec<i32>,
+}
+
 #[derive(Debug, Serialize, Deserialize, sqlx::FromRow)]
 pub struct BundleWithRawResponsesExplicit {
     pub uuid: Uuid,
