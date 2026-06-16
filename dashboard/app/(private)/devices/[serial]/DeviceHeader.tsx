@@ -21,12 +21,12 @@ import {
 	type Device,
 	useGetRecipes,
 	useIssueCommandsToDevices,
+	useTriggerRecipe
 } from "@/app/api-client";
 import { Modal } from "@/app/components/modal";
 import NetworkQualityIndicator from "@/app/components/NetworkQualityIndicator";
 import { Button } from "@/app/components/ui";
 import { useConfig } from "@/app/hooks/config";
-import { useTriggerRecipe } from "@/app/recipes-trigger";
 
 const Tooltip = ({
 	children,
@@ -127,7 +127,7 @@ const DeviceHeader: React.FC<DeviceHeaderProps> = ({ device, serial }) => {
 		// `recipes:trigger`, so we only send the recipe id and target device.
 		setRecipeError(null);
 		triggerRecipe(
-			{ recipeId: selectedRecipeId, devices: [device.id] },
+			{ recipeId: selectedRecipeId, data: { devices: [device.id] } },
 			{
 				onSuccess: () => {
 					setRecipeError(null);
