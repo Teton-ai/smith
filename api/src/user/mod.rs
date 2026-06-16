@@ -96,7 +96,9 @@ impl CurrentUser {
         user_id: i32,
     ) -> Result<Self, sqlx::Error> {
         struct UserRole {
-            role: String,
+            // Nullable: the LEFT JOIN yields a NULL role for a user with no
+            // assigned roles, so this must be Option to decode without erroring.
+            role: Option<String>,
         }
 
         let user_roles = sqlx::query_as!(
@@ -114,7 +116,8 @@ impl CurrentUser {
 
         let user_permissions = user_roles
             .iter()
-            .flat_map(|user_role| authorization.permissions_for_role(&user_role.role))
+            .filter_map(|user_role| user_role.role.as_deref())
+            .flat_map(|role| authorization.permissions_for_role(role))
             .collect();
 
         let current_user = CurrentUser {

@@ -2,11 +2,11 @@ import { useMutation } from "@tanstack/react-query";
 import { useCallback } from "react";
 import { useClientMutator } from "./api-client-mutator";
 
-// Triggering a recipe is a server-side operation: the API loads the recipe's
-// commands and gates the call on `recipes:trigger`, so a user who cannot issue
-// freeform/tunnel commands directly can still run a vetted recipe that contains
-// them. (Mirrors orval's generated mutation hooks; on the next
-// `make gen-api-client` this can be replaced by the generated `useTriggerRecipe`.)
+// STOPGAP: this should be the orval-generated `useTriggerRecipe` from
+// api-client.ts. The generated client is currently stale (it predates several
+// merged PRs and a full `make gen-api-client` produces a ~4k-line diff with
+// type errors), so the hook isn't there yet. Replace this with the generated
+// hook once the client is regenerated.
 export const useTriggerRecipe = () => {
 	const triggerRecipe = useClientMutator<void>();
 
