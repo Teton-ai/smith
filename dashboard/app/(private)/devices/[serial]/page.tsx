@@ -1,6 +1,5 @@
 import {
-	ArrowLeft,
-	ChevronRight,
+	Cpu,
 	GitBranch,
 	Globe,
 	MapPin,
@@ -15,7 +14,20 @@ import {
 import { lazy, Suspense } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { useGetDeviceInfo } from "@/app/api-client";
+import {
+	BackLink,
+	Badge,
+	Card,
+	CountryFlag,
+	InfoRow,
+	LabelChip,
+	PageContainer,
+	Panel,
+	SECTION_THEMES,
+	TabNav,
+} from "@/app/components/ui";
 import DeviceHeader from "./DeviceHeader";
+import SecurityAudit from "./SecurityAudit";
 
 const LocationMap = lazy(() => import("./LocationMap"));
 
@@ -25,52 +37,38 @@ const MapFallback = () => (
 	</div>
 );
 
+const linkClass =
+	"font-mono text-sm text-blue-600 hover:text-blue-800 hover:underline cursor-pointer transition-colors";
+
 const DeviceDetailPage = () => {
 	const params = useParams();
 	const serial = params.serial as string;
 	const navigate = useNavigate();
 	const { data: device, isLoading: loading } = useGetDeviceInfo(serial);
 
-	const getFlagUrl = (countryCode: string) => {
-		return `https://flagicons.lipis.dev/flags/4x3/${countryCode.toLowerCase()}.svg`;
-	};
-
 	if (loading) {
 		return (
-			<div className="space-y-6">
-				{/* Breadcrumb Skeleton */}
-				<div className="flex items-center space-x-2">
-					<div className="h-4 bg-gray-200 rounded w-16 animate-pulse" />
-					<ChevronRight className="w-4 h-4 text-gray-300" />
-					<div className="h-4 bg-gray-200 rounded w-32 animate-pulse" />
-				</div>
-
-				{/* Header Skeleton */}
-				<div className="bg-white rounded-lg border border-gray-200 p-6">
-					<div className="flex items-start justify-between">
-						<div className="flex items-center space-x-4">
-							<div className="p-3 bg-gray-100 rounded-lg">
-								<div className="w-8 h-8 bg-gray-200 rounded animate-pulse" />
-							</div>
-							<div>
-								<div className="h-8 bg-gray-200 rounded w-48 animate-pulse mb-2" />
-								<div className="h-4 bg-gray-200 rounded w-32 animate-pulse mb-1" />
-								<div className="h-4 bg-gray-200 rounded w-24 animate-pulse" />
-							</div>
+			<PageContainer>
+				<div className="h-4 w-40 bg-gray-200 rounded animate-pulse" />
+				<Card className="p-6">
+					<div className="flex items-center space-x-4">
+						<div className="p-3 bg-gray-100 rounded-lg">
+							<div className="w-8 h-8 bg-gray-200 rounded animate-pulse" />
 						</div>
-						<div className="text-right">
-							<div className="h-4 bg-gray-200 rounded w-16 animate-pulse mb-1" />
-							<div className="h-4 bg-gray-200 rounded w-20 animate-pulse" />
+						<div className="space-y-2">
+							<div className="h-8 bg-gray-200 rounded w-48 animate-pulse" />
+							<div className="h-4 bg-gray-200 rounded w-32 animate-pulse" />
+							<div className="h-4 bg-gray-200 rounded w-24 animate-pulse" />
 						</div>
 					</div>
-				</div>
-			</div>
+				</Card>
+			</PageContainer>
 		);
 	}
 
 	if (!device) {
 		return (
-			<div className="space-y-6">
+			<PageContainer>
 				<div className="text-center py-12">
 					<XCircle className="w-12 h-12 text-gray-400 mx-auto mb-4" />
 					<h3 className="text-lg font-medium text-gray-900 mb-2">
@@ -80,229 +78,158 @@ const DeviceDetailPage = () => {
 						The device with serial number "{serial}" could not be found.
 					</p>
 				</div>
-			</div>
+			</PageContainer>
 		);
 	}
 
 	return (
-		<div className="flex-1 overflow-y-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
-			{/* Header with Back Button */}
-			<div className="flex items-center space-x-4">
-				<button
-					type="button"
-					onClick={() => navigate(-1)}
-					className="flex items-center space-x-2 text-gray-600 hover:text-gray-900 transition-colors"
-				>
-					<ArrowLeft className="w-4 h-4" />
-					<span className="text-sm font-medium">Back to Devices</span>
-				</button>
-			</div>
+		<PageContainer>
+			<BackLink onClick={() => navigate(-1)}>Back to Devices</BackLink>
 
 			{/* Device Header */}
 			<DeviceHeader device={device} serial={serial} />
 
 			{/* Tabs */}
-			<div className="border-b border-gray-200">
-				<nav className="-mb-px flex space-x-8">
-					<button className="py-2 px-1 border-b-2 border-blue-500 text-blue-600 font-medium text-sm">
-						Overview
-					</button>
-					<Link
-						to={`/devices/${serial}/commands`}
-						className="block py-2 px-1 border-b-2 border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 font-medium text-sm transition-colors cursor-pointer"
-					>
-						Commands
-					</Link>
-					<Link
-						to={`/devices/${serial}/services`}
-						className="block py-2 px-1 border-b-2 border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 font-medium text-sm transition-colors cursor-pointer"
-					>
-						Services
-					</Link>
-					<Link
-						to={`/devices/${serial}/audit`}
-						className="block py-2 px-1 border-b-2 border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 font-medium text-sm transition-colors cursor-pointer"
-					>
-						Audit
-					</Link>
-				</nav>
-			</div>
+			<TabNav
+				items={[
+					{ label: "Overview", active: true },
+					{ label: "Commands", to: `/devices/${serial}/commands` },
+					{ label: "Services", to: `/devices/${serial}/services` },
+				]}
+			/>
 
 			{/* Overview Content */}
 			<div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
 				{/* System Information */}
-				<div className="bg-white rounded-lg border border-gray-200 p-6">
-					<h3 className="text-lg font-semibold text-gray-900 mb-4">
-						System Information
-					</h3>
-
+				<Panel
+					title="System Information"
+					icon={Cpu}
+					theme={SECTION_THEMES.blue}
+				>
 					{/* Labels */}
 					{device.labels && Object.keys(device.labels).length > 0 && (
-						<>
-							<div className="flex items-center space-x-2 mb-3">
-								<Tags className="w-4 h-4 text-purple-600" />
-								<span className="text-gray-700 font-medium">Labels</span>
+						<div className="mb-4 pb-4 border-b border-gray-100">
+							<div className="flex items-center gap-2 mb-2.5">
+								<Tags className="w-3.5 h-3.5 text-gray-400" />
+								<span className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+									Labels
+								</span>
 							</div>
-							<div className="space-y-2 mb-4">
+							<div className="flex flex-wrap gap-1.5">
 								{Object.entries(device.labels).map(([key, value]) => (
-									<div
-										key={key}
-										className="flex items-center p-2 hover:bg-gray-50 rounded"
-									>
-										<span className="text-gray-700 font-mono text-sm min-w-fit mr-3">
-											{key}
-										</span>
-										<div className="flex-1 border-b border-dotted border-gray-300"></div>
-										<span className="text-gray-900 font-mono text-sm ml-3">
-											{value}
-										</span>
-									</div>
+									<LabelChip key={key} name={key} value={value} />
 								))}
 							</div>
-							<hr className="border-gray-200 mb-4" />
-						</>
+						</div>
 					)}
 
 					{/* System Info Details */}
 					<div className="space-y-3">
-						{/* Device Model */}
 						{device.system_info?.device_tree?.model && (
-							<div className="flex justify-between">
-								<span className="text-gray-700">Model</span>
-								<span className="text-gray-900">
-									{device.system_info.device_tree.model}
-								</span>
-							</div>
+							<InfoRow label="Model">
+								{device.system_info.device_tree.model}
+							</InfoRow>
 						)}
 
-						{/* Operating System */}
 						{device.system_info?.os_release?.pretty_name && (
-							<div className="flex justify-between">
-								<span className="text-gray-700">Operating System</span>
-								<span className="font-mono text-sm text-gray-900">
+							<InfoRow label="Operating System">
+								<span className="font-mono">
 									{device.system_info.os_release.pretty_name}
 								</span>
-							</div>
+							</InfoRow>
 						)}
 
-						{/* Kernel Version */}
 						{device.system_info?.proc?.version && (
-							<div className="flex justify-between">
-								<span className="text-gray-700">Kernel</span>
-								<span className="font-mono text-sm text-gray-900">
+							<InfoRow label="Kernel">
+								<span className="font-mono">
 									{device.system_info.proc.version}
 								</span>
-							</div>
+							</InfoRow>
 						)}
 
-						{/* Distribution */}
 						{device.release && (
-							<div className="flex justify-between">
-								<span className="text-gray-700 flex items-center">
-									<GitBranch className="w-4 h-4 text-gray-400 mr-2" />
-									Distribution
-								</span>
+							<InfoRow label="Distribution" icon={GitBranch}>
 								<Link
 									to={`/distributions/${device.release?.distribution_id}`}
-									className="block font-mono text-sm text-blue-600 hover:text-blue-800 hover:underline cursor-pointer transition-colors"
+									className={linkClass}
 								>
 									{device.release.distribution_name}
 								</Link>
-							</div>
+							</InfoRow>
 						)}
 
-						{/* Current Release */}
 						{device.release && (
-							<div className="flex justify-between">
-								<span className="text-gray-700 flex items-center">
-									<Tag className="w-4 h-4 text-gray-400 mr-2" />
-									Current Release
-								</span>
+							<InfoRow label="Current Release" icon={Tag}>
 								<Link
 									to={`/releases/${device.release?.id}`}
-									className="block font-mono text-sm text-blue-600 hover:text-blue-800 hover:underline cursor-pointer transition-colors"
+									className={linkClass}
 								>
 									{device.release.version}
 								</Link>
-							</div>
+							</InfoRow>
 						)}
 
-						{/* Target Distribution */}
 						{device.target_release &&
 							device.target_release_id !== device.release_id && (
 								<>
-									<div className="flex justify-between">
-										<span className="text-gray-700 flex items-center">
-											<GitBranch className="w-4 h-4 text-purple-400 mr-2" />
-											Target Distribution
-										</span>
-										<span className="font-mono text-sm text-gray-900">
-											<Link
-												to={`/distributions/${device.target_release.distribution_id}`}
-												className="block font-mono text-sm text-blue-600 hover:text-blue-800 hover:underline cursor-pointer transition-colors"
-											>
-												{device.target_release.distribution_name}
-											</Link>
-										</span>
-									</div>
+									<InfoRow
+										label="Target Distribution"
+										icon={GitBranch}
+										iconClassName="text-purple-400"
+									>
+										<Link
+											to={`/distributions/${device.target_release.distribution_id}`}
+											className={linkClass}
+										>
+											{device.target_release.distribution_name}
+										</Link>
+									</InfoRow>
 
-									{/* Target Release */}
-									<div className="flex justify-between">
-										<span className="text-gray-700 flex items-center">
-											<Tag className="w-4 h-4 text-purple-400 mr-2" />
-											Target Release
-										</span>
-										<span className="font-mono text-sm text-gray-900">
-											<Link
-												to={`/releases/${device.target_release?.id}`}
-												className="block font-mono text-sm text-blue-600 hover:text-blue-800 hover:underline cursor-pointer transition-colors"
-											>
-												{device.target_release.version}
-											</Link>
-										</span>
-									</div>
+									<InfoRow
+										label="Target Release"
+										icon={Tag}
+										iconClassName="text-purple-400"
+									>
+										<Link
+											to={`/releases/${device.target_release?.id}`}
+											className={linkClass}
+										>
+											{device.target_release.version}
+										</Link>
+									</InfoRow>
 								</>
 							)}
 
-						{/* Agent Version */}
 						{device.system_info?.smith?.version && (
-							<div className="flex justify-between">
-								<span className="text-gray-700">Agent</span>
-								<span className="font-mono text-sm text-gray-900">
+							<InfoRow label="Agent">
+								<span className="font-mono">
 									{device.system_info.smith.version}
 								</span>
-							</div>
+							</InfoRow>
 						)}
 
-						{/* Boot Time */}
 						{device.system_info?.proc?.stat?.btime && (
-							<div className="flex justify-between">
-								<span className="text-gray-700">Boot Time</span>
-								<span className="text-sm text-gray-900">
-									{new Date(
-										device.system_info.proc.stat.btime * 1000,
-									).toLocaleString()}
-								</span>
-							</div>
+							<InfoRow label="Boot Time">
+								{new Date(
+									device.system_info.proc.stat.btime * 1000,
+								).toLocaleString()}
+							</InfoRow>
 						)}
 
-						{/* Registration Date */}
 						{device.created_on && (
-							<div className="flex justify-between">
-								<span className="text-gray-700">Registration Date</span>
-								<span className="text-sm text-gray-900">
-									{new Date(device.created_on).toLocaleString()}
-								</span>
-							</div>
+							<InfoRow label="Registration Date">
+								{new Date(device.created_on).toLocaleString()}
+							</InfoRow>
 						)}
 					</div>
-				</div>
+				</Panel>
 
 				{/* Network Connections */}
-				<div className="bg-white rounded-lg border border-gray-200 p-6">
-					<h3 className="text-lg font-semibold text-gray-900 mb-4">
-						Network Connections
-					</h3>
+				<Panel
+					title="Network Connections"
+					icon={Wifi}
+					theme={SECTION_THEMES.green}
+				>
 					{device.system_info?.network?.interfaces ? (
 						(() => {
 							const activeConnections = Object.entries(
@@ -352,7 +279,7 @@ const DeviceDetailPage = () => {
 										return (
 											<div
 												key={name}
-												className="p-3 border border-green-200 bg-green-50 rounded"
+												className="p-3 border border-green-200 bg-green-50 rounded-lg"
 											>
 												<div className="flex items-center justify-between mb-2">
 													<div className="flex items-center space-x-2">
@@ -366,11 +293,10 @@ const DeviceDetailPage = () => {
 														<span className="font-mono text-sm font-medium text-gray-900">
 															{name}
 														</span>
-														<div className="w-2 h-2 rounded-full bg-green-500"></div>
 													</div>
-													<span className="text-xs text-green-600 font-medium">
+													<Badge variant="green" pill>
 														Connected
-													</span>
+													</Badge>
 												</div>
 
 												<div className="space-y-2 text-sm">
@@ -429,7 +355,7 @@ const DeviceDetailPage = () => {
 													return (
 														<div
 															key={name}
-															className="p-3 border border-gray-200 bg-gray-50 rounded"
+															className="p-3 border border-gray-200 bg-gray-50 rounded-lg"
 														>
 															<div className="flex items-center justify-between mb-2">
 																<div className="flex items-center space-x-2">
@@ -443,11 +369,10 @@ const DeviceDetailPage = () => {
 																	<span className="font-mono text-sm font-medium text-gray-900">
 																		{name}
 																	</span>
-																	<div className="w-2 h-2 rounded-full bg-gray-400"></div>
 																</div>
-																<span className="text-xs text-gray-500 font-medium">
+																<Badge variant="gray" pill>
 																	Disconnected
-																</span>
+																</Badge>
 															</div>
 
 															<div className="space-y-2 text-sm">
@@ -501,17 +426,14 @@ const DeviceDetailPage = () => {
 							No network interface information available
 						</p>
 					)}
-				</div>
+				</Panel>
 
 				{/* Location Information */}
-				<div className="bg-white rounded-lg border border-gray-200 p-6">
-					<div className="flex items-center space-x-2 mb-4">
-						<MapPin className="w-5 h-5 text-blue-600" />
-						<h3 className="text-lg font-semibold text-gray-900">
-							Location Information
-						</h3>
-					</div>
-
+				<Panel
+					title="Location Information"
+					icon={MapPin}
+					theme={SECTION_THEMES.purple}
+				>
 					{device.ip_address ? (
 						<div className="space-y-4">
 							{/* Map */}
@@ -530,68 +452,54 @@ const DeviceDetailPage = () => {
 									<span className="font-mono text-sm text-gray-900">
 										{device.ip_address.ip_address}
 									</span>
-									{device.ip_address.country_code && (
-										<img
-											src={getFlagUrl(device.ip_address.country_code)}
-											alt={device.ip_address.country || "Country flag"}
-											className="w-6 h-4"
-											onError={(e) => {
-												(e.target as HTMLImageElement).style.display = "none";
-											}}
-										/>
-									)}
+									<CountryFlag
+										countryCode={device.ip_address.country_code}
+										country={device.ip_address.country}
+									/>
 								</div>
 
 								{device.ip_address.name && (
-									<div className="flex items-center justify-between">
-										<span className="text-gray-600">Location Name</span>
-										<span className="text-gray-900 font-medium">
+									<InfoRow label="Location Name">
+										<span className="font-medium">
 											{device.ip_address.name}
 										</span>
-									</div>
+									</InfoRow>
 								)}
 								{device.ip_address.country && (
-									<div className="flex items-center justify-between">
-										<span className="text-gray-600">Country</span>
-										<span className="text-gray-900 font-medium">
+									<InfoRow label="Country">
+										<span className="font-medium">
 											{device.ip_address.country}
 											{device.ip_address.country_code &&
 												` (${device.ip_address.country_code})`}
 										</span>
-									</div>
+									</InfoRow>
 								)}
 								{device.ip_address.region && (
-									<div className="flex items-center justify-between">
-										<span className="text-gray-600">Region</span>
-										<span className="text-gray-900 font-medium">
+									<InfoRow label="Region">
+										<span className="font-medium">
 											{device.ip_address.region}
 										</span>
-									</div>
+									</InfoRow>
 								)}
 								{device.ip_address.city && (
-									<div className="flex items-center justify-between">
-										<span className="text-gray-600">City</span>
-										<span className="text-gray-900 font-medium">
+									<InfoRow label="City">
+										<span className="font-medium">
 											{device.ip_address.city}
 										</span>
-									</div>
+									</InfoRow>
 								)}
 								{device.ip_address.isp && (
-									<div className="flex items-center justify-between">
-										<span className="text-gray-600">Internet Provider</span>
-										<span className="text-gray-900 font-medium">
-											{device.ip_address.isp}
-										</span>
-									</div>
+									<InfoRow label="Internet Provider">
+										<span className="font-medium">{device.ip_address.isp}</span>
+									</InfoRow>
 								)}
 								{device.ip_address.coordinates && (
-									<div className="flex items-center justify-between">
-										<span className="text-gray-600">Coordinates</span>
-										<span className="font-mono text-sm text-gray-900">
+									<InfoRow label="Coordinates">
+										<span className="font-mono">
 											{device.ip_address.coordinates[0].toFixed(4)},{" "}
 											{device.ip_address.coordinates[1].toFixed(4)}
 										</span>
-									</div>
+									</InfoRow>
 								)}
 							</div>
 						</div>
@@ -608,9 +516,12 @@ const DeviceDetailPage = () => {
 							</div>
 						</div>
 					)}
-				</div>
+				</Panel>
 			</div>
-		</div>
+
+			{/* Security Audit */}
+			<SecurityAudit serial={serial} deviceId={device.id} />
+		</PageContainer>
 	);
 };
 

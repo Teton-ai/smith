@@ -22,9 +22,9 @@ import {
 	useGetRecipes,
 	useIssueCommandsToDevices,
 } from "@/app/api-client";
-import { Button } from "@/app/components/button";
 import { Modal } from "@/app/components/modal";
 import NetworkQualityIndicator from "@/app/components/NetworkQualityIndicator";
+import { Button } from "@/app/components/ui";
 import { useConfig } from "@/app/hooks/config";
 
 const Tooltip = ({
@@ -474,31 +474,34 @@ const DeviceHeader: React.FC<DeviceHeaderProps> = ({ device, serial }) => {
 				</div>
 				<div className="flex-shrink-0 flex items-center space-x-3">
 					<Tooltip content="Run a command on this device">
-						<button
+						<Button
+							variant="soft"
+							tone="purple"
+							icon={<Terminal className="w-4 h-4" />}
 							onClick={() => setShowRunModal(true)}
-							className="flex items-center space-x-2 px-3 py-2 rounded-md text-sm font-medium transition-colors cursor-pointer bg-purple-50 text-purple-700 border border-purple-200 hover:bg-purple-100"
 						>
-							<Terminal className="w-4 h-4" />
-							<span>Run</span>
-						</button>
+							Run
+						</Button>
 					</Tooltip>
 					<Tooltip content="Apply a recipe to this device">
-						<button
+						<Button
+							variant="soft"
+							tone="purple"
+							icon={<ScrollText className="w-4 h-4" />}
 							onClick={() => setShowRecipeModal(true)}
-							className="flex items-center space-x-2 px-3 py-2 rounded-md text-sm font-medium transition-colors cursor-pointer bg-purple-50 text-purple-700 border border-purple-200 hover:bg-purple-100"
 						>
-							<ScrollText className="w-4 h-4" />
-							<span>Recipe</span>
-						</button>
+							Recipe
+						</Button>
 					</Tooltip>
 					<Tooltip content="Reboot this device">
-						<button
+						<Button
+							variant="soft"
+							tone="red"
+							icon={<Power className="w-4 h-4" />}
 							onClick={() => setShowRebootModal(true)}
-							className="flex items-center space-x-2 px-3 py-2 rounded-md text-sm font-medium transition-colors cursor-pointer bg-red-50 text-red-700 border border-red-200 hover:bg-red-100"
 						>
-							<Power className="w-4 h-4" />
-							<span>Reboot</span>
-						</button>
+							Reboot
+						</Button>
 					</Tooltip>
 					<Tooltip
 						content={
@@ -507,40 +510,40 @@ const DeviceHeader: React.FC<DeviceHeaderProps> = ({ device, serial }) => {
 								: `Copy SSH tunnel command: sm tunnel ${device?.serial_number || serial}`
 						}
 					>
-						<button
+						<Button
+							variant="soft"
+							tone={sshCopied ? "green" : "blue"}
 							onClick={handleSshTunnel}
-							className={`flex items-center space-x-2 px-3 py-2 rounded-md text-sm font-medium transition-colors cursor-pointer ${
-								sshCopied
-									? "bg-green-100 text-green-800 border border-green-200"
-									: "bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100"
-							}`}
-						>
-							{sshCopied ? (
-								<>
+							icon={
+								sshCopied ? (
 									<Check className="w-4 h-4" />
-									<span>Copied!</span>
-								</>
-							) : (
-								<>
-									<Terminal className="w-4 h-4" />
-									<Copy className="w-3 h-3" />
-									<span>SSH</span>
-								</>
-							)}
-						</button>
+								) : (
+									<>
+										<Terminal className="w-4 h-4" />
+										<Copy className="w-3 h-3" />
+									</>
+								)
+							}
+						>
+							{sshCopied ? "Copied!" : "SSH"}
+						</Button>
 					</Tooltip>
 					{getGrafanaUrl() && (
 						<Tooltip content="Open Grafana dashboard">
-							<a
+							<Button
+								variant="soft"
+								tone="orange"
 								href={getGrafanaUrl()!}
 								target="_blank"
-								rel="noopener noreferrer"
-								className="flex items-center space-x-2 px-3 py-2 rounded-md text-sm font-medium transition-colors cursor-pointer bg-orange-50 text-orange-700 border border-orange-200 hover:bg-orange-100"
+								icon={
+									<>
+										<BarChart3 className="w-4 h-4" />
+										<ExternalLink className="w-3 h-3" />
+									</>
+								}
 							>
-								<BarChart3 className="w-4 h-4" />
-								<ExternalLink className="w-3 h-3" />
-								<span>Grafana</span>
-							</a>
+								Grafana
+							</Button>
 						</Tooltip>
 					)}
 				</div>
@@ -557,7 +560,8 @@ const DeviceHeader: React.FC<DeviceHeaderProps> = ({ device, serial }) => {
 				footer={
 					<>
 						<Button
-							variant="secondary"
+							variant="soft"
+							tone="gray"
 							disabled={isIssuingCommands}
 							onClick={() => {
 								setShowRunModal(false);
@@ -567,7 +571,8 @@ const DeviceHeader: React.FC<DeviceHeaderProps> = ({ device, serial }) => {
 							Cancel
 						</Button>
 						<Button
-							variant="purple"
+							variant="solid"
+							tone="purple"
 							loading={isIssuingCommands}
 							disabled={!runCommand.trim()}
 							onClick={handleRunCommand}
@@ -622,14 +627,16 @@ const DeviceHeader: React.FC<DeviceHeaderProps> = ({ device, serial }) => {
 				footer={
 					<>
 						<Button
-							variant="secondary"
+							variant="soft"
+							tone="gray"
 							disabled={isRebooting}
 							onClick={() => setShowRebootModal(false)}
 						>
 							Cancel
 						</Button>
 						<Button
-							variant="danger"
+							variant="solid"
+							tone="red"
 							loading={isRebooting}
 							onClick={handleReboot}
 						>
@@ -662,20 +669,22 @@ const DeviceHeader: React.FC<DeviceHeaderProps> = ({ device, serial }) => {
 				subtitle={`Trigger a recipe onto ${getDeviceName()}`}
 				footer={
 					recipeTriggered ? (
-						<Button variant="primary" onClick={closeRecipeModal}>
+						<Button variant="solid" tone="blue" onClick={closeRecipeModal}>
 							Done
 						</Button>
 					) : (
 						<>
 							<Button
-								variant="secondary"
+								variant="soft"
+								tone="gray"
 								onClick={closeRecipeModal}
 								disabled={isTriggeringRecipe}
 							>
 								Cancel
 							</Button>
 							<Button
-								variant="purple"
+								variant="solid"
+								tone="purple"
 								loading={isTriggeringRecipe}
 								disabled={selectedRecipeId == null}
 								onClick={handleTriggerRecipe}

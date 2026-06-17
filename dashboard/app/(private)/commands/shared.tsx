@@ -1,7 +1,7 @@
 "use client";
 
 import { Check, Copy } from "lucide-react";
-import { useState } from "react";
+import { type ReactNode, useState } from "react";
 import type { DeviceCommandResponse } from "@/app/api-client";
 
 // ---------------------------------------------------------------------------
@@ -240,10 +240,13 @@ export const CodeBlock = ({
 	label,
 	content,
 	labelClassName,
+	meta,
 }: {
 	label: string;
 	content: string;
 	labelClassName?: string;
+	/** Optional muted text shown left-aligned next to the label. */
+	meta?: ReactNode;
 }) => {
 	const [copied, setCopied] = useState(false);
 
@@ -260,6 +263,11 @@ export const CodeBlock = ({
 					className={`text-xs font-medium uppercase tracking-wide ${labelClassName ?? "text-gray-400"}`}
 				>
 					{label}
+					{meta && (
+						<span className="ml-2 font-normal normal-case text-gray-400">
+							{meta}
+						</span>
+					)}
 				</span>
 				<button
 					onClick={handleCopy}
