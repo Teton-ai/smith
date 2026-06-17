@@ -180,6 +180,38 @@ pub enum SafeCommandTx {
         session_id: String,
     },
     RunAudit,
+    GetLogs {
+        unit: Option<String>,
+        since: Option<String>,
+        until: Option<String>,
+        grep: Option<String>,
+    },
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn get_logs_protocol_round_trip() {
+        // Deserialize the JSON shape the API stores in the cmd jsonb column.
+        let json = r#"{"GetLogs":{"unit":"smithd","since":"1h ago","until":null,"grep":null}}"#;
+        let cmd: SafeCommandTx = serde_json::from_str(json).unwrap();
+        match cmd {
+            SafeCommandTx::GetLogs {
+                unit,
+                since,
+                until,
+                grep,
+            } => {
+                assert_eq!(unit, Some("smithd".to_string()));
+                assert_eq!(since, Some("1h ago".to_string()));
+                assert_eq!(until, None);
+                assert_eq!(grep, None);
+            }
+            _ => panic!("expected GetLogs variant"),
+        }
+    }
 }
 
 // RESPONSE THAT IT GETS

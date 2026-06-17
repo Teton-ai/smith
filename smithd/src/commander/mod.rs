@@ -108,6 +108,12 @@ impl CommandQueueExecutor {
             SafeCommandTx::StopLogStream { session_id } => {
                 logs::stop_stream(action.id, &self.handles.logstream, session_id).await
             }
+            SafeCommandTx::GetLogs {
+                unit,
+                since,
+                until,
+                grep,
+            } => free::execute_get_logs(action.id, unit, since, until, grep).await,
             SafeCommandTx::RunAudit => {
                 let (disk_encrypted, password_access_disabled) = run_audit_checks().await;
                 SafeCommandResponse {
