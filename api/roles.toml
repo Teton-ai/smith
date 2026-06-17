@@ -1,16 +1,34 @@
+# Roles are composed from permissions. A permission is an { action, resource }
+# pair. `inherits` pulls in every permission of another role (resolved
+# transitively), so higher roles only declare what they add.
+#
+# Command permissions gate which device commands a user may dispatch. Available
+# command actions (see `required_permission` in middlewares/authorization):
+#   commands:basic     ping, restart, upgrade, network tests, variables, logs, audit
+#   commands:freeform  arbitrary shell commands
+#   commands:tunnel    open / close SSH tunnels
+#   commands:ota       OTA download / start / status
+# Recipe permissions:
+#   recipes:trigger    run a pre-authored recipe against devices
+#   recipes:write      create / update / delete recipes
+
 [roles.default]
-description = "Default role"
+description = "Standard user: manage devices, run safe commands, trigger vetted recipes"
 inherits = []
 permissions = [
     { action = "read", resource = "devices" },
     { action = "write", resource = "devices" },
+    { action = "basic", resource = "commands" },
+    { action = "trigger", resource = "recipes" },
 ]
 
 [roles.admin]
-description = "Admin role"
-inherits = []
+description = "Full access: privileged commands, tunnels, recipe authoring"
+inherits = ["default"]
 permissions = [
-    { action = "read", resource = "devices" },
-    { action = "write", resource = "devices" },
     { action = "delete", resource = "devices" },
+    { action = "freeform", resource = "commands" },
+    { action = "tunnel", resource = "commands" },
+    { action = "ota", resource = "commands" },
+    { action = "write", resource = "recipes" },
 ]

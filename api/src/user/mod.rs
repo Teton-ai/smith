@@ -96,10 +96,12 @@ impl CurrentUser {
         user_id: i32,
     ) -> Result<Self, sqlx::Error> {
         struct UserRole {
-            role: String,
+            // Nullable: the LEFT JOIN yields a NULL role for a user with no
+            // assigned roles, so this must be Option to decode without erroring.
+            role: Option<String>,
         }
 
-        let mut user_roles = sqlx::query_as!(
+        let user_roles = sqlx::query_as!(
             UserRole,
             r#"
                     SELECT users_roles.role
@@ -110,13 +112,12 @@ impl CurrentUser {
             user_id
         )
         .fetch_all(pg_pool)
-        .await
-        .expect("expected user roles");
+        .await?;
 
         let user_permissions = user_roles
-            .iter_mut()
-            .filter_map(|user_role| authorization.roles.get(&user_role.role))
-            .flat_map(|role| role.permissions.clone())
+            .iter()
+            .filter_map(|user_role| user_role.role.as_deref())
+            .flat_map(|role| authorization.permissions_for_role(role))
             .collect();
 
         let current_user = CurrentUser {

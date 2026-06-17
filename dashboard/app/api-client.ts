@@ -553,6 +553,14 @@ export interface StartExtendedTestResponse {
 	session_id: string;
 }
 
+/**
+ * Request body for triggering a recipe: the devices to run it against. The
+commands come from the stored recipe, not the caller.
+ */
+export interface TriggerRecipeInput {
+	devices: number[];
+}
+
 export interface UnhealthyServiceDevice {
 	active_state: string;
 	checked_at: string;
@@ -2275,6 +2283,91 @@ export const useDeleteRecipe = <TError = void, TContext = unknown>(
 	TContext
 > => {
 	return useMutation(useDeleteRecipeMutationOptions(options), queryClient);
+};
+
+export const useTriggerRecipeHook = () => {
+	const triggerRecipe = useClientMutator<BundleReceipt>();
+
+	return useCallback(
+		(
+			recipeId: number,
+			triggerRecipeInput: TriggerRecipeInput,
+			signal?: AbortSignal,
+		) => {
+			return triggerRecipe({
+				url: `/commands/recipes/${recipeId}/trigger`,
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				data: triggerRecipeInput,
+				signal,
+			});
+		},
+		[triggerRecipe],
+	);
+};
+
+export const useTriggerRecipeMutationOptions = <
+	TError = void,
+	TContext = unknown,
+>(options?: {
+	mutation?: UseMutationOptions<
+		Awaited<ReturnType<ReturnType<typeof useTriggerRecipeHook>>>,
+		TError,
+		{ recipeId: number; data: TriggerRecipeInput },
+		TContext
+	>;
+}): UseMutationOptions<
+	Awaited<ReturnType<ReturnType<typeof useTriggerRecipeHook>>>,
+	TError,
+	{ recipeId: number; data: TriggerRecipeInput },
+	TContext
+> => {
+	const mutationKey = ["triggerRecipe"];
+	const { mutation: mutationOptions } = options
+		? options.mutation &&
+			"mutationKey" in options.mutation &&
+			options.mutation.mutationKey
+			? options
+			: { ...options, mutation: { ...options.mutation, mutationKey } }
+		: { mutation: { mutationKey } };
+
+	const triggerRecipe = useTriggerRecipeHook();
+
+	const mutationFn: MutationFunction<
+		Awaited<ReturnType<ReturnType<typeof useTriggerRecipeHook>>>,
+		{ recipeId: number; data: TriggerRecipeInput }
+	> = (props) => {
+		const { recipeId, data } = props ?? {};
+
+		return triggerRecipe(recipeId, data);
+	};
+
+	return { mutationFn, ...mutationOptions };
+};
+
+export type TriggerRecipeMutationResult = NonNullable<
+	Awaited<ReturnType<ReturnType<typeof useTriggerRecipeHook>>>
+>;
+export type TriggerRecipeMutationBody = TriggerRecipeInput;
+export type TriggerRecipeMutationError = void;
+
+export const useTriggerRecipe = <TError = void, TContext = unknown>(
+	options?: {
+		mutation?: UseMutationOptions<
+			Awaited<ReturnType<ReturnType<typeof useTriggerRecipeHook>>>,
+			TError,
+			{ recipeId: number; data: TriggerRecipeInput },
+			TContext
+		>;
+	},
+	queryClient?: QueryClient,
+): UseMutationResult<
+	Awaited<ReturnType<ReturnType<typeof useTriggerRecipeHook>>>,
+	TError,
+	{ recipeId: number; data: TriggerRecipeInput },
+	TContext
+> => {
+	return useMutation(useTriggerRecipeMutationOptions(options), queryClient);
 };
 
 export const useGetDashboardHook = () => {

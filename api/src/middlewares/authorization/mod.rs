@@ -1,7 +1,8 @@
 use crate::user::CurrentUser;
 use anyhow::Result;
 use serde::Deserialize;
-use std::collections::HashMap;
+use smith::utils::schema::{SafeCommandRequest, SafeCommandTx};
+use std::collections::{HashMap, HashSet};
 use tracing::info;
 
 pub fn check(current_user: CurrentUser, resource: &str, action: &str) -> bool {
@@ -18,6 +19,49 @@ pub fn check(current_user: CurrentUser, resource: &str, action: &str) -> bool {
         }
     );
     has_permission
+}
+
+/// The permission required to dispatch a given command. Exhaustive on purpose:
+/// a new `SafeCommandTx` variant cannot be added without declaring how it is
+/// gated, so dangerous commands can never slip through ungated.
+pub fn required_permission(command: &SafeCommandTx) -> Permission {
+    use SafeCommandTx::*;
+    let action = match command {
+        FreeForm { .. } => "freeform",
+        OpenTunnel { .. } | CloseTunnel => "tunnel",
+        DownloadOTA { .. } | CheckOTAStatus | StartOTA => "ota",
+        Ping
+        | Upgrade
+        | Restart
+        | UpdateNetwork { .. }
+        | UpdateVariables { .. }
+        | TestNetwork
+        | ExtendedNetworkTest { .. }
+        | StreamLogs { .. }
+        | StopLogStream { .. }
+        | RunAudit => "basic",
+    };
+    Permission {
+        action: action.to_string(),
+        resource: "commands".to_string(),
+    }
+}
+
+/// Returns true only if `current_user` is allowed to dispatch every command in
+/// the bundle. The bundle is all-or-nothing: one disallowed command rejects the
+/// whole request so partial bundles are never queued.
+pub fn authorize_commands(current_user: &CurrentUser, commands: &[SafeCommandRequest]) -> bool {
+    commands.iter().all(|req| {
+        let permission = required_permission(&req.command);
+        let allowed = current_user.has_permission(&permission.resource, &permission.action);
+        if !allowed {
+            info!(
+                "{} [{}] [{}] : NOT AUTHORIZED",
+                current_user.user_id, permission.action, permission.resource
+            );
+        }
+        allowed
+    })
 }
 
 #[derive(Debug, Deserialize)]
@@ -42,6 +86,33 @@ impl AuthorizationConfig {
     pub fn new(config: &str) -> Result<Self> {
         let config: AuthorizationConfig = toml::from_str(config)?;
         Ok(config)
+    }
+
+    /// All permissions granted by a role, including those of the roles it
+    /// inherits (resolved transitively). Unknown or cyclic `inherits` entries
+    /// are skipped rather than erroring, so a typo can't lock everyone out.
+    pub fn permissions_for_role(&self, role_name: &str) -> Vec<Permission> {
+        let mut permissions = Vec::new();
+        let mut visited = HashSet::new();
+        self.collect_permissions(role_name, &mut permissions, &mut visited);
+        permissions
+    }
+
+    fn collect_permissions(
+        &self,
+        role_name: &str,
+        permissions: &mut Vec<Permission>,
+        visited: &mut HashSet<String>,
+    ) {
+        if !visited.insert(role_name.to_string()) {
+            return;
+        }
+        if let Some(role) = self.roles.get(role_name) {
+            permissions.extend(role.permissions.iter().cloned());
+            for parent in &role.inherits {
+                self.collect_permissions(parent, permissions, visited);
+            }
+        }
     }
 }
 

@@ -21,6 +21,7 @@ import {
 	type Device,
 	useGetRecipes,
 	useIssueCommandsToDevices,
+	useTriggerRecipe,
 } from "@/app/api-client";
 import { Modal } from "@/app/components/modal";
 import NetworkQualityIndicator from "@/app/components/NetworkQualityIndicator";
@@ -110,16 +111,7 @@ const DeviceHeader: React.FC<DeviceHeaderProps> = ({ device, serial }) => {
 		: [];
 
 	const { mutate: triggerRecipe, isPending: isTriggeringRecipe } =
-		useIssueCommandsToDevices({
-			mutation: {
-				onSuccess: () => {
-					setRecipeError(null);
-					setRecipeTriggered(true);
-				},
-				onError: () =>
-					setRecipeError("Failed to trigger recipe. Please try again."),
-			},
-		});
+		useTriggerRecipe();
 
 	const closeRecipeModal = () => {
 		if (isTriggeringRecipe) return;
@@ -130,16 +122,21 @@ const DeviceHeader: React.FC<DeviceHeaderProps> = ({ device, serial }) => {
 	};
 
 	const handleTriggerRecipe = () => {
-		const recipe = recipes.find((r) => r.id === selectedRecipeId);
-		if (!recipe || !device?.id) return;
-		// Triggering a recipe is just issuing a command bundle with its commands.
+		if (selectedRecipeId == null || !device?.id) return;
+		// The API loads the recipe's commands server-side and gates on
+		// `recipes:trigger`, so we only send the recipe id and target device.
 		setRecipeError(null);
-		triggerRecipe({
-			data: {
-				devices: [device.id],
-				commands: recipe.commands,
+		triggerRecipe(
+			{ recipeId: selectedRecipeId, data: { devices: [device.id] } },
+			{
+				onSuccess: () => {
+					setRecipeError(null);
+					setRecipeTriggered(true);
+				},
+				onError: () =>
+					setRecipeError("Failed to trigger recipe. Please try again."),
 			},
-		});
+		);
 	};
 
 	const { mutate: issueCommands, isPending: isIssuingCommands } =
