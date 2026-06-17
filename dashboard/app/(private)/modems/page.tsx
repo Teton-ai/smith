@@ -1,4 +1,4 @@
-import { ChevronRight, Signal, Smartphone } from "lucide-react";
+import { Signal, Smartphone } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
 import {
