@@ -212,10 +212,22 @@ pub enum Commands {
         resource: StatusResourceType,
     },
 
-    /// Get logs for a device (runs 'journalctl -r -n 500')
+    /// Get logs for a device (runs 'journalctl -r' on the device)
     Logs {
         #[command(flatten)]
         selector: DeviceSelector,
+        /// Filter logs by systemd unit (e.g. smithd or smithd.service). Passed to journalctl -u
+        #[arg(long)]
+        unit: Option<String>,
+        /// Show entries not older than this date. Passed to journalctl --since (e.g. "1h ago", "2026-06-17 10:00:00")
+        #[arg(long, value_name = "TIMESTAMP", allow_hyphen_values = true)]
+        since: Option<String>,
+        /// Show entries not newer than this date. Passed to journalctl --until
+        #[arg(long, value_name = "TIMESTAMP", allow_hyphen_values = true)]
+        until: Option<String>,
+        /// Filter log lines by pattern. Passed to journalctl --grep (supports ERE regex)
+        #[arg(long, value_name = "PATTERN", allow_hyphen_values = true)]
+        grep: Option<String>,
         /// Don't wait for result, just queue the command and return immediately (faster, recommended for agents - use 'sm command <id>' to check results later)
         #[arg(long, default_value = "false")]
         nowait: bool,

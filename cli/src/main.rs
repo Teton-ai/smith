@@ -1385,7 +1385,14 @@ async fn main() -> anyhow::Result<()> {
                     }
                 }
             },
-            Commands::Logs { selector, nowait } => {
+            Commands::Logs {
+                selector,
+                unit,
+                since,
+                until,
+                grep,
+                nowait,
+            } => {
                 let secrets = auth::get_secrets(&config)
                     .await
                     .with_context(|| "Error getting token")?
@@ -1398,7 +1405,7 @@ async fn main() -> anyhow::Result<()> {
 
                 let logs =
                     execute_device_command(&api, serial_number, "Fetching logs", nowait, |id| {
-                        api.send_logs_command(id)
+                        api.send_logs_command(id, unit, since, until, grep)
                     })
                     .await?;
 
