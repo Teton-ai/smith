@@ -1,10 +1,9 @@
-import { ArrowLeft, Loader2, Send } from "lucide-react";
+import { Loader2, Send } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router";
+import { useNavigate, useParams } from "react-router";
 import {
 	CodeBlock,
 	getCommandStatus,
-	getStatusColor,
 	getTxLabel,
 	renderRxDetail,
 	renderTxDetail,
@@ -16,11 +15,30 @@ import {
 	useGetDeviceInfo,
 } from "@/app/api-client";
 import { useClientMutator } from "@/app/api-client-mutator";
-import { Button } from "@/app/components/button";
 import { RelativeTime } from "@/app/components/RelativeTime";
+import {
+	BackLink,
+	Badge,
+	type BadgeVariant,
+	Button,
+	Card,
+	ListRow,
+	TabNav,
+} from "@/app/components/ui";
 import DeviceHeader from "../DeviceHeader";
 
 const PAGE_SIZE = 50;
+
+// Maps a command status to a design-system Badge variant.
+const STATUS_VARIANT: Record<string, BadgeVariant> = {
+	success: "green",
+	failed: "red",
+	executing: "blue",
+	cancelled: "gray",
+	pending: "yellow",
+};
+const statusVariant = (status: string): BadgeVariant =>
+	STATUS_VARIANT[status] ?? "gray";
 
 // ---------------------------------------------------------------------------
 // Right panel: full detail view
@@ -39,45 +57,33 @@ const ResponseDetail = ({ cmd }: { cmd: DeviceCommandResponse }) => {
 	return (
 		<div className="h-full flex flex-col overflow-hidden">
 			{/* Header */}
-			<div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 shrink-0">
-				<div className="flex items-center gap-2 flex-wrap">
-					<span className="text-sm font-medium text-gray-900">{txLabel}</span>
-					<span
-						className={`px-2 py-0.5 text-xs font-medium rounded ${getStatusColor(status)}`}
-					>
-						{status}
-					</span>
-					{cmd.response != null && cmd.status != null && (
-						<span
-							className={`px-2 py-0.5 text-xs font-mono rounded ${cmd.status === 0 ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800"}`}
-						>
-							exit {cmd.status}
+			<div className="px-4 py-3 border-b border-gray-200 bg-gray-50/70 shrink-0">
+				<div className="flex items-center justify-between gap-3">
+					<div className="flex items-center gap-2 flex-wrap min-w-0">
+						<span className="text-sm font-semibold text-gray-900 truncate">
+							{txLabel}
 						</span>
-					)}
-				</div>
-				<div className="flex items-center gap-3">
+						<Badge variant={statusVariant(status)}>{status}</Badge>
+						{cmd.response != null && cmd.status != null && (
+							<Badge
+								variant={cmd.status === 0 ? "green" : "red"}
+								className="font-mono"
+							>
+								exit {cmd.status}
+							</Badge>
+						)}
+					</div>
 					{cmd.response != null && (
 						<Button
-							variant="secondary"
-							className="text-xs shrink-0"
+							variant="soft"
+							tone="gray"
+							size="sm"
+							className="shrink-0"
 							onClick={() => setShowRaw((v) => !v)}
 						>
 							{showRaw ? "Formatted" : "Raw JSON"}
 						</Button>
 					)}
-					<div className="flex items-center gap-2 text-xs text-gray-400">
-						<span>
-							Issued <RelativeTime date={cmd.issued_at} />
-						</span>
-						<span>·</span>
-						{cmd.response_at ? (
-							<span>
-								Responded <RelativeTime date={cmd.response_at} />
-							</span>
-						) : (
-							<span className="text-yellow-500">Waiting for response…</span>
-						)}
-					</div>
 				</div>
 			</div>
 
@@ -87,11 +93,27 @@ const ResponseDetail = ({ cmd }: { cmd: DeviceCommandResponse }) => {
 					<>
 						<CodeBlock
 							label="raw TX"
+							meta={
+								<>
+									· Issued <RelativeTime date={cmd.issued_at} />
+								</>
+							}
 							content={JSON.stringify(cmd.cmd_data, null, 2)}
 						/>
 						<div className="mt-4">
 							<CodeBlock
 								label="raw RX"
+								meta={
+									cmd.response_at ? (
+										<>
+											· Responded <RelativeTime date={cmd.response_at} />
+										</>
+									) : (
+										<span className="text-yellow-500">
+											· Waiting for response…
+										</span>
+									)
+								}
 								content={JSON.stringify(cmd.response, null, 2)}
 							/>
 						</div>
@@ -99,14 +121,30 @@ const ResponseDetail = ({ cmd }: { cmd: DeviceCommandResponse }) => {
 				) : (
 					<>
 						<div className="mb-4">
-							<p className="text-xs font-medium uppercase tracking-wide text-gray-400 mb-3">
-								Sent
-							</p>
+							<div className="flex items-center gap-2 mb-3">
+								<p className="text-xs font-medium uppercase tracking-wide text-gray-400">
+									Sent
+								</p>
+								<span className="text-xs text-gray-400">
+									· Issued <RelativeTime date={cmd.issued_at} />
+								</span>
+							</div>
 							{renderTxDetail(cmd.cmd_data)}
 						</div>
-						<p className="text-xs font-medium uppercase tracking-wide text-gray-400 mb-3">
-							Response
-						</p>
+						<div className="flex items-center gap-2 mb-3">
+							<p className="text-xs font-medium uppercase tracking-wide text-gray-400">
+								Response
+							</p>
+							{cmd.response_at ? (
+								<span className="text-xs text-gray-400">
+									· Responded <RelativeTime date={cmd.response_at} />
+								</span>
+							) : (
+								<span className="text-xs text-yellow-500">
+									· Waiting for response…
+								</span>
+							)}
+						</div>
 						{renderRxDetail(cmd.response)}
 					</>
 				)}
@@ -186,15 +224,8 @@ const CommandsPage = () => {
 	return (
 		<div className="flex-1 overflow-hidden flex flex-col px-4 sm:px-6 lg:px-8 py-6">
 			{/* Back link */}
-			<div className="flex items-center space-x-4 mb-6">
-				<button
-					type="button"
-					onClick={() => navigate(-1)}
-					className="flex items-center space-x-2 text-gray-600 hover:text-gray-900 transition-colors"
-				>
-					<ArrowLeft className="w-4 h-4" />
-					<span className="text-sm font-medium">Back to Devices</span>
-				</button>
+			<div className="mb-6">
+				<BackLink onClick={() => navigate(-1)}>Back to Devices</BackLink>
 			</div>
 
 			{/* Device Header */}
@@ -205,30 +236,14 @@ const CommandsPage = () => {
 			)}
 
 			{/* Tabs */}
-			<div className="border-b border-gray-200 mb-6">
-				<nav className="-mb-px flex space-x-8">
-					<Link
-						to={`/devices/${serial}`}
-						className="block py-2 px-1 border-b-2 border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 font-medium text-sm transition-colors cursor-pointer"
-					>
-						Overview
-					</Link>
-					<button className="py-2 px-1 border-b-2 border-blue-500 text-blue-600 font-medium text-sm">
-						Commands
-					</button>
-					<Link
-						to={`/devices/${serial}/services`}
-						className="block py-2 px-1 border-b-2 border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 font-medium text-sm transition-colors cursor-pointer"
-					>
-						Services
-					</Link>
-					<Link
-						to={`/devices/${serial}/audit`}
-						className="block py-2 px-1 border-b-2 border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 font-medium text-sm transition-colors cursor-pointer"
-					>
-						Audit
-					</Link>
-				</nav>
+			<div className="mb-6">
+				<TabNav
+					items={[
+						{ label: "Overview", to: `/devices/${serial}` },
+						{ label: "Commands", active: true },
+						{ label: "Services", to: `/devices/${serial}/services` },
+					]}
+				/>
 			</div>
 
 			{/* Main content */}
@@ -238,21 +253,21 @@ const CommandsPage = () => {
 						<Loader2 className="w-6 h-6 animate-spin text-gray-400" />
 					</div>
 				) : commands.length === 0 ? (
-					<div className="text-center py-12 bg-white border border-gray-200 rounded-lg">
+					<Card className="text-center py-12">
 						<Send className="w-12 h-12 text-gray-300 mx-auto mb-3" />
 						<p className="text-gray-500">No commands found</p>
 						<p className="text-sm text-gray-400 mt-1">
 							Run a command from the device header above
 						</p>
-					</div>
+					</Card>
 				) : (
-					<div className="flex border border-gray-200 rounded-lg overflow-hidden bg-white h-full">
+					<Card className="flex overflow-hidden h-full">
 						{/* Left: command list */}
 						<div className="w-1/3 border-r border-gray-200 shrink-0 flex flex-col overflow-hidden">
 							<div
 								ref={scrollRef}
 								onScroll={handleScroll}
-								className="flex-1 overflow-y-auto"
+								className="flex-1 overflow-y-auto divide-y divide-gray-100"
 							>
 								{commands.map((cmd) => {
 									const status = getCommandStatus(cmd);
@@ -260,32 +275,35 @@ const CommandsPage = () => {
 									const isSelected = cmd.cmd_id === selectedId;
 
 									return (
-										<button
+										<ListRow
 											key={cmd.cmd_id}
-											type="button"
 											onClick={() => setSelectedId(cmd.cmd_id)}
-											className={`w-full text-left px-4 py-3 border-b border-gray-100 last:border-b-0 transition-colors cursor-pointer ${
+											hover={isSelected ? "bg-blue-50" : "hover:bg-gray-50"}
+											className={
 												isSelected
-													? "bg-blue-50 border-l-2 border-l-blue-500"
-													: "hover:bg-gray-50 border-l-2 border-l-transparent"
-											}`}
+													? "border-l-2 border-l-blue-500"
+													: "border-l-2 border-l-transparent"
+											}
 										>
-											<div className="flex items-center justify-between gap-2">
-												<span
-													className={`text-sm truncate ${mono ? "font-mono" : "font-medium"} ${isSelected ? "text-blue-900" : "text-gray-900"}`}
-												>
-													{label}
-												</span>
-												<span
-													className={`px-2 py-0.5 text-xs font-medium rounded shrink-0 ${getStatusColor(status)}`}
-												>
-													{status}
-												</span>
+											<div className="w-full min-w-0">
+												<div className="flex items-center justify-between gap-2">
+													<span
+														className={`text-sm truncate ${mono ? "font-mono" : "font-medium"} ${isSelected ? "text-blue-900" : "text-gray-900"}`}
+													>
+														{label}
+													</span>
+													<Badge
+														variant={statusVariant(status)}
+														className="shrink-0"
+													>
+														{status}
+													</Badge>
+												</div>
+												<div className="text-xs text-gray-400 mt-0.5">
+													<RelativeTime date={cmd.issued_at} />
+												</div>
 											</div>
-											<div className="text-xs text-gray-400 mt-0.5">
-												<RelativeTime date={cmd.issued_at} />
-											</div>
-										</button>
+										</ListRow>
 									);
 								})}
 							</div>
@@ -306,7 +324,7 @@ const CommandsPage = () => {
 								</div>
 							)}
 						</div>
-					</div>
+					</Card>
 				)}
 			</div>
 		</div>

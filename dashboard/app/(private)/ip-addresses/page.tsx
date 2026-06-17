@@ -1,7 +1,17 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { Check, Edit2, Globe, Search, Shield, Wifi, X } from "lucide-react";
+import { Check, Edit2, Globe, Shield, Wifi, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
+import {
+	Badge,
+	Card,
+	CountryFlag,
+	ListRow,
+	PageContainer,
+	SearchInput,
+	Toast,
+	type ToastState,
+} from "@/app/components/ui";
 import {
 	type IpAddressInfo,
 	useGetIpAddresses,
@@ -9,41 +19,15 @@ import {
 } from "../../api-client";
 
 const IpAddressSkeleton = () => (
-	<div className="px-4 py-3 animate-pulse">
-		<div className="grid grid-cols-6 gap-4 items-center">
-			<div className="col-span-2">
-				<div className="flex items-center space-x-3">
-					<div className="w-4 h-4 bg-gray-300 rounded flex-shrink-0"></div>
-					<div className="space-y-1">
-						<div className="h-4 bg-gray-300 rounded w-32"></div>
-						<div className="h-3 bg-gray-200 rounded w-20"></div>
-					</div>
-				</div>
-			</div>
-			<div className="col-span-2">
-				<div className="flex items-center space-x-2">
-					<div className="w-4 h-3 bg-gray-300 rounded-sm flex-shrink-0"></div>
-					<div className="h-4 bg-gray-300 rounded w-24"></div>
-				</div>
-			</div>
-			<div className="col-span-1">
-				<div className="h-4 bg-gray-300 rounded w-20"></div>
-			</div>
-			<div className="col-span-1">
-				<div className="flex items-center justify-between">
-					<div className="h-3 bg-gray-300 rounded w-12"></div>
-					<div className="w-4 h-4 bg-gray-300 rounded"></div>
-				</div>
-			</div>
+	<div className="flex items-center justify-between px-4 py-3 animate-pulse">
+		<div className="flex items-center space-x-3">
+			<div className="w-4 h-4 bg-gray-300 rounded flex-shrink-0" />
+			<div className="h-4 bg-gray-300 rounded w-32" />
 		</div>
-	</div>
-);
-
-const LoadingSkeleton = () => (
-	<div className="divide-y divide-gray-200">
-		{Array.from({ length: 8 }, (_, i) => (
-			<IpAddressSkeleton key={i} />
-		))}
+		<div className="flex items-center space-x-4">
+			<div className="h-4 bg-gray-200 rounded w-28" />
+			<div className="h-3 bg-gray-200 rounded w-10" />
+		</div>
 	</div>
 );
 
@@ -55,10 +39,7 @@ const IpAddressesPage = () => {
 	const [editingId, setEditingId] = useState<number | null>(null);
 	const [editingName, setEditingName] = useState("");
 	const [saving, setSaving] = useState(false);
-	const [toast, setToast] = useState<{
-		message: string;
-		type: "success" | "error";
-	} | null>(null);
+	const [toast, setToast] = useState<ToastState | null>(null);
 
 	const {
 		data: ipAddresses = [],
@@ -103,10 +84,6 @@ const IpAddressesPage = () => {
 		if (days > 0) return `${days}d`;
 		if (hours > 0) return `${hours}h`;
 		return `${minutes}m`;
-	};
-
-	const getFlagUrl = (countryCode: string) => {
-		return `https://flagicons.lipis.dev/flags/4x3/${countryCode.toLowerCase()}.svg`;
 	};
 
 	const getLocationString = (ip: IpAddressInfo) => {
@@ -182,69 +159,32 @@ const IpAddressesPage = () => {
 	};
 
 	return (
-		<div className="flex-1 overflow-y-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
-			{/* Toast Notification */}
-			{toast && (
-				<div
-					className={`fixed top-4 right-4 z-50 p-4 rounded-lg shadow-lg border ${
-						toast.type === "success"
-							? "bg-green-50 text-green-800 border-green-200"
-							: "bg-red-50 text-red-800 border-red-200"
-					} transition-all duration-300 ease-in-out`}
-				>
-					<div className="flex items-center space-x-2">
-						{toast.type === "success" ? (
-							<Check className="w-5 h-5 text-green-600" />
-						) : (
-							<X className="w-5 h-5 text-red-600" />
-						)}
-						<span className="text-sm font-medium">{toast.message}</span>
-						<button
-							onClick={() => setToast(null)}
-							className="ml-2 text-gray-400 hover:text-gray-600"
-						>
-							<X className="w-4 h-4" />
-						</button>
-					</div>
-				</div>
-			)}
-			{/* Search and IP Count */}
-			<div className="flex flex-col sm:flex-row sm:items-center sm:justify-between">
-				<div className="flex items-center space-x-4">
-					<div className="relative">
-						<Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
-						<input
-							type="text"
-							placeholder="Search IP addresses..."
-							value={searchTerm}
-							onChange={(e) => handleSearchChange(e.target.value)}
-							className="pl-10 pr-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm text-gray-900 placeholder-gray-400"
-						/>
-					</div>
-				</div>
+		<PageContainer>
+			<Toast toast={toast} onClose={() => setToast(null)} />
 
-				<div className="mt-4 sm:mt-0 flex items-center space-x-3">
-					<span className="text-sm text-gray-500">
-						{initialLoading
-							? "Loading..."
-							: `${filteredIpAddresses.length} IP address${filteredIpAddresses.length !== 1 ? "es" : ""} shown`}
-					</span>
-				</div>
+			{/* Search and IP Count */}
+			<div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+				<SearchInput
+					value={searchTerm}
+					onChange={handleSearchChange}
+					placeholder="Search IP addresses..."
+					className="w-full sm:w-72"
+				/>
+				<span className="text-sm text-gray-500">
+					{initialLoading
+						? "Loading..."
+						: `${filteredIpAddresses.length} IP address${filteredIpAddresses.length !== 1 ? "es" : ""} shown`}
+				</span>
 			</div>
 
 			{/* IP Address List */}
-			<div className="border border-gray-200 rounded-lg overflow-hidden bg-white">
-				<div className="bg-gray-50 px-4 py-3 border-b border-gray-200">
-					<div className="grid grid-cols-6 gap-4 text-xs font-medium text-gray-500 uppercase tracking-wide">
-						<div className="col-span-2">IP Address / Name</div>
-						<div className="col-span-2">Location</div>
-						<div className="col-span-1">ISP</div>
-						<div className="col-span-1">Updated</div>
-					</div>
-				</div>
-
+			<Card className="overflow-hidden">
 				{initialLoading ? (
-					<LoadingSkeleton />
+					<div className="divide-y divide-gray-100">
+						{Array.from({ length: 8 }, (_, i) => (
+							<IpAddressSkeleton key={i} />
+						))}
+					</div>
 				) : filteredIpAddresses.length === 0 ? (
 					<div className="p-12 text-center text-gray-500">
 						<Globe className="w-12 h-12 text-gray-400 mx-auto mb-4" />
@@ -260,153 +200,145 @@ const IpAddressesPage = () => {
 						</p>
 					</div>
 				) : (
-					<div className="divide-y divide-gray-200">
-						{filteredIpAddresses.map((ipInfo) => (
-							<div
-								key={ipInfo.id}
-								className="px-4 py-3 hover:bg-gray-50 transition-colors"
-							>
-								<div className="grid grid-cols-6 gap-4 items-center">
-									<div className="col-span-2">
-										<div className="flex items-center space-x-3">
-											<Globe className="w-4 h-4 text-gray-400 flex-shrink-0" />
-											<div className="min-w-0 flex-1">
-												{editingId === ipInfo.id ? (
-													<div className="flex items-center space-x-2">
-														<input
-															type="text"
-															value={editingName}
-															onChange={(e) => setEditingName(e.target.value)}
-															placeholder={ipInfo.ip_address}
-															disabled={saving}
-															className={`text-sm font-medium text-gray-900 bg-white border border-gray-300 rounded px-2 py-1 min-w-0 flex-1 ${
-																saving ? "opacity-50 cursor-not-allowed" : ""
-															}`}
-															onKeyDown={(e) => {
-																if (e.key === "Enter" && !saving) saveEdit();
-																if (e.key === "Escape" && !saving)
-																	cancelEditing();
-															}}
-															autoFocus
-														/>
-														<button
-															onClick={saveEdit}
-															disabled={saving}
-															className={`p-1 transition-colors ${
-																saving
-																	? "text-gray-400 cursor-not-allowed"
-																	: "text-green-600 hover:text-green-800"
-															}`}
-														>
-															{saving ? (
-																<div className="w-4 h-4 border-2 border-green-600 border-t-transparent rounded-full animate-spin"></div>
-															) : (
-																<Check className="w-4 h-4" />
-															)}
-														</button>
-														<button
-															onClick={cancelEditing}
-															disabled={saving}
-															className={`p-1 transition-colors ${
-																saving
-																	? "text-gray-400 cursor-not-allowed"
-																	: "text-red-600 hover:text-red-800"
-															}`}
-														>
-															<X className="w-4 h-4" />
-														</button>
-													</div>
-												) : (
-													<div className="flex items-center space-x-2 mb-1">
-														{ipInfo.name ? (
-															<div className="text-sm font-medium text-gray-900 truncate">
-																{ipInfo.name}
-															</div>
-														) : (
-															<code className="text-sm font-mono text-gray-900">
-																{ipInfo.ip_address}
-															</code>
-														)}
-														{ipInfo.proxy && (
-															<span className="px-1.5 py-0.5 text-xs font-medium bg-orange-100 text-orange-800 rounded-full flex-shrink-0">
-																<Shield className="w-2 h-2 inline mr-1" />
-																Proxy
-															</span>
-														)}
-														{ipInfo.hosting && (
-															<span className="px-1.5 py-0.5 text-xs font-medium bg-purple-100 text-purple-800 rounded-full flex-shrink-0">
-																<Wifi className="w-2 h-2 inline mr-1" />
-																Host
-															</span>
-														)}
-														{(ipInfo.device_count || 0) > 0 && (
-															<span className="px-1.5 py-0.5 text-xs font-medium bg-blue-100 text-blue-800 rounded-full flex-shrink-0">
-																{ipInfo.device_count} device
-																{ipInfo.device_count !== 1 ? "s" : ""}
-															</span>
-														)}
-													</div>
-												)}
-												{!editingId || editingId !== ipInfo.id
-													? ipInfo.name && (
-															<code className="text-xs font-mono text-gray-600">
-																{ipInfo.ip_address}
-															</code>
-														)
-													: null}
-											</div>
-										</div>
-									</div>
-
-									<div className="col-span-2">
-										<div className="flex items-center space-x-2">
-											{ipInfo.country_code && (
-												<img
-													src={getFlagUrl(ipInfo.country_code)}
-													alt={ipInfo.country || "Country flag"}
-													className="w-4 h-3 flex-shrink-0 rounded-sm"
-													onError={(e) => {
-														(e.target as HTMLImageElement).style.display =
-															"none";
+					<div className="divide-y divide-gray-100">
+						{filteredIpAddresses.map((ipInfo) => {
+							const isEditing = editingId === ipInfo.id;
+							return (
+								<ListRow key={ipInfo.id}>
+									{/* Left: identity */}
+									<div className="flex items-center space-x-3 min-w-0">
+										<Globe className="w-4 h-4 text-gray-400 flex-shrink-0" />
+										{isEditing ? (
+											<div className="flex items-center space-x-2">
+												<input
+													type="text"
+													value={editingName}
+													onChange={(e) => setEditingName(e.target.value)}
+													placeholder={ipInfo.ip_address}
+													disabled={saving}
+													className={`text-sm font-medium text-gray-900 bg-white border border-gray-300 rounded px-2 py-1 min-w-0 flex-1 ${
+														saving ? "opacity-50 cursor-not-allowed" : ""
+													}`}
+													onKeyDown={(e) => {
+														if (e.key === "Enter" && !saving) saveEdit();
+														if (e.key === "Escape" && !saving) cancelEditing();
 													}}
+													autoFocus
 												/>
-											)}
-											<div className="text-sm text-gray-600 truncate">
-												{getLocationString(ipInfo)}
-											</div>
-										</div>
-									</div>
-
-									<div className="col-span-1 text-sm text-gray-600 truncate">
-										{ipInfo.isp || "Unknown"}
-									</div>
-
-									<div className="col-span-1">
-										<div className="flex items-center justify-between">
-											<div className="text-sm text-gray-500">
-												{formatTimeAgo(ipInfo.updated_at)}
-											</div>
-											{editingId !== ipInfo.id && (
 												<button
-													onClick={(e) => {
-														e.stopPropagation();
-														startEditing(ipInfo);
-													}}
-													className="p-1 text-gray-400 hover:text-gray-600 transition-colors"
-													title="Edit name"
+													type="button"
+													onClick={saveEdit}
+													disabled={saving}
+													className={`p-1 transition-colors ${
+														saving
+															? "text-gray-400 cursor-not-allowed"
+															: "text-green-600 hover:text-green-800 cursor-pointer"
+													}`}
 												>
-													<Edit2 className="w-4 h-4" />
+													{saving ? (
+														<div className="w-4 h-4 border-2 border-green-600 border-t-transparent rounded-full animate-spin" />
+													) : (
+														<Check className="w-4 h-4" />
+													)}
 												</button>
-											)}
-										</div>
+												<button
+													type="button"
+													onClick={cancelEditing}
+													disabled={saving}
+													className={`p-1 transition-colors ${
+														saving
+															? "text-gray-400 cursor-not-allowed"
+															: "text-red-600 hover:text-red-800 cursor-pointer"
+													}`}
+												>
+													<X className="w-4 h-4" />
+												</button>
+											</div>
+										) : (
+											<div className="min-w-0">
+												<div className="flex items-center space-x-2">
+													{ipInfo.name ? (
+														<span className="text-sm font-medium text-gray-900 truncate">
+															{ipInfo.name}
+														</span>
+													) : (
+														<code className="text-sm font-mono text-gray-900">
+															{ipInfo.ip_address}
+														</code>
+													)}
+													{ipInfo.proxy && (
+														<Badge
+															variant="orange"
+															pill
+															className="flex-shrink-0"
+														>
+															<Shield className="w-2 h-2 inline mr-1" />
+															Proxy
+														</Badge>
+													)}
+													{ipInfo.hosting && (
+														<Badge
+															variant="purple"
+															pill
+															className="flex-shrink-0"
+														>
+															<Wifi className="w-2 h-2 inline mr-1" />
+															Host
+														</Badge>
+													)}
+													{(ipInfo.device_count || 0) > 0 && (
+														<Badge
+															variant="blue"
+															pill
+															className="flex-shrink-0"
+														>
+															{ipInfo.device_count} device
+															{ipInfo.device_count !== 1 ? "s" : ""}
+														</Badge>
+													)}
+												</div>
+												{ipInfo.name && (
+													<code className="text-xs font-mono text-gray-600">
+														{ipInfo.ip_address}
+													</code>
+												)}
+											</div>
+										)}
 									</div>
-								</div>
-							</div>
-						))}
+
+									{/* Right: location, ISP, updated, edit */}
+									<div className="flex items-center space-x-4 flex-shrink-0 text-sm">
+										<div className="hidden md:flex items-center space-x-1.5 text-gray-600 max-w-xs">
+											<CountryFlag
+												countryCode={ipInfo.country_code}
+												country={ipInfo.country}
+											/>
+											<span className="truncate">
+												{getLocationString(ipInfo)}
+												{ipInfo.isp ? ` · ${ipInfo.isp}` : ""}
+											</span>
+										</div>
+										<span className="text-gray-500 tabular-nums">
+											{formatTimeAgo(ipInfo.updated_at)}
+										</span>
+										{!isEditing && (
+											<button
+												type="button"
+												onClick={() => startEditing(ipInfo)}
+												className="p-1 text-gray-400 hover:text-gray-600 transition-colors cursor-pointer"
+												title="Edit name"
+											>
+												<Edit2 className="w-4 h-4" />
+											</button>
+										)}
+									</div>
+								</ListRow>
+							);
+						})}
 					</div>
 				)}
-			</div>
-		</div>
+			</Card>
+		</PageContainer>
 	);
 };
 

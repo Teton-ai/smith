@@ -7,15 +7,61 @@ import {
 	Layers,
 	Monitor,
 	Package,
-	Search,
 } from "lucide-react";
 import { useState } from "react";
-import { Link } from "react-router";
+import {
+	BADGE_COLORS,
+	Badge,
+	type BadgeVariant,
+	Card,
+	ListRow,
+	PageContainer,
+	SearchInput,
+} from "@/app/components/ui";
 import {
 	type DistributionRolloutStats,
 	useGetDistributionRollouts,
 	useGetDistributions,
 } from "../../api-client";
+
+const getArchIcon = (architecture: string) => {
+	switch (architecture.toLowerCase()) {
+		case "x86_64":
+		case "amd64":
+			return <Monitor className="w-5 h-5" />;
+		case "arm64":
+		case "aarch64":
+			return <Cpu className="w-5 h-5" />;
+		case "armv7":
+		case "arm":
+			return <HardDrive className="w-5 h-5" />;
+		default:
+			return <Package className="w-5 h-5" />;
+	}
+};
+
+const getArchVariant = (architecture: string): BadgeVariant => {
+	switch (architecture.toLowerCase()) {
+		case "x86_64":
+		case "amd64":
+			return "blue";
+		case "arm64":
+		case "aarch64":
+			return "green";
+		case "armv7":
+		case "arm":
+			return "purple";
+		default:
+			return "gray";
+	}
+};
+
+const getProgressVariant = (progress: number): BadgeVariant => {
+	if (progress === 100) return "green";
+	if (progress >= 75) return "blue";
+	if (progress >= 50) return "yellow";
+	return "red";
+};
 
 const DistributionsPage = () => {
 	const [showEmptyDistributions, setShowEmptyDistributions] = useState(false);
@@ -50,7 +96,7 @@ const DistributionsPage = () => {
 	});
 
 	// Apply search filter
-	const filteredDistributions = (
+	const displayedDistributions = (
 		showEmptyDistributions ? distributions : distributionsWithDevices
 	).filter((dist) => {
 		if (!searchTerm) return true;
@@ -62,40 +108,6 @@ const DistributionsPage = () => {
 		);
 	});
 
-	const displayedDistributions = filteredDistributions;
-
-	const getArchIcon = (architecture: string) => {
-		switch (architecture.toLowerCase()) {
-			case "x86_64":
-			case "amd64":
-				return <Monitor className="w-5 h-5" />;
-			case "arm64":
-			case "aarch64":
-				return <Cpu className="w-5 h-5" />;
-			case "armv7":
-			case "arm":
-				return <HardDrive className="w-5 h-5" />;
-			default:
-				return <Package className="w-5 h-5" />;
-		}
-	};
-
-	const getArchColor = (architecture: string) => {
-		switch (architecture.toLowerCase()) {
-			case "x86_64":
-			case "amd64":
-				return "bg-blue-100 text-blue-700";
-			case "arm64":
-			case "aarch64":
-				return "bg-green-100 text-green-700";
-			case "armv7":
-			case "arm":
-				return "bg-purple-100 text-purple-700";
-			default:
-				return "bg-gray-100 text-gray-700";
-		}
-	};
-
 	if (loading) {
 		return (
 			<div className="flex items-center justify-center h-32">
@@ -105,30 +117,25 @@ const DistributionsPage = () => {
 	}
 
 	return (
-		<div className="flex-1 overflow-y-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
+		<PageContainer>
 			{/* Search and Distribution Count */}
-			<div className="flex flex-col sm:flex-row sm:items-center sm:justify-between">
-				<div className="flex items-center space-x-4">
-					<div className="relative">
-						<Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
-						<input
-							type="text"
-							placeholder="Search distributions..."
-							value={searchTerm}
-							onChange={(e) => setSearchTerm(e.target.value)}
-							className="pl-10 pr-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm text-gray-900 placeholder-gray-400"
-						/>
-					</div>
-				</div>
+			<div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+				<SearchInput
+					value={searchTerm}
+					onChange={setSearchTerm}
+					placeholder="Search distributions..."
+					className="w-full sm:w-72"
+				/>
 
-				<div className="mt-4 sm:mt-0 flex items-center space-x-3">
+				<div className="flex items-center space-x-3">
 					<span className="text-sm text-gray-500">
 						{`${displayedDistributions.length} distribution${displayedDistributions.length !== 1 ? "s" : ""} shown`}
 					</span>
 					{distributionsWithoutDevices.length > 0 && (
 						<button
+							type="button"
 							onClick={() => setShowEmptyDistributions(!showEmptyDistributions)}
-							className="flex items-center space-x-1 text-blue-600 hover:text-blue-800 text-sm"
+							className="flex items-center space-x-1 text-blue-600 hover:text-blue-800 text-sm cursor-pointer"
 						>
 							{showEmptyDistributions ? (
 								<EyeOff className="w-3 h-3" />
@@ -145,24 +152,32 @@ const DistributionsPage = () => {
 			</div>
 
 			{/* Distributions List */}
-			<div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+			<Card className="overflow-hidden">
 				{displayedDistributions.length === 0 ? (
 					<div className="p-6 text-center">
 						<Layers className="w-8 h-8 text-gray-400 mx-auto mb-2" />
 						<p className="text-sm text-gray-500">No distributions found</p>
 					</div>
 				) : (
-					<div className="divide-y divide-gray-200">
-						{displayedDistributions.map((distribution) => (
-							<Link
-								key={distribution.id}
-								className="block px-4 py-3 hover:bg-gray-50 cursor-pointer transition-colors"
-								to={`/distributions/${distribution.id}`}
-							>
-								<div className="flex items-center justify-between">
-									<div className="flex items-center space-x-3">
+					<div className="divide-y divide-gray-100">
+						{displayedDistributions.map((distribution) => {
+							const archVariant = getArchVariant(distribution.architecture);
+							const rollout = rollouts.get(distribution.id);
+							const totalDevices = rollout?.total_devices || 0;
+							const progress =
+								totalDevices > 0
+									? Math.round(
+											((rollout?.updated_devices || 0) / totalDevices) * 100,
+										)
+									: null;
+							return (
+								<ListRow
+									key={distribution.id}
+									to={`/distributions/${distribution.id}`}
+								>
+									<div className="flex items-center space-x-3 min-w-0">
 										<div
-											className={`p-1.5 rounded ${getArchColor(distribution.architecture)}`}
+											className={`p-1.5 rounded-lg ${BADGE_COLORS[archVariant]}`}
 										>
 											{getArchIcon(distribution.architecture)}
 										</div>
@@ -171,11 +186,13 @@ const DistributionsPage = () => {
 												<h4 className="text-sm font-medium text-gray-900 truncate">
 													{distribution.name}
 												</h4>
-												<span
-													className={`px-1.5 py-0.5 text-xs font-medium rounded-full ${getArchColor(distribution.architecture)} flex-shrink-0`}
+												<Badge
+													variant={archVariant}
+													pill
+													className="flex-shrink-0"
 												>
 													{distribution.architecture.toUpperCase()}
-												</span>
+												</Badge>
 											</div>
 											{distribution.description && (
 												<p className="text-xs text-gray-500 truncate mt-0.5">
@@ -185,52 +202,28 @@ const DistributionsPage = () => {
 										</div>
 									</div>
 									<div className="flex items-center space-x-2 flex-shrink-0">
-										{rollouts.has(distribution.id) &&
-											(() => {
-												const rollout = rollouts.get(distribution.id)!;
-												if (
-													rollout.total_devices &&
-													rollout.total_devices > 0
-												) {
-													const progress = Math.round(
-														((rollout.updated_devices || 0) /
-															rollout.total_devices) *
-															100,
-													);
-													const progressColor =
-														progress === 100
-															? "bg-green-100 text-green-800"
-															: progress >= 75
-																? "bg-blue-100 text-blue-800"
-																: progress >= 50
-																	? "bg-yellow-100 text-yellow-800"
-																	: "bg-red-100 text-red-800";
-
-													return (
-														<>
-															<div className="text-xs text-gray-700 font-medium">
-																{rollout.updated_devices || 0}/
-																{rollout.total_devices}
-															</div>
-															<span
-																className={`px-1.5 py-0.5 text-xs font-medium rounded ${progressColor}`}
-															>
-																{progress}%
-															</span>
-														</>
-													);
-												}
-												return <div className="text-xs text-gray-500">0/0</div>;
-											})()}
+										{rollout &&
+											(progress !== null ? (
+												<>
+													<div className="text-xs text-gray-700 font-medium tabular-nums">
+														{rollout.updated_devices || 0}/{totalDevices}
+													</div>
+													<Badge variant={getProgressVariant(progress)}>
+														{progress}%
+													</Badge>
+												</>
+											) : (
+												<div className="text-xs text-gray-500">0/0</div>
+											))}
 										<ChevronRight className="w-3 h-3 text-gray-400" />
 									</div>
-								</div>
-							</Link>
-						))}
+								</ListRow>
+							);
+						})}
 					</div>
 				)}
-			</div>
-		</div>
+			</Card>
+		</PageContainer>
 	);
 };
 

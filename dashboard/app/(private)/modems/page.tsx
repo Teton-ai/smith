@@ -1,41 +1,26 @@
-import { Check, Search, Signal, Smartphone, X } from "lucide-react";
+import { Signal, Smartphone } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
+import {
+	Card,
+	ListRow,
+	PageContainer,
+	SearchInput,
+	Toast,
+	type ToastState,
+} from "@/app/components/ui";
 import { useGetModemList } from "../../api-client";
 
 const ModemSkeleton = () => (
-	<div className="px-4 py-3 animate-pulse">
-		<div className="grid grid-cols-4 gap-4 items-center">
-			<div className="col-span-2">
-				<div className="flex items-center space-x-3">
-					<div className="w-4 h-4 bg-gray-300 rounded flex-shrink-0"></div>
-					<div className="space-y-1">
-						<div className="h-4 bg-gray-300 rounded w-36"></div>
-						<div className="h-3 bg-gray-200 rounded w-24"></div>
-					</div>
-				</div>
-			</div>
-			<div className="col-span-1">
-				<div className="flex items-center space-x-2">
-					<div className="w-4 h-4 bg-gray-300 rounded flex-shrink-0"></div>
-					<div className="h-4 bg-gray-300 rounded w-28"></div>
-				</div>
-			</div>
-			<div className="col-span-1">
-				<div className="flex items-center justify-between">
-					<div className="h-3 bg-gray-300 rounded w-12"></div>
-					<div className="w-4 h-4 bg-gray-300 rounded"></div>
-				</div>
-			</div>
+	<div className="flex items-center justify-between px-4 py-3 animate-pulse">
+		<div className="flex items-center space-x-3">
+			<div className="w-4 h-4 bg-gray-300 rounded flex-shrink-0" />
+			<div className="h-4 bg-gray-300 rounded w-40" />
 		</div>
-	</div>
-);
-
-const LoadingSkeleton = () => (
-	<div className="divide-y divide-gray-200">
-		{Array.from({ length: 8 }, (_, i) => (
-			<ModemSkeleton key={i} />
-		))}
+		<div className="flex items-center space-x-4">
+			<div className="h-4 bg-gray-200 rounded w-24" />
+			<div className="h-3 bg-gray-200 rounded w-10" />
+		</div>
 	</div>
 );
 
@@ -43,10 +28,7 @@ const ModemsPage = () => {
 	const navigate = useNavigate();
 	const [searchParams] = useSearchParams();
 	const [searchTerm, setSearchTerm] = useState("");
-	const [toast, setToast] = useState<{
-		message: string;
-		type: "success" | "error";
-	} | null>(null);
+	const [toast, setToast] = useState<ToastState | null>(null);
 
 	const { data: modems = [], isLoading: initialLoading } = useGetModemList();
 
@@ -104,68 +86,32 @@ const ModemsPage = () => {
 	};
 
 	return (
-		<div className="flex-1 overflow-y-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
-			{/* Toast Notification */}
-			{toast && (
-				<div
-					className={`fixed top-4 right-4 z-50 p-4 rounded-lg shadow-lg border ${
-						toast.type === "success"
-							? "bg-green-50 text-green-800 border-green-200"
-							: "bg-red-50 text-red-800 border-red-200"
-					} transition-all duration-300 ease-in-out`}
-				>
-					<div className="flex items-center space-x-2">
-						{toast.type === "success" ? (
-							<Check className="w-5 h-5 text-green-600" />
-						) : (
-							<X className="w-5 h-5 text-red-600" />
-						)}
-						<span className="text-sm font-medium">{toast.message}</span>
-						<button
-							onClick={() => setToast(null)}
-							className="ml-2 text-gray-400 hover:text-gray-600"
-						>
-							<X className="w-4 h-4" />
-						</button>
-					</div>
-				</div>
-			)}
-			{/* Search and Modem Count */}
-			<div className="flex flex-col sm:flex-row sm:items-center sm:justify-between">
-				<div className="flex items-center space-x-4">
-					<div className="relative">
-						<Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
-						<input
-							type="text"
-							placeholder="Search modems..."
-							value={searchTerm}
-							onChange={(e) => handleSearchChange(e.target.value)}
-							className="pl-10 pr-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm text-gray-900 placeholder-gray-400"
-						/>
-					</div>
-				</div>
+		<PageContainer>
+			<Toast toast={toast} onClose={() => setToast(null)} />
 
-				<div className="mt-4 sm:mt-0 flex items-center space-x-3">
-					<span className="text-sm text-gray-500">
-						{initialLoading
-							? "Loading..."
-							: `${filteredModems.length} modem${filteredModems.length !== 1 ? "s" : ""} shown`}
-					</span>
-				</div>
+			{/* Search and Modem Count */}
+			<div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+				<SearchInput
+					value={searchTerm}
+					onChange={handleSearchChange}
+					placeholder="Search modems..."
+					className="w-full sm:w-72"
+				/>
+				<span className="text-sm text-gray-500">
+					{initialLoading
+						? "Loading..."
+						: `${filteredModems.length} modem${filteredModems.length !== 1 ? "s" : ""} shown`}
+				</span>
 			</div>
 
 			{/* Modem List */}
-			<div className="border border-gray-200 rounded-lg overflow-hidden bg-white">
-				<div className="bg-gray-50 px-4 py-3 border-b border-gray-200">
-					<div className="grid grid-cols-4 gap-4 text-xs font-medium text-gray-500 uppercase tracking-wide">
-						<div className="col-span-2">IMEI</div>
-						<div className="col-span-1">Network Provider</div>
-						<div className="col-span-1">Updated</div>
-					</div>
-				</div>
-
+			<Card className="overflow-hidden">
 				{initialLoading ? (
-					<LoadingSkeleton />
+					<div className="divide-y divide-gray-100">
+						{Array.from({ length: 8 }, (_, i) => (
+							<ModemSkeleton key={i} />
+						))}
+					</div>
 				) : filteredModems.length === 0 ? (
 					<div className="p-12 text-center text-gray-500">
 						<Smartphone className="w-12 h-12 text-gray-400 mx-auto mb-4" />
@@ -179,47 +125,30 @@ const ModemsPage = () => {
 						</p>
 					</div>
 				) : (
-					<div className="divide-y divide-gray-200">
+					<div className="divide-y divide-gray-100">
 						{filteredModems.map((modem) => (
-							<div
-								key={modem.id}
-								className="px-4 py-3 hover:bg-gray-50 transition-colors"
-							>
-								<div className="grid grid-cols-4 gap-4 items-center">
-									<div className="col-span-2">
-										<div className="flex items-center space-x-3">
-											<Smartphone className="w-4 h-4 text-gray-400 flex-shrink-0" />
-											<div className="min-w-0 flex-1">
-												<code className="text-sm font-mono text-gray-900 block truncate">
-													{modem.imei}
-												</code>
-											</div>
-										</div>
-									</div>
-
-									<div className="col-span-1">
-										<div className="flex items-center space-x-2">
-											<Signal className="w-4 h-4 text-gray-400 flex-shrink-0" />
-											<div className="text-sm text-gray-600 truncate">
-												{modem.network_provider}
-											</div>
-										</div>
-									</div>
-
-									<div className="col-span-1">
-										<div className="flex items-center justify-between">
-											<div className="text-sm text-gray-500">
-												{formatTimeAgo(modem.updated_at)}
-											</div>
-										</div>
-									</div>
+							<ListRow key={modem.id}>
+								<div className="flex items-center space-x-3 min-w-0">
+									<Smartphone className="w-4 h-4 text-gray-400 flex-shrink-0" />
+									<code className="text-sm font-mono text-gray-900 truncate">
+										{modem.imei}
+									</code>
 								</div>
-							</div>
+								<div className="flex items-center space-x-4 flex-shrink-0 text-sm">
+									<div className="flex items-center space-x-1.5 text-gray-600">
+										<Signal className="w-4 h-4 text-gray-400" />
+										<span className="truncate">{modem.network_provider}</span>
+									</div>
+									<span className="text-gray-500 tabular-nums">
+										{formatTimeAgo(modem.updated_at)}
+									</span>
+								</div>
+							</ListRow>
 						))}
 					</div>
 				)}
-			</div>
-		</div>
+			</Card>
+		</PageContainer>
 	);
 };
 

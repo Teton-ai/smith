@@ -9,7 +9,7 @@ import {
 	ShieldCheck,
 	XCircle,
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { type ReactNode, useMemo, useState } from "react";
 import { Link } from "react-router";
 import {
 	Area,
@@ -22,6 +22,18 @@ import {
 } from "recharts";
 import { Modal } from "@/app/components/modal";
 import NetworkQualityIndicator from "@/app/components/NetworkQualityIndicator";
+import {
+	Card,
+	CountryFlag,
+	type IconComponent,
+	ListRow,
+	PageContainer,
+	SECTION_THEMES,
+	SectionCard,
+	type SectionTheme,
+	StatCard,
+	ViewAllFooter,
+} from "@/app/components/ui";
 import { useConfig } from "@/app/hooks/config";
 import {
 	type Device,
@@ -33,6 +45,121 @@ import {
 	type UnhealthyServiceDevice,
 	useUnhealthyServices,
 } from "./useUnhealthyServices";
+
+const getDeviceName = (device: Device) => device.serial_number;
+
+const formatTimeAgo = (dateString: string) => {
+	const now = new Date();
+	const past = new Date(dateString);
+	const diff = now.getTime() - past.getTime();
+	const minutes = Math.floor(diff / 60000);
+	const hours = Math.floor(minutes / 60);
+	const days = Math.floor(hours / 24);
+
+	if (days > 0) return `${days}d ago`;
+	if (hours > 0) return `${hours}h ago`;
+	return `${minutes}m ago`;
+};
+
+// Sort by last_seen descending (most recent first), never seen at the end
+const sortByLastSeen = (a: Device, b: Device) => {
+	if (!a.last_seen && !b.last_seen) return 0;
+	if (!a.last_seen) return 1;
+	if (!b.last_seen) return -1;
+	return new Date(b.last_seen).getTime() - new Date(a.last_seen).getTime();
+};
+
+const getOutdatedDuration = (device: Device) => {
+	if (!device.target_release_id_set_at) return "";
+	const setAt = new Date(device.target_release_id_set_at);
+	const now = new Date();
+	const diffMinutes = Math.floor(
+		(now.getTime() - setAt.getTime()) / (1000 * 60),
+	);
+	const diffHours = Math.floor(diffMinutes / 60);
+	const diffDays = Math.floor(diffHours / 24);
+
+	if (diffDays > 0) return `${diffDays}d`;
+	if (diffHours > 0) return `${diffHours}h`;
+	return `${diffMinutes}m`;
+};
+
+// Device list row: flag + serial on the left, caller-supplied content on the
+// right. Built on the shared ListRow + CountryFlag primitives.
+const DeviceRow = ({
+	to,
+	theme,
+	device,
+	right,
+	children,
+}: {
+	to: string;
+	theme: SectionTheme;
+	device: Device;
+	right: ReactNode;
+	children?: ReactNode;
+}) => (
+	<ListRow to={to} hover={theme.hover}>
+		<div className="flex items-center gap-3 min-w-0">
+			<CountryFlag
+				countryCode={device.ip_address?.country_code}
+				country={device.ip_address?.country}
+			/>
+			<span className="font-mono text-sm text-gray-900 truncate">
+				{getDeviceName(device)}
+			</span>
+			{children}
+		</div>
+		<div className="flex items-center gap-3 text-sm flex-shrink-0">
+			{right}
+			<ChevronRight className="w-4 h-4 text-gray-400 flex-shrink-0" />
+		</div>
+	</ListRow>
+);
+
+// Offline-style section: flag + serial on the left, "time ago" on the right.
+const OfflineSection = ({
+	icon,
+	title,
+	theme,
+	devices,
+	viewAllTo,
+}: {
+	icon: IconComponent;
+	title: string;
+	theme: SectionTheme;
+	devices: Device[];
+	viewAllTo: string;
+}) => {
+	if (devices.length === 0) return null;
+	return (
+		<SectionCard
+			icon={icon}
+			title={title}
+			count={devices.length}
+			theme={theme}
+			footer={
+				devices.length > 10 ? (
+					<ViewAllFooter to={viewAllTo} count={devices.length} noun="devices" />
+				) : undefined
+			}
+		>
+			{devices.slice(0, 10).map((device) => (
+				<DeviceRow
+					key={device.id}
+					to={`/devices/${device.serial_number}`}
+					theme={theme}
+					device={device}
+					right={
+						<span className="text-gray-500">
+							{device.last_seen ? formatTimeAgo(device.last_seen) : "never"}
+						</span>
+					}
+				/>
+			))}
+		</SectionCard>
+	);
+};
 
 const AdminPanel = () => {
 	const { config } = useConfig();
@@ -139,49 +266,6 @@ const AdminPanel = () => {
 		return Array.from(map.values());
 	}, [unhealthyServices]);
 
-	const getDeviceName = (device: Device) => device.serial_number;
-
-	const formatTimeAgo = (dateString: string) => {
-		const now = new Date();
-		const past = new Date(dateString);
-		const diff = now.getTime() - past.getTime();
-		const minutes = Math.floor(diff / 60000);
-		const hours = Math.floor(minutes / 60);
-		const days = Math.floor(hours / 24);
-
-		if (days > 0) return `${days}d ago`;
-		if (hours > 0) return `${hours}h ago`;
-		return `${minutes}m ago`;
-	};
-
-	const getFlagUrl = (countryCode: string) => {
-		return `https://flagicons.lipis.dev/flags/4x3/${countryCode.toLowerCase()}.svg`;
-	};
-
-	// Sort by last_seen descending (most recent first), never seen at the end
-	const sortByLastSeen = (a: Device, b: Device) => {
-		if (!a.last_seen && !b.last_seen) return 0;
-		if (!a.last_seen) return 1;
-		if (!b.last_seen) return -1;
-		return new Date(b.last_seen).getTime() - new Date(a.last_seen).getTime();
-	};
-
-	// Outdated devices (pending update) - backend filters by outdated_minutes=30
-	const getOutdatedDuration = (device: Device) => {
-		if (!device.target_release_id_set_at) return "";
-		const setAt = new Date(device.target_release_id_set_at);
-		const now = new Date();
-		const diffMinutes = Math.floor(
-			(now.getTime() - setAt.getTime()) / (1000 * 60),
-		);
-		const diffHours = Math.floor(diffMinutes / 60);
-		const diffDays = Math.floor(diffHours / 24);
-
-		if (diffDays > 0) return `${diffDays}d`;
-		if (diffHours > 0) return `${diffHours}h`;
-		return `${diffMinutes}m`;
-	};
-
 	const stuckUpdates = [...outdatedDevices].sort(sortByLastSeen);
 
 	// Offline devices categorized by how long they've been offline
@@ -230,66 +314,62 @@ const AdminPanel = () => {
 		neverSeen.length > 0;
 
 	return (
-		<div className="flex-1 overflow-y-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
+		<PageContainer>
 			{/* Overview Stats */}
-			<div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
+			<div className="grid grid-cols-1 sm:grid-cols-3 gap-4 sm:gap-6">
 				{loading ? (
 					// Skeleton loading for stats
 					[...Array(3)].map((_, index) => (
-						<div
-							key={index}
-							className="bg-white rounded-lg border border-gray-200 p-6"
-						>
-							<div className="flex items-center">
-								<div className="w-8 h-8 bg-gray-200 rounded animate-pulse" />
-								<div className="ml-4">
+						<Card key={index} className="p-5">
+							<div className="flex items-center gap-4">
+								<div className="w-12 h-12 bg-gray-200 rounded-xl animate-pulse" />
+								<div>
 									<div className="h-4 bg-gray-200 rounded w-16 animate-pulse mb-2" />
 									<div className="h-8 bg-gray-200 rounded w-12 animate-pulse" />
 								</div>
 							</div>
-						</div>
+						</Card>
 					))
 				) : (
 					<>
 						<Link
 							to="/devices?approved=false"
-							className={`rounded-lg border p-6 transition-colors cursor-pointer ${
+							className={`group rounded-xl border p-5 shadow-sm transition-all hover:shadow-md ${
 								unapprovedDevices.length > 0
-									? "bg-orange-50 border-orange-200 hover:bg-orange-100"
-									: "bg-white border-gray-200 hover:bg-gray-50"
+									? "bg-orange-50 border-orange-200 hover:border-orange-300"
+									: "bg-white border-gray-200/80 hover:border-gray-300"
 							}`}
 						>
-							<div className="flex items-center">
-								<ShieldCheck
-									className={`w-8 h-8 ${unapprovedDevices.length > 0 ? "text-orange-500" : "text-gray-400"}`}
+							<div className="flex items-center justify-between">
+								<StatCard
+									icon={ShieldCheck}
+									label="Pending Approval"
+									value={unapprovedDevices.length}
+									tone={unapprovedDevices.length > 0 ? "orange" : "neutral"}
 								/>
-								<div className="ml-4">
-									<p className="text-sm font-medium text-gray-600">
-										Pending Approval
-									</p>
-									<p className="text-2xl font-bold text-gray-900">
-										{unapprovedDevices.length}
-									</p>
-								</div>
+								<ChevronRight
+									className={`w-5 h-5 transition-transform group-hover:translate-x-0.5 ${
+										unapprovedDevices.length > 0
+											? "text-orange-400"
+											: "text-gray-300"
+									}`}
+								/>
 							</div>
 						</Link>
 
-						<div className="bg-white rounded-lg border border-gray-200 p-6">
-							<div className="flex items-center">
-								<CheckCircle className="w-8 h-8 text-green-500" />
-								<div className="ml-4">
-									<p className="text-sm font-medium text-gray-600">Online</p>
-									<p className="text-2xl font-bold text-gray-900">
-										{dashboardQuery.data?.online_count || 0}
-									</p>
-								</div>
-							</div>
-						</div>
+						<Card className="p-5">
+							<StatCard
+								icon={CheckCircle}
+								label="Online"
+								value={dashboardQuery.data?.online_count || 0}
+								tone="green"
+							/>
+						</Card>
 
 						<button
 							type="button"
 							onClick={() => setChartOpen(true)}
-							className="group bg-white rounded-lg border border-gray-200 p-6 cursor-pointer hover:bg-gray-50 transition-colors text-left relative overflow-hidden"
+							className="group bg-white rounded-xl border border-gray-200/80 p-5 shadow-sm cursor-pointer hover:shadow-md hover:border-gray-300 transition-all text-left relative overflow-hidden"
 						>
 							{chartData.length > 1 && (
 								<div className="absolute inset-0 top-1/3">
@@ -328,17 +408,12 @@ const AdminPanel = () => {
 								</div>
 							)}
 							<div className="relative z-10">
-								<div className="flex items-center">
-									<Cpu className="w-8 h-8 text-blue-500" />
-									<div className="ml-4">
-										<p className="text-sm font-medium text-gray-600">
-											Total Devices
-										</p>
-										<p className="text-2xl font-bold text-gray-900">
-											{dashboardQuery.data?.total_count || 0}
-										</p>
-									</div>
-								</div>
+								<StatCard
+									icon={Cpu}
+									label="Total Devices"
+									value={dashboardQuery.data?.total_count || 0}
+									tone="blue"
+								/>
 							</div>
 							{chartData.length > 1 && (
 								<span className="absolute bottom-2 right-3 text-[10px] text-gray-400 opacity-0 group-hover:opacity-100 transition-opacity z-10">
@@ -356,12 +431,12 @@ const AdminPanel = () => {
 					{[...Array(4)].map((_, sectionIndex) => (
 						<div
 							key={sectionIndex}
-							className="bg-white rounded-lg border border-gray-200"
+							className="bg-white rounded-xl border border-gray-200/80 shadow-sm"
 						>
-							<div className="px-4 py-3 border-b border-gray-200">
+							<div className="px-4 py-3 border-b border-gray-100">
 								<div className="h-5 bg-gray-200 rounded w-32 animate-pulse" />
 							</div>
-							<div className="divide-y divide-gray-200">
+							<div className="divide-y divide-gray-100">
 								{[...Array(3)].map((_, index) => (
 									<div key={index} className="px-4 py-3">
 										<div className="flex items-center justify-between">
@@ -380,395 +455,151 @@ const AdminPanel = () => {
 			) : hasAttentionDevices ? (
 				<div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
 					{/* Pending Update Section */}
-					<div className="bg-white rounded-lg border border-gray-200 overflow-hidden flex flex-col">
-						<div className="bg-purple-50 px-4 py-3 border-b border-gray-200">
-							<h4 className="text-sm font-semibold text-purple-800 flex items-center">
-								<Package className="w-4 h-4 mr-2" />
-								Pending Update ({stuckUpdates.length})
-							</h4>
-						</div>
-						{stuckUpdates.length === 0 ? (
-							<div className="p-6 text-center flex-1 flex flex-col items-center justify-center">
-								<CheckCircle className="w-10 h-10 text-green-500 mx-auto mb-2" />
-								<p className="text-sm font-medium text-gray-900 mb-1">
-									All up to date
-								</p>
-								<p className="text-xs text-gray-600">
-									No online devices with pending updates
-								</p>
-							</div>
-						) : (
-							<div className="divide-y divide-gray-200">
-								{stuckUpdates.slice(0, 10).map((device) => {
-									const isOnline = device.last_seen
-										? (Date.now() - new Date(device.last_seen).getTime()) /
-												(1000 * 60) <=
-											3
-										: false;
-									return (
-										<Link
-											key={device.id}
-											className="block px-4 py-3 hover:bg-purple-50 cursor-pointer transition-colors"
-											to={`/devices/${device.serial_number}`}
-										>
-											<div className="flex items-center justify-between">
-												<div className="flex items-center space-x-3 flex-1">
-													{device.ip_address?.country_code && (
-														<img
-															src={getFlagUrl(device.ip_address.country_code)}
-															alt={device.ip_address.country || "Country flag"}
-															className="w-4 h-3 flex-shrink-0 rounded-sm"
-															onError={(e) => {
-																(e.target as HTMLImageElement).style.display =
-																	"none";
-															}}
-														/>
-													)}
-													<span className="font-mono text-sm text-gray-900">
-														{getDeviceName(device)}
+					{stuckUpdates.length > 0 && (
+						<SectionCard
+							icon={Package}
+							title="Pending Update"
+							count={stuckUpdates.length}
+							theme={SECTION_THEMES.purple}
+							footer={
+								stuckUpdates.length > 10 ? (
+									<ViewAllFooter
+										to="/devices?outdated=true"
+										count={stuckUpdates.length}
+										noun="devices"
+									/>
+								) : undefined
+							}
+						>
+							{stuckUpdates.slice(0, 10).map((device) => {
+								const isOnline = device.last_seen
+									? (Date.now() - new Date(device.last_seen).getTime()) /
+											(1000 * 60) <=
+										3
+									: false;
+								return (
+									<DeviceRow
+										key={device.id}
+										to={`/devices/${device.serial_number}`}
+										theme={SECTION_THEMES.purple}
+										device={device}
+										right={
+											<>
+												{device.release?.distribution_name && (
+													<span className="text-gray-500">
+														{device.release.distribution_name}
 													</span>
-													{device.network?.network_score && (
-														<NetworkQualityIndicator
-															isOnline={isOnline}
-															networkScore={device.network.network_score}
-														/>
-													)}
-												</div>
-												<div className="flex items-center space-x-3 text-sm">
-													{device.release?.distribution_name && (
-														<span className="text-gray-500">
-															{device.release.distribution_name}
-														</span>
-													)}
-													<span className="text-purple-600 font-mono">
-														{device.release?.version || device.release_id} →{" "}
-														{device.target_release?.version ||
-															device.target_release_id}
+												)}
+												<span className="text-purple-600 font-mono">
+													{device.release?.version || device.release_id} →{" "}
+													{device.target_release?.version ||
+														device.target_release_id}
+												</span>
+												{getOutdatedDuration(device) && (
+													<span className="text-orange-600 text-xs font-medium">
+														{getOutdatedDuration(device)}
 													</span>
-													{getOutdatedDuration(device) && (
-														<span className="text-orange-600 text-xs font-medium">
-															{getOutdatedDuration(device)}
-														</span>
-													)}
-													<ChevronRight className="w-4 h-4 text-gray-400 flex-shrink-0" />
-												</div>
-											</div>
-										</Link>
-									);
-								})}
-								{stuckUpdates.length > 10 && (
-									<div className="px-4 py-3 bg-gray-50">
-										<Link
-											to="/devices?outdated=true"
-											className="block text-sm text-blue-600 hover:text-blue-800 cursor-pointer"
-										>
-											View all {stuckUpdates.length} devices →
-										</Link>
-									</div>
-								)}
-							</div>
-						)}
-					</div>
+												)}
+											</>
+										}
+									>
+										{device.network?.network_score && (
+											<NetworkQualityIndicator
+												isOnline={isOnline}
+												networkScore={device.network.network_score}
+											/>
+										)}
+									</DeviceRow>
+								);
+							})}
+						</SectionCard>
+					)}
 
 					{/* Unhealthy Services Section */}
 					{unhealthyByDevice.length > 0 && (
-						<div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
-							<div className="bg-rose-50 px-4 py-3 border-b border-gray-200">
-								<h4 className="text-sm font-semibold text-rose-800 flex items-center">
-									<Activity className="w-4 h-4 mr-2" />
-									Service Not Running ({unhealthyByDevice.length})
-								</h4>
-							</div>
-							<div className="divide-y divide-gray-200">
-								{unhealthyByDevice.slice(0, 10).map((device) => (
-									<Link
-										key={device.serial_number}
-										className="block px-4 py-3 hover:bg-rose-50 cursor-pointer transition-colors"
-										to={`/devices/${device.serial_number}`}
-									>
-										<div className="flex items-center justify-between">
-											<div className="flex items-center space-x-3 flex-1">
-												<span className="font-mono text-sm text-gray-900">
-													{device.serial_number}
-												</span>
-											</div>
-											<div className="flex items-center space-x-3 text-sm">
-												<span className="text-rose-600 font-mono">
-													{device.services
-														.map((s) => s.service_name)
-														.join(", ")}
-												</span>
-												<ChevronRight className="w-4 h-4 text-gray-400 flex-shrink-0" />
-											</div>
-										</div>
-									</Link>
-								))}
-								{unhealthyByDevice.length > 10 && (
-									<div className="px-4 py-3 bg-gray-50">
-										<Link
-											to="/devices?service_not_running=true&online=online"
-											className="block text-sm text-blue-600 hover:text-blue-800 cursor-pointer"
-										>
-											View all {unhealthyByDevice.length} devices →
-										</Link>
+						<SectionCard
+							icon={Activity}
+							title="Service Not Running"
+							count={unhealthyByDevice.length}
+							theme={SECTION_THEMES.rose}
+							footer={
+								unhealthyByDevice.length > 10 ? (
+									<ViewAllFooter
+										to="/devices?service_not_running=true&online=online"
+										count={unhealthyByDevice.length}
+										noun="devices"
+									/>
+								) : undefined
+							}
+						>
+							{unhealthyByDevice.slice(0, 10).map((device) => (
+								<ListRow
+									key={device.serial_number}
+									to={`/devices/${device.serial_number}`}
+									hover={SECTION_THEMES.rose.hover}
+								>
+									<span className="font-mono text-sm text-gray-900 truncate">
+										{device.serial_number}
+									</span>
+									<div className="flex items-center gap-3 text-sm flex-shrink-0">
+										<span className="text-rose-600 font-mono">
+											{device.services.map((s) => s.service_name).join(", ")}
+										</span>
+										<ChevronRight className="w-4 h-4 text-gray-400 flex-shrink-0" />
 									</div>
-								)}
-							</div>
-						</div>
+								</ListRow>
+							))}
+						</SectionCard>
 					)}
 
-					{/* Recently Offline Section */}
-					{recentlyOffline.length > 0 && (
-						<div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
-							<div className="bg-yellow-50 px-4 py-3 border-b border-gray-200">
-								<h4 className="text-sm font-semibold text-yellow-800 flex items-center">
-									<Clock className="w-4 h-4 mr-2" />
-									Recently Offline ({recentlyOffline.length})
-								</h4>
-							</div>
-							<div className="divide-y divide-gray-200">
-								{recentlyOffline.slice(0, 10).map((device) => {
-									return (
-										<Link
-											key={device.id}
-											className="block px-4 py-3 hover:bg-yellow-50 cursor-pointer transition-colors"
-											to={`/devices/${device.serial_number}`}
-										>
-											<div className="flex items-center justify-between">
-												<div className="flex items-center space-x-3 flex-1">
-													{device.ip_address?.country_code && (
-														<img
-															src={getFlagUrl(device.ip_address.country_code)}
-															alt={device.ip_address.country || "Country flag"}
-															className="w-4 h-3 flex-shrink-0 rounded-sm"
-															onError={(e) => {
-																(e.target as HTMLImageElement).style.display =
-																	"none";
-															}}
-														/>
-													)}
-													<span className="font-mono text-sm text-gray-900">
-														{getDeviceName(device)}
-													</span>
-												</div>
-												<div className="flex items-center space-x-3 text-sm">
-													<span className="text-gray-500">
-														{device.last_seen
-															? formatTimeAgo(device.last_seen)
-															: "never"}
-													</span>
-													<ChevronRight className="w-4 h-4 text-gray-400 flex-shrink-0" />
-												</div>
-											</div>
-										</Link>
-									);
-								})}
-								{recentlyOffline.length > 10 && (
-									<div className="px-4 py-3 bg-gray-50">
-										<Link
-											to="/devices"
-											className="block text-sm text-blue-600 hover:text-blue-800 cursor-pointer"
-										>
-											View all {recentlyOffline.length} devices →
-										</Link>
-									</div>
-								)}
-							</div>
-						</div>
-					)}
+					<OfflineSection
+						icon={Clock}
+						title="Recently Offline"
+						theme={SECTION_THEMES.yellow}
+						devices={recentlyOffline}
+						viewAllTo="/devices"
+					/>
 
-					{/* Offline This Week Section */}
-					{offlineWeek.length > 0 && (
-						<div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
-							<div className="bg-orange-50 px-4 py-3 border-b border-gray-200">
-								<h4 className="text-sm font-semibold text-orange-800 flex items-center">
-									<AlertTriangle className="w-4 h-4 mr-2" />
-									Offline This Week ({offlineWeek.length})
-								</h4>
-							</div>
-							<div className="divide-y divide-gray-200">
-								{offlineWeek.slice(0, 10).map((device) => {
-									return (
-										<Link
-											key={device.id}
-											className="block px-4 py-3 hover:bg-orange-50 cursor-pointer transition-colors"
-											to={`/devices/${device.serial_number}`}
-										>
-											<div className="flex items-center justify-between">
-												<div className="flex items-center space-x-3 flex-1">
-													{device.ip_address?.country_code && (
-														<img
-															src={getFlagUrl(device.ip_address.country_code)}
-															alt={device.ip_address.country || "Country flag"}
-															className="w-4 h-3 flex-shrink-0 rounded-sm"
-															onError={(e) => {
-																(e.target as HTMLImageElement).style.display =
-																	"none";
-															}}
-														/>
-													)}
-													<span className="font-mono text-sm text-gray-900">
-														{getDeviceName(device)}
-													</span>
-												</div>
-												<div className="flex items-center space-x-3 text-sm">
-													<span className="text-gray-500">
-														{device.last_seen
-															? formatTimeAgo(device.last_seen)
-															: "never"}
-													</span>
-													<ChevronRight className="w-4 h-4 text-gray-400 flex-shrink-0" />
-												</div>
-											</div>
-										</Link>
-									);
-								})}
-								{offlineWeek.length > 10 && (
-									<div className="px-4 py-3 bg-gray-50">
-										<Link
-											to="/devices"
-											className="block text-sm text-blue-600 hover:text-blue-800 cursor-pointer"
-										>
-											View all {offlineWeek.length} devices →
-										</Link>
-									</div>
-								)}
-							</div>
-						</div>
-					)}
+					<OfflineSection
+						icon={AlertTriangle}
+						title="Offline This Week"
+						theme={SECTION_THEMES.orange}
+						devices={offlineWeek}
+						viewAllTo="/devices"
+					/>
 
-					{/* Long-term Offline Section */}
-					{offlineMonth.length > 0 && (
-						<div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
-							<div className="bg-red-50 px-4 py-3 border-b border-gray-200">
-								<h4 className="text-sm font-semibold text-red-800 flex items-center">
-									<XCircle className="w-4 h-4 mr-2" />
-									Long-term Offline ({offlineMonth.length})
-								</h4>
-							</div>
-							<div className="divide-y divide-gray-200">
-								{offlineMonth.slice(0, 10).map((device) => {
-									return (
-										<Link
-											key={device.id}
-											className="block px-4 py-3 hover:bg-red-50 cursor-pointer transition-colors"
-											to={`/devices/${device.serial_number}`}
-										>
-											<div className="flex items-center justify-between">
-												<div className="flex items-center space-x-3 flex-1">
-													{device.ip_address?.country_code && (
-														<img
-															src={getFlagUrl(device.ip_address.country_code)}
-															alt={device.ip_address.country || "Country flag"}
-															className="w-4 h-3 flex-shrink-0 rounded-sm"
-															onError={(e) => {
-																(e.target as HTMLImageElement).style.display =
-																	"none";
-															}}
-														/>
-													)}
-													<span className="font-mono text-sm text-gray-900">
-														{getDeviceName(device)}
-													</span>
-												</div>
-												<div className="flex items-center space-x-3 text-sm">
-													<span className="text-gray-500">
-														{device.last_seen
-															? formatTimeAgo(device.last_seen)
-															: "never"}
-													</span>
-													<ChevronRight className="w-4 h-4 text-gray-400 flex-shrink-0" />
-												</div>
-											</div>
-										</Link>
-									);
-								})}
-								{offlineMonth.length > 10 && (
-									<div className="px-4 py-3 bg-gray-50">
-										<Link
-											to="/devices"
-											className="block text-sm text-blue-600 hover:text-blue-800 cursor-pointer"
-										>
-											View all {offlineMonth.length} devices →
-										</Link>
-									</div>
-								)}
-							</div>
-						</div>
-					)}
+					<OfflineSection
+						icon={XCircle}
+						title="Long-term Offline"
+						theme={SECTION_THEMES.red}
+						devices={offlineMonth}
+						viewAllTo="/devices"
+					/>
 
-					{/* Never Connected Section */}
-					{neverSeen.length > 0 && (
-						<div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
-							<div className="bg-gray-50 px-4 py-3 border-b border-gray-200">
-								<h4 className="text-sm font-semibold text-gray-800 flex items-center">
-									<AlertTriangle className="w-4 h-4 mr-2" />
-									Never Connected ({neverSeen.length})
-								</h4>
-							</div>
-							<div className="divide-y divide-gray-200">
-								{neverSeen.slice(0, 10).map((device) => {
-									return (
-										<Link
-											key={device.id}
-											className="block px-4 py-3 hover:bg-gray-50 cursor-pointer transition-colors"
-											to={`/devices/${device.serial_number}`}
-										>
-											<div className="flex items-center justify-between">
-												<div className="flex items-center space-x-3 flex-1">
-													{device.ip_address?.country_code && (
-														<img
-															src={getFlagUrl(device.ip_address.country_code)}
-															alt={device.ip_address.country || "Country flag"}
-															className="w-4 h-3 flex-shrink-0 rounded-sm"
-															onError={(e) => {
-																(e.target as HTMLImageElement).style.display =
-																	"none";
-															}}
-														/>
-													)}
-													<span className="font-mono text-sm text-gray-900">
-														{getDeviceName(device)}
-													</span>
-												</div>
-												<div className="flex items-center space-x-3 text-sm">
-													<span className="text-gray-500">Never</span>
-													<ChevronRight className="w-4 h-4 text-gray-400 flex-shrink-0" />
-												</div>
-											</div>
-										</Link>
-									);
-								})}
-								{neverSeen.length > 10 && (
-									<div className="px-4 py-3 bg-gray-50">
-										<Link
-											to="/devices"
-											className="block text-sm text-blue-600 hover:text-blue-800 cursor-pointer"
-										>
-											View all {neverSeen.length} devices →
-										</Link>
-									</div>
-								)}
-							</div>
-						</div>
-					)}
+					<OfflineSection
+						icon={AlertTriangle}
+						title="Never Connected"
+						theme={SECTION_THEMES.gray}
+						devices={neverSeen}
+						viewAllTo="/devices"
+					/>
 				</div>
 			) : (
 				/* All Good Message */
-				<div className="bg-green-50 border border-green-200 rounded-lg p-6">
-					<div className="flex items-center space-x-3">
-						<CheckCircle className="w-6 h-6 text-green-500" />
-						<div>
-							<h3 className="text-lg font-semibold text-green-900">
-								All Systems Operational
-							</h3>
-							<p className="text-sm text-green-700 mt-1">
-								No devices need attention. All updates are successful and
-								devices are either online or archived (offline &gt;30 days).
-							</p>
+				<Card className="p-10">
+					<div className="flex flex-col items-center text-center">
+						<div className="flex h-14 w-14 items-center justify-center rounded-full bg-green-100 mb-4">
+							<CheckCircle className="w-8 h-8 text-green-600" />
 						</div>
+						<h3 className="text-lg font-semibold text-gray-900">
+							All Systems Operational
+						</h3>
+						<p className="text-sm text-gray-500 mt-1 max-w-md">
+							No devices need attention. All updates are successful and devices
+							are either online or archived (offline &gt;30 days).
+						</p>
 					</div>
-				</div>
+				</Card>
 			)}
 			{/* Registration Chart Modal */}
 			<Modal
@@ -868,7 +699,7 @@ const AdminPanel = () => {
 					</p>
 				)}
 			</Modal>
-		</div>
+		</PageContainer>
 	);
 };
 
