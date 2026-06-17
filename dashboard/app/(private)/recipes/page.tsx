@@ -1,7 +1,7 @@
 "use client";
 
 import { useQueryClient } from "@tanstack/react-query";
-import { Plus, ScrollText, Search, Send, Trash2, X } from "lucide-react";
+import { Plus, ScrollText, Send, Trash2, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { SIMPLE_COMMANDS } from "@/app/(private)/commands/shared";
 import {
@@ -16,9 +16,9 @@ import {
 	useIssueCommandsToDevices,
 	useUpdateRecipe,
 } from "@/app/api-client";
-import { Button } from "@/app/components/button";
 import { Modal } from "@/app/components/modal";
 import { RelativeTime } from "@/app/components/RelativeTime";
+import { Button, Card, SearchInput } from "@/app/components/ui";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -153,7 +153,7 @@ function commandIsValid(ec: EditableCommand): boolean {
 }
 
 const fieldClass =
-	"w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500 text-gray-900 placeholder-gray-400 text-sm";
+	"w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-gray-900 placeholder-gray-400 text-sm";
 
 // ---------------------------------------------------------------------------
 // Command row (one editable command inside the editor)
@@ -174,7 +174,7 @@ function CommandRow({
 		onChange({ ...command, ...patch });
 
 	return (
-		<div className="border border-gray-200 rounded-md p-3 space-y-3">
+		<div className="border border-gray-200/80 rounded-lg p-3 space-y-3">
 			<div className="flex items-center gap-2">
 				<span className="text-xs font-medium text-gray-400 w-5">
 					{index + 1}.
@@ -380,9 +380,9 @@ function RecipeEditor({
 	return (
 		<div className="h-full flex flex-col overflow-hidden">
 			{/* Body */}
-			<div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
+			<div className="flex-1 overflow-y-auto overflow-x-hidden px-4 py-4 space-y-4">
 				{error && (
-					<div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-md p-3">
+					<div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg p-3">
 						{error}
 					</div>
 				)}
@@ -417,7 +417,9 @@ function RecipeEditor({
 							Commands
 						</label>
 						<Button
-							variant="ghost"
+							variant="soft"
+							tone="blue"
+							size="sm"
 							icon={<Plus className="w-4 h-4" />}
 							onClick={() => setCommands((c) => [...c, emptyCommand()])}
 						>
@@ -443,10 +445,11 @@ function RecipeEditor({
 			</div>
 
 			{/* Footer */}
-			<div className="flex items-center justify-between px-4 py-3 border-t border-gray-200 shrink-0">
+			<div className="flex items-center justify-between px-4 py-3 border-t border-gray-200/80 shrink-0">
 				{recipe ? (
 					<Button
-						variant="secondary"
+						variant="soft"
+						tone="red"
 						icon={<Trash2 className="w-4 h-4" />}
 						onClick={onDeleteRequest}
 					>
@@ -458,7 +461,8 @@ function RecipeEditor({
 				<div className="flex items-center gap-3">
 					{recipe && (
 						<Button
-							variant="purple"
+							variant="soft"
+							tone="purple"
 							icon={<Send className="w-4 h-4" />}
 							onClick={onTrigger}
 						>
@@ -467,7 +471,8 @@ function RecipeEditor({
 					)}
 					{(!recipe || isDirty) && (
 						<Button
-							variant="primary"
+							variant="solid"
+							tone="blue"
 							loading={isPending}
 							disabled={!isValid}
 							onClick={handleSave}
@@ -546,20 +551,22 @@ function TriggerModal({
 			subtitle="Creates a command bundle on the selected devices"
 			footer={
 				done ? (
-					<Button variant="primary" onClick={close}>
+					<Button variant="solid" tone="blue" onClick={close}>
 						Done
 					</Button>
 				) : (
 					<>
 						<Button
-							variant="secondary"
+							variant="soft"
+							tone="gray"
 							onClick={close}
 							disabled={triggerMut.isPending}
 						>
 							Cancel
 						</Button>
 						<Button
-							variant="purple"
+							variant="solid"
+							tone="purple"
 							icon={<Send className="w-4 h-4" />}
 							loading={triggerMut.isPending}
 							disabled={selected.size === 0}
@@ -573,24 +580,19 @@ function TriggerModal({
 			}
 		>
 			{done ? (
-				<div className="bg-green-50 border border-green-200 text-green-800 text-sm rounded-md p-4">
+				<div className="bg-green-50 border border-green-200 text-green-800 text-sm rounded-lg p-4">
 					Recipe triggered on {selected.size}{" "}
 					{selected.size === 1 ? "device" : "devices"}. The commands are queued
 					and will run when each device checks in.
 				</div>
 			) : (
 				<div className="space-y-3">
-					<div className="relative">
-						<Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
-						<input
-							type="text"
-							value={search}
-							onChange={(e) => setSearch(e.target.value)}
-							placeholder="Search devices by serial…"
-							className={`${fieldClass} pl-9`}
-						/>
-					</div>
-					<div className="max-h-72 overflow-y-auto border border-gray-200 rounded-md divide-y divide-gray-100">
+					<SearchInput
+						value={search}
+						onChange={setSearch}
+						placeholder="Search devices by serial…"
+					/>
+					<div className="max-h-72 overflow-y-auto border border-gray-200/80 rounded-lg divide-y divide-gray-100">
 						{devices.length === 0 ? (
 							<p className="text-sm text-gray-400 italic p-3">
 								No devices found.
@@ -672,11 +674,11 @@ export default function RecipesPage() {
 	const editorKey = selected === "new" ? "new" : (selected ?? "empty");
 
 	return (
-		<div className="flex-1 overflow-hidden p-4 sm:p-6 flex flex-col">
-			<div className="flex-1 overflow-hidden flex border border-gray-200 bg-white rounded-lg">
+		<div className="flex-1 overflow-hidden p-4 sm:p-6 lg:p-8 flex flex-col">
+			<Card className="flex-1 overflow-hidden flex">
 				{/* Left: recipe list */}
-				<div className="w-1/4 border-r border-gray-200 shrink-0 flex flex-col overflow-hidden">
-					<div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 shrink-0">
+				<div className="w-1/4 border-r border-gray-200/80 shrink-0 flex flex-col overflow-hidden">
+					<div className="flex items-center justify-between px-4 py-3 border-b border-gray-200/80 shrink-0">
 						<span className="text-sm font-semibold text-gray-900">Recipes</span>
 						<button
 							type="button"
@@ -687,7 +689,7 @@ export default function RecipesPage() {
 							New
 						</button>
 					</div>
-					<div className="flex-1 overflow-y-auto">
+					<div className="flex-1 overflow-y-auto overflow-x-hidden">
 						{selected === "new" && (
 							<button
 								type="button"
@@ -723,12 +725,12 @@ export default function RecipesPage() {
 												: "hover:bg-gray-50 border-l-2 border-l-transparent"
 										}`}
 									>
-										<div className="flex items-center gap-2 mb-1">
+										<div className="flex items-center gap-2 mb-1 min-w-0">
 											<ScrollText
 												className={`w-3.5 h-3.5 shrink-0 ${isSelected ? "text-blue-500" : "text-purple-500"}`}
 											/>
 											<span
-												className={`text-sm font-medium truncate ${isSelected ? "text-blue-900" : "text-gray-900"}`}
+												className={`text-sm font-medium truncate min-w-0 ${isSelected ? "text-blue-900" : "text-gray-900"}`}
 											>
 												{r.name}
 											</span>
@@ -767,7 +769,7 @@ export default function RecipesPage() {
 						/>
 					)}
 				</div>
-			</div>
+			</Card>
 
 			<TriggerModal
 				open={triggering != null}
@@ -781,14 +783,16 @@ export default function RecipesPage() {
 				footer={
 					<>
 						<Button
-							variant="secondary"
+							variant="soft"
+							tone="gray"
 							disabled={deleteMut.isPending}
 							onClick={() => setDeleting(null)}
 						>
 							Cancel
 						</Button>
 						<Button
-							variant="danger"
+							variant="solid"
+							tone="red"
 							loading={deleteMut.isPending}
 							onClick={() =>
 								deleting && deleteMut.mutate({ recipeId: deleting.id })

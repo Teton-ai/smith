@@ -8,18 +8,25 @@ import {
 	useGetBundleCommandsInfinite,
 } from "@/app/api-client";
 import { useClientMutator } from "@/app/api-client-mutator";
-import { Button } from "@/app/components/button";
 import { RelativeTime } from "@/app/components/RelativeTime";
+import { Badge, type BadgeVariant, Button, Card } from "@/app/components/ui";
 import {
 	CodeBlock,
 	getCommandStatus,
-	getStatusColor,
 	getTxLabel,
 	renderRxDetail,
 	renderTxDetail,
 } from "./shared";
 
 const PAGE_SIZE = 50;
+
+const STATUS_VARIANT: Record<string, BadgeVariant> = {
+	success: "green",
+	failed: "red",
+	executing: "blue",
+	cancelled: "gray",
+	pending: "yellow",
+};
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -56,71 +63,93 @@ const CommandResult = ({ response }: { response: DeviceCommandResponse }) => {
 
 	return (
 		<div className="border-b border-gray-100 last:border-b-0">
-			<div className="flex items-center justify-between gap-3 px-5 py-3 bg-gray-50">
+			<div className="flex items-center justify-between gap-3 px-5 py-3 bg-gray-50/70">
 				<div className="flex items-center gap-2 flex-wrap min-w-0">
 					<span
-						className={`text-sm font-medium text-gray-900 truncate ${mono ? "font-mono" : ""}`}
+						className={`text-sm font-semibold text-gray-900 truncate ${mono ? "font-mono" : ""}`}
 					>
 						{label}
 					</span>
-					<span
-						className={`px-2 py-0.5 text-xs font-medium rounded ${getStatusColor(status)}`}
-					>
-						{status}
-					</span>
+					<Badge variant={STATUS_VARIANT[status] ?? "gray"}>{status}</Badge>
 					{response.response != null && response.status != null && (
-						<span
-							className={`px-2 py-0.5 text-xs font-mono rounded ${response.status === 0 ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800"}`}
+						<Badge
+							variant={response.status === 0 ? "green" : "red"}
+							className="font-mono"
 						>
 							exit {response.status}
-						</span>
+						</Badge>
 					)}
 				</div>
-				<div className="flex items-center gap-3 shrink-0">
-					{response.response != null && (
-						<Button
-							variant="secondary"
-							className="text-xs"
-							onClick={() => setShowRaw((v) => !v)}
-						>
-							{showRaw ? "Formatted" : "Raw JSON"}
-						</Button>
-					)}
-					<div className="text-xs text-gray-400">
-						{response.response_at ? (
-							<RelativeTime date={response.response_at} />
-						) : (
-							<span className="text-yellow-500">Waiting…</span>
-						)}
-					</div>
-				</div>
+				{response.response != null && (
+					<Button
+						variant="soft"
+						tone="gray"
+						size="sm"
+						className="shrink-0"
+						onClick={() => setShowRaw((v) => !v)}
+					>
+						{showRaw ? "Formatted" : "Raw JSON"}
+					</Button>
+				)}
 			</div>
-			<div className="px-5 py-3 space-y-3">
+			<div className="px-5 py-3">
 				{showRaw ? (
 					<>
 						<CodeBlock
 							label="raw TX"
+							meta={
+								<>
+									· Issued <RelativeTime date={response.issued_at} />
+								</>
+							}
 							content={JSON.stringify(response.cmd_data, null, 2)}
 						/>
-						<CodeBlock
-							label="raw RX"
-							content={JSON.stringify(response.response, null, 2)}
-						/>
+						<div className="mt-4">
+							<CodeBlock
+								label="raw RX"
+								meta={
+									response.response_at ? (
+										<>
+											· Responded <RelativeTime date={response.response_at} />
+										</>
+									) : (
+										<span className="text-yellow-500">
+											· Waiting for response…
+										</span>
+									)
+								}
+								content={JSON.stringify(response.response, null, 2)}
+							/>
+						</div>
 					</>
 				) : (
 					<>
-						<div>
-							<p className="text-xs font-medium uppercase tracking-wide text-gray-400 mb-2">
-								Sent
-							</p>
+						<div className="mb-4">
+							<div className="flex items-center gap-2 mb-3">
+								<p className="text-xs font-medium uppercase tracking-wide text-gray-400">
+									Sent
+								</p>
+								<span className="text-xs text-gray-400">
+									· Issued <RelativeTime date={response.issued_at} />
+								</span>
+							</div>
 							{renderTxDetail(response.cmd_data)}
 						</div>
-						<div>
-							<p className="text-xs font-medium uppercase tracking-wide text-gray-400 mb-2">
+						<div className="flex items-center gap-2 mb-3">
+							<p className="text-xs font-medium uppercase tracking-wide text-gray-400">
 								Response
 							</p>
-							{renderRxDetail(response.response)}
+							{response.response_at ? (
+								<span className="text-xs text-gray-400">
+									· Responded <RelativeTime date={response.response_at} />
+								</span>
+							) : (
+								<span className="text-xs text-yellow-500">
+									· Waiting for response…
+								</span>
+							)}
 						</div>
+						{renderRxDetail(response.response)}
 					</>
 				)}
 			</div>
@@ -172,7 +201,7 @@ const BundleDetail = ({ bundle }: { bundle: BundleWithCommands }) => {
 	return (
 		<div className="flex h-full overflow-hidden">
 			{/* Device list */}
-			<div className="w-2/5 border-r border-gray-200 overflow-y-auto shrink-0">
+			<div className="w-2/5 border-r border-gray-200 overflow-y-auto overflow-x-hidden shrink-0">
 				{devices.map((d) => {
 					const stats = getBundleStats(d.commands);
 					const isSelected = d.device === selectedDevice;
@@ -187,9 +216,9 @@ const BundleDetail = ({ bundle }: { bundle: BundleWithCommands }) => {
 									: "hover:bg-gray-50 border-l-2 border-l-transparent"
 							}`}
 						>
-							<div className="flex items-center justify-between gap-2 mb-1">
+							<div className="flex items-center justify-between gap-2 mb-1 min-w-0">
 								<span
-									className={`text-sm font-mono truncate ${isSelected ? "text-blue-900" : "text-gray-900"}`}
+									className={`text-sm font-mono truncate min-w-0 ${isSelected ? "text-blue-900" : "text-gray-900"}`}
 								>
 									{d.serial}
 								</span>
@@ -199,24 +228,24 @@ const BundleDetail = ({ bundle }: { bundle: BundleWithCommands }) => {
 							</div>
 							<div className="flex items-center gap-1.5 flex-wrap">
 								{stats.success > 0 && (
-									<span className="px-1.5 py-0.5 rounded-full bg-green-100 text-green-800 text-xs">
+									<Badge variant="green" pill>
 										{stats.success} ok
-									</span>
+									</Badge>
 								)}
 								{stats.failed > 0 && (
-									<span className="px-1.5 py-0.5 rounded-full bg-red-100 text-red-800 text-xs">
+									<Badge variant="red" pill>
 										{stats.failed} failed
-									</span>
+									</Badge>
 								)}
 								{stats.pending > 0 && (
-									<span className="px-1.5 py-0.5 rounded-full bg-yellow-100 text-yellow-800 text-xs">
+									<Badge variant="yellow" pill>
 										{stats.pending} pending
-									</span>
+									</Badge>
 								)}
 								{stats.executing > 0 && (
-									<span className="px-1.5 py-0.5 rounded-full bg-blue-100 text-blue-800 text-xs">
+									<Badge variant="blue" pill>
 										{stats.executing} executing
-									</span>
+									</Badge>
 								)}
 							</div>
 						</button>
@@ -236,7 +265,7 @@ const BundleDetail = ({ bundle }: { bundle: BundleWithCommands }) => {
 								{selected.serial}
 							</Link>
 						</div>
-						<div className="flex-1 overflow-y-auto">
+						<div className="flex-1 overflow-y-auto overflow-x-hidden">
 							{selected.commands.map((c) => (
 								<CommandResult key={c.cmd_id} response={c} />
 							))}
@@ -327,25 +356,29 @@ const CommandsPage = () => {
 
 	if (bundles.length === 0) {
 		return (
-			<div className="text-center py-12 bg-white border border-gray-200 rounded-lg">
-				<Send className="w-12 h-12 text-gray-300 mx-auto mb-3" />
-				<p className="text-gray-500">No bulk commands have been executed yet</p>
-				<p className="text-sm text-gray-400 mt-1">
-					Select devices and run a command to see results here
-				</p>
+			<div className="px-4 sm:px-6 lg:px-8 py-6">
+				<Card className="text-center py-12">
+					<Send className="w-12 h-12 text-gray-300 mx-auto mb-3" />
+					<p className="text-gray-500">
+						No bulk commands have been executed yet
+					</p>
+					<p className="text-sm text-gray-400 mt-1">
+						Select devices and run a command to see results here
+					</p>
+				</Card>
 			</div>
 		);
 	}
 
 	return (
-		<div className="flex-1 overflow-hidden p-4 sm:p-6 flex flex-col">
-			<div className="flex-1 overflow-hidden flex border border-gray-200 bg-white rounded-lg">
+		<div className="flex-1 overflow-hidden p-4 sm:p-6 lg:p-8 flex flex-col">
+			<Card className="flex-1 overflow-hidden flex">
 				{/* Left: bundle list (1/3) */}
 				<div className="w-1/5 border-r border-gray-200 shrink-0 flex flex-col overflow-hidden">
 					<div
 						ref={scrollRef}
 						onScroll={handleScroll}
-						className="flex-1 overflow-y-auto"
+						className="flex-1 overflow-y-auto overflow-x-hidden"
 					>
 						{bundles.map((bundle) => {
 							const stats = getBundleStats(bundle.responses);
@@ -366,12 +399,12 @@ const CommandsPage = () => {
 											: "hover:bg-gray-50 border-l-2 border-l-transparent"
 									}`}
 								>
-									<div className="flex items-center gap-2 mb-1">
+									<div className="flex items-center gap-2 mb-1 min-w-0">
 										<Terminal
 											className={`w-3.5 h-3.5 shrink-0 ${isSelected ? "text-blue-500" : "text-purple-500"}`}
 										/>
 										<span
-											className={`text-sm font-medium truncate ${isSelected ? "text-blue-900" : "text-gray-900"}`}
+											className={`text-sm font-medium truncate min-w-0 ${isSelected ? "text-blue-900" : "text-gray-900"}`}
 										>
 											{commandLabel}
 										</span>
@@ -379,24 +412,24 @@ const CommandsPage = () => {
 									<div className="flex items-center justify-between gap-2">
 										<div className="flex items-center gap-1.5 flex-wrap">
 											{stats.success > 0 && (
-												<span className="px-1.5 py-0.5 rounded-full bg-green-100 text-green-800 text-xs">
+												<Badge variant="green" pill>
 													{stats.success} ok
-												</span>
+												</Badge>
 											)}
 											{stats.failed > 0 && (
-												<span className="px-1.5 py-0.5 rounded-full bg-red-100 text-red-800 text-xs">
+												<Badge variant="red" pill>
 													{stats.failed} failed
-												</span>
+												</Badge>
 											)}
 											{stats.pending > 0 && (
-												<span className="px-1.5 py-0.5 rounded-full bg-yellow-100 text-yellow-800 text-xs">
+												<Badge variant="yellow" pill>
 													{stats.pending} pending
-												</span>
+												</Badge>
 											)}
 											{stats.executing > 0 && (
-												<span className="px-1.5 py-0.5 rounded-full bg-blue-100 text-blue-800 text-xs">
+												<Badge variant="blue" pill>
 													{stats.executing} executing
-												</span>
+												</Badge>
 											)}
 										</div>
 										<RelativeTime
@@ -425,7 +458,7 @@ const CommandsPage = () => {
 						</div>
 					)}
 				</div>
-			</div>
+			</Card>
 		</div>
 	);
 };
