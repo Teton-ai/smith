@@ -75,6 +75,91 @@ fn build_journalctl_args(
     args
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn args(
+        unit: Option<&str>,
+        since: Option<&str>,
+        until: Option<&str>,
+        grep: Option<&str>,
+    ) -> Vec<String> {
+        build_journalctl_args(
+            &unit.map(str::to_string),
+            &since.map(str::to_string),
+            &until.map(str::to_string),
+            &grep.map(str::to_string),
+        )
+    }
+
+    #[test]
+    fn defaults_only() {
+        assert_eq!(
+            args(None, None, None, None),
+            ["-r", "--no-pager", "-n", "500"]
+        );
+    }
+
+    #[test]
+    fn unit_appended() {
+        assert_eq!(
+            args(Some("smithd"), None, None, None),
+            ["-r", "--no-pager", "-n", "500", "-u", "smithd"]
+        );
+    }
+
+    #[test]
+    fn since_appended() {
+        assert_eq!(
+            args(None, Some("1h ago"), None, None),
+            ["-r", "--no-pager", "-n", "500", "--since", "1h ago"]
+        );
+    }
+
+    #[test]
+    fn until_appended() {
+        assert_eq!(
+            args(None, None, Some("2026-06-17"), None),
+            ["-r", "--no-pager", "-n", "500", "--until", "2026-06-17"]
+        );
+    }
+
+    #[test]
+    fn grep_appended() {
+        assert_eq!(
+            args(None, None, None, Some("error")),
+            ["-r", "--no-pager", "-n", "500", "--grep", "error"]
+        );
+    }
+
+    #[test]
+    fn all_combined_ordering() {
+        assert_eq!(
+            args(
+                Some("smithd"),
+                Some("1h ago"),
+                Some("2026-06-17"),
+                Some("error")
+            ),
+            [
+                "-r",
+                "--no-pager",
+                "-n",
+                "500",
+                "-u",
+                "smithd",
+                "--since",
+                "1h ago",
+                "--until",
+                "2026-06-17",
+                "--grep",
+                "error"
+            ]
+        );
+    }
+}
+
 pub(super) async fn execute(id: i32, request: String) -> SafeCommandResponse {
     match execute_command(&request).await {
         Ok(output) => {

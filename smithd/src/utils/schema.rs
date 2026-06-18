@@ -188,32 +188,6 @@ pub enum SafeCommandTx {
     },
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn get_logs_protocol_round_trip() {
-        // Deserialize the JSON shape the API stores in the cmd jsonb column.
-        let json = r#"{"GetLogs":{"unit":"smithd","since":"1h ago","until":null,"grep":null}}"#;
-        let cmd: SafeCommandTx = serde_json::from_str(json).unwrap();
-        match cmd {
-            SafeCommandTx::GetLogs {
-                unit,
-                since,
-                until,
-                grep,
-            } => {
-                assert_eq!(unit, Some("smithd".to_string()));
-                assert_eq!(since, Some("1h ago".to_string()));
-                assert_eq!(until, None);
-                assert_eq!(grep, None);
-            }
-            _ => panic!("expected GetLogs variant"),
-        }
-    }
-}
-
 // RESPONSE THAT IT GETS
 #[derive(Serialize, Deserialize, Default, Debug)]
 pub struct HomePostResponse {
@@ -334,4 +308,66 @@ pub struct NetworkInfo {
     pub interface_type: InterfaceType,
     pub interface_name: String,
     pub details: NetworkDetails,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn get_logs_protocol_round_trip() {
+        // Deserialize the JSON shape the API stores in the cmd jsonb column.
+        let json = r#"{"GetLogs":{"unit":"smithd","since":"1h ago","until":null,"grep":null}}"#;
+        let cmd: SafeCommandTx = serde_json::from_str(json).unwrap();
+        match cmd {
+            SafeCommandTx::GetLogs {
+                unit,
+                since,
+                until,
+                grep,
+            } => {
+                assert_eq!(unit, Some("smithd".to_string()));
+                assert_eq!(since, Some("1h ago".to_string()));
+                assert_eq!(until, None);
+                assert_eq!(grep, None);
+            }
+            _ => panic!("expected GetLogs variant"),
+        }
+    }
+
+    #[test]
+    fn get_logs_omitted_fields_default_to_none() {
+        // Fields absent from the JSON object must deserialize as None,
+        // not fail. Covers clients that omit null fields entirely.
+        let json = r#"{"GetLogs":{"unit":"smithd"}}"#;
+        let cmd: SafeCommandTx = serde_json::from_str(json).unwrap();
+        match cmd {
+            SafeCommandTx::GetLogs {
+                unit,
+                since,
+                until,
+                grep,
+            } => {
+                assert_eq!(unit, Some("smithd".to_string()));
+                assert_eq!(since, None);
+                assert_eq!(until, None);
+                assert_eq!(grep, None);
+            }
+            _ => panic!("expected GetLogs variant"),
+        }
+    }
+
+    #[test]
+    fn get_logs_serialization_roundtrip() {
+        // Serialized shape must match what the API stores in the cmd jsonb column.
+        let cmd = SafeCommandTx::GetLogs {
+            unit: Some("smithd".to_string()),
+            since: Some("1h ago".to_string()),
+            until: None,
+            grep: None,
+        };
+        let json = serde_json::to_string(&cmd).unwrap();
+        let expected = r#"{"GetLogs":{"unit":"smithd","since":"1h ago","until":null,"grep":null}}"#;
+        assert_eq!(json, expected);
+    }
 }

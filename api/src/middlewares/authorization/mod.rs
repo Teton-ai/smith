@@ -39,7 +39,8 @@ pub fn required_permission(command: &SafeCommandTx) -> Permission {
         | ExtendedNetworkTest { .. }
         | StreamLogs { .. }
         | StopLogStream { .. }
-        | RunAudit => "basic",
+        | RunAudit
+        | GetLogs { .. } => "basic",
     };
     Permission {
         action: action.to_string(),
