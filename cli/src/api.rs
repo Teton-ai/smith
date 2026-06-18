@@ -441,13 +441,23 @@ impl SmithAPI {
         Ok(resp.json().await?)
     }
 
-    pub async fn send_logs_command(&self, device_id: u64) -> Result<(u64, u64)> {
+    pub async fn send_logs_command(
+        &self,
+        device_id: u64,
+        unit: Option<String>,
+        since: Option<String>,
+        until: Option<String>,
+        grep: Option<String>,
+    ) -> Result<(u64, u64)> {
         let client = Client::new();
 
         let logs_command = schema::SafeCommandRequest {
             id: 0,
-            command: schema::SafeCommandTx::FreeForm {
-                cmd: String::from("journalctl -r -n 500"),
+            command: schema::SafeCommandTx::GetLogs {
+                unit,
+                since,
+                until,
+                grep,
             },
             continue_on_error: false,
         };
