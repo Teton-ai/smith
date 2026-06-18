@@ -11,6 +11,7 @@ User=root
 ExecStart=/usr/bin/smithd
 WorkingDirectory=/etc/smith
 Environment="RUST_LOG=INFO"
+EnvironmentFile=-/etc/smith/environment
 
 [Install]
 WantedBy=multi-user.target
