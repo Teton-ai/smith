@@ -1,6 +1,6 @@
 import { Loader2, Send } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate, useParams } from "react-router";
+import { useParams } from "react-router";
 import {
 	CodeBlock,
 	getCommandStatus,
@@ -17,15 +17,13 @@ import {
 import { useClientMutator } from "@/app/api-client-mutator";
 import { RelativeTime } from "@/app/components/RelativeTime";
 import {
-	BackLink,
 	Badge,
 	type BadgeVariant,
 	Button,
 	Card,
 	ListRow,
-	TabNav,
 } from "@/app/components/ui";
-import DeviceHeader from "../DeviceHeader";
+import { DeviceDetailLayout } from "../DeviceDetailLayout";
 
 const PAGE_SIZE = 50;
 
@@ -159,7 +157,6 @@ const ResponseDetail = ({ cmd }: { cmd: DeviceCommandResponse }) => {
 
 const CommandsPage = () => {
 	const { serial } = useParams<{ serial: string }>();
-	const navigate = useNavigate();
 	const [selectedId, setSelectedId] = useState<number | null>(null);
 	const scrollRef = useRef<HTMLDivElement>(null);
 	const fetcher = useClientMutator<CommandsPaginated>();
@@ -222,112 +219,92 @@ const CommandsPage = () => {
 	const selectedCmd = commands.find((c) => c.cmd_id === selectedId) ?? null;
 
 	return (
-		<div className="flex-1 overflow-hidden flex flex-col px-4 sm:px-6 lg:px-8 py-6">
-			{/* Back link */}
-			<div className="mb-6">
-				<BackLink onClick={() => navigate(-1)}>Back to Devices</BackLink>
-			</div>
-
-			{/* Device Header */}
-			{device != null && (
-				<div className="mb-6">
-					<DeviceHeader device={device} serial={serial} />
-				</div>
-			)}
-
-			{/* Tabs */}
-			<div className="mb-6">
-				<TabNav
-					items={[
-						{ label: "Overview", to: `/devices/${serial}` },
-						{ label: "Commands", active: true },
-						{ label: "Services", to: `/devices/${serial}/services` },
-					]}
-				/>
-			</div>
-
+		<DeviceDetailLayout
+			serial={serial ?? ""}
+			device={device ?? undefined}
+			activeTab="commands"
+			fill
+		>
 			{/* Main content */}
-			<div className="flex-1 overflow-hidden">
-				{loading ? (
-					<div className="flex items-center justify-center py-12">
-						<Loader2 className="w-6 h-6 animate-spin text-gray-400" />
-					</div>
-				) : commands.length === 0 ? (
-					<Card className="text-center py-12">
-						<Send className="w-12 h-12 text-gray-300 mx-auto mb-3" />
-						<p className="text-gray-500">No commands found</p>
-						<p className="text-sm text-gray-400 mt-1">
-							Run a command from the device header above
-						</p>
-					</Card>
-				) : (
-					<Card className="flex overflow-hidden h-full">
-						{/* Left: command list */}
-						<div className="w-1/3 border-r border-gray-200 shrink-0 flex flex-col overflow-hidden">
-							<div
-								ref={scrollRef}
-								onScroll={handleScroll}
-								className="flex-1 overflow-y-auto divide-y divide-gray-100"
-							>
-								{commands.map((cmd) => {
-									const status = getCommandStatus(cmd);
-									const { label, mono } = getTxLabel(cmd.cmd_data);
-									const isSelected = cmd.cmd_id === selectedId;
+			{loading ? (
+				<div className="flex items-center justify-center py-12">
+					<Loader2 className="w-6 h-6 animate-spin text-gray-400" />
+				</div>
+			) : commands.length === 0 ? (
+				<Card className="text-center py-12">
+					<Send className="w-12 h-12 text-gray-300 mx-auto mb-3" />
+					<p className="text-gray-500">No commands found</p>
+					<p className="text-sm text-gray-400 mt-1">
+						Run a command from the device header above
+					</p>
+				</Card>
+			) : (
+				<Card className="flex overflow-hidden h-full">
+					{/* Left: command list */}
+					<div className="w-1/3 border-r border-gray-200 shrink-0 flex flex-col overflow-hidden">
+						<div
+							ref={scrollRef}
+							onScroll={handleScroll}
+							className="flex-1 overflow-y-auto divide-y divide-gray-100"
+						>
+							{commands.map((cmd) => {
+								const status = getCommandStatus(cmd);
+								const { label, mono } = getTxLabel(cmd.cmd_data);
+								const isSelected = cmd.cmd_id === selectedId;
 
-									return (
-										<ListRow
-											key={cmd.cmd_id}
-											onClick={() => setSelectedId(cmd.cmd_id)}
-											hover={isSelected ? "bg-blue-50" : "hover:bg-gray-50"}
-											className={
-												isSelected
-													? "border-l-2 border-l-blue-500"
-													: "border-l-2 border-l-transparent"
-											}
-										>
-											<div className="w-full min-w-0">
-												<div className="flex items-center justify-between gap-2">
-													<span
-														className={`text-sm truncate ${mono ? "font-mono" : "font-medium"} ${isSelected ? "text-blue-900" : "text-gray-900"}`}
-													>
-														{label}
-													</span>
-													<Badge
-														variant={statusVariant(status)}
-														className="shrink-0"
-													>
-														{status}
-													</Badge>
-												</div>
-												<div className="text-xs text-gray-400 mt-0.5">
-													<RelativeTime date={cmd.issued_at} />
-												</div>
+								return (
+									<ListRow
+										key={cmd.cmd_id}
+										onClick={() => setSelectedId(cmd.cmd_id)}
+										hover={isSelected ? "bg-blue-50" : "hover:bg-gray-50"}
+										className={
+											isSelected
+												? "border-l-2 border-l-blue-500"
+												: "border-l-2 border-l-transparent"
+										}
+									>
+										<div className="w-full min-w-0">
+											<div className="flex items-center justify-between gap-2">
+												<span
+													className={`text-sm truncate ${mono ? "font-mono" : "font-medium"} ${isSelected ? "text-blue-900" : "text-gray-900"}`}
+												>
+													{label}
+												</span>
+												<Badge
+													variant={statusVariant(status)}
+													className="shrink-0"
+												>
+													{status}
+												</Badge>
 											</div>
-										</ListRow>
-									);
-								})}
+											<div className="text-xs text-gray-400 mt-0.5">
+												<RelativeTime date={cmd.issued_at} />
+											</div>
+										</div>
+									</ListRow>
+								);
+							})}
+						</div>
+						{isFetchingNextPage && (
+							<div className="flex items-center justify-center py-3 border-t border-gray-200 shrink-0">
+								<Loader2 className="w-4 h-4 animate-spin text-gray-400" />
 							</div>
-							{isFetchingNextPage && (
-								<div className="flex items-center justify-center py-3 border-t border-gray-200 shrink-0">
-									<Loader2 className="w-4 h-4 animate-spin text-gray-400" />
-								</div>
-							)}
-						</div>
+						)}
+					</div>
 
-						{/* Right: detail */}
-						<div className="flex-1 overflow-hidden">
-							{selectedCmd != null ? (
-								<ResponseDetail cmd={selectedCmd} />
-							) : (
-								<div className="flex items-center justify-center h-full text-gray-400 text-sm">
-									Select a command to see its output
-								</div>
-							)}
-						</div>
-					</Card>
-				)}
-			</div>
-		</div>
+					{/* Right: detail */}
+					<div className="flex-1 overflow-hidden">
+						{selectedCmd != null ? (
+							<ResponseDetail cmd={selectedCmd} />
+						) : (
+							<div className="flex items-center justify-center h-full text-gray-400 text-sm">
+								Select a command to see its output
+							</div>
+						)}
+					</div>
+				</Card>
+			)}
+		</DeviceDetailLayout>
 	);
 };
 

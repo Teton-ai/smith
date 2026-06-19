@@ -3,7 +3,6 @@ import { useQueryClient } from "@tanstack/react-query";
 import {
 	AlertTriangle,
 	Calendar,
-	Check,
 	CheckCircle,
 	ChevronDown,
 	Cpu,
@@ -19,11 +18,11 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
-import { Button } from "@/app/components/button";
 import LabelAutocomplete from "@/app/components/LabelAutocomplete";
 import { Modal } from "@/app/components/modal";
 import NetworkQualityIndicator from "@/app/components/NetworkQualityIndicator";
 import { RelativeTime } from "@/app/components/RelativeTime";
+import { Button, LabelChip, Toast } from "@/app/components/ui";
 import {
 	type Device,
 	type DistributionRolloutStats,
@@ -796,30 +795,7 @@ const DevicesPage = () => {
 	return (
 		<div className="flex flex-col flex-1 min-h-0 overflow-hidden">
 			{/* Toast Notification */}
-			{toast && (
-				<div
-					className={`fixed top-4 right-4 z-50 p-4 rounded-lg shadow-lg border ${
-						toast.type === "success"
-							? "bg-green-50 text-green-800 border-green-200"
-							: "bg-red-50 text-red-800 border-red-200"
-					} transition-all duration-300 ease-in-out`}
-				>
-					<div className="flex items-center space-x-2">
-						{toast.type === "success" ? (
-							<Check className="w-5 h-5 text-green-600" />
-						) : (
-							<X className="w-5 h-5 text-red-600" />
-						)}
-						<span className="text-sm font-medium">{toast.message}</span>
-						<button
-							onClick={() => setToast(null)}
-							className="ml-2 text-gray-400 hover:text-gray-600 cursor-pointer"
-						>
-							<X className="w-4 h-4" />
-						</button>
-					</div>
-				</div>
-			)}
+			<Toast toast={toast} onClose={() => setToast(null)} />
 
 			{/* Search and Filters */}
 			<div className="px-4 sm:px-6 lg:px-8 pt-6 pb-3 shrink-0">
@@ -834,7 +810,7 @@ const DevicesPage = () => {
 									placeholder="Search devices..."
 									value={searchTerm}
 									onChange={(e) => setSearchTerm(e.target.value)}
-									className="pl-10 pr-10 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm text-gray-900 placeholder-gray-400"
+									className="pl-10 pr-10 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm text-gray-900 placeholder-gray-400"
 								/>
 								{isSearching ? (
 									<Loader2 className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4 animate-spin" />
@@ -848,32 +824,24 @@ const DevicesPage = () => {
 							</div>
 
 							{/* Online Status Filter */}
-							<div className="flex space-x-1">
+							<div className="flex gap-1.5">
 								<Button
-									variant={
-										onlineStatusFilter === "all" ? "primary" : "secondary"
-									}
+									variant={onlineStatusFilter === "all" ? "solid" : "soft"}
+									tone={onlineStatusFilter === "all" ? "blue" : "gray"}
 									onClick={() => handleOnlineStatusChange("all")}
 								>
 									All
 								</Button>
 								<Button
-									variant={
-										onlineStatusFilter === "online" ? "success" : "secondary"
-									}
+									variant={onlineStatusFilter === "online" ? "solid" : "soft"}
+									tone={onlineStatusFilter === "online" ? "green" : "gray"}
 									onClick={() => handleOnlineStatusChange("online")}
 								>
 									Online
 								</Button>
 								<Button
-									variant={
-										onlineStatusFilter === "offline" ? "secondary" : "secondary"
-									}
-									className={
-										onlineStatusFilter === "offline"
-											? "bg-gray-600 hover:bg-gray-700 text-white"
-											: ""
-									}
+									variant={onlineStatusFilter === "offline" ? "solid" : "soft"}
+									tone="gray"
 									onClick={() => handleOnlineStatusChange("offline")}
 								>
 									Offline
@@ -882,10 +850,8 @@ const DevicesPage = () => {
 
 							{/* Outdated Filter */}
 							<Button
-								variant={showOutdatedOnly ? "warning" : "secondary"}
-								className={
-									showOutdatedOnly ? "bg-orange-600 hover:bg-orange-700" : ""
-								}
+								variant={showOutdatedOnly ? "solid" : "soft"}
+								tone={showOutdatedOnly ? "orange" : "gray"}
 								onClick={handleOutdatedToggle}
 							>
 								Outdated
@@ -893,10 +859,8 @@ const DevicesPage = () => {
 
 							{/* Pending Approval Filter */}
 							<Button
-								variant={showPendingApproval ? "warning" : "secondary"}
-								className={
-									showPendingApproval ? "bg-orange-600 hover:bg-orange-700" : ""
-								}
+								variant={showPendingApproval ? "solid" : "soft"}
+								tone={showPendingApproval ? "orange" : "gray"}
 								onClick={handlePendingApprovalToggle}
 							>
 								Pending Approval
@@ -904,10 +868,8 @@ const DevicesPage = () => {
 
 							{/* Service Not Running Filter */}
 							<Button
-								variant={showServiceDown ? "warning" : "secondary"}
-								className={
-									showServiceDown ? "bg-orange-600 hover:bg-orange-700" : ""
-								}
+								variant={showServiceDown ? "solid" : "soft"}
+								tone={showServiceDown ? "orange" : "gray"}
 								onClick={handleServiceDownToggle}
 							>
 								Service Down
@@ -917,10 +879,10 @@ const DevicesPage = () => {
 							<div className="relative" ref={releaseDropdownRef}>
 								<button
 									onClick={() => setShowReleaseDropdown(!showReleaseDropdown)}
-									className={`flex items-center space-x-2 px-3 py-2 text-sm rounded-md transition-colors cursor-pointer ${
+									className={`flex items-center space-x-2 px-3 py-2 text-sm font-medium rounded-lg shadow-sm transition-all cursor-pointer ${
 										releaseFilter != null || distributionFilter != null
-											? "bg-purple-600 text-white"
-											: "bg-gray-100 text-gray-700 hover:bg-gray-200"
+											? "bg-purple-600 text-white hover:bg-purple-700"
+											: "bg-gray-50 text-gray-700 border border-gray-200 hover:bg-gray-100"
 									}`}
 								>
 									<GitBranch className="w-4 h-4" />
@@ -937,7 +899,7 @@ const DevicesPage = () => {
 								</button>
 
 								{showReleaseDropdown && (
-									<div className="absolute top-full left-0 mt-1 w-72 bg-white border border-gray-200 rounded-md shadow-lg z-50">
+									<div className="absolute top-full left-0 mt-1 w-72 bg-white border border-gray-200/80 rounded-lg shadow-lg z-50">
 										{/* Search input */}
 										<div className="p-2 border-b border-gray-200">
 											<div className="relative">
@@ -1100,20 +1062,21 @@ const DevicesPage = () => {
 
 							{/* Active Label Filters - inline */}
 							{labelFilters.length > 0 &&
-								labelFilters.map((filter) => (
-									<div
-										key={filter}
-										className="flex items-center space-x-1 px-2 py-1 text-sm bg-gray-100 text-gray-700 rounded border border-gray-200"
-									>
-										<code className="font-mono text-xs">{filter}</code>
-										<button
-											onClick={() => removeLabelFilter(filter)}
-											className="text-gray-600 hover:text-gray-800 font-bold cursor-pointer"
-										>
-											×
-										</button>
-									</div>
-								))}
+								labelFilters.map((filter) => {
+									const eq = filter.indexOf("=");
+									const name = eq === -1 ? filter : filter.slice(0, eq);
+									const value = eq === -1 ? undefined : filter.slice(eq + 1);
+									return (
+										<LabelChip
+											key={filter}
+											name={name}
+											value={value}
+											active
+											title={`Remove filter: ${filter}`}
+											onRemove={() => removeLabelFilter(filter)}
+										/>
+									);
+								})}
 						</div>
 					</div>
 				</div>
@@ -1121,7 +1084,7 @@ const DevicesPage = () => {
 
 			{/* Device List — scrollable */}
 			<div className="flex-1 overflow-y-auto px-4 sm:px-6 lg:px-8 pb-6 min-h-0">
-				<div className="border border-gray-200 rounded-lg overflow-hidden bg-white">
+				<div className="border border-gray-200/80 rounded-xl overflow-hidden bg-white shadow-sm">
 					<div className="sticky top-0 z-10 bg-gray-50 px-4 py-3 border-b border-gray-200">
 						<div className="grid grid-cols-[auto_2fr_2fr_2fr_1fr_1fr] gap-4 text-xs font-medium text-gray-500 uppercase tracking-wide items-center">
 							<div className="w-6 flex items-center justify-center">
@@ -1259,13 +1222,21 @@ const DevicesPage = () => {
 										<div>
 											{device.labels &&
 											Object.keys(device.labels).length > 0 ? (
-												<div className="flex flex-wrap gap-1">
+												<div className="flex flex-wrap gap-1.5">
 													{Object.entries(device.labels).map(([key, value]) => {
 														const filter = `${key}=${value}`;
 														const isFiltered = labelFilters.includes(filter);
 														return (
-															<code
+															<LabelChip
 																key={key}
+																name={key}
+																value={value}
+																active={isFiltered}
+																title={
+																	isFiltered
+																		? `Remove filter: ${filter}`
+																		: `Filter by ${filter}`
+																}
 																onClick={(e) => {
 																	e.stopPropagation();
 																	if (isFiltered) {
@@ -1280,14 +1251,7 @@ const DevicesPage = () => {
 																		updateURL({ labels: labelsString });
 																	}
 																}}
-																className={`px-1.5 py-0.5 text-xs font-mono rounded border cursor-pointer transition-colors ${
-																	isFiltered
-																		? "bg-blue-100 text-blue-800 border-blue-300"
-																		: "bg-gray-100 text-gray-700 border-gray-200 hover:bg-gray-200"
-																}`}
-															>
-																{key}={value}
-															</code>
+															/>
 														);
 													})}
 												</div>
@@ -1375,14 +1339,15 @@ const DevicesPage = () => {
 
 			{/* Bulk Action Bar */}
 			{selectedDeviceIds.size > 0 && (
-				<div className="fixed bottom-0 left-0 right-0 bg-white border-t shadow-lg p-4 flex items-center justify-between z-40">
-					<span className="text-gray-700">
+				<div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 shadow-lg p-4 flex items-center justify-between z-40">
+					<span className="text-sm font-medium text-gray-700">
 						{selectedDeviceIds.size} device
 						{selectedDeviceIds.size > 1 ? "s" : ""} selected
 					</span>
 					<div className="flex gap-2">
 						<Button
-							variant="secondary"
+							variant="soft"
+							tone="gray"
 							onClick={() => setSelectedDeviceIds(new Set())}
 						>
 							Clear Selection
@@ -1390,7 +1355,8 @@ const DevicesPage = () => {
 						{showPendingApproval ? (
 							<>
 								<Button
-									variant="danger"
+									variant="solid"
+									tone="red"
 									icon={<XCircle className="w-4 h-4" />}
 									onClick={() => {
 										const deviceIds = Array.from(selectedDeviceIds);
@@ -1428,7 +1394,8 @@ const DevicesPage = () => {
 									Reject
 								</Button>
 								<Button
-									variant="success"
+									variant="solid"
+									tone="green"
 									icon={<CheckCircle className="w-4 h-4" />}
 									onClick={() => {
 										setApproveModalDevice(
@@ -1445,14 +1412,16 @@ const DevicesPage = () => {
 						) : (
 							<>
 								<Button
-									variant="purple"
+									variant="solid"
+									tone="purple"
 									icon={<Terminal className="w-4 h-4" />}
 									onClick={() => setShowBulkCommandModal(true)}
 								>
 									Run Command
 								</Button>
 								<Button
-									variant="warning"
+									variant="solid"
+									tone="orange"
 									onClick={() => setShowBulkDeployModal(true)}
 								>
 									Deploy to Selected
@@ -1475,7 +1444,8 @@ const DevicesPage = () => {
 				footer={
 					<>
 						<Button
-							variant="secondary"
+							variant="soft"
+							tone="gray"
 							disabled={isDeploying}
 							onClick={() => {
 								setShowBulkDeployModal(false);
@@ -1486,7 +1456,8 @@ const DevicesPage = () => {
 							Cancel
 						</Button>
 						<Button
-							variant="warning"
+							variant="solid"
+							tone="orange"
 							loading={isDeploying}
 							disabled={
 								!selectedReleaseId ||
@@ -1680,7 +1651,8 @@ const DevicesPage = () => {
 				footer={
 					<>
 						<Button
-							variant="secondary"
+							variant="soft"
+							tone="gray"
 							disabled={isIssuingCommands}
 							onClick={() => {
 								setShowBulkCommandModal(false);
@@ -1690,7 +1662,8 @@ const DevicesPage = () => {
 							Cancel
 						</Button>
 						<Button
-							variant="purple"
+							variant="solid"
+							tone="purple"
 							loading={isIssuingCommands}
 							disabled={!freeFormCommand.trim()}
 							onClick={handleBulkCommand}
@@ -1744,13 +1717,15 @@ const DevicesPage = () => {
 				footer={
 					<>
 						<Button
-							variant="secondary"
+							variant="soft"
+							tone="gray"
 							onClick={() => setApproveModalDevice(null)}
 						>
 							Cancel
 						</Button>
 						<Button
-							variant="success"
+							variant="solid"
+							tone="green"
 							icon={<CheckCircle className="w-4 h-4" />}
 							disabled={!selectedApprovalRelease}
 							onClick={handleApproveAndAssign}
@@ -1779,7 +1754,7 @@ const DevicesPage = () => {
 									onClick={() => setSelectedDistribution(distName)}
 									className={`w-full text-left p-4 rounded-lg border transition-colors cursor-pointer ${
 										selectedDistribution === distName
-											? "border-indigo-500 bg-indigo-50"
+											? "border-blue-500 bg-blue-50"
 											: "border-gray-200 hover:border-gray-300 hover:bg-gray-50"
 									}`}
 								>
@@ -1788,7 +1763,7 @@ const DevicesPage = () => {
 											<Layers
 												className={`w-5 h-5 ${
 													selectedDistribution === distName
-														? "text-indigo-600"
+														? "text-blue-600"
 														: "text-gray-400"
 												}`}
 											/>
@@ -1802,7 +1777,7 @@ const DevicesPage = () => {
 											</div>
 										</div>
 										{selectedDistribution === distName && (
-											<div className="w-5 h-5 bg-indigo-600 rounded-full flex items-center justify-center flex-shrink-0">
+											<div className="w-5 h-5 bg-blue-600 rounded-full flex items-center justify-center flex-shrink-0">
 												<svg
 													className="w-3 h-3 text-white"
 													fill="none"
