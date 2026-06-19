@@ -73,10 +73,13 @@ services:
     volumes:
       - ./scripts/network-throttle.sh:/app/network-throttle.sh:ro
     environment:
-      - RUST_LOG=INFO
+      - RUST_LOG=${RUST_LOG:-INFO}
       - NETWORK_THROTTLE=${NETWORK_THROTTLE:-random}
-    entrypoint: ["/bin/bash", "-c", "/app/network-throttle.sh && cd /etc/smith && exec /usr/bin/smithd"]
-    init: true
+    entrypoint: ["/bin/bash", "-c", "printenv > /etc/smith/environment && /app/network-throttle.sh && exec /lib/systemd/systemd"]
+    tmpfs:
+      - /run
+      - /run/lock
+      - /tmp
     deploy:
       replicas: ${DEVICE_REPLICAS:-1}
     networks:
