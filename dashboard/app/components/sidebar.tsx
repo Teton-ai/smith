@@ -166,14 +166,14 @@ export default function Sidebar({
 						const active = item.onClick ? false : isActive(item.path);
 						const itemClass = `flex items-center h-10 rounded-md transition-all duration-200 cursor-pointer relative group/item w-full text-left ${
 							active
-								? "bg-indigo-50 text-indigo-700"
+								? "bg-blue-50 text-blue-700"
 								: "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
 						}`;
 						const itemStyle = { transitionDelay: `${index * 20}ms` };
 						const inner = (
 							<>
 								<div
-									className={`absolute left-0 top-1 bottom-1 w-[3px] rounded-r-full bg-indigo-600 transition-all duration-300 ease-out ${
+									className={`absolute left-0 top-1 bottom-1 w-[3px] rounded-r-full bg-blue-600 transition-all duration-300 ease-out ${
 										active ? "opacity-100 scale-y-100" : "opacity-0 scale-y-0"
 									}`}
 								/>
@@ -329,13 +329,13 @@ export default function Sidebar({
 								const active = item.onClick ? false : isActive(item.path);
 								const itemClass = `flex items-center h-10 rounded-md transition-colors duration-200 cursor-pointer relative w-full text-left ${
 									active
-										? "bg-indigo-50 text-indigo-700"
+										? "bg-blue-50 text-blue-700"
 										: "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
 								}`;
 								const inner = (
 									<>
 										{active && (
-											<div className="absolute left-0 top-1 bottom-1 w-[3px] rounded-r-full bg-indigo-600" />
+											<div className="absolute left-0 top-1 bottom-1 w-[3px] rounded-r-full bg-blue-600" />
 										)}
 										<div className="flex items-center justify-center w-12 shrink-0">
 											<Icon className="w-[18px] h-[18px]" />

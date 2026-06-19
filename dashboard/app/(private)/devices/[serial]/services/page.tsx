@@ -1,22 +1,15 @@
 import { FileText, Play, Radio, X } from "lucide-react";
 import { useEffect, useState } from "react";
-import { useNavigate, useParams, useSearchParams } from "react-router";
+import { useParams, useSearchParams } from "react-router";
 import { useGetDeviceInfo } from "@/app/api-client";
-import {
-	BackLink,
-	Card,
-	ListRow,
-	PageContainer,
-	TabNav,
-} from "@/app/components/ui";
-import DeviceHeader from "../DeviceHeader";
+import { Card, ListRow } from "@/app/components/ui";
+import { DeviceDetailLayout } from "../DeviceDetailLayout";
 import LogViewer from "./LogViewer";
 import { type DeviceService, useDeviceServices } from "./useDeviceServices";
 
 const ServicesPage = () => {
 	const params = useParams();
 	const serial = params.serial as string;
-	const navigate = useNavigate();
 	const [searchParams, setSearchParams] = useSearchParams();
 
 	const { data: device, isLoading: deviceLoading } = useGetDeviceInfo(serial);
@@ -56,22 +49,7 @@ const ServicesPage = () => {
 	};
 
 	return (
-		<PageContainer>
-			{/* Header with Back Button */}
-			<BackLink onClick={() => navigate(-1)}>Back to Devices</BackLink>
-
-			{/* Device Header */}
-			{device && <DeviceHeader device={device} serial={serial} />}
-
-			{/* Tabs */}
-			<TabNav
-				items={[
-					{ label: "Overview", to: `/devices/${serial}` },
-					{ label: "Commands", to: `/devices/${serial}/commands` },
-					{ label: "Services", active: true },
-				]}
-			/>
-
+		<DeviceDetailLayout serial={serial} device={device} activeTab="services">
 			{/* Services Content */}
 			{loading ? (
 				<div className="p-6 text-gray-500">Loading services...</div>
@@ -189,7 +167,7 @@ const ServicesPage = () => {
 					</div>
 				</div>
 			)}
-		</PageContainer>
+		</DeviceDetailLayout>
 	);
 };
 

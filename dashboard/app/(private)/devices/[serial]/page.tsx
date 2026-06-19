@@ -12,10 +12,9 @@ import {
 	XCircle,
 } from "lucide-react";
 import { lazy, Suspense } from "react";
-import { Link, useNavigate, useParams } from "react-router";
+import { Link, useParams } from "react-router";
 import { useGetDeviceInfo } from "@/app/api-client";
 import {
-	BackLink,
 	Badge,
 	Card,
 	CountryFlag,
@@ -24,9 +23,8 @@ import {
 	PageContainer,
 	Panel,
 	SECTION_THEMES,
-	TabNav,
 } from "@/app/components/ui";
-import DeviceHeader from "./DeviceHeader";
+import { DeviceDetailLayout } from "./DeviceDetailLayout";
 import SecurityAudit from "./SecurityAudit";
 
 const LocationMap = lazy(() => import("./LocationMap"));
@@ -43,7 +41,6 @@ const linkClass =
 const DeviceDetailPage = () => {
 	const params = useParams();
 	const serial = params.serial as string;
-	const navigate = useNavigate();
 	const { data: device, isLoading: loading } = useGetDeviceInfo(serial);
 
 	if (loading) {
@@ -83,21 +80,7 @@ const DeviceDetailPage = () => {
 	}
 
 	return (
-		<PageContainer>
-			<BackLink onClick={() => navigate(-1)}>Back to Devices</BackLink>
-
-			{/* Device Header */}
-			<DeviceHeader device={device} serial={serial} />
-
-			{/* Tabs */}
-			<TabNav
-				items={[
-					{ label: "Overview", active: true },
-					{ label: "Commands", to: `/devices/${serial}/commands` },
-					{ label: "Services", to: `/devices/${serial}/services` },
-				]}
-			/>
-
+		<DeviceDetailLayout serial={serial} device={device} activeTab="overview">
 			{/* Overview Content */}
 			<div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
 				{/* System Information */}
@@ -521,7 +504,7 @@ const DeviceDetailPage = () => {
 
 			{/* Security Audit */}
 			<SecurityAudit serial={serial} deviceId={device.id} />
-		</PageContainer>
+		</DeviceDetailLayout>
 	);
 };
 
