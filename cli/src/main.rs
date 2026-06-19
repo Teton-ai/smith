@@ -521,6 +521,8 @@ async fn issue_bundle(
     Ok(())
 }
 
+const TUNNEL_CMD_LOOKBACK: u32 = 20;
+
 async fn poll_tunnel_port(
     api: &SmithAPI,
     pb: &ProgressBar,
@@ -535,24 +537,45 @@ async fn poll_tunnel_port(
         })?;
     pb.set_message("Request sent to smith 💻");
 
+    let tunnel_cmd_id = api
+        .get_last_command(device_id)
+        .await
+        .inspect_err(|_| pb.finish_with_message("Failed to poll command status"))?
+        .cmd_id;
+
     loop {
-        let response = api.get_last_command(device_id).await.inspect_err(|_| {
-            pb.finish_with_message("Failed to poll command status");
-        })?;
+        let response = api
+            .get_device_commands(device_id, Some(TUNNEL_CMD_LOOKBACK))
+            .await
+            .inspect_err(|_| pb.finish_with_message("Failed to poll command status"))?
+            .into_iter()
+            .find(|c| c.cmd_id == tunnel_cmd_id);
+
+        let Some(response) = response else {
+            tokio::time::sleep(Duration::from_secs(1)).await;
+            continue;
+        };
+
+        if response.cancelled {
+            pb.finish_with_message("Tunnel command was cancelled");
+            return Err(anyhow::anyhow!("Tunnel command was cancelled"));
+        }
+
+        if matches!(response.status, Some(s) if s != 0) {
+            pb.finish_with_message("Tunnel setup failed on device");
+            return Err(anyhow::anyhow!("Device failed to open tunnel"));
+        }
 
         if response.fetched {
             pb.set_message("Command fetched by device 👍");
         }
 
-        if let Some(ref cmd_response) = response.response {
-            if response.status != Some(0) {
-                pb.finish_with_message("Tunnel setup failed on device");
-                return Err(anyhow::anyhow!("Device failed to open tunnel"));
-            }
-
+        if matches!(response.status, Some(0))
+            && let Some(ref cmd_response) = response.response
+        {
             let port = cmd_response["OpenTunnel"]["port_server"]
                 .as_u64()
-                .filter(|&p| p > 0)
+                .filter(|&p| p > 0 && p <= u16::MAX as u64)
                 .ok_or_else(|| {
                     pb.finish_with_message("Device returned invalid port");
                     anyhow::anyhow!("Device returned invalid port")
