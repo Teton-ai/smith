@@ -197,7 +197,51 @@ pub fn get_serial_number() -> String {
         .to_owned()
 }
 
+fn get_docker_container_name() -> Option<String> {
+    use std::io::{Read, Write};
+    use std::os::unix::net::UnixStream;
+    use std::time::Duration;
+
+    // Minimum length required by the SQL query in `/devices/{device_id}`;
+    // also filters out short auto-generated names, accepting stable Compose names like `smith-device-1`.
+    const MIN_SERIAL_LEN: usize = 11;
+
+    let container_id = std::fs::read_to_string("/etc/hostname").ok()?;
+    let container_id = container_id.trim();
+
+    let mut stream = UnixStream::connect("/var/run/docker.sock").ok()?;
+    let timeout = Some(Duration::from_secs(2));
+    stream.set_read_timeout(timeout).ok()?;
+    stream.set_write_timeout(timeout).ok()?;
+
+    let request = format!(
+        "GET /containers/{}/json HTTP/1.0\r\nHost: localhost\r\n\r\n",
+        container_id
+    );
+    stream.write_all(request.as_bytes()).ok()?;
+
+    let mut response = String::new();
+    stream.read_to_string(&mut response).ok()?;
+
+    let body = response.split("\r\n\r\n").nth(1)?;
+    let json: serde_json::Value = serde_json::from_str(body).ok()?;
+    let name = json["Name"].as_str()?.trim_start_matches('/').to_owned();
+
+    if name.len() >= MIN_SERIAL_LEN {
+        Some(name)
+    } else {
+        None
+    }
+}
+
 pub fn get_raw_serial_number() -> Option<String> {
+    // Check if we're running in a docker container (in which case it's a dev env), and use the container's name.
+    if std::fs::metadata("/.dockerenv").is_ok()
+        && let Some(name) = get_docker_container_name()
+    {
+        return Some(name);
+    }
+
     // Check if we're on a Jetson and if so, use the serial number
     if let Ok(jetson_serial_number) =
         std::fs::read_to_string("/sys/firmware/devicetree/base/serial-number")
