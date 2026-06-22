@@ -102,7 +102,7 @@ pub async fn add_key(user: &str, pubkey: &str, tag: String) -> Result<()> {
 
 pub async fn remove_key(user: &str, tag: &str) -> Result<()> {
     info!("Removing key for user {user} with tag {tag}");
-    let (ssh_folder, _uid, _gid) = ensure_ssh_dir(user).await?;
+    let (ssh_folder, uid, gid) = ensure_ssh_dir(user).await?;
     let mut auth_keys = ssh_folder.clone();
     auth_keys.push("authorized_keys");
     let mut lock_file = ssh_folder.clone();
@@ -127,6 +127,7 @@ pub async fn remove_key(user: &str, tag: &str) -> Result<()> {
         };
 
         let mut lines = Vec::<String>::new();
+        let mut found = false;
         for l in BufReader::new(file).lines() {
             let l = l?;
             if l.split_whitespace()
@@ -134,7 +135,13 @@ pub async fn remove_key(user: &str, tag: &str) -> Result<()> {
                 .is_none_or(|last_part| last_part != tag)
             {
                 lines.push(l);
+            } else {
+                found = true;
             }
+        }
+
+        if !found {
+            return Ok(());
         }
 
         let mut tmp = NamedTempFile::new_in(ssh_folder)?;
@@ -143,6 +150,7 @@ pub async fn remove_key(user: &str, tag: &str) -> Result<()> {
         }
         tmp.as_file()
             .set_permissions(std::fs::Permissions::from_mode(0o600))?;
+        chown(tmp.path(), Some(uid.into()), Some(gid.into()))?;
         tmp.persist(auth_keys)?;
 
         Ok::<_, anyhow::Error>(())

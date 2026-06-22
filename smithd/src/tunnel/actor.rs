@@ -97,16 +97,6 @@ impl Actor {
                         return;
                     }
                     info!("SSH directory ensured for user: {}", remote_login.user);
-                    let res = add_key(&remote_login.user, &remote_login.pub_key, tag.clone()).await;
-                    if let Err(err) = res {
-                        error!(
-                            "Failed to add key for user '{}': {}",
-                            remote_login.user, err
-                        );
-                        _ = remote.send(0);
-                        return;
-                    }
-                    info!("SSH key added successfully for user: {}", remote_login.user);
                 }
 
                 let server = server.to_owned();
@@ -135,11 +125,27 @@ impl Actor {
                 });
 
                 let port = rx.await.unwrap_or_default();
-                _ = remote.send(port);
 
                 if port == 0 {
+                    _ = remote.send(port);
                     return;
                 }
+
+                if let Some(ref remote_login) = remote_login {
+                    let res = add_key(&remote_login.user, &remote_login.pub_key, tag.clone()).await;
+                    if let Err(err) = res {
+                        error!(
+                            "Failed to add key for user '{}': {}",
+                            remote_login.user, err
+                        );
+                        handle.abort();
+                        _ = remote.send(0);
+                        return;
+                    }
+                    info!("SSH key added successfully for user: {}", remote_login.user);
+                }
+
+                _ = remote.send(port);
 
                 self.ports.insert(
                     local,
