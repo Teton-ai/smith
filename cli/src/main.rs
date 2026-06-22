@@ -521,6 +521,74 @@ async fn issue_bundle(
     Ok(())
 }
 
+const TUNNEL_CMD_LOOKBACK: u32 = 20;
+
+async fn poll_tunnel_port(
+    api: &SmithAPI,
+    pb: &ProgressBar,
+    device_id: u64,
+    pub_key: String,
+    username: String,
+) -> anyhow::Result<u16> {
+    api.open_tunnel(device_id, pub_key, username)
+        .await
+        .inspect_err(|_| {
+            pb.finish_with_message("Failed to send tunnel request");
+        })?;
+    pb.set_message("Request sent to smith 💻");
+
+    let tunnel_cmd_id = api
+        .get_last_command(device_id)
+        .await
+        .inspect_err(|_| pb.finish_with_message("Failed to poll command status"))?
+        .cmd_id;
+
+    loop {
+        let response = api
+            .get_device_commands(device_id, Some(TUNNEL_CMD_LOOKBACK))
+            .await
+            .inspect_err(|_| pb.finish_with_message("Failed to poll command status"))?
+            .into_iter()
+            .find(|c| c.cmd_id == tunnel_cmd_id);
+
+        let Some(response) = response else {
+            tokio::time::sleep(Duration::from_secs(1)).await;
+            continue;
+        };
+
+        if response.cancelled {
+            pb.finish_with_message("Tunnel command was cancelled");
+            return Err(anyhow::anyhow!("Tunnel command was cancelled"));
+        }
+
+        if matches!(response.status, Some(s) if s != 0) {
+            pb.finish_with_message("Tunnel setup failed on device");
+            return Err(anyhow::anyhow!("Device failed to open tunnel"));
+        }
+
+        if response.fetched {
+            pb.set_message("Command fetched by device 👍");
+        }
+
+        if matches!(response.status, Some(0))
+            && let Some(ref cmd_response) = response.response
+        {
+            let port = cmd_response["OpenTunnel"]["port_server"]
+                .as_u64()
+                .filter(|&p| p > 0 && p <= u16::MAX as u64)
+                .ok_or_else(|| {
+                    pb.finish_with_message("Device returned invalid port");
+                    anyhow::anyhow!("Device returned invalid port")
+                })?;
+
+            pb.finish_with_message(format!("{} {}", "Port:".bold(), port));
+            return Ok(port as u16);
+        }
+
+        tokio::time::sleep(Duration::from_secs(1)).await;
+    }
+}
+
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
@@ -1672,7 +1740,7 @@ async fn main() -> anyhow::Result<()> {
                     bail!("This device is offline. Last ping was {}", last_ping);
                 }
 
-                let (tx, rx) = oneshot::channel();
+                let (tx, rx) = oneshot::channel::<anyhow::Result<u16>>();
                 let username = override_user
                     .as_deref()
                     .map(|u| u.trim())
@@ -1699,37 +1767,16 @@ async fn main() -> anyhow::Result<()> {
                 pb2.set_message("Sending request to smith");
 
                 let tunnel_openning_handler = tokio::spawn(async move {
-                    api.open_tunnel(device.id as u64, pub_key, username_clone)
-                        .await
-                        .unwrap();
-                    pb2.set_message("Request sent to smith 💻");
-
-                    let port;
-                    loop {
-                        let response = api.get_last_command(device.id as u64).await.unwrap();
-
-                        if response.fetched {
-                            pb2.set_message("Command fetched by device 👍");
-                        }
-
-                        if let Some(response) = response.response {
-                            port = response["OpenTunnel"]["port_server"].as_u64().unwrap();
-
-                            tx.send(port).unwrap();
-                            break;
-                        }
-
-                        thread::sleep(Duration::from_secs(1));
-                    }
-
-                    pb2.finish_with_message(format!("{} {}", "Port:".bold(), port));
+                    let result =
+                        poll_tunnel_port(&api, &pb2, device.id as u64, pub_key, username_clone)
+                            .await;
+                    let _ = tx.send(result);
                 });
 
-                let port = rx.await.unwrap() as u16;
+                let task_outcome = rx.await.context("tunnel task dropped unexpectedly")?;
+                let port = task_outcome?;
 
-                println!("Opening tunnel to port {}", port);
-
-                tunnel_openning_handler.await.unwrap();
+                let _ = tunnel_openning_handler.await;
 
                 // Give the server a moment to set up the SSH tunnel
                 println!("Waiting for tunnel setup...");
