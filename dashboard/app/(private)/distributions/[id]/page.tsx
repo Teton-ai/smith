@@ -27,8 +27,8 @@ import { Modal } from "@/app/components/modal";
 import { RelativeTime } from "@/app/components/RelativeTime";
 import { SidePanel } from "@/app/components/side-panel";
 import {
-	BackLink,
 	BADGE_COLORS,
+	BackLink,
 	Badge,
 	type BadgeVariant,
 	Button,
