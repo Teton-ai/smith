@@ -345,6 +345,8 @@ async fn start_main_server(config: &'static Config, authorization: Authorization
         ))
         .routes(routes!(command::route::trigger_recipe))
         .routes(routes!(event::route::sse_handler))
+        .routes(routes!(user::route::get_users))
+        .routes(routes!(user::route::get_roles))
         .route_layer(middleware::from_fn(middlewares::authentication::check))
         // TODO: Check why we have this, not good for all routes
         .layer(DefaultBodyLimit::max(891289600))

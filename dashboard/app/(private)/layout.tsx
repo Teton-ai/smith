@@ -7,6 +7,7 @@ import {
 	Home,
 	Layers,
 	ScrollText,
+	Settings,
 	Smartphone,
 	Terminal,
 } from "lucide-react";
@@ -31,6 +32,7 @@ const navigationItems: NavItem[] = [
 	{ path: "/ip-addresses", label: "IP Addresses", icon: Globe },
 	{ path: "/modems", label: "Modems", icon: Smartphone },
 	{ path: "/network-testing", label: "Network Analyzer", icon: Activity },
+	{ path: "/settings", label: "Settings", icon: Settings },
 ];
 
 const bottomItems = [

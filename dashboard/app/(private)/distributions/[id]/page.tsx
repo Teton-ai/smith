@@ -1,5 +1,4 @@
 import {
-	ArrowLeft,
 	ArrowLeftRight,
 	Calendar,
 	ChevronRight,
@@ -14,32 +13,67 @@ import {
 	X,
 } from "lucide-react";
 import React, { useCallback, useMemo, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router";
+import { useNavigate, useParams } from "react-router";
 import {
 	type Package as PackageType,
+	type Release,
 	useCreateDistributionRelease,
 	useGetDistributionById,
 	useGetDistributionLatestRelease,
 	useGetDistributionReleasePackages,
 	useGetDistributionReleases,
 } from "@/app/api-client";
-import { Button } from "@/app/components/button";
 import { Modal } from "@/app/components/modal";
 import { RelativeTime } from "@/app/components/RelativeTime";
 import { SidePanel } from "@/app/components/side-panel";
+import {
+	BackLink,
+	BADGE_COLORS,
+	Badge,
+	type BadgeVariant,
+	Button,
+	Card,
+	ListRow,
+	PageContainer,
+	SECTION_THEMES,
+	SectionCard,
+} from "@/app/components/ui";
 import { isStableRelease } from "@/app/utils/release";
 
+const getArchIcon = (architecture: string) => {
+	switch (architecture.toLowerCase()) {
+		case "x86_64":
+		case "amd64":
+			return <Monitor className="w-5 h-5" />;
+		case "arm64":
+		case "aarch64":
+			return <Cpu className="w-5 h-5" />;
+		case "armv7":
+		case "arm":
+			return <HardDrive className="w-5 h-5" />;
+		default:
+			return <Package className="w-5 h-5" />;
+	}
+};
+
+const getArchVariant = (architecture: string): BadgeVariant => {
+	switch (architecture.toLowerCase()) {
+		case "x86_64":
+		case "amd64":
+			return "blue";
+		case "arm64":
+		case "aarch64":
+			return "green";
+		case "armv7":
+		case "arm":
+			return "purple";
+		default:
+			return "gray";
+	}
+};
+
 interface ReleaseRowProps {
-	release: {
-		id: number;
-		version: string;
-		draft: boolean;
-		release_candidate: boolean;
-		yanked: boolean;
-		created_at: string;
-		user_email: string | null;
-		user_id: number | null;
-	};
+	release: Release;
 	compareMode: boolean;
 	isSelected: boolean;
 	selectionLabel: string | null;
@@ -55,12 +89,12 @@ const ReleaseRow = React.memo(function ReleaseRow({
 	isDeployed,
 	onSelect,
 }: ReleaseRowProps) {
-	const row = (
-		<div className="flex items-center justify-between">
-			<div className="flex items-center space-x-3">
+	const inner = (
+		<>
+			<div className="flex items-center space-x-3 min-w-0">
 				{compareMode ? (
 					<div
-						className={`w-8 h-8 rounded flex items-center justify-center text-xs font-bold ${
+						className={`w-8 h-8 rounded flex items-center justify-center text-xs font-bold flex-shrink-0 ${
 							isSelected
 								? "bg-blue-500 text-white"
 								: "bg-gray-100 text-gray-400 border border-gray-300 border-dashed"
@@ -69,32 +103,34 @@ const ReleaseRow = React.memo(function ReleaseRow({
 						{selectionLabel ?? ""}
 					</div>
 				) : (
-					<div className="p-2 bg-gray-100 text-gray-600 rounded">
+					<div className="p-2 bg-gray-100 text-gray-600 rounded flex-shrink-0">
 						<Tag className="w-4 h-4" />
 					</div>
 				)}
-				<div>
+				<div className="min-w-0">
 					<div className="flex items-center space-x-2">
-						<h4 className="font-medium text-gray-900">{release.version}</h4>
+						<h4 className="font-medium text-gray-900 truncate">
+							{release.version}
+						</h4>
 						{isDeployed && (
-							<span className="px-2 py-1 text-xs font-medium bg-green-100 text-green-800 rounded-full">
+							<Badge variant="green" pill>
 								Deployed
-							</span>
+							</Badge>
 						)}
 						{release.draft && (
-							<span className="px-2 py-1 text-xs font-medium bg-yellow-100 text-yellow-800 rounded-full">
+							<Badge variant="yellow" pill>
 								Draft
-							</span>
+							</Badge>
 						)}
 						{release.release_candidate && (
-							<span className="px-2 py-1 text-xs font-medium bg-orange-100 text-orange-700 rounded-full">
+							<Badge variant="orange" pill>
 								RC
-							</span>
+							</Badge>
 						)}
 						{release.yanked && (
-							<span className="px-2 py-1 text-xs font-medium bg-red-100 text-red-800 rounded-full">
+							<Badge variant="red" pill>
 								Yanked
-							</span>
+							</Badge>
 						)}
 					</div>
 					<div className="flex items-center space-x-3 mt-1 text-xs text-gray-500">
@@ -113,35 +149,24 @@ const ReleaseRow = React.memo(function ReleaseRow({
 				</div>
 			</div>
 			{!compareMode && (
-				<div className="flex items-center space-x-4">
-					<ChevronRight className="w-4 h-4 text-gray-400" />
-				</div>
+				<ChevronRight className="w-4 h-4 text-gray-400 flex-shrink-0" />
 			)}
-		</div>
+		</>
 	);
 
 	if (compareMode) {
 		return (
-			<button
-				type="button"
-				className={`block w-full text-left p-4 cursor-pointer transition-colors ${
-					isSelected ? "bg-blue-50 hover:bg-blue-100" : "hover:bg-gray-50"
-				}`}
+			<ListRow
 				onClick={() => onSelect(release.id)}
+				className={isSelected ? "bg-blue-50" : ""}
+				hover={isSelected ? "hover:bg-blue-100" : "hover:bg-gray-50"}
 			>
-				{row}
-			</button>
+				{inner}
+			</ListRow>
 		);
 	}
 
-	return (
-		<Link
-			className="block p-4 hover:bg-gray-50 cursor-pointer transition-colors"
-			to={`/releases/${release.id}`}
-		>
-			{row}
-		</Link>
-	);
+	return <ListRow to={`/releases/${release.id}`}>{inner}</ListRow>;
 });
 
 const DistributionDetailPage = () => {
@@ -243,38 +268,6 @@ const DistributionDetailPage = () => {
 			return [...prev, releaseId];
 		});
 	}, []);
-
-	const getArchIcon = (architecture: string) => {
-		switch (architecture.toLowerCase()) {
-			case "x86_64":
-			case "amd64":
-				return <Monitor className="w-5 h-5" />;
-			case "arm64":
-			case "aarch64":
-				return <Cpu className="w-5 h-5" />;
-			case "armv7":
-			case "arm":
-				return <HardDrive className="w-5 h-5" />;
-			default:
-				return <Package className="w-5 h-5" />;
-		}
-	};
-
-	const getArchColor = (architecture: string) => {
-		switch (architecture.toLowerCase()) {
-			case "x86_64":
-			case "amd64":
-				return "bg-blue-100 text-blue-700";
-			case "arm64":
-			case "aarch64":
-				return "bg-green-100 text-green-700";
-			case "armv7":
-			case "arm":
-				return "bg-purple-100 text-purple-700";
-			default:
-				return "bg-gray-100 text-gray-700";
-		}
-	};
 
 	// Parse version and generate options
 	const getVersionOptions = () => {
@@ -381,52 +374,53 @@ const DistributionDetailPage = () => {
 
 	if (loading || !distribution) {
 		return (
-			<div className="flex items-center justify-center h-32">
-				<div className="text-gray-500 text-sm">Loading...</div>
-			</div>
+			<PageContainer>
+				<div className="h-4 w-44 bg-gray-200 rounded animate-pulse" />
+				<Card className="p-4">
+					<div className="flex items-center space-x-3">
+						<div className="p-2 bg-gray-100 rounded">
+							<div className="w-5 h-5 bg-gray-200 rounded animate-pulse" />
+						</div>
+						<div className="space-y-2">
+							<div className="h-6 bg-gray-200 rounded w-48 animate-pulse" />
+							<div className="h-4 bg-gray-200 rounded w-64 animate-pulse" />
+						</div>
+					</div>
+				</Card>
+			</PageContainer>
 		);
 	}
 
+	const archVariant = getArchVariant(distribution.architecture);
+
 	return (
-		<div className="flex-1 overflow-y-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
-			{/* Header with Back Button */}
-			<div className="flex items-center space-x-4">
-				<Link
-					to="/distributions"
-					className="flex items-center space-x-2 text-gray-600 hover:text-gray-900 transition-colors cursor-pointer"
-				>
-					<ArrowLeft className="w-4 h-4" />
-					<span className="text-sm font-medium">Back to Distributions</span>
-				</Link>
-			</div>
+		<PageContainer>
+			{/* Back link */}
+			<BackLink to="/distributions">Back to Distributions</BackLink>
 
 			{/* Distribution Header */}
-			<div className="bg-white rounded-lg border border-gray-200 p-4">
+			<Card className="p-4">
 				<div className="flex items-center space-x-3">
-					<div
-						className={`p-2 rounded ${getArchColor(distribution.architecture)}`}
-					>
+					<div className={`p-2 rounded-lg ${BADGE_COLORS[archVariant]}`}>
 						{getArchIcon(distribution.architecture)}
 					</div>
-					<div className="flex-1">
+					<div className="flex-1 min-w-0">
 						<div className="flex items-center space-x-3">
-							<h1 className="text-xl font-bold text-gray-900">
+							<h1 className="text-xl font-bold text-gray-900 truncate">
 								{distribution.name}
 							</h1>
-							<span
-								className={`px-2 py-1 text-xs font-medium rounded-full ${getArchColor(distribution.architecture)}`}
-							>
+							<Badge variant={archVariant} pill className="flex-shrink-0">
 								{distribution.architecture.toUpperCase()}
-							</span>
+							</Badge>
 						</div>
 						{distribution.description && (
-							<p className="text-sm text-gray-600">
+							<p className="text-sm text-gray-600 mt-0.5">
 								{distribution.description}
 							</p>
 						)}
 					</div>
 				</div>
-			</div>
+			</Card>
 
 			{/* Create Release Modal */}
 			<Modal
@@ -443,7 +437,8 @@ const DistributionDetailPage = () => {
 				footer={
 					<>
 						<Button
-							variant="secondary"
+							variant="soft"
+							tone="gray"
 							disabled={creatingDraft}
 							onClick={() => {
 								setShowCreateModal(false);
@@ -455,7 +450,8 @@ const DistributionDetailPage = () => {
 							Cancel
 						</Button>
 						<Button
-							variant="success"
+							variant="solid"
+							tone="green"
 							loading={creatingDraft}
 							disabled={!canCreate}
 							onClick={handleCreateDraft}
@@ -576,9 +572,7 @@ const DistributionDetailPage = () => {
 							<span className="text-sm font-medium text-gray-900">
 								Release Candidate
 							</span>
-							<span className="px-2 py-1 text-xs font-medium bg-orange-100 text-orange-700 rounded">
-								RC
-							</span>
+							<Badge variant="orange">RC</Badge>
 						</div>
 						<p className="text-xs text-gray-600 mt-1">
 							Adds "-rc" suffix:{" "}
@@ -591,17 +585,18 @@ const DistributionDetailPage = () => {
 			</Modal>
 
 			{/* Releases Section */}
-			<div className="space-y-4">
-				<div className="flex items-center justify-between">
-					<div className="flex items-center space-x-2">
-						<Tag className="w-5 h-5 text-gray-600" />
-						<h2 className="text-lg font-semibold text-gray-900">Releases</h2>
-						<span className="text-sm text-gray-500">({releases.length})</span>
-					</div>
-					<div className="flex items-center space-x-2">
+			<SectionCard
+				icon={Tag}
+				title="Releases"
+				count={releases.length}
+				theme={SECTION_THEMES.blue}
+				actions={
+					<div className="flex items-center gap-2">
 						{releases.length >= 2 && (
 							<Button
-								variant={compareMode ? "primary" : "secondary"}
+								variant="soft"
+								tone={compareMode ? "blue" : "gray"}
+								size="sm"
 								icon={
 									compareMode ? (
 										<X className="w-4 h-4" />
@@ -619,7 +614,9 @@ const DistributionDetailPage = () => {
 						)}
 						{releases.length > 0 && (
 							<Button
-								variant="success"
+								variant="solid"
+								tone="green"
+								size="sm"
 								icon={<Plus className="w-4 h-4" />}
 								onClick={openCreateModal}
 							>
@@ -627,55 +624,53 @@ const DistributionDetailPage = () => {
 							</Button>
 						)}
 					</div>
-				</div>
-
-				<div className="bg-white rounded border border-gray-200 overflow-hidden">
-					{releasesLoading ? (
-						<div className="p-6 text-center">
-							<div className="text-gray-500 text-sm">Loading releases...</div>
-						</div>
-					) : releases.length === 0 ? (
-						<div className="p-6 text-center">
-							<Tag className="w-8 h-8 text-gray-400 mx-auto mb-2" />
-							<p className="text-sm text-gray-500">
-								No releases found for this distribution
-							</p>
-						</div>
-					) : (
-						<div className="divide-y divide-gray-200">
-							{compareMode && (
-								<div className="px-4 py-2 bg-blue-50 border-b border-blue-100 text-xs text-blue-700">
-									{compareSelection.length === 0
-										? "Select two releases to compare"
-										: compareSelection.length === 1
-											? "Select one more release"
-											: "Showing diff below — click a release to change selection"}
-								</div>
-							)}
-							{releases.map((release) => {
-								const selectionIndex = compareSelection.indexOf(release.id);
-								return (
-									<ReleaseRow
-										key={release.id}
-										release={release}
-										compareMode={compareMode}
-										isSelected={selectionIndex !== -1}
-										selectionLabel={
-											selectionIndex === 0
-												? "A"
-												: selectionIndex === 1
-													? "B"
-													: null
-										}
-										isDeployed={deployedRelease?.id === release.id}
-										onSelect={toggleCompareSelection}
-									/>
-								);
-							})}
-						</div>
-					)}
-				</div>
-			</div>
+				}
+			>
+				{releasesLoading ? (
+					<div className="p-6 text-center">
+						<div className="text-gray-500 text-sm">Loading releases...</div>
+					</div>
+				) : releases.length === 0 ? (
+					<div className="p-6 text-center">
+						<Tag className="w-8 h-8 text-gray-400 mx-auto mb-2" />
+						<p className="text-sm text-gray-500">
+							No releases found for this distribution
+						</p>
+					</div>
+				) : (
+					<>
+						{compareMode && (
+							<div className="px-4 py-2 bg-blue-50 border-b border-blue-100 text-xs text-blue-700">
+								{compareSelection.length === 0
+									? "Select two releases to compare"
+									: compareSelection.length === 1
+										? "Select one more release"
+										: "Showing diff below — click a release to change selection"}
+							</div>
+						)}
+						{releases.map((release) => {
+							const selectionIndex = compareSelection.indexOf(release.id);
+							return (
+								<ReleaseRow
+									key={release.id}
+									release={release}
+									compareMode={compareMode}
+									isSelected={selectionIndex !== -1}
+									selectionLabel={
+										selectionIndex === 0
+											? "A"
+											: selectionIndex === 1
+												? "B"
+												: null
+									}
+									isDeployed={deployedRelease?.id === release.id}
+									onSelect={toggleCompareSelection}
+								/>
+							);
+						})}
+					</>
+				)}
+			</SectionCard>
 
 			{/* Compare side panel */}
 			<SidePanel
@@ -863,7 +858,7 @@ const DistributionDetailPage = () => {
 					})()
 				) : null}
 			</SidePanel>
-		</div>
+		</PageContainer>
 	);
 };
 

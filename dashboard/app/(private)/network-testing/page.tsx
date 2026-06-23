@@ -1,13 +1,9 @@
-import { Activity, ArrowLeft, Loader2, Play } from "lucide-react";
-import { useCallback, useState } from "react";
+import { Activity, ArrowLeft, Loader2, Plus } from "lucide-react";
+import { useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
-import type { Device } from "@/app/api-client";
-import { Button } from "@/app/components/button";
+import { Button, SearchInput } from "@/app/components/ui";
 import DepartmentOverview from "./components/DepartmentOverview";
 import DeviceInspector from "./components/DeviceInspector";
-import DeviceSelector, {
-	type SelectionMode,
-} from "./components/DeviceSelector";
 import DeviceTable from "./components/DeviceTable";
 import InsightsCards from "./components/InsightsCards";
 import SessionHistory from "./components/SessionHistory";
@@ -15,20 +11,18 @@ import StartTestModal from "./components/StartTestModal";
 import {
 	type ExtendedTestSessionSummary,
 	useExtendedTestStatus,
-	useSessionsByDevices,
-	useStartExtendedTest,
 } from "./hooks/useExtendedTest";
 
 type ViewMode = "landing" | "results";
 
-export default function HackathonPage() {
+export default function NetworkTestingPage() {
 	const navigate = useNavigate();
 	const [searchParams] = useSearchParams();
 
 	// URL params for deep linking
 	const sessionFromUrl = searchParams.get("session");
 
-	// View mode: landing (device selection + history) or results (test details)
+	// View mode: landing (history) or results (test details)
 	const [viewMode, setViewMode] = useState<ViewMode>(
 		sessionFromUrl ? "results" : "landing",
 	);
@@ -36,46 +30,20 @@ export default function HackathonPage() {
 		sessionFromUrl,
 	);
 
-	// Device selection state
-	const [selectionMode, setSelectionMode] = useState<SelectionMode>("labels");
-	const [selectedLabels, setSelectedLabels] = useState<string[]>([]);
-	const [selectedDeviceIds, setSelectedDeviceIds] = useState<Set<number>>(
-		new Set(),
-	);
-	const [resolvedDevices, setResolvedDevices] = useState<Device[]>([]);
-
-	// Modal and test state
 	const [showStartModal, setShowStartModal] = useState(false);
-	const [durationMinutes, setDurationMinutes] = useState(3);
 	const [selectedDeviceId, setSelectedDeviceId] = useState<number | null>(null);
-
-	// Get serial numbers from resolved devices
-	const serialNumbers = resolvedDevices.map((d) => d.serial_number);
-
-	// Fetch sessions matching the selected devices
-	const {
-		data: matchingSessions,
-		isLoading: matchingSessionsLoading,
-		refetch: refetchMatchingSessions,
-	} = useSessionsByDevices(serialNumbers);
+	const [searchQuery, setSearchQuery] = useState("");
 
 	// Fetch selected session status
 	const { data: sessionStatus, isLoading: statusLoading } =
 		useExtendedTestStatus(selectedSessionId);
-
-	const startTestMutation = useStartExtendedTest();
 
 	// Derive selected device from live session data to avoid stale object during polling
 	const selectedDevice =
 		sessionStatus?.results.find((d) => d.device_id === selectedDeviceId) ??
 		null;
 
-	// Handle devices resolved from selector
-	const handleDevicesResolved = useCallback((devices: Device[]) => {
-		setResolvedDevices(devices);
-	}, []);
-
-	// Handle session selection from history or dropdown
+	// Handle session selection from history
 	const handleSessionSelect = (session: ExtendedTestSessionSummary) => {
 		setSelectedSessionId(session.session_id);
 		setSelectedDeviceId(null);
@@ -85,41 +53,13 @@ export default function HackathonPage() {
 		});
 	};
 
-	// Handle start test
-	const handleStartTest = async () => {
-		const labelFilter =
-			selectionMode === "labels" ? selectedLabels.join(",") : "";
-		const serialNumbers =
-			selectionMode === "devices"
-				? resolvedDevices.map((d) => d.serial_number)
-				: undefined;
-		try {
-			const result = await startTestMutation.mutateAsync({
-				label_filter: labelFilter,
-				serial_numbers: serialNumbers,
-				duration_minutes: durationMinutes,
-			});
-			setShowStartModal(false);
-			setSelectedSessionId(result.session_id);
-			setViewMode("results");
-			navigate(`/network-testing?session=${result.session_id}`, {
-				replace: true,
-			});
-			refetchMatchingSessions();
-		} catch (error) {
-			console.error("Failed to start test:", error);
-		}
-	};
-
-	// Handle view for selected devices
-	const handleViewResults = () => {
-		if (matchingSessions && matchingSessions.length > 0) {
-			const latest = [...matchingSessions].sort(
-				(a, b) =>
-					new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
-			)[0];
-			handleSessionSelect(latest);
-		}
+	// Handle a freshly started test
+	const handleTestStarted = (sessionId: string) => {
+		setShowStartModal(false);
+		setSelectedSessionId(sessionId);
+		setSelectedDeviceId(null);
+		setViewMode("results");
+		navigate(`/network-testing?session=${sessionId}`, { replace: true });
 	};
 
 	// Handle back to landing
@@ -130,111 +70,37 @@ export default function HackathonPage() {
 		navigate("/network-testing", { replace: true });
 	};
 
-	const _isTestRunning =
-		sessionStatus?.status === "running" ||
-		sessionStatus?.status === "pending" ||
-		sessionStatus?.status === "partial";
-
-	const hasDevicesSelected = resolvedDevices.length > 0;
-	const hasMatchingSessions = matchingSessions && matchingSessions.length > 0;
-
-	// Landing view - device selection + history
+	// Landing view - test history
 	if (viewMode === "landing") {
 		return (
-			<div className="flex-1 overflow-y-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
-				{/* Header */}
-				<div className="flex items-center space-x-3">
-					<Activity className="w-6 h-6 text-blue-600" />
-					<h1 className="text-2xl font-bold text-gray-900">Network Test</h1>
+			<div className="flex-1 overflow-y-auto px-4 sm:px-6 lg:px-8 py-6 space-y-4">
+				{/* Toolbar: search + new test */}
+				<div className="flex items-center justify-between gap-3">
+					<SearchInput
+						value={searchQuery}
+						onChange={setSearchQuery}
+						placeholder="Search by label, date, or status..."
+						className="max-w-md"
+					/>
+					<Button
+						variant="solid"
+						tone="blue"
+						icon={<Plus className="w-4 h-4" />}
+						onClick={() => setShowStartModal(true)}
+					>
+						New Test
+					</Button>
 				</div>
 
-				<div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-					{/* Device Selection Panel */}
-					<div className="bg-white rounded-lg border border-gray-200 p-6">
-						<h2 className="text-lg font-semibold text-gray-900 mb-4">
-							Select Devices
-						</h2>
-						<DeviceSelector
-							mode={selectionMode}
-							onModeChange={setSelectionMode}
-							selectedLabels={selectedLabels}
-							onLabelsChange={setSelectedLabels}
-							selectedDeviceIds={selectedDeviceIds}
-							onDeviceIdsChange={setSelectedDeviceIds}
-							onDevicesResolved={handleDevicesResolved}
-						/>
-
-						{/* Action Buttons */}
-						{hasDevicesSelected && (
-							<div className="mt-6 pt-4 border-t border-gray-200">
-								{matchingSessionsLoading ? (
-									<div className="flex items-center space-x-2 text-gray-500 text-sm">
-										<Loader2 className="w-4 h-4 animate-spin" />
-										<span>Checking for previous tests...</span>
-									</div>
-								) : hasMatchingSessions ? (
-									<div className="space-y-3">
-										<p className="text-sm text-gray-600">
-											Found {matchingSessions.length} previous test
-											{matchingSessions.length !== 1 ? "s" : ""} for these
-											devices
-										</p>
-										<div className="flex space-x-3">
-											<Button
-												onClick={handleViewResults}
-												className="flex-1"
-												icon={<Activity className="w-4 h-4" />}
-											>
-												View Latest Results
-											</Button>
-											<Button
-												onClick={() => setShowStartModal(true)}
-												variant="secondary"
-												icon={<Play className="w-4 h-4" />}
-											>
-												New Test
-											</Button>
-										</div>
-									</div>
-								) : (
-									<div className="space-y-3">
-										<p className="text-sm text-gray-600">
-											No previous tests found for these {resolvedDevices.length}{" "}
-											devices
-										</p>
-										<Button
-											onClick={() => setShowStartModal(true)}
-											className="w-full"
-											icon={<Play className="w-5 h-5" />}
-										>
-											Start Network Test
-										</Button>
-									</div>
-								)}
-							</div>
-						)}
-					</div>
-
-					{/* History Panel */}
-					<div className="bg-white rounded-lg border border-gray-200 p-6">
-						<h2 className="text-lg font-semibold text-gray-900 mb-4">
-							Test History
-						</h2>
-						<SessionHistory onSelectSession={handleSessionSelect} />
-					</div>
-				</div>
+				<SessionHistory
+					searchQuery={searchQuery}
+					onSelectSession={handleSessionSelect}
+				/>
 
 				<StartTestModal
 					isOpen={showStartModal}
 					onClose={() => setShowStartModal(false)}
-					onStart={handleStartTest}
-					isPending={startTestMutation.isPending}
-					isError={startTestMutation.isError}
-					durationMinutes={durationMinutes}
-					onDurationChange={setDurationMinutes}
-					selectedLabels={selectedLabels}
-					selectedDeviceCount={resolvedDevices.length}
-					selectionMode={selectionMode}
+					onStarted={handleTestStarted}
 				/>
 			</div>
 		);
@@ -247,7 +113,7 @@ export default function HackathonPage() {
 			<div className="flex items-center space-x-3">
 				<button
 					onClick={handleBackToLanding}
-					aria-label="Back to network test landing page"
+					aria-label="Back to network test history"
 					className="p-1 rounded-md hover:bg-gray-100 transition-colors"
 				>
 					<ArrowLeft className="w-5 h-5 text-gray-500" />

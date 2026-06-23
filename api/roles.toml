@@ -11,6 +11,8 @@
 # Recipe permissions:
 #   recipes:trigger    run a pre-authored recipe against devices
 #   recipes:write      create / update / delete recipes
+# User permissions:
+#   users:read         view the user list and role definitions
 
 [roles.default]
 description = "Standard user: manage devices, run safe commands, trigger vetted recipes"
@@ -31,4 +33,5 @@ permissions = [
     { action = "tunnel", resource = "commands" },
     { action = "ota", resource = "commands" },
     { action = "write", resource = "recipes" },
+    { action = "read", resource = "users" },
 ]

@@ -93,7 +93,7 @@ export function Button({
 	className?: string;
 	children?: ReactNode;
 }) {
-	const cls = `inline-flex items-center justify-center font-medium rounded-lg transition-all cursor-pointer active:scale-[.98] ${SIZE_STYLES[size]} ${VARIANT_EXTRA[variant]} ${BUTTON_STYLES[variant][tone]} ${className}`;
+	const cls = `inline-flex items-center justify-center font-medium rounded-lg transition-colors duration-100 cursor-pointer active:scale-[.98] ${SIZE_STYLES[size]} ${VARIANT_EXTRA[variant]} ${BUTTON_STYLES[variant][tone]} ${className}`;
 	const inner = (
 		<>
 			{loading ? <Loader2 className="w-4 h-4 animate-spin" /> : icon}

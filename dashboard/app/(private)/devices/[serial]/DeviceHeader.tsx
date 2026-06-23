@@ -408,68 +408,70 @@ const DeviceHeader: React.FC<DeviceHeaderProps> = ({ device, serial }) => {
 
 	return (
 		<div className="bg-white rounded-lg border border-gray-200 p-4">
-			<div className="flex items-center space-x-3">
-				<div className="p-2 bg-gray-100 text-gray-600 rounded">
-					<Cpu className="w-5 h-5" />
-				</div>
-				<div className="flex-1">
-					<div className="flex items-center space-x-3">
-						<h1 className="text-xl font-bold text-gray-900">
-							{getDeviceName()}
-						</h1>
-						<Tooltip content={getNetworkQualityTooltip()}>
-							<div className="flex-shrink-0 cursor-help">
-								<NetworkQualityIndicator
-									isOnline={status === "online"}
-									networkScore={device?.network?.network_score}
-								/>
-							</div>
-						</Tooltip>
-						{getUpdateStatus()?.status === "updating" && (
-							<Tooltip
-								content={`Updating for ${getUpdateStatus()?.duration}: ${device.release?.distribution_name}@${device.release?.version || device.release_id} → ${device.target_release?.distribution_name}@${device.target_release?.version || device.target_release_id}`}
-							>
-								<span className="px-2 py-1 text-xs font-medium bg-blue-100 text-blue-800 rounded-full cursor-help">
-									Updating {getUpdateStatus()?.duration}
-								</span>
-							</Tooltip>
-						)}
-						{getUpdateStatus()?.status === "outdated" && (
-							<Tooltip
-								content={`Update failed after ${getUpdateStatus()?.duration}: ${device.release?.distribution_name}@${device.release?.version || device.release_id} → ${device.target_release?.distribution_name}@${device.target_release?.version || device.target_release_id}`}
-							>
-								<span className="px-2 py-1 text-xs font-medium bg-orange-100 text-orange-800 rounded-full cursor-help">
-									Update Failed {getUpdateStatus()?.duration}
-								</span>
-							</Tooltip>
-						)}
+			<div className="flex flex-col gap-3 lg:flex-row lg:items-center">
+				<div className="flex flex-1 items-center space-x-3 min-w-0">
+					<div className="p-2 bg-gray-100 text-gray-600 rounded flex-shrink-0">
+						<Cpu className="w-5 h-5" />
 					</div>
-					<div className="flex items-center space-x-4 mt-1 text-sm text-gray-600">
-						{device.release && (
-							<div className="flex items-center space-x-2">
-								<div className="flex items-center space-x-1">
-									<GitBranch className="w-4 h-4" />
-									<span className="font-medium">
-										{device.release.distribution_name}
+					<div className="flex-1 min-w-0">
+						<div className="flex items-center space-x-3">
+							<h1 className="text-xl font-bold text-gray-900">
+								{getDeviceName()}
+							</h1>
+							<Tooltip content={getNetworkQualityTooltip()}>
+								<div className="flex-shrink-0 cursor-help">
+									<NetworkQualityIndicator
+										isOnline={status === "online"}
+										networkScore={device?.network?.network_score}
+									/>
+								</div>
+							</Tooltip>
+							{getUpdateStatus()?.status === "updating" && (
+								<Tooltip
+									content={`Updating for ${getUpdateStatus()?.duration}: ${device.release?.distribution_name}@${device.release?.version || device.release_id} → ${device.target_release?.distribution_name}@${device.target_release?.version || device.target_release_id}`}
+								>
+									<span className="px-2 py-1 text-xs font-medium bg-blue-100 text-blue-800 rounded-full cursor-help">
+										Updating {getUpdateStatus()?.duration}
 									</span>
+								</Tooltip>
+							)}
+							{getUpdateStatus()?.status === "outdated" && (
+								<Tooltip
+									content={`Update failed after ${getUpdateStatus()?.duration}: ${device.release?.distribution_name}@${device.release?.version || device.release_id} → ${device.target_release?.distribution_name}@${device.target_release?.version || device.target_release_id}`}
+								>
+									<span className="px-2 py-1 text-xs font-medium bg-orange-100 text-orange-800 rounded-full cursor-help">
+										Update Failed {getUpdateStatus()?.duration}
+									</span>
+								</Tooltip>
+							)}
+						</div>
+						<div className="flex items-center space-x-4 mt-1 text-sm text-gray-600">
+							{device.release && (
+								<div className="flex items-center space-x-2">
+									<div className="flex items-center space-x-1">
+										<GitBranch className="w-4 h-4" />
+										<span className="font-medium">
+											{device.release.distribution_name}
+										</span>
+									</div>
+									<div className="flex items-center space-x-1">
+										<Tag className="w-4 h-4" />
+										<span>v{device.release.version}</span>
+									</div>
 								</div>
-								<div className="flex items-center space-x-1">
-									<Tag className="w-4 h-4" />
-									<span>v{device.release.version}</span>
-								</div>
-							</div>
-						)}
-						{connectionType && (
-							<Tooltip content={getConnectionTooltip(connectionType)}>
-								<div className="flex items-center space-x-1 cursor-help">
-									{getConnectionIcon(connectionType)}
-									<span className="capitalize">{connectionType}</span>
-								</div>
-							</Tooltip>
-						)}
+							)}
+							{connectionType && (
+								<Tooltip content={getConnectionTooltip(connectionType)}>
+									<div className="flex items-center space-x-1 cursor-help">
+										{getConnectionIcon(connectionType)}
+										<span className="capitalize">{connectionType}</span>
+									</div>
+								</Tooltip>
+							)}
+						</div>
 					</div>
 				</div>
-				<div className="flex-shrink-0 flex items-center space-x-3">
+				<div className="flex flex-wrap items-center gap-2 lg:flex-shrink-0 lg:gap-3">
 					<Tooltip content="Run a command on this device">
 						<Button
 							variant="soft"

@@ -29,6 +29,10 @@ const Modems = lazy(() => import("@/app/(private)/modems/page"));
 const NetworkTesting = lazy(
 	() => import("@/app/(private)/network-testing/page"),
 );
+const SettingsUsers = lazy(() => import("@/app/(private)/settings/users/page"));
+const SettingsRoles = lazy(() => import("@/app/(private)/settings/roles/page"));
+
+const NotFound = lazy(() => import("@/app/not-found/page"));
 
 const ComponentsLayout = lazy(() => import("@/app/components/layout"));
 const ButtonsPage = lazy(() => import("@/app/components/buttons/page"));
@@ -78,6 +82,9 @@ export const router = createBrowserRouter([
 			{ path: "/ip-addresses", element: withSuspense(<IpAddresses />) },
 			{ path: "/modems", element: withSuspense(<Modems />) },
 			{ path: "/network-testing", element: withSuspense(<NetworkTesting />) },
+			{ path: "/settings", element: <Navigate to="/settings/users" replace /> },
+			{ path: "/settings/users", element: withSuspense(<SettingsUsers />) },
+			{ path: "/settings/roles", element: withSuspense(<SettingsRoles />) },
 		],
 	},
 	{
@@ -94,5 +101,9 @@ export const router = createBrowserRouter([
 			{ path: "/components/overlay", element: withSuspense(<OverlayPage />) },
 			{ path: "/components/text", element: withSuspense(<TextPage />) },
 		],
+	},
+	{
+		path: "*",
+		element: withSuspense(<NotFound />),
 	},
 ]);
