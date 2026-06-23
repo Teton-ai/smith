@@ -13,66 +13,84 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Determine versions
+        run: |
+          CURRENT_VERSION=$(grep -m 1 'version = ' Cargo.toml | sed 's/version = "\(.*\)"/\1/')
+          MAJOR=$(echo $CURRENT_VERSION | cut -d. -f1)
+          MINOR=$(echo $CURRENT_VERSION | cut -d. -f2)
+          PATCH=$(echo $CURRENT_VERSION | cut -d. -f3)
+          NEW_VERSION="$MAJOR.$MINOR.$((PATCH + 1))"
+          echo "CURRENT_VERSION=$CURRENT_VERSION" >> $GITHUB_ENV
+          echo "NEW_VERSION=$NEW_VERSION" >> $GITHUB_ENV
+
       - name: Check for existing release PR
         id: check_pr
         run: |
-          PR_COUNT=$(gh pr list --label release,automated --json number | jq length)
-          if [ "$PR_COUNT" -gt "0" ]; then
-            echo "Release PR already exists, exiting workflow."
-            echo "release_exists=true" >> $GITHUB_OUTPUT
+          PR_NUMBER=$(gh pr list --label release,automated --json number --jq '.[0].number // empty')
+          if [ -n "$PR_NUMBER" ]; then
+            echo "Release PR #$PR_NUMBER already exists; will refresh its body."
+            echo "exists=true" >> $GITHUB_OUTPUT
+            echo "number=$PR_NUMBER" >> $GITHUB_OUTPUT
           else
-            echo "No existing release PR found, proceeding with version bump."
-            echo "release_exists=false" >> $GITHUB_OUTPUT
+            echo "No existing release PR; will open one."
+            echo "exists=false" >> $GITHUB_OUTPUT
           fi
         env:
           GH_TOKEN: ${{ secrets.RELEASE_PR_TOKEN }}
 
+      - name: Draft release notes
+        run: |
+          NOTES=$(gh api \
+            --method POST \
+            -H "Accept: application/vnd.github+json" \
+            "/repos/${{ github.repository }}/releases/generate-notes" \
+            -f tag_name="v${NEW_VERSION}" \
+            -f target_commitish="main" \
+            -f previous_tag_name="v${CURRENT_VERSION}" \
+            --jq '.body')
+
+          {
+            echo "PR_BODY<<EOF"
+            echo "chore(release): v${CURRENT_VERSION} to v${NEW_VERSION}"
+            echo
+            echo "$NOTES"
+            echo "EOF"
+          } >> $GITHUB_ENV
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PR_TOKEN }}
+
+      - name: Refresh existing release PR body
+        if: steps.check_pr.outputs.exists == 'true'
+        run: |
+          printf '%s' "$PR_BODY" | gh pr edit "${{ steps.check_pr.outputs.number }}" --body-file -
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PR_TOKEN }}
+
       - uses: actions-rust-lang/setup-rust-toolchain@v1
-        if: steps.check_pr.outputs.release_exists != 'true'
+        if: steps.check_pr.outputs.exists != 'true'
 
       - name: SQLx offline
+        if: steps.check_pr.outputs.exists != 'true'
         run: echo "SQLX_OFFLINE=true" > .env
-        if: steps.check_pr.outputs.release_exists != 'true'
 
       - name: Bump version
-        if: steps.check_pr.outputs.release_exists != 'true'
+        if: steps.check_pr.outputs.exists != 'true'
         run: |
-          # Get the current version from Cargo.toml
-          CURRENT_VERSION=$(grep -m 1 'version = ' Cargo.toml | sed 's/version = "\(.*\)"/\1/')
-          echo "Current version: $CURRENT_VERSION"
-          
-          # Parse the version components
-          MAJOR=$(echo $CURRENT_VERSION | cut -d. -f1)
-          MINOR=$(echo $CURRENT_VERSION | cut -d. -f2)
-          PATCH=$(echo $CURRENT_VERSION | cut -d. -f3)
-          
-          # Increment the patch version
-          NEW_PATCH=$((PATCH + 1))
-          NEW_VERSION="$MAJOR.$MINOR.$NEW_PATCH"
-          echo "New version: $NEW_VERSION"
-          
-          # Update the version in the Cargo.toml file
           sed -i "s/version = \"$CURRENT_VERSION\"/version = \"$NEW_VERSION\"/" Cargo.toml
-          
-          # Store the versions for later steps
-          echo "CURRENT_VERSION=$CURRENT_VERSION" >> $GITHUB_ENV
-          echo "NEW_VERSION=$NEW_VERSION" >> $GITHUB_ENV
-          
-          # Verify the update
           grep -m 1 'version = ' Cargo.toml
 
       - name: Check generate lock
-        if: steps.check_pr.outputs.release_exists != 'true'
+        if: steps.check_pr.outputs.exists != 'true'
         run: cargo generate-lockfile
 
       - name: Create Pull Request
-        if: steps.check_pr.outputs.release_exists != 'true'
+        if: steps.check_pr.outputs.exists != 'true'
         uses: peter-evans/create-pull-request@v5
         with:
           token: ${{ secrets.RELEASE_PR_TOKEN }}
           commit-message: "chore(release): v${{ env.NEW_VERSION }}"
           title: "chore(release): v${{ env.NEW_VERSION }}"
-          body: "chore(release): v${{ env.CURRENT_VERSION }} to v${{ env.NEW_VERSION }}"
+          body: ${{ env.PR_BODY }}
           branch: chore/release-v${{ env.NEW_VERSION }}
           base: main
           labels: automated,release
