@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { useNavigate } from "react-router";
+import { useLocation } from "react-router";
 import type { Device } from "@/app/api-client";
 import { BackLink, TabNav } from "@/app/components/ui";
 import DeviceHeader from "./DeviceHeader";
@@ -28,7 +28,9 @@ export function DeviceDetailLayout({
 	fill?: boolean;
 	children: ReactNode;
 }) {
-	const navigate = useNavigate();
+	const back =
+		(useLocation().state as { back?: string } | null)?.back ?? "/devices";
+	const backState = { back };
 
 	const base = "flex-1 px-4 sm:px-6 lg:px-8 py-6 space-y-6";
 
@@ -40,7 +42,7 @@ export function DeviceDetailLayout({
 					: `${base} overflow-y-auto`
 			}
 		>
-			<BackLink onClick={() => navigate(-1)}>Back to Devices</BackLink>
+			<BackLink to={back}>Back to Devices</BackLink>
 
 			{device && <DeviceHeader device={device} serial={serial} />}
 
@@ -50,16 +52,19 @@ export function DeviceDetailLayout({
 						label: "Overview",
 						to: `/devices/${serial}`,
 						active: activeTab === "overview",
+						state: backState,
 					},
 					{
 						label: "Commands",
 						to: `/devices/${serial}/commands`,
 						active: activeTab === "commands",
+						state: backState,
 					},
 					{
 						label: "Services",
 						to: `/devices/${serial}/services`,
 						active: activeTab === "services",
+						state: backState,
 					},
 				]}
 			/>

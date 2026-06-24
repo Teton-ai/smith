@@ -17,7 +17,7 @@ import {
 	XCircle,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate, useSearchParams } from "react-router";
+import { useLocation, useNavigate, useSearchParams } from "react-router";
 import LabelAutocomplete from "@/app/components/LabelAutocomplete";
 import { Modal } from "@/app/components/modal";
 import NetworkQualityIndicator from "@/app/components/NetworkQualityIndicator";
@@ -143,6 +143,7 @@ const PAGE_SIZE = 100;
 const DevicesPage = () => {
 	const { isAuthenticated } = useAuth0();
 	const navigate = useNavigate();
+	const location = useLocation();
 	const [searchParams] = useSearchParams();
 	const queryClient = useQueryClient();
 	const [searchTerm, setSearchTerm] = useState("");
@@ -1147,7 +1148,11 @@ const DevicesPage = () => {
 								<div
 									key={device.id}
 									className="block px-4 py-3 hover:bg-gray-50 cursor-pointer transition-colors"
-									onClick={() => navigate(`/devices/${device.serial_number}`)}
+									onClick={() =>
+										navigate(`/devices/${device.serial_number}`, {
+											state: { back: location.pathname + location.search },
+										})
+									}
 								>
 									<div className="grid grid-cols-[auto_2fr_2fr_2fr_1fr_1fr] gap-4 items-center">
 										<div className="w-6 flex items-center justify-center">
