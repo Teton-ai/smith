@@ -47,3 +47,22 @@ seed:
 debug.smithd:
 	cargo build --release -p smith
 	sudo ln -sf $(CURDIR)/target/release/smithd /usr/bin/smithd
+
+DEVICES ?= $(shell docker ps --filter "name=smith-device" --format "{{.Names}}")
+
+watch.smithd:
+	cargo watch -s "make deploy.smithd" -w smithd -w models
+
+deploy.smithd:
+	docker compose up -d smithd-builder
+	docker exec smith-smithd-builder cargo build --package smith --bin smithd
+	docker cp smith-smithd-builder:/app/target/debug/smithd /tmp/smithd-deploy
+	@pids=""; status=0; \
+	for device in $(DEVICES); do \
+		(echo "Deploying to $$device..." && \
+		docker cp /tmp/smithd-deploy $$device:/usr/bin/smithd && \
+		docker exec $$device systemctl restart smithd) & \
+		pids="$$pids $$!"; \
+	done; \
+	for pid in $$pids; do wait $$pid || status=1; done; \
+	exit $$status
