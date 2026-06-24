@@ -17,6 +17,21 @@ pub struct CommandsDB {
     continue_on_error: bool,
 }
 
+/// Postgres `json`/`jsonb` cannot store U+0000, even though it is valid UTF-8 and
+/// valid JSON. Command output (e.g. `cat` on a binary file) can contain NUL bytes,
+/// which would otherwise fail the insert and leave the command stuck as "executing".
+/// Replace them with a visible sentinel so the byte isn't silently dropped.
+fn sanitize_nul(value: &mut Value) {
+    match value {
+        Value::String(s) if s.contains('\0') => {
+            *s = s.replace('\0', "\u{2400}"); // ␀ SYMBOL FOR NULL
+        }
+        Value::Array(a) => a.iter_mut().for_each(sanitize_nul),
+        Value::Object(o) => o.values_mut().for_each(sanitize_nul),
+        _ => {}
+    }
+}
+
 pub async fn save_responses(
     device_id: i32,
     device_serial_number: &str,
@@ -222,6 +237,8 @@ pub async fn save_responses(
             }
             _ => {}
         }
+        let mut response_json = json!(response.command);
+        sanitize_nul(&mut response_json);
         let _response_id = sqlx::query_scalar!(
             "INSERT INTO command_response (device_id, command_id, response, status)
                 VALUES (
@@ -233,7 +250,7 @@ pub async fn save_responses(
                 RETURNING id",
             device_id,
             response.id,
-            json!(response.command),
+            response_json,
             response.status
         )
         .fetch_one(&mut *tx)
