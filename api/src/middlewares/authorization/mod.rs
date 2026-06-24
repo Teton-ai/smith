@@ -70,6 +70,38 @@ pub struct AuthorizationConfig {
     pub roles: HashMap<String, Role>,
 }
 
+/// Maps a user's email to the role they should hold. Parsed from the TOML
+/// content of the `ACCOUNTS_CONFIG` env var (injected from a version-controlled
+/// file at deploy time) and reconciled into the database on startup, so the
+/// config — not the database — is the source of truth for who holds an elevated
+/// role. Absent `ACCOUNTS_CONFIG`, the feature is off.
+#[derive(Debug, Deserialize, Default)]
+pub struct AccountsConfig {
+    #[serde(default)]
+    pub accounts: HashMap<String, String>,
+}
+
+impl AccountsConfig {
+    pub fn new(config: &str) -> Result<Self> {
+        let config: AccountsConfig = toml::from_str(config)?;
+        Ok(config)
+    }
+
+    /// (email, role) pairs whose role is not defined in `authorization`. Used at
+    /// startup to surface typos: an undefined role grants no permissions, so it
+    /// is skipped during reconciliation rather than assigned.
+    pub fn unknown_roles<'a>(
+        &'a self,
+        authorization: &AuthorizationConfig,
+    ) -> Vec<(&'a str, &'a str)> {
+        self.accounts
+            .iter()
+            .filter(|(_, role)| !authorization.roles.contains_key(role.as_str()))
+            .map(|(email, role)| (email.as_str(), role.as_str()))
+            .collect()
+    }
+}
+
 #[derive(Debug, Deserialize)]
 pub struct Role {
     pub description: String,

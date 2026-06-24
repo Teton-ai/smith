@@ -1,4 +1,5 @@
 mod audience;
+use crate::middlewares::authorization::{AccountsConfig, AuthorizationConfig};
 use crate::{State, user::CurrentUser};
 use audience::Audience;
 use axum::{
@@ -10,8 +11,9 @@ use axum::{
 };
 use reqwest::Url;
 use serde::{Deserialize, Serialize};
+use sqlx::PgPool;
 use std::time::Duration;
-use tracing::info;
+use tracing::{error, info};
 
 #[derive(Debug, Serialize, Deserialize)]
 struct Claims {
@@ -112,14 +114,21 @@ pub async fn check(
                 CurrentUser::update_email(&pool, user_id, email)
                     .await
                     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+                // Email just became known, so the accounts file can now match it.
+                apply_file_role(&pool, &authorization, &state.accounts, user_id, email).await;
             }
             user_id
         }
         None => {
             info!("Creating user for sub={}", claims.sub);
-            CurrentUser::create(&pool, &claims.sub, userinfo)
+            let email = userinfo.as_ref().and_then(|info| info.email.clone());
+            let user_id = CurrentUser::create(&pool, &claims.sub, userinfo)
                 .await
-                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+            if let Some(email) = email {
+                apply_file_role(&pool, &authorization, &state.accounts, user_id, &email).await;
+            }
+            user_id
         }
     };
 
@@ -131,4 +140,22 @@ pub async fn check(
 
     let response = next.run(request).await;
     Ok(response)
+}
+
+/// Applies the user's accounts-file role on login, logging instead of failing on
+/// error: the grant is a convenience (the authoritative reconcile runs at
+/// startup), so a transient database hiccup must not deny an otherwise valid
+/// login.
+async fn apply_file_role(
+    pool: &PgPool,
+    authorization: &AuthorizationConfig,
+    accounts: &AccountsConfig,
+    user_id: i32,
+    email: &str,
+) {
+    if let Err(e) =
+        CurrentUser::apply_file_role(pool, authorization, accounts, user_id, email).await
+    {
+        error!("failed to apply accounts-file role for user_id={user_id}: {e}");
+    }
 }

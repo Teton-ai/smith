@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM auth.users_roles WHERE role <> 'default'",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "ddf5f18315633f95f03dfd90538e43d978789ec28884ac916fcd277206bf2235"
+}
