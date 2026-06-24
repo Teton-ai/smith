@@ -72,6 +72,7 @@ services:
       - NET_ADMIN
     volumes:
       - ./scripts/network-throttle.sh:/app/network-throttle.sh:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
     environment:
       - RUST_LOG=${RUST_LOG:-INFO}
       - NETWORK_THROTTLE=${NETWORK_THROTTLE:-random}
