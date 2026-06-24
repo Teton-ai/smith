@@ -25,6 +25,7 @@ import {
 	SECTION_THEMES,
 } from "@/app/components/ui";
 import { DeviceDetailLayout } from "./DeviceDetailLayout";
+import DeviceVariables from "./DeviceVariables";
 import SecurityAudit from "./SecurityAudit";
 
 const LocationMap = lazy(() => import("./LocationMap"));
@@ -411,6 +412,14 @@ const DeviceDetailPage = () => {
 					)}
 				</Panel>
 
+				{/* Variables (secrets) */}
+				<DeviceVariables deviceId={device.id} />
+			</div>
+
+			{/* Security Audit (left) and Location Information (right) */}
+			<div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
+				<SecurityAudit serial={serial} deviceId={device.id} />
+
 				{/* Location Information */}
 				<Panel
 					title="Location Information"
@@ -501,9 +510,6 @@ const DeviceDetailPage = () => {
 					)}
 				</Panel>
 			</div>
-
-			{/* Security Audit */}
-			<SecurityAudit serial={serial} deviceId={device.id} />
 		</DeviceDetailLayout>
 	);
 };

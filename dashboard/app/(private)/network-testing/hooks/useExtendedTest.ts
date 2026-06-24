@@ -110,22 +110,6 @@ export const useExtendedTestSessions = () => {
 	});
 };
 
-// Find sessions that were run for a specific set of devices (by serial numbers)
-export const useSessionsByDevices = (serialNumbers: string[]) => {
-	const fetcher = useClientMutator<ExtendedTestSessionSummary[]>();
-	const sortedSerials = [...serialNumbers].sort().join(",");
-
-	return useQuery({
-		queryKey: ["sessionsByDevices", sortedSerials],
-		queryFn: () =>
-			fetcher({
-				url: `/network/extended-test/sessions/by-devices?serial_numbers=${encodeURIComponent(sortedSerials)}`,
-				method: "GET",
-			}),
-		enabled: serialNumbers.length > 0,
-	});
-};
-
 export const useExtendedTestStatus = (sessionId: string | null) => {
 	const fetcher = useClientMutator<ExtendedTestStatus>();
 	return useQuery({

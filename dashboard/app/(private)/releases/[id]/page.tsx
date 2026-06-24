@@ -5,7 +5,6 @@ import {
 	ArrowUp,
 	Box,
 	Calendar,
-	CheckCircle,
 	ChevronsUpDown,
 	Clock,
 	Cog,
@@ -19,12 +18,10 @@ import {
 	Tag,
 	Trash2,
 	X,
-	XCircle,
 	Zap,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { createPortal } from "react-dom";
-import { Link, useNavigate, useParams } from "react-router";
+import { useNavigate, useParams } from "react-router";
 import {
 	type DeploymentRequest,
 	type Device,
@@ -41,10 +38,38 @@ import {
 	useGetReleaseServices,
 	usePatchRelease,
 } from "@/app/api-client";
-import { Button, IconButton } from "@/app/components/button";
 import LabelAutocomplete from "@/app/components/LabelAutocomplete";
 import { Modal } from "@/app/components/modal";
 import { RelativeTime } from "@/app/components/RelativeTime";
+import {
+	BackLink,
+	Badge,
+	type BadgeVariant,
+	Button,
+	Card,
+	ListRow,
+	PageContainer,
+	SECTION_THEMES,
+	SectionCard,
+	Toast,
+	type ToastState,
+} from "@/app/components/ui";
+
+const getArchVariant = (architecture: string): BadgeVariant => {
+	switch (architecture.toLowerCase()) {
+		case "x86_64":
+		case "amd64":
+			return "blue";
+		case "arm64":
+		case "aarch64":
+			return "green";
+		case "armv7":
+		case "arm":
+			return "purple";
+		default:
+			return "gray";
+	}
+};
 
 const ReleaseDetailPage = () => {
 	const navigate = useNavigate();
@@ -76,10 +101,7 @@ const ReleaseDetailPage = () => {
 	const [showYankModal, setShowYankModal] = useState(false);
 	const [yanking, setYanking] = useState(false);
 	const [yankReason, setYankReason] = useState("");
-	const [toast, setToast] = useState<{
-		message: string;
-		type: "success" | "error";
-	} | null>(null);
+	const [toast, setToast] = useState<ToastState | null>(null);
 	const [upgradingPackages, setUpgradingPackages] = useState<Set<number>>(
 		new Set(),
 	);
@@ -200,18 +222,12 @@ const ReleaseDetailPage = () => {
 				className={`inline-block w-2 h-2 rounded-full ${networkDotColor(device.network?.network_score)}`}
 			/>
 			{unhealthyDeviceIds.has(device.id) && (
-				<AlertTriangle
-					className="w-3 h-3 text-amber-500"
-					title="Unhealthy services"
-				/>
+				<span title="Unhealthy services" className="inline-flex">
+					<AlertTriangle className="w-3 h-3 text-amber-500" />
+				</span>
 			)}
 		</div>
 	);
-
-	const [mounted, setMounted] = useState(false);
-	useEffect(() => {
-		setMounted(true);
-	}, []);
 
 	useEffect(() => {
 		if (toast) {
@@ -226,22 +242,6 @@ const ReleaseDetailPage = () => {
 		}, 300);
 		return () => clearTimeout(timer);
 	}, [deviceSearchQuery]);
-
-	const getArchColor = (architecture: string) => {
-		switch (architecture.toLowerCase()) {
-			case "x86_64":
-			case "amd64":
-				return "bg-blue-100 text-blue-700";
-			case "arm64":
-			case "aarch64":
-				return "bg-green-100 text-green-700";
-			case "armv7":
-			case "arm":
-				return "bg-purple-100 text-purple-700";
-			default:
-				return "bg-gray-100 text-gray-700";
-		}
-	};
 
 	const updateReleaseHook = usePatchRelease({
 		mutation: {
@@ -486,88 +486,75 @@ const ReleaseDetailPage = () => {
 
 	if (loading || !release) {
 		return (
-			<div className="flex items-center justify-center h-32">
-				<div className="text-gray-500 text-sm">Loading...</div>
-			</div>
+			<PageContainer>
+				<div className="h-4 w-44 bg-gray-200 rounded animate-pulse" />
+				<Card className="p-4">
+					<div className="flex items-center space-x-3">
+						<div className="p-2 bg-gray-100 rounded">
+							<div className="w-5 h-5 bg-gray-200 rounded animate-pulse" />
+						</div>
+						<div className="space-y-2">
+							<div className="h-6 bg-gray-200 rounded w-48 animate-pulse" />
+							<div className="h-4 bg-gray-200 rounded w-64 animate-pulse" />
+						</div>
+					</div>
+				</Card>
+			</PageContainer>
 		);
 	}
 
 	return (
-		<div className="flex-1 overflow-y-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
+		<PageContainer>
 			{/* Toast Notification */}
-			{mounted &&
-				toast &&
-				createPortal(
-					<div className="fixed top-4 right-4 z-50 animate-in slide-in-from-top-5 duration-300">
-						<div
-							className={`flex items-center space-x-3 px-4 py-3 rounded-lg shadow-lg ${
-								toast.type === "success" ? "bg-green-600" : "bg-red-600"
-							}`}
-						>
-							{toast.type === "success" ? (
-								<CheckCircle className="w-5 h-5 text-white" />
-							) : (
-								<XCircle className="w-5 h-5 text-white" />
-							)}
-							<span className="text-white font-medium text-sm">
-								{toast.message}
-							</span>
-						</div>
-					</div>,
-					document.body,
-				)}
+			<Toast toast={toast} onClose={() => setToast(null)} />
 
-			{/* Header with Back Button */}
-			<div className="flex items-center space-x-4">
-				<Link
-					to={
-						distribution
-							? `/distributions/${distribution.id}`
-							: "/distributions"
-					}
-					className="flex items-center space-x-2 text-gray-600 hover:text-gray-900 transition-colors cursor-pointer"
-				>
-					<ArrowLeft className="w-4 h-4" />
-					<span className="text-sm font-medium">
-						{distribution
-							? `Back to ${distribution.name}`
-							: "Back to Distributions"}
-					</span>
-				</Link>
-			</div>
+			{/* Back link */}
+			<BackLink
+				to={
+					distribution ? `/distributions/${distribution.id}` : "/distributions"
+				}
+			>
+				{distribution
+					? `Back to ${distribution.name}`
+					: "Back to Distributions"}
+			</BackLink>
 
 			{/* Release Header */}
-			<div className="bg-white rounded-lg border border-gray-200 p-4">
-				<div className="flex items-center justify-between">
-					<div className="flex items-center space-x-3">
-						<div className="p-2 bg-gray-100 text-gray-600 rounded">
+			<Card className="p-4">
+				<div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+					<div className="flex items-center space-x-3 min-w-0">
+						<div className="p-2 bg-gray-100 text-gray-600 rounded flex-shrink-0">
 							<Tag className="w-5 h-5" />
 						</div>
-						<div className="flex-1">
+						<div className="min-w-0">
 							<div className="flex items-center space-x-3">
 								<h1 className="text-xl font-bold text-gray-900">
 									Release {release.version}
 								</h1>
 								{release.draft && (
-									<span className="px-2 py-1 text-xs font-medium bg-yellow-100 text-yellow-800 rounded-full">
+									<Badge variant="yellow" pill>
 										Draft
-									</span>
+									</Badge>
 								)}
 								{release.release_candidate && (
-									<span className="px-2 py-1 text-xs font-medium bg-orange-100 text-orange-700 rounded-full">
+									<Badge variant="orange" pill>
 										RC
-									</span>
+									</Badge>
 								)}
 								{release.yanked && (
-									<span className="px-2 py-1 text-xs font-medium bg-red-100 text-red-800 rounded-full">
+									<Badge variant="red" pill>
 										Yanked
-									</span>
+									</Badge>
 								)}
 								{existingDeployment?.status === "InProgress" && (
-									<span className="px-2 py-1 text-xs font-medium bg-blue-100 text-blue-800 rounded-full flex items-center">
+									<Badge
+										variant="blue"
+										pill
+										className="inline-flex items-center"
+									>
 										<Loader2 className="w-3 h-3 mr-1 animate-spin" />
 										Deploying
-									</span>
+									</Badge>
 								)}
 							</div>
 							<div className="flex items-center space-x-4 mt-1 text-sm text-gray-600">
@@ -580,27 +567,30 @@ const ReleaseDetailPage = () => {
 								{distribution && (
 									<div className="flex items-center space-x-2">
 										<span className="font-medium">{distribution.name}</span>
-										<span
-											className={`px-2 py-1 text-xs font-medium rounded-full ${getArchColor(distribution.architecture)}`}
+										<Badge
+											variant={getArchVariant(distribution.architecture)}
+											pill
 										>
 											{distribution.architecture.toUpperCase()}
-										</span>
+										</Badge>
 									</div>
 								)}
 							</div>
 						</div>
 					</div>
-					<div className="flex items-center space-x-3">
-						<Link
+					<div className="flex flex-wrap items-center gap-2 lg:flex-shrink-0 lg:gap-3">
+						<Button
+							variant="soft"
+							tone="gray"
 							to={`/devices?release_id=${release.id}`}
-							className="flex items-center space-x-2 px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-md hover:bg-gray-200 transition-colors cursor-pointer"
+							icon={<Cpu className="w-4 h-4" />}
 						>
-							<Cpu className="w-4 h-4" />
-							<span>View Devices</span>
-						</Link>
+							View Devices
+						</Button>
 						{release?.draft ? (
 							<Button
-								variant="success"
+								variant="solid"
+								tone="green"
 								loading={updateReleaseHook.isPending}
 								icon={<Eye className="w-4 h-4" />}
 								onClick={handlePublishRelease}
@@ -611,22 +601,26 @@ const ReleaseDetailPage = () => {
 							!release?.yanked && (
 								<>
 									<Button
-										variant="danger"
+										variant="solid"
+										tone="red"
 										icon={<AlertTriangle className="w-4 h-4" />}
 										onClick={() => setShowYankModal(true)}
 									>
 										Yank
 									</Button>
 									{existingDeployment?.status === "InProgress" ? (
-										<Link
+										<Button
+											variant="solid"
+											tone="blue"
 											to={`/releases/${releaseId}/deployment`}
-											className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700 transition-colors cursor-pointer"
+											icon={<Loader2 className="w-4 h-4 animate-spin" />}
 										>
-											<Loader2 className="w-4 h-4 animate-spin" />
-											<span>View Deployment</span>
-										</Link>
+											View Deployment
+										</Button>
 									) : (
 										<Button
+											variant="solid"
+											tone="blue"
 											icon={<Rocket className="w-4 h-4" />}
 											onClick={handleOpenDeployModal}
 										>
@@ -638,7 +632,7 @@ const ReleaseDetailPage = () => {
 						)}
 					</div>
 				</div>
-			</div>
+			</Card>
 
 			{/* Deploy Confirmation Modal */}
 			<Modal
@@ -655,7 +649,8 @@ const ReleaseDetailPage = () => {
 					deployStep === 1 ? (
 						<>
 							<Button
-								variant="secondary"
+								variant="soft"
+								tone="gray"
 								disabled={deploying}
 								onClick={() => setShowDeployModal(false)}
 							>
@@ -663,6 +658,8 @@ const ReleaseDetailPage = () => {
 							</Button>
 							{canaryMode === "automatic" ? (
 								<Button
+									variant="solid"
+									tone="blue"
 									loading={deploying}
 									icon={<Rocket className="w-4 h-4" />}
 									onClick={handleDeployRelease}
@@ -670,7 +667,11 @@ const ReleaseDetailPage = () => {
 									{deploying ? "Starting..." : "Start Deployment"}
 								</Button>
 							) : (
-								<Button onClick={() => setDeployStep(2)}>
+								<Button
+									variant="solid"
+									tone="blue"
+									onClick={() => setDeployStep(2)}
+								>
 									Next: Select Devices
 								</Button>
 							)}
@@ -678,7 +679,8 @@ const ReleaseDetailPage = () => {
 					) : (
 						<div className="flex justify-between w-full">
 							<Button
-								variant="secondary"
+								variant="soft"
+								tone="gray"
 								icon={<ArrowLeft className="w-4 h-4" />}
 								disabled={deploying}
 								onClick={() => setDeployStep(1)}
@@ -686,6 +688,8 @@ const ReleaseDetailPage = () => {
 								Back
 							</Button>
 							<Button
+								variant="solid"
+								tone="blue"
 								loading={deploying}
 								icon={<Rocket className="w-4 h-4" />}
 								disabled={
@@ -1042,7 +1046,8 @@ const ReleaseDetailPage = () => {
 				footer={
 					<>
 						<Button
-							variant="secondary"
+							variant="soft"
+							tone="gray"
 							disabled={yanking}
 							onClick={() => {
 								setShowYankModal(false);
@@ -1052,7 +1057,8 @@ const ReleaseDetailPage = () => {
 							Cancel
 						</Button>
 						<Button
-							variant="danger"
+							variant="solid"
+							tone="red"
 							loading={yanking}
 							disabled={!yankReason.trim()}
 							icon={<AlertTriangle className="w-4 h-4" />}
@@ -1104,12 +1110,15 @@ const ReleaseDetailPage = () => {
 					footer={
 						<>
 							<Button
-								variant="secondary"
+								variant="soft"
+								tone="gray"
 								onClick={() => setShowReplacePackageModal(false)}
 							>
 								Cancel
 							</Button>
 							<Button
+								variant="solid"
+								tone="blue"
 								disabled={!selectedAvailablePackage}
 								onClick={handleReplacePackage}
 							>
@@ -1201,11 +1210,11 @@ const ReleaseDetailPage = () => {
 																<span className="text-xs text-gray-500">
 																	v{pkg.version}
 																</span>
-																<span
-																	className={`px-2 py-0.5 text-xs font-medium rounded ${getArchColor(pkg.architecture)}`}
+																<Badge
+																	variant={getArchVariant(pkg.architecture)}
 																>
 																	{pkg.architecture}
-																</span>
+																</Badge>
 															</div>
 															<div className="text-xs text-gray-500 mt-1 truncate">
 																{pkg.file}
@@ -1251,12 +1260,15 @@ const ReleaseDetailPage = () => {
 				footer={
 					<>
 						<Button
-							variant="secondary"
+							variant="soft"
+							tone="gray"
 							onClick={() => setShowAddPackageModal(false)}
 						>
 							Cancel
 						</Button>
 						<Button
+							variant="solid"
+							tone="blue"
 							disabled={!selectedAvailablePackage}
 							onClick={handleAddPackage}
 						>
@@ -1355,11 +1367,9 @@ const ReleaseDetailPage = () => {
 															<span className="text-xs text-gray-500">
 																v{pkg.version}
 															</span>
-															<span
-																className={`px-2 py-0.5 text-xs font-medium rounded ${getArchColor(pkg.architecture)}`}
-															>
+															<Badge variant={getArchVariant(pkg.architecture)}>
 																{pkg.architecture}
-															</span>
+															</Badge>
 														</div>
 														<div className="text-xs text-gray-500 mt-1 truncate">
 															{pkg.file}
@@ -1396,170 +1406,156 @@ const ReleaseDetailPage = () => {
 			</Modal>
 
 			{/* Packages and Services Grid */}
-			<div className="grid grid-cols-2 gap-6">
+			<div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
 				{/* Packages Section */}
-				<div className="space-y-4">
-					<div className="flex items-center justify-between">
-						<div className="flex items-center space-x-2">
-							<Box className="w-5 h-5 text-gray-600" />
-							<h2 className="text-lg font-semibold text-gray-900">Packages</h2>
-							<span className="text-sm text-gray-500">({packages.length})</span>
-						</div>
-						{release?.draft && (
+				<SectionCard
+					icon={Box}
+					title="Packages"
+					count={packages.length}
+					theme={SECTION_THEMES.blue}
+					actions={
+						release?.draft ? (
 							<Button
+								variant="solid"
+								tone="blue"
+								size="sm"
 								icon={<Plus className="w-4 h-4" />}
 								onClick={openAddModal}
 							>
 								Add
 							</Button>
-						)}
-					</div>
-
-					<div className="bg-white rounded border border-gray-200 overflow-hidden">
-						{packagesLoading ? (
-							<div className="p-6 text-center">
-								<div className="text-gray-500 text-sm">Loading packages...</div>
-							</div>
-						) : packages.length === 0 ? (
-							<div className="p-6 text-center">
-								<Box className="w-8 h-8 text-gray-400 mx-auto mb-2" />
-								<p className="text-sm text-gray-500">No packages found</p>
-							</div>
-						) : (
-							<div className="divide-y divide-gray-200">
-								{packages.map((pkg) => {
-									const latestVersion = getLatestVersionForPackage(pkg);
-									const isUpgrading = upgradingPackages.has(pkg.id);
-									return (
-										<div
-											key={pkg.id}
-											className="p-4 hover:bg-gray-50 transition-colors"
-										>
-											<div className="flex items-center justify-between">
-												<div className="flex items-center space-x-3 min-w-0">
-													<div className="p-2 bg-gray-100 text-gray-600 rounded flex-shrink-0">
-														<PackageIcon className="w-4 h-4" />
-													</div>
-													<div className="min-w-0">
-														<div className="flex items-center space-x-2">
-															<span className="font-medium text-gray-900 truncate">
-																{pkg.name}
-															</span>
-															<span className="text-xs text-gray-500 flex-shrink-0">
-																v{pkg.version}
-															</span>
-															{release?.draft && latestVersion && (
-																<button
-																	onClick={() => handleUpgradePackage(pkg)}
-																	disabled={isUpgrading}
-																	className={`flex items-center space-x-0.5 px-1.5 py-0.5 text-[10px] font-medium rounded-md transition-all ${
-																		isUpgrading
-																			? "bg-gray-200 text-gray-400 cursor-not-allowed"
-																			: "bg-green-100 text-green-700 hover:bg-green-200 cursor-pointer"
-																	}`}
-																	title={`Upgrade to v${latestVersion.version}`}
-																>
-																	{isUpgrading ? (
-																		<div className="w-2.5 h-2.5 border-2 border-gray-400 border-t-transparent rounded-full animate-spin"></div>
-																	) : (
-																		<>
-																			<ArrowUp className="w-2.5 h-2.5" />
-																			<span>v{latestVersion.version}</span>
-																		</>
-																	)}
-																</button>
-															)}
-														</div>
-													</div>
-												</div>
-												{release?.draft && (
-													<div className="flex items-center space-x-1 flex-shrink-0">
-														<IconButton
-															icon={<ChevronsUpDown className="w-4 h-4" />}
-															onClick={() => openReplaceModal(pkg)}
-															title="Select different version"
-														/>
-														<IconButton
-															icon={<Trash2 className="w-4 h-4" />}
-															onClick={() => handleDeletePackage(pkg.id)}
-															className="hover:text-red-600 hover:bg-red-50"
-															title="Remove package"
-														/>
-													</div>
+						) : undefined
+					}
+				>
+					{packagesLoading ? (
+						<div className="p-6 text-center">
+							<div className="text-gray-500 text-sm">Loading packages...</div>
+						</div>
+					) : packages.length === 0 ? (
+						<div className="p-6 text-center">
+							<Box className="w-8 h-8 text-gray-400 mx-auto mb-2" />
+							<p className="text-sm text-gray-500">No packages found</p>
+						</div>
+					) : (
+						packages.map((pkg) => {
+							const latestVersion = getLatestVersionForPackage(pkg);
+							const isUpgrading = upgradingPackages.has(pkg.id);
+							return (
+								<ListRow key={pkg.id}>
+									<div className="flex items-center space-x-3 min-w-0">
+										<div className="p-2 bg-gray-100 text-gray-600 rounded flex-shrink-0">
+											<PackageIcon className="w-4 h-4" />
+										</div>
+										<div className="min-w-0">
+											<div className="flex items-center space-x-2">
+												<span className="font-medium text-gray-900 truncate">
+													{pkg.name}
+												</span>
+												<span className="text-xs text-gray-500 flex-shrink-0">
+													v{pkg.version}
+												</span>
+												{release?.draft && latestVersion && (
+													<button
+														onClick={() => handleUpgradePackage(pkg)}
+														disabled={isUpgrading}
+														className={`flex items-center space-x-0.5 px-1.5 py-0.5 text-[10px] font-medium rounded-md transition-all ${
+															isUpgrading
+																? "bg-gray-200 text-gray-400 cursor-not-allowed"
+																: "bg-green-100 text-green-700 hover:bg-green-200 cursor-pointer"
+														}`}
+														title={`Upgrade to v${latestVersion.version}`}
+													>
+														{isUpgrading ? (
+															<div className="w-2.5 h-2.5 border-2 border-gray-400 border-t-transparent rounded-full animate-spin"></div>
+														) : (
+															<>
+																<ArrowUp className="w-2.5 h-2.5" />
+																<span>v{latestVersion.version}</span>
+															</>
+														)}
+													</button>
 												)}
 											</div>
 										</div>
-									);
-								})}
-							</div>
-						)}
-					</div>
-				</div>
+									</div>
+									{release?.draft && (
+										<div className="flex items-center space-x-1 flex-shrink-0">
+											<Button
+												variant="ghost"
+												tone="gray"
+												icon={<ChevronsUpDown className="w-4 h-4" />}
+												onClick={() => openReplaceModal(pkg)}
+												title="Select different version"
+											/>
+											<Button
+												variant="ghost"
+												tone="red"
+												icon={<Trash2 className="w-4 h-4" />}
+												onClick={() => handleDeletePackage(pkg.id)}
+												title="Remove package"
+											/>
+										</div>
+									)}
+								</ListRow>
+							);
+						})
+					)}
+				</SectionCard>
 
 				{/* Services Section */}
-				<div className="space-y-4">
-					<div className="flex items-center space-x-2">
-						<Cog className="w-5 h-5 text-gray-600" />
-						<h2 className="text-lg font-semibold text-gray-900">Services</h2>
-						<span className="text-sm text-gray-500">({services.length})</span>
-					</div>
-
-					<div className="bg-white rounded border border-gray-200 overflow-hidden">
-						{servicesLoading ? (
-							<div className="p-6 text-center">
-								<div className="text-gray-500 text-sm">Loading services...</div>
-							</div>
-						) : services.length === 0 ? (
-							<div className="p-6 text-center">
-								<Cog className="w-8 h-8 text-gray-400 mx-auto mb-2" />
-								<p className="text-sm text-gray-500">No services found</p>
-								<p className="text-xs text-gray-400 mt-1">
-									Extracted from .deb packages
-								</p>
-							</div>
-						) : (
-							<div className="divide-y divide-gray-200">
-								{services.map((service) => {
-									const packageName = getPackageNameForService(
-										service.package_id,
-									);
-									return (
-										<div
-											key={service.id}
-											className="p-4 hover:bg-gray-50 transition-colors"
-										>
-											<div className="flex items-center space-x-3">
-												<div className="p-2 bg-purple-100 text-purple-600 rounded flex-shrink-0">
-													<Cog className="w-4 h-4" />
-												</div>
-												<div className="min-w-0">
-													<div className="flex items-center space-x-2">
-														<span className="font-medium text-gray-900 truncate">
-															{service.service_name}
-														</span>
-														{service.watchdog_sec && (
-															<span className="flex items-center space-x-1 px-2 py-0.5 text-xs font-medium bg-blue-100 text-blue-700 rounded-full flex-shrink-0">
-																<Clock className="w-3 h-3" />
-																<span>{service.watchdog_sec}s</span>
-															</span>
-														)}
-													</div>
-													{packageName && (
-														<p className="text-xs text-gray-500 mt-1">
-															From: {packageName}
-														</p>
-													)}
-												</div>
-											</div>
+				<SectionCard
+					icon={Cog}
+					title="Services"
+					count={services.length}
+					theme={SECTION_THEMES.purple}
+				>
+					{servicesLoading ? (
+						<div className="p-6 text-center">
+							<div className="text-gray-500 text-sm">Loading services...</div>
+						</div>
+					) : services.length === 0 ? (
+						<div className="p-6 text-center">
+							<Cog className="w-8 h-8 text-gray-400 mx-auto mb-2" />
+							<p className="text-sm text-gray-500">No services found</p>
+							<p className="text-xs text-gray-400 mt-1">
+								Extracted from .deb packages
+							</p>
+						</div>
+					) : (
+						services.map((service) => {
+							const packageName = getPackageNameForService(service.package_id);
+							return (
+								<ListRow key={service.id}>
+									<div className="flex items-center space-x-3 min-w-0">
+										<div className="p-2 bg-purple-100 text-purple-600 rounded flex-shrink-0">
+											<Cog className="w-4 h-4" />
 										</div>
-									);
-								})}
-							</div>
-						)}
-					</div>
-				</div>
+										<div className="min-w-0">
+											<div className="flex items-center space-x-2">
+												<span className="font-medium text-gray-900 truncate">
+													{service.service_name}
+												</span>
+												{service.watchdog_sec && (
+													<span className="flex items-center space-x-1 px-2 py-0.5 text-xs font-medium bg-blue-100 text-blue-700 rounded-full flex-shrink-0">
+														<Clock className="w-3 h-3" />
+														<span>{service.watchdog_sec}s</span>
+													</span>
+												)}
+											</div>
+											{packageName && (
+												<p className="text-xs text-gray-500 mt-1">
+													From: {packageName}
+												</p>
+											)}
+										</div>
+									</div>
+								</ListRow>
+							);
+						})
+					)}
+				</SectionCard>
 			</div>
-		</div>
+		</PageContainer>
 	);
 };
 

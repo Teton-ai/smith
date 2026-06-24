@@ -4,6 +4,8 @@ use crate::middlewares::{
 };
 use sqlx::PgPool;
 
+pub mod route;
+
 #[derive(Clone, Debug)]
 pub struct CurrentUser {
     pub user_id: i32,

@@ -1,25 +1,21 @@
 "use client";
 
-import { AlertTriangle, Loader2, Play, Tag } from "lucide-react";
+import { AlertTriangle, Loader2, Play } from "lucide-react";
+import { useCallback, useState } from "react";
+import type { Device } from "@/app/api-client";
 import { Button } from "@/app/components/button";
 import { Modal } from "@/app/components/modal";
 import {
 	type DongleInfo,
 	useOnlineDevicesDongleCheck,
+	useStartExtendedTest,
 } from "../hooks/useExtendedTest";
+import DeviceSelector, { type SelectionMode } from "./DeviceSelector";
 
 interface StartTestModalProps {
 	isOpen: boolean;
 	onClose: () => void;
-	onStart: () => void;
-	isPending: boolean;
-	isError: boolean;
-	durationMinutes: number;
-	onDurationChange: (minutes: number) => void;
-	// Selection from landing page
-	selectedLabels?: string[];
-	selectedDeviceCount?: number;
-	selectionMode?: "labels" | "devices";
+	onStarted: (sessionId: string) => void;
 }
 
 function estimateDataUsageMB(durationMinutes: number): string {
@@ -74,19 +70,49 @@ function DongleWarning({
 export default function StartTestModal({
 	isOpen,
 	onClose,
-	onStart,
-	isPending,
-	isError,
-	durationMinutes,
-	onDurationChange,
-	selectedLabels = [],
-	selectedDeviceCount = 0,
-	selectionMode = "labels",
+	onStarted,
 }: StartTestModalProps) {
+	const [selectionMode, setSelectionMode] = useState<SelectionMode>("labels");
+	const [selectedLabels, setSelectedLabels] = useState<string[]>([]);
+	const [selectedDeviceIds, setSelectedDeviceIds] = useState<Set<number>>(
+		new Set(),
+	);
+	const [resolvedDevices, setResolvedDevices] = useState<Device[]>([]);
+	const [durationMinutes, setDurationMinutes] = useState(3);
+
+	const startTestMutation = useStartExtendedTest();
 	const { data: dongleInfo, isLoading: dongleCheckLoading } =
 		useOnlineDevicesDongleCheck();
 
+	const handleDevicesResolved = useCallback((devices: Device[]) => {
+		setResolvedDevices(devices);
+	}, []);
+
+	const hasSelection =
+		selectionMode === "labels"
+			? selectedLabels.length > 0
+			: resolvedDevices.length > 0;
+
 	const hasDongleDevices = dongleInfo && dongleInfo.dongleDevices.length > 0;
+
+	const handleStart = async () => {
+		const labelFilter =
+			selectionMode === "labels" ? selectedLabels.join(",") : "";
+		const serialNumbers =
+			selectionMode === "devices"
+				? resolvedDevices.map((d) => d.serial_number)
+				: undefined;
+		try {
+			const result = await startTestMutation.mutateAsync({
+				label_filter: labelFilter,
+				serial_numbers: serialNumbers,
+				duration_minutes: durationMinutes,
+			});
+			onStarted(result.session_id);
+		} catch (error) {
+			console.error("Failed to start test:", error);
+		}
+	};
 
 	const footer = (
 		<>
@@ -94,13 +120,17 @@ export default function StartTestModal({
 				Cancel
 			</Button>
 			<Button
-				onClick={onStart}
-				disabled={isPending || dongleCheckLoading}
-				loading={isPending}
+				onClick={handleStart}
+				disabled={
+					startTestMutation.isPending || dongleCheckLoading || !hasSelection
+				}
+				loading={startTestMutation.isPending}
 				variant={hasDongleDevices ? "warning" : "primary"}
-				icon={isPending ? undefined : <Play className="w-4 h-4" />}
+				icon={
+					startTestMutation.isPending ? undefined : <Play className="w-4 h-4" />
+				}
 			>
-				{isPending
+				{startTestMutation.isPending
 					? "Starting..."
 					: hasDongleDevices
 						? "Start Anyway"
@@ -113,50 +143,29 @@ export default function StartTestModal({
 		<Modal
 			open={isOpen}
 			onClose={onClose}
-			title="Start Network Analysis"
-			width="w-[520px]"
+			title="Start Network Test"
+			width="w-[560px]"
 			footer={footer}
 		>
 			<div className="space-y-4">
 				{/* Info Banner */}
 				<div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
 					<p className="text-sm text-blue-800">
-						This will run an extended network speed test on all online devices
-						matching your label filter to measure network performance under
-						load.
+						This runs an extended network speed test on the selected online
+						devices to measure network performance under load.
 					</p>
 				</div>
 
-				{/* Selected Devices Display */}
-				<div>
-					<label className="block text-sm font-medium text-gray-700 mb-2">
-						<div className="flex items-center space-x-2">
-							<Tag className="w-4 h-4" />
-							<span>Target Devices</span>
-						</div>
-					</label>
-					<div className="px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg">
-						{selectionMode === "labels" && selectedLabels.length > 0 ? (
-							<div className="flex flex-wrap gap-2">
-								{selectedLabels.map((label) => (
-									<span
-										key={label}
-										className="inline-flex items-center px-2 py-1 rounded-full text-sm bg-blue-100 text-blue-800"
-									>
-										{label}
-									</span>
-								))}
-							</div>
-						) : selectionMode === "devices" && selectedDeviceCount > 0 ? (
-							<p className="text-sm text-gray-900">
-								{selectedDeviceCount} device
-								{selectedDeviceCount !== 1 ? "s" : ""} selected
-							</p>
-						) : (
-							<p className="text-sm text-gray-500">All online devices</p>
-						)}
-					</div>
-				</div>
+				{/* Device Selection */}
+				<DeviceSelector
+					mode={selectionMode}
+					onModeChange={setSelectionMode}
+					selectedLabels={selectedLabels}
+					onLabelsChange={setSelectedLabels}
+					selectedDeviceIds={selectedDeviceIds}
+					onDeviceIdsChange={setSelectedDeviceIds}
+					onDevicesResolved={handleDevicesResolved}
+				/>
 
 				{/* Dongle Warning */}
 				{dongleCheckLoading ? (
@@ -180,7 +189,7 @@ export default function StartTestModal({
 						{[3, 5, 8].map((mins) => (
 							<Button
 								key={mins}
-								onClick={() => onDurationChange(mins)}
+								onClick={() => setDurationMinutes(mins)}
 								variant={durationMinutes === mins ? "primary" : "secondary"}
 								className="flex-1"
 							>
@@ -195,7 +204,7 @@ export default function StartTestModal({
 				</div>
 
 				{/* Error Message */}
-				{isError && (
+				{startTestMutation.isError && (
 					<div className="bg-red-50 border border-red-200 rounded-lg p-3">
 						<p className="text-sm text-red-800">
 							Failed to start test. Make sure there are online devices
