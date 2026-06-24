@@ -1,6 +1,6 @@
 use crate::middlewares::{
     authentication::Auth0UserInfo,
-    authorization::{self, AuthorizationConfig},
+    authorization::{self, AccountsConfig, AuthorizationConfig},
 };
 use sqlx::PgPool;
 
@@ -90,6 +90,84 @@ impl CurrentUser {
         .id;
 
         Ok(user_id)
+    }
+
+    /// Makes the database match the accounts file. Authoritative: the file is the
+    /// sole source of elevated roles, so every non-`default` assignment is dropped
+    /// and then re-granted from the file. A user removed from the file is thereby
+    /// demoted on the next startup. `default` is never touched — it is the
+    /// baseline assigned to every user by the `auth.users` insert trigger.
+    ///
+    /// A listed email with no user row yet (the user has not logged in) is simply
+    /// not matched; `apply_file_role` covers them on first login.
+    pub async fn reconcile_roles(
+        pg_pool: &PgPool,
+        authorization: &AuthorizationConfig,
+        accounts: &AccountsConfig,
+    ) -> Result<(), sqlx::Error> {
+        let mut tx = pg_pool.begin().await?;
+
+        sqlx::query!("DELETE FROM auth.users_roles WHERE role <> 'default'")
+            .execute(&mut *tx)
+            .await?;
+
+        for (email, role) in &accounts.accounts {
+            // `default` is already held by everyone; an undefined role would grant
+            // no permissions, so skip it rather than assign a dead row.
+            if role == "default" || authorization.permissions_for_role(role).is_empty() {
+                continue;
+            }
+            sqlx::query!(
+                r#"
+                    INSERT INTO auth.users_roles (user_id, role)
+                    SELECT id, $2 FROM auth.users WHERE lower(email) = lower($1)
+                    ON CONFLICT (user_id, role) DO NOTHING
+                "#,
+                email,
+                role,
+            )
+            .execute(&mut *tx)
+            .await?;
+        }
+
+        tx.commit().await?;
+        Ok(())
+    }
+
+    /// Grants a user the role assigned to their email in the accounts file, if
+    /// any. The startup `reconcile_roles` owns revocation; this only closes the
+    /// gap where a listed user logs in for the first time between deploys, so
+    /// their row did not exist when reconciliation ran. No-op when the email is
+    /// not listed.
+    pub async fn apply_file_role(
+        pg_pool: &PgPool,
+        authorization: &AuthorizationConfig,
+        accounts: &AccountsConfig,
+        user_id: i32,
+        email: &str,
+    ) -> Result<(), sqlx::Error> {
+        let Some(role) = accounts
+            .accounts
+            .iter()
+            .find_map(|(listed, role)| listed.eq_ignore_ascii_case(email).then_some(role))
+        else {
+            return Ok(());
+        };
+        if role == "default" || authorization.permissions_for_role(role).is_empty() {
+            return Ok(());
+        }
+        sqlx::query!(
+            r#"
+                INSERT INTO auth.users_roles (user_id, role)
+                VALUES ($1, $2)
+                ON CONFLICT (user_id, role) DO NOTHING
+            "#,
+            user_id,
+            role,
+        )
+        .execute(pg_pool)
+        .await?;
+        Ok(())
     }
 
     pub async fn build(
