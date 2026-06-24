@@ -1,0 +1,52 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT\n            d.id,\n            d.name,\n            d.description,\n            d.architecture,\n            d.archived,\n            (\n                SELECT COUNT(*)\n                FROM release_packages rp\n                JOIN release r ON r.id = rp.release_id\n                WHERE r.distribution_id = d.id\n                  AND r.version = '1.0.0'\n            )::int AS num_packages\n        FROM distribution d\n        WHERE $1 = true OR d.archived = false\n        ORDER BY d.name",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "description",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "architecture",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "archived",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 5,
+        "name": "num_packages",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Bool"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      false,
+      false,
+      null
+    ]
+  },
+  "hash": "99c978acfe47b994b5632d657354a2f62310879712876b47483cad40e9e51fbe"
+}

@@ -251,6 +251,7 @@ async fn start_main_server(config: &'static Config, authorization: Authorization
             distribution::route::get_distribution_by_id,
             distribution::route::delete_distribution_by_id
         ))
+        .routes(routes!(distribution::route::update_distribution_archived))
         .routes(routes!(
             distribution::route::get_distribution_releases,
             distribution::route::create_distribution_release,

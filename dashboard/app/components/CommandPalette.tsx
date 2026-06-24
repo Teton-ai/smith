@@ -237,7 +237,7 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
 		{ query: { enabled: open && showDeviceResults } },
 	);
 
-	const { data: distributions = [] } = useGetDistributions({
+	const { data: distributions = [] } = useGetDistributions(undefined, {
 		query: { enabled: open && step.kind === "root" },
 	});
 

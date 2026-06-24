@@ -3,7 +3,7 @@ use crate::package::extract_services_from_deb;
 use crate::release::get_latest_distribution_release;
 use crate::storage::Storage;
 use crate::user::CurrentUser;
-use axum::extract::Path;
+use axum::extract::{Path, Query};
 use axum::http::StatusCode;
 use axum::{Extension, Json};
 use models::distribution::{Distribution, NewDistributionRelease};
@@ -14,9 +14,17 @@ use tracing::{error, warn};
 
 const DISTRIBUTIONS_TAG: &str = "distributions";
 
+#[derive(Debug, Deserialize, utoipa::IntoParams)]
+pub struct DistributionsFilter {
+    /// Include archived distributions in the result (defaults to false).
+    #[serde(default)]
+    pub include_archived: bool,
+}
+
 #[utoipa::path(
     get,
     path = "/distributions",
+    params(DistributionsFilter),
     responses(
         (status = StatusCode::OK, description = "List of distributions retrieved successfully", body = Vec<Distribution>),
         (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to retrieve distributions"),
@@ -28,6 +36,7 @@ const DISTRIBUTIONS_TAG: &str = "distributions";
 )]
 pub async fn get_distributions(
     Extension(state): Extension<State>,
+    Query(filter): Query<DistributionsFilter>,
 ) -> axum::response::Result<Json<Vec<Distribution>>, StatusCode> {
     let distributions = sqlx::query_as!(
         Distribution,
@@ -36,6 +45,7 @@ pub async fn get_distributions(
             d.name,
             d.description,
             d.architecture,
+            d.archived,
             (
                 SELECT COUNT(*)
                 FROM release_packages rp
@@ -44,7 +54,9 @@ pub async fn get_distributions(
                   AND r.version = '1.0.0'
             )::int AS num_packages
         FROM distribution d
-        ORDER BY d.name"#
+        WHERE $1 = true OR d.archived = false
+        ORDER BY d.name"#,
+        filter.include_archived
     )
     .fetch_all(&state.pg_pool)
     .await
@@ -133,6 +145,7 @@ pub async fn get_distribution_by_id(
             d.name,
             d.description,
             d.architecture,
+            d.archived,
             (
                 SELECT COUNT(*)
                 FROM release_packages rp
@@ -403,6 +416,47 @@ pub async fn delete_distribution_by_id(
             error!("Failed to delete distribution {err}");
             StatusCode::INTERNAL_SERVER_ERROR
         })?;
+
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Debug, Deserialize, utoipa::ToSchema)]
+pub struct UpdateDistributionArchived {
+    pub archived: bool,
+}
+
+#[utoipa::path(
+    patch,
+    path = "/distributions/{distribution_id}/archived",
+    params(
+        ("distribution_id" = i32, Path),
+    ),
+    request_body = UpdateDistributionArchived,
+    responses(
+        (status = StatusCode::NO_CONTENT, description = "Successfully updated the distribution archived state"),
+        (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to update distribution archived state"),
+    ),
+    security(
+        ("auth_token" = [])
+    ),
+    tag = DISTRIBUTIONS_TAG
+)]
+pub async fn update_distribution_archived(
+    Path(distribution_id): Path<i32>,
+    Extension(state): Extension<State>,
+    Json(payload): Json<UpdateDistributionArchived>,
+) -> axum::response::Result<StatusCode, StatusCode> {
+    sqlx::query!(
+        r#"UPDATE distribution SET archived = $1 WHERE id = $2"#,
+        payload.archived,
+        distribution_id
+    )
+    .execute(&state.pg_pool)
+    .await
+    .map_err(|err| {
+        error!("Failed to update distribution archived state {err}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
 
     Ok(StatusCode::NO_CONTENT)
 }
