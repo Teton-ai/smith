@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT\n            d.id,\n            d.name,\n            d.description,\n            d.architecture,\n            (\n                SELECT COUNT(*)\n                FROM release_packages rp\n                JOIN release r ON r.id = rp.release_id\n                WHERE r.distribution_id = d.id\n                  AND r.version = '1.0.0'\n            )::int AS num_packages\n        FROM distribution d\n        WHERE d.id = $1",
+  "query": "SELECT\n            d.id,\n            d.name,\n            d.description,\n            d.architecture,\n            d.archived,\n            (\n                SELECT COUNT(*)\n                FROM release_packages rp\n                JOIN release r ON r.id = rp.release_id\n                WHERE r.distribution_id = d.id\n                  AND r.version = '1.0.0'\n            )::int AS num_packages\n        FROM distribution d\n        WHERE d.id = $1",
   "describe": {
     "columns": [
       {
@@ -25,6 +25,11 @@
       },
       {
         "ordinal": 4,
+        "name": "archived",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 5,
         "name": "num_packages",
         "type_info": "Int4"
       }
@@ -39,8 +44,9 @@
       false,
       true,
       false,
+      false,
       null
     ]
   },
-  "hash": "d05b91ffe59edc789dc787b57018fa93a78a410353241ee31796453a3754ab18"
+  "hash": "e3e22fca9e516126c25dc6983eadfd67744451f189a01e3150091d755a358646"
 }

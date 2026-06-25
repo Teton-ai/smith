@@ -388,12 +388,20 @@ export interface DeviceServiceHealth {
 }
 
 export interface Distribution {
+	archived: boolean;
 	architecture: string;
 	description?: string;
 	id: number;
 	name: string;
 	num_packages?: number;
 }
+
+export type GetDistributionsParams = {
+	/**
+	 * Include archived distributions in the result (defaults to false).
+	 */
+	include_archived?: boolean;
+};
 
 export interface DistributionRolloutStats {
 	distribution_id: number;
@@ -8269,19 +8277,28 @@ export const useGetDistributionsHook = () => {
 	const getDistributions = useClientMutator<Distribution[]>();
 
 	return useCallback(
-		(signal?: AbortSignal) => {
-			return getDistributions({ url: `/distributions`, method: "GET", signal });
+		(params?: GetDistributionsParams, signal?: AbortSignal) => {
+			return getDistributions({
+				url: `/distributions`,
+				method: "GET",
+				params,
+				signal,
+			});
 		},
 		[getDistributions],
 	);
 };
 
-export const getGetDistributionsInfiniteQueryKey = () => {
-	return ["infinite", `/distributions`] as const;
+export const getGetDistributionsInfiniteQueryKey = (
+	params?: GetDistributionsParams,
+) => {
+	return ["infinite", `/distributions`, ...(params ? [params] : [])] as const;
 };
 
-export const getGetDistributionsQueryKey = () => {
-	return [`/distributions`] as const;
+export const getGetDistributionsQueryKey = (
+	params?: GetDistributionsParams,
+) => {
+	return [`/distributions`, ...(params ? [params] : [])] as const;
 };
 
 export const useGetDistributionsInfiniteQueryOptions = <
@@ -8289,25 +8306,28 @@ export const useGetDistributionsInfiniteQueryOptions = <
 		Awaited<ReturnType<ReturnType<typeof useGetDistributionsHook>>>
 	>,
 	TError = void,
->(options?: {
-	query?: Partial<
-		UseInfiniteQueryOptions<
-			Awaited<ReturnType<ReturnType<typeof useGetDistributionsHook>>>,
-			TError,
-			TData
-		>
-	>;
-}) => {
+>(
+	params?: GetDistributionsParams,
+	options?: {
+		query?: Partial<
+			UseInfiniteQueryOptions<
+				Awaited<ReturnType<ReturnType<typeof useGetDistributionsHook>>>,
+				TError,
+				TData
+			>
+		>;
+	},
+) => {
 	const { query: queryOptions } = options ?? {};
 
 	const queryKey =
-		queryOptions?.queryKey ?? getGetDistributionsInfiniteQueryKey();
+		queryOptions?.queryKey ?? getGetDistributionsInfiniteQueryKey(params);
 
 	const getDistributions = useGetDistributionsHook();
 
 	const queryFn: QueryFunction<
 		Awaited<ReturnType<ReturnType<typeof useGetDistributionsHook>>>
-	> = ({ signal }) => getDistributions(signal);
+	> = ({ signal }) => getDistributions(params, signal);
 
 	return { queryKey, queryFn, ...queryOptions } as UseInfiniteQueryOptions<
 		Awaited<ReturnType<ReturnType<typeof useGetDistributionsHook>>>,
@@ -8414,7 +8434,10 @@ export function useGetDistributionsInfinite<
 ): UseInfiniteQueryResult<TData, TError> & {
 	queryKey: DataTag<QueryKey, TData, TError>;
 } {
-	const queryOptions = useGetDistributionsInfiniteQueryOptions(options);
+	const queryOptions = useGetDistributionsInfiniteQueryOptions(
+		undefined,
+		options,
+	);
 
 	const query = useInfiniteQuery(
 		queryOptions,
@@ -8429,24 +8452,28 @@ export function useGetDistributionsInfinite<
 export const useGetDistributionsQueryOptions = <
 	TData = Awaited<ReturnType<ReturnType<typeof useGetDistributionsHook>>>,
 	TError = void,
->(options?: {
-	query?: Partial<
-		UseQueryOptions<
-			Awaited<ReturnType<ReturnType<typeof useGetDistributionsHook>>>,
-			TError,
-			TData
-		>
-	>;
-}) => {
+>(
+	params?: GetDistributionsParams,
+	options?: {
+		query?: Partial<
+			UseQueryOptions<
+				Awaited<ReturnType<ReturnType<typeof useGetDistributionsHook>>>,
+				TError,
+				TData
+			>
+		>;
+	},
+) => {
 	const { query: queryOptions } = options ?? {};
 
-	const queryKey = queryOptions?.queryKey ?? getGetDistributionsQueryKey();
+	const queryKey =
+		queryOptions?.queryKey ?? getGetDistributionsQueryKey(params);
 
 	const getDistributions = useGetDistributionsHook();
 
 	const queryFn: QueryFunction<
 		Awaited<ReturnType<ReturnType<typeof useGetDistributionsHook>>>
-	> = ({ signal }) => getDistributions(signal);
+	> = ({ signal }) => getDistributions(params, signal);
 
 	return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
 		Awaited<ReturnType<ReturnType<typeof useGetDistributionsHook>>>,
@@ -8464,6 +8491,7 @@ export function useGetDistributions<
 	TData = Awaited<ReturnType<ReturnType<typeof useGetDistributionsHook>>>,
 	TError = void,
 >(
+	params: undefined | GetDistributionsParams,
 	options: {
 		query: Partial<
 			UseQueryOptions<
@@ -8489,6 +8517,7 @@ export function useGetDistributions<
 	TData = Awaited<ReturnType<ReturnType<typeof useGetDistributionsHook>>>,
 	TError = void,
 >(
+	params: undefined | GetDistributionsParams,
 	options?: {
 		query?: Partial<
 			UseQueryOptions<
@@ -8514,6 +8543,7 @@ export function useGetDistributions<
 	TData = Awaited<ReturnType<ReturnType<typeof useGetDistributionsHook>>>,
 	TError = void,
 >(
+	params?: GetDistributionsParams,
 	options?: {
 		query?: Partial<
 			UseQueryOptions<
@@ -8532,6 +8562,7 @@ export function useGetDistributions<
 	TData = Awaited<ReturnType<ReturnType<typeof useGetDistributionsHook>>>,
 	TError = void,
 >(
+	params?: GetDistributionsParams,
 	options?: {
 		query?: Partial<
 			UseQueryOptions<
@@ -8545,7 +8576,7 @@ export function useGetDistributions<
 ): UseQueryResult<TData, TError> & {
 	queryKey: DataTag<QueryKey, TData, TError>;
 } {
-	const queryOptions = useGetDistributionsQueryOptions(options);
+	const queryOptions = useGetDistributionsQueryOptions(params, options);
 
 	const query = useQuery(queryOptions, queryClient) as UseQueryResult<
 		TData,

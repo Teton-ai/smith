@@ -7,6 +7,7 @@ pub struct Distribution {
     pub description: Option<String>,
     pub architecture: String,
     pub num_packages: Option<i32>,
+    pub archived: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize, utoipa::ToSchema)]
