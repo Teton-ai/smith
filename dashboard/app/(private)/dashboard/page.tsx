@@ -1,4 +1,16 @@
 import {
+	Card,
+	CountryFlag,
+	type IconComponent,
+	ListRow,
+	PageContainer,
+	SECTION_THEMES,
+	SectionCard,
+	type SectionTheme,
+	StatCard,
+	ViewAllFooter,
+} from "@teton/smith-ui";
+import {
 	Activity,
 	AlertTriangle,
 	CheckCircle,
@@ -22,18 +34,6 @@ import {
 } from "recharts";
 import { Modal } from "@/app/components/modal";
 import NetworkQualityIndicator from "@/app/components/NetworkQualityIndicator";
-import {
-	Card,
-	CountryFlag,
-	type IconComponent,
-	ListRow,
-	PageContainer,
-	SECTION_THEMES,
-	SectionCard,
-	type SectionTheme,
-	StatCard,
-	ViewAllFooter,
-} from "@/app/components/ui";
 import { useConfig } from "@/app/hooks/config";
 import {
 	type Device,

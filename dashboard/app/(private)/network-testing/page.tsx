@@ -1,7 +1,7 @@
+import { Button, SearchInput } from "@teton/smith-ui";
 import { Activity, ArrowLeft, Loader2, Plus } from "lucide-react";
 import { useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
-import { Button, SearchInput } from "@/app/components/ui";
 import DepartmentOverview from "./components/DepartmentOverview";
 import DeviceInspector from "./components/DeviceInspector";
 import DeviceTable from "./components/DeviceTable";

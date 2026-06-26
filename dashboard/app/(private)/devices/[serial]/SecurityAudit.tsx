@@ -1,3 +1,4 @@
+import { Button, Panel, SECTION_THEMES } from "@teton/smith-ui";
 import {
 	CheckCircle2,
 	MinusCircle,
@@ -6,7 +7,6 @@ import {
 	XCircle,
 } from "lucide-react";
 import { useIssueCommandsToDevices } from "@/app/api-client";
-import { Button, Panel, SECTION_THEMES } from "@/app/components/ui";
 import { type DeviceAudit, useDeviceAudit } from "./audit/useDeviceAudit";
 
 /** Renders a yes / no / unknown status pill for a single audit check. */

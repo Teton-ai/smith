@@ -1,4 +1,7 @@
 **/target/
+node_modules
+dist
+*.tsbuildinfo
 build-info
 *.tar.gz
 magic.toml

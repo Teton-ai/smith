@@ -1,4 +1,4 @@
-// Design system primitives. Import from "@/app/components/ui".
+// Design system primitives. Import from "@teton/smith-ui".
 export { BADGE_COLORS, Badge, type BadgeVariant, LabelChip } from "./badge";
 export {
 	Button,

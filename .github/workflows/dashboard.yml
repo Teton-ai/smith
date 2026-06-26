@@ -42,7 +42,8 @@ jobs:
       - name: Docker Build
         uses: docker/build-push-action@v5
         with:
-          context: ./dashboard
+          context: .
+          file: dashboard/Dockerfile
           push: true
           tags: |
             tetonai/smith-dashboard

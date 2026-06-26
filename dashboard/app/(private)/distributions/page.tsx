@@ -1,4 +1,13 @@
 import {
+	BADGE_COLORS,
+	Badge,
+	type BadgeVariant,
+	Card,
+	ListRow,
+	PageContainer,
+	SearchInput,
+} from "@teton/smith-ui";
+import {
 	Check,
 	ChevronDown,
 	ChevronRight,
@@ -9,15 +18,6 @@ import {
 	Package,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import {
-	BADGE_COLORS,
-	Badge,
-	type BadgeVariant,
-	Card,
-	ListRow,
-	PageContainer,
-	SearchInput,
-} from "@/app/components/ui";
 import {
 	type DistributionRolloutStats,
 	useGetDistributionRollouts,

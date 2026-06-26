@@ -1,4 +1,14 @@
 import {
+	Badge,
+	Card,
+	CountryFlag,
+	InfoRow,
+	LabelChip,
+	PageContainer,
+	Panel,
+	SECTION_THEMES,
+} from "@teton/smith-ui";
+import {
 	Cpu,
 	GitBranch,
 	Globe,
@@ -14,16 +24,6 @@ import {
 import { lazy, Suspense } from "react";
 import { Link, useParams } from "react-router";
 import { useGetDeviceInfo } from "@/app/api-client";
-import {
-	Badge,
-	Card,
-	CountryFlag,
-	InfoRow,
-	LabelChip,
-	PageContainer,
-	Panel,
-	SECTION_THEMES,
-} from "@/app/components/ui";
 import { DeviceDetailLayout } from "./DeviceDetailLayout";
 import DeviceVariables from "./DeviceVariables";
 import SecurityAudit from "./SecurityAudit";

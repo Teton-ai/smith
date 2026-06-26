@@ -1,7 +1,7 @@
+import { BackLink, TabNav } from "@teton/smith-ui";
 import type { ReactNode } from "react";
 import { useNavigate } from "react-router";
 import type { Device } from "@/app/api-client";
-import { BackLink, TabNav } from "@/app/components/ui";
 import DeviceHeader from "./DeviceHeader";
 
 export type DeviceTab = "overview" | "commands" | "services";

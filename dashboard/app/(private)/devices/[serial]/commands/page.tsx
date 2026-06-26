@@ -1,3 +1,10 @@
+import {
+	Badge,
+	type BadgeVariant,
+	Button,
+	Card,
+	ListRow,
+} from "@teton/smith-ui";
 import { Loader2, Send } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "react-router";
@@ -16,13 +23,6 @@ import {
 } from "@/app/api-client";
 import { useClientMutator } from "@/app/api-client-mutator";
 import { RelativeTime } from "@/app/components/RelativeTime";
-import {
-	Badge,
-	type BadgeVariant,
-	Button,
-	Card,
-	ListRow,
-} from "@/app/components/ui";
 import { DeviceDetailLayout } from "../DeviceDetailLayout";
 
 const PAGE_SIZE = 50;

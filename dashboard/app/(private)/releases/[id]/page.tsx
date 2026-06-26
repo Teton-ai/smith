@@ -1,5 +1,18 @@
 import { useQueryClient } from "@tanstack/react-query";
 import {
+	BackLink,
+	Badge,
+	type BadgeVariant,
+	Button,
+	Card,
+	ListRow,
+	PageContainer,
+	SECTION_THEMES,
+	SectionCard,
+	Toast,
+	type ToastState,
+} from "@teton/smith-ui";
+import {
 	AlertTriangle,
 	ArrowLeft,
 	ArrowUp,
@@ -41,19 +54,6 @@ import {
 import LabelAutocomplete from "@/app/components/LabelAutocomplete";
 import { Modal } from "@/app/components/modal";
 import { RelativeTime } from "@/app/components/RelativeTime";
-import {
-	BackLink,
-	Badge,
-	type BadgeVariant,
-	Button,
-	Card,
-	ListRow,
-	PageContainer,
-	SECTION_THEMES,
-	SectionCard,
-	Toast,
-	type ToastState,
-} from "@/app/components/ui";
 
 const getArchVariant = (architecture: string): BadgeVariant => {
 	switch (architecture.toLowerCase()) {
