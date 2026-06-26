@@ -56,7 +56,7 @@ pub async fn get_networks(
                     n.description,
                     n.password
                 FROM network n
-                JOIN device d ON n.id = d.network_id
+                JOIN device d ON n.id = d.current_network_id
                 WHERE d.serial_number = ANY($1)
                 "#,
                 &serials[..]

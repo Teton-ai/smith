@@ -65,28 +65,28 @@
       },
       {
         "ordinal": 12,
-        "name": "network_id",
-        "type_info": "Int4"
-      },
-      {
-        "ordinal": 13,
         "name": "modem_id",
         "type_info": "Int4"
       },
       {
-        "ordinal": 14,
+        "ordinal": 13,
         "name": "archived",
         "type_info": "Bool"
       },
       {
-        "ordinal": 15,
+        "ordinal": 14,
         "name": "ip_address_id",
         "type_info": "Int8"
       },
       {
-        "ordinal": 16,
+        "ordinal": 15,
         "name": "target_release_id_set_at",
         "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 16,
+        "name": "current_network_id",
+        "type_info": "Int4"
       },
       {
         "ordinal": 17,
@@ -113,8 +113,8 @@
       true,
       true,
       true,
-      true,
       false,
+      true,
       true,
       true,
       null
