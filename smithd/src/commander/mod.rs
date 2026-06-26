@@ -70,7 +70,6 @@ impl CommandQueueExecutor {
             } => tunnel::open_port(action.id, &self.handles.tunnel, port, user, pub_key).await,
             SafeCommandTx::CloseTunnel => tunnel::close_ssh(action.id, &self.handles.tunnel).await,
             SafeCommandTx::Upgrade => upgrade::upgrade(action.id, &self.handles.updater).await,
-            SafeCommandTx::UpdateNetwork { network } => network::execute(action.id, network).await,
             SafeCommandTx::DownloadOTA {
                 tools,
                 payload,
@@ -125,6 +124,14 @@ impl CommandQueueExecutor {
                     status: 0,
                 }
             }
+            // T6: replace with real handlers
+            SafeCommandTx::SetAuthorizedNetworks { .. }
+            | SafeCommandTx::ReportNMProfiles
+            | SafeCommandTx::WifiScan => SafeCommandResponse {
+                id: action.id,
+                command: SafeCommandRx::Pong,
+                status: -1,
+            },
         }
     }
 

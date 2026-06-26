@@ -1,6 +1,5 @@
 use crate::utils::schema::{
-    InterfaceType, Network, NetworkDetails, NetworkInfo, SafeCommandResponse, SafeCommandRx,
-    SpeedSample,
+    InterfaceType, NetworkDetails, NetworkInfo, SafeCommandResponse, SafeCommandRx, SpeedSample,
 };
 use anyhow::{Context, Result};
 use chrono::Utc;
@@ -11,107 +10,10 @@ use tokio::{
     time::{sleep, timeout},
 };
 
-pub(super) async fn execute(id: i32, network: Network) -> SafeCommandResponse {
-    let network_name = network.name;
-    let network_ssid = network.ssid.unwrap_or(network_name.clone());
+// T5: replaces this with execute_set_authorized_networks, execute_report_nm_profiles, execute_wifi_scan
 
-    // Initially attempt to connect to the network by network name. In case connecting
-    // to the WiFi fails, add a new connection and make another attempt after.
-    //
-    // Before adding a connection, delete any existing connections with the same name.
-    // This is done in order to cater use cases such as password changes.
-
-    // Try to connect to existing connection
-    let mut cmd = Command::new("nmcli");
-    cmd.arg("c").arg("up").arg(&network_name);
-
-    if let Ok(output) = execute_nmcli_command(cmd).await
-        && output.status.success()
-    {
-        let (status_code, response) = process_output(output);
-        return SafeCommandResponse {
-            id,
-            command: response,
-            status: status_code,
-        };
-    }
-    // Connection failed, delete old connection and create new one
-    // Delete existing connection (ignore errors if it doesn't exist)
-    let mut delete_cmd = Command::new("nmcli");
-    delete_cmd
-        .arg("connection")
-        .arg("delete")
-        .arg(&network_name);
-    let _ = execute_nmcli_command(delete_cmd).await;
-
-    // Add new connection
-    let mut add_cmd = Command::new("nmcli");
-    add_cmd.args([
-        "connection",
-        "add",
-        "type",
-        "wifi",
-        "con-name",
-        &network_name,
-        "ssid",
-        &network_ssid,
-        "autoconnect",
-        "yes",
-        "connection.autoconnect-priority",
-        "500",
-        "save",
-        "yes",
-    ]);
-
-    if let Some(password) = network.password {
-        add_cmd.args(["wifi-sec.key-mgmt", "wpa-psk", "wifi-sec.psk", &password]);
-    }
-
-    match execute_nmcli_command(add_cmd).await {
-        Ok(output) if output.status.success() => {
-            // Connection added successfully, now connect
-            let mut connect_cmd = Command::new("nmcli");
-            connect_cmd.args(["c", "up"]).arg(&network_name);
-
-            match execute_nmcli_command(connect_cmd).await {
-                Ok(output) => {
-                    let (status_code, response) = process_output(output);
-                    SafeCommandResponse {
-                        id,
-                        command: response,
-                        status: status_code,
-                    }
-                }
-                Err(e) => SafeCommandResponse {
-                    id,
-                    command: SafeCommandRx::WifiConnect {
-                        stdout: "".to_string(),
-                        stderr: format!("Error connecting after adding connection: {}", e),
-                    },
-                    status: -1,
-                },
-            }
-        }
-        Ok(output) => {
-            let (status_code, response) = process_output(output);
-            SafeCommandResponse {
-                id,
-                command: response,
-                status: status_code,
-            }
-        }
-        Err(e) => SafeCommandResponse {
-            id,
-            command: SafeCommandRx::WifiConnect {
-                stdout: "".to_string(),
-                stderr: format!("Error adding connection: {}", e),
-            },
-            status: -1,
-        },
-    }
-}
-
-async fn execute_nmcli_command(mut cmd: Command) -> Result<std::process::Output> {
+#[allow(dead_code)]
+pub(super) async fn execute_nmcli_command(mut cmd: Command) -> Result<std::process::Output> {
     let future = cmd.kill_on_drop(true).output();
 
     match timeout(Duration::from_secs(60), future).await {
@@ -120,6 +22,7 @@ async fn execute_nmcli_command(mut cmd: Command) -> Result<std::process::Output>
     }
 }
 
+#[allow(dead_code)]
 fn process_output(output: std::process::Output) -> (i32, SafeCommandRx) {
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
     let stderr = String::from_utf8_lossy(&output.stderr).to_string();

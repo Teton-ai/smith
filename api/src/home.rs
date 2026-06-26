@@ -2,11 +2,8 @@ use crate::device::Variable;
 use anyhow::Result;
 use serde_json::Value;
 use serde_json::json;
-use smith::utils::schema;
-use smith::utils::schema::SafeCommandTx::{UpdateNetwork, UpdateVariables};
-use smith::utils::schema::{
-    HomePost, NetworkType, SafeCommandRequest, SafeCommandRx, ServiceStatus,
-};
+use smith::utils::schema::SafeCommandTx::UpdateVariables;
+use smith::utils::schema::{HomePost, SafeCommandRequest, SafeCommandRx, ServiceStatus};
 use sqlx::PgPool;
 use tracing::debug;
 use tracing::error;
@@ -73,39 +70,7 @@ pub async fn save_responses(
                 .await?;
             }
             SafeCommandRx::GetNetwork => {
-                let network = sqlx::query_as!(
-                    schema::Network,
-                    r#"
-                        SELECT
-                            n.id,
-                            n.network_type::TEXT,
-                            n.is_network_hidden,
-                            n.ssid,
-                            n.name,
-                            n.description,
-                            n.password
-                        FROM network n
-                        JOIN device d ON n.id = d.network_id
-                        WHERE d.id = $1"#,
-                    &device_id
-                )
-                .fetch_optional(&mut *tx)
-                .await?;
-
-                if let Some(network) = network
-                    && network.network_type == NetworkType::Wifi
-                {
-                    add_commands(
-                        device_serial_number,
-                        vec![SafeCommandRequest {
-                            id: -4,
-                            command: UpdateNetwork { network },
-                            continue_on_error: false,
-                        }],
-                        pool,
-                    )
-                    .await?;
-                }
+                // T9: fetch device_authorized_network rows and queue SetAuthorizedNetworks
             }
             SafeCommandRx::UpdateSystemInfo { ref system_info } => {
                 sqlx::query!(
