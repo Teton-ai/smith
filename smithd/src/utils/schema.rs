@@ -103,6 +103,7 @@ pub enum SafeCommandRx {
     Upgraded,
     UpdateVariables,
     GetNetwork,
+    SetAuthorizedNetworks,
     ReportNMProfiles {
         profiles: Vec<NMProfile>,
     },

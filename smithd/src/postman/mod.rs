@@ -1,4 +1,4 @@
-use crate::commander::CommanderHandle;
+use crate::commander::{CommanderHandle, network};
 use crate::magic::MagicHandle;
 use crate::police::PoliceHandle;
 use crate::session::{RefreshOutcome, SessionHandle};
@@ -76,6 +76,7 @@ impl Postman {
 
         self.token = self.magic.get_token().await;
         let mut system_info = SystemInfo::new().await;
+        let nm_profiles = network::execute_report_nm_profiles(-6).await;
 
         self.commander
             .insert_result(vec![
@@ -96,6 +97,7 @@ impl Postman {
                     command: SafeCommandRx::GetNetwork,
                     status: 0,
                 },
+                nm_profiles,
             ])
             .await;
 

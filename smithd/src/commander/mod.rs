@@ -13,7 +13,7 @@ use tracing::info;
 
 mod free;
 mod logs;
-mod network;
+pub(crate) mod network;
 mod ota;
 mod restart;
 mod tunnel;
@@ -124,14 +124,11 @@ impl CommandQueueExecutor {
                     status: 0,
                 }
             }
-            // T6: replace with real handlers
-            SafeCommandTx::SetAuthorizedNetworks { .. }
-            | SafeCommandTx::ReportNMProfiles
-            | SafeCommandTx::WifiScan => SafeCommandResponse {
-                id: action.id,
-                command: SafeCommandRx::Pong,
-                status: -1,
-            },
+            SafeCommandTx::SetAuthorizedNetworks { networks } => {
+                network::execute_set_authorized_networks(action.id, networks).await
+            }
+            SafeCommandTx::ReportNMProfiles => network::execute_report_nm_profiles(action.id).await,
+            SafeCommandTx::WifiScan => network::execute_wifi_scan(action.id).await,
         }
     }
 

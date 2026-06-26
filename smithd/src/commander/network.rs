@@ -1,23 +1,188 @@
 use crate::utils::schema::{
-    InterfaceType, NMProfile, NetworkDetails, NetworkInfo, SafeCommandResponse, SafeCommandRx,
-    SpeedSample, WifiNetwork,
+    InterfaceType, NMProfile, Network, NetworkDetails, NetworkInfo, SafeCommandResponse,
+    SafeCommandRx, SpeedSample, WifiNetwork,
 };
 use anyhow::{Context, Result};
 use chrono::Utc;
 use reqwest::Client;
+use std::collections::HashSet;
 use std::time::{Duration, Instant};
 use tokio::{
     process::Command,
     time::{sleep, timeout},
 };
 
-// T5: adds execute_set_authorized_networks
-
 const NM_CONNECTION_FIELDS: usize = 5;
 const NM_WIFI_SCAN_FIELDS: usize = 4;
 
-#[allow(dead_code)]
-pub(super) async fn execute_report_nm_profiles(id: i32) -> SafeCommandResponse {
+pub(super) async fn execute_set_authorized_networks(
+    id: i32,
+    networks: Vec<Network>,
+) -> SafeCommandResponse {
+    let mut had_error = false;
+    let total = networks.len();
+
+    let existing = match get_nm_wifi_profile_names().await {
+        Ok(names) => names,
+        Err(e) => {
+            tracing::error!("Failed to query NM wifi profiles: {e}");
+            return SafeCommandResponse {
+                id,
+                command: SafeCommandRx::SetAuthorizedNetworks,
+                status: -1,
+            };
+        }
+    };
+
+    for (index, network) in networks.iter().enumerate() {
+        let priority = (total - index) as i32 * 10;
+        let ssid = match network.ssid.as_deref() {
+            Some(s) => s,
+            None => {
+                tracing::error!("Network '{}' has no SSID, skipping", network.name);
+                had_error = true;
+                continue;
+            }
+        };
+        if let Err(e) =
+            upsert_nm_profile(&network.name, ssid, network.password.as_deref(), priority).await
+        {
+            tracing::error!("Failed to configure NM profile '{}': {e}", network.name);
+            had_error = true;
+        }
+    }
+
+    let new_names: HashSet<String> = networks.iter().map(|n| n.name.clone()).collect();
+    for name in existing.difference(&new_names) {
+        let mut cmd = Command::new("nmcli");
+        cmd.args(["connection", "delete", name.as_str()]);
+        match execute_nmcli_command(cmd).await {
+            Ok(output) if output.status.success() => {}
+            Ok(output) => {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                tracing::error!("Failed to delete NM profile '{name}': {stderr}");
+                had_error = true;
+            }
+            Err(e) => {
+                tracing::error!("Failed to delete NM profile '{name}': {e}");
+                had_error = true;
+            }
+        }
+    }
+
+    SafeCommandResponse {
+        id,
+        command: SafeCommandRx::SetAuthorizedNetworks,
+        status: if had_error { -1 } else { 0 },
+    }
+}
+
+async fn get_nm_wifi_profile_names() -> Result<HashSet<String>> {
+    let mut cmd = Command::new("nmcli");
+    cmd.args(["-t", "-f", "NAME,TYPE", "connection", "show"]);
+    let output = execute_nmcli_command(cmd).await?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(anyhow::anyhow!("{stderr}"));
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let names = stdout
+        .lines()
+        .filter_map(|line| {
+            let fields = split_terse_line(line, 2);
+            if fields.len() == 2 && fields[1] == "802-11-wireless" {
+                Some(fields[0].clone())
+            } else {
+                None
+            }
+        })
+        .collect();
+    Ok(names)
+}
+
+async fn upsert_nm_profile(
+    name: &str,
+    ssid: &str,
+    password: Option<&str>,
+    priority: i32,
+) -> Result<()> {
+    let exists = profile_exists(name).await?;
+    let priority_str = priority.to_string();
+
+    let mut args: Vec<&str> = if exists {
+        vec![
+            "connection",
+            "modify",
+            name,
+            "802-11-wireless.ssid",
+            ssid,
+            "connection.autoconnect",
+            "yes",
+            "connection.autoconnect-priority",
+            &priority_str,
+        ]
+    } else {
+        vec![
+            "connection",
+            "add",
+            "type",
+            "wifi",
+            "con-name",
+            name,
+            "ssid",
+            ssid,
+            "connection.autoconnect",
+            "yes",
+            "connection.autoconnect-priority",
+            &priority_str,
+        ]
+    };
+
+    if let Some(pw) = password {
+        args.extend_from_slice(&[
+            "802-11-wireless-security.key-mgmt",
+            "wpa-psk",
+            "802-11-wireless-security.psk",
+            pw,
+        ]);
+    }
+
+    let mut cmd = Command::new("nmcli");
+    cmd.args(&args);
+
+    let output = execute_nmcli_command(cmd).await?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(anyhow::anyhow!("{stderr}"));
+    }
+
+    if exists && password.is_none() {
+        let mut cmd = Command::new("nmcli");
+        cmd.args([
+            "connection",
+            "modify",
+            name,
+            "remove",
+            "802-11-wireless-security",
+        ]);
+        let output = execute_nmcli_command(cmd).await?;
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(anyhow::anyhow!("{stderr}"));
+        }
+    }
+
+    Ok(())
+}
+
+async fn profile_exists(name: &str) -> Result<bool> {
+    let mut cmd = Command::new("nmcli");
+    cmd.args(["-t", "-f", "NAME", "connection", "show", name]);
+    let output = execute_nmcli_command(cmd).await?;
+    Ok(output.status.success())
+}
+
+pub(crate) async fn execute_report_nm_profiles(id: i32) -> SafeCommandResponse {
     let mut cmd = Command::new("nmcli");
     cmd.args([
         "-t",
@@ -51,7 +216,6 @@ pub(super) async fn execute_report_nm_profiles(id: i32) -> SafeCommandResponse {
     }
 }
 
-#[allow(dead_code)]
 pub(super) async fn execute_wifi_scan(id: i32) -> SafeCommandResponse {
     let mut cmd = Command::new("nmcli");
     cmd.args([
@@ -165,7 +329,6 @@ fn split_terse_line(line: &str, max_fields: usize) -> Vec<String> {
     fields
 }
 
-#[allow(dead_code)]
 pub(super) async fn execute_nmcli_command(mut cmd: Command) -> Result<std::process::Output> {
     let future = cmd.kill_on_drop(true).output();
 
