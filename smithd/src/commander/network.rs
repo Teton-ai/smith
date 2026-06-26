@@ -1,6 +1,6 @@
 use crate::utils::schema::{
     InterfaceType, NMProfile, NetworkDetails, NetworkInfo, SafeCommandResponse, SafeCommandRx,
-    SpeedSample,
+    SpeedSample, WifiNetwork,
 };
 use anyhow::{Context, Result};
 use chrono::Utc;
@@ -14,6 +14,7 @@ use tokio::{
 // T5: adds execute_set_authorized_networks
 
 const NM_CONNECTION_FIELDS: usize = 5;
+const NM_WIFI_SCAN_FIELDS: usize = 4;
 
 #[allow(dead_code)]
 pub(super) async fn execute_report_nm_profiles(id: i32) -> SafeCommandResponse {
@@ -50,8 +51,68 @@ pub(super) async fn execute_report_nm_profiles(id: i32) -> SafeCommandResponse {
     }
 }
 
+#[allow(dead_code)]
+pub(super) async fn execute_wifi_scan(id: i32) -> SafeCommandResponse {
+    let mut cmd = Command::new("nmcli");
+    cmd.args([
+        "-t",
+        "-f",
+        "SSID,SIGNAL,RATE,SECURITY",
+        "device",
+        "wifi",
+        "list",
+    ]);
+
+    let (networks, status) = match execute_nmcli_command(cmd).await {
+        Ok(output) if output.status.success() => {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let networks = stdout.lines().filter_map(parse_wifi_scan_line).collect();
+            (networks, 0)
+        }
+        Ok(output) => {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            tracing::error!("nmcli device wifi list failed: {stderr}");
+            (vec![], -1)
+        }
+        Err(e) => {
+            tracing::error!("Failed to run nmcli device wifi list: {e}");
+            (vec![], -1)
+        }
+    };
+
+    SafeCommandResponse {
+        id,
+        command: SafeCommandRx::WifiScan { networks },
+        status,
+    }
+}
+
+fn parse_wifi_scan_line(line: &str) -> Option<WifiNetwork> {
+    let fields = split_terse_line(line, NM_WIFI_SCAN_FIELDS);
+    if fields.len() < NM_WIFI_SCAN_FIELDS || fields[0].is_empty() {
+        return None;
+    }
+    let signal = fields[1].parse::<i32>().unwrap_or(0);
+    let rate = fields[2]
+        .split_whitespace()
+        .next()
+        .and_then(|s| s.parse::<i32>().ok())
+        .unwrap_or(0);
+    let security = if fields[3] == "--" {
+        String::new()
+    } else {
+        fields[3].clone()
+    };
+    Some(WifiNetwork {
+        ssid: fields[0].clone(),
+        signal,
+        rate,
+        security,
+    })
+}
+
 fn parse_nm_profile_line(line: &str) -> Option<NMProfile> {
-    let fields = split_terse_line(line);
+    let fields = split_terse_line(line, NM_CONNECTION_FIELDS);
     if fields.len() < NM_CONNECTION_FIELDS || fields[1] != "802-11-wireless" {
         return None;
     }
@@ -73,7 +134,7 @@ fn parse_nm_profile_line(line: &str) -> Option<NMProfile> {
     })
 }
 
-fn split_terse_line(line: &str) -> Vec<String> {
+fn split_terse_line(line: &str, max_fields: usize) -> Vec<String> {
     let mut fields = Vec::new();
     let mut current = String::new();
     let mut chars = line.chars().peekable();
@@ -85,7 +146,7 @@ fn split_terse_line(line: &str) -> Vec<String> {
         } else if ch == ':' {
             fields.push(current.clone());
             current.clear();
-            if fields.len() == NM_CONNECTION_FIELDS - 1 {
+            if fields.len() == max_fields - 1 {
                 while let Some(ch) = chars.next() {
                     if ch == '\\' && chars.peek() == Some(&':') {
                         chars.next();
@@ -779,5 +840,42 @@ OpenNet:802-11-wireless:OpenNet:--:--";
     #[test]
     fn parse_nm_profiles_skips_non_wifi() {
         assert!(parse_nm_profile_line("eth0:802-3-ethernet:::--").is_none());
+    }
+
+    #[test]
+    fn parse_wifi_scan_extracts_fields() {
+        let output = "\
+CorpWifi:72:130 Mbit/s:WPA2\n\
+BackupAP:45:54 Mbit/s:WPA1 WPA2\n\
+OpenNet:60:54 Mbit/s:--";
+
+        let networks: Vec<WifiNetwork> = output.lines().filter_map(parse_wifi_scan_line).collect();
+
+        assert_eq!(networks.len(), 3);
+
+        assert_eq!(networks[0].ssid, "CorpWifi");
+        assert_eq!(networks[0].signal, 72);
+        assert_eq!(networks[0].rate, 130);
+        assert_eq!(networks[0].security, "WPA2");
+
+        assert_eq!(networks[1].ssid, "BackupAP");
+        assert_eq!(networks[1].rate, 54);
+        assert_eq!(networks[1].security, "WPA1 WPA2");
+
+        assert_eq!(networks[2].security, "");
+    }
+
+    #[test]
+    fn parse_wifi_scan_skips_empty_ssid() {
+        let output = ":72:130 Mbit/s:WPA2";
+        assert!(parse_wifi_scan_line(output).is_none());
+    }
+
+    #[test]
+    fn parse_wifi_scan_handles_colon_in_ssid() {
+        let network = parse_wifi_scan_line("My\\:Network:80:130 Mbit/s:WPA2").unwrap();
+        assert_eq!(network.ssid, "My:Network");
+        assert_eq!(network.signal, 80);
+        assert_eq!(network.rate, 130);
     }
 }
