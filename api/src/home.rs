@@ -131,6 +131,33 @@ pub async fn save_responses(
                 .execute(&mut *tx)
                 .await?;
             }
+            SafeCommandRx::WifiScan { ref networks } => {
+                sqlx::query!(
+                    "DELETE FROM wifi_scan_result WHERE device_id = $1",
+                    device_id
+                )
+                .execute(&mut *tx)
+                .await?;
+
+                if !networks.is_empty() {
+                    let ssids: Vec<String> = networks.iter().map(|n| n.ssid.clone()).collect();
+                    let signals: Vec<i32> = networks.iter().map(|n| n.signal).collect();
+                    let rates: Vec<i32> = networks.iter().map(|n| n.rate).collect();
+                    let securities: Vec<String> =
+                        networks.iter().map(|n| n.security.clone()).collect();
+                    sqlx::query!(
+                        r#"INSERT INTO wifi_scan_result (device_id, ssid, signal, rate, security, expires_at)
+                           SELECT $1, UNNEST($2::text[]), UNNEST($3::int[]), UNNEST($4::int[]), UNNEST($5::text[]), now() + INTERVAL '30 minutes'"#,
+                        device_id,
+                        &ssids,
+                        &signals,
+                        &rates,
+                        &securities
+                    )
+                    .execute(&mut *tx)
+                    .await?;
+                }
+            }
             SafeCommandRx::UpdateSystemInfo { ref system_info } => {
                 sqlx::query!(
                     "UPDATE device SET system_info = $2 WHERE id = $1",
