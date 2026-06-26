@@ -2233,33 +2233,11 @@ pub async fn delete_token(
     tag = DEVICES_TAG
 )]
 pub async fn get_network_for_device(
-    Path(serial_number): Path<String>,
-    Extension(state): Extension<State>,
+    Path(_serial_number): Path<String>,
+    Extension(_state): Extension<State>,
 ) -> axum::response::Result<Json<schema::Network>, StatusCode> {
-    let network = sqlx::query_as!(
-        schema::Network,
-        r#"
-        SELECT
-            n.id,
-            n.network_type::TEXT,
-            n.is_network_hidden,
-            n.ssid,
-            n.name,
-            n.description,
-            n.password
-        FROM network n
-        JOIN device d ON n.id = d.network_id
-        WHERE d.serial_number = $1"#,
-        serial_number
-    )
-    .fetch_one(&state.pg_pool)
-    .await
-    .map_err(|err| {
-        error!("Failed to get network for device {err}");
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
-
-    Ok(Json(network))
+    // T10: replaced by current_network and authorized_networks in the device response
+    Err(StatusCode::GONE)
 }
 
 #[utoipa::path(
@@ -2278,23 +2256,12 @@ pub async fn get_network_for_device(
     tag = DEVICES_TAG
 )]
 pub async fn update_device_network(
-    Path(serial_number): Path<String>,
-    Extension(state): Extension<State>,
-    Json(network_id): Json<i32>,
+    Path(_serial_number): Path<String>,
+    Extension(_state): Extension<State>,
+    Json(_network_id): Json<i32>,
 ) -> axum::response::Result<StatusCode, StatusCode> {
-    sqlx::query!(
-        "UPDATE device SET network_id = $1 WHERE serial_number = $2",
-        network_id,
-        serial_number
-    )
-    .execute(&state.pg_pool)
-    .await
-    .map_err(|err| {
-        error!("Failed to update network id for device {serial_number}; {err}");
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
-
-    Ok(StatusCode::OK)
+    // T9: replaced by POST /devices/{serial}/authorized-networks
+    Err(StatusCode::GONE)
 }
 
 #[utoipa::path(
