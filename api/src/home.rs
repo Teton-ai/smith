@@ -72,6 +72,65 @@ pub async fn save_responses(
             SafeCommandRx::GetNetwork => {
                 // T9: fetch device_authorized_network rows and queue SetAuthorizedNetworks
             }
+            SafeCommandRx::ReportNMProfiles { ref profiles } => {
+                let mut profile_network_ids: Vec<(i32, bool)> = Vec::new();
+
+                for profile in profiles {
+                    let ssid = match profile.ssid.as_deref() {
+                        Some(s) => s,
+                        None => continue,
+                    };
+
+                    let network_id: i32 = sqlx::query_scalar!(
+                        r#"INSERT INTO network (ssid, password, name, network_type, is_network_hidden)
+                           VALUES ($1, $2, $1, 'wifi', false)
+                           ON CONFLICT ON CONSTRAINT network_ssid_password_unique DO UPDATE SET ssid = EXCLUDED.ssid
+                           RETURNING id"#,
+                        ssid,
+                        profile.password
+                    )
+                    .fetch_one(&mut *tx)
+                    .await?;
+
+                    profile_network_ids.push((network_id, profile.is_active));
+                }
+
+                sqlx::query!(
+                    "DELETE FROM device_configured_network WHERE device_id = $1",
+                    device_id
+                )
+                .execute(&mut *tx)
+                .await?;
+
+                if !profile_network_ids.is_empty() {
+                    let network_ids: Vec<i32> =
+                        profile_network_ids.iter().map(|(id, _)| *id).collect();
+                    let is_active_flags: Vec<bool> =
+                        profile_network_ids.iter().map(|(_, a)| *a).collect();
+                    sqlx::query!(
+                        r#"INSERT INTO device_configured_network (device_id, network_id, is_active)
+                           SELECT $1, UNNEST($2::int[]), UNNEST($3::bool[])"#,
+                        device_id,
+                        &network_ids,
+                        &is_active_flags
+                    )
+                    .execute(&mut *tx)
+                    .await?;
+                }
+
+                let current_network_id = profile_network_ids
+                    .iter()
+                    .find(|(_, is_active)| *is_active)
+                    .map(|(id, _)| *id);
+
+                sqlx::query!(
+                    "UPDATE device SET current_network_id = $2 WHERE id = $1",
+                    device_id,
+                    current_network_id
+                )
+                .execute(&mut *tx)
+                .await?;
+            }
             SafeCommandRx::UpdateSystemInfo { ref system_info } => {
                 sqlx::query!(
                     "UPDATE device SET system_info = $2 WHERE id = $1",
