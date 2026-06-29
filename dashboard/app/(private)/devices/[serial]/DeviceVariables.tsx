@@ -1,7 +1,7 @@
+import { Button, Panel, SECTION_THEMES } from "@teton/smith-ui";
 import { Eye, EyeOff, KeyRound } from "lucide-react";
 import { useState } from "react";
 import { useGetVariablesForDevice } from "@/app/api-client";
-import { Button, Panel, SECTION_THEMES } from "@/app/components/ui";
 
 /** Length-agnostic mask so a hidden secret never leaks its length. */
 const MASK = "••••••••••••";

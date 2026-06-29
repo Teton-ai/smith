@@ -1,8 +1,8 @@
+import { Card, ListRow } from "@teton/smith-ui";
 import { FileText, Play, Radio, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useParams, useSearchParams } from "react-router";
 import { useGetDeviceInfo } from "@/app/api-client";
-import { Card, ListRow } from "@/app/components/ui";
 import { DeviceDetailLayout } from "../DeviceDetailLayout";
 import LogViewer from "./LogViewer";
 import { type DeviceService, useDeviceServices } from "./useDeviceServices";

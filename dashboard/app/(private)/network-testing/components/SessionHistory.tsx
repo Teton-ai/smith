@@ -1,9 +1,9 @@
 "use client";
 
+import { Badge, type BadgeVariant } from "@teton/smith-ui";
 import { Calendar, Cpu, Loader2, Tag } from "lucide-react";
 import moment from "moment";
 import { useMemo } from "react";
-import { Badge, type BadgeVariant } from "@/app/components/ui";
 import {
 	type ExtendedTestSessionSummary,
 	useExtendedTestSessions,

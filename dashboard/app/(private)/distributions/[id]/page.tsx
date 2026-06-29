@@ -1,4 +1,16 @@
 import {
+	BADGE_COLORS,
+	BackLink,
+	Badge,
+	type BadgeVariant,
+	Button,
+	Card,
+	ListRow,
+	PageContainer,
+	SECTION_THEMES,
+	SectionCard,
+} from "@teton/smith-ui";
+import {
 	ArrowLeftRight,
 	Calendar,
 	ChevronRight,
@@ -26,18 +38,6 @@ import {
 import { Modal } from "@/app/components/modal";
 import { RelativeTime } from "@/app/components/RelativeTime";
 import { SidePanel } from "@/app/components/side-panel";
-import {
-	BADGE_COLORS,
-	BackLink,
-	Badge,
-	type BadgeVariant,
-	Button,
-	Card,
-	ListRow,
-	PageContainer,
-	SECTION_THEMES,
-	SectionCard,
-} from "@/app/components/ui";
 import { isStableRelease } from "@/app/utils/release";
 
 const getArchIcon = (architecture: string) => {

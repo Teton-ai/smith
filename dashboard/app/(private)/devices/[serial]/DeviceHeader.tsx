@@ -1,5 +1,6 @@
 "use client";
 
+import { Button } from "@teton/smith-ui";
 import {
 	BarChart3,
 	Check,
@@ -25,7 +26,6 @@ import {
 } from "@/app/api-client";
 import { Modal } from "@/app/components/modal";
 import NetworkQualityIndicator from "@/app/components/NetworkQualityIndicator";
-import { Button } from "@/app/components/ui";
 import { useConfig } from "@/app/hooks/config";
 
 const Tooltip = ({

@@ -48,11 +48,22 @@ export default defineConfig(({ mode }) => {
 		resolve: {
 			alias: {
 				"@": projectRoot,
+				// Consume the UI package from source so component edits hot-reload
+				// without a separate build step. The published dist is only used by
+				// external npm consumers.
+				"@teton/smith-ui": path.resolve(
+					projectRoot,
+					"../packages/ui/src/index.ts",
+				),
 			},
 		},
 		server: {
 			port: 3000,
 			host: true,
+			// Allow serving the sibling workspace package from the repo root.
+			fs: {
+				allow: [path.resolve(projectRoot, "..")],
+			},
 		},
 		preview: {
 			port: 3000,

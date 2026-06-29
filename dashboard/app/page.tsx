@@ -1,8 +1,8 @@
 import { useAuth0 } from "@auth0/auth0-react";
+import { Button, Card } from "@teton/smith-ui";
 import { AlertTriangle, Loader2, LogIn } from "lucide-react";
 import { useEffect } from "react";
 import { useNavigate } from "react-router";
-import { Button, Card } from "@/app/components/ui";
 
 const LoginPage = () => {
 	const { isLoading, error, loginWithPopup } = useAuth0();

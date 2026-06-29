@@ -1,5 +1,6 @@
 import { useAuth0 } from "@auth0/auth0-react";
 import { useQueryClient } from "@tanstack/react-query";
+import { Button, LabelChip, Toast } from "@teton/smith-ui";
 import {
 	AlertTriangle,
 	Calendar,
@@ -22,7 +23,6 @@ import LabelAutocomplete from "@/app/components/LabelAutocomplete";
 import { Modal } from "@/app/components/modal";
 import NetworkQualityIndicator from "@/app/components/NetworkQualityIndicator";
 import { RelativeTime } from "@/app/components/RelativeTime";
-import { Button, LabelChip, Toast } from "@/app/components/ui";
 import {
 	type Device,
 	type DistributionRolloutStats,

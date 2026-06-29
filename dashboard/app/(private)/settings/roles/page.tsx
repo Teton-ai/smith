@@ -1,11 +1,5 @@
+import { Badge, Card, LabelChip, Panel, SECTION_THEMES } from "@teton/smith-ui";
 import { Shield, ShieldCheck } from "lucide-react";
-import {
-	Badge,
-	Card,
-	LabelChip,
-	Panel,
-	SECTION_THEMES,
-} from "@/app/components/ui";
 import { type RoleInfo, useGetRoles } from "../api";
 import { roleVariant, SettingsLayout } from "../SettingsLayout";
 
