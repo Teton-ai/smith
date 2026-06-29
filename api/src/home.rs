@@ -3,7 +3,9 @@ use anyhow::Result;
 use serde_json::Value;
 use serde_json::json;
 use smith::utils::schema::SafeCommandTx::UpdateVariables;
-use smith::utils::schema::{HomePost, SafeCommandRequest, SafeCommandRx, ServiceStatus};
+use smith::utils::schema::{
+    HomePost, Network, NetworkType, SafeCommandRequest, SafeCommandRx, SafeCommandTx, ServiceStatus,
+};
 use sqlx::PgPool;
 use tracing::debug;
 use tracing::error;
@@ -70,7 +72,43 @@ pub async fn save_responses(
                 .await?;
             }
             SafeCommandRx::GetNetwork => {
-                // T9: fetch device_authorized_network rows and queue SetAuthorizedNetworks
+                let rows = sqlx::query!(
+                    r#"
+                    SELECT n.id, n.network_type::TEXT as "network_type!", n.is_network_hidden,
+                           n.ssid, n.name, n.description, n.password
+                    FROM device_authorized_network dan
+                    JOIN network n ON n.id = dan.network_id
+                    WHERE dan.device_id = $1
+                    ORDER BY dan.added_at ASC
+                    "#,
+                    device_id
+                )
+                .fetch_all(&mut *tx)
+                .await?;
+
+                let networks: Vec<Network> = rows
+                    .into_iter()
+                    .map(|r| Network {
+                        id: r.id,
+                        network_type: NetworkType::from(Some(r.network_type)),
+                        is_network_hidden: r.is_network_hidden,
+                        ssid: r.ssid,
+                        name: r.name,
+                        description: r.description,
+                        password: r.password,
+                    })
+                    .collect();
+
+                add_commands(
+                    device_serial_number,
+                    vec![SafeCommandRequest {
+                        id: -4,
+                        command: SafeCommandTx::SetAuthorizedNetworks { networks },
+                        continue_on_error: false,
+                    }],
+                    pool,
+                )
+                .await?;
             }
             SafeCommandRx::ReportNMProfiles { ref profiles } => {
                 let mut profile_network_ids: Vec<(i32, bool)> = Vec::new();

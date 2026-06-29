@@ -1,0 +1,40 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT n.id, n.name, n.ssid, dan.added_at\n        FROM device_authorized_network dan\n        JOIN network n ON n.id = dan.network_id\n        WHERE dan.device_id = $1\n        ORDER BY dan.added_at ASC\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "ssid",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "added_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      false
+    ]
+  },
+  "hash": "4775805d0f0a98541cd8560cc5b455f3a3b90dee8d2d44e1b786abf0867f4c1a"
+}

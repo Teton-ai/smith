@@ -1,0 +1,58 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                    SELECT n.id, n.network_type::TEXT as \"network_type!\", n.is_network_hidden,\n                           n.ssid, n.name, n.description, n.password\n                    FROM device_authorized_network dan\n                    JOIN network n ON n.id = dan.network_id\n                    WHERE dan.device_id = $1\n                    ORDER BY dan.added_at ASC\n                    ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "network_type!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "is_network_hidden",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 3,
+        "name": "ssid",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "description",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "password",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false,
+      null,
+      false,
+      true,
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "72ffa0c9efec709c9d7d98e3c5f2fb71ac11a45c1532a917a400602ecfbc4a52"
+}

@@ -139,6 +139,39 @@ pub struct LabelWithValues {
     pub values: Vec<String>,
 }
 
+#[derive(Debug, Serialize, utoipa::ToSchema)]
+pub struct AuthorizedNetwork {
+    pub id: i32,
+    pub name: String,
+    pub ssid: Option<String>,
+    pub added_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Serialize, utoipa::ToSchema)]
+pub struct ConfiguredNetwork {
+    pub network_id: i32,
+    pub ssid: Option<String>,
+    pub name: String,
+    pub password: Option<String>,
+    pub is_active: bool,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Deserialize, utoipa::ToSchema)]
+pub struct AddAuthorizedNetworkRequest {
+    pub network_id: i32,
+}
+
+#[derive(Debug, Serialize, utoipa::ToSchema)]
+pub struct WifiScanEntry {
+    pub ssid: String,
+    pub signal: Option<i32>,
+    pub rate: Option<i32>,
+    pub security: Option<String>,
+    pub scanned_at: DateTime<Utc>,
+    pub expires_at: DateTime<Utc>,
+}
+
 async fn update_ip_geolocation(
     ip_address: IpAddr,
     ip_id: i64,

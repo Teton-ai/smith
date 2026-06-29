@@ -1,8 +1,9 @@
 use crate::State;
 use crate::device::{
-    ApproveDeviceBody, DeviceHealth, DeviceLedgerItem, DeviceLedgerItemPaginated, DeviceRelease,
-    LabelWithValues, NewVariable, Note, RawDevice, UpdateDeviceRelease, UpdateDevicesRelease,
-    Variable,
+    AddAuthorizedNetworkRequest, ApproveDeviceBody, AuthorizedNetwork, ConfiguredNetwork,
+    DeviceHealth, DeviceLedgerItem, DeviceLedgerItemPaginated, DeviceRelease, LabelWithValues,
+    NewVariable, Note, RawDevice, UpdateDeviceRelease, UpdateDevicesRelease, Variable,
+    WifiScanEntry,
 };
 use crate::event::PublicEvent;
 use crate::handlers::AuthedDevice;
@@ -23,7 +24,7 @@ use models::release::Release;
 use serde::Deserialize;
 use serde_json::json;
 use smith::utils::schema;
-use smith::utils::schema::SafeCommandRequest;
+use smith::utils::schema::{Network, NetworkType, SafeCommandRequest, SafeCommandTx};
 use sqlx::types::Json as SqlxJson;
 use std::collections::HashMap;
 use tracing::error;
@@ -2506,4 +2507,421 @@ pub async fn get_audit_for_device(
         running_latest_release: audit.running_latest_release,
         checked_at: audit.checked_at,
     }))
+}
+
+async fn queue_set_authorized_networks(
+    serial: &str,
+    device_id: i32,
+    pool: &sqlx::PgPool,
+) -> Result<(), StatusCode> {
+    let rows = sqlx::query!(
+        r#"
+        SELECT n.id, n.network_type::TEXT as "network_type!", n.is_network_hidden,
+               n.ssid, n.name, n.description, n.password
+        FROM device_authorized_network dan
+        JOIN network n ON n.id = dan.network_id
+        WHERE dan.device_id = $1
+        ORDER BY dan.added_at ASC
+        "#,
+        device_id
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|err| {
+        error!("Failed to fetch authorized networks for device {device_id}: {err}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    let networks: Vec<Network> = rows
+        .into_iter()
+        .map(|r| Network {
+            id: r.id,
+            network_type: NetworkType::from(Some(r.network_type)),
+            is_network_hidden: r.is_network_hidden,
+            ssid: r.ssid,
+            name: r.name,
+            description: r.description,
+            password: r.password,
+        })
+        .collect();
+
+    crate::home::add_commands(
+        serial,
+        vec![SafeCommandRequest {
+            id: -4,
+            command: SafeCommandTx::SetAuthorizedNetworks { networks },
+            continue_on_error: false,
+        }],
+        pool,
+    )
+    .await
+    .map_err(|err| {
+        error!("Failed to queue SetAuthorizedNetworks for device {serial}: {err}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    Ok(())
+}
+
+#[utoipa::path(
+    get,
+    path = "/devices/{serial_number}/authorized-networks",
+    params(
+        ("serial_number" = String, Path),
+    ),
+    responses(
+        (status = StatusCode::OK, description = "List of authorized networks", body = Vec<AuthorizedNetwork>),
+        (status = StatusCode::NOT_FOUND, description = "Device not found"),
+        (status = StatusCode::FORBIDDEN, description = "Forbidden"),
+        (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to retrieve authorized networks"),
+    ),
+    security(("auth_token" = [])),
+    tag = DEVICES_TAG
+)]
+pub async fn get_authorized_networks_for_device(
+    Path(serial_number): Path<String>,
+    Extension(state): Extension<State>,
+    Extension(current_user): Extension<CurrentUser>,
+) -> Result<Json<Vec<AuthorizedNetwork>>, StatusCode> {
+    if !authorization::check(current_user, "devices", "read") {
+        return Err(StatusCode::FORBIDDEN);
+    }
+
+    let device = sqlx::query!(
+        "SELECT id FROM device WHERE serial_number = $1",
+        serial_number
+    )
+    .fetch_optional(&state.pg_pool)
+    .await
+    .map_err(|err| {
+        error!("Failed to fetch device {serial_number}: {err}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?
+    .ok_or(StatusCode::NOT_FOUND)?;
+
+    let rows = sqlx::query!(
+        r#"
+        SELECT n.id, n.name, n.ssid, dan.added_at
+        FROM device_authorized_network dan
+        JOIN network n ON n.id = dan.network_id
+        WHERE dan.device_id = $1
+        ORDER BY dan.added_at ASC
+        "#,
+        device.id
+    )
+    .fetch_all(&state.pg_pool)
+    .await
+    .map_err(|err| {
+        error!("Failed to get authorized networks for device {serial_number}: {err}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    let networks = rows
+        .into_iter()
+        .map(|r| AuthorizedNetwork {
+            id: r.id,
+            name: r.name,
+            ssid: r.ssid,
+            added_at: r.added_at,
+        })
+        .collect();
+
+    Ok(Json(networks))
+}
+
+#[utoipa::path(
+    post,
+    path = "/devices/{serial_number}/authorized-networks",
+    params(
+        ("serial_number" = String, Path),
+    ),
+    request_body = AddAuthorizedNetworkRequest,
+    responses(
+        (status = StatusCode::CREATED, description = "Network added to authorized list"),
+        (status = StatusCode::NOT_FOUND, description = "Device or network not found"),
+        (status = StatusCode::FORBIDDEN, description = "Forbidden"),
+        (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to add authorized network"),
+    ),
+    security(("auth_token" = [])),
+    tag = DEVICES_TAG
+)]
+pub async fn add_authorized_network_for_device(
+    Path(serial_number): Path<String>,
+    Extension(state): Extension<State>,
+    Extension(current_user): Extension<CurrentUser>,
+    Json(body): Json<AddAuthorizedNetworkRequest>,
+) -> Result<StatusCode, StatusCode> {
+    if !authorization::check(current_user, "devices", "write") {
+        return Err(StatusCode::FORBIDDEN);
+    }
+
+    let device = sqlx::query!(
+        "SELECT id FROM device WHERE serial_number = $1",
+        serial_number
+    )
+    .fetch_optional(&state.pg_pool)
+    .await
+    .map_err(|err| {
+        error!("Failed to fetch device {serial_number}: {err}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?
+    .ok_or(StatusCode::NOT_FOUND)?;
+
+    sqlx::query!(
+        "INSERT INTO device_authorized_network (device_id, network_id) VALUES ($1, $2)",
+        device.id,
+        body.network_id
+    )
+    .execute(&state.pg_pool)
+    .await
+    .map_err(|err| {
+        if let sqlx::Error::Database(db_err) = &err {
+            match db_err.constraint() {
+                Some("device_authorized_network_network_id_fkey") => return StatusCode::NOT_FOUND,
+                Some("device_authorized_network_pkey") => return StatusCode::CONFLICT,
+                _ => {}
+            }
+        }
+        error!("Failed to insert authorized network for device {serial_number}: {err}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    queue_set_authorized_networks(&serial_number, device.id, &state.pg_pool).await?;
+
+    Ok(StatusCode::CREATED)
+}
+
+#[utoipa::path(
+    delete,
+    path = "/devices/{serial_number}/authorized-networks/{network_id}",
+    params(
+        ("serial_number" = String, Path),
+        ("network_id" = i32, Path),
+    ),
+    responses(
+        (status = StatusCode::NO_CONTENT, description = "Network removed from authorized list"),
+        (status = StatusCode::NOT_FOUND, description = "Device not found"),
+        (status = StatusCode::FORBIDDEN, description = "Forbidden"),
+        (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to remove authorized network"),
+    ),
+    security(("auth_token" = [])),
+    tag = DEVICES_TAG
+)]
+pub async fn delete_authorized_network_for_device(
+    Path((serial_number, network_id)): Path<(String, i32)>,
+    Extension(state): Extension<State>,
+    Extension(current_user): Extension<CurrentUser>,
+) -> Result<StatusCode, StatusCode> {
+    if !authorization::check(current_user, "devices", "write") {
+        return Err(StatusCode::FORBIDDEN);
+    }
+
+    let device = sqlx::query!(
+        "SELECT id FROM device WHERE serial_number = $1",
+        serial_number
+    )
+    .fetch_optional(&state.pg_pool)
+    .await
+    .map_err(|err| {
+        error!("Failed to fetch device {serial_number}: {err}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?
+    .ok_or(StatusCode::NOT_FOUND)?;
+
+    let result = sqlx::query!(
+        "DELETE FROM device_authorized_network WHERE device_id = $1 AND network_id = $2",
+        device.id,
+        network_id
+    )
+    .execute(&state.pg_pool)
+    .await
+    .map_err(|err| {
+        error!(
+            "Failed to delete authorized network {network_id} for device {serial_number}: {err}"
+        );
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    if result.rows_affected() > 0 {
+        queue_set_authorized_networks(&serial_number, device.id, &state.pg_pool).await?;
+    }
+
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[utoipa::path(
+    get,
+    path = "/devices/{serial_number}/configured-networks",
+    params(
+        ("serial_number" = String, Path),
+    ),
+    responses(
+        (status = StatusCode::OK, description = "NM profiles reported by device", body = Vec<ConfiguredNetwork>),
+        (status = StatusCode::NOT_FOUND, description = "Device not found"),
+        (status = StatusCode::FORBIDDEN, description = "Forbidden"),
+        (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to retrieve configured networks"),
+    ),
+    security(("auth_token" = [])),
+    tag = DEVICES_TAG
+)]
+pub async fn get_configured_networks_for_device(
+    Path(serial_number): Path<String>,
+    Extension(state): Extension<State>,
+    Extension(current_user): Extension<CurrentUser>,
+) -> Result<Json<Vec<ConfiguredNetwork>>, StatusCode> {
+    if !authorization::check(current_user, "devices", "read") {
+        return Err(StatusCode::FORBIDDEN);
+    }
+
+    let device = sqlx::query!(
+        "SELECT id FROM device WHERE serial_number = $1",
+        serial_number
+    )
+    .fetch_optional(&state.pg_pool)
+    .await
+    .map_err(|err| {
+        error!("Failed to fetch device {serial_number}: {err}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?
+    .ok_or(StatusCode::NOT_FOUND)?;
+
+    let rows = sqlx::query!(
+        r#"
+        SELECT n.id as network_id, n.ssid, n.name, n.password,
+               dcn.is_active, dcn.updated_at
+        FROM device_configured_network dcn
+        JOIN network n ON n.id = dcn.network_id
+        WHERE dcn.device_id = $1
+        ORDER BY n.name
+        "#,
+        device.id
+    )
+    .fetch_all(&state.pg_pool)
+    .await
+    .map_err(|err| {
+        error!("Failed to get configured networks for device {serial_number}: {err}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    let networks = rows
+        .into_iter()
+        .map(|r| ConfiguredNetwork {
+            network_id: r.network_id,
+            ssid: r.ssid,
+            name: r.name,
+            password: r.password,
+            is_active: r.is_active,
+            updated_at: r.updated_at,
+        })
+        .collect();
+
+    Ok(Json(networks))
+}
+
+#[utoipa::path(
+    get,
+    path = "/devices/{serial_number}/wifi-scan",
+    params(
+        ("serial_number" = String, Path),
+    ),
+    responses(
+        (status = StatusCode::OK, description = "Current WiFi scan results", body = Vec<WifiScanEntry>),
+        (status = StatusCode::ACCEPTED, description = "No fresh results — scan queued"),
+        (status = StatusCode::NOT_FOUND, description = "Device not found"),
+        (status = StatusCode::FORBIDDEN, description = "Forbidden"),
+        (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to retrieve scan results"),
+    ),
+    security(("auth_token" = [])),
+    tag = DEVICES_TAG
+)]
+pub async fn get_wifi_scan_for_device(
+    Path(serial_number): Path<String>,
+    Extension(state): Extension<State>,
+    Extension(current_user): Extension<CurrentUser>,
+) -> Result<(StatusCode, Json<Vec<WifiScanEntry>>), StatusCode> {
+    if !authorization::check(current_user, "devices", "read") {
+        return Err(StatusCode::FORBIDDEN);
+    }
+
+    let device = sqlx::query!(
+        "SELECT id FROM device WHERE serial_number = $1",
+        serial_number
+    )
+    .fetch_optional(&state.pg_pool)
+    .await
+    .map_err(|err| {
+        error!("Failed to fetch device {serial_number}: {err}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?
+    .ok_or(StatusCode::NOT_FOUND)?;
+
+    let rows = sqlx::query!(
+        r#"
+        SELECT ssid, signal, rate, security, scanned_at, expires_at
+        FROM wifi_scan_result
+        WHERE device_id = $1 AND expires_at > now()
+        ORDER BY signal DESC NULLS LAST
+        "#,
+        device.id
+    )
+    .fetch_all(&state.pg_pool)
+    .await
+    .map_err(|err| {
+        error!("Failed to get wifi scan results for device {serial_number}: {err}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    if rows.is_empty() {
+        let already_queued = sqlx::query_scalar!(
+            r#"
+            SELECT EXISTS(
+                SELECT 1 FROM command_queue
+                WHERE device_id = $1
+                  AND fetched = false
+                  AND canceled = false
+                  AND cmd::text = '"WifiScan"'
+            ) as "exists!"
+            "#,
+            device.id
+        )
+        .fetch_one(&state.pg_pool)
+        .await
+        .map_err(|err| {
+            error!("Failed to check pending WifiScan for device {serial_number}: {err}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+
+        if !already_queued {
+            crate::home::add_commands(
+                &serial_number,
+                vec![SafeCommandRequest {
+                    id: -7,
+                    command: SafeCommandTx::WifiScan,
+                    continue_on_error: false,
+                }],
+                &state.pg_pool,
+            )
+            .await
+            .map_err(|err| {
+                error!("Failed to queue WifiScan for device {serial_number}: {err}");
+                StatusCode::INTERNAL_SERVER_ERROR
+            })?;
+        }
+
+        return Ok((StatusCode::ACCEPTED, Json(vec![])));
+    }
+
+    let results = rows
+        .into_iter()
+        .map(|r| WifiScanEntry {
+            ssid: r.ssid,
+            signal: r.signal,
+            rate: r.rate,
+            security: r.security,
+            scanned_at: r.scanned_at,
+            expires_at: r.expires_at,
+        })
+        .collect();
+
+    Ok((StatusCode::OK, Json(results)))
 }
