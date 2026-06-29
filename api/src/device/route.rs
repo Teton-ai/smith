@@ -17,7 +17,7 @@ use axum::http::StatusCode;
 use axum::{Extension, Json};
 use axum_extra::extract::Query;
 use models::device::{
-    CommandsPaginated, Device, DeviceCommandResponse, DeviceFilter, DeviceNetwork,
+    CommandsPaginated, Device, DeviceCommandResponse, DeviceFilter, DeviceNetwork, NetworkSummary,
 };
 use models::modem::Modem;
 use models::release::Release;
@@ -158,7 +158,16 @@ pub async fn get_devices(
             dn.upload_speed_mbps as "network_upload_speed_mbps?",
             dn.source as "network_source?",
             dn.updated_at as "network_updated_at?",
-            COALESCE(JSONB_OBJECT_AGG(l.name, dl.value) FILTER (WHERE l.name IS NOT NULL), '{}') as "labels!: SqlxJson<HashMap<String, String>>"
+            COALESCE(JSONB_OBJECT_AGG(l.name, dl.value) FILTER (WHERE l.name IS NOT NULL), '{}') as "labels!: SqlxJson<HashMap<String, String>>",
+            (SELECT JSON_BUILD_OBJECT('id', n.id, 'name', n.name, 'ssid', n.ssid)::text
+             FROM network n WHERE n.id = d.current_network_id) as "current_network_json?",
+            COALESCE(
+                (SELECT JSON_AGG(JSON_BUILD_OBJECT('id', n.id, 'name', n.name, 'ssid', n.ssid) ORDER BY dan.added_at ASC)::text
+                 FROM device_authorized_network dan
+                 JOIN network n ON n.id = dan.network_id
+                 WHERE dan.device_id = d.id),
+                '[]'
+            ) as "authorized_networks_json!"
         FROM device d
         LEFT JOIN ip_address ip ON d.ip_address_id = ip.id
         LEFT JOIN modem m ON d.modem_id = m.id
@@ -230,9 +239,9 @@ pub async fn get_devices(
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
 
-    let devices: Vec<Device> = devices
+    let devices = devices
         .into_iter()
-        .map(|row| {
+        .map(|row| -> Result<Device, StatusCode> {
             let ip_address = if row.ip_id.is_some() {
                 let coordinates = match (row.ip_longitude, row.ip_latitude) {
                     (Some(lon), Some(lat)) => Some((lon, lat)),
@@ -323,7 +332,29 @@ pub async fn get_devices(
                 None
             };
 
-            Device {
+            let current_network: Option<NetworkSummary> = row
+                .current_network_json
+                .as_deref()
+                .map(serde_json::from_str)
+                .transpose()
+                .map_err(|err| {
+                    error!(
+                        serial_number = row.serial_number,
+                        "Failed to deserialize current_network: {err}"
+                    );
+                    StatusCode::INTERNAL_SERVER_ERROR
+                })?;
+
+            let authorized_networks: Vec<NetworkSummary> =
+                serde_json::from_str(&row.authorized_networks_json).map_err(|err| {
+                    error!(
+                        serial_number = row.serial_number,
+                        "Failed to deserialize authorized_networks: {err}"
+                    );
+                    StatusCode::INTERNAL_SERVER_ERROR
+                })?;
+
+            Ok(Device {
                 id: row.id,
                 serial_number: row.serial_number,
                 note: row.note,
@@ -344,9 +375,11 @@ pub async fn get_devices(
                 target_release,
                 network,
                 labels: row.labels,
-            }
+                current_network,
+                authorized_networks,
+            })
         })
-        .collect();
+        .collect::<Result<Vec<Device>, StatusCode>>()?;
 
     Ok(Json(devices))
 }
@@ -1633,7 +1666,16 @@ pub async fn get_device_info(
         dn.upload_speed_mbps as "network_upload_speed_mbps?",
         dn.source as "network_source?",
         dn.updated_at as "network_updated_at?",
-        COALESCE(JSONB_OBJECT_AGG(l.name, dl.value) FILTER (WHERE l.name IS NOT NULL), '{}') as "labels!: SqlxJson<HashMap<String, String>>"
+        COALESCE(JSONB_OBJECT_AGG(l.name, dl.value) FILTER (WHERE l.name IS NOT NULL), '{}') as "labels!: SqlxJson<HashMap<String, String>>",
+        (SELECT JSON_BUILD_OBJECT('id', n.id, 'name', n.name, 'ssid', n.ssid)::text
+         FROM network n WHERE n.id = d.current_network_id) as "current_network_json?",
+        COALESCE(
+            (SELECT JSON_AGG(JSON_BUILD_OBJECT('id', n.id, 'name', n.name, 'ssid', n.ssid) ORDER BY dan.added_at ASC)::text
+             FROM device_authorized_network dan
+             JOIN network n ON n.id = dan.network_id
+             WHERE dan.device_id = d.id),
+            '[]'
+        ) as "authorized_networks_json!"
         FROM device d
         LEFT JOIN ip_address ip ON d.ip_address_id = ip.id
         LEFT JOIN modem m ON d.modem_id = m.id
@@ -1756,6 +1798,22 @@ pub async fn get_device_info(
         None
     };
 
+    let current_network: Option<NetworkSummary> = device_row
+        .current_network_json
+        .as_deref()
+        .map(serde_json::from_str)
+        .transpose()
+        .map_err(|err| {
+            error!("Failed to deserialize current_network for {device_id}: {err}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+
+    let authorized_networks: Vec<NetworkSummary> =
+        serde_json::from_str(&device_row.authorized_networks_json).map_err(|err| {
+            error!("Failed to deserialize authorized_networks for {device_id}: {err}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+
     let device = Device {
         id: device_row.id,
         serial_number: device_row.serial_number,
@@ -1777,6 +1835,8 @@ pub async fn get_device_info(
         target_release,
         network,
         labels: device_row.labels,
+        current_network,
+        authorized_networks,
     };
 
     Ok(Json(device))
