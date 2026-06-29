@@ -40,6 +40,7 @@ export interface TabItem {
 	label: string;
 	to?: string;
 	active?: boolean;
+	state?: unknown;
 }
 
 /** Underlined tab bar used across the device detail subpages. The active tab
@@ -53,7 +54,12 @@ export function TabNav({ items }: { items: TabItem[] }) {
 						? "py-2 px-1 border-b-2 border-blue-500 text-blue-600 font-medium text-sm"
 						: "py-2 px-1 border-b-2 border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 font-medium text-sm transition-colors cursor-pointer";
 					return item.to && !item.active ? (
-						<Link key={item.label} to={item.to} className={cls}>
+						<Link
+							key={item.label}
+							to={item.to}
+							state={item.state}
+							className={cls}
+						>
 							{item.label}
 						</Link>
 					) : (

@@ -72,6 +72,7 @@ services:
       - NET_ADMIN
     volumes:
       - ./scripts/network-throttle.sh:/app/network-throttle.sh:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
     environment:
       - RUST_LOG=${RUST_LOG:-INFO}
       - NETWORK_THROTTLE=${NETWORK_THROTTLE:-random}
@@ -87,6 +88,20 @@ services:
     depends_on:
       - api
       - bore
+
+  smithd-builder:
+    build:
+      context: .
+      dockerfile: smithd/dev.Dockerfile
+      target: toolchain
+      args:
+        BASE_IMAGE: ${DEVICE_BASE_IMAGE:-nvcr.io/nvidia/l4t-base:r36.2.0}
+    container_name: smith-smithd-builder
+    volumes:
+      - .:/app
+      - smithd-cargo-registry:/root/.cargo/registry
+      - smithd-cargo-git:/root/.cargo/git
+      - smithd-target:/app/target
 
   dashboard:
     build:
@@ -118,3 +133,6 @@ volumes:
   target-cache:
   postgres-data:
   node_modules-cache:
+  smithd-cargo-registry:
+  smithd-cargo-git:
+  smithd-target:

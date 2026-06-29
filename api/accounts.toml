@@ -1,0 +1,14 @@
+# Maps a user's email to the role they hold. This file is a template: in
+# production its contents are delivered to the API as the ACCOUNTS_CONFIG env var
+# (the real list lives in the smith-infrastructure repo under config/), and the
+# API reconciles the database to match it on boot.
+#
+# It is the source of truth for who holds an elevated role:
+#   - removing someone here demotes them to the `default` baseline on next boot
+#   - a listed user is granted their role on first login
+#   - roles must be defined in roles.toml; any others are logged and ignored
+#
+# When ACCOUNTS_CONFIG is unset the feature is off and roles are left untouched.
+
+[accounts]
+"example@example.com" = "admin"

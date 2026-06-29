@@ -1,6 +1,7 @@
 use crate::auth::{DebugJwksClient, DeviceJwtSigner};
 use crate::event::PublicEvent;
 use crate::sentry::Sentry;
+use crate::user::CurrentUser;
 use ::sentry::integrations::tower::{NewSentryLayer, SentryHttpLayer};
 use axum::body::Body;
 use axum::error_handling::HandleErrorLayer;
@@ -9,7 +10,7 @@ use axum::http::{Request, StatusCode};
 use axum::response::Redirect;
 use axum::{Extension, Router, middleware, routing::get};
 use config::Config;
-use middlewares::authorization::AuthorizationConfig;
+use middlewares::authorization::{AccountsConfig, AuthorizationConfig};
 use sqlx::postgres::{PgPool, PgPoolOptions};
 use std::env;
 use std::fs::File;
@@ -64,6 +65,7 @@ pub struct State {
     config: &'static Config,
     public_events: Arc<Mutex<Sender<PublicEvent>>>,
     authorization: Arc<AuthorizationConfig>,
+    accounts: Arc<AccountsConfig>,
     jwks_client: DebugJwksClient,
     device_jwt_signer: DeviceJwtSigner,
 }
@@ -82,6 +84,14 @@ fn main() {
 
     let authorization =
         AuthorizationConfig::new(&roles_toml).expect("Failed to load authorization config");
+
+    // Email→role assignments are delivered as the TOML *content* of ACCOUNTS_CONFIG
+    // (Fargate has no file to point a path at). When unset or blank the whole
+    // feature is off: no reconciliation runs and existing roles are left alone.
+    let accounts = env::var("ACCOUNTS_CONFIG")
+        .ok()
+        .filter(|content| !content.trim().is_empty())
+        .map(|content| AccountsConfig::new(&content).expect("Failed to parse ACCOUNTS_CONFIG"));
 
     let config: &'static Config = Box::leak(Box::new(
         Config::new().expect("error: failed to construct config"),
@@ -102,7 +112,7 @@ fn main() {
         .enable_all()
         .build()
         .expect("error: failed to initialize tokio runtime")
-        .block_on(async { start_main_server(config, authorization).await });
+        .block_on(async { start_main_server(config, authorization, accounts).await });
 }
 
 struct SecurityAddon;
@@ -150,7 +160,11 @@ struct ApiDoc;
 )]
 struct SmithApiDoc;
 
-async fn start_main_server(config: &'static Config, authorization: AuthorizationConfig) {
+async fn start_main_server(
+    config: &'static Config,
+    authorization: AuthorizationConfig,
+    accounts: Option<AccountsConfig>,
+) {
     info!("Starting Smith API v{}", env!("CARGO_PKG_VERSION"));
 
     // set up connection pool
@@ -165,6 +179,30 @@ async fn start_main_server(config: &'static Config, authorization: Authorization
         .run(&pool)
         .await
         .expect("sqlx migration failed");
+
+    // When ACCOUNTS_CONFIG is provided, make the database match it before serving
+    // any request; otherwise the feature is off and roles are left untouched. An
+    // entry referencing an undefined role is logged and skipped (it would grant
+    // no permissions) rather than aborting startup over a typo.
+    let accounts = match accounts {
+        Some(accounts) => {
+            for (email, role) in accounts.unknown_roles(&authorization) {
+                tracing::error!(
+                    "accounts config assigns unknown role '{}' to {}; ignoring",
+                    role,
+                    email
+                );
+            }
+            CurrentUser::reconcile_roles(&pool, &authorization, &accounts)
+                .await
+                .expect("failed to reconcile roles from ACCOUNTS_CONFIG");
+            accounts
+        }
+        None => {
+            info!("ACCOUNTS_CONFIG not set; skipping role reconciliation");
+            AccountsConfig::default()
+        }
+    };
 
     let (tx_message, _rx_message) = broadcast::channel::<PublicEvent>(1);
     let tx_message = Arc::new(Mutex::new(tx_message));
@@ -187,6 +225,7 @@ async fn start_main_server(config: &'static Config, authorization: Authorization
         config,
         public_events: tx_message,
         authorization: Arc::new(authorization),
+        accounts: Arc::new(accounts),
         jwks_client,
         device_jwt_signer,
     };

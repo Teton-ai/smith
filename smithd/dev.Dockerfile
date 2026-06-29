@@ -8,11 +8,13 @@
 #   docker build --build-arg BASE_IMAGE=ubuntu:22.04 -f smithd/dev.Dockerfile .
 ARG BASE_IMAGE=nvcr.io/nvidia/l4t-base:r36.2.0
 
-FROM ${BASE_IMAGE} AS builder
+# Stage 1: toolchain - just the build environment, no source code
+# Used directly by the smithd-builder service (with source mounted as a volume)
+FROM ${BASE_IMAGE} AS toolchain
 
 ARG RUST_VERSION=1.91.0
 
-WORKDIR /build
+WORKDIR /app
 
 # Install build dependencies and Rust
 RUN apt-get update && apt-get install -y \
@@ -28,6 +30,11 @@ RUN apt-get update && apt-get install -y \
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain ${RUST_VERSION}
 ENV PATH="/root/.cargo/bin:${PATH}"
 
+CMD ["tail", "-f", "/dev/null"]
+
+# Stage 2: builder - compiles the binaries for the device image
+FROM toolchain AS builder
+
 # Copy the workspace
 COPY . .
 
@@ -35,7 +42,7 @@ COPY . .
 RUN cargo build --package smith --bin smithd
 RUN cargo build --package smith-updater
 
-# Runtime stage - Linux for tegra to emulate real devices
+# Stage 3: runtime - the actual device container
 ARG BASE_IMAGE
 FROM ${BASE_IMAGE}
 
@@ -74,8 +81,8 @@ RUN echo 'PasswordAuthentication no' >> /etc/ssh/sshd_config
 RUN mkdir -p /root/.ssh
 
 # Copy binaries from builder
-COPY --from=builder /build/target/debug/smithd /usr/bin/smithd
-COPY --from=builder /build/target/debug/smith-updater /usr/bin/smith-updater
+COPY --from=builder /app/target/debug/smithd /usr/bin/smithd
+COPY --from=builder /app/target/debug/smith-updater /usr/bin/smith-updater
 
 # Copy systemd service files
 COPY smithd/debian/smithd.service /etc/systemd/system/smithd.service
