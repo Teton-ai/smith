@@ -173,13 +173,13 @@ pub(crate) async fn execute_report_nm_profiles(id: i32) -> SafeCommandResponse {
                 for line in stdout.lines() {
                     if let Some(val) = line.strip_prefix("802-11-wireless.ssid:") {
                         if !val.is_empty() {
-                            ssid = Some(val.to_string());
+                            ssid = Some(unescape_terse(val));
                         }
                     } else if let Some(val) = line.strip_prefix("802-11-wireless-security.psk:")
                         && !val.is_empty()
                         && val != "--"
                     {
-                        psk = Some(val.to_string());
+                        psk = Some(unescape_terse(val));
                     }
                 }
                 (ssid, psk)
@@ -203,11 +203,35 @@ pub(crate) async fn execute_report_nm_profiles(id: i32) -> SafeCommandResponse {
         });
     }
 
+    let partial = profiles.iter().any(|p| p.ssid.is_none());
     SafeCommandResponse {
         id,
         command: SafeCommandRx::ReportNMProfiles { profiles },
-        status: 0,
+        status: if partial { 1 } else { 0 },
     }
+}
+
+fn unescape_terse(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut chars = s.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch == '\\' {
+            match chars.peek() {
+                Some(&':') => {
+                    chars.next();
+                    out.push(':');
+                }
+                Some(&'\\') => {
+                    chars.next();
+                    out.push('\\');
+                }
+                _ => out.push(ch),
+            }
+        } else {
+            out.push(ch);
+        }
+    }
+    out
 }
 
 fn split_terse_line(line: &str, max_fields: usize) -> Vec<String> {

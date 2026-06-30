@@ -2566,22 +2566,39 @@ pub async fn get_configured_networks_for_device(
         return Err(StatusCode::FORBIDDEN);
     }
 
+    let resolved_id: Option<i32> = sqlx::query_scalar!(
+        r#"
+        SELECT id FROM device
+        WHERE
+            CASE
+                WHEN $1 ~ '^[0-9]+$' AND length($1) <= 10 THEN
+                    id = $1::int4
+                ELSE
+                    serial_number = $1
+            END
+        "#,
+        device_id
+    )
+    .fetch_optional(&state.pg_pool)
+    .await
+    .map_err(|err| {
+        error!("Failed to resolve device {device_id}: {err}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    let Some(resolved_id) = resolved_id else {
+        return Err(StatusCode::NOT_FOUND);
+    };
+
     let rows = sqlx::query!(
         r#"
         SELECT dcn.network_id, n.ssid, n.name, n.password, dcn.is_active, dcn.updated_at
         FROM device_configured_network dcn
         JOIN network n ON n.id = dcn.network_id
-        JOIN device d ON d.id = dcn.device_id
-        WHERE
-            CASE
-                WHEN $1 ~ '^[0-9]+$' AND length($1) <= 10 THEN
-                    d.id = $1::int4
-                ELSE
-                    d.serial_number = $1
-            END
+        WHERE dcn.device_id = $1
         ORDER BY dcn.is_active DESC, n.name ASC
         "#,
-        device_id
+        resolved_id
     )
     .fetch_all(&state.pg_pool)
     .await

@@ -107,7 +107,7 @@ pub async fn save_responses(
                     .await?;
                 }
             }
-            SafeCommandRx::ReportNMProfiles { ref profiles } => {
+            SafeCommandRx::ReportNMProfiles { ref profiles } if response.status == 0 => {
                 let mut profile_network_ids: Vec<(i32, bool)> = Vec::new();
 
                 for profile in profiles {
@@ -178,6 +178,12 @@ pub async fn save_responses(
                 )
                 .execute(&mut *tx)
                 .await?;
+            }
+            SafeCommandRx::ReportNMProfiles { .. } => {
+                error!(
+                    device_id,
+                    "Partial NM profile snapshot (some detail lookups failed); preserving existing state"
+                );
             }
             SafeCommandRx::UpdateSystemInfo { ref system_info } => {
                 sqlx::query!(

@@ -21,12 +21,13 @@ const WifiPanel = ({ serial }: WifiPanelProps) => {
 	const [syncing, setSyncing] = useState(false);
 	const dispatchedAt = useRef<Date | null>(null);
 
-	const { data: profiles, isLoading } = useGetConfiguredNetworksForDevice(
-		serial,
-		{
-			query: { refetchInterval: 5000 },
-		},
-	);
+	const {
+		data: profiles,
+		isLoading,
+		isError,
+	} = useGetConfiguredNetworksForDevice(serial, {
+		query: { refetchInterval: syncing ? 3000 : false },
+	});
 
 	const currentNetwork = profiles?.find((p) => p.is_active);
 
@@ -69,20 +70,24 @@ const WifiPanel = ({ serial }: WifiPanelProps) => {
 		return () => clearTimeout(timer);
 	}, [syncing]);
 
-	// Auto-trigger once after first data load, only if never synced or data is older than 12h.
+	// Auto-trigger once after first successful data load, only if data is older than 12h.
+	// Persisted per device in localStorage so the throttle survives remounts.
 	const hasAutoDispatched = useRef(false);
 	useEffect(() => {
-		if (isLoading || hasAutoDispatched.current) return;
+		if (isLoading || isError || hasAutoDispatched.current) return;
 		hasAutoDispatched.current = true;
+		const staleMs = 12 * 60 * 60 * 1000; // 12 hours
 		const newestAt =
 			profiles && profiles.length > 0
 				? Math.max(...profiles.map((p) => new Date(p.updated_at).getTime()))
 				: 0;
-		const staleMs = 12 * 60 * 60 * 1000; // 12 hours
-		if (Date.now() - newestAt > staleMs) {
+		const storageKey = `wifi_auto_dispatch_${serial}`;
+		const lastDispatch = Number(localStorage.getItem(storageKey) ?? 0);
+		if (Date.now() - Math.max(newestAt, lastDispatch) > staleMs) {
+			localStorage.setItem(storageKey, String(Date.now()));
 			dispatchRefresh();
 		}
-	}, [isLoading, profiles, dispatchRefresh]);
+	}, [isLoading, isError, profiles, dispatchRefresh, serial]);
 
 	const toggleReveal = (networkId: number) => {
 		setRevealedIds((prev) => {
@@ -117,11 +122,17 @@ const WifiPanel = ({ serial }: WifiPanelProps) => {
 			}
 		>
 			{/* Last checked */}
-			<p className="text-sm text-gray-500 mb-3">
-				{profiles && profiles.length > 0
-					? `Last checked ${new Date(Math.max(...profiles.map((p) => new Date(p.updated_at).getTime()))).toLocaleString()}`
-					: "Never checked"}
-			</p>
+			{isError ? (
+				<p className="text-sm text-red-500 mb-3">
+					Failed to load WiFi profiles.
+				</p>
+			) : (
+				<p className="text-sm text-gray-500 mb-3">
+					{profiles && profiles.length > 0
+						? `Last checked ${new Date(Math.max(...profiles.map((p) => new Date(p.updated_at).getTime()))).toLocaleString()}`
+						: "Never checked"}
+				</p>
+			)}
 
 			{/* Current network */}
 			<div className="mb-4 pb-4 border-b border-gray-100">
@@ -198,6 +209,8 @@ const WifiPanel = ({ serial }: WifiPanelProps) => {
 												type="button"
 												onClick={() => toggleReveal(profile.network_id)}
 												className="text-gray-400 hover:text-gray-600"
+												aria-label={`${revealed ? "Hide" : "Reveal"} password for ${profile.name}`}
+												aria-pressed={revealed}
 											>
 												{revealed ? (
 													<EyeOff className="w-3.5 h-3.5" />

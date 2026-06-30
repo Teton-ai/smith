@@ -81,7 +81,6 @@ impl Postman {
 
         self.token = self.magic.get_token().await;
         let mut system_info = SystemInfo::new().await;
-        let nm_profiles = network::execute_report_nm_profiles(CMD_ID_REPORT_NM_PROFILES).await;
 
         self.commander
             .insert_result(vec![
@@ -102,9 +101,14 @@ impl Postman {
                     command: SafeCommandRx::GetNetwork,
                     status: 0,
                 },
-                nm_profiles,
             ])
             .await;
+
+        let commander = self.commander.clone();
+        tokio::spawn(async move {
+            let nm_profiles = network::execute_report_nm_profiles(CMD_ID_REPORT_NM_PROFILES).await;
+            commander.insert_result(vec![nm_profiles]).await;
+        });
 
         const IDLE_INTERVAL_SECS: u64 = 20;
         const ACTIVE_INTERVAL_SECS: u64 = 1;
