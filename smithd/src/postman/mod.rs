@@ -1,4 +1,4 @@
-use crate::commander::CommanderHandle;
+use crate::commander::{CommanderHandle, network};
 use crate::magic::MagicHandle;
 use crate::police::PoliceHandle;
 use crate::session::{RefreshOutcome, SessionHandle};
@@ -15,6 +15,11 @@ use std::fmt::Write;
 use std::time::Duration;
 use tokio::{sync::mpsc, time};
 use tracing::{error, info, warn};
+
+const CMD_ID_GET_VARIABLES: i32 = -1;
+const CMD_ID_UPDATE_SYSTEM_INFO: i32 = -2;
+const CMD_ID_GET_NETWORK: i32 = -4;
+const CMD_ID_REPORT_NM_PROFILES: i32 = -6;
 
 enum PollMode {
     Active { ticks_without_commands: u32 },
@@ -76,26 +81,28 @@ impl Postman {
 
         self.token = self.magic.get_token().await;
         let mut system_info = SystemInfo::new().await;
+        let nm_profiles = network::execute_report_nm_profiles(CMD_ID_REPORT_NM_PROFILES).await;
 
         self.commander
             .insert_result(vec![
                 SafeCommandResponse {
-                    id: -1,
+                    id: CMD_ID_GET_VARIABLES,
                     command: SafeCommandRx::GetVariables,
                     status: 0,
                 },
                 SafeCommandResponse {
-                    id: -2,
+                    id: CMD_ID_UPDATE_SYSTEM_INFO,
                     command: SafeCommandRx::UpdateSystemInfo {
                         system_info: system_info.to_value(),
                     },
                     status: 0,
                 },
                 SafeCommandResponse {
-                    id: -4,
+                    id: CMD_ID_GET_NETWORK,
                     command: SafeCommandRx::GetNetwork,
                     status: 0,
                 },
+                nm_profiles,
             ])
             .await;
 
@@ -162,7 +169,7 @@ impl Postman {
                             .insert_result(vec![
                                 // Keep the system info in sync.
                                 SafeCommandResponse {
-                                    id: -2,
+                                    id: CMD_ID_UPDATE_SYSTEM_INFO,
                                     command: SafeCommandRx::UpdateSystemInfo {
                                         system_info: new_system_info.to_value(),
                                     },
