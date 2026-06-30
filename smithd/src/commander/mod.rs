@@ -13,7 +13,7 @@ use tracing::info;
 
 mod free;
 mod logs;
-mod network;
+pub(crate) mod network;
 mod ota;
 mod restart;
 mod tunnel;
@@ -70,7 +70,6 @@ impl CommandQueueExecutor {
             } => tunnel::open_port(action.id, &self.handles.tunnel, port, user, pub_key).await,
             SafeCommandTx::CloseTunnel => tunnel::close_ssh(action.id, &self.handles.tunnel).await,
             SafeCommandTx::Upgrade => upgrade::upgrade(action.id, &self.handles.updater).await,
-            SafeCommandTx::UpdateNetwork { network } => network::execute(action.id, network).await,
             SafeCommandTx::DownloadOTA {
                 tools,
                 payload,
@@ -125,6 +124,11 @@ impl CommandQueueExecutor {
                     status: 0,
                 }
             }
+            SafeCommandTx::SetAuthorizedNetworks { networks } => {
+                network::execute_set_authorized_networks(action.id, networks).await
+            }
+            SafeCommandTx::ReportNMProfiles => network::execute_report_nm_profiles(action.id).await,
+            SafeCommandTx::WifiScan => network::execute_wifi_scan(action.id).await,
         }
     }
 

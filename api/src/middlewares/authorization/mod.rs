@@ -33,7 +33,9 @@ pub fn required_permission(command: &SafeCommandTx) -> Permission {
         Ping
         | Upgrade
         | Restart
-        | UpdateNetwork { .. }
+        | SetAuthorizedNetworks { .. }
+        | ReportNMProfiles
+        | WifiScan
         | UpdateVariables { .. }
         | TestNetwork
         | ExtendedNetworkTest { .. }

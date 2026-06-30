@@ -1,0 +1,52 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT ssid, signal, rate, security, scanned_at, expires_at\n        FROM wifi_scan_result\n        WHERE device_id = $1 AND expires_at > now()\n        ORDER BY signal DESC NULLS LAST\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "ssid",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "signal",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 2,
+        "name": "rate",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 3,
+        "name": "security",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "scanned_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 5,
+        "name": "expires_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      true,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "cd5de9686bbf8ebd0163f731e3307b30bed5c54ea7689742f13926fd94ef553e"
+}

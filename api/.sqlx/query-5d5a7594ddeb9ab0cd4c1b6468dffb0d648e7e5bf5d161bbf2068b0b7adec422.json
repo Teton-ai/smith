@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT EXISTS(\n                SELECT 1 FROM command_queue\n                WHERE device_id = $1\n                  AND fetched = false\n                  AND canceled = false\n                  AND cmd::text = '\"WifiScan\"'\n            ) as \"exists!\"\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "exists!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "5d5a7594ddeb9ab0cd4c1b6468dffb0d648e7e5bf5d161bbf2068b0b7adec422"
+}

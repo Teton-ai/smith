@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO network (ssid, password, name, network_type, is_network_hidden)\n                           VALUES ($1, $2, $1, 'wifi', false)\n                           ON CONFLICT ON CONSTRAINT network_ssid_password_unique DO UPDATE SET ssid = EXCLUDED.ssid\n                           RETURNING id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "087e8194493b089ab9e62c9e3bec380a3735fb08cda4045be0545db7f926d19a"
+}

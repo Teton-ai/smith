@@ -15,6 +15,7 @@ use tracing::{error, warn};
 const DISTRIBUTIONS_TAG: &str = "distributions";
 
 #[derive(Debug, Deserialize, utoipa::IntoParams)]
+#[into_params(parameter_in = Query)]
 pub struct DistributionsFilter {
     /// Include archived distributions in the result (defaults to false).
     #[serde(default)]

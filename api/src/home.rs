@@ -2,10 +2,9 @@ use crate::device::Variable;
 use anyhow::Result;
 use serde_json::Value;
 use serde_json::json;
-use smith::utils::schema;
-use smith::utils::schema::SafeCommandTx::{UpdateNetwork, UpdateVariables};
+use smith::utils::schema::SafeCommandTx::UpdateVariables;
 use smith::utils::schema::{
-    HomePost, NetworkType, SafeCommandRequest, SafeCommandRx, ServiceStatus,
+    HomePost, Network, NetworkType, SafeCommandRequest, SafeCommandRx, SafeCommandTx, ServiceStatus,
 };
 use sqlx::PgPool;
 use tracing::debug;
@@ -73,37 +72,127 @@ pub async fn save_responses(
                 .await?;
             }
             SafeCommandRx::GetNetwork => {
-                let network = sqlx::query_as!(
-                    schema::Network,
+                let rows = sqlx::query!(
                     r#"
-                        SELECT
-                            n.id,
-                            n.network_type::TEXT,
-                            n.is_network_hidden,
-                            n.ssid,
-                            n.name,
-                            n.description,
-                            n.password
-                        FROM network n
-                        JOIN device d ON n.id = d.network_id
-                        WHERE d.id = $1"#,
-                    &device_id
+                    SELECT n.id, n.network_type::TEXT as "network_type!", n.is_network_hidden,
+                           n.ssid, n.name, n.description, n.password
+                    FROM device_authorized_network dan
+                    JOIN network n ON n.id = dan.network_id
+                    WHERE dan.device_id = $1
+                    ORDER BY dan.added_at ASC
+                    "#,
+                    device_id
                 )
-                .fetch_optional(&mut *tx)
+                .fetch_all(&mut *tx)
                 .await?;
 
-                if let Some(network) = network
-                    && network.network_type == NetworkType::Wifi
-                {
-                    add_commands(
-                        device_serial_number,
-                        vec![SafeCommandRequest {
-                            id: -4,
-                            command: UpdateNetwork { network },
-                            continue_on_error: false,
-                        }],
-                        pool,
+                let networks: Vec<Network> = rows
+                    .into_iter()
+                    .map(|r| Network {
+                        id: r.id,
+                        network_type: NetworkType::from(Some(r.network_type)),
+                        is_network_hidden: r.is_network_hidden,
+                        ssid: r.ssid,
+                        name: r.name,
+                        description: r.description,
+                        password: r.password,
+                    })
+                    .collect();
+
+                add_commands(
+                    device_serial_number,
+                    vec![SafeCommandRequest {
+                        id: -4,
+                        command: SafeCommandTx::SetAuthorizedNetworks { networks },
+                        continue_on_error: false,
+                    }],
+                    pool,
+                )
+                .await?;
+            }
+            SafeCommandRx::ReportNMProfiles { ref profiles } => {
+                let mut profile_network_ids: Vec<(i32, bool)> = Vec::new();
+
+                for profile in profiles {
+                    let ssid = match profile.ssid.as_deref() {
+                        Some(s) => s,
+                        None => continue,
+                    };
+
+                    let network_id: i32 = sqlx::query_scalar!(
+                        r#"INSERT INTO network (ssid, password, name, network_type, is_network_hidden)
+                           VALUES ($1, $2, $1, 'wifi', false)
+                           ON CONFLICT ON CONSTRAINT network_ssid_password_unique DO UPDATE SET ssid = EXCLUDED.ssid
+                           RETURNING id"#,
+                        ssid,
+                        profile.password
                     )
+                    .fetch_one(&mut *tx)
+                    .await?;
+
+                    profile_network_ids.push((network_id, profile.is_active));
+                }
+
+                sqlx::query!(
+                    "DELETE FROM device_configured_network WHERE device_id = $1",
+                    device_id
+                )
+                .execute(&mut *tx)
+                .await?;
+
+                if !profile_network_ids.is_empty() {
+                    let network_ids: Vec<i32> =
+                        profile_network_ids.iter().map(|(id, _)| *id).collect();
+                    let is_active_flags: Vec<bool> =
+                        profile_network_ids.iter().map(|(_, a)| *a).collect();
+                    sqlx::query!(
+                        r#"INSERT INTO device_configured_network (device_id, network_id, is_active)
+                           SELECT $1, UNNEST($2::int[]), UNNEST($3::bool[])"#,
+                        device_id,
+                        &network_ids,
+                        &is_active_flags
+                    )
+                    .execute(&mut *tx)
+                    .await?;
+                }
+
+                let current_network_id = profile_network_ids
+                    .iter()
+                    .find(|(_, is_active)| *is_active)
+                    .map(|(id, _)| *id);
+
+                sqlx::query!(
+                    "UPDATE device SET current_network_id = $2 WHERE id = $1",
+                    device_id,
+                    current_network_id
+                )
+                .execute(&mut *tx)
+                .await?;
+            }
+            SafeCommandRx::WifiScan { ref networks } => {
+                sqlx::query!(
+                    "DELETE FROM wifi_scan_result WHERE device_id = $1",
+                    device_id
+                )
+                .execute(&mut *tx)
+                .await?;
+
+                if !networks.is_empty() {
+                    let ssids: Vec<String> = networks.iter().map(|n| n.ssid.clone()).collect();
+                    let signals: Vec<i32> = networks.iter().map(|n| n.signal).collect();
+                    let rates: Vec<i32> = networks.iter().map(|n| n.rate).collect();
+                    let securities: Vec<String> =
+                        networks.iter().map(|n| n.security.clone()).collect();
+                    sqlx::query!(
+                        r#"INSERT INTO wifi_scan_result (device_id, ssid, signal, rate, security, expires_at)
+                           SELECT $1, UNNEST($2::text[]), UNNEST($3::int[]), UNNEST($4::int[]), UNNEST($5::text[]), now() + INTERVAL '30 minutes'"#,
+                        device_id,
+                        &ssids,
+                        &signals,
+                        &rates,
+                        &securities
+                    )
+                    .execute(&mut *tx)
                     .await?;
                 }
             }
