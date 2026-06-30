@@ -8,13 +8,6 @@ use sqlx::types::{
 use std::collections::HashMap;
 use utoipa::{IntoParams, ToSchema};
 
-#[derive(Debug, Serialize, Deserialize, utoipa::ToSchema, Clone)]
-pub struct NetworkSummary {
-    pub id: i32,
-    pub name: String,
-    pub ssid: Option<String>,
-}
-
 #[derive(Debug, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct DeviceNetwork {
     pub network_score: Option<i32>,
@@ -48,7 +41,6 @@ pub struct Device {
     pub network: Option<DeviceNetwork>,
     #[schema(value_type = HashMap<String, String>)]
     pub labels: Json<HashMap<String, String>>,
-    pub current_network: Option<NetworkSummary>,
 }
 
 /// Query filter for device listing.

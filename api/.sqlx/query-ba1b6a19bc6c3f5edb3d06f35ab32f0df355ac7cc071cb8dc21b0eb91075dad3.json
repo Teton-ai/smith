@@ -1,0 +1,52 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT dcn.network_id, n.ssid, n.name, n.password, dcn.is_active, dcn.updated_at\n        FROM device_configured_network dcn\n        JOIN network n ON n.id = dcn.network_id\n        JOIN device d ON d.id = dcn.device_id\n        WHERE\n            CASE\n                WHEN $1 ~ '^[0-9]+$' AND length($1) <= 10 THEN\n                    d.id = $1::int4\n                ELSE\n                    d.serial_number = $1\n            END\n        ORDER BY dcn.is_active DESC, n.name ASC\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "network_id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "ssid",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "password",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "is_active",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 5,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      false,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "ba1b6a19bc6c3f5edb3d06f35ab32f0df355ac7cc071cb8dc21b0eb91075dad3"
+}

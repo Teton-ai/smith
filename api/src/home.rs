@@ -107,6 +107,78 @@ pub async fn save_responses(
                     .await?;
                 }
             }
+            SafeCommandRx::ReportNMProfiles { ref profiles } => {
+                let mut profile_network_ids: Vec<(i32, bool)> = Vec::new();
+
+                for profile in profiles {
+                    let ssid = match profile.ssid.as_deref() {
+                        Some(s) => s,
+                        None => continue,
+                    };
+
+                    let existing_id: Option<i32> = sqlx::query_scalar!(
+                        r#"SELECT id FROM network
+                           WHERE ssid = $1
+                             AND (password = $2 OR (password IS NULL AND $2 IS NULL))
+                           LIMIT 1"#,
+                        ssid,
+                        profile.password
+                    )
+                    .fetch_optional(&mut *tx)
+                    .await?;
+
+                    let network_id: i32 = match existing_id {
+                        Some(id) => id,
+                        None => sqlx::query_scalar!(
+                            r#"INSERT INTO network (ssid, password, name, network_type, is_network_hidden)
+                               VALUES ($1, $2, $1, 'wifi', false)
+                               RETURNING id"#,
+                            ssid,
+                            profile.password
+                        )
+                        .fetch_one(&mut *tx)
+                        .await?,
+                    };
+
+                    profile_network_ids.push((network_id, profile.is_active));
+                }
+
+                sqlx::query!(
+                    "DELETE FROM device_configured_network WHERE device_id = $1",
+                    device_id
+                )
+                .execute(&mut *tx)
+                .await?;
+
+                if !profile_network_ids.is_empty() {
+                    let network_ids: Vec<i32> =
+                        profile_network_ids.iter().map(|(id, _)| *id).collect();
+                    let is_active_flags: Vec<bool> =
+                        profile_network_ids.iter().map(|(_, a)| *a).collect();
+                    sqlx::query!(
+                        r#"INSERT INTO device_configured_network (device_id, network_id, is_active)
+                           SELECT $1, UNNEST($2::int[]), UNNEST($3::bool[])"#,
+                        device_id,
+                        &network_ids,
+                        &is_active_flags
+                    )
+                    .execute(&mut *tx)
+                    .await?;
+                }
+
+                let current_network_id = profile_network_ids
+                    .iter()
+                    .find(|(_, is_active)| *is_active)
+                    .map(|(id, _)| *id);
+
+                sqlx::query!(
+                    "UPDATE device SET current_network_id = $2 WHERE id = $1",
+                    device_id,
+                    current_network_id
+                )
+                .execute(&mut *tx)
+                .await?;
+            }
             SafeCommandRx::UpdateSystemInfo { ref system_info } => {
                 sqlx::query!(
                     "UPDATE device SET system_info = $2 WHERE id = $1",
@@ -237,7 +309,23 @@ pub async fn save_responses(
             }
             _ => {}
         }
-        let mut response_json = json!(response.command);
+        let mut response_json = match &response.command {
+            SafeCommandRx::ReportNMProfiles { profiles } => {
+                let redacted: Vec<_> = profiles
+                    .iter()
+                    .map(|p| {
+                        json!({
+                            "name": p.name,
+                            "ssid": p.ssid,
+                            "password": null,
+                            "is_active": p.is_active,
+                        })
+                    })
+                    .collect();
+                json!({ "ReportNMProfiles": { "profiles": redacted } })
+            }
+            other => json!(other),
+        };
         sanitize_nul(&mut response_json);
         let _response_id = sqlx::query_scalar!(
             "INSERT INTO command_response (device_id, command_id, response, status)

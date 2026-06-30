@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO device_configured_network (device_id, network_id, is_active)\n                           SELECT $1, UNNEST($2::int[]), UNNEST($3::bool[])",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Int4Array",
+        "BoolArray"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "6d4deb57a5407065455bc28b0c531d18c7004a67d61bbbe2b4f909c9d41092c7"
+}
