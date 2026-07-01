@@ -17,7 +17,7 @@ interface WifiPanelProps {
 }
 
 const WifiPanel = ({ serial }: WifiPanelProps) => {
-	const [revealedIds, setRevealedIds] = useState<Set<number>>(new Set());
+	const [revealedIds, setRevealedIds] = useState<Set<string>>(new Set());
 	const [syncing, setSyncing] = useState(false);
 	const dispatchedAt = useRef<Date | null>(null);
 
@@ -89,13 +89,13 @@ const WifiPanel = ({ serial }: WifiPanelProps) => {
 		}
 	}, [isLoading, isError, profiles, dispatchRefresh, serial]);
 
-	const toggleReveal = (networkId: number) => {
+	const toggleReveal = (profileName: string) => {
 		setRevealedIds((prev) => {
 			const next = new Set(prev);
-			if (next.has(networkId)) {
-				next.delete(networkId);
+			if (next.has(profileName)) {
+				next.delete(profileName);
 			} else {
-				next.add(networkId);
+				next.add(profileName);
 			}
 			return next;
 		});
@@ -145,7 +145,7 @@ const WifiPanel = ({ serial }: WifiPanelProps) => {
 					<div className="flex items-center gap-2">
 						<Wifi className="w-4 h-4 text-green-500 flex-shrink-0" />
 						<span className="text-sm font-medium text-gray-900">
-							{currentNetwork.ssid ?? currentNetwork.name}
+							{currentNetwork.ssid}
 						</span>
 						<Badge variant="green" pill>
 							Connected
@@ -175,18 +175,18 @@ const WifiPanel = ({ serial }: WifiPanelProps) => {
 				) : (
 					<div className="divide-y divide-gray-100">
 						{profiles.map((profile: ConfiguredNetwork) => {
-							const revealed = revealedIds.has(profile.network_id);
+							const revealed = revealedIds.has(profile.profile_name);
 							return (
 								<div
-									key={profile.network_id}
+									key={profile.profile_name}
 									className="py-3 flex flex-col gap-1"
 								>
 									<div className="flex items-center justify-between gap-2">
-										<div className="flex items-center gap-2 min-w-0">
+										<div className="flex flex-col min-w-0">
 											<span className="text-sm font-medium text-gray-900 truncate">
-												{profile.name}
+												{profile.profile_name}
 											</span>
-											{profile.ssid && profile.ssid !== profile.name && (
+											{profile.ssid && (
 												<span className="text-xs text-gray-500 font-mono truncate">
 													{profile.ssid}
 												</span>
@@ -207,9 +207,9 @@ const WifiPanel = ({ serial }: WifiPanelProps) => {
 											</span>
 											<button
 												type="button"
-												onClick={() => toggleReveal(profile.network_id)}
+												onClick={() => toggleReveal(profile.profile_name)}
 												className="text-gray-400 hover:text-gray-600"
-												aria-label={`${revealed ? "Hide" : "Reveal"} password for ${profile.name}`}
+												aria-label={`${revealed ? "Hide" : "Reveal"} password for ${profile.profile_name}`}
 												aria-pressed={revealed}
 											>
 												{revealed ? (

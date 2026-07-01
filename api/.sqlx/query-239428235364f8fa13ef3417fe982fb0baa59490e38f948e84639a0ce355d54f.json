@@ -85,12 +85,12 @@
       },
       {
         "ordinal": 16,
-        "name": "current_network_id",
+        "name": "network_id",
         "type_info": "Int4"
       },
       {
         "ordinal": 17,
-        "name": "network_id",
+        "name": "current_network_id",
         "type_info": "Int4"
       },
       {

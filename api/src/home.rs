@@ -108,7 +108,7 @@ pub async fn save_responses(
                 }
             }
             SafeCommandRx::ReportNMProfiles { ref profiles } if response.status == 0 => {
-                let mut profile_network_ids: Vec<(i32, bool)> = Vec::new();
+                let mut profiles_resolved: Vec<(i32, bool, String)> = Vec::new();
 
                 for profile in profiles {
                     let ssid = match profile.ssid.as_deref() {
@@ -140,7 +140,7 @@ pub async fn save_responses(
                         .await?,
                     };
 
-                    profile_network_ids.push((network_id, profile.is_active));
+                    profiles_resolved.push((network_id, profile.is_active, profile.name.clone()));
                 }
 
                 sqlx::query!(
@@ -150,26 +150,31 @@ pub async fn save_responses(
                 .execute(&mut *tx)
                 .await?;
 
-                if !profile_network_ids.is_empty() {
+                if !profiles_resolved.is_empty() {
                     let network_ids: Vec<i32> =
-                        profile_network_ids.iter().map(|(id, _)| *id).collect();
+                        profiles_resolved.iter().map(|(id, _, _)| *id).collect();
                     let is_active_flags: Vec<bool> =
-                        profile_network_ids.iter().map(|(_, a)| *a).collect();
+                        profiles_resolved.iter().map(|(_, a, _)| *a).collect();
+                    let profile_names: Vec<String> = profiles_resolved
+                        .iter()
+                        .map(|(_, _, n)| n.clone())
+                        .collect();
                     sqlx::query!(
-                        r#"INSERT INTO device_configured_network (device_id, network_id, is_active)
-                           SELECT $1, UNNEST($2::int[]), UNNEST($3::bool[])"#,
+                        r#"INSERT INTO device_configured_network (device_id, network_id, is_active, profile_name)
+                           SELECT $1, UNNEST($2::int[]), UNNEST($3::bool[]), UNNEST($4::text[])"#,
                         device_id,
                         &network_ids,
-                        &is_active_flags
+                        &is_active_flags,
+                        &profile_names as &[String]
                     )
                     .execute(&mut *tx)
                     .await?;
                 }
 
-                let current_network_id = profile_network_ids
+                let current_network_id = profiles_resolved
                     .iter()
-                    .find(|(_, is_active)| *is_active)
-                    .map(|(id, _)| *id);
+                    .find(|(_, is_active, _)| *is_active)
+                    .map(|(id, _, _)| *id);
 
                 sqlx::query!(
                     "UPDATE device SET current_network_id = $2 WHERE id = $1",

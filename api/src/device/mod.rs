@@ -143,6 +143,7 @@ pub struct LabelWithValues {
 #[derive(Debug, Serialize, utoipa::ToSchema)]
 pub struct ConfiguredNetwork {
     pub network_id: i32,
+    pub profile_name: String,
     pub ssid: Option<String>,
     pub name: String,
     pub password: Option<String>,

@@ -135,6 +135,7 @@ export interface ConfiguredNetwork {
 	name: string;
 	network_id: number;
 	password?: string;
+	profile_name: string;
 	ssid?: string;
 	updated_at: string;
 }

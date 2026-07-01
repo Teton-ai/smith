@@ -2592,11 +2592,11 @@ pub async fn get_configured_networks_for_device(
 
     let rows = sqlx::query!(
         r#"
-        SELECT dcn.network_id, n.ssid, n.name, n.password, dcn.is_active, dcn.updated_at
+        SELECT dcn.network_id, dcn.profile_name, n.ssid, n.name, n.password, dcn.is_active, dcn.updated_at
         FROM device_configured_network dcn
         JOIN network n ON n.id = dcn.network_id
         WHERE dcn.device_id = $1
-        ORDER BY dcn.is_active DESC, n.name ASC
+        ORDER BY dcn.is_active DESC, dcn.profile_name ASC
         "#,
         resolved_id
     )
@@ -2611,6 +2611,7 @@ pub async fn get_configured_networks_for_device(
         .into_iter()
         .map(|r| ConfiguredNetwork {
             network_id: r.network_id,
+            profile_name: r.profile_name,
             ssid: r.ssid,
             name: r.name,
             password: r.password,
