@@ -125,6 +125,15 @@ impl CommandQueueExecutor {
                     status: 0,
                 }
             }
+            SafeCommandTx::RunNetworkDiagnostic => {
+                let opts = crate::netdiag::handler::options_from_magic(
+                    &self.handles.magic,
+                    crate::netdiag::Trigger::Command,
+                )
+                .await;
+                let report = crate::netdiag::handler::sweep_and_persist(opts).await;
+                crate::netdiag::handler::to_response(action.id, &report)
+            }
         }
     }
 
