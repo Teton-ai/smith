@@ -1,8 +1,8 @@
 use crate::State;
 use crate::device::{
-    ApproveDeviceBody, DeviceHealth, DeviceLedgerItem, DeviceLedgerItemPaginated, DeviceRelease,
-    LabelWithValues, NewVariable, Note, RawDevice, UpdateDeviceRelease, UpdateDevicesRelease,
-    Variable,
+    ApproveDeviceBody, ConfiguredNetwork, DeviceHealth, DeviceLedgerItem,
+    DeviceLedgerItemPaginated, DeviceRelease, LabelWithValues, NewVariable, Note, RawDevice,
+    UpdateDeviceRelease, UpdateDevicesRelease, Variable,
 };
 use crate::event::PublicEvent;
 use crate::handlers::AuthedDevice;
@@ -2312,7 +2312,6 @@ pub async fn update_device_network(
     ),
     tag = DEVICES_TAG
 )]
-/// Batch updates the `network_id` for a list of `serial_number`s.
 pub async fn update_devices_network(
     Path(network_id): Path<i32>,
     Extension(state): Extension<State>,
@@ -2539,4 +2538,87 @@ pub async fn get_audit_for_device(
         running_latest_release: audit.running_latest_release,
         checked_at: audit.checked_at,
     }))
+}
+
+#[utoipa::path(
+    get,
+    path = "/devices/{device_id}/configured-networks",
+    params(
+        ("device_id" = String, Path),
+    ),
+    responses(
+        (status = StatusCode::OK, description = "Configured NM profiles for the device", body = Vec<ConfiguredNetwork>),
+        (status = StatusCode::NOT_FOUND, description = "Device not found"),
+        (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to retrieve configured networks"),
+    ),
+    security(
+        ("auth_token" = [])
+    ),
+    tag = DEVICES_TAG
+)]
+pub async fn get_configured_networks_for_device(
+    Path(device_id): Path<String>,
+    Extension(state): Extension<State>,
+    Extension(current_user): Extension<CurrentUser>,
+) -> Result<Json<Vec<ConfiguredNetwork>>, StatusCode> {
+    // All authenticated users (default role) can retrieve PSKs via this endpoint: powers the dashboard reveal toggle.
+    if !authorization::check(current_user, "devices", "read") {
+        return Err(StatusCode::FORBIDDEN);
+    }
+
+    let resolved_id: Option<i32> = sqlx::query_scalar!(
+        r#"
+        SELECT id FROM device
+        WHERE
+            CASE
+                WHEN $1 ~ '^[0-9]+$' AND length($1) <= 10 THEN
+                    id = $1::int4
+                ELSE
+                    serial_number = $1
+            END
+        "#,
+        device_id
+    )
+    .fetch_optional(&state.pg_pool)
+    .await
+    .map_err(|err| {
+        error!("Failed to resolve device {device_id}: {err}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    let Some(resolved_id) = resolved_id else {
+        return Err(StatusCode::NOT_FOUND);
+    };
+
+    let rows = sqlx::query!(
+        r#"
+        SELECT dcn.network_id, dcn.profile_name, n.ssid, n.name, n.password, dcn.is_active, dcn.updated_at
+        FROM device_configured_network dcn
+        JOIN network n ON n.id = dcn.network_id
+        WHERE dcn.device_id = $1
+        ORDER BY dcn.is_active DESC, dcn.profile_name ASC
+        "#,
+        resolved_id
+    )
+    .fetch_all(&state.pg_pool)
+    .await
+    .map_err(|err| {
+        error!("Failed to get configured networks for device: {err}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    let networks = rows
+        .into_iter()
+        .map(|r| ConfiguredNetwork {
+            network_id: r.network_id,
+            profile_name: r.profile_name,
+            ssid: r.ssid,
+            name: r.name,
+            password: r.password,
+            is_active: r.is_active,
+            updated_at: r.updated_at,
+        })
+        .collect();
+
+    Ok(Json(networks))
 }

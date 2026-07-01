@@ -1,0 +1,58 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT dcn.network_id, dcn.profile_name, n.ssid, n.name, n.password, dcn.is_active, dcn.updated_at\n        FROM device_configured_network dcn\n        JOIN network n ON n.id = dcn.network_id\n        WHERE dcn.device_id = $1\n        ORDER BY dcn.is_active DESC, dcn.profile_name ASC\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "network_id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "profile_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "ssid",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "password",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "is_active",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 6,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      false,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "57f3490c957f9475f25080799937049765706d312167c0619688ab1fa7e0ffab"
+}
