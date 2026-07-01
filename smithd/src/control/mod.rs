@@ -1,4 +1,6 @@
 use crate::dbus::SmithDbusProxy;
+use crate::magic::MagicHandle;
+use crate::shutdown::ShutdownHandler;
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use tracing::info;
@@ -33,6 +35,8 @@ enum Commands {
         #[arg(help = "Expose a port to the internet", long)]
         port: u16,
     },
+    /// Run network connectivity diagnostics and print a report for IT
+    Diagnose,
 }
 
 #[derive(Parser, Debug)]
@@ -64,10 +68,33 @@ pub async fn execute() -> bool {
         Some(Commands::Tunnel { port }) => {
             _ = expose_port(port).await;
         }
+        Some(Commands::Diagnose) => {
+            if let Err(err) = diagnose().await {
+                info!("Diagnostics failed: {err:#}");
+            }
+        }
         None => daemon_should_run = true,
     }
 
     daemon_should_run
+}
+
+/// Run a one-shot connectivity sweep and print the human-readable report. Loads
+/// configuration directly so it works even when the daemon isn't running — the
+/// exact situation an on-site technician faces at an offline device.
+pub async fn diagnose() -> Result<()> {
+    let shutdown = ShutdownHandler::new();
+    let configuration = MagicHandle::new(shutdown.signals());
+    configuration.load(None).await;
+
+    let opts = crate::netdiag::handler::options_from_magic(
+        &configuration,
+        crate::netdiag::Trigger::OnDemand,
+    )
+    .await;
+    let report = crate::netdiag::handler::sweep_and_persist(opts).await;
+    println!("{}", crate::netdiag::render_text(&report));
+    Ok(())
 }
 
 pub async fn ensure_daemon_mode() -> bool {

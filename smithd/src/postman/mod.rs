@@ -12,6 +12,7 @@ use crate::utils::system::SystemInfo;
 use anyhow::{Result, anyhow};
 use reqwest::{Response, StatusCode};
 use std::fmt::Write;
+use std::path::PathBuf;
 use std::time::Duration;
 use tokio::{sync::mpsc, time};
 use tracing::{error, info, warn};
@@ -118,13 +119,18 @@ impl Postman {
                         continue;
                     }
 
-                    let responses = self.commander.get_results().await;
+                    let mut responses = self.commander.get_results().await;
+                    // Bundle any reports captured while offline into this POST;
+                    // they're deleted from the queue once it's acknowledged.
+                    let (diag_responses, diag_paths) = self.load_queued_diagnostics().await;
+                    responses.extend(diag_responses);
+
                     let release_id = self.magic.get_release_id().await.ok();
                     let service_statuses = self.check_services().await;
 
                     let ping_home_body = HomePost::new(responses, release_id, service_statuses);
 
-                    let response = self.ping_home(ping_home_body).await;
+                    let response = self.ping_home(ping_home_body, diag_paths).await;
 
                     let target_release_id = response.target_release_id;
                     self.services_to_check = response.services;
@@ -277,7 +283,7 @@ impl Postman {
         Ok(())
     }
 
-    async fn ping_home(&mut self, message: HomePost) -> HomePostResponse {
+    async fn ping_home(&mut self, message: HomePost, delivered: Vec<PathBuf>) -> HomePostResponse {
         // Prefer the short-lived JWT from session; fall back to the opaque
         // token (which is also what session returns when no JWT is cached).
         let token = self
@@ -300,6 +306,13 @@ impl Postman {
                         self.police.report_problem_solved(problem).await;
                         self.problems = None;
                     };
+                    // The queued diagnostic reports rode along in this POST; now
+                    // that it's acknowledged, drop them from the upload queue.
+                    for path in &delivered {
+                        if let Err(err) = crate::netdiag::store::clear_uploaded(path.clone()).await {
+                            warn!("Delivered report but failed to remove {}: {err}", path.display());
+                        }
+                    }
                     response.json().await.unwrap_or_default()
                 }
                 StatusCode::UNAUTHORIZED => {
@@ -344,6 +357,63 @@ impl Postman {
                 HomePostResponse::default()
             }
         }
+    }
+
+    /// Load queued diagnostic reports (captured while offline) as `/home`
+    /// responses to ride along in the next POST, returning the responses and the
+    /// files they came from so they can be deleted once the POST is acknowledged.
+    /// Reports that are corrupt on disk are dropped here rather than blocking the
+    /// queue forever. Bounded per poll so a backlog can't bloat the keep-alive.
+    async fn load_queued_diagnostics(&self) -> (Vec<SafeCommandResponse>, Vec<PathBuf>) {
+        const MAX_PER_POLL: usize = 10;
+        /// Synthetic ids for queued reports; the backend keys on the report's own
+        /// id inside the payload, so these only need to be distinct in the batch.
+        const DIAG_ID_BASE: i32 = -100;
+
+        let pending = match crate::netdiag::store::pending_uploads().await {
+            Ok(pending) => pending,
+            Err(err) => {
+                warn!("Could not scan the diagnostics queue: {err:#}");
+                return (Vec::new(), Vec::new());
+            }
+        };
+        if pending.is_empty() {
+            return (Vec::new(), Vec::new());
+        }
+
+        let mut responses = Vec::new();
+        let mut paths = Vec::new();
+        for (i, path) in pending.into_iter().take(MAX_PER_POLL).enumerate() {
+            let bytes = match tokio::fs::read(&path).await {
+                Ok(bytes) => bytes,
+                Err(err) => {
+                    warn!("Could not read queued report {}: {err}", path.display());
+                    continue;
+                }
+            };
+
+            let report: serde_json::Value = match serde_json::from_slice(&bytes) {
+                Ok(value) => value,
+                Err(err) => {
+                    error!(
+                        "Queued report {} is not valid JSON ({err}); dropping it",
+                        path.display()
+                    );
+                    if let Err(err) = crate::netdiag::store::clear_uploaded(path.clone()).await {
+                        warn!("Failed to remove corrupt report {}: {err}", path.display());
+                    }
+                    continue;
+                }
+            };
+
+            responses.push(SafeCommandResponse {
+                id: DIAG_ID_BASE - i as i32,
+                command: SafeCommandRx::NetworkDiagnosticReport { report },
+                status: 0,
+            });
+            paths.push(path);
+        }
+        (responses, paths)
     }
 
     async fn register_device(
