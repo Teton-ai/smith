@@ -26,7 +26,7 @@ const WifiPanel = ({ serial }: WifiPanelProps) => {
 		isLoading,
 		isError,
 	} = useGetConfiguredNetworksForDevice(serial, {
-		query: { refetchInterval: syncing ? 3000 : false },
+		query: { refetchInterval: syncing ? 3000 : 30000 },
 	});
 
 	const currentNetwork = profiles?.find((p) => p.is_active);
