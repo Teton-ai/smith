@@ -70,25 +70,6 @@ const WifiPanel = ({ serial }: WifiPanelProps) => {
 		return () => clearTimeout(timer);
 	}, [syncing]);
 
-	// Auto-trigger once after first successful data load, only if data is older than 12h.
-	// Persisted per device in localStorage so the throttle survives remounts.
-	const hasAutoDispatched = useRef(false);
-	useEffect(() => {
-		if (isLoading || isError || hasAutoDispatched.current) return;
-		hasAutoDispatched.current = true;
-		const staleMs = 12 * 60 * 60 * 1000; // 12 hours
-		const newestAt =
-			profiles && profiles.length > 0
-				? Math.max(...profiles.map((p) => new Date(p.updated_at).getTime()))
-				: 0;
-		const storageKey = `wifi_auto_dispatch_${serial}`;
-		const lastDispatch = Number(localStorage.getItem(storageKey) ?? 0);
-		if (Date.now() - Math.max(newestAt, lastDispatch) > staleMs) {
-			localStorage.setItem(storageKey, String(Date.now()));
-			dispatchRefresh();
-		}
-	}, [isLoading, isError, profiles, dispatchRefresh, serial]);
-
 	const toggleReveal = (profileName: string) => {
 		setRevealedIds((prev) => {
 			const next = new Set(prev);
