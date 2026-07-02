@@ -1,0 +1,58 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT ssid, bssid, signal, rate, security, channel, scanned_at\n        FROM wifi_scan_result\n        WHERE device_id = $1\n        ORDER BY signal DESC NULLS LAST\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "ssid",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "bssid",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "signal",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 3,
+        "name": "rate",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 4,
+        "name": "security",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "channel",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 6,
+        "name": "scanned_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4"
+      ]
+    },
+    "nullable": [
+      true,
+      false,
+      true,
+      true,
+      true,
+      true,
+      false
+    ]
+  },
+  "hash": "892e1d5cc26909eaae43e5925ea9830c998ceb9c6a7c541b9cc725e38165da1f"
+}

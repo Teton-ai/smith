@@ -126,6 +126,7 @@ impl CommandQueueExecutor {
                 }
             }
             SafeCommandTx::ReportNMProfiles => network::execute_report_nm_profiles(action.id).await,
+            SafeCommandTx::WifiScan => network::execute_wifi_scan(action.id).await,
         }
     }
 

@@ -190,6 +190,46 @@ pub async fn save_responses(
                     "Partial NM profile snapshot (some detail lookups failed); preserving existing state"
                 );
             }
+            SafeCommandRx::WifiScan { ref networks } if response.status == 0 => {
+                sqlx::query!(
+                    "DELETE FROM wifi_scan_result WHERE device_id = $1",
+                    device_id
+                )
+                .execute(&mut *tx)
+                .await?;
+
+                if !networks.is_empty() {
+                    let ssids: Vec<Option<String>> =
+                        networks.iter().map(|n| n.ssid.clone()).collect();
+                    let bssids: Vec<String> = networks.iter().map(|n| n.bssid.clone()).collect();
+                    let signals: Vec<Option<i32>> = networks.iter().map(|n| n.signal).collect();
+                    let rates: Vec<Option<i32>> = networks.iter().map(|n| n.rate).collect();
+                    let securities: Vec<Option<String>> =
+                        networks.iter().map(|n| n.security.clone()).collect();
+                    let channels: Vec<Option<i32>> = networks.iter().map(|n| n.channel).collect();
+
+                    sqlx::query!(
+                        r#"INSERT INTO wifi_scan_result (device_id, ssid, bssid, signal, rate, security, channel)
+                           SELECT $1, UNNEST($2::text[]), UNNEST($3::text[]), UNNEST($4::int[]),
+                                  UNNEST($5::int[]), UNNEST($6::text[]), UNNEST($7::int[])"#,
+                        device_id,
+                        &ssids as &[Option<String>],
+                        &bssids as &[String],
+                        &signals as &[Option<i32>],
+                        &rates as &[Option<i32>],
+                        &securities as &[Option<String>],
+                        &channels as &[Option<i32>],
+                    )
+                    .execute(&mut *tx)
+                    .await?;
+                }
+            }
+            SafeCommandRx::WifiScan { .. } => {
+                error!(
+                    device_id,
+                    "WiFi scan failed on device; preserving existing scan results"
+                );
+            }
             SafeCommandRx::UpdateSystemInfo { ref system_info } => {
                 sqlx::query!(
                     "UPDATE device SET system_info = $2 WHERE id = $1",

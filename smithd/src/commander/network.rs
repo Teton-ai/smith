@@ -1,6 +1,6 @@
 use crate::utils::schema::{
     InterfaceType, NMProfile, Network, NetworkDetails, NetworkInfo, SafeCommandResponse,
-    SafeCommandRx, SpeedSample,
+    SafeCommandRx, SpeedSample, WifiNetwork,
 };
 use anyhow::{Context, Result};
 use chrono::Utc;
@@ -208,6 +208,119 @@ pub(crate) async fn execute_report_nm_profiles(id: i32) -> SafeCommandResponse {
         id,
         command: SafeCommandRx::ReportNMProfiles { profiles },
         status: if partial { 1 } else { 0 },
+    }
+}
+
+const WIFI_SCAN_FIELDS: usize = 6;
+
+pub(crate) async fn execute_wifi_scan(id: i32) -> SafeCommandResponse {
+    let mut cmd = Command::new("nmcli");
+    cmd.args([
+        "-t",
+        "-f",
+        "SSID,BSSID,SIGNAL,RATE,SECURITY,CHAN",
+        "device",
+        "wifi",
+        "list",
+        "--rescan",
+        "yes",
+    ]);
+
+    match execute_nmcli_command(cmd).await {
+        Ok(output) if output.status.success() => {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let networks = stdout.lines().filter_map(parse_wifi_scan_line).collect();
+            SafeCommandResponse {
+                id,
+                command: SafeCommandRx::WifiScan { networks },
+                status: 0,
+            }
+        }
+        Ok(output) => {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            tracing::error!("nmcli device wifi list failed: {stderr}");
+            SafeCommandResponse {
+                id,
+                command: SafeCommandRx::WifiScan { networks: vec![] },
+                status: -1,
+            }
+        }
+        Err(e) => {
+            tracing::error!("Failed to run nmcli device wifi list: {e}");
+            SafeCommandResponse {
+                id,
+                command: SafeCommandRx::WifiScan { networks: vec![] },
+                status: -1,
+            }
+        }
+    }
+}
+
+fn parse_wifi_scan_line(line: &str) -> Option<WifiNetwork> {
+    if line.is_empty() {
+        return None;
+    }
+    let fields = split_terse_line(line, WIFI_SCAN_FIELDS);
+    if fields.len() < WIFI_SCAN_FIELDS {
+        tracing::warn!("Skipping malformed wifi scan line: {line}");
+        return None;
+    }
+
+    let ssid_raw = unescape_terse(&fields[0]);
+    let ssid = if ssid_raw.is_empty() {
+        None
+    } else {
+        Some(ssid_raw)
+    };
+    let bssid = unescape_terse(&fields[1]);
+    if ssid.is_none() && bssid.is_empty() {
+        return None;
+    }
+
+    let signal = match parse_optional_i32(&fields[2]) {
+        Ok(v) => v,
+        Err(e) => {
+            tracing::warn!("Skipping wifi scan line, bad signal {:?}: {e}", fields[2]);
+            return None;
+        }
+    };
+    // Rate comes as "130 Mbit/s"; keep only the numeric part.
+    let rate_token = fields[3].split(' ').next().unwrap_or("");
+    let rate = match parse_optional_i32(rate_token) {
+        Ok(v) => v,
+        Err(e) => {
+            tracing::warn!("Skipping wifi scan line, bad rate {:?}: {e}", fields[3]);
+            return None;
+        }
+    };
+    let security = if fields[4].is_empty() || fields[4] == "--" {
+        None
+    } else {
+        Some(unescape_terse(&fields[4]))
+    };
+    let channel = match parse_optional_i32(&fields[5]) {
+        Ok(v) => v,
+        Err(e) => {
+            tracing::warn!("Skipping wifi scan line, bad channel {:?}: {e}", fields[5]);
+            return None;
+        }
+    };
+
+    Some(WifiNetwork {
+        ssid,
+        bssid,
+        signal,
+        rate,
+        security,
+        channel,
+    })
+}
+
+fn parse_optional_i32(s: &str) -> Result<Option<i32>, std::num::ParseIntError> {
+    if s.is_empty() {
+        Ok(None)
+    } else {
+        s.parse::<i32>().map(Some)
     }
 }
 
@@ -954,5 +1067,57 @@ OpenNet:802-11-wireless:OpenNet:--:--";
     #[test]
     fn parse_nm_profiles_skips_non_wifi() {
         assert!(parse_nm_profile_line("eth0:802-3-ethernet:::--").is_none());
+    }
+
+    #[test]
+    fn parse_wifi_scan_normal_ap() {
+        let net =
+            parse_wifi_scan_line("CorpWifi:AA\\:46\\:8D\\:29\\:A7\\:16:82:130 Mbit/s:WPA2:11")
+                .unwrap();
+        assert_eq!(net.ssid, Some("CorpWifi".to_string()));
+        assert_eq!(net.bssid, "AA:46:8D:29:A7:16");
+        assert_eq!(net.signal, Some(82));
+        assert_eq!(net.rate, Some(130));
+        assert_eq!(net.security, Some("WPA2".to_string()));
+        assert_eq!(net.channel, Some(11));
+    }
+
+    #[test]
+    fn parse_wifi_scan_hidden_ap_keeps_bssid() {
+        let net =
+            parse_wifi_scan_line(":AA\\:BB\\:CC\\:DD\\:EE\\:FF:60:270 Mbit/s:WPA2:36").unwrap();
+        assert_eq!(net.ssid, None);
+        assert_eq!(net.bssid, "AA:BB:CC:DD:EE:FF");
+        assert_eq!(net.channel, Some(36));
+    }
+
+    #[test]
+    fn parse_wifi_scan_open_network_has_no_security() {
+        let net =
+            parse_wifi_scan_line("CafeNet:11\\:22\\:33\\:44\\:55\\:66:45:54 Mbit/s:--:6").unwrap();
+        assert_eq!(net.ssid, Some("CafeNet".to_string()));
+        assert_eq!(net.security, None);
+    }
+
+    #[test]
+    fn parse_wifi_scan_ssid_with_escaped_colon() {
+        let net =
+            parse_wifi_scan_line("My\\:Net:AA\\:BB\\:CC\\:DD\\:EE\\:FF:70:130 Mbit/s:WPA1 WPA2:1")
+                .unwrap();
+        assert_eq!(net.ssid, Some("My:Net".to_string()));
+        assert_eq!(net.security, Some("WPA1 WPA2".to_string()));
+    }
+
+    #[test]
+    fn parse_wifi_scan_skips_bad_rows() {
+        // Both SSID and BSSID empty.
+        assert!(parse_wifi_scan_line("::60:270 Mbit/s:WPA2:36").is_none());
+        // Unparseable signal.
+        assert!(
+            parse_wifi_scan_line("Net:AA\\:BB\\:CC\\:DD\\:EE\\:FF:high:54 Mbit/s:WPA2:6").is_none()
+        );
+        // Too few fields.
+        assert!(parse_wifi_scan_line("Net:AA\\:BB\\:CC\\:DD\\:EE\\:FF:60").is_none());
+        assert!(parse_wifi_scan_line("").is_none());
     }
 }
