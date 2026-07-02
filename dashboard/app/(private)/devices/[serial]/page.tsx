@@ -27,6 +27,7 @@ import { useGetDeviceInfo } from "@/app/api-client";
 import { DeviceDetailLayout } from "./DeviceDetailLayout";
 import DeviceVariables from "./DeviceVariables";
 import SecurityAudit from "./SecurityAudit";
+import WifiPanel from "./WifiPanel";
 
 const LocationMap = lazy(() => import("./LocationMap"));
 
@@ -415,6 +416,9 @@ const DeviceDetailPage = () => {
 				{/* Variables (secrets) */}
 				<DeviceVariables deviceId={device.id} />
 			</div>
+
+			{/* WiFi */}
+			<WifiPanel serial={serial} />
 
 			{/* Security Audit (left) and Location Information (right) */}
 			<div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">

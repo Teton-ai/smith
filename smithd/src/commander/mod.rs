@@ -13,7 +13,7 @@ use tracing::info;
 
 mod free;
 mod logs;
-mod network;
+pub(crate) mod network;
 mod ota;
 mod restart;
 mod tunnel;
@@ -125,6 +125,7 @@ impl CommandQueueExecutor {
                     status: 0,
                 }
             }
+            SafeCommandTx::ReportNMProfiles => network::execute_report_nm_profiles(action.id).await,
         }
     }
 

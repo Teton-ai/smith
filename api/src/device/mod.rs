@@ -35,6 +35,7 @@ pub struct RawDevice {
     pub target_release_id_set_at: Option<DateTime<Utc>>,
     pub system_info: Option<serde_json::Value>,
     pub network_id: Option<i32>,
+    pub current_network_id: Option<i32>,
     pub modem_id: Option<i32>,
     pub archived: bool,
     pub ip_address_id: Option<i64>,
@@ -137,6 +138,17 @@ pub struct DeviceHealth {
 pub struct LabelWithValues {
     pub key: String,
     pub values: Vec<String>,
+}
+
+#[derive(Debug, Serialize, utoipa::ToSchema)]
+pub struct ConfiguredNetwork {
+    pub network_id: i32,
+    pub profile_name: String,
+    pub ssid: Option<String>,
+    pub name: String,
+    pub password: Option<String>,
+    pub is_active: bool,
+    pub updated_at: DateTime<Utc>,
 }
 
 async fn update_ip_geolocation(
