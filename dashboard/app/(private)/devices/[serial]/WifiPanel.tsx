@@ -23,6 +23,55 @@ const MASK = "••••••••••••";
 const filterFieldClass =
 	"px-2 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm text-gray-900";
 
+const SCAN_COLUMNS = [
+	{ label: "Network", className: "py-2 pr-2 text-left" },
+	{ label: "Band", className: "px-2 py-2 text-left" },
+	{ label: "Signal", className: "px-2 py-2 text-right" },
+	{ label: "Rate", className: "px-2 py-2 text-right" },
+	{ label: "Security", className: "pl-2 py-2 text-left" },
+];
+
+const getProfileTimestamp = (p: ConfiguredNetwork) => p.updated_at;
+const getScanTimestamp = (r: WifiScanResult) => r.scanned_at;
+
+// Tracks a dispatched command until the DB confirms the device responded (any
+// row timestamp newer than the dispatch) or a 45s timeout, which covers empty
+// result sets and offline devices. `syncing` lives in the caller because the
+// query's refetchInterval needs it before the query provides `data`.
+function useCommandSync<T>(
+	syncing: boolean,
+	setSyncing: (value: boolean) => void,
+	data: T[] | undefined,
+	getTimestamp: (item: T) => string,
+) {
+	const dispatchedAt = useRef<Date | null>(null);
+
+	useEffect(() => {
+		if (
+			syncing &&
+			dispatchedAt.current !== null &&
+			data?.some((item) => new Date(getTimestamp(item)) > dispatchedAt.current!)
+		) {
+			setSyncing(false);
+			dispatchedAt.current = null;
+		}
+	}, [data, syncing, setSyncing, getTimestamp]);
+
+	useEffect(() => {
+		if (!syncing) return;
+		const timer = setTimeout(() => {
+			setSyncing(false);
+			dispatchedAt.current = null;
+		}, 45_000);
+		return () => clearTimeout(timer);
+	}, [syncing, setSyncing]);
+
+	return () => {
+		setSyncing(true);
+		dispatchedAt.current = new Date();
+	};
+}
+
 interface WifiPanelProps {
 	serial: string;
 }
@@ -30,9 +79,7 @@ interface WifiPanelProps {
 const WifiPanel = ({ serial }: WifiPanelProps) => {
 	const [revealedIds, setRevealedIds] = useState<Set<string>>(new Set());
 	const [syncing, setSyncing] = useState(false);
-	const dispatchedAt = useRef<Date | null>(null);
 	const [scanSyncing, setScanSyncing] = useState(false);
-	const scanDispatchedAt = useRef<Date | null>(null);
 	const [scanQuery, setScanQuery] = useState("");
 	const [bandFilter, setBandFilter] = useState("all");
 	const [securityFilter, setSecurityFilter] = useState("all");
@@ -47,10 +94,26 @@ const WifiPanel = ({ serial }: WifiPanelProps) => {
 
 	const currentNetwork = profiles?.find((p) => p.is_active);
 
-	const { data: scanResults, isLoading: isScanLoading } =
-		useGetWifiScanForDevice(serial, {
-			query: { refetchInterval: scanSyncing ? 3000 : false },
-		});
+	const {
+		data: scanResults,
+		isLoading: isScanLoading,
+		isError: isScanError,
+	} = useGetWifiScanForDevice(serial, {
+		query: { refetchInterval: scanSyncing ? 3000 : false },
+	});
+
+	const startProfileSync = useCommandSync(
+		syncing,
+		setSyncing,
+		profiles,
+		getProfileTimestamp,
+	);
+	const startScanSync = useCommandSync(
+		scanSyncing,
+		setScanSyncing,
+		scanResults,
+		getScanTimestamp,
+	);
 
 	const fetcher = useClientMutator<void>();
 	const { mutate: dispatchRefresh, isPending: isDispatching } = useMutation({
@@ -62,10 +125,7 @@ const WifiPanel = ({ serial }: WifiPanelProps) => {
 					{ id: -6, command: "ReportNMProfiles", continue_on_error: false },
 				],
 			}),
-		onSuccess: () => {
-			setSyncing(true);
-			dispatchedAt.current = new Date();
-		},
+		onSuccess: startProfileSync,
 	});
 
 	const { mutate: dispatchScan, isPending: isScanDispatching } = useMutation({
@@ -75,56 +135,8 @@ const WifiPanel = ({ serial }: WifiPanelProps) => {
 				method: "POST",
 				data: [{ id: -7, command: "WifiScan", continue_on_error: false }],
 			}),
-		onSuccess: () => {
-			setScanSyncing(true);
-			scanDispatchedAt.current = new Date();
-		},
+		onSuccess: startScanSync,
 	});
-
-	// Fast path: clear syncing when the DB rows confirm the device responded.
-	useEffect(() => {
-		if (
-			syncing &&
-			dispatchedAt.current !== null &&
-			profiles?.some((p) => new Date(p.updated_at) > dispatchedAt.current!)
-		) {
-			setSyncing(false);
-			dispatchedAt.current = null;
-		}
-	}, [profiles, syncing]);
-
-	// Timeout fallback: covers devices with no configured profiles (empty array
-	// has no updated_at to compare) and offline devices.
-	useEffect(() => {
-		if (!syncing) return;
-		const timer = setTimeout(() => {
-			setSyncing(false);
-			dispatchedAt.current = null;
-		}, 45_000);
-		return () => clearTimeout(timer);
-	}, [syncing]);
-
-	useEffect(() => {
-		if (
-			scanSyncing &&
-			scanDispatchedAt.current !== null &&
-			scanResults?.some(
-				(r) => new Date(r.scanned_at) > scanDispatchedAt.current!,
-			)
-		) {
-			setScanSyncing(false);
-			scanDispatchedAt.current = null;
-		}
-	}, [scanResults, scanSyncing]);
-
-	useEffect(() => {
-		if (!scanSyncing) return;
-		const timer = setTimeout(() => {
-			setScanSyncing(false);
-			scanDispatchedAt.current = null;
-		}, 45_000);
-		return () => clearTimeout(timer);
-	}, [scanSyncing]);
 
 	const securityOptions = useMemo(
 		() =>
@@ -292,11 +304,18 @@ const WifiPanel = ({ serial }: WifiPanelProps) => {
 				{/* Scan results */}
 				<div className="border-t border-gray-100 pt-4 lg:border-t-0 lg:pt-0 lg:border-l lg:border-gray-100 lg:pl-6">
 					<div className="flex items-center justify-between gap-2 mb-3">
-						<p className="text-sm text-gray-500">
-							{scanResults && scanResults.length > 0
-								? `Last checked ${new Date(Math.max(...scanResults.map((r) => new Date(r.scanned_at).getTime()))).toLocaleString()}`
-								: "Never scanned"}
-						</p>
+						{isScanError ? (
+							<p className="text-sm text-red-500">
+								Failed to load WiFi scan results.
+							</p>
+						) : (
+							<p className="text-sm text-gray-500">
+								{/* All rows share one scanned_at: the API replaces them atomically. */}
+								{scanResults && scanResults.length > 0
+									? `Last checked ${new Date(scanResults[0].scanned_at).toLocaleString()}`
+									: "Never scanned"}
+							</p>
+						)}
 						<Button
 							variant="soft"
 							tone="gray"
@@ -363,41 +382,20 @@ const WifiPanel = ({ serial }: WifiPanelProps) => {
 									<table className="min-w-full divide-y divide-gray-200">
 										<thead>
 											<tr>
-												<th
-													scope="col"
-													className="py-2 pr-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
-												>
-													Network
-												</th>
-												<th
-													scope="col"
-													className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
-												>
-													Band
-												</th>
-												<th
-													scope="col"
-													className="px-2 py-2 text-right text-xs font-medium text-gray-500 uppercase tracking-wider"
-												>
-													Signal
-												</th>
-												<th
-													scope="col"
-													className="px-2 py-2 text-right text-xs font-medium text-gray-500 uppercase tracking-wider"
-												>
-													Rate
-												</th>
-												<th
-													scope="col"
-													className="pl-2 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
-												>
-													Security
-												</th>
+												{SCAN_COLUMNS.map((col) => (
+													<th
+														key={col.label}
+														scope="col"
+														className={`${col.className} text-xs font-medium text-gray-500 uppercase tracking-wider`}
+													>
+														{col.label}
+													</th>
+												))}
 											</tr>
 										</thead>
 										<tbody className="divide-y divide-gray-100">
 											{filteredResults.map((result: WifiScanResult) => (
-												<tr key={result.bssid}>
+												<tr key={`${result.bssid}-${result.channel}`}>
 													<td className="py-2 pr-2 max-w-0 w-full">
 														<div className="flex flex-col min-w-0">
 															{result.ssid ? (

@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT ssid, bssid, signal, rate, security, channel, scanned_at\n        FROM wifi_scan_result\n        WHERE device_id = $1\n        ORDER BY signal DESC NULLS LAST\n        ",
+  "query": "\n        SELECT w.ssid, w.bssid AS \"bssid?\", w.signal, w.rate, w.security, w.channel,\n               w.scanned_at AS \"scanned_at?\"\n        FROM device d\n        LEFT JOIN wifi_scan_result w ON w.device_id = d.id\n        WHERE\n            CASE\n                WHEN $1 ~ '^[0-9]+$' AND length($1) <= 10 THEN\n                    d.id = $1::int4\n                ELSE\n                    d.serial_number = $1\n            END\n        ORDER BY w.signal DESC NULLS LAST\n        ",
   "describe": {
     "columns": [
       {
@@ -10,7 +10,7 @@
       },
       {
         "ordinal": 1,
-        "name": "bssid",
+        "name": "bssid?",
         "type_info": "Text"
       },
       {
@@ -35,13 +35,13 @@
       },
       {
         "ordinal": 6,
-        "name": "scanned_at",
+        "name": "scanned_at?",
         "type_info": "Timestamptz"
       }
     ],
     "parameters": {
       "Left": [
-        "Int4"
+        "Text"
       ]
     },
     "nullable": [
@@ -54,5 +54,5 @@
       false
     ]
   },
-  "hash": "892e1d5cc26909eaae43e5925ea9830c998ceb9c6a7c541b9cc725e38165da1f"
+  "hash": "3cb912cf16cd23ac93671955242af022683a60777d3bf2718364c8f12ba9c203"
 }

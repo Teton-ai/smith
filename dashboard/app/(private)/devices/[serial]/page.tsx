@@ -418,7 +418,8 @@ const DeviceDetailPage = () => {
 			</div>
 
 			{/* WiFi */}
-			<WifiPanel serial={serial} />
+			{/* Keyed by serial so filter/reveal state resets when navigating between devices. */}
+			<WifiPanel key={serial} serial={serial} />
 
 			{/* Security Audit (left) and Location Information (right) */}
 			<div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">

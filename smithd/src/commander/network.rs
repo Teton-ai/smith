@@ -284,9 +284,10 @@ fn parse_wifi_scan_line(line: &str) -> Option<WifiNetwork> {
             return None;
         }
     };
-    // Rate comes as "130 Mbit/s"; keep only the numeric part.
+    // Rate comes as "130 Mbit/s"; keep only the numeric part. 802.11b rates
+    // are fractional ("5.5 Mbit/s"), so parse as float and round to whole Mbps.
     let rate_token = fields[3].split(' ').next().unwrap_or("");
-    let rate = match parse_optional_i32(rate_token) {
+    let rate = match parse_optional_rate(rate_token) {
         Ok(v) => v,
         Err(e) => {
             tracing::warn!("Skipping wifi scan line, bad rate {:?}: {e}", fields[3]);
@@ -321,6 +322,14 @@ fn parse_optional_i32(s: &str) -> Result<Option<i32>, std::num::ParseIntError> {
         Ok(None)
     } else {
         s.parse::<i32>().map(Some)
+    }
+}
+
+fn parse_optional_rate(s: &str) -> Result<Option<i32>, std::num::ParseFloatError> {
+    if s.is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some(s.parse::<f64>()?.round() as i32))
     }
 }
 
@@ -1106,6 +1115,13 @@ OpenNet:802-11-wireless:OpenNet:--:--";
                 .unwrap();
         assert_eq!(net.ssid, Some("My:Net".to_string()));
         assert_eq!(net.security, Some("WPA1 WPA2".to_string()));
+    }
+
+    #[test]
+    fn parse_wifi_scan_fractional_rate_rounds() {
+        let net =
+            parse_wifi_scan_line("OldNet:AA\\:BB\\:CC\\:DD\\:EE\\:FF:30:5.5 Mbit/s:WEP:3").unwrap();
+        assert_eq!(net.rate, Some(6));
     }
 
     #[test]

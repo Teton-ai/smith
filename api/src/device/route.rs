@@ -2648,59 +2648,51 @@ pub async fn get_wifi_scan_for_device(
         return Err(StatusCode::FORBIDDEN);
     }
 
-    let resolved_id: Option<i32> = sqlx::query_scalar!(
+    // LEFT JOIN keeps the 404 distinction in a single round-trip: no rows means
+    // unknown device; a row with NULL scan columns means a device with no scans.
+    let rows = sqlx::query!(
         r#"
-        SELECT id FROM device
+        SELECT w.ssid, w.bssid AS "bssid?", w.signal, w.rate, w.security, w.channel,
+               w.scanned_at AS "scanned_at?"
+        FROM device d
+        LEFT JOIN wifi_scan_result w ON w.device_id = d.id
         WHERE
             CASE
                 WHEN $1 ~ '^[0-9]+$' AND length($1) <= 10 THEN
-                    id = $1::int4
+                    d.id = $1::int4
                 ELSE
-                    serial_number = $1
+                    d.serial_number = $1
             END
+        ORDER BY w.signal DESC NULLS LAST
         "#,
         device_id
-    )
-    .fetch_optional(&state.pg_pool)
-    .await
-    .map_err(|err| {
-        error!("Failed to resolve device {device_id}: {err}");
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
-
-    let Some(resolved_id) = resolved_id else {
-        return Err(StatusCode::NOT_FOUND);
-    };
-
-    let rows = sqlx::query!(
-        r#"
-        SELECT ssid, bssid, signal, rate, security, channel, scanned_at
-        FROM wifi_scan_result
-        WHERE device_id = $1
-        ORDER BY signal DESC NULLS LAST
-        "#,
-        resolved_id
     )
     .fetch_all(&state.pg_pool)
     .await
     .map_err(|err| {
-        error!("Failed to get wifi scan results for device: {err}");
+        error!("Failed to get wifi scan results for device {device_id}: {err}");
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
 
+    if rows.is_empty() {
+        return Err(StatusCode::NOT_FOUND);
+    }
+
     let results = rows
         .into_iter()
-        .map(|r| WifiScanResult {
-            ssid: r.ssid,
-            bssid: r.bssid,
-            signal: r.signal,
-            rate: r.rate,
-            security: r.security,
-            band: r
-                .channel
-                .map(|c| if c <= 14 { "2.4 GHz" } else { "5 GHz" }.to_string()),
-            channel: r.channel,
-            scanned_at: r.scanned_at,
+        .filter_map(|r| {
+            Some(WifiScanResult {
+                ssid: r.ssid,
+                bssid: r.bssid?,
+                signal: r.signal,
+                rate: r.rate,
+                security: r.security,
+                band: r
+                    .channel
+                    .map(|c| if c <= 14 { "2.4 GHz" } else { "5 GHz" }.to_string()),
+                channel: r.channel,
+                scanned_at: r.scanned_at?,
+            })
         })
         .collect();
 
