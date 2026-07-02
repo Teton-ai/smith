@@ -334,6 +334,7 @@ async fn start_main_server(
         .routes(routes!(device::route::get_services_for_device))
         .routes(routes!(device::route::get_audit_for_device))
         .routes(routes!(device::route::get_configured_networks_for_device))
+        .routes(routes!(device::route::get_wifi_scan_for_device))
         .routes(routes!(rollout::route::api_rollout,))
         .routes(routes!(rollout::route::get_distribution_rollouts))
         .routes(routes!(deployment::route::api_get_deployment_devices))

@@ -76,6 +76,16 @@ pub struct NMProfile {
     pub is_active: bool,
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct WifiNetwork {
+    pub ssid: Option<String>,
+    pub bssid: String,
+    pub signal: Option<i32>,
+    pub rate: Option<i32>,
+    pub security: Option<String>,
+    pub channel: Option<i32>,
+}
+
 #[derive(Serialize, Deserialize, Default, Debug, Clone)]
 pub enum SafeCommandRx {
     #[default]
@@ -98,6 +108,9 @@ pub enum SafeCommandRx {
     UpdateNetwork,
     ReportNMProfiles {
         profiles: Vec<NMProfile>,
+    },
+    WifiScan {
+        networks: Vec<WifiNetwork>,
     },
     UpdateSystemInfo {
         system_info: Value,
@@ -170,6 +183,7 @@ pub enum SafeCommandTx {
         network: Network,
     },
     ReportNMProfiles,
+    WifiScan,
     UpdateVariables {
         variables: HashMap<String, String>,
     },

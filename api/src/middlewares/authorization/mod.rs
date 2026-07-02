@@ -41,7 +41,8 @@ pub fn required_permission(command: &SafeCommandTx) -> Permission {
         | StopLogStream { .. }
         | RunAudit
         | GetLogs { .. }
-        | ReportNMProfiles => "basic",
+        | ReportNMProfiles
+        | WifiScan => "basic",
     };
     Permission {
         action: action.to_string(),

@@ -151,6 +151,18 @@ pub struct ConfiguredNetwork {
     pub updated_at: DateTime<Utc>,
 }
 
+#[derive(Debug, Serialize, utoipa::ToSchema)]
+pub struct WifiScanResult {
+    pub ssid: Option<String>,
+    pub bssid: String,
+    pub signal: Option<i32>,
+    pub rate: Option<i32>,
+    pub security: Option<String>,
+    pub channel: Option<i32>,
+    pub band: Option<String>,
+    pub scanned_at: DateTime<Utc>,
+}
+
 async fn update_ip_geolocation(
     ip_address: IpAddr,
     ip_id: i64,
