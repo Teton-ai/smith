@@ -2,6 +2,7 @@
 
 import { Button } from "@teton/smith-ui";
 import {
+	ArrowLeft,
 	BarChart3,
 	Check,
 	Copy,
@@ -17,6 +18,7 @@ import {
 	Wifi,
 } from "lucide-react";
 import { useRef, useState } from "react";
+import { Link } from "react-router";
 import {
 	type CommandRecipe,
 	type Device,
@@ -26,6 +28,7 @@ import {
 } from "@/app/api-client";
 import { Modal } from "@/app/components/modal";
 import NetworkQualityIndicator from "@/app/components/NetworkQualityIndicator";
+import { useCommandPalette } from "@/app/hooks/commandPalette";
 import { useConfig } from "@/app/hooks/config";
 
 const Tooltip = ({
@@ -90,11 +93,25 @@ const Tooltip = ({
 };
 
 interface DeviceHeaderProps {
-	device: Device;
+	device?: Device;
 	serial: string;
+	back: string;
 }
 
-const DeviceHeader: React.FC<DeviceHeaderProps> = ({ device, serial }) => {
+/** Doubles as the device icon and the "back to devices" link: on hover it
+ *  morphs from the Cpu glyph into a back arrow. */
+const DeviceIconBackLink = ({ back }: { back: string }) => (
+	<Link
+		to={back}
+		title="Back to devices"
+		className="group relative flex-shrink-0 w-9 h-9 flex items-center justify-center bg-gray-100 hover:bg-gray-200 text-gray-600 rounded transition-colors"
+	>
+		<Cpu className="w-5 h-5 transition-all duration-200 group-hover:opacity-0 group-hover:-translate-x-1" />
+		<ArrowLeft className="w-5 h-5 absolute opacity-0 translate-x-1 transition-all duration-200 group-hover:opacity-100 group-hover:translate-x-0" />
+	</Link>
+);
+
+const DeviceHeader: React.FC<DeviceHeaderProps> = ({ device, serial, back }) => {
 	const [sshCopied, setSshCopied] = useState(false);
 	const [showRunModal, setShowRunModal] = useState(false);
 	const [showRebootModal, setShowRebootModal] = useState(false);
@@ -104,6 +121,7 @@ const DeviceHeader: React.FC<DeviceHeaderProps> = ({ device, serial }) => {
 	const [recipeError, setRecipeError] = useState<string | null>(null);
 	const [runCommand, setRunCommand] = useState("");
 	const { config } = useConfig();
+	const openCommandPalette = useCommandPalette();
 
 	const { data: recipesData, isLoading: isLoadingRecipes } = useGetRecipes();
 	const recipes: CommandRecipe[] = Array.isArray(recipesData)
@@ -218,12 +236,16 @@ const DeviceHeader: React.FC<DeviceHeaderProps> = ({ device, serial }) => {
 		return (
 			<div className="bg-white rounded-lg border border-gray-200 p-4">
 				<div className="flex items-center space-x-3">
-					<div className="p-2 bg-gray-100 text-gray-600 rounded">
-						<Cpu className="w-5 h-5" />
-					</div>
+					<DeviceIconBackLink back={back} />
 					<div className="flex-1">
 						<div className="flex items-center space-x-3">
-							<h1 className="text-xl font-bold text-gray-900">{serial}</h1>
+							<h1
+								className="text-xl font-bold text-gray-900 hover:text-blue-600 cursor-pointer transition-colors"
+								onClick={openCommandPalette}
+								title="Search devices"
+							>
+								{serial}
+							</h1>
 						</div>
 						<div className="flex items-center space-x-4 mt-1 text-sm text-gray-600">
 							<span>Loading...</span>
@@ -410,12 +432,14 @@ const DeviceHeader: React.FC<DeviceHeaderProps> = ({ device, serial }) => {
 		<div className="bg-white rounded-lg border border-gray-200 p-4">
 			<div className="flex flex-col gap-3 lg:flex-row lg:items-center">
 				<div className="flex flex-1 items-center space-x-3 min-w-0">
-					<div className="p-2 bg-gray-100 text-gray-600 rounded flex-shrink-0">
-						<Cpu className="w-5 h-5" />
-					</div>
+					<DeviceIconBackLink back={back} />
 					<div className="flex-1 min-w-0">
 						<div className="flex items-center space-x-3">
-							<h1 className="text-xl font-bold text-gray-900">
+							<h1
+								className="text-xl font-bold text-gray-900 hover:text-blue-600 cursor-pointer transition-colors"
+								onClick={openCommandPalette}
+								title="Search devices"
+							>
 								{getDeviceName()}
 							</h1>
 							<Tooltip content={getNetworkQualityTooltip()}>

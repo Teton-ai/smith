@@ -16,6 +16,7 @@ import { Outlet, useNavigate } from "react-router";
 import { CommandPalette } from "@/app/components/CommandPalette";
 import Profile from "@/app/components/profile";
 import Sidebar, { type NavItem } from "@/app/components/sidebar";
+import { CommandPaletteProvider } from "@/app/hooks/commandPalette";
 import { useConfig } from "@/app/hooks/config";
 
 const navigationItems: NavItem[] = [
@@ -138,7 +139,9 @@ export default function PrivateLayout() {
 				onSearch={() => setPaletteOpen(true)}
 			/>
 			<main className="flex-1 min-w-0 overflow-hidden mt-14 md:mt-0 flex flex-col">
-				<Outlet />
+				<CommandPaletteProvider open={() => setPaletteOpen(true)}>
+					<Outlet />
+				</CommandPaletteProvider>
 			</main>
 			<CommandPalette
 				open={paletteOpen}

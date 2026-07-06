@@ -30,6 +30,13 @@ function useIsMac() {
 	return isMac;
 }
 
+// A little vertical padding on each row creates breathing room between rows,
+// but `bg-clip-content` keeps the hover/active background clipped to the
+// content box (excluding that padding) so it doesn't paint into the gap. The
+// row's own hit box still spans the full height and stays flush against its
+// neighbor, so there's no dead zone for the cursor to cross between rows.
+const ROW_CLASS = "h-10 py-0.5 bg-clip-content";
+
 function SearchTrigger({
 	onClick,
 	expanded,
@@ -42,10 +49,10 @@ function SearchTrigger({
 		<button
 			onClick={onClick}
 			aria-label="Open command palette"
-			className="w-full flex items-center h-10 rounded-md text-gray-600 hover:bg-gray-100 hover:text-gray-900 transition-colors duration-200 cursor-pointer group/item"
+			className={`w-full flex items-center ${ROW_CLASS} rounded-md text-gray-600 hover:bg-gray-200 hover:text-gray-900 transition-colors duration-150 cursor-pointer group/item`}
 		>
 			<div className="flex items-center justify-center w-12 shrink-0">
-				<Search className="w-[18px] h-[18px] transition-transform duration-200 group-hover/item:scale-110" />
+				<Search className="w-[18px] h-[18px] transition-transform duration-150 delay-150 group-hover/item:scale-110" />
 			</div>
 			<DesktopLabel expanded={expanded}>
 				<span className="flex items-center justify-between gap-2 w-full pr-2">
@@ -64,7 +71,7 @@ function MobileSearchTrigger({ onClick }: { onClick: () => void }) {
 		<button
 			onClick={onClick}
 			aria-label="Open command palette"
-			className="w-full flex items-center h-10 rounded-md text-gray-600 hover:bg-gray-100 hover:text-gray-900 transition-colors duration-200 cursor-pointer"
+			className="w-full flex items-center h-10 rounded-md text-gray-600 hover:bg-gray-200 hover:text-gray-900 transition-colors duration-150 cursor-pointer"
 		>
 			<div className="flex items-center justify-center w-12 shrink-0">
 				<Search className="w-[18px] h-[18px]" />
@@ -159,17 +166,16 @@ export default function Sidebar({
 				</div>
 
 				{/* Nav items */}
-				<nav className="flex-1 px-2 py-4 space-y-1">
+				<nav className="flex-1 px-2 py-4">
 					{onSearch && <SearchTrigger onClick={onSearch} expanded={expanded} />}
-					{items.map((item, index) => {
+					{items.map((item) => {
 						const Icon = item.icon;
 						const active = item.onClick ? false : isActive(item.path);
-						const itemClass = `flex items-center h-10 rounded-md transition-all duration-200 cursor-pointer relative group/item w-full text-left ${
+						const itemClass = `flex items-center ${ROW_CLASS} rounded-md transition-colors duration-150 cursor-pointer relative group/item w-full text-left ${
 							active
 								? "bg-blue-50 text-blue-700"
-								: "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
+								: "text-gray-600 hover:bg-gray-200 hover:text-gray-900"
 						}`;
-						const itemStyle = { transitionDelay: `${index * 20}ms` };
 						const inner = (
 							<>
 								<div
@@ -178,7 +184,7 @@ export default function Sidebar({
 									}`}
 								/>
 								<div className="flex items-center justify-center w-12 shrink-0">
-									<Icon className="w-[18px] h-[18px] transition-transform duration-200 group-hover/item:scale-110" />
+									<Icon className="w-[18px] h-[18px] transition-transform duration-150 delay-150 group-hover/item:scale-110" />
 								</div>
 								<DesktopLabel expanded={expanded}>
 									<span className="flex items-center justify-between gap-2 w-full pr-2">
@@ -199,19 +205,13 @@ export default function Sidebar({
 									key={item.path}
 									onClick={item.onClick}
 									className={itemClass}
-									style={itemStyle}
 								>
 									{inner}
 								</button>
 							);
 						}
 						return (
-							<Link
-								key={item.path}
-								to={item.path}
-								className={itemClass}
-								style={itemStyle}
-							>
+							<Link key={item.path} to={item.path} className={itemClass}>
 								{inner}
 							</Link>
 						);
@@ -220,15 +220,14 @@ export default function Sidebar({
 
 				{/* Bottom section */}
 				{(bottomItems.length > 0 || bottomContent) && (
-					<div className="shrink-0 border-t border-gray-200 px-2 py-3 space-y-1">
+					<div className="shrink-0 border-t border-gray-200 px-2 py-3">
 						{bottomItems.map((item) => {
 							const Icon = item.icon;
-							const className =
-								"flex items-center h-10 rounded-md text-gray-600 hover:bg-gray-100 hover:text-gray-900 transition-colors duration-200 cursor-pointer group/item";
+							const className = `flex items-center ${ROW_CLASS} rounded-md text-gray-600 hover:bg-gray-200 hover:text-gray-900 transition-colors duration-150 cursor-pointer group/item`;
 							const inner = (
 								<>
 									<div className="flex items-center justify-center w-12 shrink-0">
-										<Icon className="w-[18px] h-[18px] transition-transform duration-200 group-hover/item:scale-110" />
+										<Icon className="w-[18px] h-[18px] transition-transform duration-150 delay-150 group-hover/item:scale-110" />
 									</div>
 									<DesktopLabel expanded={expanded}>{item.label}</DesktopLabel>
 								</>
@@ -315,7 +314,7 @@ export default function Sidebar({
 						</div>
 
 						{/* Nav items */}
-						<nav className="flex-1 px-2 py-4 space-y-1">
+						<nav className="flex-1 px-2 py-4">
 							{onSearch && (
 								<MobileSearchTrigger
 									onClick={() => {
@@ -327,10 +326,10 @@ export default function Sidebar({
 							{items.map((item) => {
 								const Icon = item.icon;
 								const active = item.onClick ? false : isActive(item.path);
-								const itemClass = `flex items-center h-10 rounded-md transition-colors duration-200 cursor-pointer relative w-full text-left ${
+								const itemClass = `flex items-center h-10 rounded-md transition-colors duration-150 cursor-pointer relative w-full text-left ${
 									active
 										? "bg-blue-50 text-blue-700"
-										: "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
+										: "text-gray-600 hover:bg-gray-200 hover:text-gray-900"
 								}`;
 								const inner = (
 									<>
@@ -382,11 +381,11 @@ export default function Sidebar({
 
 						{/* Bottom section */}
 						{(bottomItems.length > 0 || mobileBottomContent) && (
-							<div className="shrink-0 border-t border-gray-200 px-2 py-3 space-y-1">
+							<div className="shrink-0 border-t border-gray-200 px-2 py-3">
 								{bottomItems.map((item) => {
 									const Icon = item.icon;
 									const className =
-										"flex items-center h-10 rounded-md text-gray-600 hover:bg-gray-100 hover:text-gray-900 transition-colors duration-200 cursor-pointer";
+										"flex items-center h-10 rounded-md text-gray-600 hover:bg-gray-200 hover:text-gray-900 transition-colors duration-150 cursor-pointer";
 									const inner = (
 										<>
 											<div className="flex items-center justify-center w-12 shrink-0">
