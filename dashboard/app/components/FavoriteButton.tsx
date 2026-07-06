@@ -11,7 +11,7 @@ export default function FavoriteButton({
 	device: Device;
 	className?: string;
 }) {
-	const { isFavorite, toggle } = useFavorites();
+	const { isFavorite, toggle, isToggling } = useFavorites();
 	const [toast, setToast] = useState<ToastState | null>(null);
 	const favorite = isFavorite(device.id);
 
@@ -43,8 +43,11 @@ export default function FavoriteButton({
 			<button
 				type="button"
 				title={favorite ? "Remove from favorites" : "Add to favorites"}
+				aria-label={favorite ? "Remove from favorites" : "Add to favorites"}
+				aria-pressed={favorite}
+				disabled={isToggling}
 				onClick={handleClick}
-				className={`p-1 rounded-md transition-colors cursor-pointer ${
+				className={`p-1 rounded-md transition-colors cursor-pointer disabled:pointer-events-none ${
 					favorite
 						? "text-red-500 hover:text-red-600"
 						: "text-gray-300 hover:text-red-400"

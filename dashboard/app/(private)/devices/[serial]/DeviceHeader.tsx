@@ -28,6 +28,7 @@ import FavoriteButton from "@/app/components/FavoriteButton";
 import { Modal } from "@/app/components/modal";
 import NetworkQualityIndicator from "@/app/components/NetworkQualityIndicator";
 import { useConfig } from "@/app/hooks/config";
+import { formatTimeAgo } from "@/app/utils/device";
 
 const Tooltip = ({
 	children,
@@ -234,19 +235,6 @@ const DeviceHeader: React.FC<DeviceHeaderProps> = ({ device, serial }) => {
 			</div>
 		);
 	}
-
-	const formatTimeAgo = (date: string) => {
-		const now = new Date();
-		const past = new Date(date);
-		const diff = now.getTime() - past.getTime();
-		const minutes = Math.floor(diff / 60000);
-		const hours = Math.floor(minutes / 60);
-		const days = Math.floor(hours / 24);
-
-		if (days > 0) return `${days}d ago`;
-		if (hours > 0) return `${hours}h ago`;
-		return `${minutes}m ago`;
-	};
 
 	const getDeviceStatus = () => {
 		if (!device || !device.last_seen) return "offline";

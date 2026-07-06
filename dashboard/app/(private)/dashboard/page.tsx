@@ -37,6 +37,7 @@ import { Modal } from "@/app/components/modal";
 import NetworkQualityIndicator from "@/app/components/NetworkQualityIndicator";
 import { useConfig } from "@/app/hooks/config";
 import { useFavorites } from "@/app/hooks/favorites";
+import { formatTimeAgo, sortByLastSeen } from "@/app/utils/device";
 import {
 	type Device,
 	useGetDashboard,
@@ -49,27 +50,6 @@ import {
 } from "./useUnhealthyServices";
 
 const getDeviceName = (device: Device) => device.serial_number;
-
-const formatTimeAgo = (dateString: string) => {
-	const now = new Date();
-	const past = new Date(dateString);
-	const diff = now.getTime() - past.getTime();
-	const minutes = Math.floor(diff / 60000);
-	const hours = Math.floor(minutes / 60);
-	const days = Math.floor(hours / 24);
-
-	if (days > 0) return `${days}d ago`;
-	if (hours > 0) return `${hours}h ago`;
-	return `${minutes}m ago`;
-};
-
-// Sort by last_seen descending (most recent first), never seen at the end
-const sortByLastSeen = (a: Device, b: Device) => {
-	if (!a.last_seen && !b.last_seen) return 0;
-	if (!a.last_seen) return 1;
-	if (!b.last_seen) return -1;
-	return new Date(b.last_seen).getTime() - new Date(a.last_seen).getTime();
-};
 
 const getOutdatedDuration = (device: Device) => {
 	if (!device.target_release_id_set_at) return "";
@@ -614,16 +594,14 @@ const AdminPanel = () => {
 
 			{/* Favorites: personal per-user list, shown regardless of fleet health */}
 			{favorites.length > 0 && (
-				<div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-					<OfflineSection
-						icon={Heart}
-						title="Favorites"
-						theme={SECTION_THEMES.blue}
-						devices={[...favorites].sort(sortByLastSeen)}
-						viewAllTo="/favorites"
-						alwaysShowFooter
-					/>
-				</div>
+				<OfflineSection
+					icon={Heart}
+					title="Favorites"
+					theme={SECTION_THEMES.blue}
+					devices={[...favorites].sort(sortByLastSeen)}
+					viewAllTo="/favorites"
+					alwaysShowFooter
+				/>
 			)}
 			{/* Registration Chart Modal */}
 			<Modal

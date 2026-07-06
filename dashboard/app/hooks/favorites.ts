@@ -62,5 +62,10 @@ export const useFavorites = () => {
 		[queryClient, addMutation, removeMutation],
 	);
 
-	return { favorites, isFavorite, toggle, isLoading };
+	// Mutation instances are local to each hook consumer, so this flag only
+	// covers toggles started by that consumer (one button disables itself,
+	// not every heart on the page).
+	const isToggling = addMutation.isPending || removeMutation.isPending;
+
+	return { favorites, isFavorite, toggle, isToggling, isLoading };
 };

@@ -1,30 +1,10 @@
-import { Card, CountryFlag, ListRow, PageContainer } from "@teton/smith-ui";
+import { Card, CountryFlag, PageContainer } from "@teton/smith-ui";
 import { Heart } from "lucide-react";
+import { useNavigate } from "react-router";
 import FavoriteButton from "@/app/components/FavoriteButton";
 import NetworkQualityIndicator from "@/app/components/NetworkQualityIndicator";
 import { useFavorites } from "@/app/hooks/favorites";
-import type { Device } from "../../api-client";
-
-const formatTimeAgo = (dateString: string) => {
-	const now = new Date();
-	const past = new Date(dateString);
-	const diff = now.getTime() - past.getTime();
-	const minutes = Math.floor(diff / 60000);
-	const hours = Math.floor(minutes / 60);
-	const days = Math.floor(hours / 24);
-
-	if (days > 0) return `${days}d ago`;
-	if (hours > 0) return `${hours}h ago`;
-	return `${minutes}m ago`;
-};
-
-// Sort by last_seen descending (most recent first), never seen at the end
-const sortByLastSeen = (a: Device, b: Device) => {
-	if (!a.last_seen && !b.last_seen) return 0;
-	if (!a.last_seen) return 1;
-	if (!b.last_seen) return -1;
-	return new Date(b.last_seen).getTime() - new Date(a.last_seen).getTime();
-};
+import { formatTimeAgo, sortByLastSeen } from "@/app/utils/device";
 
 const FavoriteSkeleton = () => (
 	<div className="flex items-center justify-between px-4 py-3 animate-pulse">
@@ -37,6 +17,7 @@ const FavoriteSkeleton = () => (
 );
 
 const FavoritesPage = () => {
+	const navigate = useNavigate();
 	const { favorites, isLoading } = useFavorites();
 
 	const sortedFavorites = [...favorites].sort(sortByLastSeen);
@@ -71,8 +52,23 @@ const FavoritesPage = () => {
 					</div>
 				) : (
 					<div className="divide-y divide-gray-100">
+						{/* Rows navigate via onClick (devices-page idiom) rather than a
+						    Link so the heart button is not nested inside an anchor. */}
 						{sortedFavorites.map((device) => (
-							<ListRow key={device.id} to={`/devices/${device.serial_number}`}>
+							// biome-ignore lint/a11y/useSemanticElements: can't use <button> because FavoriteButton (also a <button>) is a child
+							<div
+								key={device.id}
+								role="button"
+								tabIndex={0}
+								className="flex items-center justify-between px-4 py-3 hover:bg-gray-50 cursor-pointer transition-colors"
+								onClick={() => navigate(`/devices/${device.serial_number}`)}
+								onKeyDown={(e) => {
+									if (e.key === "Enter" || e.key === " ") {
+										e.preventDefault();
+										navigate(`/devices/${device.serial_number}`);
+									}
+								}}
+							>
 								<div className="flex items-center space-x-3 min-w-0">
 									<NetworkQualityIndicator
 										isOnline={device.online}
@@ -94,7 +90,7 @@ const FavoritesPage = () => {
 									</span>
 									<FavoriteButton device={device} />
 								</div>
-							</ListRow>
+							</div>
 						))}
 					</div>
 				)}

@@ -171,7 +171,15 @@ pub async fn get_favorite_devices(
         return Err(StatusCode::FORBIDDEN);
     }
 
-    let devices = query_devices(&state.pg_pool, &DeviceFilter::default(), Some(user_id))
+    // Favorites must list everything the user hearted: include archived
+    // devices and lift the default 100-row cap (1000 is the query's hard max).
+    let filter = DeviceFilter {
+        archived: Some(true),
+        limit: Some(1000),
+        ..DeviceFilter::default()
+    };
+
+    let devices = query_devices(&state.pg_pool, &filter, Some(user_id))
         .await
         .map_err(|err| {
             error!("error: failed to get favorite devices: {:?}", err);
