@@ -17,6 +17,7 @@ import {
 	ChevronRight,
 	Clock,
 	Cpu,
+	Heart,
 	Package,
 	ShieldCheck,
 	XCircle,
@@ -35,6 +36,7 @@ import {
 import { Modal } from "@/app/components/modal";
 import NetworkQualityIndicator from "@/app/components/NetworkQualityIndicator";
 import { useConfig } from "@/app/hooks/config";
+import { useFavorites } from "@/app/hooks/favorites";
 import {
 	type Device,
 	useGetDashboard,
@@ -124,12 +126,14 @@ const OfflineSection = ({
 	theme,
 	devices,
 	viewAllTo,
+	alwaysShowFooter = false,
 }: {
 	icon: IconComponent;
 	title: string;
 	theme: SectionTheme;
 	devices: Device[];
 	viewAllTo: string;
+	alwaysShowFooter?: boolean;
 }) => {
 	if (devices.length === 0) return null;
 	return (
@@ -139,8 +143,12 @@ const OfflineSection = ({
 			count={devices.length}
 			theme={theme}
 			footer={
-				devices.length > 10 ? (
-					<ViewAllFooter to={viewAllTo} count={devices.length} noun="devices" />
+				alwaysShowFooter || devices.length > 10 ? (
+					<ViewAllFooter
+						to={viewAllTo}
+						count={devices.length}
+						noun={devices.length === 1 ? "device" : "devices"}
+					/>
 				) : undefined
 			}
 		>
@@ -200,6 +208,8 @@ const AdminPanel = () => {
 		);
 
 	const { data: unhealthyServices = [] } = useUnhealthyServices();
+
+	const { favorites } = useFavorites();
 
 	const { data: registrationData } = useGetRegistrationCounts();
 
@@ -600,6 +610,20 @@ const AdminPanel = () => {
 						</p>
 					</div>
 				</Card>
+			)}
+
+			{/* Favorites: personal per-user list, shown regardless of fleet health */}
+			{favorites.length > 0 && (
+				<div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+					<OfflineSection
+						icon={Heart}
+						title="Favorites"
+						theme={SECTION_THEMES.blue}
+						devices={[...favorites].sort(sortByLastSeen)}
+						viewAllTo="/favorites"
+						alwaysShowFooter
+					/>
+				</div>
 			)}
 			{/* Registration Chart Modal */}
 			<Modal
