@@ -20055,6 +20055,461 @@ export function useGetRoles<
 	return { ...query, queryKey: queryOptions.queryKey };
 }
 
+export const useGetFavoriteDevicesHook = () => {
+	const getFavoriteDevices = useClientMutator<Device[]>();
+
+	return useCallback(
+		(signal?: AbortSignal) => {
+			return getFavoriteDevices({
+				url: `/user/favorites`,
+				method: "GET",
+				signal,
+			});
+		},
+		[getFavoriteDevices],
+	);
+};
+
+export const getGetFavoriteDevicesInfiniteQueryKey = () => {
+	return ["infinite", `/user/favorites`] as const;
+};
+
+export const getGetFavoriteDevicesQueryKey = () => {
+	return [`/user/favorites`] as const;
+};
+
+export const useGetFavoriteDevicesInfiniteQueryOptions = <
+	TData = InfiniteData<
+		Awaited<ReturnType<ReturnType<typeof useGetFavoriteDevicesHook>>>
+	>,
+	TError = void,
+>(options?: {
+	query?: Partial<
+		UseInfiniteQueryOptions<
+			Awaited<ReturnType<ReturnType<typeof useGetFavoriteDevicesHook>>>,
+			TError,
+			TData
+		>
+	>;
+}) => {
+	const { query: queryOptions } = options ?? {};
+
+	const queryKey =
+		queryOptions?.queryKey ?? getGetFavoriteDevicesInfiniteQueryKey();
+
+	const getFavoriteDevices = useGetFavoriteDevicesHook();
+
+	const queryFn: QueryFunction<
+		Awaited<ReturnType<ReturnType<typeof useGetFavoriteDevicesHook>>>
+	> = ({ signal }) => getFavoriteDevices(signal);
+
+	return { queryKey, queryFn, ...queryOptions } as UseInfiniteQueryOptions<
+		Awaited<ReturnType<ReturnType<typeof useGetFavoriteDevicesHook>>>,
+		TError,
+		TData
+	> & { queryKey: DataTag<QueryKey, TData, TError> };
+};
+
+export type GetFavoriteDevicesInfiniteQueryResult = NonNullable<
+	Awaited<ReturnType<ReturnType<typeof useGetFavoriteDevicesHook>>>
+>;
+export type GetFavoriteDevicesInfiniteQueryError = void;
+
+export function useGetFavoriteDevicesInfinite<
+	TData = InfiniteData<
+		Awaited<ReturnType<ReturnType<typeof useGetFavoriteDevicesHook>>>
+	>,
+	TError = void,
+>(
+	options: {
+		query: Partial<
+			UseInfiniteQueryOptions<
+				Awaited<ReturnType<ReturnType<typeof useGetFavoriteDevicesHook>>>,
+				TError,
+				TData
+			>
+		> &
+			Pick<
+				DefinedInitialDataOptions<
+					Awaited<ReturnType<ReturnType<typeof useGetFavoriteDevicesHook>>>,
+					TError,
+					Awaited<ReturnType<ReturnType<typeof useGetFavoriteDevicesHook>>>
+				>,
+				"initialData"
+			>;
+	},
+	queryClient?: QueryClient,
+): DefinedUseInfiniteQueryResult<TData, TError> & {
+	queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useGetFavoriteDevicesInfinite<
+	TData = InfiniteData<
+		Awaited<ReturnType<ReturnType<typeof useGetFavoriteDevicesHook>>>
+	>,
+	TError = void,
+>(
+	options?: {
+		query?: Partial<
+			UseInfiniteQueryOptions<
+				Awaited<ReturnType<ReturnType<typeof useGetFavoriteDevicesHook>>>,
+				TError,
+				TData
+			>
+		> &
+			Pick<
+				UndefinedInitialDataOptions<
+					Awaited<ReturnType<ReturnType<typeof useGetFavoriteDevicesHook>>>,
+					TError,
+					Awaited<ReturnType<ReturnType<typeof useGetFavoriteDevicesHook>>>
+				>,
+				"initialData"
+			>;
+	},
+	queryClient?: QueryClient,
+): UseInfiniteQueryResult<TData, TError> & {
+	queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useGetFavoriteDevicesInfinite<
+	TData = InfiniteData<
+		Awaited<ReturnType<ReturnType<typeof useGetFavoriteDevicesHook>>>
+	>,
+	TError = void,
+>(
+	options?: {
+		query?: Partial<
+			UseInfiniteQueryOptions<
+				Awaited<ReturnType<ReturnType<typeof useGetFavoriteDevicesHook>>>,
+				TError,
+				TData
+			>
+		>;
+	},
+	queryClient?: QueryClient,
+): UseInfiniteQueryResult<TData, TError> & {
+	queryKey: DataTag<QueryKey, TData, TError>;
+};
+
+export function useGetFavoriteDevicesInfinite<
+	TData = InfiniteData<
+		Awaited<ReturnType<ReturnType<typeof useGetFavoriteDevicesHook>>>
+	>,
+	TError = void,
+>(
+	options?: {
+		query?: Partial<
+			UseInfiniteQueryOptions<
+				Awaited<ReturnType<ReturnType<typeof useGetFavoriteDevicesHook>>>,
+				TError,
+				TData
+			>
+		>;
+	},
+	queryClient?: QueryClient,
+): UseInfiniteQueryResult<TData, TError> & {
+	queryKey: DataTag<QueryKey, TData, TError>;
+} {
+	const queryOptions = useGetFavoriteDevicesInfiniteQueryOptions(options);
+
+	const query = useInfiniteQuery(
+		queryOptions,
+		queryClient,
+	) as UseInfiniteQueryResult<TData, TError> & {
+		queryKey: DataTag<QueryKey, TData, TError>;
+	};
+
+	return { ...query, queryKey: queryOptions.queryKey };
+}
+
+export const useGetFavoriteDevicesQueryOptions = <
+	TData = Awaited<ReturnType<ReturnType<typeof useGetFavoriteDevicesHook>>>,
+	TError = void,
+>(options?: {
+	query?: Partial<
+		UseQueryOptions<
+			Awaited<ReturnType<ReturnType<typeof useGetFavoriteDevicesHook>>>,
+			TError,
+			TData
+		>
+	>;
+}) => {
+	const { query: queryOptions } = options ?? {};
+
+	const queryKey = queryOptions?.queryKey ?? getGetFavoriteDevicesQueryKey();
+
+	const getFavoriteDevices = useGetFavoriteDevicesHook();
+
+	const queryFn: QueryFunction<
+		Awaited<ReturnType<ReturnType<typeof useGetFavoriteDevicesHook>>>
+	> = ({ signal }) => getFavoriteDevices(signal);
+
+	return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+		Awaited<ReturnType<ReturnType<typeof useGetFavoriteDevicesHook>>>,
+		TError,
+		TData
+	> & { queryKey: DataTag<QueryKey, TData, TError> };
+};
+
+export type GetFavoriteDevicesQueryResult = NonNullable<
+	Awaited<ReturnType<ReturnType<typeof useGetFavoriteDevicesHook>>>
+>;
+export type GetFavoriteDevicesQueryError = void;
+
+export function useGetFavoriteDevices<
+	TData = Awaited<ReturnType<ReturnType<typeof useGetFavoriteDevicesHook>>>,
+	TError = void,
+>(
+	options: {
+		query: Partial<
+			UseQueryOptions<
+				Awaited<ReturnType<ReturnType<typeof useGetFavoriteDevicesHook>>>,
+				TError,
+				TData
+			>
+		> &
+			Pick<
+				DefinedInitialDataOptions<
+					Awaited<ReturnType<ReturnType<typeof useGetFavoriteDevicesHook>>>,
+					TError,
+					Awaited<ReturnType<ReturnType<typeof useGetFavoriteDevicesHook>>>
+				>,
+				"initialData"
+			>;
+	},
+	queryClient?: QueryClient,
+): DefinedUseQueryResult<TData, TError> & {
+	queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useGetFavoriteDevices<
+	TData = Awaited<ReturnType<ReturnType<typeof useGetFavoriteDevicesHook>>>,
+	TError = void,
+>(
+	options?: {
+		query?: Partial<
+			UseQueryOptions<
+				Awaited<ReturnType<ReturnType<typeof useGetFavoriteDevicesHook>>>,
+				TError,
+				TData
+			>
+		> &
+			Pick<
+				UndefinedInitialDataOptions<
+					Awaited<ReturnType<ReturnType<typeof useGetFavoriteDevicesHook>>>,
+					TError,
+					Awaited<ReturnType<ReturnType<typeof useGetFavoriteDevicesHook>>>
+				>,
+				"initialData"
+			>;
+	},
+	queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+	queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useGetFavoriteDevices<
+	TData = Awaited<ReturnType<ReturnType<typeof useGetFavoriteDevicesHook>>>,
+	TError = void,
+>(
+	options?: {
+		query?: Partial<
+			UseQueryOptions<
+				Awaited<ReturnType<ReturnType<typeof useGetFavoriteDevicesHook>>>,
+				TError,
+				TData
+			>
+		>;
+	},
+	queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+	queryKey: DataTag<QueryKey, TData, TError>;
+};
+
+export function useGetFavoriteDevices<
+	TData = Awaited<ReturnType<ReturnType<typeof useGetFavoriteDevicesHook>>>,
+	TError = void,
+>(
+	options?: {
+		query?: Partial<
+			UseQueryOptions<
+				Awaited<ReturnType<ReturnType<typeof useGetFavoriteDevicesHook>>>,
+				TError,
+				TData
+			>
+		>;
+	},
+	queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+	queryKey: DataTag<QueryKey, TData, TError>;
+} {
+	const queryOptions = useGetFavoriteDevicesQueryOptions(options);
+
+	const query = useQuery(queryOptions, queryClient) as UseQueryResult<
+		TData,
+		TError
+	> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+	return { ...query, queryKey: queryOptions.queryKey };
+}
+
+export const useAddFavoriteDeviceHook = () => {
+	const addFavoriteDevice = useClientMutator<void>();
+
+	return useCallback(
+		(deviceId: number, signal?: AbortSignal) => {
+			return addFavoriteDevice({
+				url: `/user/favorites/${deviceId}`,
+				method: "PUT",
+				signal,
+			});
+		},
+		[addFavoriteDevice],
+	);
+};
+
+export const useAddFavoriteDeviceMutationOptions = <
+	TError = void,
+	TContext = unknown,
+>(options?: {
+	mutation?: UseMutationOptions<
+		Awaited<ReturnType<ReturnType<typeof useAddFavoriteDeviceHook>>>,
+		TError,
+		{ deviceId: number },
+		TContext
+	>;
+}): UseMutationOptions<
+	Awaited<ReturnType<ReturnType<typeof useAddFavoriteDeviceHook>>>,
+	TError,
+	{ deviceId: number },
+	TContext
+> => {
+	const mutationKey = ["addFavoriteDevice"];
+	const { mutation: mutationOptions } = options
+		? options.mutation &&
+			"mutationKey" in options.mutation &&
+			options.mutation.mutationKey
+			? options
+			: { ...options, mutation: { ...options.mutation, mutationKey } }
+		: { mutation: { mutationKey } };
+
+	const addFavoriteDevice = useAddFavoriteDeviceHook();
+
+	const mutationFn: MutationFunction<
+		Awaited<ReturnType<ReturnType<typeof useAddFavoriteDeviceHook>>>,
+		{ deviceId: number }
+	> = (props) => {
+		const { deviceId } = props ?? {};
+
+		return addFavoriteDevice(deviceId);
+	};
+
+	return { mutationFn, ...mutationOptions };
+};
+
+export type AddFavoriteDeviceMutationResult = NonNullable<
+	Awaited<ReturnType<ReturnType<typeof useAddFavoriteDeviceHook>>>
+>;
+
+export type AddFavoriteDeviceMutationError = void;
+
+export const useAddFavoriteDevice = <TError = void, TContext = unknown>(
+	options?: {
+		mutation?: UseMutationOptions<
+			Awaited<ReturnType<ReturnType<typeof useAddFavoriteDeviceHook>>>,
+			TError,
+			{ deviceId: number },
+			TContext
+		>;
+	},
+	queryClient?: QueryClient,
+): UseMutationResult<
+	Awaited<ReturnType<ReturnType<typeof useAddFavoriteDeviceHook>>>,
+	TError,
+	{ deviceId: number },
+	TContext
+> => {
+	return useMutation(useAddFavoriteDeviceMutationOptions(options), queryClient);
+};
+
+export const useRemoveFavoriteDeviceHook = () => {
+	const removeFavoriteDevice = useClientMutator<void>();
+
+	return useCallback(
+		(deviceId: number, signal?: AbortSignal) => {
+			return removeFavoriteDevice({
+				url: `/user/favorites/${deviceId}`,
+				method: "DELETE",
+				signal,
+			});
+		},
+		[removeFavoriteDevice],
+	);
+};
+
+export const useRemoveFavoriteDeviceMutationOptions = <
+	TError = void,
+	TContext = unknown,
+>(options?: {
+	mutation?: UseMutationOptions<
+		Awaited<ReturnType<ReturnType<typeof useRemoveFavoriteDeviceHook>>>,
+		TError,
+		{ deviceId: number },
+		TContext
+	>;
+}): UseMutationOptions<
+	Awaited<ReturnType<ReturnType<typeof useRemoveFavoriteDeviceHook>>>,
+	TError,
+	{ deviceId: number },
+	TContext
+> => {
+	const mutationKey = ["removeFavoriteDevice"];
+	const { mutation: mutationOptions } = options
+		? options.mutation &&
+			"mutationKey" in options.mutation &&
+			options.mutation.mutationKey
+			? options
+			: { ...options, mutation: { ...options.mutation, mutationKey } }
+		: { mutation: { mutationKey } };
+
+	const removeFavoriteDevice = useRemoveFavoriteDeviceHook();
+
+	const mutationFn: MutationFunction<
+		Awaited<ReturnType<ReturnType<typeof useRemoveFavoriteDeviceHook>>>,
+		{ deviceId: number }
+	> = (props) => {
+		const { deviceId } = props ?? {};
+
+		return removeFavoriteDevice(deviceId);
+	};
+
+	return { mutationFn, ...mutationOptions };
+};
+
+export type RemoveFavoriteDeviceMutationResult = NonNullable<
+	Awaited<ReturnType<ReturnType<typeof useRemoveFavoriteDeviceHook>>>
+>;
+
+export type RemoveFavoriteDeviceMutationError = void;
+
+export const useRemoveFavoriteDevice = <TError = void, TContext = unknown>(
+	options?: {
+		mutation?: UseMutationOptions<
+			Awaited<ReturnType<ReturnType<typeof useRemoveFavoriteDeviceHook>>>,
+			TError,
+			{ deviceId: number },
+			TContext
+		>;
+	},
+	queryClient?: QueryClient,
+): UseMutationResult<
+	Awaited<ReturnType<ReturnType<typeof useRemoveFavoriteDeviceHook>>>,
+	TError,
+	{ deviceId: number },
+	TContext
+> => {
+	return useMutation(
+		useRemoveFavoriteDeviceMutationOptions(options),
+		queryClient,
+	);
+};
+
 export const useGetUsersHook = () => {
 	const getUsers = useClientMutator<UserWithRoles[]>();
 
