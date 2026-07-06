@@ -76,7 +76,8 @@ Operators and API endpoints write intent tables only; the device response path i
 
 ### D3. Intent is a ranked list, applied as one declarative command `[settled unless objected]`
 
-A device's intent is a ranked *list* of networks (`device_network_intent`, N rows per device), replacing the single `network_id` FK. A single network cannot represent what devices need: a fallback network keeps the device reachable when the primary degrades, a staged password rotation holds old and new credentials simultaneously during the transition (with D5's guard), and NM autoconnect is built around choosing among multiple profiles anyway. Most devices already *have* multiple profiles in reality (BLE plus whatever accumulated); intent must be able to express that.
+A device's intent is a ranked *list* of networks (`device_network_intent`, N rows per device), replacing the single `network_id` FK. A single network cannot represent what devices need: a fallback network keeps the device reachable when the primary degrades, and NM autoconnect is built around choosing among multiple profiles anyway. Most devices already *have* multiple profiles in reality (BLE plus whatever accumulated); intent must be able to express that.
+The list is unique per SSID: SSID is the reconciliation identity (D4), so the API rejects two intent entries with the same SSID for one device. A password rotation is therefore a PSK change on the existing entry, not a second entry; D5 defines how it applies without dropping connectivity.
 
 `ApplyNetworks { version, networks: [{ssid, psk, priority}, ...] }` always ships the complete list. A device that missed three intent changes converges in one apply.
 *Rejected alternative 1:* keep the single `network_id` push. Cannot express fallbacks or staged rotations, and forces every network change to be a hard cutover.
@@ -84,7 +85,7 @@ A device's intent is a ranked *list* of networks (`device_network_intent`, N row
 
 ### D4. Reconcile by SSID, with adoption and a persisted last-applied list `[input wanted]`
 
-Per intended SSID: modify an existing profile with that SSID in place (whoever created it, BLE included), else create one. Delete only profiles that were in smithd's *previous applied list* and are absent from the new one (the list is persisted to disk, so it survives restarts; this is kubectl's last-applied-configuration three-way merge). Profiles smithd never applied (a tech's maintenance hotspot, customer equipment) are never touched, only reported.
+Per intended SSID: modify an existing profile with that SSID in place (whoever created it, BLE included; for the profile currently carrying the connection, see D5), else create one. Delete only profiles that were in smithd's *previous applied list* and are absent from the new one (the list is persisted to disk, so it survives restarts; this is kubectl's last-applied-configuration three-way merge). Profiles smithd never applied (a tech's maintenance hotspot, customer equipment) are never touched, only reported.
 Adoption is what fixes the stranded device: the wrong-PSK BLE profile has the intended SSID, so apply corrects it in place instead of racing a parallel profile for the same SSID (NetworkManager autoconnect picks one profile per SSID; leaving a broken higher-priority twin means flapping).
 *Rejected alternative 1:* never touch profiles Smith didn't create. Makes the stranded-device case permanently unfixable remotely, which is the single most valuable case.
 *Rejected alternative 2:* key reconciliation on NM profile *name* instead of SSID. Profile names are arbitrary local identity; SSID is what the network actually is, and same-SSID conflicts are the real hazard.
@@ -96,6 +97,7 @@ An external profile with a hand-set higher `autoconnect-priority` still wins the
 ### D5. Never break working connectivity `[settled unless objected]`
 
 Apply never deletes or modifies the profile currently carrying the active connection until its replacement has successfully connected (create-connect-delete order). A failed apply must leave the device at least as connected as before.
+This covers same-SSID password rotation: smithd creates a temporary second NM profile for the same SSID with the new PSK, connects it, and deletes the old profile only on success; on failure the old profile (and the connection) survive and the apply reports `Failed: WrongPSK` (D6). Two profiles for one SSID exist only inside a single apply, never in intent (D3).
 
 ### D6. Failures are structured per-item conditions `[settled unless objected]`
 
