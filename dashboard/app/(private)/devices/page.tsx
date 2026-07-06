@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useSearchParams } from "react-router";
+import FavoriteButton from "@/app/components/FavoriteButton";
 import LabelAutocomplete from "@/app/components/LabelAutocomplete";
 import { Modal } from "@/app/components/modal";
 import NetworkQualityIndicator from "@/app/components/NetworkQualityIndicator";
@@ -1306,7 +1307,7 @@ const DevicesPage = () => {
 											{getOSVersion(device)}
 										</div>
 
-										<div>
+										<div className="flex items-center justify-between gap-2">
 											{getReleaseInfo(device) ? (
 												<div className="flex flex-col space-y-1">
 													<div className="flex items-center space-x-1">
@@ -1330,6 +1331,7 @@ const DevicesPage = () => {
 													</span>
 												</div>
 											)}
+											<FavoriteButton device={device} />
 										</div>
 									</div>
 								</div>

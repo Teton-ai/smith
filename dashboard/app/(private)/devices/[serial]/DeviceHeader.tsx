@@ -24,6 +24,7 @@ import {
 	useIssueCommandsToDevices,
 	useTriggerRecipe,
 } from "@/app/api-client";
+import FavoriteButton from "@/app/components/FavoriteButton";
 import { Modal } from "@/app/components/modal";
 import NetworkQualityIndicator from "@/app/components/NetworkQualityIndicator";
 import { useConfig } from "@/app/hooks/config";
@@ -418,6 +419,7 @@ const DeviceHeader: React.FC<DeviceHeaderProps> = ({ device, serial }) => {
 							<h1 className="text-xl font-bold text-gray-900">
 								{getDeviceName()}
 							</h1>
+							<FavoriteButton device={device} />
 							<Tooltip content={getNetworkQualityTooltip()}>
 								<div className="flex-shrink-0 cursor-help">
 									<NetworkQualityIndicator
