@@ -57,7 +57,7 @@ The apply loop that connects intent and reality, step by step:
 2. The operator presses Apply; the API resolves credentials from the catalog and queues `ApplyNetworks { version: 7, networks: [...] }` to the device.
 3. smithd reconciles its NM profiles against the list (by SSID) and persists "I applied version 7" to disk.
 4. From then on, every profile report the device sends (startup, NM change, on demand) carries `applied_version: 7` plus one condition per SSID (`Applied` or `Failed` + reason).
-5. The API stores these into `device.observed_intent_version` and `device.network_conditions`.
+5. The API stores these into `device.observed_intent_version` and `device.network_conditions`. Updates are monotonic: a report is applied only if its `applied_version` is >= the stored value, so a delayed or duplicated report can never regress the sync state. A report carrying no version (old smithd, or a device that lost its local state) resets the fields to NULL, i.e. "Unknown".
 6. The dashboard derives sync state: `observed < intent` means "Applying...", equal with a `Failed` condition means "Error", equal and clean means "Synced".
 
 "Is the device in sync?" is therefore a comparison of two integers plus a look at conditions, never a diff of network lists.
@@ -85,7 +85,7 @@ The list is unique per SSID: SSID is the reconciliation identity (D4), so the AP
 
 ### D4. Reconcile by SSID, with adoption and a persisted last-applied list `[input wanted]`
 
-Per intended SSID: modify an existing profile with that SSID in place (whoever created it, BLE included; for the profile currently carrying the connection, see D5), else create one. Delete only profiles that were in smithd's *previous applied list* and are absent from the new one (the list is persisted to disk, so it survives restarts; this is kubectl's last-applied-configuration three-way merge). Profiles smithd never applied (a tech's maintenance hotspot, customer equipment) are never touched, only reported.
+Per intended SSID: modify an existing profile with that SSID in place (whoever created it, BLE included; for the profile currently carrying the connection, see D5), else create one. Delete only profiles that were in smithd's *previous applied list* and are absent from the new one (the list is persisted to disk, so it survives restarts; this is kubectl's last-applied-configuration three-way merge). Profiles whose SSID is outside the intent list (a tech's maintenance hotspot, customer equipment) are never modified, only reported. The two rules key on different things: intent membership (by SSID) is the sole trigger for touching a profile, regardless of who created it; the applied-record is the sole permission for deleting one. Wanting to modify an external profile and adding its SSID to intent are the same act; there is no other gateway.
 Adoption is what fixes the stranded device: the wrong-PSK BLE profile has the intended SSID, so apply corrects it in place instead of racing a parallel profile for the same SSID (NetworkManager autoconnect picks one profile per SSID; leaving a broken higher-priority twin means flapping).
 *Rejected alternative 1:* never touch profiles Smith didn't create. Makes the stranded-device case permanently unfixable remotely, which is the single most valuable case.
 *Rejected alternative 2:* key reconciliation on NM profile *name* instead of SSID. Profile names are arbitrary local identity; SSID is what the network actually is, and same-SSID conflicts are the real hazard.
