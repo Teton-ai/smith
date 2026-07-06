@@ -24,6 +24,7 @@ use serde::Deserialize;
 use serde_json::json;
 use smith::utils::schema;
 use smith::utils::schema::SafeCommandRequest;
+use sqlx::PgPool;
 use sqlx::types::Json as SqlxJson;
 use std::collections::HashMap;
 use tracing::error;
@@ -94,6 +95,24 @@ pub async fn get_devices(
     Extension(state): Extension<State>,
     filter: Query<DeviceFilter>,
 ) -> axum::response::Result<Json<Vec<Device>>, StatusCode> {
+    let devices = query_devices(&state.pg_pool, &filter, None)
+        .await
+        .map_err(|err| {
+            error!("Failed to get devices {err}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+
+    Ok(Json(devices))
+}
+
+/// Shared device listing query. `favorites_of` restricts the result to devices
+/// favorited by that user; it is intentionally not part of `DeviceFilter` so it
+/// can only ever be set from the authenticated user context, never from a request.
+pub(crate) async fn query_devices(
+    pg_pool: &PgPool,
+    filter: &DeviceFilter,
+    favorites_of: Option<i32>,
+) -> Result<Vec<Device>, sqlx::Error> {
     #[allow(deprecated)]
     let devices = sqlx::query!(
         r#"SELECT
@@ -202,6 +221,10 @@ pub async fn get_devices(
                      AND rs.watchdog_sec IS NOT NULL
                      AND dss.active_state != 'active'
                )))
+          AND ($15::int IS NULL OR EXISTS (
+              SELECT 1 FROM auth.user_favorite_devices ufd
+              WHERE ufd.device_id = d.id AND ufd.user_id = $15
+          ))
         GROUP BY d.id, ip.id, m.id, r.id, rd.id, tr.id, trd.id, dn.device_id
         ORDER BY d.last_ping DESC NULLS LAST, d.serial_number
         LIMIT $8
@@ -220,14 +243,11 @@ pub async fn get_devices(
         filter.release_id,
         filter.outdated_minutes,
         filter.distribution_id,
-        filter.service_not_running
+        filter.service_not_running,
+        favorites_of
     )
-    .fetch_all(&state.pg_pool)
-    .await
-    .map_err(|err| {
-        error!("Failed to get devices {err}");
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
+    .fetch_all(pg_pool)
+    .await?;
 
     let devices: Vec<Device> = devices
         .into_iter()
@@ -347,7 +367,7 @@ pub async fn get_devices(
         })
         .collect();
 
-    Ok(Json(devices))
+    Ok(devices)
 }
 
 #[utoipa::path(
