@@ -14,6 +14,7 @@ const DeviceServices = lazy(
 const DeviceCommands = lazy(
 	() => import("@/app/(private)/devices/[serial]/commands/page"),
 );
+const Favorites = lazy(() => import("@/app/(private)/favorites/page"));
 const Distributions = lazy(() => import("@/app/(private)/distributions/page"));
 const DistributionDetail = lazy(
 	() => import("@/app/(private)/distributions/[id]/page"),
@@ -67,6 +68,7 @@ export const router = createBrowserRouter([
 				path: "/devices/:serial/commands",
 				element: withSuspense(<DeviceCommands />),
 			},
+			{ path: "/favorites", element: withSuspense(<Favorites />) },
 			{ path: "/distributions", element: withSuspense(<Distributions />) },
 			{
 				path: "/distributions/:id",
