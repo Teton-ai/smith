@@ -389,6 +389,11 @@ async fn start_main_server(
         .routes(routes!(event::route::sse_handler))
         .routes(routes!(user::route::get_users))
         .routes(routes!(user::route::get_roles))
+        .routes(routes!(user::route::get_favorite_devices))
+        .routes(routes!(
+            user::route::add_favorite_device,
+            user::route::remove_favorite_device
+        ))
         .route_layer(middleware::from_fn(middlewares::authentication::check))
         // TODO: Check why we have this, not good for all routes
         .layer(DefaultBodyLimit::max(891289600))

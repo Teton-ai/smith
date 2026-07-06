@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            DELETE FROM auth.user_favorite_devices\n            WHERE user_id = $1 AND device_id = $2\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "d7e42d6e07f4bf0efa46c191c152865eb8d556b731c5baec24fb9889cb1478c9"
+}

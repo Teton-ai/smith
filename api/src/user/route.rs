@@ -1,8 +1,11 @@
 use crate::State;
+use crate::device::route::query_devices;
 use crate::middlewares::authorization;
 use crate::user::CurrentUser;
+use axum::extract::Path;
 use axum::http::StatusCode;
 use axum::{Extension, Json};
+use models::device::{Device, DeviceFilter};
 use serde::Serialize;
 use tracing::error;
 use utoipa::ToSchema;
@@ -144,4 +147,135 @@ pub async fn get_roles(
     roles.sort_by(|a, b| a.name.cmp(&b.name));
 
     Ok(Json(roles))
+}
+
+#[utoipa::path(
+    get,
+    path = "/user/favorites",
+    responses(
+        (status = 200, description = "Favorite devices of the current user", body = Vec<Device>),
+        (status = 403, description = "Forbidden"),
+        (status = 500, description = "Failed to retrieve favorite devices"),
+    ),
+    security(
+        ("auth_token" = [])
+    ),
+    tag = TAG
+)]
+pub async fn get_favorite_devices(
+    Extension(state): Extension<State>,
+    Extension(current_user): Extension<CurrentUser>,
+) -> Result<Json<Vec<Device>>, StatusCode> {
+    let user_id = current_user.user_id;
+    if !authorization::check(current_user, "devices", "read") {
+        return Err(StatusCode::FORBIDDEN);
+    }
+
+    let devices = query_devices(&state.pg_pool, &DeviceFilter::default(), Some(user_id))
+        .await
+        .map_err(|err| {
+            error!("error: failed to get favorite devices: {:?}", err);
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+
+    Ok(Json(devices))
+}
+
+#[utoipa::path(
+    put,
+    path = "/user/favorites/{device_id}",
+    params(
+        ("device_id" = i32, Path),
+    ),
+    responses(
+        (status = 204, description = "Device added to favorites"),
+        (status = 403, description = "Forbidden"),
+        (status = 404, description = "Device not found"),
+        (status = 500, description = "Failed to add favorite"),
+    ),
+    security(
+        ("auth_token" = [])
+    ),
+    tag = TAG
+)]
+pub async fn add_favorite_device(
+    Extension(state): Extension<State>,
+    Extension(current_user): Extension<CurrentUser>,
+    Path(device_id): Path<i32>,
+) -> Result<StatusCode, StatusCode> {
+    let user_id = current_user.user_id;
+    if !authorization::check(current_user, "devices", "read") {
+        return Err(StatusCode::FORBIDDEN);
+    }
+
+    sqlx::query!(
+        r#"
+            INSERT INTO auth.user_favorite_devices (user_id, device_id)
+            VALUES ($1, $2)
+            ON CONFLICT (user_id, device_id) DO NOTHING
+        "#,
+        user_id,
+        device_id
+    )
+    .execute(&state.pg_pool)
+    .await
+    .map_err(|err| {
+        // A foreign key violation on device_id means the device does not exist.
+        if err
+            .as_database_error()
+            .and_then(|db_err| db_err.code())
+            .is_some_and(|code| code == "23503")
+        {
+            StatusCode::NOT_FOUND
+        } else {
+            error!("error: failed to add favorite device: {:?}", err);
+            StatusCode::INTERNAL_SERVER_ERROR
+        }
+    })?;
+
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[utoipa::path(
+    delete,
+    path = "/user/favorites/{device_id}",
+    params(
+        ("device_id" = i32, Path),
+    ),
+    responses(
+        (status = 204, description = "Device removed from favorites"),
+        (status = 403, description = "Forbidden"),
+        (status = 500, description = "Failed to remove favorite"),
+    ),
+    security(
+        ("auth_token" = [])
+    ),
+    tag = TAG
+)]
+pub async fn remove_favorite_device(
+    Extension(state): Extension<State>,
+    Extension(current_user): Extension<CurrentUser>,
+    Path(device_id): Path<i32>,
+) -> Result<StatusCode, StatusCode> {
+    let user_id = current_user.user_id;
+    if !authorization::check(current_user, "devices", "read") {
+        return Err(StatusCode::FORBIDDEN);
+    }
+
+    sqlx::query!(
+        r#"
+            DELETE FROM auth.user_favorite_devices
+            WHERE user_id = $1 AND device_id = $2
+        "#,
+        user_id,
+        device_id
+    )
+    .execute(&state.pg_pool)
+    .await
+    .map_err(|err| {
+        error!("error: failed to remove favorite device: {:?}", err);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    Ok(StatusCode::NO_CONTENT)
 }

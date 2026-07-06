@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO auth.user_favorite_devices (user_id, device_id)\n            VALUES ($1, $2)\n            ON CONFLICT (user_id, device_id) DO NOTHING\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "1311fafe940078b30ce0f775d8a2b6c2c35303bf87d95d855fd5c8e1cb12b41d"
+}
