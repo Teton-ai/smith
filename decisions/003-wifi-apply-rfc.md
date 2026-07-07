@@ -173,6 +173,17 @@ Phases 0 and 1 are specified to implementation level; phase 2 is a direction tha
 - **Trigger.** Cron (like the existing sync and labels jobs) vs event-driven on `network_wifis` changes.
 - **Scope.** WiFi only; the survey tables' ethernet and cellular data stay out.
 
+## Review notes
+
+**Enterprise WiFi auth (raised by @LudeeD)**
+
+Some sites already use WPA-EAP / PEAP+MSCHAPv2 rather than plain PSK. The current credential shape (`{ssid, psk, priority}`) cannot express enterprise auth, which requires at minimum `key_mgmt`, `eap`, `phase2_auth`, and `identity` in addition to `password`.
+
+Two things need to change before the relevant PRs ship:
+
+- **Before PR B:** The `ApplyNetworks` payload shape (`{ssid, psk, priority}`) must become a credentials envelope so the protocol is not locked to PSK. Proposed: `{ssid, priority, credentials: {type: "psk", psk: "..."}}`, with `type: "eap"` carrying the additional fields. Changing this after PR B is in prod is a protocol break between smithd and the API.
+- **Before PR D:** The `network` catalog currently stores only `password`. Enterprise auth fields (`key_mgmt`, `eap`, `phase2_auth`, `identity`) have no home in the schema. PR D (catalog provenance + verification) is the right place to decide on the credential schema extension: typed columns (sparse but queryable) vs a JSONB blob (flexible but untyped).
+
 ## Appendix
 
 - Catalog duplication incident: #481
