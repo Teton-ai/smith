@@ -57,7 +57,7 @@ The apply loop that connects intent and reality, step by step:
 2. The operator presses Apply; the API resolves credentials from the catalog and queues `ApplyNetworks { version: 7, networks: [...] }` to the device.
 3. smithd reconciles its NM profiles against the list (by SSID) and persists "I applied version 7" to disk.
 4. From then on, every profile report the device sends (startup, NM change, on demand) carries `applied_version: 7` plus one condition per SSID (`Applied` or `Failed` + reason).
-5. The API stores these into `device.observed_intent_version` and `device.network_conditions`. Updates are monotonic: a report is applied only if its `applied_version` is >= the stored value, so a delayed or duplicated report can never regress the sync state. A report carrying no version (old smithd, or a device that lost its local state) resets the fields to NULL, i.e. "Unknown".
+5. The API stores these into `device.observed_intent_version` and `device.network_conditions`. Updates are monotonic: a report is applied only if its `applied_version` is >= the stored value, so a delayed or duplicated report can never regress the sync state. A report carrying no version (old smithd, or a device that lost its local state) updates `network_conditions` (profile reality is still useful) but does not touch `observed_intent_version`; the sync chip therefore holds its last-derived state rather than regressing to "Unknown".
 6. The dashboard derives sync state: `observed < intent` means "Applying...", equal with a `Failed` condition means "Error", equal and clean means "Synced".
 
 "Is the device in sync?" is therefore a comparison of two integers plus a look at conditions, never a diff of network lists.
@@ -97,7 +97,7 @@ An external profile with a hand-set higher `autoconnect-priority` still wins the
 ### D5. Never break working connectivity `[settled unless objected]`
 
 Apply never deletes or modifies the profile currently carrying the active connection until its replacement has successfully connected (create-connect-delete order). A failed apply must leave the device at least as connected as before.
-This covers same-SSID password rotation: smithd creates a temporary second NM profile for the same SSID with the new PSK, connects it, and deletes the old profile only on success; on failure the old profile (and the connection) survive and the apply reports `Failed: WrongPSK` (D6). Two profiles for one SSID exist only inside a single apply, never in intent (D3).
+This covers same-SSID password rotation: smithd creates a temporary second NM profile for the same SSID with the new PSK, connects it, and deletes the old profile only on success. On failure, smithd deletes the temporary profile before returning `Failed: WrongPSK` (D6), leaving the device exactly as connected as before and no stranded duplicate in NM. The temporary profile is never written to the applied-record; only the surviving profile is (the original on failure, the new one on success). Two profiles for one SSID exist only inside a single apply, never in intent (D3).
 
 ### D6. Failures are structured per-item conditions `[settled unless objected]`
 
