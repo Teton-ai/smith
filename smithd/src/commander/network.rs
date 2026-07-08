@@ -120,24 +120,30 @@ async fn execute_nmcli_command(mut cmd: Command) -> Result<std::process::Output>
     }
 }
 
+// ACTIVE field in terse mode always returns "no" on NetworkManager 1.22.x
+// (Ubuntu 20.04 / L4T 35.3.1). Use DEVICE instead: a non-empty, non-"--"
+// device name means the profile is currently active.
+fn parse_nm_connection_list_line(line: &str) -> Option<(String, bool)> {
+    let parts = split_terse_line(line, 3);
+    if parts.len() == 3 && parts[1] == "802-11-wireless" {
+        let is_active = !parts[2].is_empty() && parts[2] != "--";
+        Some((parts[0].clone(), is_active))
+    } else {
+        None
+    }
+}
+
 pub(crate) async fn execute_report_nm_profiles(id: i32) -> SafeCommandResponse {
     // Step 1: list all connections to find wifi ones and their active status.
     let mut list_cmd = Command::new("nmcli");
-    list_cmd.args(["-t", "-f", "NAME,TYPE,ACTIVE", "connection", "show"]);
+    list_cmd.args(["-t", "-f", "NAME,TYPE,DEVICE", "connection", "show"]);
 
     let entries = match execute_nmcli_command(list_cmd).await {
         Ok(output) if output.status.success() => {
             let stdout = String::from_utf8_lossy(&output.stdout);
             stdout
                 .lines()
-                .filter_map(|line| {
-                    let parts = split_terse_line(line, 3);
-                    if parts.len() == 3 && parts[1] == "802-11-wireless" {
-                        Some((parts[0].clone(), parts[2] == "yes"))
-                    } else {
-                        None
-                    }
-                })
+                .filter_map(parse_nm_connection_list_line)
                 .collect::<Vec<_>>()
         }
         Ok(output) => {
@@ -1009,6 +1015,70 @@ fn parse_mmcli_output(output: &str) -> (Option<String>, Option<i32>, Option<Stri
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn active_detection_profile_with_device_is_active() {
+        // Active profile: DEVICE column contains a real interface name.
+        // This is the case NM 1.22.x reported incorrectly via the ACTIVE field.
+        let (name, is_active) =
+            parse_nm_connection_list_line("HomeWifi:802-11-wireless:wlan0").unwrap();
+        assert_eq!(name, "HomeWifi");
+        assert!(is_active);
+    }
+
+    #[test]
+    fn active_detection_profile_with_dash_is_inactive() {
+        let (name, is_active) =
+            parse_nm_connection_list_line("OfficeWifi:802-11-wireless:--").unwrap();
+        assert_eq!(name, "OfficeWifi");
+        assert!(!is_active);
+    }
+
+    #[test]
+    fn active_detection_profile_with_empty_device_is_inactive() {
+        let (name, is_active) =
+            parse_nm_connection_list_line("GuestWifi:802-11-wireless:").unwrap();
+        assert_eq!(name, "GuestWifi");
+        assert!(!is_active);
+    }
+
+    #[test]
+    fn active_detection_skips_non_wifi_connections() {
+        assert!(parse_nm_connection_list_line("Wired:802-3-ethernet:eth0").is_none());
+        assert!(parse_nm_connection_list_line("lo:loopback:lo").is_none());
+    }
+
+    #[test]
+    fn active_detection_handles_escaped_colon_in_name() {
+        let (name, is_active) =
+            parse_nm_connection_list_line("My\\:Network:802-11-wireless:wlan0").unwrap();
+        assert_eq!(name, "My:Network");
+        assert!(is_active);
+    }
+
+    #[test]
+    fn active_detection_full_output_mixed_profiles() {
+        // Realistic nmcli -t -f NAME,TYPE,DEVICE connection show output:
+        // the active profile has a device name; inactive ones have "--".
+        let output = "\
+HomeWifi:802-11-wireless:wlan0\n\
+OfficeWifi:802-11-wireless:--\n\
+Wired connection 1:802-3-ethernet:eth0\n\
+BackupAP:802-11-wireless:--";
+
+        let entries: Vec<(String, bool)> = output
+            .lines()
+            .filter_map(parse_nm_connection_list_line)
+            .collect();
+
+        assert_eq!(entries.len(), 3);
+        assert_eq!(entries[0].0, "HomeWifi");
+        assert!(entries[0].1, "HomeWifi should be active (device=wlan0)");
+        assert_eq!(entries[1].0, "OfficeWifi");
+        assert!(!entries[1].1, "OfficeWifi should be inactive (device=--)");
+        assert_eq!(entries[2].0, "BackupAP");
+        assert!(!entries[2].1, "BackupAP should be inactive (device=--)");
+    }
 
     const NM_CONNECTION_FIELDS: usize = 5;
 
