@@ -1,8 +1,8 @@
 use crate::State;
 use crate::device::{
-    ApproveDeviceBody, DeviceHealth, DeviceLedgerItem, DeviceLedgerItemPaginated, DeviceRelease,
-    LabelWithValues, NewVariable, Note, RawDevice, UpdateDeviceRelease, UpdateDevicesRelease,
-    Variable,
+    ApproveDeviceBody, ConfiguredNetwork, DeviceHealth, DeviceLedgerItem,
+    DeviceLedgerItemPaginated, DeviceRelease, LabelWithValues, NewVariable, Note, RawDevice,
+    UpdateDeviceRelease, UpdateDevicesRelease, Variable, WifiScanResult,
 };
 use crate::event::PublicEvent;
 use crate::handlers::AuthedDevice;
@@ -2312,7 +2312,6 @@ pub async fn update_device_network(
     ),
     tag = DEVICES_TAG
 )]
-/// Batch updates the `network_id` for a list of `serial_number`s.
 pub async fn update_devices_network(
     Path(network_id): Path<i32>,
     Extension(state): Extension<State>,
@@ -2539,4 +2538,163 @@ pub async fn get_audit_for_device(
         running_latest_release: audit.running_latest_release,
         checked_at: audit.checked_at,
     }))
+}
+
+#[utoipa::path(
+    get,
+    path = "/devices/{device_id}/configured-networks",
+    params(
+        ("device_id" = String, Path),
+    ),
+    responses(
+        (status = StatusCode::OK, description = "Configured NM profiles for the device", body = Vec<ConfiguredNetwork>),
+        (status = StatusCode::NOT_FOUND, description = "Device not found"),
+        (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to retrieve configured networks"),
+    ),
+    security(
+        ("auth_token" = [])
+    ),
+    tag = DEVICES_TAG
+)]
+pub async fn get_configured_networks_for_device(
+    Path(device_id): Path<String>,
+    Extension(state): Extension<State>,
+    Extension(current_user): Extension<CurrentUser>,
+) -> Result<Json<Vec<ConfiguredNetwork>>, StatusCode> {
+    // All authenticated users (default role) can retrieve PSKs via this endpoint: powers the dashboard reveal toggle.
+    if !authorization::check(current_user, "devices", "read") {
+        return Err(StatusCode::FORBIDDEN);
+    }
+
+    let resolved_id: Option<i32> = sqlx::query_scalar!(
+        r#"
+        SELECT id FROM device
+        WHERE
+            CASE
+                WHEN $1 ~ '^[0-9]+$' AND length($1) <= 10 THEN
+                    id = $1::int4
+                ELSE
+                    serial_number = $1
+            END
+        "#,
+        device_id
+    )
+    .fetch_optional(&state.pg_pool)
+    .await
+    .map_err(|err| {
+        error!("Failed to resolve device {device_id}: {err}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    let Some(resolved_id) = resolved_id else {
+        return Err(StatusCode::NOT_FOUND);
+    };
+
+    let rows = sqlx::query!(
+        r#"
+        SELECT dcn.network_id, dcn.profile_name, n.ssid, n.name, n.password, dcn.is_active, dcn.updated_at
+        FROM device_configured_network dcn
+        JOIN network n ON n.id = dcn.network_id
+        WHERE dcn.device_id = $1
+        ORDER BY dcn.is_active DESC, dcn.profile_name ASC
+        "#,
+        resolved_id
+    )
+    .fetch_all(&state.pg_pool)
+    .await
+    .map_err(|err| {
+        error!("Failed to get configured networks for device: {err}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    let networks = rows
+        .into_iter()
+        .map(|r| ConfiguredNetwork {
+            network_id: r.network_id,
+            profile_name: r.profile_name,
+            ssid: r.ssid,
+            name: r.name,
+            password: r.password,
+            is_active: r.is_active,
+            updated_at: r.updated_at,
+        })
+        .collect();
+
+    Ok(Json(networks))
+}
+
+#[utoipa::path(
+    get,
+    path = "/devices/{device_id}/wifi-scan",
+    params(
+        ("device_id" = String, Path),
+    ),
+    responses(
+        (status = StatusCode::OK, description = "Latest WiFi scan results for the device", body = Vec<WifiScanResult>),
+        (status = StatusCode::NOT_FOUND, description = "Device not found"),
+        (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to retrieve WiFi scan results"),
+    ),
+    security(
+        ("auth_token" = [])
+    ),
+    tag = DEVICES_TAG
+)]
+pub async fn get_wifi_scan_for_device(
+    Path(device_id): Path<String>,
+    Extension(state): Extension<State>,
+    Extension(current_user): Extension<CurrentUser>,
+) -> Result<Json<Vec<WifiScanResult>>, StatusCode> {
+    if !authorization::check(current_user, "devices", "read") {
+        return Err(StatusCode::FORBIDDEN);
+    }
+
+    // LEFT JOIN keeps the 404 distinction in a single round-trip: no rows means
+    // unknown device; a row with NULL scan columns means a device with no scans.
+    let rows = sqlx::query!(
+        r#"
+        SELECT w.ssid, w.bssid AS "bssid?", w.signal, w.rate, w.security, w.channel,
+               w.scanned_at AS "scanned_at?"
+        FROM device d
+        LEFT JOIN wifi_scan_result w ON w.device_id = d.id
+        WHERE
+            CASE
+                WHEN $1 ~ '^[0-9]+$' AND length($1) <= 10 THEN
+                    d.id = $1::int4
+                ELSE
+                    d.serial_number = $1
+            END
+        ORDER BY w.signal DESC NULLS LAST
+        "#,
+        device_id
+    )
+    .fetch_all(&state.pg_pool)
+    .await
+    .map_err(|err| {
+        error!("Failed to get wifi scan results for device {device_id}: {err}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    if rows.is_empty() {
+        return Err(StatusCode::NOT_FOUND);
+    }
+
+    let results = rows
+        .into_iter()
+        .filter_map(|r| {
+            Some(WifiScanResult {
+                ssid: r.ssid,
+                bssid: r.bssid?,
+                signal: r.signal,
+                rate: r.rate,
+                security: r.security,
+                band: r
+                    .channel
+                    .map(|c| if c <= 14 { "2.4 GHz" } else { "5 GHz" }.to_string()),
+                channel: r.channel,
+                scanned_at: r.scanned_at?,
+            })
+        })
+        .collect();
+
+    Ok(Json(results))
 }

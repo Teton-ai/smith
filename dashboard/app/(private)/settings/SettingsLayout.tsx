@@ -1,6 +1,6 @@
+import { type BadgeVariant, PageContainer, SideNav } from "@teton/smith-ui";
 import { Shield, Users } from "lucide-react";
 import type { ReactNode } from "react";
-import { type BadgeVariant, PageContainer, SideNav } from "@/app/components/ui";
 
 export type SettingsTab = "users" | "roles";
 

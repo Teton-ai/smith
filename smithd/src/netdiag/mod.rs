@@ -14,8 +14,8 @@ pub mod handler;
 pub mod report;
 pub mod store;
 
-pub use checks::{run_sweep, SweepOptions};
+pub use checks::{SweepOptions, run_sweep};
 pub use report::{
-    build_verdict, render_text, Category, CheckOutcome, CheckStatus, DeviceInfo, DiagnosticReport,
-    FaultSide, ItHandoff, ReportBuilder, Trigger, Verdict,
+    Category, CheckOutcome, CheckStatus, DeviceInfo, DiagnosticReport, FaultSide, ItHandoff,
+    ReportBuilder, Trigger, Verdict, build_verdict, render_text,
 };

@@ -1,7 +1,4 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { Check, Edit2, Globe, Shield, Wifi, X } from "lucide-react";
-import { useEffect, useState } from "react";
-import { useNavigate, useSearchParams } from "react-router";
 import {
 	Badge,
 	Card,
@@ -11,7 +8,10 @@ import {
 	SearchInput,
 	Toast,
 	type ToastState,
-} from "@/app/components/ui";
+} from "@teton/smith-ui";
+import { Check, Edit2, Globe, Shield, Wifi, X } from "lucide-react";
+import { useEffect, useState } from "react";
+import { useNavigate, useSearchParams } from "react-router";
 import {
 	type IpAddressInfo,
 	useGetIpAddresses,

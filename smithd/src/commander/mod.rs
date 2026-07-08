@@ -13,7 +13,7 @@ use tracing::info;
 
 mod free;
 mod logs;
-mod network;
+pub(crate) mod network;
 mod ota;
 mod restart;
 mod tunnel;
@@ -134,6 +134,8 @@ impl CommandQueueExecutor {
                 let report = crate::netdiag::handler::sweep_and_persist(opts).await;
                 crate::netdiag::handler::to_response(action.id, &report)
             }
+            SafeCommandTx::ReportNMProfiles => network::execute_report_nm_profiles(action.id).await,
+            SafeCommandTx::WifiScan => network::execute_wifi_scan(action.id).await,
         }
     }
 

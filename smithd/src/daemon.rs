@@ -5,6 +5,7 @@ use crate::downloader::DownloaderHandle;
 use crate::filemanager::FileManagerHandle;
 use crate::logstream::LogStreamHandle;
 use crate::magic::MagicHandle;
+use crate::nm_watcher::NMWatcherHandle;
 use crate::police::PoliceHandle;
 use crate::postman::PostmanHandle;
 use crate::session::SessionHandle;
@@ -80,6 +81,8 @@ pub async fn run() {
         configuration.clone(),
         session.clone(),
     );
+
+    let _nm_watcher = NMWatcherHandle::new(shutdown.signals(), commander.clone());
 
     let _dbus = DbusHandle::new(
         shutdown.signals(),

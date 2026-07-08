@@ -107,6 +107,129 @@ pub async fn save_responses(
                     .await?;
                 }
             }
+            SafeCommandRx::ReportNMProfiles { ref profiles } if response.status == 0 => {
+                let mut profiles_resolved: Vec<(i32, bool, String)> = Vec::new();
+
+                for profile in profiles {
+                    let ssid = match profile.ssid.as_deref() {
+                        Some(s) => s,
+                        None => continue,
+                    };
+
+                    let existing_id: Option<i32> = sqlx::query_scalar!(
+                        r#"SELECT id FROM network
+                           WHERE ssid = $1
+                             AND (password = $2 OR (password IS NULL AND $2 IS NULL))
+                           LIMIT 1"#,
+                        ssid,
+                        profile.password
+                    )
+                    .fetch_optional(&mut *tx)
+                    .await?;
+
+                    let network_id: i32 = match existing_id {
+                        Some(id) => id,
+                        None => sqlx::query_scalar!(
+                            r#"INSERT INTO network (ssid, password, name, network_type, is_network_hidden)
+                               VALUES ($1, $2, $1, 'wifi', false)
+                               RETURNING id"#,
+                            ssid,
+                            profile.password
+                        )
+                        .fetch_one(&mut *tx)
+                        .await?,
+                    };
+
+                    profiles_resolved.push((network_id, profile.is_active, profile.name.clone()));
+                }
+
+                sqlx::query!(
+                    "DELETE FROM device_configured_network WHERE device_id = $1",
+                    device_id
+                )
+                .execute(&mut *tx)
+                .await?;
+
+                if !profiles_resolved.is_empty() {
+                    let network_ids: Vec<i32> =
+                        profiles_resolved.iter().map(|(id, _, _)| *id).collect();
+                    let is_active_flags: Vec<bool> =
+                        profiles_resolved.iter().map(|(_, a, _)| *a).collect();
+                    let profile_names: Vec<String> = profiles_resolved
+                        .iter()
+                        .map(|(_, _, n)| n.clone())
+                        .collect();
+                    sqlx::query!(
+                        r#"INSERT INTO device_configured_network (device_id, network_id, is_active, profile_name)
+                           SELECT $1, UNNEST($2::int[]), UNNEST($3::bool[]), UNNEST($4::text[])"#,
+                        device_id,
+                        &network_ids,
+                        &is_active_flags,
+                        &profile_names as &[String]
+                    )
+                    .execute(&mut *tx)
+                    .await?;
+                }
+
+                let current_network_id = profiles_resolved
+                    .iter()
+                    .find(|(_, is_active, _)| *is_active)
+                    .map(|(id, _, _)| *id);
+
+                sqlx::query!(
+                    "UPDATE device SET current_network_id = $2 WHERE id = $1",
+                    device_id,
+                    current_network_id
+                )
+                .execute(&mut *tx)
+                .await?;
+            }
+            SafeCommandRx::ReportNMProfiles { .. } => {
+                error!(
+                    device_id,
+                    "Partial NM profile snapshot (some detail lookups failed); preserving existing state"
+                );
+            }
+            SafeCommandRx::WifiScan { ref networks } if response.status == 0 => {
+                sqlx::query!(
+                    "DELETE FROM wifi_scan_result WHERE device_id = $1",
+                    device_id
+                )
+                .execute(&mut *tx)
+                .await?;
+
+                if !networks.is_empty() {
+                    let ssids: Vec<Option<String>> =
+                        networks.iter().map(|n| n.ssid.clone()).collect();
+                    let bssids: Vec<String> = networks.iter().map(|n| n.bssid.clone()).collect();
+                    let signals: Vec<Option<i32>> = networks.iter().map(|n| n.signal).collect();
+                    let rates: Vec<Option<i32>> = networks.iter().map(|n| n.rate).collect();
+                    let securities: Vec<Option<String>> =
+                        networks.iter().map(|n| n.security.clone()).collect();
+                    let channels: Vec<Option<i32>> = networks.iter().map(|n| n.channel).collect();
+
+                    sqlx::query!(
+                        r#"INSERT INTO wifi_scan_result (device_id, ssid, bssid, signal, rate, security, channel)
+                           SELECT $1, UNNEST($2::text[]), UNNEST($3::text[]), UNNEST($4::int[]),
+                                  UNNEST($5::int[]), UNNEST($6::text[]), UNNEST($7::int[])"#,
+                        device_id,
+                        &ssids as &[Option<String>],
+                        &bssids as &[String],
+                        &signals as &[Option<i32>],
+                        &rates as &[Option<i32>],
+                        &securities as &[Option<String>],
+                        &channels as &[Option<i32>],
+                    )
+                    .execute(&mut *tx)
+                    .await?;
+                }
+            }
+            SafeCommandRx::WifiScan { .. } => {
+                error!(
+                    device_id,
+                    "WiFi scan failed on device; preserving existing scan results"
+                );
+            }
             SafeCommandRx::UpdateSystemInfo { ref system_info } => {
                 sqlx::query!(
                     "UPDATE device SET system_info = $2 WHERE id = $1",
@@ -237,7 +360,23 @@ pub async fn save_responses(
             }
             _ => {}
         }
-        let mut response_json = json!(response.command);
+        let mut response_json = match &response.command {
+            SafeCommandRx::ReportNMProfiles { profiles } => {
+                let redacted: Vec<_> = profiles
+                    .iter()
+                    .map(|p| {
+                        json!({
+                            "name": p.name,
+                            "ssid": p.ssid,
+                            "password": null,
+                            "is_active": p.is_active,
+                        })
+                    })
+                    .collect();
+                json!({ "ReportNMProfiles": { "profiles": redacted } })
+            }
+            other => json!(other),
+        };
         sanitize_nul(&mut response_json);
         let _response_id = sqlx::query_scalar!(
             "INSERT INTO command_response (device_id, command_id, response, status)

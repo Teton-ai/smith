@@ -1,20 +1,21 @@
-# Development Dockerfile for Dashboard with hot reloading
+# Development Dockerfile for the dashboard with hot reloading.
+# Build context is the repo root (npm workspace).
 FROM node:22-alpine
 
 WORKDIR /app
 
-# Install dependencies first for better caching
-COPY package*.json ./
+# Install workspace dependencies first for better caching.
+COPY package.json package-lock.json ./
+COPY dashboard/package.json dashboard/package.json
+COPY packages/ui/package.json packages/ui/package.json
 RUN npm i
 
-# Copy source code
-COPY . .
+# Copy source code (compose mounts override these for live reload).
+COPY packages/ui packages/ui
+COPY dashboard dashboard
 
-# Expose development port
 EXPOSE 3000
-
-# Set environment for development
 ENV NODE_ENV=development
 
-# Use npm run dev for hot reloading
-CMD ["npm", "run", "dev"]
+# Run the dashboard dev server; Vite serves @teton/smith-ui from source.
+CMD ["npm", "run", "dev", "-w", "@teton/smith-dashboard"]

@@ -9,7 +9,7 @@
 //! handler without dragging in actors.
 
 use crate::magic::MagicHandle;
-use crate::netdiag::{run_sweep, store, DeviceInfo, DiagnosticReport, SweepOptions, Trigger};
+use crate::netdiag::{DeviceInfo, DiagnosticReport, SweepOptions, Trigger, run_sweep, store};
 use crate::utils::schema::{SafeCommandResponse, SafeCommandRx};
 use tracing::{error, info};
 

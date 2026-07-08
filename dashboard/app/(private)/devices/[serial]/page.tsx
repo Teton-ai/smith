@@ -1,4 +1,14 @@
 import {
+	Badge,
+	Card,
+	CountryFlag,
+	InfoRow,
+	LabelChip,
+	PageContainer,
+	Panel,
+	SECTION_THEMES,
+} from "@teton/smith-ui";
+import {
 	Cpu,
 	GitBranch,
 	Globe,
@@ -14,19 +24,10 @@ import {
 import { lazy, Suspense } from "react";
 import { Link, useParams } from "react-router";
 import { useGetDeviceInfo } from "@/app/api-client";
-import {
-	Badge,
-	Card,
-	CountryFlag,
-	InfoRow,
-	LabelChip,
-	PageContainer,
-	Panel,
-	SECTION_THEMES,
-} from "@/app/components/ui";
 import { DeviceDetailLayout } from "./DeviceDetailLayout";
 import DeviceVariables from "./DeviceVariables";
 import SecurityAudit from "./SecurityAudit";
+import WifiPanel from "./WifiPanel";
 
 const LocationMap = lazy(() => import("./LocationMap"));
 
@@ -415,6 +416,10 @@ const DeviceDetailPage = () => {
 				{/* Variables (secrets) */}
 				<DeviceVariables deviceId={device.id} />
 			</div>
+
+			{/* WiFi */}
+			{/* Keyed by serial so filter/reveal state resets when navigating between devices. */}
+			<WifiPanel key={serial} serial={serial} />
 
 			{/* Security Audit (left) and Location Information (right) */}
 			<div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">

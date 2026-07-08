@@ -1,6 +1,3 @@
-import { Signal, Smartphone } from "lucide-react";
-import { useEffect, useState } from "react";
-import { useNavigate, useSearchParams } from "react-router";
 import {
 	Card,
 	ListRow,
@@ -8,7 +5,10 @@ import {
 	SearchInput,
 	Toast,
 	type ToastState,
-} from "@/app/components/ui";
+} from "@teton/smith-ui";
+import { Signal, Smartphone } from "lucide-react";
+import { useEffect, useState } from "react";
+import { useNavigate, useSearchParams } from "react-router";
 import { useGetModemList } from "../../api-client";
 
 const ModemSkeleton = () => (

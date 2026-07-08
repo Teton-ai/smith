@@ -1,7 +1,7 @@
+import { Badge, Button, type ButtonTone, Card } from "@teton/smith-ui";
 import { Search, Shield, User } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
-import { Badge, Button, type ButtonTone, Card } from "@/app/components/ui";
 import { useGetUsers } from "../api";
 import { roleVariant, SettingsLayout } from "../SettingsLayout";
 

@@ -1,6 +1,6 @@
+import { Button, Card } from "@teton/smith-ui";
 import { Compass, Home, MoveLeft } from "lucide-react";
 import { useNavigate } from "react-router";
-import { Button, Card } from "@/app/components/ui";
 
 export default function NotFoundPage() {
 	const navigate = useNavigate();

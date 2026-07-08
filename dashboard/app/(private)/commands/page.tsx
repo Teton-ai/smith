@@ -1,3 +1,4 @@
+import { Badge, type BadgeVariant, Button, Card } from "@teton/smith-ui";
 import { Loader2, Send, Terminal } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router";
@@ -9,7 +10,6 @@ import {
 } from "@/app/api-client";
 import { useClientMutator } from "@/app/api-client-mutator";
 import { RelativeTime } from "@/app/components/RelativeTime";
-import { Badge, type BadgeVariant, Button, Card } from "@/app/components/ui";
 import {
 	CodeBlock,
 	getCommandStatus,

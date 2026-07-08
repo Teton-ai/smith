@@ -15,9 +15,9 @@ use crate::netdiag::report::{
 use chrono::{Datelike, Utc};
 use serde_json::json;
 use std::time::Instant;
-use tokio::net::{lookup_host, TcpStream};
+use tokio::net::{TcpStream, lookup_host};
 use tokio::process::Command;
-use tokio::time::{timeout, Duration};
+use tokio::time::{Duration, timeout};
 use tracing::warn;
 use url::Url;
 
@@ -191,7 +191,9 @@ async fn check_dns(host: &str) -> (CheckOutcome, bool) {
                         Category::Dns,
                         format!("DNS returned no addresses for {host}"),
                     )
-                    .with_remediation(format!("Ask IT why {host} does not resolve on this network"))
+                    .with_remediation(format!(
+                        "Ask IT why {host} does not resolve on this network"
+                    ))
                     .with_duration_ms(ms(started)),
                     false,
                 )
@@ -255,7 +257,12 @@ async fn probe_tcp(host: &str, port: u16) -> Conn {
 
 /// Rungs 3–4 — can we open a TCP connection to a required host:port? Returns the
 /// reachability for the allowlist (`None` when we couldn't test).
-async fn check_egress(id: &str, host: &str, port: u16, dns_ok: bool) -> (CheckOutcome, Option<bool>) {
+async fn check_egress(
+    id: &str,
+    host: &str,
+    port: u16,
+    dns_ok: bool,
+) -> (CheckOutcome, Option<bool>) {
     let started = Instant::now();
     if !dns_ok {
         return (
@@ -478,11 +485,7 @@ async fn read_mac(iface: &str) -> Option<String> {
     match tokio::fs::read_to_string(&path).await {
         Ok(s) => {
             let mac = s.trim().to_string();
-            if mac.is_empty() {
-                None
-            } else {
-                Some(mac)
-            }
+            if mac.is_empty() { None } else { Some(mac) }
         }
         Err(e) => {
             warn!("Could not read MAC from {path}: {e}");
@@ -538,7 +541,10 @@ mod tests {
     #[test]
     fn parses_iw_link_fields() {
         let sample = "Connected to 12:34:56:78:9a:bc (on wlan0)\n\tSSID: Hospital-IoT\n\tfreq: 5180\n\tsignal: -58 dBm\n\ttx bitrate: 130.0 MBit/s\n";
-        assert_eq!(parse_field(sample, "SSID:"), Some("Hospital-IoT".to_string()));
+        assert_eq!(
+            parse_field(sample, "SSID:"),
+            Some("Hospital-IoT".to_string())
+        );
         assert_eq!(parse_signal(sample), Some(-58));
     }
 

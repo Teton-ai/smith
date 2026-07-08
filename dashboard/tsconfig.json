@@ -15,7 +15,8 @@
 		"incremental": true,
 		"types": ["vite/client"],
 		"paths": {
-			"@/*": ["./*"]
+			"@/*": ["./*"],
+			"@teton/smith-ui": ["../packages/ui/src/index.ts"]
 		}
 	},
 	"include": ["**/*.ts", "**/*.tsx"],

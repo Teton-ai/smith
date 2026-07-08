@@ -1,6 +1,7 @@
 "use client";
 
 import { useQueryClient } from "@tanstack/react-query";
+import { Button, Card, SearchInput } from "@teton/smith-ui";
 import { Plus, ScrollText, Send, Trash2, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { SIMPLE_COMMANDS } from "@/app/(private)/commands/shared";
@@ -18,7 +19,6 @@ import {
 } from "@/app/api-client";
 import { Modal } from "@/app/components/modal";
 import { RelativeTime } from "@/app/components/RelativeTime";
-import { Button, Card, SearchInput } from "@/app/components/ui";
 
 // ---------------------------------------------------------------------------
 // Helpers

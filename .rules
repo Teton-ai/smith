@@ -5,8 +5,11 @@ Monorepo for an open-source fleet management system:
 - **smithd**: Rust daemon, runs on devices (critical, handle with extra care).
 - **updater**: Rust daemon, updates `smithd`.
 - **api**: Rust service, communication layer for `smithd`.
-- **dashboard**: React (Next.js for routing only), fully client-side UI.
+- **dashboard**: React SPA (Vite + react-router), fully client-side UI.
+- **packages/ui** (`@teton/smith-ui`): shared design-system primitives used by `dashboard`.
 - **cli**: Rust tool for users, less critical than `smithd`.
+
+The JS side is an npm-workspaces monorepo (`workspaces: ["dashboard", "packages/*"]` in the root `package.json`).
 
 ## General Guidelines
 - Prioritize correctness and clarity. Efficiency comes second unless specified.
@@ -27,8 +30,14 @@ Monorepo for an open-source fleet management system:
 - Don't forget `cargo fmt` when you are done
 
 ## React (dashboard)
-- Next.js is for routing only.
-- Do not use server components.
-- Do not use API routes.
-- Do not use SSR.
-- All code must run client-side.
+- Built with **Vite + React 19**. No Next.js, no SSR, no server components, no API routes. All code runs client-side.
+- Routing is **react-router** (`createBrowserRouter`). Routes are wired up manually in `dashboard/src/router.tsx`; entry point is `dashboard/src/main.tsx`.
+- The `app/` directory keeps the `page.tsx` / `layout.tsx` naming and `(private)` route-group folders, but these are plain components imported by `router.tsx` — there is **no file-based routing**. Adding a page means creating the component and registering it in `router.tsx`.
+- Styling is **Tailwind CSS v4**.
+- Use **Biome** (not ESLint/Prettier) for format/lint: `npm run lint` in `dashboard`.
+
+## UI package (packages/ui, `@teton/smith-ui`)
+- Shared design-system primitives (buttons, cards, badges, stat cards, search input, nav, toasts, theme tokens) live here, **not** in `dashboard`.
+- Reuse them in the dashboard via `import { Button, Card } from "@teton/smith-ui"`. Do not recreate these primitives inside `dashboard`.
+- When adding/changing a primitive, edit it in `packages/ui/src` and re-export it from `packages/ui/src/index.ts`. The dashboard consumes the package from source in dev (Vite alias), so changes hot-reload without a build.
+- The package is published to npm and uses Biome for format/lint.

@@ -69,6 +69,24 @@ pub struct SafeCommandResponse {
 }
 
 #[derive(Serialize, Deserialize, Default, Debug, Clone)]
+pub struct NMProfile {
+    pub name: String,
+    pub ssid: Option<String>,
+    pub password: Option<String>,
+    pub is_active: bool,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct WifiNetwork {
+    pub ssid: Option<String>,
+    pub bssid: String,
+    pub signal: Option<i32>,
+    pub rate: Option<i32>,
+    pub security: Option<String>,
+    pub channel: Option<i32>,
+}
+
+#[derive(Serialize, Deserialize, Default, Debug, Clone)]
 pub enum SafeCommandRx {
     #[default]
     Pong,
@@ -88,6 +106,12 @@ pub enum SafeCommandRx {
     UpdateVariables,
     GetNetwork,
     UpdateNetwork,
+    ReportNMProfiles {
+        profiles: Vec<NMProfile>,
+    },
+    WifiScan {
+        networks: Vec<WifiNetwork>,
+    },
     UpdateSystemInfo {
         system_info: Value,
     },
@@ -163,6 +187,8 @@ pub enum SafeCommandTx {
     UpdateNetwork {
         network: Network,
     },
+    ReportNMProfiles,
+    WifiScan,
     UpdateVariables {
         variables: HashMap<String, String>,
     },

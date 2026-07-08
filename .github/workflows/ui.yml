@@ -1,0 +1,54 @@
+name: ui
+
+on:
+  push:
+    tags:
+      - "*"
+
+concurrency:
+  group: ui-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+
+      - name: Resolve version from Cargo.toml
+        run: |
+          UI_VERSION=$(grep '^version = ' Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
+          echo "UI_VERSION=${UI_VERSION}" >> "$GITHUB_ENV"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Set package version
+        run: npm version "${UI_VERSION}" --no-git-tag-version -w @teton/smith-ui
+
+      - name: Build
+        run: npm run build -w @teton/smith-ui
+
+      - name: Publish
+        run: npm publish -w @teton/smith-ui
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Report Status
+        if: always()
+        uses: ravsamhq/notify-slack-action@v2
+        with:
+          status: ${{ job.status }}
+          notify_when: "failure"
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SMITH_TEAM_SLACK_NOTIFICATIONS }}

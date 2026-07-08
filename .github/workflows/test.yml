@@ -2,6 +2,7 @@ name: test
 on:
   pull_request:
     branches: [ main ]
+    types: [opened, synchronize, reopened, ready_for_review]
 
 env:
   CARGO_TERM_COLOR: always
@@ -9,7 +10,7 @@ env:
 
 jobs:
   fmt:
-    if: ${{ !startsWith(github.head_ref, 'chore/release-v') }}
+    if: ${{ !startsWith(github.head_ref, 'chore/release-v') && github.event.pull_request.draft == false }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
@@ -31,7 +32,7 @@ jobs:
           SLACK_WEBHOOK_URL: ${{ secrets.SMITH_TEAM_SLACK_NOTIFICATIONS }}
 
   clippy:
-    if: ${{ !startsWith(github.head_ref, 'chore/release-v') }}
+    if: ${{ !startsWith(github.head_ref, 'chore/release-v') && github.event.pull_request.draft == false }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
@@ -61,7 +62,7 @@ jobs:
           SLACK_WEBHOOK_URL: ${{ secrets.SMITH_TEAM_SLACK_NOTIFICATIONS }}
 
   test:
-    if: ${{ !startsWith(github.head_ref, 'chore/release-v') }}
+    if: ${{ !startsWith(github.head_ref, 'chore/release-v') && github.event.pull_request.draft == false }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
@@ -91,7 +92,7 @@ jobs:
           SLACK_WEBHOOK_URL: ${{ secrets.SMITH_TEAM_SLACK_NOTIFICATIONS }}
 
   sqlx:
-    if: ${{ !startsWith(github.head_ref, 'chore/release-v') }}
+    if: ${{ !startsWith(github.head_ref, 'chore/release-v') && github.event.pull_request.draft == false }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
@@ -128,7 +129,7 @@ jobs:
           SLACK_WEBHOOK_URL: ${{ secrets.SMITH_TEAM_SLACK_NOTIFICATIONS }}
 
   dashboard:
-    if: ${{ !startsWith(github.head_ref, 'chore/release-v') }}
+    if: ${{ !startsWith(github.head_ref, 'chore/release-v') && github.event.pull_request.draft == false }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
@@ -142,6 +143,21 @@ jobs:
       - name: Dashboard linting
         working-directory: ./dashboard
         run: biome ci .
+
+      - name: UI package linting
+        working-directory: ./packages/ui
+        run: biome ci .
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build UI package
+        run: npm run build -w @teton/smith-ui
 
       - name: Report Status
         if: always()

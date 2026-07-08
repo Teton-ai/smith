@@ -282,9 +282,11 @@ mod tests {
         let history = list_sorted(&base.join("history"), ".json.gz").expect("history");
         assert_eq!(history.len(), 1);
         // The queue is a separate concern; persist must not touch it.
-        assert!(list_sorted(&base.join("queue"), ".json")
-            .expect("queue")
-            .is_empty());
+        assert!(
+            list_sorted(&base.join("queue"), ".json")
+                .expect("queue")
+                .is_empty()
+        );
     }
 
     #[test]
