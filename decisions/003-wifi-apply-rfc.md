@@ -158,7 +158,7 @@ Each PR is independently shippable, reviewable, and revertable. No pair requires
 | A | 0 | Smith DB + API: `device_network_intent`, version columns, intent CRUD + Apply endpoint (bump version, queue command) | Intent becomes visible and auditable, before any device acts on it | D1, D2, D10 (column only); Q3 (seeding) |
 | B | 0 | smithd: `ApplyNetworks` handler, SSID reconciliation, connectivity guard, persisted last-applied list, version + conditions in reports | The stranded-device fix; old API simply ignores the new fields | D2, D3, D4, D5, D6 |
 | C | 0 | API report handler stores version/conditions; dashboard: intent section, chip, Apply button | Operators see truthful sync state; `UpdateNetwork` deprecated | D6, D9; Q1 (manual-only apply) |
-| D | 1 | Catalog provenance columns + backfill, derived-verification query, credential-drift surface + "update from device", external-profile adopt/remove UI | The bad catalog becomes visibly bad instead of silently wrong | D7, D8; #481 (must land first) |
+| D | 1 | Catalog provenance columns + backfill, derived-verification query, credential-drift surface + "update from device", external-profile adopt/remove UI; network delete must list devices with intent referencing it (RESTRICT FK from PR A) | The bad catalog becomes visibly bad instead of silently wrong | D7, D8; #481 (must land first) |
 | E | 2 | App API: upsert-capable sync (may land much earlier as a standalone fix) | Password rotations propagate; #481 cannot recur | Q2 |
 | F | 2 | App API + Smith: department-default intent writer | New devices get their site's networks without an operator | D10; Q1 (auto-apply), Q4 |
 
