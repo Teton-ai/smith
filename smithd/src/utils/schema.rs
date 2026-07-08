@@ -155,6 +155,11 @@ pub enum SafeCommandRx {
         disk_encrypted: Option<bool>,
         password_access_disabled: Option<bool>,
     },
+    /// A full network-diagnostic sweep, carried as the serialized
+    /// `netdiag::DiagnosticReport` so this enum stays decoupled from its shape.
+    NetworkDiagnosticReport {
+        report: Value,
+    },
 }
 
 #[derive(Serialize, Deserialize, Default, Debug)]
@@ -206,6 +211,7 @@ pub enum SafeCommandTx {
         session_id: String,
     },
     RunAudit,
+    RunNetworkDiagnostic,
     GetLogs {
         unit: Option<String>,
         since: Option<String>,
