@@ -159,7 +159,7 @@ Each PR is independently shippable, reviewable, and revertable. No pair requires
 | B | 0 | smithd: `ApplyNetworks` handler, SSID reconciliation, connectivity guard, persisted last-applied list, version + conditions in reports | The stranded-device fix; old API simply ignores the new fields | D2, D3, D4, D5, D6 |
 | C | 0 | API report handler stores version/conditions; dashboard: intent section, chip, Apply button | Operators see truthful sync state; `UpdateNetwork` deprecated | D6, D9; Q1 (manual-only apply) |
 | D | 1 | Catalog provenance columns + backfill, derived-verification query, credential-drift surface + "update from device", external-profile adopt/remove UI; network delete must list devices with intent referencing it (RESTRICT FK from PR A) | The bad catalog becomes visibly bad instead of silently wrong | D7, D8; #481 (must land first) |
-| E | 2 | App API: upsert-capable sync (may land much earlier as a standalone fix) | Password rotations propagate; #481 cannot recur | Q2 |
+| E | 2 | App API: upsert-capable sync (may land much earlier as a standalone fix); migrate `network.password` to a `credentials JSONB` column and update the App API sync to write into it; expand the `ApplyNetworks` credentials envelope beyond PSK | Password rotations propagate; #481 cannot recur; enterprise auth types become expressible | Q2; #488 |
 | F | 2 | App API + Smith: department-default intent writer | New devices get their site's networks without an operator | D10; Q1 (auto-apply), Q4 |
 
 Related but independent: #481 (catalog dedupe + sync idempotency) should land before D to avoid backfilling provenance onto ~590 rows that are about to be deleted.
@@ -182,7 +182,7 @@ Some sites already use WPA-EAP / PEAP+MSCHAPv2 rather than plain PSK. The curren
 Two things need to change before the relevant PRs ship:
 
 - **Before PR B:** The `ApplyNetworks` payload shape (`{ssid, psk, priority}`) must become a credentials envelope so the protocol is not locked to PSK. Proposed: `{ssid, priority, credentials: {type: "psk", psk: "..."}}`, with `type: "eap"` carrying the additional fields. Changing this after PR B is in prod is a protocol break between smithd and the API.
-- **Before PR D:** The `network` catalog currently stores only `password`. Enterprise auth fields (`key_mgmt`, `eap`, `phase2_auth`, `identity`) have no home in the schema. PR D (catalog provenance + verification) is the right place to decide on the credential schema extension: typed columns (sparse but queryable) vs a JSONB blob (flexible but untyped).
+- **Before PR E:** The `network` catalog currently stores only `password`. Migrating to a `credentials JSONB` column and expanding the `ApplyNetworks` envelope beyond PSK is PR E scope, not PR A or D, because the App API sync also writes to `network.password` — the two must move together. PR A produces `{"key_mgmt": "wpa-psk", "psk": <password>}` from `network.password` as an interim measure; the envelope shape is already extensible. PR E also needs to update the App API sync to write into `credentials` instead of `password`, and extend `NMProfile` reporting to include `key_mgmt` and EAP fields (see #488).
 
 ## Appendix
 
