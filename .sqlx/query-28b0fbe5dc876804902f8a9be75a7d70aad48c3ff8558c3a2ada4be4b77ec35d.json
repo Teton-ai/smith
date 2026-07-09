@@ -1,0 +1,54 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        INSERT INTO release_services (release_id, package_id, service_name, watchdog_sec)\n        VALUES ($1, NULL, $2, $3)\n        RETURNING *\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "release_id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 2,
+        "name": "package_id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 3,
+        "name": "service_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "watchdog_sec",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 5,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Text",
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      false,
+      true,
+      false
+    ]
+  },
+  "hash": "28b0fbe5dc876804902f8a9be75a7d70aad48c3ff8558c3a2ada4be4b77ec35d"
+}

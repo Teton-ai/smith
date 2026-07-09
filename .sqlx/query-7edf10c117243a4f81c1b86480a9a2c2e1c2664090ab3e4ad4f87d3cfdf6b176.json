@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE device SET approved = true WHERE id = $1 RETURNING serial_number",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "serial_number",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "7edf10c117243a4f81c1b86480a9a2c2e1c2664090ab3e4ad4f87d3cfdf6b176"
+}

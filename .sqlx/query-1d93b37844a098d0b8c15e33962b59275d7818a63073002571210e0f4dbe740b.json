@@ -1,0 +1,26 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        INSERT INTO network_test_sessions (label_filter, duration_minutes, device_count, device_set_hash, bundle_id)\n        VALUES ($1, $2, $3, md5($4), $5)\n        RETURNING id\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Int4",
+        "Int4",
+        "Text",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "1d93b37844a098d0b8c15e33962b59275d7818a63073002571210e0f4dbe740b"
+}

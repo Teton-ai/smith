@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT COUNT(*) FROM device d\n            WHERE d.last_ping < now() - INTERVAL '3 minutes'\n            AND d.archived = false\n            AND NOT EXISTS (\n                SELECT 1 FROM device_label dl\n                JOIN label l ON l.id = dl.label_id\n                WHERE dl.device_id = d.id\n                AND l.name || '=' || dl.value = ANY($1)\n            )\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "TextArray"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "f998498c14f87a14e551e9746a712f4c92494e2b89b557f148e3e86808d65988"
+}

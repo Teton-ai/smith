@@ -1,0 +1,25 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE device_network_intent\n        SET\n            priority   = COALESCE($3, priority),\n            managed_by = COALESCE($4, managed_by),\n            updated_at = now()\n        WHERE id = $2 AND device_id = $1\n        RETURNING id\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Int4",
+        "Int4",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "cc2ebe8a352803aa12d43b2cb21ea18b49b5cde3a42b58c2ac602b5ded7d77e8"
+}

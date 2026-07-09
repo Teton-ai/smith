@@ -1,0 +1,50 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT\n            nts.id,\n            nts.created_at,\n            nts.label_filter,\n            nts.device_count,\n            COUNT(cr.id) as completed_count,\n            COUNT(cq.id) FILTER (WHERE cq.canceled) as canceled_count\n        FROM network_test_sessions nts\n        JOIN command_queue cq ON cq.bundle = nts.bundle_id\n        LEFT JOIN command_response cr ON cr.command_id = cq.id\n        GROUP BY nts.id, nts.created_at, nts.label_filter, nts.device_count\n        ORDER BY nts.created_at DESC\n        LIMIT 50\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 2,
+        "name": "label_filter",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "device_count",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 4,
+        "name": "completed_count",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 5,
+        "name": "canceled_count",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      null,
+      null
+    ]
+  },
+  "hash": "0e6d5192923639175f8f34725f09373458e59fc291207a5a1989d50a95fc2309"
+}

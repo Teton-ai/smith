@@ -1,0 +1,35 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT r.version, d.name as distribution_name, dev.serial_number\n             FROM release r\n             JOIN distribution d ON r.distribution_id = d.id\n             JOIN device dev ON dev.id = $2\n             WHERE r.id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "version",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "distribution_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "serial_number",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "ea21b32c6e11e89e30adf1584491b0c2c7d1306ded038d6e7bddf95b7ae6ae95"
+}

@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            WITH selected_devices AS (\n                SELECT d.id FROM device d\n                JOIN release r ON d.release_id = r.id\n                WHERE\n                    d.id = ANY($3)\n                    AND d.release_id = d.target_release_id\n                    AND d.last_ping > NOW() - INTERVAL '3 minutes'\n                    AND r.distribution_id = $1\n            )\n            INSERT INTO deployment_devices (deployment_id, device_id)\n            SELECT $2, id FROM selected_devices\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Int4",
+        "Int4Array"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "cd5e1fba42f98908236a45b5d12f59aac6f65e50c2d8a5965983462bbb593a95"
+}

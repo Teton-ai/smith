@@ -1,0 +1,46 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT\n            cq.device_id,\n            d.serial_number,\n            cq.fetched as \"fetched!\",\n            cq.canceled as \"canceled!\",\n            cr.response as \"response?\"\n        FROM command_queue cq\n        JOIN device d ON d.id = cq.device_id\n        LEFT JOIN command_response cr ON cr.command_id = cq.id\n        WHERE cq.bundle = $1\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "device_id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "serial_number",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "fetched!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 3,
+        "name": "canceled!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 4,
+        "name": "response?",
+        "type_info": "Json"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "9f3bd9f68a5a591d11893689f341938f617d952b4aea9a2ca2617656e355b508"
+}

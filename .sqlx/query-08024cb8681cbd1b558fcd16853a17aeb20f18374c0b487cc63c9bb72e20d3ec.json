@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        INSERT INTO device_audit (device_id, disk_encrypted, password_access_disabled, checked_at)\n        VALUES ($1, $2, $3, NOW())\n        ON CONFLICT (device_id) DO UPDATE SET\n            disk_encrypted = EXCLUDED.disk_encrypted,\n            password_access_disabled = EXCLUDED.password_access_disabled,\n            checked_at = EXCLUDED.checked_at\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Bool",
+        "Bool"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "08024cb8681cbd1b558fcd16853a17aeb20f18374c0b487cc63c9bb72e20d3ec"
+}

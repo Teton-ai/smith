@@ -1,0 +1,76 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT\n            dni.id,\n            dni.device_id,\n            dni.network_id,\n            dni.priority,\n            dni.managed_by,\n            dni.created_at,\n            dni.updated_at,\n            n.ssid,\n            n.name,\n            n.network_type::TEXT as \"network_type!\"\n        FROM device_network_intent dni\n        JOIN network n ON n.id = dni.network_id\n        WHERE dni.id = $1\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "device_id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 2,
+        "name": "network_id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 3,
+        "name": "priority",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 4,
+        "name": "managed_by",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 6,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 7,
+        "name": "ssid",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 9,
+        "name": "network_type!",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      null
+    ]
+  },
+  "hash": "de603391b4e956f02b02c29df67ea8a525033ec39f5cc46be43bf548ba2be831"
+}

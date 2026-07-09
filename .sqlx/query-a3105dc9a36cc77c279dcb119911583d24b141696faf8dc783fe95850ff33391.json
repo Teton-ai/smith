@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE auth.users_roles SET role = 'default' WHERE role <> 'default'",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "a3105dc9a36cc77c279dcb119911583d24b141696faf8dc783fe95850ff33391"
+}

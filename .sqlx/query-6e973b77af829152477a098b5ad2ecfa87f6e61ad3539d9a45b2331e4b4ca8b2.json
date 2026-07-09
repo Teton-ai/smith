@@ -1,0 +1,52 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT id as \"_id\", created_at, label_filter, duration_minutes, device_count as \"_device_count\", bundle_id\n        FROM network_test_sessions\n        WHERE id = $1\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 2,
+        "name": "label_filter",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "duration_minutes",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 4,
+        "name": "_device_count",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 5,
+        "name": "bundle_id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "6e973b77af829152477a098b5ad2ecfa87f6e61ad3539d9a45b2331e4b4ca8b2"
+}

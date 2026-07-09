@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE device \n        SET approved = false,\n            release_id = NULL,\n            target_release_id = NULL\n        WHERE id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "f3013d27bd6e100b9f0906a3380e185a5ac3ffda5b134c61899d980d41e07f1f"
+}

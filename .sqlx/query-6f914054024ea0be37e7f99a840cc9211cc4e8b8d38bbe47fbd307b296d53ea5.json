@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO release_packages (release_id, package_id)\n         SELECT $1, package_id FROM release_packages WHERE release_id = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "6f914054024ea0be37e7f99a840cc9211cc4e8b8d38bbe47fbd307b296d53ea5"
+}

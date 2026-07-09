@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                INSERT INTO auth.users_roles (user_id, role)\n                VALUES ($1, $2)\n                ON CONFLICT (user_id) DO UPDATE SET role = EXCLUDED.role\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "9b6493424e5a23460693f503f8c3a058820a648f74d8915b2d963d0fbb5a25c5"
+}

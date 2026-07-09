@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM release_packages WHERE release_id = $1 AND package_id = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "185907d9ee0433cf96d1674be6795d6ec7b4ffae2a529f998964ca1093a46250"
+}

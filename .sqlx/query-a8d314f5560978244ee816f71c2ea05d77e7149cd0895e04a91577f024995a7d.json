@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT r.version, d.name as distribution_name\n             FROM release r\n             JOIN distribution d ON r.distribution_id = d.id\n             WHERE r.id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "version",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "distribution_name",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "a8d314f5560978244ee816f71c2ea05d77e7149cd0895e04a91577f024995a7d"
+}

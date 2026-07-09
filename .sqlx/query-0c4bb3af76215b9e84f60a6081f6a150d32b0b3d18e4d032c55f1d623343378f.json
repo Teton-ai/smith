@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                        INSERT INTO device_release_upgrades\n                        (device_id, previous_release_id, upgraded_release_id)\n                        VALUES ($1, $2, $3)\n                        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Int4",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "0c4bb3af76215b9e84f60a6081f6a150d32b0b3d18e4d032c55f1d623343378f"
+}
