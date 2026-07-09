@@ -1,8 +1,9 @@
 use crate::State;
 use crate::device::{
-    ApproveDeviceBody, ConfiguredNetwork, DeviceHealth, DeviceLedgerItem,
-    DeviceLedgerItemPaginated, DeviceRelease, LabelWithValues, NewVariable, Note, RawDevice,
-    UpdateDeviceRelease, UpdateDevicesRelease, Variable, WifiScanResult,
+    ApplyIntentResponse, ApproveDeviceBody, ConfiguredNetwork, CreateIntentRequest, DeviceHealth,
+    DeviceLedgerItem, DeviceLedgerItemPaginated, DeviceNetworkIntent, DeviceRelease,
+    LabelWithValues, NewVariable, Note, PatchIntentRequest, RawDevice, UpdateDeviceRelease,
+    UpdateDevicesRelease, Variable, WifiScanResult,
 };
 use crate::event::PublicEvent;
 use crate::handlers::AuthedDevice;
@@ -52,7 +53,27 @@ pub async fn get_device(
         RawDevice,
         r#"
         SELECT
-            d.*,
+            d.id,
+            d.serial_number,
+            d.wifi_mac,
+            d.created_on,
+            d.modified_on,
+            d.last_ping,
+            d.note,
+            d.approved,
+            d.token,
+            d.release_id,
+            d.target_release_id,
+            d.target_release_id_set_at,
+            d.system_info,
+            d.network_id,
+            d.current_network_id,
+            d.modem_id,
+            d.archived,
+            d.ip_address_id,
+            d.intent_version,
+            d.observed_intent_version,
+            d.network_conditions,
             COALESCE(JSONB_OBJECT_AGG(l.name, dl.value) FILTER (WHERE l.name IS NOT NULL), '{}') as "labels!: SqlxJson<HashMap<String, String>>"
         FROM device d
         LEFT JOIN device_label dl ON dl.device_id = d.id
@@ -157,6 +178,9 @@ pub async fn get_devices(
             dn.upload_speed_mbps as "network_upload_speed_mbps?",
             dn.source as "network_source?",
             dn.updated_at as "network_updated_at?",
+            d.intent_version,
+            d.observed_intent_version,
+            d.network_conditions,
             COALESCE(JSONB_OBJECT_AGG(l.name, dl.value) FILTER (WHERE l.name IS NOT NULL), '{}') as "labels!: SqlxJson<HashMap<String, String>>"
         FROM device d
         LEFT JOIN ip_address ip ON d.ip_address_id = ip.id
@@ -342,6 +366,9 @@ pub async fn get_devices(
                 release,
                 target_release,
                 network,
+                intent_version: row.intent_version,
+                observed_intent_version: row.observed_intent_version,
+                network_conditions: row.network_conditions,
                 labels: row.labels,
             }
         })
@@ -1076,6 +1103,13 @@ pub async fn get_all_commands_for_device(
     // so it is a unique, stable ordering key even within a bundle (whose rows
     // all share the same created_at).
     commands.sort_by(|a, b| b.cmd_id.cmp(&a.cmd_id));
+    let commands: Vec<_> = commands
+        .into_iter()
+        .map(|mut c| {
+            c.cmd_data = crate::command::redact_cmd_data(c.cmd_data);
+            c
+        })
+        .collect();
 
     let first_id = commands.first().map(|c| c.cmd_id);
     let last_id = commands.last().map(|c| c.cmd_id);
@@ -1632,6 +1666,9 @@ pub async fn get_device_info(
         dn.upload_speed_mbps as "network_upload_speed_mbps?",
         dn.source as "network_source?",
         dn.updated_at as "network_updated_at?",
+        d.intent_version,
+        d.observed_intent_version,
+        d.network_conditions,
         COALESCE(JSONB_OBJECT_AGG(l.name, dl.value) FILTER (WHERE l.name IS NOT NULL), '{}') as "labels!: SqlxJson<HashMap<String, String>>"
         FROM device d
         LEFT JOIN ip_address ip ON d.ip_address_id = ip.id
@@ -1775,6 +1812,9 @@ pub async fn get_device_info(
         release,
         target_release,
         network,
+        intent_version: device_row.intent_version,
+        observed_intent_version: device_row.observed_intent_version,
+        network_conditions: device_row.network_conditions,
         labels: device_row.labels,
     };
 
@@ -2697,4 +2737,545 @@ pub async fn get_wifi_scan_for_device(
         .collect();
 
     Ok(Json(results))
+}
+
+async fn resolve_device_id(device_id: &str, pool: &sqlx::PgPool) -> Result<i32, StatusCode> {
+    sqlx::query_scalar!(
+        r#"
+        SELECT id FROM device
+        WHERE
+            CASE
+                WHEN $1 ~ '^[0-9]+$' AND length($1) <= 9 THEN
+                    id = $1::int4
+                ELSE
+                    serial_number = $1
+            END
+        "#,
+        device_id
+    )
+    .fetch_optional(pool)
+    .await
+    .map_err(|err| {
+        error!("Failed to resolve device {device_id}: {err}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?
+    .ok_or(StatusCode::NOT_FOUND)
+}
+
+#[utoipa::path(
+    get,
+    path = "/devices/{device_id}/intent",
+    params(
+        ("device_id" = String, Path),
+    ),
+    responses(
+        (status = StatusCode::OK, description = "Intent list for the device", body = Vec<DeviceNetworkIntent>),
+        (status = StatusCode::NOT_FOUND, description = "Device not found"),
+        (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to retrieve device intent"),
+    ),
+    security(
+        ("auth_token" = [])
+    ),
+    tag = DEVICES_TAG
+)]
+pub async fn get_device_intent(
+    Path(device_id): Path<String>,
+    Extension(state): Extension<State>,
+    Extension(current_user): Extension<CurrentUser>,
+) -> Result<Json<Vec<DeviceNetworkIntent>>, StatusCode> {
+    if !authorization::check(current_user, "devices", "read") {
+        return Err(StatusCode::FORBIDDEN);
+    }
+
+    let resolved_id = resolve_device_id(&device_id, &state.pg_pool).await?;
+
+    let intents = sqlx::query_as!(
+        DeviceNetworkIntent,
+        r#"
+        SELECT
+            dni.id,
+            dni.device_id,
+            dni.network_id,
+            dni.priority,
+            dni.managed_by,
+            dni.created_at,
+            dni.updated_at,
+            n.ssid,
+            n.name,
+            n.network_type::TEXT as "network_type!"
+        FROM device_network_intent dni
+        JOIN network n ON n.id = dni.network_id
+        WHERE dni.device_id = $1
+        ORDER BY dni.priority ASC
+        "#,
+        resolved_id
+    )
+    .fetch_all(&state.pg_pool)
+    .await
+    .map_err(|err| {
+        error!("Failed to get intent for device {resolved_id}: {err}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    Ok(Json(intents))
+}
+
+#[utoipa::path(
+    post,
+    path = "/devices/{device_id}/intent",
+    params(
+        ("device_id" = String, Path),
+    ),
+    request_body = CreateIntentRequest,
+    responses(
+        (status = StatusCode::CREATED, description = "Intent row created", body = DeviceNetworkIntent),
+        (status = StatusCode::CONFLICT, description = "Profile name already in intent or duplicate network_id"),
+        (status = StatusCode::BAD_REQUEST, description = "Unknown network_id"),
+        (status = StatusCode::NOT_FOUND, description = "Device not found"),
+        (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to create intent"),
+    ),
+    security(
+        ("auth_token" = [])
+    ),
+    tag = DEVICES_TAG
+)]
+pub async fn create_device_intent(
+    Path(device_id): Path<String>,
+    Extension(state): Extension<State>,
+    Extension(current_user): Extension<CurrentUser>,
+    Json(payload): Json<CreateIntentRequest>,
+) -> Result<(StatusCode, Json<DeviceNetworkIntent>), StatusCode> {
+    if !authorization::check(current_user, "devices", "write") {
+        return Err(StatusCode::FORBIDDEN);
+    }
+
+    let resolved_id = resolve_device_id(&device_id, &state.pg_pool).await?;
+
+    let mut tx = state.pg_pool.begin().await.map_err(|err| {
+        error!("Failed to start transaction: {err}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    sqlx::query!(
+        "SELECT 1 as x FROM device WHERE id = $1 FOR UPDATE",
+        resolved_id
+    )
+    .fetch_one(&mut *tx)
+    .await
+    .map_err(|err| {
+        error!("Failed to lock device row {resolved_id}: {err}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    let profile_name_conflict = sqlx::query_scalar!(
+        r#"
+        SELECT EXISTS (
+            SELECT 1
+            FROM device_network_intent dni
+            JOIN network existing_n ON existing_n.id = dni.network_id
+            JOIN network new_n ON new_n.id = $2
+            WHERE dni.device_id = $1
+              AND existing_n.name = new_n.name
+              AND dni.network_id != $2
+        ) as "exists!"
+        "#,
+        resolved_id,
+        payload.network_id
+    )
+    .fetch_one(&mut *tx)
+    .await
+    .map_err(|err| {
+        error!("Failed to check profile name uniqueness: {err}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    if profile_name_conflict {
+        return Err(StatusCode::CONFLICT);
+    }
+
+    let intent_id = sqlx::query_scalar!(
+        r#"
+        INSERT INTO device_network_intent (device_id, network_id, priority, managed_by)
+        VALUES ($1, $2, $3, $4)
+        RETURNING id
+        "#,
+        resolved_id,
+        payload.network_id,
+        payload.priority,
+        payload.managed_by,
+    )
+    .fetch_one(&mut *tx)
+    .await
+    .map_err(|err| {
+        let msg = err.to_string();
+        if msg.contains("device_network_intent_device_network_unique") {
+            StatusCode::CONFLICT
+        } else if msg.contains("violates foreign key constraint") {
+            StatusCode::BAD_REQUEST
+        } else {
+            error!("Failed to insert device network intent: {err}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        }
+    })?;
+
+    sqlx::query!(
+        "UPDATE device SET intent_version = intent_version + 1 WHERE id = $1",
+        resolved_id
+    )
+    .execute(&mut *tx)
+    .await
+    .map_err(|err| {
+        error!("Failed to increment intent_version: {err}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    let row = sqlx::query_as!(
+        DeviceNetworkIntent,
+        r#"
+        SELECT
+            dni.id,
+            dni.device_id,
+            dni.network_id,
+            dni.priority,
+            dni.managed_by,
+            dni.created_at,
+            dni.updated_at,
+            n.ssid,
+            n.name,
+            n.network_type::TEXT as "network_type!"
+        FROM device_network_intent dni
+        JOIN network n ON n.id = dni.network_id
+        WHERE dni.id = $1
+        "#,
+        intent_id
+    )
+    .fetch_one(&mut *tx)
+    .await
+    .map_err(|err| {
+        error!("Failed to fetch created intent: {err}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    tx.commit().await.map_err(|err| {
+        error!("Failed to commit transaction: {err}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    Ok((StatusCode::CREATED, Json(row)))
+}
+
+#[utoipa::path(
+    patch,
+    path = "/devices/{device_id}/intent/{intent_id}",
+    params(
+        ("device_id" = String, Path),
+        ("intent_id" = i32, Path),
+    ),
+    request_body = PatchIntentRequest,
+    responses(
+        (status = StatusCode::OK, description = "Intent row updated", body = DeviceNetworkIntent),
+        (status = StatusCode::NOT_FOUND, description = "Device or intent not found"),
+        (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to update intent"),
+    ),
+    security(
+        ("auth_token" = [])
+    ),
+    tag = DEVICES_TAG
+)]
+pub async fn update_device_intent(
+    Path((device_id, intent_id)): Path<(String, i32)>,
+    Extension(state): Extension<State>,
+    Extension(current_user): Extension<CurrentUser>,
+    Json(payload): Json<PatchIntentRequest>,
+) -> Result<Json<DeviceNetworkIntent>, StatusCode> {
+    if !authorization::check(current_user, "devices", "write") {
+        return Err(StatusCode::FORBIDDEN);
+    }
+
+    let resolved_id = resolve_device_id(&device_id, &state.pg_pool).await?;
+
+    let mut tx = state.pg_pool.begin().await.map_err(|err| {
+        error!("Failed to start transaction: {err}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    let updated = sqlx::query_scalar!(
+        r#"
+        UPDATE device_network_intent
+        SET
+            priority   = COALESCE($3, priority),
+            managed_by = COALESCE($4, managed_by),
+            updated_at = now()
+        WHERE id = $2 AND device_id = $1
+        RETURNING id
+        "#,
+        resolved_id,
+        intent_id,
+        payload.priority,
+        payload.managed_by,
+    )
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(|err| {
+        error!("Failed to update device network intent {intent_id}: {err}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    if updated.is_none() {
+        return Err(StatusCode::NOT_FOUND);
+    }
+
+    sqlx::query!(
+        "UPDATE device SET intent_version = intent_version + 1 WHERE id = $1",
+        resolved_id
+    )
+    .execute(&mut *tx)
+    .await
+    .map_err(|err| {
+        error!("Failed to increment intent_version: {err}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    let row = sqlx::query_as!(
+        DeviceNetworkIntent,
+        r#"
+        SELECT
+            dni.id,
+            dni.device_id,
+            dni.network_id,
+            dni.priority,
+            dni.managed_by,
+            dni.created_at,
+            dni.updated_at,
+            n.ssid,
+            n.name,
+            n.network_type::TEXT as "network_type!"
+        FROM device_network_intent dni
+        JOIN network n ON n.id = dni.network_id
+        WHERE dni.id = $1
+        "#,
+        intent_id
+    )
+    .fetch_one(&mut *tx)
+    .await
+    .map_err(|err| {
+        error!("Failed to fetch updated intent: {err}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    tx.commit().await.map_err(|err| {
+        error!("Failed to commit transaction: {err}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    Ok(Json(row))
+}
+
+#[utoipa::path(
+    delete,
+    path = "/devices/{device_id}/intent/{intent_id}",
+    params(
+        ("device_id" = String, Path),
+        ("intent_id" = i32, Path),
+    ),
+    responses(
+        (status = StatusCode::NO_CONTENT, description = "Intent row deleted"),
+        (status = StatusCode::NOT_FOUND, description = "Device or intent not found"),
+        (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to delete intent"),
+    ),
+    security(
+        ("auth_token" = [])
+    ),
+    tag = DEVICES_TAG
+)]
+pub async fn delete_device_intent(
+    Path((device_id, intent_id)): Path<(String, i32)>,
+    Extension(state): Extension<State>,
+    Extension(current_user): Extension<CurrentUser>,
+) -> Result<StatusCode, StatusCode> {
+    if !authorization::check(current_user, "devices", "write") {
+        return Err(StatusCode::FORBIDDEN);
+    }
+
+    let resolved_id = resolve_device_id(&device_id, &state.pg_pool).await?;
+
+    let mut tx = state.pg_pool.begin().await.map_err(|err| {
+        error!("Failed to start transaction: {err}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    let deleted = sqlx::query_scalar!(
+        "DELETE FROM device_network_intent WHERE id = $2 AND device_id = $1 RETURNING id",
+        resolved_id,
+        intent_id,
+    )
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(|err| {
+        error!("Failed to delete device network intent {intent_id}: {err}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    if deleted.is_none() {
+        return Err(StatusCode::NOT_FOUND);
+    }
+
+    sqlx::query!(
+        "UPDATE device SET intent_version = intent_version + 1 WHERE id = $1",
+        resolved_id
+    )
+    .execute(&mut *tx)
+    .await
+    .map_err(|err| {
+        error!("Failed to increment intent_version: {err}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    tx.commit().await.map_err(|err| {
+        error!("Failed to commit transaction: {err}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[utoipa::path(
+    post,
+    path = "/devices/{device_id}/intent/apply",
+    params(
+        ("device_id" = String, Path),
+    ),
+    responses(
+        (status = StatusCode::ACCEPTED, description = "ApplyNetworks command queued", body = ApplyIntentResponse),
+        (status = StatusCode::BAD_REQUEST, description = "No intent (version 0) or network with NULL SSID"),
+        (status = StatusCode::NOT_FOUND, description = "Device not found"),
+        (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to queue command"),
+    ),
+    security(
+        ("auth_token" = [])
+    ),
+    tag = DEVICES_TAG
+)]
+pub async fn apply_device_intent(
+    Path(device_id): Path<String>,
+    Extension(state): Extension<State>,
+    Extension(current_user): Extension<CurrentUser>,
+) -> Result<(StatusCode, Json<ApplyIntentResponse>), StatusCode> {
+    if !authorization::check(current_user, "devices", "write") {
+        return Err(StatusCode::FORBIDDEN);
+    }
+
+    let resolved_id = resolve_device_id(&device_id, &state.pg_pool).await?;
+
+    let mut tx = state.pg_pool.begin().await.map_err(|err| {
+        error!("Failed to start transaction: {err}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    let intent_version: i32 = sqlx::query_scalar!(
+        "SELECT intent_version FROM device WHERE id = $1 FOR UPDATE",
+        resolved_id
+    )
+    .fetch_one(&mut *tx)
+    .await
+    .map_err(|err| {
+        error!("Failed to read intent_version for device {resolved_id}: {err}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    if intent_version == 0 {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+
+    let networks = sqlx::query!(
+        r#"
+        SELECT
+            dni.priority,
+            n.ssid,
+            n.name,
+            n.password
+        FROM device_network_intent dni
+        JOIN network n ON n.id = dni.network_id
+        WHERE dni.device_id = $1
+        ORDER BY dni.priority ASC
+        "#,
+        resolved_id
+    )
+    .fetch_all(&mut *tx)
+    .await
+    .map_err(|err| {
+        error!("Failed to fetch intent networks for device {resolved_id}: {err}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    if networks.is_empty() || networks.iter().any(|n| n.ssid.is_none()) {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+
+    let bundle = sqlx::query!("INSERT INTO command_bundles DEFAULT VALUES RETURNING uuid")
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(|err| {
+            error!("Failed to insert command bundle: {err}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+
+    // ApplyNetworks command shape (read by smithd):
+    // {
+    //   "ApplyNetworks": {
+    //     "version": <intent_version: i32>,
+    //     "networks": [
+    //       { "profile_name": "<catalog name>", "ssid": "<ssid>", "priority": <i32>,
+    //         "credentials": { "key_mgmt": "wpa-psk", "psk": "<password>" } }
+    //       { "profile_name": "<catalog name>", "ssid": "<ssid>", "priority": <i32>,
+    //         "credentials": { "key_mgmt": "none" } }  // open network
+    //     ]
+    //   }
+    // }
+    let cmd = serde_json::json!({
+        "ApplyNetworks": {
+            "version": intent_version,
+            "networks": networks.iter().map(|n| {
+                let credentials = if let Some(psk) = n.password.as_deref() {
+                    serde_json::json!({ "key_mgmt": "wpa-psk", "psk": psk })
+                } else {
+                    serde_json::json!({ "key_mgmt": "none" })
+                };
+                serde_json::json!({
+                    "profile_name": n.name,
+                    "ssid": n.ssid.as_deref().unwrap_or(""),
+                    "priority": n.priority,
+                    "credentials": credentials
+                })
+            }).collect::<Vec<_>>()
+        }
+    });
+
+    let command_id: i32 = sqlx::query_scalar!(
+        "INSERT INTO command_queue (device_id, cmd, continue_on_error, canceled, bundle)
+         VALUES ($1, $2::jsonb, false, false, $3)
+         RETURNING id",
+        resolved_id,
+        cmd,
+        bundle.uuid,
+    )
+    .fetch_one(&mut *tx)
+    .await
+    .map_err(|err| {
+        error!("Failed to insert ApplyNetworks command for device {resolved_id}: {err}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    tx.commit().await.map_err(|err| {
+        error!("Failed to commit transaction: {err}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    Ok((
+        StatusCode::ACCEPTED,
+        Json(ApplyIntentResponse {
+            bundle_uuid: bundle.uuid,
+            command_id,
+        }),
+    ))
 }

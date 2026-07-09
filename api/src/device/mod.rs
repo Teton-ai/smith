@@ -12,6 +12,7 @@ use std::net::IpAddr;
 use std::time::Duration;
 use thiserror::Error;
 use tracing::{debug, error, info, warn};
+use uuid::Uuid;
 
 pub mod route;
 
@@ -39,6 +40,9 @@ pub struct RawDevice {
     pub modem_id: Option<i32>,
     pub archived: bool,
     pub ip_address_id: Option<i64>,
+    pub intent_version: i32,
+    pub observed_intent_version: Option<i32>,
+    pub network_conditions: Option<serde_json::Value>,
 }
 
 fn serialize_token_presence<S>(token: &Option<String>, serializer: S) -> Result<S::Ok, S::Error>
@@ -161,6 +165,39 @@ pub struct WifiScanResult {
     pub channel: Option<i32>,
     pub band: Option<String>,
     pub scanned_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Serialize, sqlx::FromRow, utoipa::ToSchema)]
+pub struct DeviceNetworkIntent {
+    pub id: i32,
+    pub device_id: i32,
+    pub network_id: i32,
+    pub ssid: Option<String>,
+    pub name: String,
+    pub network_type: String,
+    pub priority: i32,
+    pub managed_by: String,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Deserialize, utoipa::ToSchema)]
+pub struct CreateIntentRequest {
+    pub network_id: i32,
+    pub priority: i32,
+    pub managed_by: String,
+}
+
+#[derive(Debug, Deserialize, utoipa::ToSchema)]
+pub struct PatchIntentRequest {
+    pub priority: Option<i32>,
+    pub managed_by: Option<String>,
+}
+
+#[derive(Debug, Serialize, utoipa::ToSchema)]
+pub struct ApplyIntentResponse {
+    pub bundle_uuid: Uuid,
+    pub command_id: i32,
 }
 
 async fn update_ip_geolocation(

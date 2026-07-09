@@ -30,4 +30,4 @@ sqlx = { version = "0.7", features = [
     "uuid",
     "ipnetwork",
 ] }
-utoipa = { version = "5", features = ["chrono"] }
+utoipa = { version = "5", features = ["chrono", "uuid"] }
