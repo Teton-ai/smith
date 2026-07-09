@@ -86,8 +86,17 @@ pub struct AccountsConfig {
 
 impl AccountsConfig {
     pub fn new(config: &str) -> Result<Self> {
-        let config: AccountsConfig = toml::from_str(config)?;
-        Ok(config)
+        let parsed: AccountsConfig = toml::from_str(config)?;
+        // Emails are normalized (lowercased, whitespace-trimmed) when users are
+        // created/updated (see `CurrentUser::create`/`update_email`), so normalize
+        // the config keys the same way. This keeps reconciliation matching robust
+        // and collapses any case-duplicate keys into one entry (last wins).
+        let accounts = parsed
+            .accounts
+            .into_iter()
+            .map(|(email, role)| (email.trim().to_lowercase(), role))
+            .collect();
+        Ok(AccountsConfig { accounts })
     }
 
     /// (email, role) pairs whose role is not defined in `authorization`. Used at
