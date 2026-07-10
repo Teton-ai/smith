@@ -1,5 +1,5 @@
 use crate::device::Variable;
-use anyhow::Result;
+use anyhow::{Context, Result};
 use serde_json::Value;
 use serde_json::json;
 use smith::utils::schema;
@@ -362,6 +362,21 @@ pub async fn save_responses(
                     password_access_disabled,
                 )
                 .execute(pool)
+                .await?;
+            }
+            SafeCommandRx::ApplyNetworksResult {
+                applied_version,
+                ref conditions,
+            } => {
+                let conditions_json =
+                    serde_json::to_value(conditions).context("serializing network conditions")?;
+                sqlx::query!(
+                    "UPDATE device SET observed_intent_version = $2, network_conditions = $3 WHERE id = $1",
+                    device_id,
+                    applied_version,
+                    conditions_json
+                )
+                .execute(&mut *tx)
                 .await?;
             }
             _ => {}
