@@ -17,6 +17,23 @@ use sqlx::PgPool;
 use std::collections::HashMap;
 use tracing::error;
 
+fn redact_cmd_data(mut cmd: serde_json::Value) -> serde_json::Value {
+    if let Some(networks) = cmd
+        .get_mut("ApplyNetworks")
+        .and_then(|v| v.get_mut("networks"))
+        .and_then(|v| v.as_array_mut())
+    {
+        for network in networks.iter_mut() {
+            if let Some(creds) = network.get_mut("credentials")
+                && let Some(obj) = creds.as_object_mut()
+            {
+                obj.insert("psk".to_string(), serde_json::Value::Null);
+            }
+        }
+    }
+    cmd
+}
+
 /// Queue `commands` against every device in `devices` as a single bundle.
 /// Shared by raw bundle issuing and recipe triggering so both produce identical
 /// `command_bundles` / `command_queue` rows and the same receipt shape.
@@ -254,7 +271,7 @@ pub async fn get_bundle_commands(
             serial_number: raw_bundle.serial_number,
             cmd_id: raw_bundle.cmd_id,
             issued_at: raw_bundle.issued_at,
-            cmd_data: raw_bundle.cmd_data,
+            cmd_data: redact_cmd_data(raw_bundle.cmd_data),
             cancelled: raw_bundle.cancelled,
             fetched: raw_bundle.fetched,
             fetched_at: raw_bundle.fetched_at,
@@ -440,7 +457,7 @@ pub async fn get_bundle(
             serial_number: raw.serial_number,
             cmd_id: raw.cmd_id,
             issued_at: raw.issued_at,
-            cmd_data: raw.cmd_data,
+            cmd_data: redact_cmd_data(raw.cmd_data),
             cancelled: raw.cancelled,
             fetched: raw.fetched,
             fetched_at: raw.fetched_at,

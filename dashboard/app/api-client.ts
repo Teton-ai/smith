@@ -45,6 +45,11 @@ export interface AggregateEvaluation {
 	speed_tier: number;
 }
 
+export interface ApplyIntentResponse {
+	bundle_uuid: string;
+	command_id: number;
+}
+
 export interface ApproveDeviceBody {
 	target_release_id?: number;
 }
@@ -145,6 +150,12 @@ export interface ConnectionStatus {
 	connection_state: string;
 	device_name: string;
 	device_type: string;
+}
+
+export interface CreateIntentRequest {
+	managed_by: string;
+	network_id: number;
+	priority: number;
 }
 
 export interface Dashboard {
@@ -373,6 +384,19 @@ export interface DeviceLedgerItemPaginated {
 	previous?: string;
 }
 
+export interface DeviceNetworkIntent {
+	created_at: string;
+	device_id: number;
+	id: number;
+	managed_by: string;
+	name: string;
+	network_id: number;
+	network_type: string;
+	priority: number;
+	ssid?: string;
+	updated_at: string;
+}
+
 export interface DeviceRelease {
 	previous_release?: Release;
 	release?: Release;
@@ -490,6 +514,11 @@ export interface Package {
 	version: string;
 }
 
+export interface PatchIntentRequest {
+	managed_by?: string;
+	priority?: number;
+}
+
 /**
  * A single { action, resource } permission, flattened for the dashboard.
  */
@@ -510,13 +539,16 @@ export interface RawDevice {
 	created_on: string;
 	current_network_id?: number;
 	id: number;
+	intent_version: number;
 	ip_address_id?: number;
 	labels: RawDeviceLabels;
 	last_ping?: string;
 	modem_id?: number;
 	modified_on: string;
+	network_conditions?: unknown;
 	network_id?: number;
 	note?: string;
+	observed_intent_version?: number;
 	release_id?: number;
 	serial_number: string;
 	system_info?: unknown;
@@ -6509,6 +6541,666 @@ export function useGetHealthForDevice<
 
 	return { ...query, queryKey: queryOptions.queryKey };
 }
+
+export const useGetDeviceIntentHook = () => {
+	const getDeviceIntent = useClientMutator<DeviceNetworkIntent[]>();
+
+	return useCallback(
+		(deviceId: string, signal?: AbortSignal) => {
+			return getDeviceIntent({
+				url: `/devices/${deviceId}/intent`,
+				method: "GET",
+				signal,
+			});
+		},
+		[getDeviceIntent],
+	);
+};
+
+export const getGetDeviceIntentInfiniteQueryKey = (deviceId: string) => {
+	return ["infinite", `/devices/${deviceId}/intent`] as const;
+};
+
+export const getGetDeviceIntentQueryKey = (deviceId: string) => {
+	return [`/devices/${deviceId}/intent`] as const;
+};
+
+export const useGetDeviceIntentInfiniteQueryOptions = <
+	TData = InfiniteData<
+		Awaited<ReturnType<ReturnType<typeof useGetDeviceIntentHook>>>
+	>,
+	TError = void,
+>(
+	deviceId: string,
+	options?: {
+		query?: Partial<
+			UseInfiniteQueryOptions<
+				Awaited<ReturnType<ReturnType<typeof useGetDeviceIntentHook>>>,
+				TError,
+				TData
+			>
+		>;
+	},
+) => {
+	const { query: queryOptions } = options ?? {};
+
+	const queryKey =
+		queryOptions?.queryKey ?? getGetDeviceIntentInfiniteQueryKey(deviceId);
+
+	const getDeviceIntent = useGetDeviceIntentHook();
+
+	const queryFn: QueryFunction<
+		Awaited<ReturnType<ReturnType<typeof useGetDeviceIntentHook>>>
+	> = ({ signal }) => getDeviceIntent(deviceId, signal);
+
+	return {
+		queryKey,
+		queryFn,
+		enabled: deviceId !== null && deviceId !== undefined,
+		...queryOptions,
+	} as UseInfiniteQueryOptions<
+		Awaited<ReturnType<ReturnType<typeof useGetDeviceIntentHook>>>,
+		TError,
+		TData
+	> & { queryKey: DataTag<QueryKey, TData, TError> };
+};
+
+export type GetDeviceIntentInfiniteQueryResult = NonNullable<
+	Awaited<ReturnType<ReturnType<typeof useGetDeviceIntentHook>>>
+>;
+export type GetDeviceIntentInfiniteQueryError = void;
+
+export function useGetDeviceIntentInfinite<
+	TData = InfiniteData<
+		Awaited<ReturnType<ReturnType<typeof useGetDeviceIntentHook>>>
+	>,
+	TError = void,
+>(
+	deviceId: string,
+	options: {
+		query: Partial<
+			UseInfiniteQueryOptions<
+				Awaited<ReturnType<ReturnType<typeof useGetDeviceIntentHook>>>,
+				TError,
+				TData
+			>
+		> &
+			Pick<
+				DefinedInitialDataOptions<
+					Awaited<ReturnType<ReturnType<typeof useGetDeviceIntentHook>>>,
+					TError,
+					Awaited<ReturnType<ReturnType<typeof useGetDeviceIntentHook>>>
+				>,
+				"initialData"
+			>;
+	},
+	queryClient?: QueryClient,
+): DefinedUseInfiniteQueryResult<TData, TError> & {
+	queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useGetDeviceIntentInfinite<
+	TData = InfiniteData<
+		Awaited<ReturnType<ReturnType<typeof useGetDeviceIntentHook>>>
+	>,
+	TError = void,
+>(
+	deviceId: string,
+	options?: {
+		query?: Partial<
+			UseInfiniteQueryOptions<
+				Awaited<ReturnType<ReturnType<typeof useGetDeviceIntentHook>>>,
+				TError,
+				TData
+			>
+		> &
+			Pick<
+				UndefinedInitialDataOptions<
+					Awaited<ReturnType<ReturnType<typeof useGetDeviceIntentHook>>>,
+					TError,
+					Awaited<ReturnType<ReturnType<typeof useGetDeviceIntentHook>>>
+				>,
+				"initialData"
+			>;
+	},
+	queryClient?: QueryClient,
+): UseInfiniteQueryResult<TData, TError> & {
+	queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useGetDeviceIntentInfinite<
+	TData = InfiniteData<
+		Awaited<ReturnType<ReturnType<typeof useGetDeviceIntentHook>>>
+	>,
+	TError = void,
+>(
+	deviceId: string,
+	options?: {
+		query?: Partial<
+			UseInfiniteQueryOptions<
+				Awaited<ReturnType<ReturnType<typeof useGetDeviceIntentHook>>>,
+				TError,
+				TData
+			>
+		>;
+	},
+	queryClient?: QueryClient,
+): UseInfiniteQueryResult<TData, TError> & {
+	queryKey: DataTag<QueryKey, TData, TError>;
+};
+
+export function useGetDeviceIntentInfinite<
+	TData = InfiniteData<
+		Awaited<ReturnType<ReturnType<typeof useGetDeviceIntentHook>>>
+	>,
+	TError = void,
+>(
+	deviceId: string,
+	options?: {
+		query?: Partial<
+			UseInfiniteQueryOptions<
+				Awaited<ReturnType<ReturnType<typeof useGetDeviceIntentHook>>>,
+				TError,
+				TData
+			>
+		>;
+	},
+	queryClient?: QueryClient,
+): UseInfiniteQueryResult<TData, TError> & {
+	queryKey: DataTag<QueryKey, TData, TError>;
+} {
+	const queryOptions = useGetDeviceIntentInfiniteQueryOptions(
+		deviceId,
+		options,
+	);
+
+	const query = useInfiniteQuery(
+		queryOptions,
+		queryClient,
+	) as UseInfiniteQueryResult<TData, TError> & {
+		queryKey: DataTag<QueryKey, TData, TError>;
+	};
+
+	return { ...query, queryKey: queryOptions.queryKey };
+}
+
+export const useGetDeviceIntentQueryOptions = <
+	TData = Awaited<ReturnType<ReturnType<typeof useGetDeviceIntentHook>>>,
+	TError = void,
+>(
+	deviceId: string,
+	options?: {
+		query?: Partial<
+			UseQueryOptions<
+				Awaited<ReturnType<ReturnType<typeof useGetDeviceIntentHook>>>,
+				TError,
+				TData
+			>
+		>;
+	},
+) => {
+	const { query: queryOptions } = options ?? {};
+
+	const queryKey =
+		queryOptions?.queryKey ?? getGetDeviceIntentQueryKey(deviceId);
+
+	const getDeviceIntent = useGetDeviceIntentHook();
+
+	const queryFn: QueryFunction<
+		Awaited<ReturnType<ReturnType<typeof useGetDeviceIntentHook>>>
+	> = ({ signal }) => getDeviceIntent(deviceId, signal);
+
+	return {
+		queryKey,
+		queryFn,
+		enabled: deviceId !== null && deviceId !== undefined,
+		...queryOptions,
+	} as UseQueryOptions<
+		Awaited<ReturnType<ReturnType<typeof useGetDeviceIntentHook>>>,
+		TError,
+		TData
+	> & { queryKey: DataTag<QueryKey, TData, TError> };
+};
+
+export type GetDeviceIntentQueryResult = NonNullable<
+	Awaited<ReturnType<ReturnType<typeof useGetDeviceIntentHook>>>
+>;
+export type GetDeviceIntentQueryError = void;
+
+export function useGetDeviceIntent<
+	TData = Awaited<ReturnType<ReturnType<typeof useGetDeviceIntentHook>>>,
+	TError = void,
+>(
+	deviceId: string,
+	options: {
+		query: Partial<
+			UseQueryOptions<
+				Awaited<ReturnType<ReturnType<typeof useGetDeviceIntentHook>>>,
+				TError,
+				TData
+			>
+		> &
+			Pick<
+				DefinedInitialDataOptions<
+					Awaited<ReturnType<ReturnType<typeof useGetDeviceIntentHook>>>,
+					TError,
+					Awaited<ReturnType<ReturnType<typeof useGetDeviceIntentHook>>>
+				>,
+				"initialData"
+			>;
+	},
+	queryClient?: QueryClient,
+): DefinedUseQueryResult<TData, TError> & {
+	queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useGetDeviceIntent<
+	TData = Awaited<ReturnType<ReturnType<typeof useGetDeviceIntentHook>>>,
+	TError = void,
+>(
+	deviceId: string,
+	options?: {
+		query?: Partial<
+			UseQueryOptions<
+				Awaited<ReturnType<ReturnType<typeof useGetDeviceIntentHook>>>,
+				TError,
+				TData
+			>
+		> &
+			Pick<
+				UndefinedInitialDataOptions<
+					Awaited<ReturnType<ReturnType<typeof useGetDeviceIntentHook>>>,
+					TError,
+					Awaited<ReturnType<ReturnType<typeof useGetDeviceIntentHook>>>
+				>,
+				"initialData"
+			>;
+	},
+	queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+	queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useGetDeviceIntent<
+	TData = Awaited<ReturnType<ReturnType<typeof useGetDeviceIntentHook>>>,
+	TError = void,
+>(
+	deviceId: string,
+	options?: {
+		query?: Partial<
+			UseQueryOptions<
+				Awaited<ReturnType<ReturnType<typeof useGetDeviceIntentHook>>>,
+				TError,
+				TData
+			>
+		>;
+	},
+	queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+	queryKey: DataTag<QueryKey, TData, TError>;
+};
+
+export function useGetDeviceIntent<
+	TData = Awaited<ReturnType<ReturnType<typeof useGetDeviceIntentHook>>>,
+	TError = void,
+>(
+	deviceId: string,
+	options?: {
+		query?: Partial<
+			UseQueryOptions<
+				Awaited<ReturnType<ReturnType<typeof useGetDeviceIntentHook>>>,
+				TError,
+				TData
+			>
+		>;
+	},
+	queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+	queryKey: DataTag<QueryKey, TData, TError>;
+} {
+	const queryOptions = useGetDeviceIntentQueryOptions(deviceId, options);
+
+	const query = useQuery(queryOptions, queryClient) as UseQueryResult<
+		TData,
+		TError
+	> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+	return { ...query, queryKey: queryOptions.queryKey };
+}
+
+export const useCreateDeviceIntentHook = () => {
+	const createDeviceIntent = useClientMutator<DeviceNetworkIntent>();
+
+	return useCallback(
+		(
+			deviceId: string,
+			createIntentRequest: CreateIntentRequest,
+			signal?: AbortSignal,
+		) => {
+			return createDeviceIntent({
+				url: `/devices/${deviceId}/intent`,
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				data: createIntentRequest,
+				signal,
+			});
+		},
+		[createDeviceIntent],
+	);
+};
+
+export const useCreateDeviceIntentMutationOptions = <
+	TError = void,
+	TContext = unknown,
+>(options?: {
+	mutation?: UseMutationOptions<
+		Awaited<ReturnType<ReturnType<typeof useCreateDeviceIntentHook>>>,
+		TError,
+		{ deviceId: string; data: CreateIntentRequest },
+		TContext
+	>;
+}): UseMutationOptions<
+	Awaited<ReturnType<ReturnType<typeof useCreateDeviceIntentHook>>>,
+	TError,
+	{ deviceId: string; data: CreateIntentRequest },
+	TContext
+> => {
+	const mutationKey = ["createDeviceIntent"];
+	const { mutation: mutationOptions } = options
+		? options.mutation &&
+			"mutationKey" in options.mutation &&
+			options.mutation.mutationKey
+			? options
+			: { ...options, mutation: { ...options.mutation, mutationKey } }
+		: { mutation: { mutationKey } };
+
+	const createDeviceIntent = useCreateDeviceIntentHook();
+
+	const mutationFn: MutationFunction<
+		Awaited<ReturnType<ReturnType<typeof useCreateDeviceIntentHook>>>,
+		{ deviceId: string; data: CreateIntentRequest }
+	> = (props) => {
+		const { deviceId, data } = props ?? {};
+
+		return createDeviceIntent(deviceId, data);
+	};
+
+	return { mutationFn, ...mutationOptions };
+};
+
+export type CreateDeviceIntentMutationResult = NonNullable<
+	Awaited<ReturnType<ReturnType<typeof useCreateDeviceIntentHook>>>
+>;
+export type CreateDeviceIntentMutationBody = CreateIntentRequest;
+export type CreateDeviceIntentMutationError = void;
+
+export const useCreateDeviceIntent = <TError = void, TContext = unknown>(
+	options?: {
+		mutation?: UseMutationOptions<
+			Awaited<ReturnType<ReturnType<typeof useCreateDeviceIntentHook>>>,
+			TError,
+			{ deviceId: string; data: CreateIntentRequest },
+			TContext
+		>;
+	},
+	queryClient?: QueryClient,
+): UseMutationResult<
+	Awaited<ReturnType<ReturnType<typeof useCreateDeviceIntentHook>>>,
+	TError,
+	{ deviceId: string; data: CreateIntentRequest },
+	TContext
+> => {
+	return useMutation(
+		useCreateDeviceIntentMutationOptions(options),
+		queryClient,
+	);
+};
+
+export const useApplyDeviceIntentHook = () => {
+	const applyDeviceIntent = useClientMutator<ApplyIntentResponse>();
+
+	return useCallback(
+		(deviceId: string, signal?: AbortSignal) => {
+			return applyDeviceIntent({
+				url: `/devices/${deviceId}/intent/apply`,
+				method: "POST",
+				signal,
+			});
+		},
+		[applyDeviceIntent],
+	);
+};
+
+export const useApplyDeviceIntentMutationOptions = <
+	TError = void,
+	TContext = unknown,
+>(options?: {
+	mutation?: UseMutationOptions<
+		Awaited<ReturnType<ReturnType<typeof useApplyDeviceIntentHook>>>,
+		TError,
+		{ deviceId: string },
+		TContext
+	>;
+}): UseMutationOptions<
+	Awaited<ReturnType<ReturnType<typeof useApplyDeviceIntentHook>>>,
+	TError,
+	{ deviceId: string },
+	TContext
+> => {
+	const mutationKey = ["applyDeviceIntent"];
+	const { mutation: mutationOptions } = options
+		? options.mutation &&
+			"mutationKey" in options.mutation &&
+			options.mutation.mutationKey
+			? options
+			: { ...options, mutation: { ...options.mutation, mutationKey } }
+		: { mutation: { mutationKey } };
+
+	const applyDeviceIntent = useApplyDeviceIntentHook();
+
+	const mutationFn: MutationFunction<
+		Awaited<ReturnType<ReturnType<typeof useApplyDeviceIntentHook>>>,
+		{ deviceId: string }
+	> = (props) => {
+		const { deviceId } = props ?? {};
+
+		return applyDeviceIntent(deviceId);
+	};
+
+	return { mutationFn, ...mutationOptions };
+};
+
+export type ApplyDeviceIntentMutationResult = NonNullable<
+	Awaited<ReturnType<ReturnType<typeof useApplyDeviceIntentHook>>>
+>;
+
+export type ApplyDeviceIntentMutationError = void;
+
+export const useApplyDeviceIntent = <TError = void, TContext = unknown>(
+	options?: {
+		mutation?: UseMutationOptions<
+			Awaited<ReturnType<ReturnType<typeof useApplyDeviceIntentHook>>>,
+			TError,
+			{ deviceId: string },
+			TContext
+		>;
+	},
+	queryClient?: QueryClient,
+): UseMutationResult<
+	Awaited<ReturnType<ReturnType<typeof useApplyDeviceIntentHook>>>,
+	TError,
+	{ deviceId: string },
+	TContext
+> => {
+	return useMutation(useApplyDeviceIntentMutationOptions(options), queryClient);
+};
+
+export const useDeleteDeviceIntentHook = () => {
+	const deleteDeviceIntent = useClientMutator<void>();
+
+	return useCallback(
+		(deviceId: string, intentId: number, signal?: AbortSignal) => {
+			return deleteDeviceIntent({
+				url: `/devices/${deviceId}/intent/${intentId}`,
+				method: "DELETE",
+				signal,
+			});
+		},
+		[deleteDeviceIntent],
+	);
+};
+
+export const useDeleteDeviceIntentMutationOptions = <
+	TError = void,
+	TContext = unknown,
+>(options?: {
+	mutation?: UseMutationOptions<
+		Awaited<ReturnType<ReturnType<typeof useDeleteDeviceIntentHook>>>,
+		TError,
+		{ deviceId: string; intentId: number },
+		TContext
+	>;
+}): UseMutationOptions<
+	Awaited<ReturnType<ReturnType<typeof useDeleteDeviceIntentHook>>>,
+	TError,
+	{ deviceId: string; intentId: number },
+	TContext
+> => {
+	const mutationKey = ["deleteDeviceIntent"];
+	const { mutation: mutationOptions } = options
+		? options.mutation &&
+			"mutationKey" in options.mutation &&
+			options.mutation.mutationKey
+			? options
+			: { ...options, mutation: { ...options.mutation, mutationKey } }
+		: { mutation: { mutationKey } };
+
+	const deleteDeviceIntent = useDeleteDeviceIntentHook();
+
+	const mutationFn: MutationFunction<
+		Awaited<ReturnType<ReturnType<typeof useDeleteDeviceIntentHook>>>,
+		{ deviceId: string; intentId: number }
+	> = (props) => {
+		const { deviceId, intentId } = props ?? {};
+
+		return deleteDeviceIntent(deviceId, intentId);
+	};
+
+	return { mutationFn, ...mutationOptions };
+};
+
+export type DeleteDeviceIntentMutationResult = NonNullable<
+	Awaited<ReturnType<ReturnType<typeof useDeleteDeviceIntentHook>>>
+>;
+
+export type DeleteDeviceIntentMutationError = void;
+
+export const useDeleteDeviceIntent = <TError = void, TContext = unknown>(
+	options?: {
+		mutation?: UseMutationOptions<
+			Awaited<ReturnType<ReturnType<typeof useDeleteDeviceIntentHook>>>,
+			TError,
+			{ deviceId: string; intentId: number },
+			TContext
+		>;
+	},
+	queryClient?: QueryClient,
+): UseMutationResult<
+	Awaited<ReturnType<ReturnType<typeof useDeleteDeviceIntentHook>>>,
+	TError,
+	{ deviceId: string; intentId: number },
+	TContext
+> => {
+	return useMutation(
+		useDeleteDeviceIntentMutationOptions(options),
+		queryClient,
+	);
+};
+
+export const useUpdateDeviceIntentHook = () => {
+	const updateDeviceIntent = useClientMutator<DeviceNetworkIntent>();
+
+	return useCallback(
+		(
+			deviceId: string,
+			intentId: number,
+			patchIntentRequest: PatchIntentRequest,
+			signal?: AbortSignal,
+		) => {
+			return updateDeviceIntent({
+				url: `/devices/${deviceId}/intent/${intentId}`,
+				method: "PATCH",
+				headers: { "Content-Type": "application/json" },
+				data: patchIntentRequest,
+				signal,
+			});
+		},
+		[updateDeviceIntent],
+	);
+};
+
+export const useUpdateDeviceIntentMutationOptions = <
+	TError = void,
+	TContext = unknown,
+>(options?: {
+	mutation?: UseMutationOptions<
+		Awaited<ReturnType<ReturnType<typeof useUpdateDeviceIntentHook>>>,
+		TError,
+		{ deviceId: string; intentId: number; data: PatchIntentRequest },
+		TContext
+	>;
+}): UseMutationOptions<
+	Awaited<ReturnType<ReturnType<typeof useUpdateDeviceIntentHook>>>,
+	TError,
+	{ deviceId: string; intentId: number; data: PatchIntentRequest },
+	TContext
+> => {
+	const mutationKey = ["updateDeviceIntent"];
+	const { mutation: mutationOptions } = options
+		? options.mutation &&
+			"mutationKey" in options.mutation &&
+			options.mutation.mutationKey
+			? options
+			: { ...options, mutation: { ...options.mutation, mutationKey } }
+		: { mutation: { mutationKey } };
+
+	const updateDeviceIntent = useUpdateDeviceIntentHook();
+
+	const mutationFn: MutationFunction<
+		Awaited<ReturnType<ReturnType<typeof useUpdateDeviceIntentHook>>>,
+		{ deviceId: string; intentId: number; data: PatchIntentRequest }
+	> = (props) => {
+		const { deviceId, intentId, data } = props ?? {};
+
+		return updateDeviceIntent(deviceId, intentId, data);
+	};
+
+	return { mutationFn, ...mutationOptions };
+};
+
+export type UpdateDeviceIntentMutationResult = NonNullable<
+	Awaited<ReturnType<ReturnType<typeof useUpdateDeviceIntentHook>>>
+>;
+export type UpdateDeviceIntentMutationBody = PatchIntentRequest;
+export type UpdateDeviceIntentMutationError = void;
+
+export const useUpdateDeviceIntent = <TError = void, TContext = unknown>(
+	options?: {
+		mutation?: UseMutationOptions<
+			Awaited<ReturnType<ReturnType<typeof useUpdateDeviceIntentHook>>>,
+			TError,
+			{ deviceId: string; intentId: number; data: PatchIntentRequest },
+			TContext
+		>;
+	},
+	queryClient?: QueryClient,
+): UseMutationResult<
+	Awaited<ReturnType<ReturnType<typeof useUpdateDeviceIntentHook>>>,
+	TError,
+	{ deviceId: string; intentId: number; data: PatchIntentRequest },
+	TContext
+> => {
+	return useMutation(
+		useUpdateDeviceIntentMutationOptions(options),
+		queryClient,
+	);
+};
 
 export const useGetLedgerForDeviceHook = () => {
 	const getLedgerForDevice = useClientMutator<DeviceLedgerItemPaginated>();
