@@ -1,5 +1,5 @@
 use crate::device::Variable;
-use anyhow::{Context, Result};
+use anyhow::Result;
 use serde_json::Value;
 use serde_json::json;
 use smith::utils::schema;
@@ -368,13 +368,11 @@ pub async fn save_responses(
                 applied_version,
                 ref conditions,
             } => {
-                let conditions_json =
-                    serde_json::to_value(conditions).context("serializing network conditions")?;
                 sqlx::query!(
                     "UPDATE device SET observed_intent_version = $2, network_conditions = $3 WHERE id = $1",
                     device_id,
                     applied_version,
-                    conditions_json
+                    json!(conditions)
                 )
                 .execute(&mut *tx)
                 .await?;
