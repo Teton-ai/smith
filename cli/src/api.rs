@@ -664,6 +664,27 @@ impl SmithAPI {
         Ok(recipes)
     }
 
+    pub async fn trigger_recipe(
+        &self,
+        recipe_id: i32,
+        device_ids: Vec<i32>,
+    ) -> Result<BundleReceipt> {
+        let client = Client::new();
+        let receipt = client
+            .post(format!(
+                "{}/commands/recipes/{recipe_id}/trigger",
+                self.domain
+            ))
+            .header("Authorization", format!("Bearer {}", &self.bearer_token))
+            .json(&serde_json::json!({ "devices": device_ids }))
+            .send()
+            .await?
+            .error_for_status()?
+            .json()
+            .await?;
+        Ok(receipt)
+    }
+
     pub async fn approve_device(&self, device_id: u64) -> Result<()> {
         let client = Client::new();
 

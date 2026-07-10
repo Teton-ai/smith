@@ -18,6 +18,7 @@ use clap::{CommandFactory, Parser};
 use clap_complete::generate;
 use colored::Colorize;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
+use models::command::BundleReceipt;
 use models::device::{Device, DeviceFilter};
 use smith::utils::schema;
 use std::{
@@ -366,19 +367,29 @@ async fn resolve_target_devices(
     resolve_devices_from_selector(api, &selector).await
 }
 
-/// Issue a bundle of commands to the given (already resolved, deduplicated, and
-/// confirmed) devices, then optionally poll the bundle until every command
-/// completes. The bundle receipt tells us exactly which `command_queue` rows we
-/// created, so tracking is precise even with multiple commands per device.
-async fn issue_bundle(
+fn render_command_output(payload: &serde_json::Value) -> String {
+    if let Some(stdout) = payload["FreeForm"]["stdout"].as_str() {
+        stdout.to_string()
+    } else if let Some(variant) = payload.as_str() {
+        format!("({variant})")
+    } else {
+        payload
+            .as_object()
+            .and_then(|m| m.keys().next())
+            .map(|k| format!("({k})"))
+            .unwrap_or_else(|| String::from("(completed)"))
+    }
+}
+
+/// Poll a bundle until every command completes and display results. The bundle
+/// receipt tells us exactly which `command_queue` rows were created, so
+/// tracking is precise even with multiple commands per device.
+async fn poll_bundle(
     api: &SmithAPI,
     devices: &[Device],
-    commands: Vec<schema::SafeCommandRequest>,
+    receipt: BundleReceipt,
     wait: bool,
 ) -> anyhow::Result<()> {
-    let device_ids: Vec<i32> = devices.iter().map(|d| d.id).collect();
-    let receipt = api.send_bundle(device_ids, commands).await?;
-
     let serials: HashMap<i32, String> = devices
         .iter()
         .map(|d| (d.id, d.serial_number.clone()))
@@ -485,12 +496,8 @@ async fn issue_bundle(
                 ));
             }
 
-            if let Some(output) = &response.response {
-                let output = output["FreeForm"]["stdout"]
-                    .as_str()
-                    .map(|s| s.to_string())
-                    .unwrap_or_else(|| String::from("(no output)"));
-                results[idx].2 = output;
+            if let Some(payload) = &response.response {
+                results[idx].2 = render_command_output(payload);
                 pb.finish_with_message(format!(
                     "{} [{}:{}] Completed ✓",
                     serial.bright_green(),
@@ -519,6 +526,19 @@ async fn issue_bundle(
     }
 
     Ok(())
+}
+
+/// Send a command bundle to the given devices, then poll until every command
+/// completes. Convenience wrapper around `poll_bundle` for the freeform path.
+async fn issue_bundle(
+    api: &SmithAPI,
+    devices: &[Device],
+    commands: Vec<schema::SafeCommandRequest>,
+    wait: bool,
+) -> anyhow::Result<()> {
+    let device_ids: Vec<i32> = devices.iter().map(|d| d.id).collect();
+    let receipt = api.send_bundle(device_ids, commands).await?;
+    poll_bundle(api, devices, receipt, wait).await
 }
 
 const TUNNEL_CMD_LOOKBACK: u32 = 20;
@@ -1672,11 +1692,7 @@ async fn main() -> anyhow::Result<()> {
                     println!("Fetched: {}", command.fetched);
 
                     if let Some(response) = command.response {
-                        if let Some(stdout) = response["FreeForm"]["stdout"].as_str() {
-                            println!("Output:\n{}", stdout);
-                        } else {
-                            println!("Status: Completed (no output)");
-                        }
+                        println!("Output:\n{}", render_command_output(&response));
                     } else {
                         println!("Status: Pending");
                     }
@@ -1832,6 +1848,7 @@ async fn main() -> anyhow::Result<()> {
                 // Build the command list and a human label, from either a saved
                 // recipe or a free-form command (args after -- or stdin).
                 let cmd_from_stdin;
+                let mut recipe_id: Option<i32> = None;
                 let (commands, label) = if let Some(key) = recipe {
                     cmd_from_stdin = false;
                     let recipe = api
@@ -1844,17 +1861,23 @@ async fn main() -> anyhow::Result<()> {
                         })
                         .ok_or_else(|| anyhow::anyhow!("No recipe found matching '{}'", key))?;
 
-                    let commands: Vec<schema::SafeCommandRequest> =
-                        serde_json::from_value(recipe.commands).with_context(|| {
-                            format!("Recipe '{}' has invalid commands", recipe.name)
-                        })?;
-
-                    if commands.is_empty() {
+                    let cmd_count = recipe
+                        .commands
+                        .as_array()
+                        .ok_or_else(|| {
+                            anyhow::anyhow!(
+                                "Recipe '{}' has malformed commands (not a JSON array)",
+                                recipe.name
+                            )
+                        })?
+                        .len();
+                    if cmd_count == 0 {
                         bail!("Recipe '{}' has no commands", recipe.name);
                     }
 
-                    let label = format!("recipe '{}' ({} command(s))", recipe.name, commands.len());
-                    (commands, label)
+                    let label = format!("recipe '{}' ({} command(s))", recipe.name, cmd_count);
+                    recipe_id = Some(recipe.id);
+                    (vec![], label)
                 } else {
                     let cmd_string = if !command.is_empty() {
                         // Command provided via args after --, validate that -- was actually present
@@ -1963,7 +1986,13 @@ async fn main() -> anyhow::Result<()> {
 
                 println!();
 
-                issue_bundle(&api, &target_devices, commands, wait).await?;
+                if let Some(id) = recipe_id {
+                    let device_ids: Vec<i32> = target_devices.iter().map(|d| d.id).collect();
+                    let receipt = api.trigger_recipe(id, device_ids).await?;
+                    poll_bundle(&api, &target_devices, receipt, wait).await?;
+                } else {
+                    issue_bundle(&api, &target_devices, commands, wait).await?;
+                }
             }
             Commands::Label {
                 selector,
