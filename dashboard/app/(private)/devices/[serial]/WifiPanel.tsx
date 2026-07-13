@@ -1,6 +1,6 @@
 "use client";
 
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
 	Badge,
 	Button,
@@ -8,13 +8,37 @@ import {
 	SECTION_THEMES,
 	SearchInput,
 } from "@teton/smith-ui";
-import { Eye, EyeOff, Radar, RefreshCw, Wifi, WifiOff } from "lucide-react";
+import { isAxiosError } from "axios";
+import {
+	ArrowLeft,
+	ChevronDown,
+	ChevronUp,
+	Eye,
+	EyeOff,
+	Plus,
+	Radar,
+	RefreshCw,
+	Trash2,
+	Wifi,
+	WifiOff,
+	X,
+} from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
 	type ConfiguredNetwork,
 	type Device,
+	getGetDeviceInfoQueryKey,
+	getGetDeviceIntentQueryKey,
+	getGetNetworksQueryKey,
+	useApplyDeviceIntent,
+	useCreateDeviceIntent,
+	useDeleteDeviceIntent,
 	useGetConfiguredNetworksForDevice,
+	useGetDeviceInfo,
+	useGetDeviceIntent,
+	useGetNetworks,
 	useGetWifiScanForDevice,
+	useUpdateDeviceIntent,
 	type WifiScanResult,
 } from "@/app/api-client";
 import { useClientMutator } from "@/app/api-client-mutator";
@@ -34,6 +58,42 @@ const SCAN_COLUMNS = [
 
 const getProfileTimestamp = (p: ConfiguredNetwork) => p.updated_at;
 const getScanTimestamp = (r: WifiScanResult) => r.scanned_at;
+
+interface NetworkCondition {
+	ssid: string;
+	state: "Applied" | "Failed";
+	reason: "WrongPSK" | "NotInRange" | "NmcliError" | null;
+	message: string | null;
+}
+
+interface CatalogNetwork {
+	id: number;
+	name: string;
+	ssid: string | null;
+	network_type: string;
+	is_network_hidden: boolean;
+	password: string | null;
+	description: string | null;
+}
+
+type SyncState = "unknown" | "pending" | "applying" | "error" | "synced";
+
+function parseConditions(raw: unknown): NetworkCondition[] {
+	if (!Array.isArray(raw)) return [];
+	return raw as NetworkCondition[];
+}
+
+function deriveSyncState(
+	intentVersion: number,
+	observedVersion: number | undefined,
+	conditions: NetworkCondition[],
+	applying: boolean,
+): SyncState {
+	if (observedVersion == null) return "unknown";
+	if (observedVersion < intentVersion) return applying ? "applying" : "pending";
+	if (conditions.some((c) => c.state === "Failed")) return "error";
+	return "synced";
+}
 
 // Tracks a dispatched command until the DB confirms the device responded (any
 // row timestamp newer than the dispatch) or a 45s timeout, which covers empty
@@ -71,6 +131,55 @@ function useCommandSync<T>(
 		setSyncing(true);
 		dispatchedAt.current = new Date();
 	};
+}
+
+function SyncChip({
+	state,
+	conditions,
+}: {
+	state: SyncState;
+	conditions: NetworkCondition[];
+}) {
+	const [expanded, setExpanded] = useState(false);
+	if (state === "unknown") return <Badge variant="gray">Unknown</Badge>;
+	if (state === "pending") return <Badge variant="orange">Pending</Badge>;
+	if (state === "applying")
+		return (
+			<span className="inline-flex items-center gap-1.5">
+				<span className="relative flex h-2 w-2">
+					<span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-yellow-400 opacity-75" />
+					<span className="relative inline-flex rounded-full h-2 w-2 bg-yellow-500" />
+				</span>
+				<Badge variant="yellow">Applying...</Badge>
+			</span>
+		);
+	if (state === "synced") return <Badge variant="green">Synced</Badge>;
+	const failed = conditions.filter((c) => c.state === "Failed");
+	return (
+		<span className="inline-flex flex-col gap-1">
+			<button
+				type="button"
+				onClick={() => setExpanded((p) => !p)}
+				className="inline-flex items-center gap-1 cursor-pointer"
+			>
+				<Badge variant="red">Error</Badge>
+				<ChevronDown
+					className={`w-3 h-3 text-red-500 transition-transform ${expanded ? "rotate-180" : ""}`}
+				/>
+			</button>
+			{expanded && failed.length > 0 && (
+				<ul className="text-xs text-red-700 space-y-0.5 pl-1">
+					{failed.map((c) => (
+						<li key={c.ssid}>
+							<span className="font-mono">{c.ssid}</span>
+							{c.reason ? ` [${c.reason}]` : ""}
+							{c.message ? `: ${c.message}` : ""}
+						</li>
+					))}
+				</ul>
+			)}
+		</span>
+	);
 }
 
 interface WifiPanelProps {
@@ -177,8 +286,709 @@ const WifiPanel = ({ serial, device }: WifiPanelProps) => {
 
 	const isBusy = isLoading || isDispatching || syncing;
 
+	// Intent section
+	const deviceId = String(device.id);
+	const queryClient = useQueryClient();
+
+	const { data: intentList } = useGetDeviceIntent(deviceId, {
+		query: { refetchInterval: 30_000 },
+	});
+	const sortedIntent = useMemo(
+		() => [...(intentList ?? [])].sort((a, b) => a.priority - b.priority),
+		[intentList],
+	);
+
+	const [applying, setApplying] = useState(false);
+	const { data: polledDevice } = useGetDeviceInfo(serial, {
+		query: { refetchInterval: applying ? 3000 : false },
+	});
+	const effectiveDevice = polledDevice ?? device;
+
+	const conditions = useMemo(
+		() => parseConditions(effectiveDevice.network_conditions),
+		[effectiveDevice.network_conditions],
+	);
+
+	useEffect(() => {
+		if (
+			applying &&
+			effectiveDevice.observed_intent_version != null &&
+			effectiveDevice.observed_intent_version >= effectiveDevice.intent_version
+		) {
+			setApplying(false);
+		}
+	}, [
+		applying,
+		effectiveDevice.observed_intent_version,
+		effectiveDevice.intent_version,
+	]);
+
+	useEffect(() => {
+		if (!applying) return;
+		const timer = setTimeout(() => setApplying(false), 60_000);
+		return () => clearTimeout(timer);
+	}, [applying]);
+
+	const syncState = deriveSyncState(
+		effectiveDevice.intent_version,
+		effectiveDevice.observed_intent_version ?? undefined,
+		conditions,
+		applying,
+	);
+
+	const [showAddPicker, setShowAddPicker] = useState(false);
+	const [modalView, setModalView] = useState<"list" | "create">("list");
+	const [networkSearch, setNetworkSearch] = useState("");
+	const [revealedNetworkIds, setRevealedNetworkIds] = useState<Set<number>>(
+		new Set(),
+	);
+	const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
+
+	// Create-network form state
+	const [newNetName, setNewNetName] = useState("");
+	const [newNetSsid, setNewNetSsid] = useState("");
+	const [newNetPassword, setNewNetPassword] = useState("");
+	const [newNetHidden, setNewNetHidden] = useState(false);
+	const [newNetDescription, setNewNetDescription] = useState("");
+	const [showNewNetPassword, setShowNewNetPassword] = useState(false);
+	const [addIntentError, setAddIntentError] = useState<string | null>(null);
+	const [listAddError, setListAddError] = useState<string | null>(null);
+
+	function closeModal() {
+		setShowAddPicker(false);
+		setModalView("list");
+		setNetworkSearch("");
+		setRevealedNetworkIds(new Set());
+		setNewNetName("");
+		setNewNetSsid("");
+		setNewNetPassword("");
+		setNewNetHidden(false);
+		setNewNetDescription("");
+		setShowNewNetPassword(false);
+		setAddIntentError(null);
+		setListAddError(null);
+	}
+
+	useEffect(() => {
+		if (!showAddPicker) return;
+		function onKeyDown(e: KeyboardEvent) {
+			if (e.key !== "Escape") return;
+			if (modalView === "create") {
+				setModalView("list");
+				setAddIntentError(null);
+			} else {
+				setShowAddPicker(false);
+				setModalView("list");
+				setNetworkSearch("");
+				setRevealedNetworkIds(new Set());
+				setNewNetName("");
+				setNewNetSsid("");
+				setNewNetPassword("");
+				setNewNetHidden(false);
+				setNewNetDescription("");
+				setShowNewNetPassword(false);
+				setAddIntentError(null);
+				setListAddError(null);
+			}
+		}
+		document.addEventListener("keydown", onKeyDown);
+		return () => document.removeEventListener("keydown", onKeyDown);
+	}, [showAddPicker, modalView]);
+
+	const { mutateAsync: createIntentAsync } = useCreateDeviceIntent();
+
+	const { mutate: createIntent } = useCreateDeviceIntent({
+		mutation: {
+			onSuccess: () => {
+				queryClient.invalidateQueries({
+					queryKey: getGetDeviceIntentQueryKey(deviceId),
+				});
+				queryClient.invalidateQueries({
+					queryKey: getGetDeviceInfoQueryKey(serial),
+				});
+				closeModal();
+			},
+			onError: (err) => {
+				const status = isAxiosError(err) ? err.response?.status : undefined;
+				setListAddError(
+					status === 409
+						? "A network with this name is already in the intent."
+						: "Failed to add network to intent.",
+				);
+			},
+		},
+	});
+
+	const networkCreator = useClientMutator<{ id: number }>();
+	const { mutate: createNetwork, isPending: isCreatingNetwork } = useMutation({
+		mutationFn: async () => {
+			if (sortedIntent.some((e) => e.name === newNetName.trim())) {
+				throw Object.assign(new Error("intent-conflict"), { status: 409 });
+			}
+			const created = await networkCreator({
+				url: "/networks",
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				data: {
+					network_type: "wifi",
+					is_network_hidden: newNetHidden,
+					ssid: newNetSsid.trim() || null,
+					name: newNetName.trim(),
+					description: newNetDescription.trim() || null,
+					password: newNetPassword || null,
+				},
+			});
+			const maxPriority =
+				sortedIntent.length > 0
+					? Math.max(...sortedIntent.map((e) => e.priority))
+					: 0;
+			await createIntentAsync({
+				deviceId,
+				data: {
+					network_id: created.id,
+					priority: maxPriority + 1,
+					managed_by: "operator",
+				},
+			});
+		},
+		onSuccess: () => {
+			queryClient.invalidateQueries({ queryKey: getGetNetworksQueryKey() });
+			queryClient.invalidateQueries({
+				queryKey: getGetDeviceIntentQueryKey(deviceId),
+			});
+			queryClient.invalidateQueries({
+				queryKey: getGetDeviceInfoQueryKey(serial),
+			});
+			closeModal();
+		},
+		onError: (err) => {
+			const status = isAxiosError(err)
+				? err.response?.status
+				: (err as { status?: number }).status;
+			setAddIntentError(
+				status === 409
+					? "A network with this name is already in the intent."
+					: "Failed to add network to intent.",
+			);
+		},
+	});
+
+	const { mutate: deleteIntent } = useDeleteDeviceIntent({
+		mutation: {
+			onSuccess: () => {
+				queryClient.invalidateQueries({
+					queryKey: getGetDeviceIntentQueryKey(deviceId),
+				});
+				queryClient.invalidateQueries({
+					queryKey: getGetDeviceInfoQueryKey(serial),
+				});
+				setConfirmDeleteId(null);
+			},
+		},
+	});
+
+	const { mutateAsync: updateIntent } = useUpdateDeviceIntent({
+		mutation: {
+			onSuccess: () => {
+				queryClient.invalidateQueries({
+					queryKey: getGetDeviceIntentQueryKey(deviceId),
+				});
+				queryClient.invalidateQueries({
+					queryKey: getGetDeviceInfoQueryKey(serial),
+				});
+			},
+		},
+	});
+
+	const { mutate: triggerApply, isPending: isApplyPending } =
+		useApplyDeviceIntent({
+			mutation: {
+				onSuccess: () => setApplying(true),
+			},
+		});
+
+	// useGetNetworks returns void in the generated client (missing utoipa response annotation); cast is safe at runtime
+	const { data: catalogRaw } = useGetNetworks();
+	const wifiCatalog = ((catalogRaw ?? []) as CatalogNetwork[]).filter(
+		(n) => n.network_type === "wifi" || n.ssid != null,
+	);
+
+	async function swapPriority(indexA: number, indexB: number) {
+		const a = sortedIntent[indexA];
+		const b = sortedIntent[indexB];
+		await updateIntent({
+			deviceId,
+			intentId: a.id,
+			data: { priority: b.priority },
+		});
+		await updateIntent({
+			deviceId,
+			intentId: b.id,
+			data: { priority: a.priority },
+		});
+	}
+
 	return (
 		<Panel title="WiFi" icon={Wifi} theme={SECTION_THEMES.orange}>
+			{/* Intent section */}
+			<div className="mb-6 pb-6 border-b border-gray-100">
+				<div className="flex items-center justify-between gap-2 mb-3">
+					<div className="flex items-center gap-2">
+						<p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+							Intent
+						</p>
+						<SyncChip state={syncState} conditions={conditions} />
+					</div>
+					<Button
+						variant="solid"
+						tone="orange"
+						size="sm"
+						disabled={sortedIntent.length === 0 || applying || isApplyPending}
+						loading={applying || isApplyPending}
+						onClick={() => triggerApply({ deviceId })}
+					>
+						Apply
+					</Button>
+				</div>
+
+				{sortedIntent.length === 0 ? (
+					<p className="text-sm text-gray-500 mb-3">
+						No networks in intent. Add one below.
+					</p>
+				) : (
+					<div className="divide-y divide-gray-100 mb-3">
+						{sortedIntent.map((entry, idx) => (
+							<div key={entry.id} className="py-2.5 flex items-center gap-2">
+								<div className="flex flex-col">
+									<button
+										type="button"
+										disabled={idx === 0}
+										onClick={() => swapPriority(idx, idx - 1)}
+										className="text-gray-400 hover:text-gray-600 disabled:opacity-30 disabled:cursor-not-allowed"
+										aria-label="Move up"
+									>
+										<ChevronUp className="w-3.5 h-3.5" />
+									</button>
+									<button
+										type="button"
+										disabled={idx === sortedIntent.length - 1}
+										onClick={() => swapPriority(idx, idx + 1)}
+										className="text-gray-400 hover:text-gray-600 disabled:opacity-30 disabled:cursor-not-allowed"
+										aria-label="Move down"
+									>
+										<ChevronDown className="w-3.5 h-3.5" />
+									</button>
+								</div>
+								<span className="text-xs text-gray-400 w-4 text-center select-none">
+									{idx + 1}
+								</span>
+								<div className="flex-1 min-w-0">
+									<span className="text-sm font-medium text-gray-900">
+										{entry.name}
+									</span>
+									{entry.ssid && (
+										<span className="text-xs text-gray-500 font-mono ml-2">
+											{entry.ssid}
+										</span>
+									)}
+								</div>
+								{confirmDeleteId === entry.id ? (
+									<span className="inline-flex items-center gap-1.5 text-xs">
+										<span className="text-red-600 font-medium">Remove?</span>
+										<button
+											type="button"
+											onClick={() =>
+												deleteIntent({ deviceId, intentId: entry.id })
+											}
+											className="text-red-600 hover:text-red-800 font-medium"
+										>
+											Confirm
+										</button>
+										<button
+											type="button"
+											onClick={() => setConfirmDeleteId(null)}
+											className="text-gray-500 hover:text-gray-700"
+										>
+											Cancel
+										</button>
+									</span>
+								) : (
+									<button
+										type="button"
+										onClick={() => setConfirmDeleteId(entry.id)}
+										className="text-gray-400 hover:text-red-500 transition-colors"
+										aria-label={`Remove ${entry.name}`}
+									>
+										<Trash2 className="w-3.5 h-3.5" />
+									</button>
+								)}
+							</div>
+						))}
+					</div>
+				)}
+
+				<Button
+					variant="soft"
+					tone="gray"
+					size="sm"
+					icon={<Plus className="w-3.5 h-3.5" />}
+					onClick={() => setShowAddPicker(true)}
+				>
+					Add network
+				</Button>
+
+				{showAddPicker && (
+					<div className="fixed inset-0 z-50 flex items-center justify-center">
+						<div
+							className="absolute inset-0 bg-black/40"
+							onClick={closeModal}
+						/>
+						<div className="relative bg-white rounded-xl shadow-xl w-full max-w-4xl mx-4 max-h-[80vh] flex flex-col">
+							<div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+								{modalView === "create" ? (
+									<div className="flex items-center gap-2">
+										<button
+											type="button"
+											onClick={() => setModalView("list")}
+											className="text-gray-400 hover:text-gray-600 cursor-pointer"
+											aria-label="Back to list"
+										>
+											<ArrowLeft className="w-4 h-4" />
+										</button>
+										<h2 className="text-sm font-semibold text-gray-900">
+											New WiFi network
+										</h2>
+									</div>
+								) : (
+									<div className="flex items-center gap-3">
+										<h2 className="text-sm font-semibold text-gray-900">
+											Add network to intent
+										</h2>
+										<Button
+											variant="soft"
+											tone="blue"
+											size="sm"
+											icon={<Plus className="w-3.5 h-3.5" />}
+											onClick={() => {
+												setModalView("create");
+												setListAddError(null);
+											}}
+										>
+											New network
+										</Button>
+									</div>
+								)}
+								<button
+									type="button"
+									onClick={closeModal}
+									className="text-gray-400 hover:text-gray-600 cursor-pointer"
+									aria-label="Close"
+								>
+									<X className="w-4 h-4" />
+								</button>
+							</div>
+							{modalView === "list" && (
+								<div className="px-6 py-3 border-b border-gray-100">
+									<SearchInput
+										value={networkSearch}
+										onChange={setNetworkSearch}
+										placeholder="Search by name or SSID..."
+									/>
+								</div>
+							)}
+							{modalView === "create" ? (
+								<>
+									<div className="overflow-y-auto flex-1 p-6 space-y-4">
+										<div>
+											<label
+												htmlFor="new-net-name"
+												className="block text-xs font-medium text-gray-700 mb-1"
+											>
+												Name *
+											</label>
+											<input
+												id="new-net-name"
+												type="text"
+												value={newNetName}
+												onChange={(e) => setNewNetName(e.target.value)}
+												className={`${filterFieldClass} w-full`}
+												placeholder="e.g. Office WiFi"
+											/>
+										</div>
+										<div>
+											<label
+												htmlFor="new-net-ssid"
+												className="block text-xs font-medium text-gray-700 mb-1"
+											>
+												SSID *
+											</label>
+											<input
+												id="new-net-ssid"
+												type="text"
+												value={newNetSsid}
+												onChange={(e) => setNewNetSsid(e.target.value)}
+												className={`${filterFieldClass} w-full`}
+												placeholder="Network SSID"
+											/>
+										</div>
+										<div>
+											<label
+												htmlFor="new-net-password"
+												className="block text-xs font-medium text-gray-700 mb-1"
+											>
+												Password
+											</label>
+											<div className="relative">
+												<input
+													id="new-net-password"
+													type={showNewNetPassword ? "text" : "password"}
+													value={newNetPassword}
+													onChange={(e) => setNewNetPassword(e.target.value)}
+													className={`${filterFieldClass} w-full pr-10`}
+													placeholder="Leave empty for open networks"
+												/>
+												<button
+													type="button"
+													onClick={() => setShowNewNetPassword((p) => !p)}
+													className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+													aria-label={
+														showNewNetPassword
+															? "Hide password"
+															: "Show password"
+													}
+												>
+													{showNewNetPassword ? (
+														<EyeOff className="w-4 h-4" />
+													) : (
+														<Eye className="w-4 h-4" />
+													)}
+												</button>
+											</div>
+										</div>
+										<div>
+											<label
+												htmlFor="new-net-description"
+												className="block text-xs font-medium text-gray-700 mb-1"
+											>
+												Description
+											</label>
+											<input
+												id="new-net-description"
+												type="text"
+												value={newNetDescription}
+												onChange={(e) => setNewNetDescription(e.target.value)}
+												className={`${filterFieldClass} w-full`}
+												placeholder="Optional"
+											/>
+										</div>
+										<div className="flex items-center gap-2">
+											<input
+												id="new-net-hidden"
+												type="checkbox"
+												checked={newNetHidden}
+												onChange={(e) => setNewNetHidden(e.target.checked)}
+												className="rounded border-gray-300 text-blue-600"
+											/>
+											<label
+												htmlFor="new-net-hidden"
+												className="text-sm text-gray-700"
+											>
+												Hidden network (SSID not broadcast)
+											</label>
+										</div>
+									</div>
+									{addIntentError && (
+										<p className="px-6 py-2 text-sm text-red-600">
+											{addIntentError}
+										</p>
+									)}
+									<div className="flex items-center justify-end gap-2 px-6 py-4 border-t border-gray-100">
+										<Button
+											variant="ghost"
+											tone="gray"
+											size="sm"
+											onClick={() => {
+												setModalView("list");
+												setAddIntentError(null);
+											}}
+										>
+											Cancel
+										</Button>
+										<Button
+											variant="solid"
+											tone="blue"
+											size="sm"
+											disabled={
+												!newNetName.trim() ||
+												!newNetSsid.trim() ||
+												isCreatingNetwork
+											}
+											loading={isCreatingNetwork}
+											onClick={() => createNetwork()}
+										>
+											Create and add to intent
+										</Button>
+									</div>
+								</>
+							) : (
+								<div className="overflow-y-auto flex-1">
+									{listAddError && (
+										<p className="px-6 pt-4 text-sm text-red-600">
+											{listAddError}
+										</p>
+									)}
+									{(() => {
+										const q = networkSearch.trim().toLowerCase();
+										const filtered = q
+											? wifiCatalog.filter(
+													(n) =>
+														n.name.toLowerCase().includes(q) ||
+														(n.ssid?.toLowerCase().includes(q) ?? false),
+												)
+											: wifiCatalog;
+										return filtered.length === 0 ? (
+											<p className="text-sm text-gray-500 p-6">
+												{q
+													? "No networks match your search."
+													: "No WiFi networks in catalog."}
+											</p>
+										) : (
+											<table className="min-w-full divide-y divide-gray-200">
+												<thead className="sticky top-0 bg-white">
+													<tr>
+														{[
+															"Name",
+															"SSID",
+															"Password",
+															"Type",
+															"Hidden",
+															"",
+														].map((col) => (
+															<th
+																key={col}
+																scope="col"
+																className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
+															>
+																{col}
+															</th>
+														))}
+													</tr>
+												</thead>
+												<tbody className="divide-y divide-gray-100">
+													{filtered.map((n) => {
+														const revealed = revealedNetworkIds.has(n.id);
+														return (
+															<tr
+																key={n.id}
+																className="hover:bg-gray-50 transition-colors"
+															>
+																<td className="px-4 py-3 text-sm font-medium text-gray-900">
+																	{n.name}
+																	{n.description && (
+																		<p className="text-xs text-gray-400 font-normal">
+																			{n.description}
+																		</p>
+																	)}
+																</td>
+																<td className="px-4 py-3 text-sm font-mono text-gray-600">
+																	{n.ssid ?? (
+																		<span className="text-gray-400 italic">
+																			—
+																		</span>
+																	)}
+																</td>
+																<td className="px-4 py-3 min-w-[16rem]">
+																	{n.password ? (
+																		<div className="flex items-center gap-1.5">
+																			<span className="text-sm font-mono text-gray-700">
+																				{revealed ? n.password : MASK}
+																			</span>
+																			<button
+																				type="button"
+																				onClick={() =>
+																					setRevealedNetworkIds((prev) => {
+																						const next = new Set(prev);
+																						next.has(n.id)
+																							? next.delete(n.id)
+																							: next.add(n.id);
+																						return next;
+																					})
+																				}
+																				className="text-gray-400 hover:text-gray-600"
+																				aria-label={
+																					revealed
+																						? "Hide password"
+																						: "Reveal password"
+																				}
+																			>
+																				{revealed ? (
+																					<EyeOff className="w-3.5 h-3.5" />
+																				) : (
+																					<Eye className="w-3.5 h-3.5" />
+																				)}
+																			</button>
+																		</div>
+																	) : (
+																		<span className="text-xs text-gray-400">
+																			None
+																		</span>
+																	)}
+																</td>
+																<td className="px-4 py-3">
+																	<Badge variant="gray">{n.network_type}</Badge>
+																</td>
+																<td className="px-4 py-3 text-center">
+																	{n.is_network_hidden ? (
+																		<span className="text-green-600 text-xs font-medium">
+																			Yes
+																		</span>
+																	) : (
+																		<span className="text-gray-400 text-xs">
+																			No
+																		</span>
+																	)}
+																</td>
+																<td className="px-4 py-3 text-right">
+																	<Button
+																		variant="soft"
+																		tone="blue"
+																		size="sm"
+																		onClick={() => {
+																			const maxPriority =
+																				sortedIntent.length > 0
+																					? Math.max(
+																							...sortedIntent.map(
+																								(e) => e.priority,
+																							),
+																						)
+																					: 0;
+																			createIntent({
+																				deviceId,
+																				data: {
+																					network_id: n.id,
+																					priority: maxPriority + 1,
+																					managed_by: "operator",
+																				},
+																			});
+																		}}
+																	>
+																		Add
+																	</Button>
+																</td>
+															</tr>
+														);
+													})}
+												</tbody>
+											</table>
+										);
+									})()}
+								</div>
+							)}
+						</div>
+					</div>
+				)}
+			</div>
+
 			<div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
 				<div>
 					{/* Last checked */}
