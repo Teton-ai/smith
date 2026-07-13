@@ -654,6 +654,8 @@ async fn main() -> anyhow::Result<()> {
                     println!("Changing profile to {}", profile);
                     config.change_profile(profile).await?;
                     println!("new: {}", config);
+                } else {
+                    println!("{}", config);
                 }
             }
             Commands::Get { resource } => match resource {
