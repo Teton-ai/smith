@@ -77,6 +77,42 @@ pub struct NMProfile {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct IntentNetwork {
+    pub profile_name: String,
+    pub ssid: String,
+    pub priority: i32,
+    pub credentials: NetworkCredentials,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct NetworkCredentials {
+    pub key_mgmt: String,
+    #[serde(default)]
+    pub psk: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct NetworkCondition {
+    pub profile_name: String,
+    pub state: ConditionState,
+    pub reason: Option<ConditionReason>,
+    pub message: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub enum ConditionState {
+    Applied,
+    Failed,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub enum ConditionReason {
+    WrongPSK,
+    NotInRange,
+    NmcliError,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct WifiNetwork {
     pub ssid: Option<String>,
     pub bssid: String,
@@ -160,6 +196,10 @@ pub enum SafeCommandRx {
     NetworkDiagnosticReport {
         report: Value,
     },
+    ApplyNetworksResult {
+        applied_version: i32,
+        conditions: Vec<NetworkCondition>,
+    },
 }
 
 #[derive(Serialize, Deserialize, Default, Debug)]
@@ -217,6 +257,10 @@ pub enum SafeCommandTx {
         since: Option<String>,
         until: Option<String>,
         grep: Option<String>,
+    },
+    ApplyNetworks {
+        version: i32,
+        networks: Vec<IntentNetwork>,
     },
 }
 

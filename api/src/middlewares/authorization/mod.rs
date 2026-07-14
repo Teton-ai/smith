@@ -43,7 +43,8 @@ pub fn required_permission(command: &SafeCommandTx) -> Permission {
         | GetLogs { .. }
         | RunNetworkDiagnostic
         | ReportNMProfiles
-        | WifiScan => "basic",
+        | WifiScan
+        | ApplyNetworks { .. } => "basic",
     };
     Permission {
         action: action.to_string(),
