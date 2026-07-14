@@ -12,6 +12,7 @@ import { Eye, EyeOff, Radar, RefreshCw, Wifi, WifiOff } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
 	type ConfiguredNetwork,
+	type Device,
 	useGetConfiguredNetworksForDevice,
 	useGetWifiScanForDevice,
 	type WifiScanResult,
@@ -74,9 +75,10 @@ function useCommandSync<T>(
 
 interface WifiPanelProps {
 	serial: string;
+	device: Device;
 }
 
-const WifiPanel = ({ serial }: WifiPanelProps) => {
+const WifiPanel = ({ serial, device }: WifiPanelProps) => {
 	const [revealedIds, setRevealedIds] = useState<Set<string>>(new Set());
 	const [syncing, setSyncing] = useState(false);
 	const [scanSyncing, setScanSyncing] = useState(false);
