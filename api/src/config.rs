@@ -59,6 +59,7 @@ pub struct Config {
     pub database_url: String,
     pub packages_bucket_name: String,
     pub assets_bucket_name: String,
+    pub data_engine_bucket_name: String,
     pub aws_region: String,
     pub sentry_url: Option<String>,
     pub slack_hook_url: Option<String>,
@@ -89,6 +90,8 @@ impl Config {
                 .context("PACKAGES_BUCKET_NAME is required.")?,
             assets_bucket_name: env::var("ASSETS_BUCKET_NAME")
                 .context("ASSETS_BUCKET_NAME is required.")?,
+            data_engine_bucket_name: env::var("DATA_ENGINE_BUCKET_NAME")
+                .context("DATA_ENGINE_BUCKET_NAME is required.")?,
             aws_region: env::var("AWS_REGION").context("AWS_REGION is required.")?,
             sentry_url: env::var("SENTRY_URL").ok(),
             slack_hook_url: env::var("SLACK_HOOK_URL").ok(),
