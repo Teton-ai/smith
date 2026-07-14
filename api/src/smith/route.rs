@@ -257,9 +257,21 @@ pub struct UploadResult {
 }
 
 // TODO: Change to streaming, so we are not saving in memory
+#[derive(Deserialize, Debug, IntoParams)]
+pub struct UploadParams {
+    /// When true, the file is treated as sensitive and stored in the
+    /// data-engine bucket. When false or omitted, it goes to the assets
+    /// bucket (backwards-compatible default for existing clients).
+    #[serde(default)]
+    sensitive: bool,
+}
+
 #[utoipa::path(
   post,
   path = "/smith/upload",
+  params(
+        UploadParams
+  ),
   responses(
         (status = 200, description = "File uploaded successfully", body = UploadResult),
         (status = 400, description = "Bad request"),
@@ -273,8 +285,15 @@ pub async fn upload_file(
     _device: AuthedDevice,
     path: Option<Path<String>>,
     Extension(state): Extension<State>,
+    Query(params): Query<UploadParams>,
     mut multipart: Multipart,
 ) -> Result<Json<UploadResult>, StatusCode> {
+    let bucket_name = if params.sensitive {
+        &state.config.data_engine_bucket_name
+    } else {
+        &state.config.assets_bucket_name
+    };
+
     let mut file_name = String::new();
     if let Some(prefix) = path {
         file_name.push_str(&prefix.0);
@@ -284,7 +303,7 @@ pub async fn upload_file(
     let field = multipart
         .next_field()
         .await
-        .expect("error: failed to get next multipart field")
+        .map_err(|_| StatusCode::BAD_REQUEST)?
         .ok_or(StatusCode::BAD_REQUEST)?;
     let Some(local_file_name) = field.file_name() else {
         return Err(StatusCode::BAD_REQUEST);
@@ -297,20 +316,15 @@ pub async fn upload_file(
         return Err(StatusCode::BAD_REQUEST);
     }
 
-    Storage::save_to_s3(
-        &state.config.assets_bucket_name,
-        None,
-        &file_name,
-        &file_data,
-    )
-    .await
-    .map_err(|err| {
-        error!("{:?}", err);
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
+    Storage::save_to_s3(bucket_name, None, &file_name, &file_data)
+        .await
+        .map_err(|err| {
+            error!("{:?}", err);
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
 
     Ok(Json(UploadResult {
-        url: format!("s3://{}/{}", &state.config.assets_bucket_name, &file_name),
+        url: format!("s3://{}/{}", bucket_name, &file_name),
     }))
 }
 
