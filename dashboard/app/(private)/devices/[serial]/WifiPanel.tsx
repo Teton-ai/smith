@@ -33,6 +33,7 @@ import {
 	useApplyDeviceIntent,
 	useCreateDeviceIntent,
 	useDeleteDeviceIntent,
+	useDeleteNetworkById,
 	useGetConfiguredNetworksForDevice,
 	useGetDeviceInfo,
 	useGetDeviceIntent,
@@ -290,6 +291,14 @@ const WifiPanel = ({ serial, device }: WifiPanelProps) => {
 	const deviceId = String(device.id);
 	const queryClient = useQueryClient();
 
+	const prevSyncing = useRef(false);
+	useEffect(() => {
+		if (prevSyncing.current && !syncing) {
+			queryClient.invalidateQueries({ queryKey: getGetNetworksQueryKey() });
+		}
+		prevSyncing.current = syncing;
+	}, [syncing, queryClient]);
+
 	const { data: intentList } = useGetDeviceIntent(deviceId, {
 		query: { refetchInterval: 30_000 },
 	});
@@ -420,6 +429,7 @@ const WifiPanel = ({ serial, device }: WifiPanelProps) => {
 	});
 
 	const networkCreator = useClientMutator<{ id: number }>();
+	const { mutateAsync: deleteNetworkByIdAsync } = useDeleteNetworkById();
 	const { mutate: createNetwork, isPending: isCreatingNetwork } = useMutation({
 		mutationFn: async () => {
 			if (sortedIntent.some((e) => e.name === newNetName.trim())) {
@@ -442,14 +452,21 @@ const WifiPanel = ({ serial, device }: WifiPanelProps) => {
 				sortedIntent.length > 0
 					? Math.max(...sortedIntent.map((e) => e.priority))
 					: 0;
-			await createIntentAsync({
-				deviceId,
-				data: {
-					network_id: created.id,
-					priority: maxPriority + 1,
-					managed_by: "operator",
-				},
-			});
+			try {
+				await createIntentAsync({
+					deviceId,
+					data: {
+						network_id: created.id,
+						priority: maxPriority + 1,
+						managed_by: "operator",
+					},
+				});
+			} catch (err) {
+				// Best-effort: remove the catalog entry so it doesn't appear as an orphan.
+				// If this also fails, the entry remains in the catalog but unlinked to any intent.
+				await deleteNetworkByIdAsync({ networkId: created.id }).catch(() => {});
+				throw err;
+			}
 		},
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: getGetNetworksQueryKey() });
@@ -510,22 +527,37 @@ const WifiPanel = ({ serial, device }: WifiPanelProps) => {
 	// useGetNetworks returns void in the generated client (missing utoipa response annotation); cast is safe at runtime
 	const { data: catalogRaw } = useGetNetworks();
 	const wifiCatalog = ((catalogRaw ?? []) as CatalogNetwork[]).filter(
-		(n) => n.network_type === "wifi" || n.ssid != null,
+		(n) => n.network_type === "wifi" && n.ssid != null,
 	);
 
 	async function swapPriority(indexA: number, indexB: number) {
 		const a = sortedIntent[indexA];
 		const b = sortedIntent[indexB];
-		await updateIntent({
-			deviceId,
-			intentId: a.id,
-			data: { priority: b.priority },
-		});
-		await updateIntent({
-			deviceId,
-			intentId: b.id,
-			data: { priority: a.priority },
-		});
+		try {
+			await updateIntent({
+				deviceId,
+				intentId: a.id,
+				data: { priority: b.priority },
+			});
+			await updateIntent({
+				deviceId,
+				intentId: b.id,
+				data: { priority: a.priority },
+			});
+		} catch {
+			// Revert both sides to leave priorities consistent. Errors here are swallowed:
+			// worst case the user sees a stale order until the next refetch.
+			await updateIntent({
+				deviceId,
+				intentId: a.id,
+				data: { priority: a.priority },
+			}).catch(() => {});
+			await updateIntent({
+				deviceId,
+				intentId: b.id,
+				data: { priority: b.priority },
+			}).catch(() => {});
+		}
 	}
 
 	return (

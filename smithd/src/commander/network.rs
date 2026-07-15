@@ -1308,10 +1308,20 @@ pub(crate) async fn execute_apply_networks(
         .map(|p| (p.name.clone(), p))
         .collect();
 
-    let last_applied = load_last_applied_networks()
-        .await
-        .into_iter()
-        .collect::<HashSet<String>>();
+    let last_applied = match load_last_applied_networks().await {
+        Ok(list) => list.into_iter().collect::<HashSet<String>>(),
+        Err(e) => {
+            tracing::error!("execute_apply_networks: failed to load last-applied list: {e:#}");
+            return SafeCommandResponse {
+                id,
+                command: SafeCommandRx::ApplyNetworksResult {
+                    applied_version: version,
+                    conditions: vec![],
+                },
+                status: -1,
+            };
+        }
+    };
 
     let n = networks.len();
     let intent_profile_names: HashSet<String> =
@@ -1343,30 +1353,45 @@ pub(crate) async fn execute_apply_networks(
             continue;
         }
 
+        // Reject wpa-psk networks without a PSK before branching. The nmcli helpers treat
+        // a None PSK as "open", which would silently create an insecure profile.
+        if !is_open && psk.is_none() {
+            tracing::error!("execute_apply_networks: wpa-psk network {profile_name} has no psk");
+            conditions.push(NetworkCondition {
+                profile_name: profile_name.clone(),
+                state: ConditionState::Failed,
+                reason: Some(ConditionReason::NmcliError),
+                message: Some("wpa-psk network has no psk".to_string()),
+            });
+            continue;
+        }
+
         let result = match current_profiles.get(profile_name.as_str()) {
             Some(profile) if profile.is_active => {
                 if is_open {
-                    nmcli_update_priority(profile_name, priority)
-                        .await
-                        .map_err(|e| {
-                            tracing::error!(
-                                "execute_apply_networks: set priority {profile_name} failed: {e:#}"
-                            );
-                            ConditionReason::NmcliError
-                        })
+                    let ssid_matches = profile.ssid.as_deref() == Some(ssid.as_str());
+                    if ssid_matches {
+                        nmcli_update_priority(profile_name, priority)
+                            .await
+                            .map_err(|e| {
+                                tracing::error!(
+                                    "execute_apply_networks: set priority {profile_name} failed: {e:#}"
+                                );
+                                ConditionReason::NmcliError
+                            })
+                    } else {
+                        nmcli_modify_profile(profile_name, ssid, psk, priority)
+                            .await
+                            .map_err(|e| {
+                                tracing::error!(
+                                    "execute_apply_networks: modify {profile_name} failed: {e:#}"
+                                );
+                                ConditionReason::NmcliError
+                            })
+                    }
                 } else {
-                    let Some(psk) = psk else {
-                        tracing::error!(
-                            "execute_apply_networks: wpa-psk network {profile_name} has no psk"
-                        );
-                        conditions.push(NetworkCondition {
-                            profile_name: profile_name.clone(),
-                            state: ConditionState::Failed,
-                            reason: Some(ConditionReason::NmcliError),
-                            message: Some("wpa-psk network has no psk".to_string()),
-                        });
-                        continue;
-                    };
+                    // psk is guaranteed Some by the pre-match guard above.
+                    let psk = psk.expect("wpa-psk with None psk reached active branch");
                     let ssid_matches = profile.ssid.as_deref() == Some(ssid.as_str());
                     let psk_matches = profile.password.as_deref() == Some(psk);
                     if ssid_matches && psk_matches {
@@ -1504,6 +1529,14 @@ pub(crate) async fn execute_apply_networks(
     let new_last_applied: Vec<String> = new_last_applied.into_iter().collect();
     if let Err(e) = save_last_applied_networks(&new_last_applied).await {
         tracing::error!("execute_apply_networks: failed to persist last-applied list: {e:#}");
+        return SafeCommandResponse {
+            id,
+            command: SafeCommandRx::ApplyNetworksResult {
+                applied_version: version,
+                conditions,
+            },
+            status: -1,
+        };
     }
 
     SafeCommandResponse {

@@ -373,20 +373,13 @@ async fn write_file_atomic(path: &Path, contents: &str, mode: u32) -> Result<()>
 
 const LAST_APPLIED_PATH: &str = "/etc/smith/last-applied-networks.json";
 
-pub async fn load_last_applied_networks() -> Vec<String> {
+pub async fn load_last_applied_networks() -> Result<Vec<String>> {
     match tokio::fs::read_to_string(LAST_APPLIED_PATH).await {
-        Ok(contents) => match serde_json::from_str(&contents) {
-            Ok(ssids) => ssids,
-            Err(e) => {
-                warn!("Failed to parse {LAST_APPLIED_PATH}: {e}");
-                vec![]
-            }
-        },
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => vec![],
-        Err(e) => {
-            warn!("Failed to read {LAST_APPLIED_PATH}: {e}");
-            vec![]
+        Ok(contents) => {
+            serde_json::from_str(&contents).with_context(|| format!("parsing {LAST_APPLIED_PATH}"))
         }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(vec![]),
+        Err(e) => Err(e).with_context(|| format!("reading {LAST_APPLIED_PATH}")),
     }
 }
 
