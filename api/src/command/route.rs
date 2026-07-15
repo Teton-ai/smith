@@ -254,7 +254,6 @@ pub async fn get_bundle_commands(
     .await
     .unwrap_or_default();
 
-    // Map: (uuid, created_on) -> (user_email, responses)
     let mut map_responses: HashMap<(Uuid, _), (Option<String>, Vec<DeviceCommandResponse>)> =
         HashMap::new();
 
@@ -272,6 +271,7 @@ pub async fn get_bundle_commands(
             response_at: raw_bundle.response_at,
             response: raw_bundle.response,
             status: raw_bundle.status,
+            user_email: None,
         };
 
         map_responses
@@ -284,23 +284,20 @@ pub async fn get_bundle_commands(
             .or_insert((raw_bundle.user_email, vec![response]));
     });
 
-    let mut bundles: Vec<BundleWithCommands> = Vec::new();
-
-    for (uuid, created_on) in map_responses.keys() {
-        let (user_email, mut responses) = map_responses
-            .get(&(*uuid, *created_on))
-            .expect("error: failed to get device command responses for (UUID, creation date)")
-            .clone();
-        // Keep commands in the order they were issued (queue id is serial), so
-        // the displayed order matches how the bundle/recipe was defined.
-        responses.sort_by_key(|response| response.cmd_id);
-        bundles.push(BundleWithCommands {
-            uuid: *uuid,
-            created_on: *created_on,
-            user_email,
-            responses,
-        });
-    }
+    let mut bundles: Vec<BundleWithCommands> = map_responses
+        .into_iter()
+        .map(|((uuid, created_on), (user_email, mut responses))| {
+            // Keep commands in the order they were issued (queue id is serial), so
+            // the displayed order matches how the bundle/recipe was defined.
+            responses.sort_by_key(|r| r.cmd_id);
+            BundleWithCommands {
+                uuid,
+                created_on,
+                user_email,
+                responses,
+            }
+        })
+        .collect();
 
     // Sort by timestamp (most recent first).
     bundles.sort_by(|a, b| b.created_on.cmp(&a.created_on));
@@ -464,6 +461,7 @@ pub async fn get_bundle(
             response_at: raw.response_at,
             response: raw.response,
             status: raw.status,
+            user_email: None,
         })
         .collect();
 

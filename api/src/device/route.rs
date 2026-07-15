@@ -1023,10 +1023,13 @@ pub async fn get_all_commands_for_device(
                 cr.id as "response_id?",
                 cr.created_at as "response_at?",
                 cr.response as "response?",
-                cr.status as "status?"
+                cr.status as "status?",
+                u.email as "user_email?"
             FROM command_queue cq
             LEFT JOIN command_response cr ON cq.id = cr.command_id
             LEFT JOIN device d ON cq.device_id = d.id
+            LEFT JOIN command_bundles cb ON cq.bundle = cb.uuid
+            LEFT JOIN auth.users u ON cb.user_id = u.id
             WHERE cq.device_id = $1
                 AND cq.id < $2
             ORDER BY cq.id DESC
@@ -1052,10 +1055,13 @@ pub async fn get_all_commands_for_device(
                 cr.id as "response_id?",
                 cr.created_at as "response_at?",
                 cr.response as "response?",
-                cr.status as "status?"
+                cr.status as "status?",
+                u.email as "user_email?"
             FROM command_queue cq
             LEFT JOIN command_response cr ON cq.id = cr.command_id
             LEFT JOIN device d ON cq.device_id = d.id
+            LEFT JOIN command_bundles cb ON cq.bundle = cb.uuid
+            LEFT JOIN auth.users u ON cb.user_id = u.id
             WHERE cq.device_id = $1
                 AND cq.id > $2
             ORDER BY cq.id ASC
@@ -1081,10 +1087,13 @@ pub async fn get_all_commands_for_device(
                 cr.id as "response_id?",
                 cr.created_at as "response_at?",
                 cr.response as "response?",
-                cr.status as "status?"
+                cr.status as "status?",
+                u.email as "user_email?"
             FROM command_queue cq
             LEFT JOIN command_response cr ON cq.id = cr.command_id
             LEFT JOIN device d ON cq.device_id = d.id
+            LEFT JOIN command_bundles cb ON cq.bundle = cb.uuid
+            LEFT JOIN auth.users u ON cb.user_id = u.id
             WHERE cq.device_id = $1
             ORDER BY cq.id DESC
             LIMIT $2::int"#,

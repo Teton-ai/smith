@@ -192,7 +192,10 @@ async fn handle_dashboard_ws(
         },
         continue_on_error: false,
     };
-    let _ = add_commands(&device_serial, vec![stop_command], &state.pg_pool, user_id).await;
+    if let Err(e) = add_commands(&device_serial, vec![stop_command], &state.pg_pool, user_id).await
+    {
+        error!("Failed to queue StopLogStream command: {}", e);
+    }
 
     sessions_clone.remove_session(&session_id_clone).await;
     forward_task.abort();
