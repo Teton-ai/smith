@@ -62,7 +62,7 @@ const getScanTimestamp = (r: WifiScanResult) => r.scanned_at;
 interface NetworkCondition {
 	profile_name: string;
 	state: "Applied" | "Failed";
-	reason: "WrongPSK" | "NotInRange" | "NmcliError" | null;
+	reason: "WrongPSK" | "NotInRange" | "NmcliError" | "ActiveProfileKept" | null;
 	message: string | null;
 }
 

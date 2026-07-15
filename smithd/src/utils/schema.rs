@@ -110,6 +110,7 @@ pub enum ConditionReason {
     WrongPSK,
     NotInRange,
     NmcliError,
+    ActiveProfileKept,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]

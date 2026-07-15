@@ -1249,6 +1249,39 @@ async fn connectivity_guard(
     }
 }
 
+async fn try_connect_to_fallback(
+    active_profile_name: &str,
+    networks: &[IntentNetwork],
+    current_profiles: &HashMap<String, NMProfile>,
+) -> bool {
+    // Intent profiles first, in priority order (as delivered by the API).
+    for network in networks {
+        if network.profile_name == active_profile_name {
+            continue;
+        }
+        let mut cmd = Command::new("nmcli");
+        cmd.args(["c", "up", &network.profile_name]);
+        if matches!(execute_nmcli_command(cmd).await, Ok(o) if o.status.success()) {
+            return true;
+        }
+    }
+
+    // Then any remaining NM profiles not in the intent.
+    let intent_names: HashSet<&str> = networks.iter().map(|n| n.profile_name.as_str()).collect();
+    for name in current_profiles.keys() {
+        if name == active_profile_name || intent_names.contains(name.as_str()) {
+            continue;
+        }
+        let mut cmd = Command::new("nmcli");
+        cmd.args(["c", "up", name]);
+        if matches!(execute_nmcli_command(cmd).await, Ok(o) if o.status.success()) {
+            return true;
+        }
+    }
+
+    false
+}
+
 pub(crate) async fn execute_apply_networks(
     id: i32,
     version: i32,
@@ -1397,18 +1430,66 @@ pub(crate) async fn execute_apply_networks(
     }
 
     // Delete all NM profiles Smith previously managed that are no longer in intent.
+    // Active profiles are handled last: all inactive deletions run first so that
+    // the fallback-connection attempt for an active profile has the best chance of
+    // succeeding without repeating the attempt for every profile in the cleanup set.
     let mut successfully_deleted: HashSet<String> = HashSet::new();
+    let mut active_to_delete: Vec<String> = Vec::new();
+    let mut inactive_to_delete: Vec<String> = Vec::new();
+
     for profile_name in last_applied.difference(&intent_profile_names) {
-        if current_profiles.contains_key(profile_name.as_str())
-            && nmcli_delete_profile(profile_name).await.inspect_err(|e| {
+        match current_profiles.get(profile_name.as_str()) {
+            None => {
+                // Already gone from NM; mark deleted without an nmcli call.
+                successfully_deleted.insert(profile_name.clone());
+            }
+            Some(p) if p.is_active => active_to_delete.push(profile_name.clone()),
+            Some(_) => inactive_to_delete.push(profile_name.clone()),
+        }
+    }
+
+    for profile_name in &inactive_to_delete {
+        if nmcli_delete_profile(profile_name)
+            .await
+            .inspect_err(|e| {
                 tracing::error!(
                     "execute_apply_networks: failed to delete removed profile {profile_name}: {e:#}"
                 );
-            }).is_err()
+            })
+            .is_ok()
         {
-            continue;
+            successfully_deleted.insert(profile_name.clone());
         }
-        successfully_deleted.insert(profile_name.clone());
+    }
+
+    // For active profiles, try to connect to a fallback before deleting so the
+    // device is not left without connectivity. Intent profiles are tried first
+    // (in priority order), then any remaining NM profiles.
+    for profile_name in &active_to_delete {
+        if try_connect_to_fallback(profile_name, &networks, &current_profiles).await {
+            if nmcli_delete_profile(profile_name)
+                .await
+                .inspect_err(|e| {
+                    tracing::error!(
+                        "execute_apply_networks: failed to delete active profile {profile_name}: {e:#}"
+                    );
+                })
+                .is_ok()
+            {
+                successfully_deleted.insert(profile_name.clone());
+            }
+        } else {
+            tracing::warn!(
+                "execute_apply_networks: skipping deletion of active profile {profile_name}: \
+                 no fallback connection succeeded"
+            );
+            conditions.push(NetworkCondition {
+                profile_name: profile_name.clone(),
+                state: ConditionState::Failed,
+                reason: Some(ConditionReason::ActiveProfileKept),
+                message: None,
+            });
+        }
     }
 
     // Persist: union of previous and newly applied, minus what was cleanly deleted.
