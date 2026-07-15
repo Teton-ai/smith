@@ -6,6 +6,23 @@ use sqlx::types::chrono;
 
 pub mod route;
 
+pub fn redact_cmd_data(mut cmd: serde_json::Value) -> serde_json::Value {
+    if let Some(networks) = cmd
+        .get_mut("ApplyNetworks")
+        .and_then(|v| v.get_mut("networks"))
+        .and_then(|v| v.as_array_mut())
+    {
+        for network in networks.iter_mut() {
+            if let Some(creds) = network.get_mut("credentials")
+                && let Some(obj) = creds.as_object_mut()
+            {
+                obj.remove("psk");
+            }
+        }
+    }
+    cmd
+}
+
 #[derive(Debug, Serialize, utoipa::ToSchema)]
 pub struct BundleWithCommandsPaginated {
     pub bundles: Vec<BundleWithCommands>,

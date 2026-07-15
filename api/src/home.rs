@@ -143,6 +143,12 @@ pub async fn save_responses(
                     profiles_resolved.push((network_id, profile.is_active, profile.name.clone()));
                 }
 
+                // Guard against duplicate NM profile names (broken NM state where two
+                // connections share the same connection.id). Keep the first occurrence so
+                // the INSERT doesn't hit the (device_id, profile_name) PK constraint.
+                let mut seen_names = std::collections::HashSet::new();
+                profiles_resolved.retain(|(_, _, name)| seen_names.insert(name.clone()));
+
                 sqlx::query!(
                     "DELETE FROM device_configured_network WHERE device_id = $1",
                     device_id

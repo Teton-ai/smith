@@ -39,6 +39,10 @@ pub struct Device {
     pub release: Option<Release>,
     pub target_release: Option<Release>,
     pub network: Option<DeviceNetwork>,
+    pub intent_version: i32,
+    pub observed_intent_version: Option<i32>,
+    #[schema(value_type = Option<serde_json::Value>)]
+    pub network_conditions: Option<Value>,
     #[schema(value_type = HashMap<String, String>)]
     pub labels: Json<HashMap<String, String>>,
 }
