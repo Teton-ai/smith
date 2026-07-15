@@ -57,6 +57,7 @@ pub struct TriggerRecipeInput {
 pub struct BundleWithRawResponsesExplicit {
     pub uuid: Uuid,
     pub created_on: chrono::DateTime<chrono::Utc>,
+    pub user_email: Option<String>,
     pub device: i32,
     pub serial_number: String,
     pub cmd_id: i32,

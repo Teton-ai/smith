@@ -69,6 +69,7 @@ pub async fn save_responses(
                         continue_on_error: false,
                     }],
                     pool,
+                    None,
                 )
                 .await?;
             }
@@ -103,6 +104,7 @@ pub async fn save_responses(
                             continue_on_error: false,
                         }],
                         pool,
+                        None,
                     )
                     .await?;
                 }
@@ -503,6 +505,7 @@ pub async fn add_commands(
     serial_number: &str,
     commands: Vec<SafeCommandRequest>,
     pool: &PgPool,
+    user_id: Option<i32>,
 ) -> Result<Vec<i32>> {
     debug!("Adding commands to device {}", serial_number);
     debug!("Commands: {:?}", commands);
@@ -510,9 +513,12 @@ pub async fn add_commands(
 
     let mut tx = pool.begin().await?;
 
-    let bundle_id = sqlx::query!(r#"INSERT INTO command_bundles DEFAULT VALUES RETURNING uuid"#)
-        .fetch_one(&mut *tx)
-        .await?;
+    let bundle_id = sqlx::query!(
+        r#"INSERT INTO command_bundles (user_id) VALUES ($1) RETURNING uuid"#,
+        user_id
+    )
+    .fetch_one(&mut *tx)
+    .await?;
 
     for command in commands {
         let command_id: i32 = sqlx::query_scalar!(

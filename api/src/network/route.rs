@@ -1,4 +1,5 @@
 use crate::State;
+use crate::user::CurrentUser;
 use axum::http::StatusCode;
 use axum::response::Result;
 use axum::{
@@ -290,6 +291,7 @@ pub struct SpeedStats {
 )]
 pub async fn start_extended_network_test(
     Extension(state): Extension<State>,
+    Extension(current_user): Extension<CurrentUser>,
     Json(request): Json<StartExtendedTestRequest>,
 ) -> Result<(StatusCode, Json<StartExtendedTestResponse>), StatusCode> {
     // Validate duration (3-8 minutes)
@@ -405,14 +407,16 @@ pub async fn start_extended_network_test(
     }
 
     // Create command bundle
-    let bundle_id =
-        sqlx::query_scalar!(r#"INSERT INTO command_bundles DEFAULT VALUES RETURNING uuid"#)
-            .fetch_one(&mut *tx)
-            .await
-            .map_err(|err| {
-                error!("Failed to create command bundle: {err}");
-                StatusCode::INTERNAL_SERVER_ERROR
-            })?;
+    let bundle_id = sqlx::query_scalar!(
+        r#"INSERT INTO command_bundles (user_id) VALUES ($1) RETURNING uuid"#,
+        current_user.user_id
+    )
+    .fetch_one(&mut *tx)
+    .await
+    .map_err(|err| {
+        error!("Failed to create command bundle: {err}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
 
     // Queue ExtendedNetworkTest command for all devices (bulk insert)
     let command = serde_json::json!({

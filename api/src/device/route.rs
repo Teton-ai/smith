@@ -1549,13 +1549,16 @@ pub async fn issue_commands_to_device(
         }
     };
 
-    let bundle_id = sqlx::query!("INSERT INTO command_bundles DEFAULT VALUES RETURNING uuid")
-        .fetch_one(&mut *tx)
-        .await
-        .map_err(|err| {
-            error!("Failed to insert command bundle {err}");
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?;
+    let bundle_id = sqlx::query!(
+        "INSERT INTO command_bundles (user_id) VALUES ($1) RETURNING uuid",
+        current_user.user_id
+    )
+    .fetch_one(&mut *tx)
+    .await
+    .map_err(|err| {
+        error!("Failed to insert command bundle {err}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
 
     for command in commands {
         sqlx::query!(

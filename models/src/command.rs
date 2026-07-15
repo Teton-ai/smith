@@ -39,5 +39,6 @@ pub struct BundleWithCommands {
     #[schema(value_type = String)]
     pub uuid: Uuid,
     pub created_on: DateTime<Utc>,
+    pub user_email: Option<String>,
     pub responses: Vec<DeviceCommandResponse>,
 }
