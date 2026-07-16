@@ -565,7 +565,6 @@ impl Actor {
         }
 
         // One apt transaction: everything is unpacked before any postinst runs.
-        let mut batch_error = None;
         if !to_install.is_empty() {
             match self.batch_install(&to_install).await {
                 Ok(()) => {
@@ -586,7 +585,6 @@ impl Actor {
                 Err(BatchInstallError::Failed { detail }) => {
                     error!("Batch install failed:\n{detail}");
                     self.handle_batch_failure(&to_install, &detail).await;
-                    batch_error = Some(anyhow::anyhow!("batch install failed"));
                 }
             }
         }
@@ -602,10 +600,6 @@ impl Actor {
             if !status.status.success() {
                 error!("Failed to start smith updater {:?}", status);
             }
-        }
-
-        if let Some(err) = batch_error {
-            return Err(err);
         }
 
         self.are_packages_up_to_date().await?;
