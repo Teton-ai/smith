@@ -41,6 +41,16 @@ struct PackageFailure {
     last_failure_kind: InstallFailureKind,
 }
 
+/// Failure modes of the single-transaction install. A timeout is kept separate
+/// from an ordinary failure because the killed child is only our `sudo`
+/// wrapper — the apt transaction itself may still be running and holding the
+/// dpkg lock, so the caller must not start competing installs.
+#[derive(Debug)]
+enum BatchInstallError {
+    TimedOut { seconds: u64 },
+    Failed { detail: String },
+}
+
 fn classify_install_failure(stderr: &str) -> InstallFailureKind {
     let stderr_lower = stderr.to_lowercase();
 
@@ -63,6 +73,8 @@ fn classify_install_failure(stderr: &str) -> InstallFailureKind {
         "conflicts with",
         "no space left on device",
         "unable to access dpkg",
+        "unable to acquire the dpkg frontend lock",
+        "could not get lock",
         "unmet dependencies",
         "broken packages",
     ];
@@ -583,12 +595,13 @@ impl Actor {
             }
         }
 
-        // Install everything in a single apt transaction: dpkg unpacks every
-        // archive before it runs any package's postinst, so a service restarted
-        // by its postinst (e.g. snakebrain) starts once, against the complete
-        // new file set. Installing one package at a time restarted services
-        // mid-release against a mix of old and new files, in whatever order the
-        // release manifest happened to list the packages.
+        // Install everything in a single apt transaction. For a flat set of
+        // application debs like ours (no Essential/Pre-Depends relations), apt
+        // unpacks every archive before it runs any package's postinst, so a
+        // service restarted by its postinst (e.g. snakebrain) starts once,
+        // against the complete new file set. Installing one package at a time
+        // restarted services mid-release against a mix of old and new files,
+        // in whatever order the release manifest happened to list the packages.
         if !to_install.is_empty() {
             match self.batch_install(&to_install).await {
                 Ok(()) => {
@@ -596,8 +609,33 @@ impl Actor {
                         self.install_failures.remove(package_name);
                     }
                 }
-                Err(err) => {
-                    warn!("Batch install failed ({err:#}); falling back to per-package installs");
+                Err(BatchInstallError::TimedOut { seconds }) => {
+                    // kill_on_drop only reaches our direct child; apt (run via
+                    // sudo) survives orphaned and may still hold the dpkg lock
+                    // and complete on its own. Don't race per-package installs
+                    // against it — the periodic Check re-drives the upgrade.
+                    error!(
+                        "Batch install timed out after {} seconds; skipping per-package fallback while the apt transaction may still be running",
+                        seconds
+                    );
+                }
+                Err(BatchInstallError::Failed { detail }) => {
+                    error!("Batch install failed; falling back to per-package installs:\n{detail}");
+
+                    // A batch that died between dpkg's unpack and configure
+                    // phases leaves every package half-installed. Recover
+                    // synchronously so the fallback installs and the
+                    // up-to-date gate below don't run against a broken dpkg
+                    // state.
+                    if detail.contains("dpkg was interrupted")
+                        && detail.contains("dpkg --configure -a")
+                    {
+                        info!("Detected dpkg interruption after batch install, running recovery");
+                        if let Err(e) = Self::run_dpkg_recovery_static().await {
+                            error!("Dpkg recovery failed: {}", e);
+                        }
+                    }
+
                     for (package_name, package_file) in &to_install {
                         self.install_package(package_name, package_file).await;
                     }
@@ -626,21 +664,18 @@ impl Actor {
     }
 
     /// Install all pending packages with one apt invocation so every archive is
-    /// unpacked before any postinst runs. Returns an error if the command fails
-    /// as a whole; the caller falls back to per-package installs for granular
-    /// failure handling.
-    async fn batch_install(&self, to_install: &[(String, PathBuf)]) -> Result<()> {
+    /// unpacked before any postinst runs. On failure the caller falls back to
+    /// per-package installs for granular failure handling; on timeout it must
+    /// NOT, because the orphaned apt may still hold the dpkg lock.
+    async fn batch_install(
+        &self,
+        to_install: &[(String, PathBuf)],
+    ) -> Result<(), BatchInstallError> {
         let names = to_install
             .iter()
             .map(|(name, _)| name.as_str())
             .collect::<Vec<_>>()
             .join(", ");
-        let files = to_install
-            .iter()
-            .map(|(_, file)| file.display().to_string())
-            .collect::<Vec<_>>()
-            .join(" ");
-        let install_command = format!("sudo apt install {} -y --allow-downgrades", files);
 
         // Same 5-minute-per-package budget as the fallback path, spent on one command.
         let timeout = Duration::from_secs(300 * to_install.len() as u64);
@@ -651,19 +686,28 @@ impl Actor {
             names
         );
 
-        let install_future = Command::new("sh")
-            .arg("-c")
-            .arg(&install_command)
+        // No shell: arguments are passed directly so file names from the
+        // release manifest can't be interpreted by `sh`.
+        let install_future = Command::new("sudo")
+            .arg("apt")
+            .arg("install")
+            .arg("-y")
+            .arg("--allow-downgrades")
+            .args(to_install.iter().map(|(_, file)| file.as_os_str()))
             .kill_on_drop(true)
             .output();
 
         let output = match time::timeout(timeout, install_future).await {
-            Ok(result) => result.with_context(|| "Failed to run batch install command")?,
+            Ok(Ok(output)) => output,
+            Ok(Err(e)) => {
+                return Err(BatchInstallError::Failed {
+                    detail: format!("failed to run batch install command: {e}"),
+                });
+            }
             Err(_) => {
-                return Err(anyhow::anyhow!(
-                    "batch install timed out after {} seconds",
-                    timeout.as_secs()
-                ));
+                return Err(BatchInstallError::TimedOut {
+                    seconds: timeout.as_secs(),
+                });
             }
         };
 
@@ -673,12 +717,12 @@ impl Actor {
         } else {
             let stdout = String::from_utf8_lossy(&output.stdout);
             let stderr = String::from_utf8_lossy(&output.stderr);
-            Err(anyhow::anyhow!(
-                "batch install exited with {}:\nstderr: {}\nstdout: {}",
-                output.status,
-                stderr,
-                stdout
-            ))
+            Err(BatchInstallError::Failed {
+                detail: format!(
+                    "batch install exited with {}:\nstderr: {}\nstdout: {}",
+                    output.status, stderr, stdout
+                ),
+            })
         }
     }
 
@@ -826,13 +870,25 @@ impl Actor {
 
         // check the system version of the packages in the magic file
         for package in packages {
-            let installed_version = package.get_system_version().await?;
+            let (status, installed_version) = package.get_system_state().await?;
             let magic_toml_version = package.version;
 
             if magic_toml_version != installed_version {
                 return Err(anyhow::anyhow!(
                     "Package {} is not up to date",
                     package.name
+                ));
+            }
+
+            // dpkg reports the target version as soon as an archive is
+            // unpacked; require fully-configured "ii" so an install that died
+            // between dpkg's unpack and configure phases can't pass this gate
+            // and advance the release id.
+            if status != "ii" {
+                return Err(anyhow::anyhow!(
+                    "Package {} is at the target version but not fully configured (dpkg status {})",
+                    package.name,
+                    status
                 ));
             }
         }
