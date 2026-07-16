@@ -364,6 +364,21 @@ pub async fn save_responses(
                 .execute(pool)
                 .await?;
             }
+            SafeCommandRx::ApplyNetworksResult {
+                applied_version,
+                ref conditions,
+            } => {
+                if response.status == 0 {
+                    sqlx::query!(
+                        "UPDATE device SET observed_intent_version = $2, network_conditions = $3 WHERE id = $1",
+                        device_id,
+                        applied_version,
+                        json!(conditions)
+                    )
+                    .execute(&mut *tx)
+                    .await?;
+                }
+            }
             _ => {}
         }
         let mut response_json = match &response.command {

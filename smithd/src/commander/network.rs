@@ -1,10 +1,13 @@
+use crate::utils::files::{load_last_applied_networks, save_last_applied_networks};
 use crate::utils::schema::{
-    InterfaceType, NMProfile, Network, NetworkDetails, NetworkInfo, SafeCommandResponse,
-    SafeCommandRx, SpeedSample, WifiNetwork,
+    ConditionReason, ConditionState, IntentNetwork, InterfaceType, NMProfile, Network,
+    NetworkCondition, NetworkDetails, NetworkInfo, SafeCommandResponse, SafeCommandRx, SpeedSample,
+    WifiNetwork,
 };
 use anyhow::{Context, Result};
 use chrono::Utc;
 use reqwest::Client;
+use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
 use tokio::{
     process::Command,
@@ -123,20 +126,21 @@ async fn execute_nmcli_command(mut cmd: Command) -> Result<std::process::Output>
 // ACTIVE field in terse mode always returns "no" on NetworkManager 1.22.x
 // (Ubuntu 20.04 / L4T 35.3.1). Use DEVICE instead: a non-empty, non-"--"
 // device name means the profile is currently active.
-fn parse_nm_connection_list_line(line: &str) -> Option<(String, bool)> {
-    let parts = split_terse_line(line, 3);
-    if parts.len() == 3 && parts[1] == "802-11-wireless" {
+fn parse_nm_connection_list_line(line: &str) -> Option<(String, bool, String)> {
+    let parts = split_terse_line(line, 4);
+    if parts.len() == 4 && parts[1] == "802-11-wireless" {
         let is_active = !parts[2].is_empty() && parts[2] != "--";
-        Some((parts[0].clone(), is_active))
+        Some((parts[0].clone(), is_active, parts[3].clone()))
     } else {
         None
     }
 }
 
-pub(crate) async fn execute_report_nm_profiles(id: i32) -> SafeCommandResponse {
-    // Step 1: list all connections to find wifi ones and their active status.
+async fn get_nm_wifi_profiles() -> Result<Vec<NMProfile>> {
     let mut list_cmd = Command::new("nmcli");
-    list_cmd.args(["-t", "-f", "NAME,TYPE,DEVICE", "connection", "show"]);
+    // Include UUID so each profile is queried by UUID in step 2, avoiding ambiguous
+    // output when multiple connections share the same connection.id (name).
+    list_cmd.args(["-t", "-f", "NAME,TYPE,DEVICE,UUID", "connection", "show"]);
 
     let entries = match execute_nmcli_command(list_cmd).await {
         Ok(output) if output.status.success() => {
@@ -148,28 +152,15 @@ pub(crate) async fn execute_report_nm_profiles(id: i32) -> SafeCommandResponse {
         }
         Ok(output) => {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            tracing::error!("nmcli connection show failed: {stderr}");
-            return SafeCommandResponse {
-                id,
-                command: SafeCommandRx::ReportNMProfiles { profiles: vec![] },
-                status: -1,
-            };
+            return Err(anyhow::anyhow!("nmcli connection show failed: {stderr}"));
         }
-        Err(e) => {
-            tracing::error!("Failed to run nmcli connection show: {e}");
-            return SafeCommandResponse {
-                id,
-                command: SafeCommandRx::ReportNMProfiles { profiles: vec![] },
-                status: -1,
-            };
-        }
+        Err(e) => return Err(e.context("running nmcli connection show")),
     };
 
-    // Step 2: for each wifi connection, fetch SSID and PSK individually.
     let mut profiles = Vec::new();
-    for (name, is_active) in entries {
+    for (name, is_active, uuid) in entries {
         let mut detail_cmd = Command::new("nmcli");
-        detail_cmd.args(["--show-secrets", "-t", "connection", "show", "id", &name]);
+        detail_cmd.args(["--show-secrets", "-t", "connection", "show", "uuid", &uuid]);
 
         let (ssid, password) = match execute_nmcli_command(detail_cmd).await {
             Ok(output) if output.status.success() => {
@@ -192,11 +183,11 @@ pub(crate) async fn execute_report_nm_profiles(id: i32) -> SafeCommandResponse {
             }
             Ok(output) => {
                 let stderr = String::from_utf8_lossy(&output.stderr);
-                tracing::warn!("nmcli connection show id {name} failed: {stderr}");
+                tracing::warn!("nmcli connection show uuid {uuid} failed: {stderr}");
                 (None, None)
             }
             Err(e) => {
-                tracing::warn!("Failed to run nmcli connection show id {name}: {e}");
+                tracing::warn!("Failed to run nmcli connection show uuid {uuid}: {e}");
                 (None, None)
             }
         };
@@ -209,11 +200,27 @@ pub(crate) async fn execute_report_nm_profiles(id: i32) -> SafeCommandResponse {
         });
     }
 
-    let partial = profiles.iter().any(|p| p.ssid.is_none());
-    SafeCommandResponse {
-        id,
-        command: SafeCommandRx::ReportNMProfiles { profiles },
-        status: if partial { 1 } else { 0 },
+    Ok(profiles)
+}
+
+pub(crate) async fn execute_report_nm_profiles(id: i32) -> SafeCommandResponse {
+    match get_nm_wifi_profiles().await {
+        Ok(profiles) => {
+            let partial = profiles.iter().any(|p| p.ssid.is_none());
+            SafeCommandResponse {
+                id,
+                command: SafeCommandRx::ReportNMProfiles { profiles },
+                status: if partial { 1 } else { 0 },
+            }
+        }
+        Err(e) => {
+            tracing::error!("get_nm_wifi_profiles failed: {e:#}");
+            SafeCommandResponse {
+                id,
+                command: SafeCommandRx::ReportNMProfiles { profiles: vec![] },
+                status: -1,
+            }
+        }
     }
 }
 
@@ -1012,6 +1019,536 @@ fn parse_mmcli_output(output: &str) -> (Option<String>, Option<i32>, Option<Stri
     (operator, signal_quality, access_technology)
 }
 
+async fn nmcli_delete_profile(name: &str) -> Result<()> {
+    let mut cmd = Command::new("nmcli");
+    cmd.args(["connection", "delete", name]);
+    let output = execute_nmcli_command(cmd).await?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(anyhow::anyhow!("nmcli delete {name} failed: {stderr}"));
+    }
+    Ok(())
+}
+
+async fn nmcli_update_priority(name: &str, priority: i32) -> Result<()> {
+    let mut cmd = Command::new("nmcli");
+    cmd.args([
+        "connection",
+        "modify",
+        name,
+        "connection.autoconnect",
+        "yes",
+        "connection.autoconnect-priority",
+        &priority.to_string(),
+    ]);
+    let output = execute_nmcli_command(cmd).await?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(anyhow::anyhow!(
+            "nmcli set-priority {name} failed: {stderr}"
+        ));
+    }
+    Ok(())
+}
+
+async fn nmcli_modify_profile(
+    name: &str,
+    ssid: &str,
+    psk: Option<&str>,
+    priority: i32,
+) -> Result<()> {
+    let mut cmd = Command::new("nmcli");
+    cmd.args([
+        "connection",
+        "modify",
+        name,
+        "802-11-wireless.ssid",
+        ssid,
+        "connection.autoconnect",
+        "yes",
+        "connection.autoconnect-priority",
+        &priority.to_string(),
+    ]);
+    if let Some(psk) = psk {
+        cmd.args(["wifi-sec.key-mgmt", "wpa-psk", "wifi-sec.psk", psk]);
+    } else {
+        cmd.args(["wifi-sec.key-mgmt", "none", "wifi-sec.psk", ""]);
+    }
+    let output = execute_nmcli_command(cmd).await?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(anyhow::anyhow!("nmcli modify {name} failed: {stderr}"));
+    }
+    Ok(())
+}
+
+async fn nmcli_create_profile(
+    profile_name: &str,
+    ssid: &str,
+    psk: Option<&str>,
+    priority: i32,
+) -> Result<()> {
+    let mut cmd = Command::new("nmcli");
+    cmd.args([
+        "connection",
+        "add",
+        "type",
+        "wifi",
+        "con-name",
+        profile_name,
+        "ssid",
+        ssid,
+        "autoconnect",
+        "yes",
+        "connection.autoconnect-priority",
+        &priority.to_string(),
+        "save",
+        "yes",
+    ]);
+    if let Some(psk) = psk {
+        cmd.args(["wifi-sec.key-mgmt", "wpa-psk", "wifi-sec.psk", psk]);
+    }
+    let output = execute_nmcli_command(cmd).await?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(anyhow::anyhow!("nmcli add {profile_name} failed: {stderr}"));
+    }
+    Ok(())
+}
+
+fn classify_connect_error(stderr: &str) -> ConditionReason {
+    let lower = stderr.to_lowercase();
+    if lower.contains("secrets") || lower.contains("psk") || lower.contains("authentication") {
+        ConditionReason::WrongPSK
+    } else if lower.contains("no network with ssid") || lower.contains("not found") {
+        ConditionReason::NotInRange
+    } else {
+        ConditionReason::NmcliError
+    }
+}
+
+async fn connectivity_guard(
+    profile_name: &str,
+    ssid: &str,
+    psk: &str,
+    priority: i32,
+) -> Result<(), ConditionReason> {
+    let tmp_name = format!("tmp-{profile_name}");
+
+    // Create temporary profile with new credentials.
+    let mut add_cmd = Command::new("nmcli");
+    add_cmd.args([
+        "connection",
+        "add",
+        "type",
+        "wifi",
+        "con-name",
+        &tmp_name,
+        "ssid",
+        ssid,
+        "autoconnect",
+        "no",
+        "connection.autoconnect-priority",
+        &priority.to_string(),
+        "save",
+        "yes",
+        "wifi-sec.key-mgmt",
+        "wpa-psk",
+        "wifi-sec.psk",
+        psk,
+    ]);
+    match execute_nmcli_command(add_cmd).await {
+        Ok(out) if !out.status.success() => {
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            tracing::error!(
+                "connectivity_guard: failed to create temp profile {tmp_name}: {stderr}"
+            );
+            return Err(ConditionReason::NmcliError);
+        }
+        Err(e) => {
+            tracing::error!("connectivity_guard: failed to create temp profile {tmp_name}: {e:#}");
+            return Err(ConditionReason::NmcliError);
+        }
+        Ok(_) => {}
+    }
+
+    // Try connecting with the new credentials.
+    let mut up_cmd = Command::new("nmcli");
+    up_cmd.args(["c", "up", &tmp_name]);
+    let connect_stderr = match execute_nmcli_command(up_cmd).await {
+        Ok(output) if output.status.success() => None,
+        Ok(output) => Some(String::from_utf8_lossy(&output.stderr).to_string()),
+        Err(e) => {
+            tracing::error!("connectivity_guard: nmcli c up {tmp_name} error: {e:#}");
+            Some(String::new())
+        }
+    };
+
+    if connect_stderr.is_none() {
+        // New credentials work. Delete old profile first, then rename temp to the
+        // canonical profile_name and re-enable autoconnect.
+        if let Err(e) = nmcli_delete_profile(profile_name).await {
+            tracing::error!(
+                "connectivity_guard: failed to delete old profile {profile_name}: {e:#}"
+            );
+        }
+        let mut rename_cmd = Command::new("nmcli");
+        rename_cmd.args([
+            "connection",
+            "modify",
+            &tmp_name,
+            "connection.id",
+            profile_name,
+            "connection.autoconnect",
+            "yes",
+        ]);
+        let rename_ok = match execute_nmcli_command(rename_cmd).await {
+            Ok(out) if !out.status.success() => {
+                let stderr = String::from_utf8_lossy(&out.stderr);
+                tracing::error!(
+                    "connectivity_guard: failed to rename {tmp_name} to {profile_name}: {stderr}"
+                );
+                false
+            }
+            Err(e) => {
+                tracing::error!(
+                    "connectivity_guard: failed to rename {tmp_name} to {profile_name}: {e:#}"
+                );
+                false
+            }
+            Ok(_) => true,
+        };
+
+        if !rename_ok {
+            // Old profile is already deleted; re-enable autoconnect on the temp profile so
+            // the device can reconnect after reboot, then surface the failure.
+            if let Err(e) = nmcli_update_priority(&tmp_name, priority).await {
+                tracing::error!(
+                    "connectivity_guard: failed to re-enable autoconnect on {tmp_name}: {e:#}"
+                );
+            }
+            return Err(ConditionReason::NmcliError);
+        }
+
+        Ok(())
+    } else {
+        // New credentials failed — restore original connection, remove temp profile.
+        let mut up_old = Command::new("nmcli");
+        up_old.args(["c", "up", profile_name]);
+        if let Err(e) = execute_nmcli_command(up_old).await {
+            tracing::warn!("connectivity_guard: failed to reconnect {profile_name}: {e:#}");
+        }
+
+        let reason = classify_connect_error(&connect_stderr.unwrap_or_default());
+
+        if let Err(e) = nmcli_delete_profile(&tmp_name).await {
+            tracing::error!("connectivity_guard: failed to delete temp profile {tmp_name}: {e:#}");
+        }
+
+        Err(reason)
+    }
+}
+
+async fn try_connect_to_fallback(
+    active_profile_name: &str,
+    networks: &[IntentNetwork],
+    current_profiles: &HashMap<String, NMProfile>,
+) -> bool {
+    // Intent profiles first, in priority order (as delivered by the API).
+    for network in networks {
+        if network.profile_name == active_profile_name {
+            continue;
+        }
+        let mut cmd = Command::new("nmcli");
+        cmd.args(["c", "up", &network.profile_name]);
+        if matches!(execute_nmcli_command(cmd).await, Ok(o) if o.status.success()) {
+            return true;
+        }
+    }
+
+    // Then any remaining NM profiles not in the intent.
+    let intent_names: HashSet<&str> = networks.iter().map(|n| n.profile_name.as_str()).collect();
+    for name in current_profiles.keys() {
+        if name == active_profile_name || intent_names.contains(name.as_str()) {
+            continue;
+        }
+        let mut cmd = Command::new("nmcli");
+        cmd.args(["c", "up", name]);
+        if matches!(execute_nmcli_command(cmd).await, Ok(o) if o.status.success()) {
+            return true;
+        }
+    }
+
+    false
+}
+
+pub(crate) async fn execute_apply_networks(
+    id: i32,
+    version: i32,
+    networks: Vec<IntentNetwork>,
+) -> SafeCommandResponse {
+    let all_profiles = match get_nm_wifi_profiles().await {
+        Ok(profiles) => profiles,
+        Err(e) => {
+            tracing::error!("execute_apply_networks: failed to list NM profiles: {e:#}");
+            return SafeCommandResponse {
+                id,
+                command: SafeCommandRx::ApplyNetworksResult {
+                    applied_version: version,
+                    conditions: vec![],
+                },
+                status: -1,
+            };
+        }
+    };
+    // Keyed by NM connection name (profile_name). Last entry wins for duplicate names,
+    // which can occur with pre-existing user profiles; the apply loop handles this gracefully.
+    let current_profiles: HashMap<String, NMProfile> = all_profiles
+        .into_iter()
+        .map(|p| (p.name.clone(), p))
+        .collect();
+
+    let last_applied = match load_last_applied_networks().await {
+        Ok(list) => list.into_iter().collect::<HashSet<String>>(),
+        Err(e) => {
+            tracing::error!("execute_apply_networks: failed to load last-applied list: {e:#}");
+            return SafeCommandResponse {
+                id,
+                command: SafeCommandRx::ApplyNetworksResult {
+                    applied_version: version,
+                    conditions: vec![],
+                },
+                status: -1,
+            };
+        }
+    };
+
+    let n = networks.len();
+    let intent_profile_names: HashSet<String> =
+        networks.iter().map(|nw| nw.profile_name.clone()).collect();
+    let mut conditions: Vec<NetworkCondition> = Vec::new();
+    let mut applied_profile_names: Vec<String> = Vec::new();
+
+    for (index, network) in networks.iter().enumerate() {
+        let priority = ((n - index) * 10) as i32;
+        let ssid = &network.ssid;
+        let profile_name = &network.profile_name;
+        let is_open = network.credentials.key_mgmt == "none";
+        let psk = network.credentials.psk.as_deref();
+
+        if !is_open && network.credentials.key_mgmt != "wpa-psk" {
+            tracing::error!(
+                "execute_apply_networks: unsupported key_mgmt '{}' for {profile_name}",
+                network.credentials.key_mgmt
+            );
+            conditions.push(NetworkCondition {
+                profile_name: profile_name.clone(),
+                state: ConditionState::Failed,
+                reason: Some(ConditionReason::NmcliError),
+                message: Some(format!(
+                    "unsupported key_mgmt: {}",
+                    network.credentials.key_mgmt
+                )),
+            });
+            continue;
+        }
+
+        // Reject wpa-psk networks without a PSK before branching. The nmcli helpers treat
+        // a None PSK as "open", which would silently create an insecure profile.
+        if !is_open && psk.is_none() {
+            tracing::error!("execute_apply_networks: wpa-psk network {profile_name} has no psk");
+            conditions.push(NetworkCondition {
+                profile_name: profile_name.clone(),
+                state: ConditionState::Failed,
+                reason: Some(ConditionReason::NmcliError),
+                message: Some("wpa-psk network has no psk".to_string()),
+            });
+            continue;
+        }
+
+        let result = match current_profiles.get(profile_name.as_str()) {
+            Some(profile) if profile.is_active => {
+                if is_open {
+                    let ssid_matches = profile.ssid.as_deref() == Some(ssid.as_str());
+                    if ssid_matches {
+                        nmcli_update_priority(profile_name, priority)
+                            .await
+                            .map_err(|e| {
+                                tracing::error!(
+                                    "execute_apply_networks: set priority {profile_name} failed: {e:#}"
+                                );
+                                ConditionReason::NmcliError
+                            })
+                    } else {
+                        nmcli_modify_profile(profile_name, ssid, psk, priority)
+                            .await
+                            .map_err(|e| {
+                                tracing::error!(
+                                    "execute_apply_networks: modify {profile_name} failed: {e:#}"
+                                );
+                                ConditionReason::NmcliError
+                            })
+                    }
+                } else {
+                    // psk is guaranteed Some by the pre-match guard above.
+                    let psk = psk.expect("wpa-psk with None psk reached active branch");
+                    let ssid_matches = profile.ssid.as_deref() == Some(ssid.as_str());
+                    let psk_matches = profile.password.as_deref() == Some(psk);
+                    if ssid_matches && psk_matches {
+                        // Nothing changed: only update priority to avoid an unnecessary reconnect.
+                        // Note: profile.password is None when the PSK is stored in a system keyring
+                        // rather than the NM config file. In that case this check always misses and
+                        // the guard runs with the same PSK, which succeeds harmlessly.
+                        nmcli_update_priority(profile_name, priority)
+                            .await
+                            .map_err(|e| {
+                                tracing::error!(
+                                    "execute_apply_networks: set priority {profile_name} failed: {e:#}"
+                                );
+                                ConditionReason::NmcliError
+                            })
+                    } else {
+                        // SSID or PSK changed on an active profile: use connectivity guard to
+                        // validate new credentials before committing (avoids stranding the device).
+                        connectivity_guard(profile_name, ssid, psk, priority).await
+                    }
+                }
+            }
+            Some(_) => {
+                // Inactive profile: overwrite SSID, credentials, and priority in place.
+                nmcli_modify_profile(profile_name, ssid, psk, priority)
+                    .await
+                    .map_err(|e| {
+                        tracing::error!(
+                            "execute_apply_networks: modify {profile_name} failed: {e:#}"
+                        );
+                        ConditionReason::NmcliError
+                    })
+            }
+            None => nmcli_create_profile(profile_name, ssid, psk, priority)
+                .await
+                .map_err(|e| {
+                    tracing::error!("execute_apply_networks: create {profile_name} failed: {e:#}");
+                    ConditionReason::NmcliError
+                }),
+        };
+
+        match result {
+            Ok(()) => {
+                conditions.push(NetworkCondition {
+                    profile_name: profile_name.clone(),
+                    state: ConditionState::Applied,
+                    reason: None,
+                    message: None,
+                });
+                applied_profile_names.push(profile_name.clone());
+            }
+            Err(reason) => {
+                conditions.push(NetworkCondition {
+                    profile_name: profile_name.clone(),
+                    state: ConditionState::Failed,
+                    reason: Some(reason),
+                    message: None,
+                });
+            }
+        }
+    }
+
+    // Delete all NM profiles Smith previously managed that are no longer in intent.
+    // Active profiles are handled last: all inactive deletions run first so that
+    // the fallback-connection attempt for an active profile has the best chance of
+    // succeeding without repeating the attempt for every profile in the cleanup set.
+    let mut successfully_deleted: HashSet<String> = HashSet::new();
+    let mut active_to_delete: Vec<String> = Vec::new();
+    let mut inactive_to_delete: Vec<String> = Vec::new();
+
+    for profile_name in last_applied.difference(&intent_profile_names) {
+        match current_profiles.get(profile_name.as_str()) {
+            None => {
+                // Already gone from NM; mark deleted without an nmcli call.
+                successfully_deleted.insert(profile_name.clone());
+            }
+            Some(p) if p.is_active => active_to_delete.push(profile_name.clone()),
+            Some(_) => inactive_to_delete.push(profile_name.clone()),
+        }
+    }
+
+    for profile_name in &inactive_to_delete {
+        if nmcli_delete_profile(profile_name)
+            .await
+            .inspect_err(|e| {
+                tracing::error!(
+                    "execute_apply_networks: failed to delete removed profile {profile_name}: {e:#}"
+                );
+            })
+            .is_ok()
+        {
+            successfully_deleted.insert(profile_name.clone());
+        }
+    }
+
+    // For active profiles, try to connect to a fallback before deleting so the
+    // device is not left without connectivity. Intent profiles are tried first
+    // (in priority order), then any remaining NM profiles.
+    for profile_name in &active_to_delete {
+        if try_connect_to_fallback(profile_name, &networks, &current_profiles).await {
+            if nmcli_delete_profile(profile_name)
+                .await
+                .inspect_err(|e| {
+                    tracing::error!(
+                        "execute_apply_networks: failed to delete active profile {profile_name}: {e:#}"
+                    );
+                })
+                .is_ok()
+            {
+                successfully_deleted.insert(profile_name.clone());
+            }
+        } else {
+            tracing::warn!(
+                "execute_apply_networks: skipping deletion of active profile {profile_name}: \
+                 no fallback connection succeeded"
+            );
+            conditions.push(NetworkCondition {
+                profile_name: profile_name.clone(),
+                state: ConditionState::Failed,
+                reason: Some(ConditionReason::ActiveProfileKept),
+                message: None,
+            });
+        }
+    }
+
+    // Persist: union of previous and newly applied, minus what was cleanly deleted.
+    // This prevents a failed run from erasing tracking of still-existing profiles.
+    let mut new_last_applied = last_applied;
+    for s in applied_profile_names {
+        new_last_applied.insert(s);
+    }
+    for s in &successfully_deleted {
+        new_last_applied.remove(s);
+    }
+    let new_last_applied: Vec<String> = new_last_applied.into_iter().collect();
+    if let Err(e) = save_last_applied_networks(&new_last_applied).await {
+        tracing::error!("execute_apply_networks: failed to persist last-applied list: {e:#}");
+        return SafeCommandResponse {
+            id,
+            command: SafeCommandRx::ApplyNetworksResult {
+                applied_version: version,
+                conditions,
+            },
+            status: -1,
+        };
+    }
+
+    SafeCommandResponse {
+        id,
+        command: SafeCommandRx::ApplyNetworksResult {
+            applied_version: version,
+            conditions,
+        },
+        status: 0,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1020,53 +1557,54 @@ mod tests {
     fn active_detection_profile_with_device_is_active() {
         // Active profile: DEVICE column contains a real interface name.
         // This is the case NM 1.22.x reported incorrectly via the ACTIVE field.
-        let (name, is_active) =
-            parse_nm_connection_list_line("HomeWifi:802-11-wireless:wlan0").unwrap();
+        let (name, is_active, uuid) =
+            parse_nm_connection_list_line("HomeWifi:802-11-wireless:wlan0:abc-123").unwrap();
         assert_eq!(name, "HomeWifi");
         assert!(is_active);
+        assert_eq!(uuid, "abc-123");
     }
 
     #[test]
     fn active_detection_profile_with_dash_is_inactive() {
-        let (name, is_active) =
-            parse_nm_connection_list_line("OfficeWifi:802-11-wireless:--").unwrap();
+        let (name, is_active, _) =
+            parse_nm_connection_list_line("OfficeWifi:802-11-wireless:--:def-456").unwrap();
         assert_eq!(name, "OfficeWifi");
         assert!(!is_active);
     }
 
     #[test]
     fn active_detection_profile_with_empty_device_is_inactive() {
-        let (name, is_active) =
-            parse_nm_connection_list_line("GuestWifi:802-11-wireless:").unwrap();
+        let (name, is_active, _) =
+            parse_nm_connection_list_line("GuestWifi:802-11-wireless::ghi-789").unwrap();
         assert_eq!(name, "GuestWifi");
         assert!(!is_active);
     }
 
     #[test]
     fn active_detection_skips_non_wifi_connections() {
-        assert!(parse_nm_connection_list_line("Wired:802-3-ethernet:eth0").is_none());
-        assert!(parse_nm_connection_list_line("lo:loopback:lo").is_none());
+        assert!(parse_nm_connection_list_line("Wired:802-3-ethernet:eth0:jkl-000").is_none());
+        assert!(parse_nm_connection_list_line("lo:loopback:lo:mno-111").is_none());
     }
 
     #[test]
     fn active_detection_handles_escaped_colon_in_name() {
-        let (name, is_active) =
-            parse_nm_connection_list_line("My\\:Network:802-11-wireless:wlan0").unwrap();
+        let (name, is_active, _) =
+            parse_nm_connection_list_line("My\\:Network:802-11-wireless:wlan0:pqr-222").unwrap();
         assert_eq!(name, "My:Network");
         assert!(is_active);
     }
 
     #[test]
     fn active_detection_full_output_mixed_profiles() {
-        // Realistic nmcli -t -f NAME,TYPE,DEVICE connection show output:
+        // Realistic nmcli -t -f NAME,TYPE,DEVICE,UUID connection show output:
         // the active profile has a device name; inactive ones have "--".
         let output = "\
-HomeWifi:802-11-wireless:wlan0\n\
-OfficeWifi:802-11-wireless:--\n\
-Wired connection 1:802-3-ethernet:eth0\n\
-BackupAP:802-11-wireless:--";
+HomeWifi:802-11-wireless:wlan0:uuid-1\n\
+OfficeWifi:802-11-wireless:--:uuid-2\n\
+Wired connection 1:802-3-ethernet:eth0:uuid-3\n\
+BackupAP:802-11-wireless:--:uuid-4";
 
-        let entries: Vec<(String, bool)> = output
+        let entries: Vec<(String, bool, String)> = output
             .lines()
             .filter_map(parse_nm_connection_list_line)
             .collect();
