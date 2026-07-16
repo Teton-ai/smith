@@ -2757,7 +2757,7 @@ async fn resolve_device_id(device_id: &str, pool: &sqlx::PgPool) -> Result<i32, 
         SELECT id FROM device
         WHERE
             CASE
-                WHEN $1 ~ '^[0-9]+$' AND length($1) <= 9 THEN
+                WHEN $1 ~ '^[0-9]+$' AND length($1) <= 10 THEN
                     id = $1::int4
                 ELSE
                     serial_number = $1
