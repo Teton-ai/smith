@@ -442,6 +442,11 @@ async fn start_main_server(
         .merge(ws_router)
         .route("/metrics", get(move || ready(recorder_handle.render())))
         .route("/health", get(health::check))
+        // DEV-ONLY TEST PATCH (do not commit): local package blob endpoint
+        .route(
+            "/dev-packages/:name",
+            get(smith::route::dev_package_download),
+        )
         .route("/.well-known/jwks.json", get(auth::route::jwks_well_known))
         .merge(SwaggerUi::new("/docs").url("/openapi.json", api_doc))
         .merge(SwaggerUi::new("/smith/docs").url("/smith/openapi.json", smith_api))

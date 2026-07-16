@@ -41,8 +41,6 @@ struct PackageFailure {
     last_failure_kind: InstallFailureKind,
 }
 
-/// Timeout is kept separate from failure: a timed-out apt survives the kill
-/// (only the `sudo` wrapper dies) and may still hold the dpkg lock.
 #[derive(Debug)]
 enum BatchInstallError {
     TimedOut { seconds: u64 },
@@ -601,8 +599,6 @@ impl Actor {
             }
         }
 
-        // Runs even when the batch failed so a broken package can never block
-        // smith's own update.
         if update_smith {
             let status = Command::new("sh")
                 .arg("-c")
@@ -627,7 +623,6 @@ impl Actor {
         self.clean_up_old_packages().await
     }
 
-    /// Install all pending packages with one apt invocation.
     async fn batch_install(
         &self,
         to_install: &[(String, PathBuf)],
@@ -638,7 +633,6 @@ impl Actor {
             .collect::<Vec<_>>()
             .join(", ");
 
-        // Same 5-minute-per-package budget the sequential installs had.
         let timeout = Duration::from_secs(300 * to_install.len() as u64);
         info!(
             "Installing {} package(s) in one transaction with {} minute timeout: {}",
@@ -647,7 +641,6 @@ impl Actor {
             names
         );
 
-        // argv passed directly — manifest file names never reach a shell.
         let install_future = Command::new("sudo")
             .arg("apt")
             .arg("install")
