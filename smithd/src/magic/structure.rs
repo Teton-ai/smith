@@ -37,10 +37,7 @@ pub struct ConfigPackage {
 }
 
 impl ConfigPackage {
-    /// Returns the dpkg status flags and installed version for this package,
-    /// e.g. `("ii", "1.2.3")`. dpkg reports the *target* version as soon as an
-    /// archive is unpacked (status `iU`/`iF`), so callers that need "fully
-    /// installed" must check the status flags, not just the version.
+    /// Returns the dpkg status flags and installed version, e.g. `("ii", "1.2.3")`.
     pub async fn get_system_state(&self) -> Result<(String, String)> {
         let name = &self.name;
         let output = tokio::process::Command::new("dpkg")
