@@ -542,20 +542,14 @@ impl Actor {
                 continue;
             }
 
-            // Require target version AND status "ii": a failed postinst
-            // leaves the target version at "iF" and must be retried.
+            // A failed postinst sits at the target version with status "iF" — require "ii".
             let package_installed = match package.get_system_state().await {
                 Ok((status, version)) => {
                     info!("> {} | {} => {}", package.name, version, package.version);
                     status == "ii" && version == package.version
                 }
-                Err(e) => {
-                    // Not installed at all (dpkg -l knows nothing about it) or
-                    // unparsable output — either way it needs installing.
-                    info!(
-                        "> {} | not installed ({}) => {}",
-                        package.name, e, package.version
-                    );
+                Err(_) => {
+                    info!("> {} | not installed => {}", package.name, package.version);
                     false
                 }
             };
@@ -570,8 +564,7 @@ impl Actor {
             }
         }
 
-        // One apt transaction: archives are unpacked before postinsts run, so
-        // services restart once, against the complete new file set.
+        // One apt transaction: everything is unpacked before any postinst runs.
         let mut batch_error = None;
         if !to_install.is_empty() {
             match self.batch_install(&to_install).await {
@@ -581,8 +574,7 @@ impl Actor {
                     }
                 }
                 Err(BatchInstallError::TimedOut { seconds }) => {
-                    // apt survives the timeout kill and may still hold the dpkg
-                    // lock, so run nothing else that needs dpkg this cycle.
+                    // apt may still be running and holding the dpkg lock.
                     error!(
                         "Batch install timed out after {} seconds; the apt transaction may still be running",
                         seconds
@@ -679,8 +671,6 @@ impl Actor {
         }
     }
 
-    /// Evict corrupt blobs named in the apt output and recover an interrupted
-    /// dpkg configuration.
     async fn handle_batch_failure(&mut self, to_install: &[(String, PathBuf)], detail: &str) {
         if matches!(
             classify_install_failure(detail),
@@ -695,7 +685,9 @@ impl Actor {
                     continue;
                 }
 
-                self.handle_install_failure(package_name, InstallFailureKind::CorruptPackage);
+                if !self.handle_install_failure(package_name, InstallFailureKind::CorruptPackage) {
+                    continue;
+                }
                 if let Err(e) = tokio::fs::remove_file(package_file).await {
                     error!(
                         "Failed to remove package file {}: {}",
@@ -796,8 +788,7 @@ impl Actor {
                 ));
             }
 
-            // dpkg reports the target version at unpack already; require
-            // fully-configured "ii" before advancing the release id.
+            // dpkg reports the target version at unpack already; require "ii".
             if status != "ii" {
                 return Err(anyhow::anyhow!(
                     "Package {} is at the target version but not fully configured (dpkg status {})",
