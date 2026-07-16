@@ -598,10 +598,16 @@ impl Actor {
         // Install everything in a single apt transaction. For a flat set of
         // application debs like ours (no Essential/Pre-Depends relations), apt
         // unpacks every archive before it runs any package's postinst, so a
-        // service restarted by its postinst (e.g. snakebrain) starts once,
-        // against the complete new file set. Installing one package at a time
-        // restarted services mid-release against a mix of old and new files,
-        // in whatever order the release manifest happened to list the packages.
+        // service restarted by its postinst starts once, against the complete
+        // new file set. Installing one package at a time restarted services
+        // mid-release against a mix of old and new files, in whatever order
+        // the release manifest happened to list the packages.
+        //
+        // dpkg keeps going past a failing package for the independent rest of
+        // the transaction, and packages that did reach their target version
+        // are filtered out of `to_install` above — so after a partial failure
+        // the next Check retries only what is still behind. No per-package
+        // fallback is needed.
         if !to_install.is_empty() {
             match self.batch_install(&to_install).await {
                 Ok(()) => {
@@ -612,33 +618,20 @@ impl Actor {
                 Err(BatchInstallError::TimedOut { seconds }) => {
                     // kill_on_drop only reaches our direct child; apt (run via
                     // sudo) survives orphaned and may still hold the dpkg lock
-                    // and complete on its own. Don't race per-package installs
-                    // against it — the periodic Check re-drives the upgrade.
+                    // and complete on its own. Don't start anything else that
+                    // needs dpkg — the periodic Check re-drives the upgrade.
                     error!(
-                        "Batch install timed out after {} seconds; skipping per-package fallback while the apt transaction may still be running",
+                        "Batch install timed out after {} seconds; the apt transaction may still be running",
                         seconds
                     );
+                    return Err(anyhow::anyhow!(
+                        "batch install timed out after {seconds} seconds"
+                    ));
                 }
                 Err(BatchInstallError::Failed { detail }) => {
-                    error!("Batch install failed; falling back to per-package installs:\n{detail}");
-
-                    // A batch that died between dpkg's unpack and configure
-                    // phases leaves every package half-installed. Recover
-                    // synchronously so the fallback installs and the
-                    // up-to-date gate below don't run against a broken dpkg
-                    // state.
-                    if detail.contains("dpkg was interrupted")
-                        && detail.contains("dpkg --configure -a")
-                    {
-                        info!("Detected dpkg interruption after batch install, running recovery");
-                        if let Err(e) = Self::run_dpkg_recovery_static().await {
-                            error!("Dpkg recovery failed: {}", e);
-                        }
-                    }
-
-                    for (package_name, package_file) in &to_install {
-                        self.install_package(package_name, package_file).await;
-                    }
+                    error!("Batch install failed:\n{detail}");
+                    self.handle_batch_failure(&to_install, &detail).await;
+                    return Err(anyhow::anyhow!("batch install failed"));
                 }
             }
         }
@@ -664,9 +657,8 @@ impl Actor {
     }
 
     /// Install all pending packages with one apt invocation so every archive is
-    /// unpacked before any postinst runs. On failure the caller falls back to
-    /// per-package installs for granular failure handling; on timeout it must
-    /// NOT, because the orphaned apt may still hold the dpkg lock.
+    /// unpacked before any postinst runs. On timeout the caller must not start
+    /// anything else that needs dpkg — the orphaned apt may still hold the lock.
     async fn batch_install(
         &self,
         to_install: &[(String, PathBuf)],
@@ -677,7 +669,7 @@ impl Actor {
             .collect::<Vec<_>>()
             .join(", ");
 
-        // Same 5-minute-per-package budget as the fallback path, spent on one command.
+        // Same 5-minute-per-package budget the sequential installs had.
         let timeout = Duration::from_secs(300 * to_install.len() as u64);
         info!(
             "Installing {} package(s) in one transaction with {} minute timeout: {}",
@@ -726,79 +718,46 @@ impl Actor {
         }
     }
 
-    async fn install_package(&mut self, package_name: &str, package_file: &Path) {
-        let install_command = format!(
-            "sudo apt install {} -y --allow-downgrades",
-            package_file.display()
-        );
+    /// Apply the per-package remedies to a failed batch: evict corrupt blobs
+    /// named in the apt output so they get re-downloaded, and finish an
+    /// interrupted dpkg configuration synchronously so the next attempt starts
+    /// from a clean state.
+    async fn handle_batch_failure(&mut self, to_install: &[(String, PathBuf)], detail: &str) {
+        if matches!(
+            classify_install_failure(detail),
+            InstallFailureKind::CorruptPackage
+        ) {
+            for (package_name, package_file) in to_install {
+                let named_in_output = package_file
+                    .file_name()
+                    .and_then(|f| f.to_str())
+                    .is_some_and(|f| detail.contains(f));
+                if !named_in_output {
+                    continue;
+                }
 
-        info!("Installing package {} with 5 minute timeout", package_name);
-        let install_future = Command::new("sh")
-            .arg("-c")
-            .arg(&install_command)
-            .kill_on_drop(true)
-            .output();
-
-        match time::timeout(Duration::from_secs(300), install_future).await {
-            Ok(Ok(status)) => {
-                if status.status.success() {
-                    info!("Successfully installed package {}", package_name);
-                    self.install_failures.remove(package_name);
-                } else {
-                    let stdout = String::from_utf8_lossy(&status.stdout);
-                    let stderr = String::from_utf8_lossy(&status.stderr);
+                self.handle_install_failure(package_name, InstallFailureKind::CorruptPackage);
+                if let Err(e) = tokio::fs::remove_file(package_file).await {
                     error!(
-                        "Failed to install package {}:\nstderr: {}\nstdout: {}",
-                        package_name, stderr, stdout
+                        "Failed to remove package file {}: {}",
+                        package_file.display(),
+                        e
                     );
-
-                    let combined_output = format!("{}\n{}", stderr, stdout);
-                    let kind = classify_install_failure(&combined_output);
-                    let should_delete = self.handle_install_failure(package_name, kind);
-
-                    if should_delete {
-                        if let Err(e) = tokio::fs::remove_file(&package_file).await {
-                            error!(
-                                "Failed to remove package file {}: {}",
-                                package_file.display(),
-                                e
-                            );
-                        } else {
-                            info!(
-                                "Removed package file {} so it will be re-downloaded",
-                                package_file.display()
-                            );
-                        }
-                    }
-
-                    if combined_output.contains("dpkg was interrupted")
-                        && combined_output.contains("dpkg --configure -a")
-                    {
-                        info!(
-                            "Detected dpkg interruption for package {}, attempting recovery",
-                            package_name
-                        );
-                        tokio::spawn(async {
-                            if let Err(e) = Self::run_dpkg_recovery_static().await {
-                                error!("Dpkg recovery failed: {}", e);
-                            }
-                        });
-                    }
+                } else {
+                    info!(
+                        "Removed package file {} so it will be re-downloaded",
+                        package_file.display()
+                    );
                 }
             }
-            Ok(Err(e)) => {
-                error!(
-                    "Failed to execute install command for {}: {}",
-                    package_name, e
-                );
-                self.handle_install_failure(package_name, InstallFailureKind::Unknown);
-            }
-            Err(_) => {
-                error!(
-                    "apt install for package {} timed out after 5 minutes",
-                    package_name
-                );
-                self.handle_install_failure(package_name, InstallFailureKind::Unknown);
+        }
+
+        // A batch that died between dpkg's unpack and configure phases leaves
+        // packages half-installed; recover before the next attempt.
+        if detail.contains("dpkg was interrupted") && detail.contains("dpkg --configure -a") {
+            info!("Detected dpkg interruption after batch install, running recovery");
+            if let Err(e) = Self::run_dpkg_recovery_static().await {
+                error!("Dpkg recovery failed: {}", e);
             }
         }
     }
