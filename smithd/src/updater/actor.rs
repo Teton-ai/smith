@@ -528,6 +528,7 @@ impl Actor {
 
         // now install packages
         let mut update_smith = false;
+        let mut to_install: Vec<(String, PathBuf)> = Vec::new();
         for package in packages {
             let package_name = package.name;
             let package_file = package.file;
@@ -578,82 +579,32 @@ impl Actor {
                     update_smith = true;
                     continue;
                 }
-                let install_command = format!(
-                    "sudo apt install {} -y --allow-downgrades",
-                    package_file.display()
-                );
+                to_install.push((package_name, package_file));
+            }
+        }
 
-                info!("Installing package {} with 5 minute timeout", package_name);
-                let install_future = Command::new("sh")
-                    .arg("-c")
-                    .arg(&install_command)
-                    .kill_on_drop(true)
-                    .output();
-
-                match time::timeout(Duration::from_secs(300), install_future).await {
-                    Ok(Ok(status)) => {
-                        if status.status.success() {
-                            info!("Successfully installed package {}", package_name);
-                            self.install_failures.remove(&package_name);
-                        } else {
-                            let stdout = String::from_utf8_lossy(&status.stdout);
-                            let stderr = String::from_utf8_lossy(&status.stderr);
-                            error!(
-                                "Failed to install package {}:\nstderr: {}\nstdout: {}",
-                                package_name, stderr, stdout
-                            );
-
-                            let combined_output = format!("{}\n{}", stderr, stdout);
-                            let kind = classify_install_failure(&combined_output);
-                            let should_delete = self.handle_install_failure(&package_name, kind);
-
-                            if should_delete {
-                                if let Err(e) = tokio::fs::remove_file(&package_file).await {
-                                    error!(
-                                        "Failed to remove package file {}: {}",
-                                        package_file.display(),
-                                        e
-                                    );
-                                } else {
-                                    info!(
-                                        "Removed package file {} so it will be re-downloaded",
-                                        package_file.display()
-                                    );
-                                }
-                            }
-
-                            if combined_output.contains("dpkg was interrupted")
-                                && combined_output.contains("dpkg --configure -a")
-                            {
-                                info!(
-                                    "Detected dpkg interruption for package {}, attempting recovery",
-                                    package_name
-                                );
-                                tokio::spawn(async {
-                                    if let Err(e) = Self::run_dpkg_recovery_static().await {
-                                        error!("Dpkg recovery failed: {}", e);
-                                    }
-                                });
-                            }
-                        }
+        // Install everything in a single apt transaction: dpkg unpacks every
+        // archive before it runs any package's postinst, so a service restarted
+        // by its postinst (e.g. snakebrain) starts once, against the complete
+        // new file set. Installing one package at a time restarted services
+        // mid-release against a mix of old and new files, in whatever order the
+        // release manifest happened to list the packages.
+        if !to_install.is_empty() {
+            match self.batch_install(&to_install).await {
+                Ok(()) => {
+                    for (package_name, _) in &to_install {
+                        self.install_failures.remove(package_name);
                     }
-                    Ok(Err(e)) => {
-                        error!(
-                            "Failed to execute install command for {}: {}",
-                            package_name, e
-                        );
-                        self.handle_install_failure(&package_name, InstallFailureKind::Unknown);
-                    }
-                    Err(_) => {
-                        error!(
-                            "apt install for package {} timed out after 5 minutes",
-                            package_name
-                        );
-                        self.handle_install_failure(&package_name, InstallFailureKind::Unknown);
+                }
+                Err(err) => {
+                    warn!("Batch install failed ({err:#}); falling back to per-package installs");
+                    for (package_name, package_file) in &to_install {
+                        self.install_package(package_name, package_file).await;
                     }
                 }
             }
         }
+
         if update_smith {
             let status = Command::new("sh")
                 .arg("-c")
@@ -672,6 +623,140 @@ impl Actor {
         self.magic.set_release_id(target_release_id).await;
 
         self.clean_up_old_packages().await
+    }
+
+    /// Install all pending packages with one apt invocation so every archive is
+    /// unpacked before any postinst runs. Returns an error if the command fails
+    /// as a whole; the caller falls back to per-package installs for granular
+    /// failure handling.
+    async fn batch_install(&self, to_install: &[(String, PathBuf)]) -> Result<()> {
+        let names = to_install
+            .iter()
+            .map(|(name, _)| name.as_str())
+            .collect::<Vec<_>>()
+            .join(", ");
+        let files = to_install
+            .iter()
+            .map(|(_, file)| file.display().to_string())
+            .collect::<Vec<_>>()
+            .join(" ");
+        let install_command = format!("sudo apt install {} -y --allow-downgrades", files);
+
+        // Same 5-minute-per-package budget as the fallback path, spent on one command.
+        let timeout = Duration::from_secs(300 * to_install.len() as u64);
+        info!(
+            "Installing {} package(s) in one transaction with {} minute timeout: {}",
+            to_install.len(),
+            timeout.as_secs() / 60,
+            names
+        );
+
+        let install_future = Command::new("sh")
+            .arg("-c")
+            .arg(&install_command)
+            .kill_on_drop(true)
+            .output();
+
+        let output = match time::timeout(timeout, install_future).await {
+            Ok(result) => result.with_context(|| "Failed to run batch install command")?,
+            Err(_) => {
+                return Err(anyhow::anyhow!(
+                    "batch install timed out after {} seconds",
+                    timeout.as_secs()
+                ));
+            }
+        };
+
+        if output.status.success() {
+            info!("Successfully installed {} package(s)", to_install.len());
+            Ok(())
+        } else {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            Err(anyhow::anyhow!(
+                "batch install exited with {}:\nstderr: {}\nstdout: {}",
+                output.status,
+                stderr,
+                stdout
+            ))
+        }
+    }
+
+    async fn install_package(&mut self, package_name: &str, package_file: &Path) {
+        let install_command = format!(
+            "sudo apt install {} -y --allow-downgrades",
+            package_file.display()
+        );
+
+        info!("Installing package {} with 5 minute timeout", package_name);
+        let install_future = Command::new("sh")
+            .arg("-c")
+            .arg(&install_command)
+            .kill_on_drop(true)
+            .output();
+
+        match time::timeout(Duration::from_secs(300), install_future).await {
+            Ok(Ok(status)) => {
+                if status.status.success() {
+                    info!("Successfully installed package {}", package_name);
+                    self.install_failures.remove(package_name);
+                } else {
+                    let stdout = String::from_utf8_lossy(&status.stdout);
+                    let stderr = String::from_utf8_lossy(&status.stderr);
+                    error!(
+                        "Failed to install package {}:\nstderr: {}\nstdout: {}",
+                        package_name, stderr, stdout
+                    );
+
+                    let combined_output = format!("{}\n{}", stderr, stdout);
+                    let kind = classify_install_failure(&combined_output);
+                    let should_delete = self.handle_install_failure(package_name, kind);
+
+                    if should_delete {
+                        if let Err(e) = tokio::fs::remove_file(&package_file).await {
+                            error!(
+                                "Failed to remove package file {}: {}",
+                                package_file.display(),
+                                e
+                            );
+                        } else {
+                            info!(
+                                "Removed package file {} so it will be re-downloaded",
+                                package_file.display()
+                            );
+                        }
+                    }
+
+                    if combined_output.contains("dpkg was interrupted")
+                        && combined_output.contains("dpkg --configure -a")
+                    {
+                        info!(
+                            "Detected dpkg interruption for package {}, attempting recovery",
+                            package_name
+                        );
+                        tokio::spawn(async {
+                            if let Err(e) = Self::run_dpkg_recovery_static().await {
+                                error!("Dpkg recovery failed: {}", e);
+                            }
+                        });
+                    }
+                }
+            }
+            Ok(Err(e)) => {
+                error!(
+                    "Failed to execute install command for {}: {}",
+                    package_name, e
+                );
+                self.handle_install_failure(package_name, InstallFailureKind::Unknown);
+            }
+            Err(_) => {
+                error!(
+                    "apt install for package {} timed out after 5 minutes",
+                    package_name
+                );
+                self.handle_install_failure(package_name, InstallFailureKind::Unknown);
+            }
+        }
     }
 
     async fn clean_up_old_packages(&self) -> Result<()> {
