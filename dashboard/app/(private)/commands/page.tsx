@@ -265,7 +265,10 @@ const BundleDetail = ({ bundle }: { bundle: BundleWithCommands }) => {
 								>
 									{selected.serial}
 								</Link>
-								<p className="text-xs text-gray-500 shrink-0">
+								<p
+									className="text-xs text-gray-500 min-w-0 truncate"
+									title={bundle.user_email ?? "System"}
+								>
 									Triggered by: {bundle.user_email ?? "System"}
 								</p>
 							</div>

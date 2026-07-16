@@ -62,13 +62,18 @@ pub async fn dashboard_logs_ws(
             StatusCode::UNAUTHORIZED
         })?;
 
-    let user_id = if let Some(sub) = claims.get("sub").and_then(|s| s.as_str()) {
-        CurrentUser::lookup(&state.pg_pool, sub)
-            .await
-            .ok()
-            .map(|(id, _)| id)
-    } else {
-        None
+    let sub = claims
+        .get("sub")
+        .and_then(|s| s.as_str())
+        .ok_or(StatusCode::UNAUTHORIZED)?;
+
+    let user_id = match CurrentUser::lookup(&state.pg_pool, sub).await {
+        Ok((id, _)) => id,
+        Err(sqlx::Error::RowNotFound) => return Err(StatusCode::UNAUTHORIZED),
+        Err(e) => {
+            error!("Database error looking up user: {}", e);
+            return Err(StatusCode::INTERNAL_SERVER_ERROR);
+        }
     };
 
     let _device = sqlx::query!(
@@ -110,7 +115,7 @@ async fn handle_dashboard_ws(
     service_name: String,
     state: State,
     sessions: LogStreamSessions,
-    user_id: Option<i32>,
+    user_id: i32,
 ) {
     let (mut ws_tx, mut ws_rx) = socket.split();
     let (log_tx, mut log_rx) = mpsc::channel::<String>(100);
@@ -126,7 +131,8 @@ async fn handle_dashboard_ws(
         continue_on_error: false,
     };
 
-    if let Err(e) = add_commands(&device_serial, vec![command], &state.pg_pool, user_id).await {
+    if let Err(e) = add_commands(&device_serial, vec![command], &state.pg_pool, Some(user_id)).await
+    {
         error!("Failed to queue StreamLogs command: {}", e);
         sessions.remove_session(&session_id).await;
         return;
@@ -192,7 +198,13 @@ async fn handle_dashboard_ws(
         },
         continue_on_error: false,
     };
-    if let Err(e) = add_commands(&device_serial, vec![stop_command], &state.pg_pool, user_id).await
+    if let Err(e) = add_commands(
+        &device_serial,
+        vec![stop_command],
+        &state.pg_pool,
+        Some(user_id),
+    )
+    .await
     {
         error!("Failed to queue StopLogStream command: {}", e);
     }

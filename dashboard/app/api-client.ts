@@ -92,7 +92,7 @@ export interface DeviceCommandResponse {
 	response_id?: number;
 	serial_number: string;
 	status?: number;
-	user_email?: string;
+	user_email?: string | null;
 }
 
 /**
@@ -101,7 +101,7 @@ export interface DeviceCommandResponse {
 export interface BundleWithCommands {
 	created_on: string;
 	responses: DeviceCommandResponse[];
-	user_email?: string;
+	user_email?: string | null;
 	uuid: string;
 }
 
@@ -261,7 +261,7 @@ export interface Release {
 	draft: boolean;
 	id: number;
 	release_candidate: boolean;
-	user_email?: string;
+	user_email?: string | null;
 	user_id?: number;
 	version: string;
 	yanked: boolean;

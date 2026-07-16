@@ -3173,6 +3173,7 @@ pub async fn apply_device_intent(
     Extension(state): Extension<State>,
     Extension(current_user): Extension<CurrentUser>,
 ) -> Result<(StatusCode, Json<ApplyIntentResponse>), StatusCode> {
+    let user_id = current_user.user_id;
     if !authorization::check(current_user, "devices", "write") {
         return Err(StatusCode::FORBIDDEN);
     }
@@ -3224,13 +3225,16 @@ pub async fn apply_device_intent(
         return Err(StatusCode::BAD_REQUEST);
     }
 
-    let bundle = sqlx::query!("INSERT INTO command_bundles DEFAULT VALUES RETURNING uuid")
-        .fetch_one(&mut *tx)
-        .await
-        .map_err(|err| {
-            error!("Failed to insert command bundle: {err}");
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?;
+    let bundle = sqlx::query!(
+        "INSERT INTO command_bundles (user_id) VALUES ($1) RETURNING uuid",
+        user_id
+    )
+    .fetch_one(&mut *tx)
+    .await
+    .map_err(|err| {
+        error!("Failed to insert command bundle: {err}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
 
     // ApplyNetworks command shape (read by smithd):
     // {
