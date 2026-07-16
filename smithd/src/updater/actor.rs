@@ -348,8 +348,19 @@ impl Actor {
             .join(release_id.to_string());
 
         if release_cache.exists() {
-            info!("release cache exists, skipping download");
-            return Ok(());
+            // Evicted/missing blobs must be re-fetched, manifest or not.
+            let manifest = tokio::fs::read_to_string(&release_cache).await?;
+            let blobs = self.packages_dir.join("blobs");
+            let all_present = manifest
+                .lines()
+                .filter_map(|line| line.split(' ').nth(2))
+                .all(|file| blobs.join(file).exists());
+            if all_present {
+                info!("release cache exists, skipping download");
+                return Ok(());
+            }
+            warn!("release cache exists but blobs are missing; re-fetching");
+            tokio::fs::remove_file(&release_cache).await?;
         }
 
         // Prefer the short-lived device JWT; falls back to the opaque token when
