@@ -180,29 +180,6 @@ pub async fn download_file(
         return Err(StatusCode::BAD_REQUEST);
     }
 
-    // ─── DEV-ONLY TEST PATCH (do not commit) ────────────────────────────────
-    // When LOCAL_PACKAGES_DIR is set, serve package blobs from a local
-    // directory instead of S3/CloudFront, replying with the same contract the
-    // device downloader expects (200 + Location + X-File-Size + ETag).
-    if let Ok(_dir) = std::env::var("LOCAL_PACKAGES_DIR") {
-        if bucket.eq_ignore_ascii_case("packages") {
-            let fs_path = dev_package_path(file_name)?;
-            let (len, etag) = dev_package_headers(&fs_path).await?;
-            let public_base = std::env::var("LOCAL_PACKAGES_PUBLIC_URL")
-                .unwrap_or_else(|_| "http://api:8080/dev-packages".to_string());
-            let response = Response::builder()
-                .header(
-                    axum::http::header::LOCATION,
-                    format!("{}/{}", public_base, file_name),
-                )
-                .header("X-File-Size", len)
-                .header(axum::http::header::ETAG, etag)
-                .body(Body::empty())
-                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-            return Ok(response);
-        }
-    }
-
     // Add more buckets here if needed
     let response = match bucket.to_lowercase().as_str() {
         // "packages" => &state.config.packages_bucket_name,
@@ -433,64 +410,4 @@ pub async fn test_upload(body: axum::body::Bytes) -> Json<UploadTestResult> {
     Json(UploadTestResult {
         bytes_received: body.len(),
     })
-}
-
-// ─── DEV-ONLY TEST PATCH (do not commit): local package storage ──────────────
-
-fn dev_package_path(name: &str) -> Result<std::path::PathBuf, StatusCode> {
-    let dir = std::env::var("LOCAL_PACKAGES_DIR").map_err(|_| StatusCode::NOT_FOUND)?;
-    if name.contains("..") || name.contains('/') {
-        return Err(StatusCode::BAD_REQUEST);
-    }
-    Ok(std::path::Path::new(&dir).join(name))
-}
-
-async fn dev_package_headers(fs_path: &std::path::Path) -> Result<(u64, String), StatusCode> {
-    let meta = tokio::fs::metadata(fs_path).await.map_err(|_| {
-        error!("dev package not found: {}", fs_path.display());
-        StatusCode::NOT_FOUND
-    })?;
-    let mtime = meta
-        .modified()
-        .ok()
-        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
-    Ok((meta.len(), format!("\"dev-{}-{}\"", meta.len(), mtime)))
-}
-
-/// Unauthenticated dev-only blob endpoint standing in for the CDN.
-/// Supports the `Range: bytes=N-` form the device downloader uses to resume.
-pub async fn dev_package_download(
-    Path(name): Path<String>,
-    headers: HeaderMap,
-) -> Result<Response, StatusCode> {
-    let fs_path = dev_package_path(&name)?;
-    let (len, etag) = dev_package_headers(&fs_path).await?;
-    let bytes = tokio::fs::read(&fs_path)
-        .await
-        .map_err(|_| StatusCode::NOT_FOUND)?;
-
-    let range_start = headers
-        .get(axum::http::header::RANGE)
-        .and_then(|v| v.to_str().ok())
-        .and_then(|v| v.strip_prefix("bytes="))
-        .and_then(|v| v.strip_suffix('-'))
-        .and_then(|v| v.parse::<u64>().ok());
-
-    let response = match range_start {
-        Some(start) if start < len => Response::builder()
-            .status(StatusCode::PARTIAL_CONTENT)
-            .header(axum::http::header::ETAG, etag)
-            .header(
-                axum::http::header::CONTENT_RANGE,
-                format!("bytes {}-{}/{}", start, len - 1, len),
-            )
-            .body(Body::from(bytes[start as usize..].to_vec())),
-        _ => Response::builder()
-            .status(StatusCode::OK)
-            .header(axum::http::header::ETAG, etag)
-            .body(Body::from(bytes)),
-    };
-    response.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
 }
