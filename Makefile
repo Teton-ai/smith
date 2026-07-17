@@ -36,6 +36,7 @@ schema:
 init:
 	echo "Initializing the repo"
 	test -f .env || cp .env.template .env
+	./scripts/ensure-device-jwt-key.sh
 	test -f dashboard/.env || cp dashboard/.env.template dashboard/.env
 
 gen-api-client:
@@ -55,6 +56,7 @@ E2E_SERVICES = postgres api bore device
 E2E_UP_FLAGS ?= --build
 
 test.e2e.up:
+	./scripts/ensure-device-jwt-key.sh
 	DEVICE_BASE_IMAGE=ubuntu:22.04 docker compose $(E2E_COMPOSE_FLAGS) up -d $(E2E_UP_FLAGS) $(E2E_SERVICES)
 
 test.e2e.run:
