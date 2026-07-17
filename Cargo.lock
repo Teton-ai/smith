@@ -5652,6 +5652,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "smith-e2e"
+version = "0.2.174"
+dependencies = [
+ "anyhow",
+ "reqwest 0.12.28",
+ "serde_json",
+ "sqlx",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
 name = "smith-updater"
 version = "0.2.174"
 dependencies = [

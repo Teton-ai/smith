@@ -1,0 +1,9 @@
+{
+  "registration": {
+    "serial_number": "smith-device-1",
+    "wifi_mac": "aa:bb:cc:dd:ee:ff"
+  },
+  "response": {
+    "token": "8b1a44a4-2a10-42da-9e59-6dc2b3f6e1b0"
+  }
+}

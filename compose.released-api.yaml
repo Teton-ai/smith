@@ -1,0 +1,11 @@
+# Overlay that swaps the api service to the published image, for testing the
+# HEAD daemon against the API version that production actually runs:
+#   docker compose -f compose.yaml -f compose.released-api.yaml up -d
+# Use INSTEAD of compose.e2e.yaml, not combined with it (the released image
+# runs its own entrypoint). Requires docker compose >= 2.24 (for !reset).
+services:
+  api:
+    image: ${SMITH_API_IMAGE:-tetonai/smith-api:latest}
+    pull_policy: always
+    build: !reset null
+    volumes: !reset []

@@ -1,0 +1,9 @@
+# Overlay for the e2e tests: run the API binary prebuilt into the dev image
+# instead of cargo-watch. The watch setup recompiles at startup and type-checks
+# sqlx macros against the live database, which cannot succeed on a fresh volume
+# (migrations only run once the API boots). The prebuilt binary boots at once
+# and applies migrations itself. Requires docker compose >= 2.24 (for !reset).
+services:
+  api:
+    volumes: !reset []
+    command: ["/app/target/debug/api"]

@@ -13,29 +13,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Check for existing release PR
-        id: check_pr
-        run: |
-          PR_COUNT=$(gh pr list --label release,automated --json number | jq length)
-          if [ "$PR_COUNT" -gt "0" ]; then
-            echo "Release PR already exists, exiting workflow."
-            echo "release_exists=true" >> $GITHUB_OUTPUT
-          else
-            echo "No existing release PR found, proceeding with version bump."
-            echo "release_exists=false" >> $GITHUB_OUTPUT
-          fi
-        env:
-          GH_TOKEN: ${{ secrets.RELEASE_PR_TOKEN }}
-
       - uses: actions-rust-lang/setup-rust-toolchain@v1
-        if: steps.check_pr.outputs.release_exists != 'true'
 
       - name: SQLx offline
         run: echo "SQLX_OFFLINE=true" > .env
-        if: steps.check_pr.outputs.release_exists != 'true'
 
+      # Runs on every main push: create-pull-request rebuilds the release
+      # branch as main + version bump and force-pushes only when it changed,
+      # so the open release PR tracks main and its checks (including e2e)
+      # re-run against the exact state that would be released.
       - name: Bump version
-        if: steps.check_pr.outputs.release_exists != 'true'
         run: |
           # Get the current version from Cargo.toml
           CURRENT_VERSION=$(grep -m 1 'version = ' Cargo.toml | sed 's/version = "\(.*\)"/\1/')
@@ -62,11 +49,9 @@ jobs:
           grep -m 1 'version = ' Cargo.toml
 
       - name: Check generate lock
-        if: steps.check_pr.outputs.release_exists != 'true'
         run: cargo generate-lockfile
 
       - name: Create Pull Request
-        if: steps.check_pr.outputs.release_exists != 'true'
         uses: peter-evans/create-pull-request@v5
         with:
           token: ${{ secrets.RELEASE_PR_TOKEN }}

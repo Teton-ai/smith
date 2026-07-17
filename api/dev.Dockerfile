@@ -29,6 +29,7 @@ COPY smithd ./smithd
 COPY models ./models
 COPY updater ./updater
 COPY cli ./cli
+COPY e2e ./e2e
 
 # Pre-build dependencies with offline mode (no DB available during build)
 # At runtime, cargo-watch will use the live database for type checking

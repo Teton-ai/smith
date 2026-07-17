@@ -14,8 +14,9 @@ The JS side is an npm-workspaces monorepo (`workspaces: ["dashboard", "packages/
 ## General Guidelines
 - Prioritize correctness and clarity. Efficiency comes second unless specified.
 - Add code to existing files when possible; avoid scattering logic across many small files.
-- Write comments only to explain *why*, not *what*.
+- Write comments only to explain *why*, not *what*, be concise, this is not a novel.
 - Do not add speculative features or “creative” additions unless explicitly requested.
+- Do not promote or publicise the tool or harness being used.
 
 ## Database
 - The `schema.sql` file is the source of truth for the current database schema, not the migrations folder.
