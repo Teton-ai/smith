@@ -16,17 +16,20 @@ use utoipa::ToSchema;
         (status = 200, description = "Victoria metrics data forwarded successfully"),
         (status = 501, description = "Victoria metrics not implemented"),
         (status = 500, description = "Internal server error")
-    )
+    ),
+    security(
+        ("device_token" = [])
+    ),
 )]
 pub async fn victoria(
+    device: AuthedDevice,
     Extension(state): Extension<State>,
     req: Request<Body>,
 ) -> Result<StatusCode, StatusCode> {
-    let client_config = state
-        .config
-        .victoria_metrics_client
-        .as_ref()
-        .ok_or(StatusCode::NOT_IMPLEMENTED)?;
+    let clients = &state.config.victoria_metrics_clients;
+    let Some((primary, secondaries)) = clients.split_first() else {
+        return Err(StatusCode::NOT_IMPLEMENTED);
+    };
 
     let (parts, body) = req.into_parts();
     let method = parts.method;
@@ -38,9 +41,33 @@ pub async fn victoria(
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
 
-    let response = client_config
+    for secondary in secondaries {
+        let client = secondary.client.clone();
+        let url = secondary.url.clone();
+        let headers = headers.clone();
+        let body_bytes = body_bytes.clone();
+        let method = method.clone();
+        let serial_number = device.serial_number.clone();
+        tokio::spawn(async move {
+            if let Err(err) = client
+                .request(method, &url)
+                .headers(headers)
+                .body(body_bytes)
+                .send()
+                .await
+            {
+                error!(
+                    error = %err,
+                    serial_number,
+                    "Failed to forward telemetry to secondary VictoriaMetrics target"
+                );
+            }
+        });
+    }
+
+    let response = primary
         .client
-        .request(method, &client_config.url)
+        .request(method, &primary.url)
         .headers(headers)
         .body(body_bytes)
         .send()
