@@ -37,7 +37,8 @@ pub struct ConfigPackage {
 }
 
 impl ConfigPackage {
-    pub async fn get_system_version(&self) -> Result<String> {
+    /// Returns the dpkg status flags and installed version, e.g. `("ii", "1.2.3")`.
+    pub async fn get_system_state(&self) -> Result<(String, String)> {
         let name = &self.name;
         let output = tokio::process::Command::new("dpkg")
             .arg("-l")
@@ -49,11 +50,19 @@ impl ConfigPackage {
         let lines: Vec<&str> = stdout.lines().collect();
         let package_info = lines.get(5).with_context(|| "Failed to get package info")?;
         let fields: Vec<&str> = package_info.split_whitespace().collect();
+        let status = fields
+            .first()
+            .with_context(|| "Failed to get package status")?;
         let version = fields
             .get(2)
             .with_context(|| "Failed to get package version")?;
 
-        Ok(version.to_string())
+        Ok((status.to_string(), version.to_string()))
+    }
+
+    pub async fn get_system_version(&self) -> Result<String> {
+        let (_, version) = self.get_system_state().await?;
+        Ok(version)
     }
 }
 #[derive(Serialize, Deserialize, Clone, Debug)]

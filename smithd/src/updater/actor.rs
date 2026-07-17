@@ -41,6 +41,12 @@ struct PackageFailure {
     last_failure_kind: InstallFailureKind,
 }
 
+#[derive(Debug)]
+enum BatchInstallError {
+    TimedOut { seconds: u64 },
+    Failed { detail: String },
+}
+
 fn classify_install_failure(stderr: &str) -> InstallFailureKind {
     let stderr_lower = stderr.to_lowercase();
 
@@ -63,6 +69,8 @@ fn classify_install_failure(stderr: &str) -> InstallFailureKind {
         "conflicts with",
         "no space left on device",
         "unable to access dpkg",
+        "unable to acquire the dpkg frontend lock",
+        "could not get lock",
         "unmet dependencies",
         "broken packages",
     ];
@@ -528,132 +536,59 @@ impl Actor {
 
         // now install packages
         let mut update_smith = false;
+        let mut to_install: Vec<(String, PathBuf)> = Vec::new();
         for package in packages {
-            let package_name = package.name;
-            let package_file = package.file;
-            let package_version = package.version;
-
-            if self.should_skip_install(&package_name) {
+            if self.should_skip_install(&package.name) {
                 continue;
             }
 
-            let package_file = blobs.join(package_file);
-
-            // check if version on system is the one we should be running
-            let output = match Command::new("dpkg")
-                .arg("-l")
-                .arg(&package_name)
-                .output()
-                .await
-            {
-                Ok(output) => output,
-                Err(e) => {
-                    error!("Failed to execute dpkg command for {}: {}", package_name, e);
-                    continue;
+            // A failed postinst sits at the target version with status "iF" — require "ii".
+            let package_installed = match package.get_system_state().await {
+                Ok((status, version)) => {
+                    info!("> {} | {} => {}", package.name, version, package.version);
+                    status == "ii" && version == package.version
+                }
+                Err(_) => {
+                    info!("> {} | not installed => {}", package.name, package.version);
+                    false
                 }
             };
 
-            let mut package_installed = false;
-            if output.status.success() {
-                if let Ok(stdout) = String::from_utf8(output.stdout) {
-                    let lines: Vec<&str> = stdout.lines().collect();
-                    if let Some(package_info) = lines.get(5) {
-                        let fields: Vec<&str> = package_info.split_whitespace().collect();
-                        if let Some(version) = fields.get(2) {
-                            info!("> {} | {} => {}", package_name, version, &package_version);
-                            package_installed = version == &package_version;
-                        } else {
-                            error!("Failed to get version for package {}", package_name);
-                        }
-                    } else {
-                        error!("Failed to get package info for {}", package_name);
-                    }
-                } else {
-                    error!("Failed to parse dpkg output for {}", package_name);
-                }
-            }
-
             if !package_installed {
-                if package_name == "smith" || package_name == "smith_amd64" {
+                if package.name == "smith" || package.name == "smith_amd64" {
                     update_smith = true;
                     continue;
                 }
-                let install_command = format!(
-                    "sudo apt install {} -y --allow-downgrades",
-                    package_file.display()
-                );
+                let blob_path = blobs.join(&package.file);
+                to_install.push((package.name, blob_path));
+            }
+        }
 
-                info!("Installing package {} with 5 minute timeout", package_name);
-                let install_future = Command::new("sh")
-                    .arg("-c")
-                    .arg(&install_command)
-                    .kill_on_drop(true)
-                    .output();
-
-                match time::timeout(Duration::from_secs(300), install_future).await {
-                    Ok(Ok(status)) => {
-                        if status.status.success() {
-                            info!("Successfully installed package {}", package_name);
-                            self.install_failures.remove(&package_name);
-                        } else {
-                            let stdout = String::from_utf8_lossy(&status.stdout);
-                            let stderr = String::from_utf8_lossy(&status.stderr);
-                            error!(
-                                "Failed to install package {}:\nstderr: {}\nstdout: {}",
-                                package_name, stderr, stdout
-                            );
-
-                            let combined_output = format!("{}\n{}", stderr, stdout);
-                            let kind = classify_install_failure(&combined_output);
-                            let should_delete = self.handle_install_failure(&package_name, kind);
-
-                            if should_delete {
-                                if let Err(e) = tokio::fs::remove_file(&package_file).await {
-                                    error!(
-                                        "Failed to remove package file {}: {}",
-                                        package_file.display(),
-                                        e
-                                    );
-                                } else {
-                                    info!(
-                                        "Removed package file {} so it will be re-downloaded",
-                                        package_file.display()
-                                    );
-                                }
-                            }
-
-                            if combined_output.contains("dpkg was interrupted")
-                                && combined_output.contains("dpkg --configure -a")
-                            {
-                                info!(
-                                    "Detected dpkg interruption for package {}, attempting recovery",
-                                    package_name
-                                );
-                                tokio::spawn(async {
-                                    if let Err(e) = Self::run_dpkg_recovery_static().await {
-                                        error!("Dpkg recovery failed: {}", e);
-                                    }
-                                });
-                            }
-                        }
+        // One apt transaction: everything is unpacked before any postinst runs.
+        if !to_install.is_empty() {
+            match self.batch_install(&to_install).await {
+                Ok(()) => {
+                    for (package_name, _) in &to_install {
+                        self.install_failures.remove(package_name);
                     }
-                    Ok(Err(e)) => {
-                        error!(
-                            "Failed to execute install command for {}: {}",
-                            package_name, e
-                        );
-                        self.handle_install_failure(&package_name, InstallFailureKind::Unknown);
-                    }
-                    Err(_) => {
-                        error!(
-                            "apt install for package {} timed out after 5 minutes",
-                            package_name
-                        );
-                        self.handle_install_failure(&package_name, InstallFailureKind::Unknown);
-                    }
+                }
+                Err(BatchInstallError::TimedOut { seconds }) => {
+                    // apt may still be running and holding the dpkg lock.
+                    error!(
+                        "Batch install timed out after {} seconds; the apt transaction may still be running",
+                        seconds
+                    );
+                    return Err(anyhow::anyhow!(
+                        "batch install timed out after {seconds} seconds"
+                    ));
+                }
+                Err(BatchInstallError::Failed { detail }) => {
+                    error!("Batch install failed:\n{detail}");
+                    self.handle_batch_failure(&to_install, &detail).await;
                 }
             }
         }
+
         if update_smith {
             let status = Command::new("sh")
                 .arg("-c")
@@ -672,6 +607,102 @@ impl Actor {
         self.magic.set_release_id(target_release_id).await;
 
         self.clean_up_old_packages().await
+    }
+
+    async fn batch_install(
+        &self,
+        to_install: &[(String, PathBuf)],
+    ) -> Result<(), BatchInstallError> {
+        let names = to_install
+            .iter()
+            .map(|(name, _)| name.as_str())
+            .collect::<Vec<_>>()
+            .join(", ");
+
+        let timeout = Duration::from_secs(300 * to_install.len() as u64);
+        info!(
+            "Installing {} package(s) in one transaction with {} minute timeout: {}",
+            to_install.len(),
+            timeout.as_secs() / 60,
+            names
+        );
+
+        let install_future = Command::new("sudo")
+            .arg("apt")
+            .arg("install")
+            .arg("-y")
+            .arg("--allow-downgrades")
+            .args(to_install.iter().map(|(_, file)| file.as_os_str()))
+            .kill_on_drop(true)
+            .output();
+
+        let output = match time::timeout(timeout, install_future).await {
+            Ok(Ok(output)) => output,
+            Ok(Err(e)) => {
+                return Err(BatchInstallError::Failed {
+                    detail: format!("failed to run batch install command: {e}"),
+                });
+            }
+            Err(_) => {
+                return Err(BatchInstallError::TimedOut {
+                    seconds: timeout.as_secs(),
+                });
+            }
+        };
+
+        if output.status.success() {
+            info!("Successfully installed {} package(s)", to_install.len());
+            Ok(())
+        } else {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            Err(BatchInstallError::Failed {
+                detail: format!(
+                    "batch install exited with {}:\nstderr: {}\nstdout: {}",
+                    output.status, stderr, stdout
+                ),
+            })
+        }
+    }
+
+    async fn handle_batch_failure(&mut self, to_install: &[(String, PathBuf)], detail: &str) {
+        if matches!(
+            classify_install_failure(detail),
+            InstallFailureKind::CorruptPackage
+        ) {
+            for (package_name, package_file) in to_install {
+                let named_in_output = package_file
+                    .file_name()
+                    .and_then(|f| f.to_str())
+                    .is_some_and(|f| detail.contains(f));
+                if !named_in_output {
+                    continue;
+                }
+
+                if !self.handle_install_failure(package_name, InstallFailureKind::CorruptPackage) {
+                    continue;
+                }
+                if let Err(e) = tokio::fs::remove_file(package_file).await {
+                    error!(
+                        "Failed to remove package file {}: {}",
+                        package_file.display(),
+                        e
+                    );
+                } else {
+                    info!(
+                        "Removed package file {} so it will be re-downloaded",
+                        package_file.display()
+                    );
+                }
+            }
+        }
+
+        if detail.contains("dpkg was interrupted") && detail.contains("dpkg --configure -a") {
+            info!("Detected dpkg interruption after batch install, running recovery");
+            if let Err(e) = Self::run_dpkg_recovery_static().await {
+                error!("Dpkg recovery failed: {}", e);
+            }
+        }
     }
 
     async fn clean_up_old_packages(&self) -> Result<()> {
@@ -741,13 +772,22 @@ impl Actor {
 
         // check the system version of the packages in the magic file
         for package in packages {
-            let installed_version = package.get_system_version().await?;
+            let (status, installed_version) = package.get_system_state().await?;
             let magic_toml_version = package.version;
 
             if magic_toml_version != installed_version {
                 return Err(anyhow::anyhow!(
                     "Package {} is not up to date",
                     package.name
+                ));
+            }
+
+            // dpkg reports the target version at unpack already; require "ii".
+            if status != "ii" {
+                return Err(anyhow::anyhow!(
+                    "Package {} is at the target version but not fully configured (dpkg status {})",
+                    package.name,
+                    status
                 ));
             }
         }
