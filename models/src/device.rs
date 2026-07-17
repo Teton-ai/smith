@@ -96,6 +96,7 @@ pub struct DeviceCommandResponse {
     pub response_at: Option<DateTime<Utc>>,
     pub response: Option<Value>,
     pub status: Option<i32>,
+    pub user_email: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, utoipa::ToSchema)]

@@ -26,19 +26,23 @@ async fn queue_commands_bundle(
     pg_pool: &PgPool,
     devices: &[i32],
     commands: &[SafeCommandRequest],
+    user_id: i32,
 ) -> Result<BundleReceipt, StatusCode> {
     let mut tx = pg_pool.begin().await.map_err(|err| {
         error!("Failed to start transaction {err}");
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
 
-    let bundle_id = sqlx::query!(r#"INSERT INTO command_bundles DEFAULT VALUES RETURNING uuid"#)
-        .fetch_one(&mut *tx)
-        .await
-        .map_err(|err| {
-            error!("Failed to insert command bundle {err}");
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?;
+    let bundle_id = sqlx::query!(
+        r#"INSERT INTO command_bundles (user_id) VALUES ($1) RETURNING uuid"#,
+        user_id
+    )
+    .fetch_one(&mut *tx)
+    .await
+    .map_err(|err| {
+        error!("Failed to insert command bundle {err}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
 
     let mut queued = Vec::with_capacity(devices.len() * commands.len());
     for device_id in devices {
@@ -158,6 +162,7 @@ pub async fn issue_commands_to_devices(
         &state.pg_pool,
         &bundle_commands.devices,
         &bundle_commands.commands,
+        current_user.user_id,
     )
     .await?;
 
@@ -224,6 +229,7 @@ pub async fn get_bundle_commands(
         SELECT
             b.uuid,
             b.created_on,
+            u.email as user_email,
             cq.device_id as device,
             d.serial_number as serial_number,
             cq.id as cmd_id,
@@ -237,6 +243,7 @@ pub async fn get_bundle_commands(
             cr.response as response,
             cr.status as status
         FROM latest_bundles b
+        LEFT JOIN auth.users u ON b.user_id = u.id
         LEFT JOIN command_queue cq ON b.uuid = cq.bundle
         LEFT JOIN command_response cr ON cq.id = cr.command_id
         LEFT JOIN device d ON cq.device_id = d.id
@@ -247,10 +254,10 @@ pub async fn get_bundle_commands(
     .await
     .unwrap_or_default();
 
-    let mut map_responses = HashMap::new();
+    let mut map_responses: HashMap<(Uuid, _), (Option<String>, Vec<DeviceCommandResponse>)> =
+        HashMap::new();
 
     raw_bundles.into_iter().for_each(|raw_bundle| {
-        // check if we have already seen this bundle
         let response = DeviceCommandResponse {
             device: raw_bundle.device,
             serial_number: raw_bundle.serial_number,
@@ -264,32 +271,33 @@ pub async fn get_bundle_commands(
             response_at: raw_bundle.response_at,
             response: raw_bundle.response,
             status: raw_bundle.status,
+            user_email: None,
         };
 
         map_responses
             .entry((raw_bundle.uuid, raw_bundle.created_on))
-            .and_modify(|responses: &mut Vec<DeviceCommandResponse>| {
-                responses.push(response.clone());
-            })
-            .or_insert(vec![response]);
+            .and_modify(
+                |(_, responses): &mut (Option<String>, Vec<DeviceCommandResponse>)| {
+                    responses.push(response.clone());
+                },
+            )
+            .or_insert((raw_bundle.user_email, vec![response]));
     });
 
-    let mut bundles: Vec<BundleWithCommands> = Vec::new();
-
-    for (uuid, created_on) in map_responses.keys() {
-        let mut responses = map_responses
-            .get(&(*uuid, *created_on))
-            .expect("error: failed to get device command responses for (UUID, creation date)")
-            .clone();
-        // Keep commands in the order they were issued (queue id is serial), so
-        // the displayed order matches how the bundle/recipe was defined.
-        responses.sort_by_key(|response| response.cmd_id);
-        bundles.push(BundleWithCommands {
-            uuid: *uuid,
-            created_on: *created_on,
-            responses,
-        });
-    }
+    let mut bundles: Vec<BundleWithCommands> = map_responses
+        .into_iter()
+        .map(|((uuid, created_on), (user_email, mut responses))| {
+            // Keep commands in the order they were issued (queue id is serial), so
+            // the displayed order matches how the bundle/recipe was defined.
+            responses.sort_by_key(|r| r.cmd_id);
+            BundleWithCommands {
+                uuid,
+                created_on,
+                user_email,
+                responses,
+            }
+        })
+        .collect();
 
     // Sort by timestamp (most recent first).
     bundles.sort_by(|a, b| b.created_on.cmp(&a.created_on));
@@ -405,6 +413,7 @@ pub async fn get_bundle(
         r#"SELECT
             b.uuid,
             b.created_on,
+            u.email as user_email,
             cq.device_id as device,
             d.serial_number as serial_number,
             cq.id as cmd_id,
@@ -418,6 +427,7 @@ pub async fn get_bundle(
             cr.response as response,
             cr.status as status
         FROM command_bundles b
+        LEFT JOIN auth.users u ON b.user_id = u.id
         LEFT JOIN command_queue cq ON b.uuid = cq.bundle
         LEFT JOIN command_response cr ON cq.id = cr.command_id
         LEFT JOIN device d ON cq.device_id = d.id
@@ -434,6 +444,7 @@ pub async fn get_bundle(
 
     let first = rows.first().ok_or(StatusCode::NOT_FOUND)?;
     let created_on = first.created_on;
+    let user_email = first.user_email.clone();
 
     let responses = rows
         .into_iter()
@@ -450,12 +461,14 @@ pub async fn get_bundle(
             response_at: raw.response_at,
             response: raw.response,
             status: raw.status,
+            user_email: None,
         })
         .collect();
 
     Ok(Json(BundleWithCommands {
         uuid,
         created_on,
+        user_email,
         responses,
     }))
 }
@@ -674,7 +687,7 @@ pub async fn trigger_recipe(
     // vetted artifact (authoring needs `recipes:write`), so a user who can only
     // trigger recipes can run one that contains freeform/tunnel steps without
     // being able to issue those commands directly.
-    if !authorization::check(current_user, "recipes", "trigger") {
+    if !authorization::check(current_user.clone(), "recipes", "trigger") {
         return Err(StatusCode::FORBIDDEN);
     }
 
@@ -700,7 +713,13 @@ pub async fn trigger_recipe(
             StatusCode::INTERNAL_SERVER_ERROR
         })?;
 
-    let receipt = queue_commands_bundle(&state.pg_pool, &input.devices, &commands).await?;
+    let receipt = queue_commands_bundle(
+        &state.pg_pool,
+        &input.devices,
+        &commands,
+        current_user.user_id,
+    )
+    .await?;
 
     Ok((StatusCode::CREATED, Json(receipt)))
 }

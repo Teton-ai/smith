@@ -1023,10 +1023,13 @@ pub async fn get_all_commands_for_device(
                 cr.id as "response_id?",
                 cr.created_at as "response_at?",
                 cr.response as "response?",
-                cr.status as "status?"
+                cr.status as "status?",
+                u.email as "user_email?"
             FROM command_queue cq
             LEFT JOIN command_response cr ON cq.id = cr.command_id
             LEFT JOIN device d ON cq.device_id = d.id
+            LEFT JOIN command_bundles cb ON cq.bundle = cb.uuid
+            LEFT JOIN auth.users u ON cb.user_id = u.id
             WHERE cq.device_id = $1
                 AND cq.id < $2
             ORDER BY cq.id DESC
@@ -1052,10 +1055,13 @@ pub async fn get_all_commands_for_device(
                 cr.id as "response_id?",
                 cr.created_at as "response_at?",
                 cr.response as "response?",
-                cr.status as "status?"
+                cr.status as "status?",
+                u.email as "user_email?"
             FROM command_queue cq
             LEFT JOIN command_response cr ON cq.id = cr.command_id
             LEFT JOIN device d ON cq.device_id = d.id
+            LEFT JOIN command_bundles cb ON cq.bundle = cb.uuid
+            LEFT JOIN auth.users u ON cb.user_id = u.id
             WHERE cq.device_id = $1
                 AND cq.id > $2
             ORDER BY cq.id ASC
@@ -1081,10 +1087,13 @@ pub async fn get_all_commands_for_device(
                 cr.id as "response_id?",
                 cr.created_at as "response_at?",
                 cr.response as "response?",
-                cr.status as "status?"
+                cr.status as "status?",
+                u.email as "user_email?"
             FROM command_queue cq
             LEFT JOIN command_response cr ON cq.id = cr.command_id
             LEFT JOIN device d ON cq.device_id = d.id
+            LEFT JOIN command_bundles cb ON cq.bundle = cb.uuid
+            LEFT JOIN auth.users u ON cb.user_id = u.id
             WHERE cq.device_id = $1
             ORDER BY cq.id DESC
             LIMIT $2::int"#,
@@ -1549,13 +1558,16 @@ pub async fn issue_commands_to_device(
         }
     };
 
-    let bundle_id = sqlx::query!("INSERT INTO command_bundles DEFAULT VALUES RETURNING uuid")
-        .fetch_one(&mut *tx)
-        .await
-        .map_err(|err| {
-            error!("Failed to insert command bundle {err}");
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?;
+    let bundle_id = sqlx::query!(
+        "INSERT INTO command_bundles (user_id) VALUES ($1) RETURNING uuid",
+        current_user.user_id
+    )
+    .fetch_one(&mut *tx)
+    .await
+    .map_err(|err| {
+        error!("Failed to insert command bundle {err}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
 
     for command in commands {
         sqlx::query!(
@@ -2745,7 +2757,7 @@ async fn resolve_device_id(device_id: &str, pool: &sqlx::PgPool) -> Result<i32, 
         SELECT id FROM device
         WHERE
             CASE
-                WHEN $1 ~ '^[0-9]+$' AND length($1) <= 9 THEN
+                WHEN $1 ~ '^[0-9]+$' AND length($1) <= 10 THEN
                     id = $1::int4
                 ELSE
                     serial_number = $1
@@ -3161,6 +3173,7 @@ pub async fn apply_device_intent(
     Extension(state): Extension<State>,
     Extension(current_user): Extension<CurrentUser>,
 ) -> Result<(StatusCode, Json<ApplyIntentResponse>), StatusCode> {
+    let user_id = current_user.user_id;
     if !authorization::check(current_user, "devices", "write") {
         return Err(StatusCode::FORBIDDEN);
     }
@@ -3212,13 +3225,16 @@ pub async fn apply_device_intent(
         return Err(StatusCode::BAD_REQUEST);
     }
 
-    let bundle = sqlx::query!("INSERT INTO command_bundles DEFAULT VALUES RETURNING uuid")
-        .fetch_one(&mut *tx)
-        .await
-        .map_err(|err| {
-            error!("Failed to insert command bundle: {err}");
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?;
+    let bundle = sqlx::query!(
+        "INSERT INTO command_bundles (user_id) VALUES ($1) RETURNING uuid",
+        user_id
+    )
+    .fetch_one(&mut *tx)
+    .await
+    .map_err(|err| {
+        error!("Failed to insert command bundle: {err}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
 
     // ApplyNetworks command shape (read by smithd):
     // {

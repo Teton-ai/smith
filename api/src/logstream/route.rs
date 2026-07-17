@@ -1,6 +1,7 @@
 use super::session::LogStreamSessions;
 use crate::State;
 use crate::home::add_commands;
+use crate::user::CurrentUser;
 use axum::{
     Extension,
     extract::{
@@ -51,8 +52,8 @@ pub async fn dashboard_logs_ws(
     Extension(state): Extension<State>,
     Extension(sessions): Extension<LogStreamSessions>,
 ) -> Result<Response, StatusCode> {
-    // Validate the JWT token
-    state
+    // Validate the JWT token and extract the sub claim for user attribution
+    let claims = state
         .jwks_client
         .decode::<serde_json::Value>(&auth.token, &[&state.config.auth0_audience])
         .await
@@ -60,6 +61,20 @@ pub async fn dashboard_logs_ws(
             error!("Token validation failed: {}", e);
             StatusCode::UNAUTHORIZED
         })?;
+
+    let sub = claims
+        .get("sub")
+        .and_then(|s| s.as_str())
+        .ok_or(StatusCode::UNAUTHORIZED)?;
+
+    let user_id = match CurrentUser::lookup(&state.pg_pool, sub).await {
+        Ok((id, _)) => id,
+        Err(sqlx::Error::RowNotFound) => return Err(StatusCode::UNAUTHORIZED),
+        Err(e) => {
+            error!("Database error looking up user: {}", e);
+            return Err(StatusCode::INTERNAL_SERVER_ERROR);
+        }
+    };
 
     let _device = sqlx::query!(
         "SELECT id FROM device WHERE serial_number = $1",
@@ -88,6 +103,7 @@ pub async fn dashboard_logs_ws(
             service_name,
             state,
             sessions,
+            user_id,
         )
     }))
 }
@@ -99,6 +115,7 @@ async fn handle_dashboard_ws(
     service_name: String,
     state: State,
     sessions: LogStreamSessions,
+    user_id: i32,
 ) {
     let (mut ws_tx, mut ws_rx) = socket.split();
     let (log_tx, mut log_rx) = mpsc::channel::<String>(100);
@@ -114,7 +131,8 @@ async fn handle_dashboard_ws(
         continue_on_error: false,
     };
 
-    if let Err(e) = add_commands(&device_serial, vec![command], &state.pg_pool).await {
+    if let Err(e) = add_commands(&device_serial, vec![command], &state.pg_pool, Some(user_id)).await
+    {
         error!("Failed to queue StreamLogs command: {}", e);
         sessions.remove_session(&session_id).await;
         return;
@@ -180,7 +198,16 @@ async fn handle_dashboard_ws(
         },
         continue_on_error: false,
     };
-    let _ = add_commands(&device_serial, vec![stop_command], &state.pg_pool).await;
+    if let Err(e) = add_commands(
+        &device_serial,
+        vec![stop_command],
+        &state.pg_pool,
+        Some(user_id),
+    )
+    .await
+    {
+        error!("Failed to queue StopLogStream command: {}", e);
+    }
 
     sessions_clone.remove_session(&session_id_clone).await;
     forward_task.abort();

@@ -71,17 +71,25 @@ const ResponseDetail = ({ cmd }: { cmd: DeviceCommandResponse }) => {
 							</Badge>
 						)}
 					</div>
-					{cmd.response != null && (
-						<Button
-							variant="soft"
-							tone="gray"
-							size="sm"
-							className="shrink-0"
-							onClick={() => setShowRaw((v) => !v)}
+					<div className="flex items-center gap-3 min-w-0">
+						<p
+							className="text-xs text-gray-500 min-w-0 truncate"
+							title={cmd.user_email ?? "System"}
 						>
-							{showRaw ? "Formatted" : "Raw JSON"}
-						</Button>
-					)}
+							Triggered by: {cmd.user_email ?? "System"}
+						</p>
+						{cmd.response != null && (
+							<Button
+								variant="soft"
+								tone="gray"
+								size="sm"
+								className="shrink-0"
+								onClick={() => setShowRaw((v) => !v)}
+							>
+								{showRaw ? "Formatted" : "Raw JSON"}
+							</Button>
+						)}
+					</div>
 				</div>
 			</div>
 

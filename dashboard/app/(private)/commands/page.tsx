@@ -258,12 +258,20 @@ const BundleDetail = ({ bundle }: { bundle: BundleWithCommands }) => {
 				{selected != null ? (
 					<>
 						<div className="px-5 py-3 border-b border-gray-200 shrink-0">
-							<Link
-								to={`/devices/${selected.serial}/commands`}
-								className="text-sm font-mono font-medium text-blue-600 hover:underline"
-							>
-								{selected.serial}
-							</Link>
+							<div className="flex items-center justify-between gap-3">
+								<Link
+									to={`/devices/${selected.serial}/commands`}
+									className="text-sm font-mono font-medium text-blue-600 hover:underline"
+								>
+									{selected.serial}
+								</Link>
+								<p
+									className="text-xs text-gray-500 min-w-0 truncate"
+									title={bundle.user_email ?? "System"}
+								>
+									Triggered by: {bundle.user_email ?? "System"}
+								</p>
+							</div>
 						</div>
 						<div className="flex-1 overflow-y-auto overflow-x-hidden">
 							{selected.commands.map((c) => (
@@ -432,6 +440,11 @@ const CommandsPage = () => {
 												</Badge>
 											)}
 										</div>
+										<span className="text-xs text-gray-400 shrink-0 truncate max-w-[50%] text-right">
+											{bundle.user_email ?? "System"}
+										</span>
+									</div>
+									<div className="flex justify-end mt-0.5">
 										<RelativeTime
 											date={bundle.created_on}
 											className="text-xs text-gray-400 shrink-0"
