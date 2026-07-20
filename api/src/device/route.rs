@@ -3225,6 +3225,23 @@ pub async fn delete_device_intent(
     Ok(StatusCode::NO_CONTENT)
 }
 
+/// Map a stored `security_type` (and its psk, if any) to the wire credential
+/// object smithd's applier consumes. Capability-bounded: it only ever emits a
+/// `key_mgmt` smithd can currently apply (`none`/`wpa-psk`), degrading `sae` to
+/// `wpa-psk` and `owe` to `none`. Returns `None` when smithd cannot apply the
+/// type yet (`wpa-eap`, unknown) or a psk-requiring type has no psk, so the
+/// caller can skip the network rather than emit an unusable credential.
+fn wire_credentials(security_type: &str, psk: Option<&str>) -> Option<serde_json::Value> {
+    match security_type {
+        "open" | "owe" => Some(serde_json::json!({ "key_mgmt": "none" })),
+        "wpa-psk" | "sae" => {
+            let psk = psk?;
+            Some(serde_json::json!({ "key_mgmt": "wpa-psk", "psk": psk }))
+        }
+        _ => None,
+    }
+}
+
 #[utoipa::path(
     post,
     path = "/devices/{device_id}/intent/apply",
@@ -3368,4 +3385,55 @@ pub async fn apply_device_intent(
             command_id,
         }),
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::wire_credentials;
+    use serde_json::json;
+
+    #[test]
+    fn open_and_owe_map_to_none() {
+        assert_eq!(
+            wire_credentials("open", None),
+            Some(json!({ "key_mgmt": "none" }))
+        );
+        assert_eq!(
+            wire_credentials("owe", None),
+            Some(json!({ "key_mgmt": "none" }))
+        );
+        // psk is ignored for open-family types
+        assert_eq!(
+            wire_credentials("owe", Some("ignored")),
+            Some(json!({ "key_mgmt": "none" }))
+        );
+    }
+
+    #[test]
+    fn wpa_psk_and_sae_map_to_wpa_psk_with_psk() {
+        assert_eq!(
+            wire_credentials("wpa-psk", Some("secret")),
+            Some(json!({ "key_mgmt": "wpa-psk", "psk": "secret" }))
+        );
+        // sae degrades to wpa-psk (works on WPA2/WPA3-mixed APs smithd can apply)
+        assert_eq!(
+            wire_credentials("sae", Some("secret")),
+            Some(json!({ "key_mgmt": "wpa-psk", "psk": "secret" }))
+        );
+    }
+
+    #[test]
+    fn psk_required_but_missing_is_skipped() {
+        assert_eq!(wire_credentials("wpa-psk", None), None);
+        assert_eq!(wire_credentials("sae", None), None);
+    }
+
+    #[test]
+    fn unapplyable_types_are_skipped() {
+        // enterprise not applyable by smithd yet
+        assert_eq!(wire_credentials("wpa-eap", Some("secret")), None);
+        // unknown / unmodelled types
+        assert_eq!(wire_credentials("wep", None), None);
+        assert_eq!(wire_credentials("", None), None);
+    }
 }
