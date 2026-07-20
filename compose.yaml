@@ -35,7 +35,9 @@ services:
 
   postgres:
     container_name: smith-postgres
-    image: postgres:15
+    build:
+      context: .
+      dockerfile: postgres.Dockerfile
     env_file:
       - .env
     ports:
