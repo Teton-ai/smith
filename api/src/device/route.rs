@@ -1,9 +1,10 @@
 use crate::State;
+use crate::device::debug_ap;
 use crate::device::{
-    ApplyIntentResponse, ApproveDeviceBody, ConfiguredNetwork, CreateIntentRequest, DeviceHealth,
-    DeviceLedgerItem, DeviceLedgerItemPaginated, DeviceNetworkIntent, DeviceRelease,
-    LabelWithValues, NewVariable, Note, PatchIntentRequest, RawDevice, UpdateDeviceRelease,
-    UpdateDevicesRelease, Variable, WifiScanResult,
+    ApplyIntentResponse, ApproveDeviceBody, ConfiguredNetwork, CreateIntentRequest,
+    DebugApCredentials, DeviceHealth, DeviceLedgerItem, DeviceLedgerItemPaginated,
+    DeviceNetworkIntent, DeviceRelease, LabelWithValues, NewVariable, Note, PatchIntentRequest,
+    RawDevice, UpdateDeviceRelease, UpdateDevicesRelease, Variable, WifiScanResult,
 };
 use crate::event::PublicEvent;
 use crate::handlers::AuthedDevice;
@@ -2214,6 +2215,79 @@ pub async fn revoke_device(
     })?;
 
     Ok(Json(true))
+}
+
+#[utoipa::path(
+    get,
+    path = "/devices/{device_id}/debug-ap-password",
+    params(
+        ("device_id" = String, Path),
+    ),
+    responses(
+        (status = StatusCode::OK, description = "Derived debug-AP WiFi credentials", body = DebugApCredentials),
+        (status = StatusCode::NOT_FOUND, description = "Device not found or has no token"),
+        (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to derive credentials"),
+    ),
+    security(
+        ("auth_token" = [])
+    ),
+    tag = DEVICES_TAG
+)]
+/// Derive the WPA2 password for a device's debug-access AP (`<serial>-tunnel`).
+///
+/// The device's `plex` daemon brings up this AP when it can't reach the backend
+/// and derives the same password on-device from its secret token. The backend
+/// reproduces it here (it already knows the token) so a technician standing next
+/// to an offline device can join and read its diagnostic report. The token is
+/// never returned — only the derived AP credentials.
+pub async fn get_debug_ap_password(
+    Path(device_id): Path<String>,
+    Extension(state): Extension<State>,
+    Extension(current_user): Extension<CurrentUser>,
+) -> axum::response::Result<Json<DebugApCredentials>, StatusCode> {
+    if !authorization::check(current_user, "devices", "read") {
+        return Err(StatusCode::FORBIDDEN);
+    }
+
+    // Same id-or-serial resolution as `get_device_info`: a short all-digit input
+    // is treated as an `id`, anything else (incl. 13-digit serials) as a serial.
+    let row = sqlx::query!(
+        r#"
+        SELECT d.serial_number, d.token
+        FROM device d
+        WHERE
+            CASE
+                WHEN $1 ~ '^[0-9]+$' AND length($1) <= 10 THEN
+                    d.id = $1::int4
+                ELSE
+                    d.serial_number = $1
+            END
+        "#,
+        device_id
+    )
+    .fetch_one(&state.pg_pool)
+    .await
+    .map_err(|err| match err {
+        sqlx::Error::RowNotFound => StatusCode::NOT_FOUND,
+        _ => {
+            error!(
+                device = device_id,
+                "Failed to fetch device for debug-AP password: {err}"
+            );
+            StatusCode::INTERNAL_SERVER_ERROR
+        }
+    })?;
+
+    // No token → no derivable password. Mirror plex's fail-safe: an
+    // unprovisioned device can't have a debug AP. 404 rather than leak that the
+    // row exists but is tokenless.
+    let token = row.token.ok_or(StatusCode::NOT_FOUND)?;
+
+    Ok(Json(DebugApCredentials {
+        ssid: debug_ap::ssid_for(&row.serial_number),
+        password: debug_ap::derive_debug_ap_password(&row.serial_number, &token),
+        serial_number: row.serial_number,
+    }))
 }
 
 #[utoipa::path(

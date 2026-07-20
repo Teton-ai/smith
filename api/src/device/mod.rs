@@ -14,7 +14,17 @@ use thiserror::Error;
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
+pub mod debug_ap;
 pub mod route;
+
+/// Credentials for a device's debug-access WiFi AP (`<serial>-tunnel`).
+/// Derived from the device's secret token; the token itself is never included.
+#[derive(Debug, Serialize, utoipa::ToSchema)]
+pub struct DebugApCredentials {
+    pub serial_number: String,
+    pub ssid: String,
+    pub password: String,
+}
 
 // TODO: Change this, this needs to be device and the other is PublicDevice, API type
 #[derive(Debug, Serialize, utoipa::ToSchema, Clone)]
