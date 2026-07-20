@@ -2231,7 +2231,12 @@ pub async fn revoke_device(
 pub async fn get_debug_ap_password(
     Path(device_id): Path<String>,
     Extension(state): Extension<State>,
+    Extension(current_user): Extension<CurrentUser>,
 ) -> axum::response::Result<Json<DebugApCredentials>, StatusCode> {
+    if !authorization::check(current_user, "devices", "read") {
+        return Err(StatusCode::FORBIDDEN);
+    }
+
     // Same id-or-serial resolution as `get_device_info`: a short all-digit input
     // is treated as an `id`, anything else (incl. 13-digit serials) as a serial.
     let row = sqlx::query!(
