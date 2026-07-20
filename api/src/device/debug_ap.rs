@@ -66,8 +66,7 @@ mod tests {
     use super::*;
 
     // Same test token plex uses in its unit tests.
-    const TEST_TOKEN: &str =
-        "8f3a1c9e4b7d2f60a5c8e1b3d9f4a2c6e8b0d1f3a5c7e9b2d4f6a8c0e2b4d6f8";
+    const TEST_TOKEN: &str = "8f3a1c9e4b7d2f60a5c8e1b3d9f4a2c6e8b0d1f3a5c7e9b2d4f6a8c0e2b4d6f8";
 
     #[test]
     fn password_is_deterministic_and_wpa2_valid() {
@@ -75,7 +74,10 @@ mod tests {
         let b = derive_debug_ap_password("1421325026425", TEST_TOKEN);
         assert_eq!(a, b, "same serial+token must yield the same password");
         assert_eq!(a.len(), 10);
-        assert!((8..=63).contains(&a.len()), "WPA2-PSK requires 8..=63 chars");
+        assert!(
+            (8..=63).contains(&a.len()),
+            "WPA2-PSK requires 8..=63 chars"
+        );
         assert!(
             a.chars().all(|c| c.is_ascii_alphanumeric()),
             "password must be printable ascii alphanumerics"

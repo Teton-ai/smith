@@ -2253,7 +2253,10 @@ pub async fn get_debug_ap_password(
     .map_err(|err| match err {
         sqlx::Error::RowNotFound => StatusCode::NOT_FOUND,
         _ => {
-            error!(device = device_id, "Failed to fetch device for debug-AP password: {err}");
+            error!(
+                device = device_id,
+                "Failed to fetch device for debug-AP password: {err}"
+            );
             StatusCode::INTERNAL_SERVER_ERROR
         }
     })?;
