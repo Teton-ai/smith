@@ -35,6 +35,14 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
+      # docker/setup-buildx-action doesn't expose the GitHub Actions cache
+      # credentials to the shell; only higher-level actions like
+      # docker-build-push wire that up automatically. Without this, `docker
+      # buildx bake --cache-to/--cache-from=type=gha` silently no-ops — no
+      # error, it just never exports or imports anything.
+      - name: Expose GitHub Actions cache credentials
+        uses: crazy-max/ghaction-github-runtime@056b8ec6661ce03a987ab8643a0edc346ae63fe3 # v2.2.0
+
       - name: Build and cache api, device, postgres
         run: |
           docker buildx bake -f compose.yaml api device postgres \
@@ -71,6 +79,14 @@ jobs:
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
+
+      # docker/setup-buildx-action doesn't expose the GitHub Actions cache
+      # credentials to the shell; only higher-level actions like
+      # docker-build-push wire that up automatically. Without this, `docker
+      # buildx bake --cache-to/--cache-from=type=gha` silently no-ops — no
+      # error, it just never exports or imports anything.
+      - name: Expose GitHub Actions cache credentials
+        uses: crazy-max/ghaction-github-runtime@056b8ec6661ce03a987ab8643a0edc346ae63fe3 # v2.2.0
 
       - name: Restore api, device, postgres from cache
         run: |
@@ -142,6 +158,14 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
+      # docker/setup-buildx-action doesn't expose the GitHub Actions cache
+      # credentials to the shell; only higher-level actions like
+      # docker-build-push wire that up automatically. Without this, `docker
+      # buildx bake --cache-to/--cache-from=type=gha` silently no-ops — no
+      # error, it just never exports or imports anything.
+      - name: Expose GitHub Actions cache credentials
+        uses: crazy-max/ghaction-github-runtime@056b8ec6661ce03a987ab8643a0edc346ae63fe3 # v2.2.0
+
       - name: Restore api, postgres from cache
         run: |
           docker buildx bake -f compose.yaml api postgres \
@@ -211,6 +235,14 @@ jobs:
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
+
+      # docker/setup-buildx-action doesn't expose the GitHub Actions cache
+      # credentials to the shell; only higher-level actions like
+      # docker-build-push wire that up automatically. Without this, `docker
+      # buildx bake --cache-to/--cache-from=type=gha` silently no-ops — no
+      # error, it just never exports or imports anything.
+      - name: Expose GitHub Actions cache credentials
+        uses: crazy-max/ghaction-github-runtime@056b8ec6661ce03a987ab8643a0edc346ae63fe3 # v2.2.0
 
       - name: Restore device, postgres from cache
         run: |
