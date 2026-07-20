@@ -15,11 +15,42 @@ env:
   SQLX_OFFLINE: "true"
 
 jobs:
+  # api, device (both from HEAD) and postgres (pg_partman, static) are each
+  # needed by two or more of the jobs below. Building them here once and
+  # populating the GHA layer cache means the parallel jobs restore instead of
+  # rebuilding — without this, three jobs starting at the same instant can't
+  # see each other's cache and each pays the full build cost.
+  build-images:
+    name: "Build shared images (api, device, postgres)"
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.pull_request.draft == false }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and cache api, device, postgres
+        run: |
+          docker buildx bake -f compose.yaml api device postgres \
+            --set 'api.tags=smith-api:latest' \
+            --set 'device.tags=smith-device:latest' \
+            --set 'postgres.tags=smith-postgres:latest' \
+            --set '*.cache-from=type=gha' \
+            --set '*.cache-to=type=gha,mode=max'
+        env:
+          DEVICE_BASE_IMAGE: ubuntu:22.04
+
   # Real smithd (under systemd, in a container) against the API built from the
   # same tree. A failure means the daemon in this tree cannot talk to its API.
   e2e-head:
+    name: "E2E: HEAD daemon x HEAD API"
+    needs: build-images
     if: ${{ github.event_name == 'workflow_dispatch' || github.event.pull_request.draft == false }}
     runs-on: ubuntu-latest
+    env:
+      E2E_COMPOSE_FLAGS: -f compose.yaml -f compose.e2e.yaml
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -36,14 +67,13 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build images
+      - name: Restore api, device, postgres from cache
         run: |
           docker buildx bake -f compose.yaml api device postgres \
             --set 'api.tags=smith-api:latest' \
             --set 'device.tags=smith-device:latest' \
             --set 'postgres.tags=smith-postgres:latest' \
             --set '*.cache-from=type=gha' \
-            --set '*.cache-to=type=gha,mode=max' \
             --load
         env:
           DEVICE_BASE_IMAGE: ubuntu:22.04
@@ -56,8 +86,8 @@ jobs:
       - name: Dump stack logs
         if: failure()
         run: |
-          docker compose ps -a
-          docker compose logs api device postgres
+          docker compose $E2E_COMPOSE_FLAGS ps -a
+          docker compose $E2E_COMPOSE_FLAGS logs api device postgres
 
       - name: Tear down
         if: always()
@@ -78,8 +108,12 @@ jobs:
   # since updates flow through the API. The server side must stay backward
   # compatible with deployed daemons, so treat red here as a blocker.
   e2e-released-daemon:
+    name: "E2E: released daemon x HEAD API"
+    needs: build-images
     if: ${{ github.event_name == 'workflow_dispatch' || github.event.pull_request.draft == false }}
     runs-on: ubuntu-latest
+    env:
+      E2E_COMPOSE_FLAGS: -f compose.yaml -f compose.e2e.yaml
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -98,13 +132,12 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build images
+      - name: Restore api, postgres from cache
         run: |
           docker buildx bake -f compose.yaml api postgres \
             --set 'api.tags=smith-api:latest' \
             --set 'postgres.tags=smith-postgres:latest' \
             --set '*.cache-from=type=gha' \
-            --set '*.cache-to=type=gha,mode=max' \
             --load
 
       - name: Build device image from latest release
@@ -118,8 +151,8 @@ jobs:
       - name: Dump stack logs
         if: failure()
         run: |
-          docker compose ps -a
-          docker compose logs api device postgres
+          docker compose $E2E_COMPOSE_FLAGS ps -a
+          docker compose $E2E_COMPOSE_FLAGS logs api device postgres
 
       - name: Tear down
         if: always()
@@ -139,6 +172,8 @@ jobs:
   # Non-blocking: an intentional, coordinated protocol change legitimately
   # fails here until the API side ships.
   e2e-released-api:
+    name: "E2E: HEAD daemon x released API (non-blocking)"
+    needs: build-images
     if: ${{ github.event_name == 'workflow_dispatch' || github.event.pull_request.draft == false }}
     runs-on: ubuntu-latest
     continue-on-error: true
@@ -162,13 +197,12 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build images
+      - name: Restore device, postgres from cache
         run: |
           docker buildx bake -f compose.yaml device postgres \
             --set 'device.tags=smith-device:latest' \
             --set 'postgres.tags=smith-postgres:latest' \
             --set '*.cache-from=type=gha' \
-            --set '*.cache-to=type=gha,mode=max' \
             --load
         env:
           DEVICE_BASE_IMAGE: ubuntu:22.04
