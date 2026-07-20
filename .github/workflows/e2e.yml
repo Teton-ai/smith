@@ -38,9 +38,10 @@ jobs:
 
       - name: Build images
         run: |
-          docker buildx bake -f compose.yaml api device \
+          docker buildx bake -f compose.yaml api device postgres \
             --set 'api.tags=smith-api:latest' \
             --set 'device.tags=smith-device:latest' \
+            --set 'postgres.tags=smith-postgres:latest' \
             --set '*.cache-from=type=gha' \
             --set '*.cache-to=type=gha,mode=max' \
             --load
@@ -97,10 +98,11 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build api image
+      - name: Build images
         run: |
-          docker buildx bake -f compose.yaml api \
+          docker buildx bake -f compose.yaml api postgres \
             --set 'api.tags=smith-api:latest' \
+            --set 'postgres.tags=smith-postgres:latest' \
             --set '*.cache-from=type=gha' \
             --set '*.cache-to=type=gha,mode=max' \
             --load
@@ -160,10 +162,11 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build device image
+      - name: Build images
         run: |
-          docker buildx bake -f compose.yaml device \
+          docker buildx bake -f compose.yaml device postgres \
             --set 'device.tags=smith-device:latest' \
+            --set 'postgres.tags=smith-postgres:latest' \
             --set '*.cache-from=type=gha' \
             --set '*.cache-to=type=gha,mode=max' \
             --load
