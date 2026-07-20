@@ -7,7 +7,6 @@ pub mod downloader;
 pub mod filemanager;
 pub mod logstream;
 pub mod magic;
-pub mod netdiag;
 pub mod nm_watcher;
 pub mod police;
 pub mod postman;

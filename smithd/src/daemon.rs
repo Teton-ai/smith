@@ -69,11 +69,6 @@ pub async fn run() {
     let auditor = AuditorHandle::new(shutdown.signals(), commander.clone());
     auditor.run_audit().await;
 
-    // Diagnose connectivity once on boot. Spawned so a slow sweep never delays
-    // startup, and run even before registration so we can explain why a device
-    // can't reach us. The report is queued and uploaded via /home when reachable.
-    crate::netdiag::handler::run_on_startup(configuration.clone());
-
     let _postman = PostmanHandle::new(
         shutdown.signals(),
         police.clone(),

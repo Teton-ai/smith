@@ -41,7 +41,6 @@ pub fn required_permission(command: &SafeCommandTx) -> Permission {
         | StopLogStream { .. }
         | RunAudit
         | GetLogs { .. }
-        | RunNetworkDiagnostic
         | ReportNMProfiles
         | WifiScan
         | ApplyNetworks { .. } => "basic",

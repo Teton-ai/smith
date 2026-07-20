@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT d.serial_number, d.token\n        FROM device d\n        WHERE\n            CASE\n                WHEN $1 ~ '^[0-9]+$' AND length($1) <= 10 THEN\n                    d.id = $1::int4\n                ELSE\n                    d.serial_number = $1\n            END\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "serial_number",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "token",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      true
+    ]
+  },
+  "hash": "110f4a2a501e33e0e8c7a93a71987f26d393050b92e9c70a1f7647a47870790d"
+}
