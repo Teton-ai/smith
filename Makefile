@@ -57,6 +57,7 @@ E2E_UP_FLAGS ?= --build
 
 test.e2e.up:
 	./scripts/ensure-device-jwt-key.sh
+	./scripts/ensure-e2e-auth0-issuer.sh
 	DEVICE_BASE_IMAGE=ubuntu:22.04 docker compose $(E2E_COMPOSE_FLAGS) up -d $(E2E_UP_FLAGS) $(E2E_SERVICES)
 
 test.e2e.run:
