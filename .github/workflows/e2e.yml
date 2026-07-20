@@ -24,6 +24,7 @@ jobs:
     name: "Build shared images (api, device, postgres)"
     if: ${{ github.event_name == 'workflow_dispatch' || github.event.pull_request.draft == false }}
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -52,6 +53,7 @@ jobs:
     needs: build-images
     if: ${{ github.event_name == 'workflow_dispatch' || github.event.pull_request.draft == false }}
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     env:
       E2E_COMPOSE_FLAGS: -f compose.yaml -f compose.e2e.yaml
     steps:
@@ -91,6 +93,10 @@ jobs:
         run: |
           docker compose $E2E_COMPOSE_FLAGS ps -a
           docker compose $E2E_COMPOSE_FLAGS logs api device postgres
+          # smithd/smith-updater run under systemd inside the device
+          # container, so their output goes to its journal, not container
+          # stdout — "logs device" above never shows it.
+          docker compose $E2E_COMPOSE_FLAGS exec -T device journalctl -u smithd -u smith-updater --no-pager || true
 
       - name: Tear down
         if: always()
@@ -115,6 +121,7 @@ jobs:
     needs: build-images
     if: ${{ github.event_name == 'workflow_dispatch' || github.event.pull_request.draft == false }}
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     env:
       E2E_COMPOSE_FLAGS: -f compose.yaml -f compose.e2e.yaml
     steps:
@@ -156,6 +163,10 @@ jobs:
         run: |
           docker compose $E2E_COMPOSE_FLAGS ps -a
           docker compose $E2E_COMPOSE_FLAGS logs api device postgres
+          # smithd/smith-updater run under systemd inside the device
+          # container, so their output goes to its journal, not container
+          # stdout — "logs device" above never shows it.
+          docker compose $E2E_COMPOSE_FLAGS exec -T device journalctl -u smithd -u smith-updater --no-pager || true
 
       - name: Tear down
         if: always()
@@ -179,6 +190,7 @@ jobs:
     needs: build-images
     if: ${{ github.event_name == 'workflow_dispatch' || github.event.pull_request.draft == false }}
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     continue-on-error: true
     env:
       # Replaces the default e2e overlay: the released image runs its own
@@ -220,6 +232,10 @@ jobs:
         run: |
           docker compose $E2E_COMPOSE_FLAGS ps -a
           docker compose $E2E_COMPOSE_FLAGS logs api device postgres
+          # smithd/smith-updater run under systemd inside the device
+          # container, so their output goes to its journal, not container
+          # stdout — "logs device" above never shows it.
+          docker compose $E2E_COMPOSE_FLAGS exec -T device journalctl -u smithd -u smith-updater --no-pager || true
 
       - name: Tear down
         if: always()
