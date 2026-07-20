@@ -28,7 +28,7 @@ use smith::utils::schema;
 use smith::utils::schema::SafeCommandRequest;
 use sqlx::types::Json as SqlxJson;
 use std::collections::HashMap;
-use tracing::error;
+use tracing::{error, warn};
 use utoipa::IntoParams;
 
 const DEVICE_TAG: &str = "device";
@@ -3297,7 +3297,9 @@ pub async fn apply_device_intent(
             dni.priority,
             n.ssid,
             n.name,
-            n.password
+            n.password,
+            n.security_type,
+            n.credentials ->> 'psk' AS credentials_psk
         FROM device_network_intent dni
         JOIN network n ON n.id = dni.network_id
         WHERE dni.device_id = $1
@@ -3339,22 +3341,51 @@ pub async fn apply_device_intent(
     //     ]
     //   }
     // }
-    let cmd = serde_json::json!({
-        "ApplyNetworks": {
-            "version": intent_version,
-            "networks": networks.iter().map(|n| {
-                let credentials = if let Some(psk) = n.password.as_deref() {
+    let applyable_networks: Vec<serde_json::Value> = networks
+        .iter()
+        .filter_map(|n| {
+            let credentials = match n.security_type.as_deref() {
+                Some(security_type) => {
+                    wire_credentials(security_type, n.credentials_psk.as_deref())
+                }
+                // Legacy rows with no backfilled security_type: preserve the
+                // original password-null inference exactly.
+                None => Some(if let Some(psk) = n.password.as_deref() {
                     serde_json::json!({ "key_mgmt": "wpa-psk", "psk": psk })
                 } else {
                     serde_json::json!({ "key_mgmt": "none" })
-                };
-                serde_json::json!({
-                    "profile_name": n.name,
-                    "ssid": n.ssid.as_deref().unwrap_or(""),
-                    "priority": n.priority,
-                    "credentials": credentials
-                })
-            }).collect::<Vec<_>>()
+                }),
+            };
+            let Some(credentials) = credentials else {
+                warn!(
+                    device_id = resolved_id,
+                    ssid = n.ssid.as_deref().unwrap_or(""),
+                    security_type = n.security_type.as_deref().unwrap_or("<null>"),
+                    "skipping network in ApplyNetworks: security type not applyable by smithd"
+                );
+                return None;
+            };
+            Some(serde_json::json!({
+                "profile_name": n.name,
+                "ssid": n.ssid.as_deref().unwrap_or(""),
+                "priority": n.priority,
+                "credentials": credentials
+            }))
+        })
+        .collect();
+
+    if applyable_networks.is_empty() {
+        error!(
+            device_id = resolved_id,
+            "no applyable networks remain after security_type filtering; refusing to send empty ApplyNetworks"
+        );
+        return Err(StatusCode::UNPROCESSABLE_ENTITY);
+    }
+
+    let cmd = serde_json::json!({
+        "ApplyNetworks": {
+            "version": intent_version,
+            "networks": applyable_networks
         }
     });
 
