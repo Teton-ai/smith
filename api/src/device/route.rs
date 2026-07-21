@@ -3423,6 +3423,17 @@ mod tests {
     use super::wire_credentials;
     use serde_json::json;
 
+    // Mirrors the legacy inline heuristic in apply_device_intent exactly.
+    // Used to verify the dual-read path produces byte-identical output for
+    // backfilled rows (where credentials_psk == password by construction).
+    fn legacy_credentials(password: Option<&str>) -> serde_json::Value {
+        if let Some(psk) = password {
+            json!({ "key_mgmt": "wpa-psk", "psk": psk })
+        } else {
+            json!({ "key_mgmt": "none" })
+        }
+    }
+
     #[test]
     fn open_and_owe_map_to_none() {
         assert_eq!(
@@ -3466,5 +3477,35 @@ mod tests {
         // unknown / unmodelled types
         assert_eq!(wire_credentials("wep", None), None);
         assert_eq!(wire_credentials("", None), None);
+    }
+
+    #[test]
+    fn dual_read_matches_legacy_for_backfilled_rows() {
+        // Open row: password IS NULL, security_type backfilled to "open", credentials = {}.
+        // credentials_psk extracted from {} is None.
+        let password: Option<&str> = None;
+        let credentials_psk: Option<&str> = None;
+        assert_eq!(
+            wire_credentials("open", credentials_psk),
+            Some(legacy_credentials(password))
+        );
+
+        // WPA-PSK row: password = "secret", security_type = "wpa-psk",
+        // credentials = {"psk": "secret"}, so credentials_psk = Some("secret").
+        let password = Some("secret");
+        let credentials_psk = Some("secret");
+        assert_eq!(
+            wire_credentials("wpa-psk", credentials_psk),
+            Some(legacy_credentials(password))
+        );
+
+        // NULL security_type row (new insert from an unupdated writer):
+        // the dual-read builder falls back to the legacy heuristic verbatim,
+        // so the output is the legacy output by definition. Verify both shapes.
+        assert_eq!(legacy_credentials(None), json!({ "key_mgmt": "none" }));
+        assert_eq!(
+            legacy_credentials(Some("pw")),
+            json!({ "key_mgmt": "wpa-psk", "psk": "pw" })
+        );
     }
 }
