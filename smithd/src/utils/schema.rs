@@ -64,8 +64,21 @@ pub struct Package {
 #[derive(Serialize, Deserialize, Default, Debug, Clone)]
 pub struct SafeCommandResponse {
     pub id: i32,
+    #[serde(deserialize_with = "deserialize_command")]
     pub command: SafeCommandRx,
     pub status: i32,
+}
+
+/// Tolerate any report variant this build doesn't recognize (e.g. a report type that
+/// was removed but is still sent by an un-upgraded device): fall back to
+/// `SafeCommandRx::Unknown` instead of failing to deserialize the whole request,
+/// which would otherwise reject the POST and block the device's status update.
+fn deserialize_command<'de, D>(deserializer: D) -> Result<SafeCommandRx, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = Value::deserialize(deserializer)?;
+    Ok(serde_json::from_value(value).unwrap_or(SafeCommandRx::Unknown))
 }
 
 #[derive(Serialize, Deserialize, Default, Debug, Clone)]
@@ -196,6 +209,8 @@ pub enum SafeCommandRx {
         applied_version: i32,
         conditions: Vec<NetworkCondition>,
     },
+    /// Fallback for any report this build doesn't recognize; ignored by the api.
+    Unknown,
 }
 
 #[derive(Serialize, Deserialize, Default, Debug)]
