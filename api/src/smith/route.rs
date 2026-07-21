@@ -68,27 +68,8 @@ pub async fn home(
     device: AuthedDevice,
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
     Extension(state): Extension<State>,
-    body: Bytes,
+    Json(mut payload): Json<HomePost>,
 ) -> (StatusCode, Json<HomePostResponse>) {
-    // Temporary diagnostic: axum's `Json<HomePost>` extractor rejects with 422
-    // before the handler runs, and the raw body/error aren't logged anywhere,
-    // making a version-skew payload mismatch invisible. Parse manually here so
-    // we can see exactly what's failing. Remove once diagnosed.
-    let mut payload: HomePost = match serde_json::from_slice(&body) {
-        Ok(payload) => payload,
-        Err(err) => {
-            error!(
-                "Failed to parse /smith/home body for device {} (serial {}): {err}; raw body: {}",
-                device.id,
-                device.serial_number,
-                String::from_utf8_lossy(&body)
-            );
-            return (
-                StatusCode::UNPROCESSABLE_ENTITY,
-                Json(HomePostResponse::default()),
-            );
-        }
-    };
     let release_id = payload.release_id;
     let service_statuses = std::mem::take(&mut payload.service_statuses);
     let _ = crate::home::save_responses(device.id, &device.serial_number, payload, &state.pg_pool)

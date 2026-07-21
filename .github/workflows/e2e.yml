@@ -16,15 +16,18 @@ env:
 
 jobs:
   # api, device (both from HEAD) and postgres (pg_partman, static) are each
-  # needed by two or more of the jobs below. Building them here once and
-  # populating the GHA layer cache means the parallel jobs restore instead of
-  # rebuilding — without this, three jobs starting at the same instant can't
-  # see each other's cache and each pays the full build cost.
+  # needed by two or more of the jobs below. Built here once and handed to the
+  # parallel jobs as a single artifact (docker save/load) rather than through
+  # buildx's GHA layer cache: that cache is only loosely consistent across
+  # jobs that start moments apart, and a downstream job can silently restore
+  # a stale layer for one image while getting fresh layers for another —
+  # e.g. an `api` build missing a very recent schema change. An artifact is
+  # an exact byte-for-byte copy, so every job runs the same images.
   build-images:
     name: "Build shared images (api, device, postgres)"
     if: ${{ github.event_name == 'workflow_dispatch' || github.event.pull_request.draft == false }}
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -43,16 +46,31 @@ jobs:
       - name: Expose GitHub Actions cache credentials
         uses: crazy-max/ghaction-github-runtime@056b8ec6661ce03a987ab8643a0edc346ae63fe3 # v2.2.0
 
-      - name: Build and cache api, device, postgres
+      # cache-from/cache-to here only speed up build-images' own layer
+      # rebuild across separate CI runs; --load additionally lands the
+      # images in this job's local daemon so they can be saved below. No
+      # other job ever reads this GHA cache directly.
+      - name: Build api, device, postgres
         run: |
           docker buildx bake -f compose.yaml api device postgres \
             --set 'api.tags=smith-api:latest' \
             --set 'device.tags=smith-device:latest' \
             --set 'postgres.tags=smith-postgres:latest' \
             --set '*.cache-from=type=gha' \
-            --set '*.cache-to=type=gha,mode=max'
+            --set '*.cache-to=type=gha,mode=max' \
+            --load
         env:
           DEVICE_BASE_IMAGE: ubuntu:22.04
+
+      - name: Save images for downstream jobs
+        run: docker save smith-api:latest smith-device:latest smith-postgres:latest -o /tmp/e2e-images.tar
+
+      - name: Upload images artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-images
+          path: /tmp/e2e-images.tar
+          retention-days: 1
 
   # Real smithd (under systemd, in a container) against the API built from the
   # same tree. A failure means the daemon in this tree cannot talk to its API.
@@ -77,27 +95,14 @@ jobs:
       - name: Set up cargo cache
         uses: Swatinem/rust-cache@v2
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+      - name: Download images artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: e2e-images
+          path: /tmp
 
-      # docker/setup-buildx-action doesn't expose the GitHub Actions cache
-      # credentials to the shell; only higher-level actions like
-      # docker-build-push wire that up automatically. Without this, `docker
-      # buildx bake --cache-to/--cache-from=type=gha` silently no-ops — no
-      # error, it just never exports or imports anything.
-      - name: Expose GitHub Actions cache credentials
-        uses: crazy-max/ghaction-github-runtime@056b8ec6661ce03a987ab8643a0edc346ae63fe3 # v2.2.0
-
-      - name: Restore api, device, postgres from cache
-        run: |
-          docker buildx bake -f compose.yaml api device postgres \
-            --set 'api.tags=smith-api:latest' \
-            --set 'device.tags=smith-device:latest' \
-            --set 'postgres.tags=smith-postgres:latest' \
-            --set '*.cache-from=type=gha' \
-            --load
-        env:
-          DEVICE_BASE_IMAGE: ubuntu:22.04
+      - name: Load images
+        run: docker load -i /tmp/e2e-images.tar
 
       - name: Run e2e tests
         run: make test.e2e
@@ -155,24 +160,17 @@ jobs:
       - name: Set up cargo cache
         uses: Swatinem/rust-cache@v2
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+      - name: Download images artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: e2e-images
+          path: /tmp
 
-      # docker/setup-buildx-action doesn't expose the GitHub Actions cache
-      # credentials to the shell; only higher-level actions like
-      # docker-build-push wire that up automatically. Without this, `docker
-      # buildx bake --cache-to/--cache-from=type=gha` silently no-ops — no
-      # error, it just never exports or imports anything.
-      - name: Expose GitHub Actions cache credentials
-        uses: crazy-max/ghaction-github-runtime@056b8ec6661ce03a987ab8643a0edc346ae63fe3 # v2.2.0
-
-      - name: Restore api, postgres from cache
-        run: |
-          docker buildx bake -f compose.yaml api postgres \
-            --set 'api.tags=smith-api:latest' \
-            --set 'postgres.tags=smith-postgres:latest' \
-            --set '*.cache-from=type=gha' \
-            --load
+      # Loads smith-api and smith-postgres (the images this job needs from
+      # build-images); smith-device from the artifact is immediately
+      # overwritten by the next step, which is the point of this job.
+      - name: Load images
+        run: docker load -i /tmp/e2e-images.tar
 
       - name: Build device image from latest release
         run: ./scripts/build-released-device.sh
@@ -233,26 +231,17 @@ jobs:
       - name: Set up cargo cache
         uses: Swatinem/rust-cache@v2
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+      - name: Download images artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: e2e-images
+          path: /tmp
 
-      # docker/setup-buildx-action doesn't expose the GitHub Actions cache
-      # credentials to the shell; only higher-level actions like
-      # docker-build-push wire that up automatically. Without this, `docker
-      # buildx bake --cache-to/--cache-from=type=gha` silently no-ops — no
-      # error, it just never exports or imports anything.
-      - name: Expose GitHub Actions cache credentials
-        uses: crazy-max/ghaction-github-runtime@056b8ec6661ce03a987ab8643a0edc346ae63fe3 # v2.2.0
-
-      - name: Restore device, postgres from cache
-        run: |
-          docker buildx bake -f compose.yaml device postgres \
-            --set 'device.tags=smith-device:latest' \
-            --set 'postgres.tags=smith-postgres:latest' \
-            --set '*.cache-from=type=gha' \
-            --load
-        env:
-          DEVICE_BASE_IMAGE: ubuntu:22.04
+      # This job only uses smith-device and smith-postgres from the artifact;
+      # smith-api is loaded too but unused since compose.released-api.yaml
+      # swaps in the published tetonai/smith-api:latest image instead.
+      - name: Load images
+        run: docker load -i /tmp/e2e-images.tar
 
       - name: Run e2e tests
         run: make test.e2e
