@@ -3359,7 +3359,6 @@ pub async fn apply_device_intent(
             let Some(credentials) = credentials else {
                 warn!(
                     device_id = resolved_id,
-                    ssid = n.ssid.as_deref().unwrap_or(""),
                     security_type = n.security_type.as_deref().unwrap_or("<null>"),
                     "skipping network in ApplyNetworks: security type not applyable by smithd"
                 );
