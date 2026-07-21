@@ -162,41 +162,26 @@ async fn get_nm_wifi_profiles() -> Result<Vec<NMProfile>> {
         let mut detail_cmd = Command::new("nmcli");
         detail_cmd.args(["--show-secrets", "-t", "connection", "show", "uuid", &uuid]);
 
-        let (ssid, password) = match execute_nmcli_command(detail_cmd).await {
+        let detail = match execute_nmcli_command(detail_cmd).await {
             Ok(output) if output.status.success() => {
                 let stdout = String::from_utf8_lossy(&output.stdout);
-                let mut ssid = None;
-                let mut psk = None;
-                for line in stdout.lines() {
-                    if let Some(val) = line.strip_prefix("802-11-wireless.ssid:") {
-                        if !val.is_empty() {
-                            ssid = Some(unescape_terse(val));
-                        }
-                    } else if let Some(val) = line.strip_prefix("802-11-wireless-security.psk:")
-                        && !val.is_empty()
-                        && val != "--"
-                    {
-                        psk = Some(unescape_terse(val));
-                    }
-                }
-                (ssid, psk)
+                parse_nm_profile_detail(&stdout)
             }
             Ok(output) => {
                 let stderr = String::from_utf8_lossy(&output.stderr);
                 tracing::warn!("nmcli connection show uuid {uuid} failed: {stderr}");
-                (None, None)
+                NMProfile::default()
             }
             Err(e) => {
                 tracing::warn!("Failed to run nmcli connection show uuid {uuid}: {e}");
-                (None, None)
+                NMProfile::default()
             }
         };
 
         profiles.push(NMProfile {
             name,
-            ssid,
-            password,
             is_active,
+            ..detail
         });
     }
 
@@ -343,6 +328,89 @@ fn parse_optional_rate(s: &str) -> Result<Option<i32>, std::num::ParseFloatError
         Ok(None)
     } else {
         Ok(Some(s.parse::<f64>()?.round() as i32))
+    }
+}
+
+fn parse_nm_profile_detail(stdout: &str) -> NMProfile {
+    let mut ssid = None;
+    let mut password = None;
+    let mut raw_key_mgmt: Option<String> = None;
+    let mut raw_hidden: Option<String> = None;
+    let mut pmf = None;
+    let mut eap = None;
+    let mut phase2_auth = None;
+    let mut anonymous_identity = None;
+    let mut eap_identity = None;
+
+    for line in stdout.lines() {
+        if let Some(val) = line.strip_prefix("802-11-wireless.ssid:") {
+            if !val.is_empty() {
+                ssid = Some(unescape_terse(val));
+            }
+        } else if let Some(val) = line.strip_prefix("802-11-wireless-security.psk:")
+            && !val.is_empty()
+            && val != "--"
+        {
+            password = Some(unescape_terse(val));
+        } else if let Some(val) = line.strip_prefix("802-11-wireless-security.key-mgmt:")
+            && !val.is_empty()
+            && val != "--"
+        {
+            raw_key_mgmt = Some(unescape_terse(val));
+        } else if let Some(val) = line.strip_prefix("802-11-wireless.hidden:")
+            && !val.is_empty()
+            && val != "--"
+        {
+            raw_hidden = Some(unescape_terse(val));
+        } else if let Some(val) = line.strip_prefix("802-11-wireless-security.pmf:")
+            && !val.is_empty()
+            && val != "--"
+        {
+            pmf = Some(unescape_terse(val));
+        } else if let Some(val) = line.strip_prefix("802-1x.eap:")
+            && !val.is_empty()
+            && val != "--"
+        {
+            eap = Some(unescape_terse(val));
+        } else if let Some(val) = line.strip_prefix("802-1x.phase2-auth:")
+            && !val.is_empty()
+            && val != "--"
+        {
+            phase2_auth = Some(unescape_terse(val));
+        } else if let Some(val) = line.strip_prefix("802-1x.anonymous-identity:")
+            && !val.is_empty()
+            && val != "--"
+        {
+            anonymous_identity = Some(unescape_terse(val));
+        } else if let Some(val) = line.strip_prefix("802-1x.identity:")
+            && !val.is_empty()
+            && val != "--"
+        {
+            eap_identity = Some(unescape_terse(val));
+        }
+    }
+
+    // Sentinel: None means old smithd did not extract key_mgmt; Some("open") means confirmed
+    // no security block (open network). Always Some for new smithd.
+    let key_mgmt = Some(raw_key_mgmt.unwrap_or_else(|| "open".to_string()));
+
+    let hidden = raw_hidden.as_deref().and_then(|v| match v {
+        "yes" | "true" => Some(true),
+        "no" | "false" => Some(false),
+        _ => None,
+    });
+
+    NMProfile {
+        ssid,
+        password,
+        key_mgmt,
+        hidden,
+        pmf,
+        eap,
+        phase2_auth,
+        anonymous_identity,
+        eap_identity,
+        ..Default::default()
     }
 }
 
@@ -1640,6 +1708,7 @@ BackupAP:802-11-wireless:--:uuid-4";
             ssid,
             password,
             is_active: fields[4] == "activated",
+            ..Default::default()
         })
     }
 
@@ -1684,6 +1753,96 @@ OpenNet:802-11-wireless:OpenNet:--:--";
     #[test]
     fn parse_nm_profiles_skips_non_wifi() {
         assert!(parse_nm_profile_line("eth0:802-3-ethernet:::--").is_none());
+    }
+
+    #[test]
+    fn nm_profile_detail_wpa2_personal() {
+        let stdout = "802-11-wireless.ssid:CorpWifi\n\
+802-11-wireless-security.key-mgmt:wpa-psk\n\
+802-11-wireless-security.psk:secret123\n\
+802-11-wireless.hidden:no\n\
+802-11-wireless-security.pmf:0\n";
+        let p = parse_nm_profile_detail(stdout);
+        assert_eq!(p.ssid, Some("CorpWifi".to_string()));
+        assert_eq!(p.password, Some("secret123".to_string()));
+        assert_eq!(p.key_mgmt, Some("wpa-psk".to_string()));
+        assert_eq!(p.hidden, Some(false));
+        assert_eq!(p.pmf, Some("0".to_string()));
+        assert_eq!(p.eap, None);
+    }
+
+    #[test]
+    fn nm_profile_detail_open_network_explicit_key_mgmt() {
+        let stdout = "802-11-wireless.ssid:GuestWifi\n\
+802-11-wireless-security.key-mgmt:none\n\
+802-11-wireless.hidden:no\n";
+        let p = parse_nm_profile_detail(stdout);
+        assert_eq!(p.key_mgmt, Some("none".to_string()));
+        assert_eq!(p.password, None);
+    }
+
+    #[test]
+    fn nm_profile_detail_open_network_no_security_block_sets_sentinel() {
+        // No 802-11-wireless-security lines at all: sentinel "open" must be set.
+        let stdout = "802-11-wireless.ssid:FreeWifi\n\
+802-11-wireless.hidden:no\n";
+        let p = parse_nm_profile_detail(stdout);
+        assert_eq!(p.key_mgmt, Some("open".to_string()));
+        assert_eq!(p.password, None);
+    }
+
+    #[test]
+    fn nm_profile_detail_key_mgmt_dash_sets_sentinel() {
+        // key-mgmt field present but value is "--": treat as no security block.
+        let stdout = "802-11-wireless.ssid:FreeWifi\n\
+802-11-wireless-security.key-mgmt:--\n";
+        let p = parse_nm_profile_detail(stdout);
+        assert_eq!(p.key_mgmt, Some("open".to_string()));
+    }
+
+    #[test]
+    fn nm_profile_detail_hidden_yes_no_parsing() {
+        let yes = parse_nm_profile_detail("802-11-wireless.hidden:yes\n");
+        assert_eq!(yes.hidden, Some(true));
+        let no = parse_nm_profile_detail("802-11-wireless.hidden:no\n");
+        assert_eq!(no.hidden, Some(false));
+        let missing = parse_nm_profile_detail("802-11-wireless.ssid:X\n");
+        assert_eq!(missing.hidden, None);
+        let dash = parse_nm_profile_detail("802-11-wireless.hidden:--\n");
+        assert_eq!(dash.hidden, None);
+    }
+
+    #[test]
+    fn nm_profile_detail_eap_enterprise_fields() {
+        let stdout = "802-11-wireless.ssid:CorpEAP\n\
+802-11-wireless-security.key-mgmt:wpa-eap\n\
+802-11-wireless.hidden:no\n\
+802-11-wireless-security.pmf:1\n\
+802-1x.eap:peap\n\
+802-1x.phase2-auth:mschapv2\n\
+802-1x.anonymous-identity:anon@corp.com\n\
+802-1x.identity:user@corp.com\n";
+        let p = parse_nm_profile_detail(stdout);
+        assert_eq!(p.key_mgmt, Some("wpa-eap".to_string()));
+        assert_eq!(p.pmf, Some("1".to_string()));
+        assert_eq!(p.eap, Some("peap".to_string()));
+        assert_eq!(p.phase2_auth, Some("mschapv2".to_string()));
+        assert_eq!(p.anonymous_identity, Some("anon@corp.com".to_string()));
+        assert_eq!(p.eap_identity, Some("user@corp.com".to_string()));
+    }
+
+    #[test]
+    fn nm_profile_detail_absent_eap_fields_are_none() {
+        let stdout = "802-11-wireless.ssid:X\n\
+802-1x.eap:--\n\
+802-1x.phase2-auth:--\n\
+802-1x.anonymous-identity:--\n\
+802-1x.identity:--\n";
+        let p = parse_nm_profile_detail(stdout);
+        assert_eq!(p.eap, None);
+        assert_eq!(p.phase2_auth, None);
+        assert_eq!(p.anonymous_identity, None);
+        assert_eq!(p.eap_identity, None);
     }
 
     #[test]
