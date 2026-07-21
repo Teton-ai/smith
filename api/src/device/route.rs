@@ -28,7 +28,7 @@ use smith::utils::schema;
 use smith::utils::schema::SafeCommandRequest;
 use sqlx::types::Json as SqlxJson;
 use std::collections::HashMap;
-use tracing::error;
+use tracing::{error, warn};
 use utoipa::IntoParams;
 
 const DEVICE_TAG: &str = "device";
@@ -3225,6 +3225,23 @@ pub async fn delete_device_intent(
     Ok(StatusCode::NO_CONTENT)
 }
 
+/// Map a stored `security_type` (and its psk, if any) to the wire credential
+/// object smithd's applier consumes. Capability-bounded: it only ever emits a
+/// `key_mgmt` smithd can currently apply (`none`/`wpa-psk`), degrading `sae` to
+/// `wpa-psk` and `owe` to `none`. Returns `None` when smithd cannot apply the
+/// type yet (`wpa-eap`, unknown) or a psk-requiring type has no psk, so the
+/// caller can skip the network rather than emit an unusable credential.
+fn wire_credentials(security_type: &str, psk: Option<&str>) -> Option<serde_json::Value> {
+    match security_type {
+        "open" | "owe" => Some(serde_json::json!({ "key_mgmt": "none" })),
+        "wpa-psk" | "sae" => {
+            let psk = psk?;
+            Some(serde_json::json!({ "key_mgmt": "wpa-psk", "psk": psk }))
+        }
+        _ => None,
+    }
+}
+
 #[utoipa::path(
     post,
     path = "/devices/{device_id}/intent/apply",
@@ -3280,7 +3297,9 @@ pub async fn apply_device_intent(
             dni.priority,
             n.ssid,
             n.name,
-            n.password
+            n.password,
+            n.security_type,
+            n.credentials ->> 'psk' AS credentials_psk
         FROM device_network_intent dni
         JOIN network n ON n.id = dni.network_id
         WHERE dni.device_id = $1
@@ -3322,22 +3341,50 @@ pub async fn apply_device_intent(
     //     ]
     //   }
     // }
-    let cmd = serde_json::json!({
-        "ApplyNetworks": {
-            "version": intent_version,
-            "networks": networks.iter().map(|n| {
-                let credentials = if let Some(psk) = n.password.as_deref() {
+    let applyable_networks: Vec<serde_json::Value> = networks
+        .iter()
+        .filter_map(|n| {
+            let credentials = match n.security_type.as_deref() {
+                Some(security_type) => {
+                    wire_credentials(security_type, n.credentials_psk.as_deref())
+                }
+                // Legacy rows with no backfilled security_type: preserve the
+                // original password-null inference exactly.
+                None => Some(if let Some(psk) = n.password.as_deref() {
                     serde_json::json!({ "key_mgmt": "wpa-psk", "psk": psk })
                 } else {
                     serde_json::json!({ "key_mgmt": "none" })
-                };
-                serde_json::json!({
-                    "profile_name": n.name,
-                    "ssid": n.ssid.as_deref().unwrap_or(""),
-                    "priority": n.priority,
-                    "credentials": credentials
-                })
-            }).collect::<Vec<_>>()
+                }),
+            };
+            let Some(credentials) = credentials else {
+                warn!(
+                    device_id = resolved_id,
+                    security_type = n.security_type.as_deref().unwrap_or("<null>"),
+                    "skipping network in ApplyNetworks: security type not applyable by smithd"
+                );
+                return None;
+            };
+            Some(serde_json::json!({
+                "profile_name": n.name,
+                "ssid": n.ssid.as_deref().unwrap_or(""),
+                "priority": n.priority,
+                "credentials": credentials
+            }))
+        })
+        .collect();
+
+    if applyable_networks.is_empty() {
+        error!(
+            device_id = resolved_id,
+            "no applyable networks remain after security_type filtering; refusing to send empty ApplyNetworks"
+        );
+        return Err(StatusCode::UNPROCESSABLE_ENTITY);
+    }
+
+    let cmd = serde_json::json!({
+        "ApplyNetworks": {
+            "version": intent_version,
+            "networks": applyable_networks
         }
     });
 
@@ -3368,4 +3415,96 @@ pub async fn apply_device_intent(
             command_id,
         }),
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::wire_credentials;
+    use serde_json::json;
+
+    // Mirrors the legacy inline heuristic in apply_device_intent exactly.
+    // Used to verify the dual-read path produces byte-identical output for
+    // backfilled rows (where credentials_psk == password by construction).
+    fn legacy_credentials(password: Option<&str>) -> serde_json::Value {
+        if let Some(psk) = password {
+            json!({ "key_mgmt": "wpa-psk", "psk": psk })
+        } else {
+            json!({ "key_mgmt": "none" })
+        }
+    }
+
+    #[test]
+    fn open_and_owe_map_to_none() {
+        assert_eq!(
+            wire_credentials("open", None),
+            Some(json!({ "key_mgmt": "none" }))
+        );
+        assert_eq!(
+            wire_credentials("owe", None),
+            Some(json!({ "key_mgmt": "none" }))
+        );
+        // psk is ignored for open-family types
+        assert_eq!(
+            wire_credentials("owe", Some("ignored")),
+            Some(json!({ "key_mgmt": "none" }))
+        );
+    }
+
+    #[test]
+    fn wpa_psk_and_sae_map_to_wpa_psk_with_psk() {
+        assert_eq!(
+            wire_credentials("wpa-psk", Some("secret")),
+            Some(json!({ "key_mgmt": "wpa-psk", "psk": "secret" }))
+        );
+        // sae degrades to wpa-psk (works on WPA2/WPA3-mixed APs smithd can apply)
+        assert_eq!(
+            wire_credentials("sae", Some("secret")),
+            Some(json!({ "key_mgmt": "wpa-psk", "psk": "secret" }))
+        );
+    }
+
+    #[test]
+    fn psk_required_but_missing_is_skipped() {
+        assert_eq!(wire_credentials("wpa-psk", None), None);
+        assert_eq!(wire_credentials("sae", None), None);
+    }
+
+    #[test]
+    fn unapplyable_types_are_skipped() {
+        // enterprise not applyable by smithd yet
+        assert_eq!(wire_credentials("wpa-eap", Some("secret")), None);
+        // unknown / unmodelled types
+        assert_eq!(wire_credentials("wep", None), None);
+        assert_eq!(wire_credentials("", None), None);
+    }
+
+    #[test]
+    fn dual_read_matches_legacy_for_backfilled_rows() {
+        // Open row: password IS NULL, security_type backfilled to "open", credentials = {}.
+        // credentials_psk extracted from {} is None.
+        let password: Option<&str> = None;
+        let credentials_psk: Option<&str> = None;
+        assert_eq!(
+            wire_credentials("open", credentials_psk),
+            Some(legacy_credentials(password))
+        );
+
+        // WPA-PSK row: password = "secret", security_type = "wpa-psk",
+        // credentials = {"psk": "secret"}, so credentials_psk = Some("secret").
+        let password = Some("secret");
+        let credentials_psk = Some("secret");
+        assert_eq!(
+            wire_credentials("wpa-psk", credentials_psk),
+            Some(legacy_credentials(password))
+        );
+
+        // NULL security_type row (new insert from an unupdated writer):
+        // the dual-read builder falls back to the legacy heuristic verbatim,
+        // so the output is the legacy output by definition. Verify both shapes.
+        assert_eq!(legacy_credentials(None), json!({ "key_mgmt": "none" }));
+        assert_eq!(
+            legacy_credentials(Some("pw")),
+            json!({ "key_mgmt": "wpa-psk", "psk": "pw" })
+        );
+    }
 }

@@ -1,0 +1,52 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT\n            dni.priority,\n            n.ssid,\n            n.name,\n            n.password,\n            n.security_type,\n            n.credentials ->> 'psk' AS credentials_psk\n        FROM device_network_intent dni\n        JOIN network n ON n.id = dni.network_id\n        WHERE dni.device_id = $1\n        ORDER BY dni.priority ASC\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "priority",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "ssid",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "password",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "security_type",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "credentials_psk",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      false,
+      true,
+      true,
+      null
+    ]
+  },
+  "hash": "f5b209c801bd9829b51271c59be56f611e76adae900a5138ed5348b46a670516"
+}
