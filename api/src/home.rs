@@ -468,15 +468,16 @@ pub async fn save_responses(
         }
         let mut response_json = match &response.command {
             SafeCommandRx::ReportNMProfiles { profiles } => {
+                // Serialize the whole profile so any future NMProfile field is kept
+                // automatically, then redact just the secret.
                 let redacted: Vec<_> = profiles
                     .iter()
                     .map(|p| {
-                        json!({
-                            "name": p.name,
-                            "ssid": p.ssid,
-                            "password": null,
-                            "is_active": p.is_active,
-                        })
+                        let mut v = json!(p);
+                        if let Some(obj) = v.as_object_mut() {
+                            obj.insert("password".to_string(), Value::Null);
+                        }
+                        v
                     })
                     .collect();
                 json!({ "ReportNMProfiles": { "profiles": redacted } })
