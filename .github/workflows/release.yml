@@ -10,6 +10,9 @@ permissions:
 jobs:
   bump-version:
     runs-on: ubuntu-latest
+    concurrency:
+      group: release-bump-version
+      cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
 

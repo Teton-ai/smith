@@ -119,7 +119,12 @@ async fn empty_release_upgrade_reports_release_id() -> Result<()> {
 
     // The Upgrade command makes the daemon upgrade immediately instead of
     // waiting for the updater's 60s check tick.
-    enqueue(&ctx, device_id, r#""Upgrade""#).await?;
+    let command_id = enqueue(&ctx, device_id, r#""Upgrade""#).await?;
+    let (response, status) = wait_for_response(&ctx, command_id).await?;
+    ensure!(
+        status == 0,
+        "Upgrade command failed with status {status}: {response}"
+    );
 
     wait_until(
         &format!("device to report release_id {release_id}"),

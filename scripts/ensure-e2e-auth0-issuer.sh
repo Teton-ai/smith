@@ -10,7 +10,8 @@ cd "$(dirname "$0")/.."
 env_file="${1:-.env}"
 touch "$env_file"
 
-if grep -qE '^AUTH0_ISSUER=https?://' "$env_file"; then
+existing=$(sed -n 's/^AUTH0_ISSUER=//p' "$env_file" | head -1)
+if [[ "$existing" =~ ^https?://[^/]+ ]]; then
   exit 0
 fi
 
