@@ -10,6 +10,14 @@ concurrency:
   group: e2e-${{ github.ref }}
   cancel-in-progress: true
 
+# Gate every job below to the release PR (branch created by release.yml's
+# bump-version job) rather than every PR into main: e2e is what confirms main
+# is safe to release, not a per-feature-PR check, and build-images alone takes
+# ~20-30 minutes. release.yml refreshes the release PR on every main push, so
+# this still runs at least once per merge — just after, not before. Manual
+# workflow_dispatch bypasses the branch check to let any branch be tested
+# on demand.
+
 permissions:
   contents: read
 
@@ -28,7 +36,7 @@ jobs:
   # an exact byte-for-byte copy, so every job runs the same images.
   build-images:
     name: "Build shared images (api, device, postgres)"
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event.pull_request.draft == false }}
+    if: ${{ github.event_name == 'workflow_dispatch' || (github.event.pull_request.draft == false && startsWith(github.head_ref, 'chore/release-v')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -80,7 +88,7 @@ jobs:
   e2e-head:
     name: "E2E: HEAD daemon x HEAD API"
     needs: build-images
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event.pull_request.draft == false }}
+    if: ${{ github.event_name == 'workflow_dispatch' || (github.event.pull_request.draft == false && startsWith(github.head_ref, 'chore/release-v')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
@@ -143,7 +151,7 @@ jobs:
   e2e-released-daemon:
     name: "E2E: released daemon x HEAD API"
     needs: build-images
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event.pull_request.draft == false }}
+    if: ${{ github.event_name == 'workflow_dispatch' || (github.event.pull_request.draft == false && startsWith(github.head_ref, 'chore/release-v')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 25
     env:
@@ -213,7 +221,7 @@ jobs:
   e2e-released-api:
     name: "E2E: HEAD daemon x released API (non-blocking)"
     needs: build-images
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event.pull_request.draft == false }}
+    if: ${{ github.event_name == 'workflow_dispatch' || (github.event.pull_request.draft == false && startsWith(github.head_ref, 'chore/release-v')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     continue-on-error: true
