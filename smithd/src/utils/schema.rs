@@ -87,6 +87,13 @@ pub struct NMProfile {
     pub ssid: Option<String>,
     pub password: Option<String>,
     pub is_active: bool,
+    pub key_mgmt: Option<String>,
+    pub hidden: Option<bool>,
+    pub pmf: Option<String>,
+    pub eap: Option<String>,
+    pub phase2_auth: Option<String>,
+    pub anonymous_identity: Option<String>,
+    pub eap_identity: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]

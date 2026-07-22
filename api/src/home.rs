@@ -32,6 +32,23 @@ fn sanitize_nul(value: &mut Value) {
     }
 }
 
+fn map_key_mgmt(km: &str) -> Option<&'static str> {
+    match km {
+        "open" | "none" => Some("open"),
+        "wpa-psk" => Some("wpa-psk"),
+        "sae" => Some("sae"),
+        "owe" => Some("owe"),
+        "wpa-eap" => Some("wpa-eap"),
+        other => {
+            tracing::warn!(
+                key_mgmt = other,
+                "unknown key_mgmt in ReportNMProfiles; skipping security_type"
+            );
+            None
+        }
+    }
+}
+
 pub async fn save_responses(
     device_id: i32,
     device_serial_number: &str,
@@ -118,28 +135,94 @@ pub async fn save_responses(
                         None => continue,
                     };
 
+                    let mapped_security_type: Option<&str> =
+                        profile.key_mgmt.as_deref().and_then(map_key_mgmt);
+
+                    let mut creds_patch = serde_json::Map::new();
+                    if let Some(v) = &profile.pmf {
+                        creds_patch.insert("pmf".into(), json!(v));
+                    }
+                    if let Some(v) = &profile.eap {
+                        creds_patch.insert("eap".into(), json!(v));
+                    }
+                    if let Some(v) = &profile.phase2_auth {
+                        creds_patch.insert("phase2_auth".into(), json!(v));
+                    }
+                    if let Some(v) = &profile.anonymous_identity {
+                        creds_patch.insert("anonymous_identity".into(), json!(v));
+                    }
+                    let identity_val = profile
+                        .eap_identity
+                        .as_ref()
+                        .map(|u| json!({"username": u}));
+
                     let existing_id: Option<i32> = sqlx::query_scalar!(
+                        // ORDER BY id DESC ensures old smithd (NULL discriminators, may match
+                        // multiple rows) picks the newest row, which carries real security_type
+                        // data from new smithd reports rather than the provisional backfill.
                         r#"SELECT id FROM network
                            WHERE ssid = $1
                              AND (password = $2 OR (password IS NULL AND $2 IS NULL))
+                             AND ($3::bool IS NULL OR is_network_hidden = $3)
+                             AND ($4::text IS NULL OR security_type = $4)
+                           ORDER BY id DESC
                            LIMIT 1"#,
                         ssid,
-                        profile.password
+                        profile.password,
+                        profile.hidden as Option<bool>,
+                        mapped_security_type as Option<&str>,
                     )
                     .fetch_optional(&mut *tx)
                     .await?;
 
                     let network_id: i32 = match existing_id {
-                        Some(id) => id,
-                        None => sqlx::query_scalar!(
-                            r#"INSERT INTO network (ssid, password, name, network_type, is_network_hidden)
-                               VALUES ($1, $2, $1, 'wifi', false)
-                               RETURNING id"#,
-                            ssid,
-                            profile.password
-                        )
-                        .fetch_one(&mut *tx)
-                        .await?,
+                        Some(id) => {
+                            if !creds_patch.is_empty() || identity_val.is_some() {
+                                sqlx::query!(
+                                    r#"UPDATE network
+                                       SET credentials = credentials || $2::jsonb,
+                                           identity    = COALESCE($3::jsonb, identity)
+                                       WHERE id = $1"#,
+                                    id,
+                                    serde_json::Value::Object(creds_patch.clone()),
+                                    identity_val.clone() as Option<serde_json::Value>,
+                                )
+                                .execute(&mut *tx)
+                                .await?;
+                            }
+                            id
+                        }
+                        None => {
+                            let mut insert_creds: serde_json::Map<String, serde_json::Value> =
+                                match mapped_security_type {
+                                    Some("wpa-psk") | Some("sae") => {
+                                        if let Some(psk) = &profile.password {
+                                            [("psk".into(), json!(psk))].into_iter().collect()
+                                        } else {
+                                            serde_json::Map::new()
+                                        }
+                                    }
+                                    _ => serde_json::Map::new(),
+                                };
+                            insert_creds.extend(creds_patch);
+                            let insert_credentials = serde_json::Value::Object(insert_creds);
+
+                            sqlx::query_scalar!(
+                                r#"INSERT INTO network
+                                       (ssid, password, name, network_type, is_network_hidden,
+                                        security_type, credentials, identity)
+                                   VALUES ($1, $2, $1, 'wifi', $3, $4, $5, $6)
+                                   RETURNING id"#,
+                                ssid,
+                                profile.password,
+                                profile.hidden.unwrap_or(false),
+                                mapped_security_type as Option<&str>,
+                                insert_credentials,
+                                identity_val as Option<serde_json::Value>,
+                            )
+                            .fetch_one(&mut *tx)
+                            .await?
+                        }
                     };
 
                     profiles_resolved.push((network_id, profile.is_active, profile.name.clone()));
@@ -544,4 +627,26 @@ pub async fn add_commands(
 
     tx.commit().await?;
     Ok(command_ids)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::map_key_mgmt;
+
+    #[test]
+    fn map_key_mgmt_known_values() {
+        assert_eq!(map_key_mgmt("open"), Some("open"));
+        assert_eq!(map_key_mgmt("none"), Some("open"));
+        assert_eq!(map_key_mgmt("wpa-psk"), Some("wpa-psk"));
+        assert_eq!(map_key_mgmt("sae"), Some("sae"));
+        assert_eq!(map_key_mgmt("owe"), Some("owe"));
+        assert_eq!(map_key_mgmt("wpa-eap"), Some("wpa-eap"));
+    }
+
+    #[test]
+    fn map_key_mgmt_unknown_returns_none() {
+        assert_eq!(map_key_mgmt("wep"), None);
+        assert_eq!(map_key_mgmt(""), None);
+        assert_eq!(map_key_mgmt("wpa3"), None);
+    }
 }
