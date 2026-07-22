@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE network\n                                       SET credentials = credentials || $2::jsonb,\n                                           identity    = COALESCE($3::jsonb, identity)\n                                       WHERE id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Jsonb",
+        "Jsonb"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "ab964845f75bc552a1b4c27cbab90a4b58d91e25841b8f9ce891efe1f58f4443"
+}

@@ -1,0 +1,25 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id FROM network\n                           WHERE ssid = $1\n                             AND (password = $2 OR (password IS NULL AND $2 IS NULL))\n                             AND ($3::bool IS NULL OR is_network_hidden = $3)\n                             AND ($4::text IS NULL OR security_type = $4)\n                           ORDER BY id DESC\n                           LIMIT 1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Bool",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "9019f16649b7349ef2ed8f6719ebbe12aba36f6abfff19d53084779b1afa83c7"
+}

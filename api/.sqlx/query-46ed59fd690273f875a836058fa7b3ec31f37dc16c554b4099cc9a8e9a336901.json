@@ -1,0 +1,27 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO network\n                                       (ssid, password, name, network_type, is_network_hidden,\n                                        security_type, credentials, identity)\n                                   VALUES ($1, $2, $1, 'wifi', $3, $4, $5, $6)\n                                   RETURNING id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Bool",
+        "Text",
+        "Jsonb",
+        "Jsonb"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "46ed59fd690273f875a836058fa7b3ec31f37dc16c554b4099cc9a8e9a336901"
+}
