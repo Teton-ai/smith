@@ -463,4 +463,164 @@ mod tests {
         let expected = r#"{"GetLogs":{"unit":"smithd","since":"1h ago","until":null,"grep":null}}"#;
         assert_eq!(json, expected);
     }
+
+    // Golden-file wire-format tests. The fixtures are the on-the-wire contract
+    // between smithd and the API: a deployed daemon and a deployed API may run
+    // different versions, so any change that makes these fail is a protocol
+    // change and must be backward compatible (new fields need serde(default),
+    // renames/tag changes are breaking). Update a fixture only deliberately.
+
+    #[test]
+    fn home_post_matches_golden_fixture() {
+        let post = HomePost {
+            timestamp: Duration::new(1, 500_000_000),
+            responses: vec![
+                SafeCommandResponse {
+                    id: -1,
+                    command: SafeCommandRx::Pong,
+                    status: 0,
+                },
+                SafeCommandResponse {
+                    id: 2,
+                    command: SafeCommandRx::FreeForm {
+                        stdout: "e2e-ok\n".to_string(),
+                        stderr: String::new(),
+                    },
+                    status: 0,
+                },
+                SafeCommandResponse {
+                    id: 3,
+                    command: SafeCommandRx::Upgraded,
+                    status: 0,
+                },
+                SafeCommandResponse {
+                    id: 4,
+                    command: SafeCommandRx::UpdateSystemInfo {
+                        system_info: serde_json::json!({"os": "ubuntu"}),
+                    },
+                    status: 0,
+                },
+            ],
+            release_id: Some(42),
+            service_statuses: vec![ServiceStatus {
+                id: 1,
+                active_state: "active".to_string(),
+                n_restarts: 2,
+            }],
+        };
+
+        let fixture: Value = serde_json::from_str(include_str!("fixtures/home_post.json")).unwrap();
+        assert_eq!(
+            serde_json::to_value(&post).unwrap(),
+            fixture,
+            "HomePost serialization no longer matches the wire contract"
+        );
+
+        // The reverse direction catches new required fields the old peer omits.
+        let parsed: HomePost = serde_json::from_value(fixture).unwrap();
+        assert_eq!(parsed.release_id, Some(42));
+        assert_eq!(parsed.responses.len(), 4);
+        assert_eq!(parsed.service_statuses.len(), 1);
+    }
+
+    #[test]
+    fn home_post_response_matches_golden_fixture() {
+        let response = HomePostResponse {
+            timestamp: Duration::new(1721, 0),
+            commands: vec![
+                SafeCommandRequest {
+                    id: 1,
+                    command: SafeCommandTx::Ping,
+                    continue_on_error: false,
+                },
+                SafeCommandRequest {
+                    id: 2,
+                    command: SafeCommandTx::FreeForm {
+                        cmd: "echo hi".to_string(),
+                    },
+                    continue_on_error: false,
+                },
+                SafeCommandRequest {
+                    id: 3,
+                    command: SafeCommandTx::Upgrade,
+                    continue_on_error: true,
+                },
+                SafeCommandRequest {
+                    id: 4,
+                    command: SafeCommandTx::GetLogs {
+                        unit: Some("smithd".to_string()),
+                        since: Some("1h ago".to_string()),
+                        until: None,
+                        grep: None,
+                    },
+                    continue_on_error: false,
+                },
+            ],
+            target_release_id: Some(7),
+            services: vec![ServiceCheck {
+                id: 1,
+                name: "smithd".to_string(),
+            }],
+        };
+
+        let fixture: Value =
+            serde_json::from_str(include_str!("fixtures/home_post_response.json")).unwrap();
+        assert_eq!(
+            serde_json::to_value(&response).unwrap(),
+            fixture,
+            "HomePostResponse serialization no longer matches the wire contract"
+        );
+
+        let parsed: HomePostResponse = serde_json::from_value(fixture).unwrap();
+        assert_eq!(parsed.target_release_id, Some(7));
+        assert_eq!(parsed.commands.len(), 4);
+        assert_eq!(parsed.services.len(), 1);
+    }
+
+    #[test]
+    fn registration_matches_golden_fixture() {
+        let registration = DeviceRegistration {
+            serial_number: "smith-device-1".to_string(),
+            wifi_mac: "aa:bb:cc:dd:ee:ff".to_string(),
+        };
+        let response = DeviceRegistrationResponse {
+            token: "8b1a44a4-2a10-42da-9e59-6dc2b3f6e1b0".to_string(),
+        };
+
+        let fixture: Value =
+            serde_json::from_str(include_str!("fixtures/registration.json")).unwrap();
+        assert_eq!(
+            serde_json::to_value(&registration).unwrap(),
+            fixture["registration"],
+            "DeviceRegistration serialization no longer matches the wire contract"
+        );
+        assert_eq!(
+            serde_json::to_value(&response).unwrap(),
+            fixture["response"],
+            "DeviceRegistrationResponse serialization no longer matches the wire contract"
+        );
+
+        let parsed: DeviceRegistration =
+            serde_json::from_value(fixture["registration"].clone()).unwrap();
+        assert_eq!(parsed.serial_number, "smith-device-1");
+        let parsed: DeviceRegistrationResponse =
+            serde_json::from_value(fixture["response"].clone()).unwrap();
+        assert_eq!(parsed.token, "8b1a44a4-2a10-42da-9e59-6dc2b3f6e1b0");
+    }
+
+    #[test]
+    fn home_post_tolerates_peer_without_service_statuses() {
+        // An older daemon omits service_statuses entirely; the API must accept it.
+        let json = r#"{"timestamp":{"secs":1,"nanos":0},"responses":[],"release_id":null}"#;
+        let post: HomePost = serde_json::from_str(json).unwrap();
+        assert!(post.service_statuses.is_empty());
+    }
+
+    #[test]
+    fn home_post_response_tolerates_peer_without_services() {
+        // An older API omits services entirely; the daemon must accept it.
+        let json = r#"{"timestamp":{"secs":1,"nanos":0},"commands":[],"target_release_id":null}"#;
+        let response: HomePostResponse = serde_json::from_str(json).unwrap();
+        assert!(response.services.is_empty());
+    }
 }

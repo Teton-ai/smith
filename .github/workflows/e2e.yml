@@ -1,0 +1,283 @@
+name: e2e
+on:
+  pull_request:
+    branches: [ main ]
+    types: [opened, synchronize, reopened, ready_for_review]
+  workflow_dispatch:
+
+# The release PR is refreshed on every main push; cancel superseded runs.
+concurrency:
+  group: e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+# Gate every job below to the release PR (branch created by release.yml's
+# bump-version job) rather than every PR into main: e2e is what confirms main
+# is safe to release, not a per-feature-PR check, and build-images alone takes
+# ~20-30 minutes. release.yml refreshes the release PR on every main push, so
+# this still runs at least once per merge — just after, not before. Manual
+# workflow_dispatch bypasses the branch check to let any branch be tested
+# on demand.
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  SQLX_OFFLINE: "true"
+
+jobs:
+  # api, device (both from HEAD) and postgres (pg_partman, static) are each
+  # needed by two or more of the jobs below. Built here once and handed to the
+  # parallel jobs as a single artifact (docker save/load) rather than through
+  # buildx's GHA layer cache: that cache is only loosely consistent across
+  # jobs that start moments apart, and a downstream job can silently restore
+  # a stale layer for one image while getting fresh layers for another —
+  # e.g. an `api` build missing a very recent schema change. An artifact is
+  # an exact byte-for-byte copy, so every job runs the same images.
+  build-images:
+    name: "Build shared images (api, device, postgres)"
+    if: ${{ github.event_name == 'workflow_dispatch' || (github.event.pull_request.draft == false && startsWith(github.head_ref, 'chore/release-v')) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Prepare environment
+        run: cp .env.template .env
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # docker/setup-buildx-action doesn't expose the GitHub Actions cache
+      # credentials to the shell; only higher-level actions like
+      # docker-build-push wire that up automatically. Without this, `docker
+      # buildx bake --cache-to/--cache-from=type=gha` silently no-ops — no
+      # error, it just never exports or imports anything.
+      - name: Expose GitHub Actions cache credentials
+        uses: crazy-max/ghaction-github-runtime@056b8ec6661ce03a987ab8643a0edc346ae63fe3 # v2.2.0
+
+      # cache-from/cache-to here only speed up build-images' own layer
+      # rebuild across separate CI runs; --load additionally lands the
+      # images in this job's local daemon so they can be saved below. No
+      # other job ever reads this GHA cache directly.
+      - name: Build api, device, postgres
+        run: |
+          docker buildx bake -f compose.yaml api device postgres \
+            --set 'api.tags=smith-api:latest' \
+            --set 'device.tags=smith-device:latest' \
+            --set 'postgres.tags=smith-postgres:latest' \
+            --set '*.cache-from=type=gha' \
+            --set '*.cache-to=type=gha,mode=max' \
+            --load
+        env:
+          DEVICE_BASE_IMAGE: ubuntu:22.04
+
+      - name: Save images for downstream jobs
+        run: docker save smith-api:latest smith-device:latest smith-postgres:latest -o /tmp/e2e-images.tar
+
+      - name: Upload images artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-images
+          path: /tmp/e2e-images.tar
+          retention-days: 1
+
+  # Real smithd (under systemd, in a container) against the API built from the
+  # same tree. A failure means the daemon in this tree cannot talk to its API.
+  e2e-head:
+    name: "E2E: HEAD daemon x HEAD API"
+    needs: build-images
+    if: ${{ github.event_name == 'workflow_dispatch' || (github.event.pull_request.draft == false && startsWith(github.head_ref, 'chore/release-v')) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      E2E_COMPOSE_FLAGS: -f compose.yaml -f compose.e2e.yaml
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Prepare environment
+        run: cp .env.template .env
+
+      - name: Install Rust Toolchain
+        uses: dsherret/rust-toolchain-file@v1
+
+      - name: Set up cargo cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Download images artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: e2e-images
+          path: /tmp
+
+      - name: Load images
+        run: docker load -i /tmp/e2e-images.tar
+
+      - name: Run e2e tests
+        run: make test.e2e
+        env:
+          E2E_UP_FLAGS: --no-build
+
+      - name: Dump stack logs
+        if: failure()
+        run: |
+          docker compose $E2E_COMPOSE_FLAGS ps -a
+          docker compose $E2E_COMPOSE_FLAGS logs api device postgres
+          # smithd/smith-updater run under systemd inside the device
+          # container, so their output goes to its journal, not container
+          # stdout — "logs device" above never shows it.
+          docker compose $E2E_COMPOSE_FLAGS exec -T device journalctl -u smithd -u smith-updater --no-pager || true
+
+      - name: Tear down
+        if: always()
+        run: make test.e2e.down
+
+      - name: Report Status
+        if: always()
+        uses: ravsamhq/notify-slack-action@v2
+        with:
+          status: ${{ job.status }}
+          notify_when: 'failure'
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SMITH_TEAM_SLACK_NOTIFICATIONS }}
+
+  # The released daemon (built from the latest release tag — what the fleet
+  # runs) against the API built from this tree. A failure means deploying this
+  # API breaks deployed devices, which then can't even receive a fixed daemon
+  # since updates flow through the API. The server side must stay backward
+  # compatible with deployed daemons, so treat red here as a blocker.
+  e2e-released-daemon:
+    name: "E2E: released daemon x HEAD API"
+    needs: build-images
+    if: ${{ github.event_name == 'workflow_dispatch' || (github.event.pull_request.draft == false && startsWith(github.head_ref, 'chore/release-v')) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      E2E_COMPOSE_FLAGS: -f compose.yaml -f compose.e2e.yaml
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Prepare environment
+        run: cp .env.template .env
+
+      - name: Install Rust Toolchain
+        uses: dsherret/rust-toolchain-file@v1
+
+      - name: Set up cargo cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Download images artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: e2e-images
+          path: /tmp
+
+      # Loads smith-api and smith-postgres (the images this job needs from
+      # build-images); smith-device from the artifact is immediately
+      # overwritten by the next step, which is the point of this job.
+      - name: Load images
+        run: docker load -i /tmp/e2e-images.tar
+
+      - name: Build device image from latest release
+        run: ./scripts/build-released-device.sh
+
+      - name: Run e2e tests
+        run: make test.e2e
+        env:
+          E2E_UP_FLAGS: --no-build
+
+      - name: Dump stack logs
+        if: failure()
+        run: |
+          docker compose $E2E_COMPOSE_FLAGS ps -a
+          docker compose $E2E_COMPOSE_FLAGS logs api device postgres
+          # smithd/smith-updater run under systemd inside the device
+          # container, so their output goes to its journal, not container
+          # stdout — "logs device" above never shows it.
+          docker compose $E2E_COMPOSE_FLAGS exec -T device journalctl -u smithd -u smith-updater --no-pager || true
+
+      - name: Tear down
+        if: always()
+        run: make test.e2e.down
+
+      - name: Report Status
+        if: always()
+        uses: ravsamhq/notify-slack-action@v2
+        with:
+          status: ${{ job.status }}
+          notify_when: 'failure'
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SMITH_TEAM_SLACK_NOTIFICATIONS }}
+
+  # Same daemon, but against the released API image production runs
+  # (tetonai/smith-api:latest). Catches version skew before a daemon rollout.
+  # Non-blocking: an intentional, coordinated protocol change legitimately
+  # fails here until the API side ships.
+  e2e-released-api:
+    name: "E2E: HEAD daemon x released API (non-blocking)"
+    needs: build-images
+    if: ${{ github.event_name == 'workflow_dispatch' || (github.event.pull_request.draft == false && startsWith(github.head_ref, 'chore/release-v')) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    continue-on-error: true
+    env:
+      # Replaces the default e2e overlay: the released image runs its own
+      # entrypoint, so only the image swap applies.
+      E2E_COMPOSE_FLAGS: -f compose.yaml -f compose.released-api.yaml
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Prepare environment
+        run: cp .env.template .env
+
+      - name: Install Rust Toolchain
+        uses: dsherret/rust-toolchain-file@v1
+
+      - name: Set up cargo cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Download images artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: e2e-images
+          path: /tmp
+
+      # This job only uses smith-device and smith-postgres from the artifact;
+      # smith-api is loaded too but unused since compose.released-api.yaml
+      # swaps in the published tetonai/smith-api:latest image instead.
+      - name: Load images
+        run: docker load -i /tmp/e2e-images.tar
+
+      - name: Run e2e tests
+        run: make test.e2e
+        env:
+          E2E_UP_FLAGS: --no-build
+
+      - name: Dump stack logs
+        if: failure()
+        run: |
+          docker compose $E2E_COMPOSE_FLAGS ps -a
+          docker compose $E2E_COMPOSE_FLAGS logs api device postgres
+          # smithd/smith-updater run under systemd inside the device
+          # container, so their output goes to its journal, not container
+          # stdout — "logs device" above never shows it.
+          docker compose $E2E_COMPOSE_FLAGS exec -T device journalctl -u smithd -u smith-updater --no-pager || true
+
+      - name: Tear down
+        if: always()
+        run: make test.e2e.down
+
+      - name: Report Status
+        if: always()
+        uses: ravsamhq/notify-slack-action@v2
+        with:
+          status: ${{ job.status }}
+          notify_when: 'failure'
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SMITH_TEAM_SLACK_NOTIFICATIONS }}

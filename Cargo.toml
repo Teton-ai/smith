@@ -1,5 +1,5 @@
 [workspace]
-members = ["api", "cli", "models", "smithd", "updater"]
+members = ["api", "cli", "e2e", "models", "smithd", "updater"]
 resolver = "2"
 
 [workspace.package]

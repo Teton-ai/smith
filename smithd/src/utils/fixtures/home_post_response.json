@@ -1,0 +1,46 @@
+{
+  "timestamp": {
+    "secs": 1721,
+    "nanos": 0
+  },
+  "commands": [
+    {
+      "id": 1,
+      "command": "Ping",
+      "continue_on_error": false
+    },
+    {
+      "id": 2,
+      "command": {
+        "FreeForm": {
+          "cmd": "echo hi"
+        }
+      },
+      "continue_on_error": false
+    },
+    {
+      "id": 3,
+      "command": "Upgrade",
+      "continue_on_error": true
+    },
+    {
+      "id": 4,
+      "command": {
+        "GetLogs": {
+          "unit": "smithd",
+          "since": "1h ago",
+          "until": null,
+          "grep": null
+        }
+      },
+      "continue_on_error": false
+    }
+  ],
+  "target_release_id": 7,
+  "services": [
+    {
+      "id": 1,
+      "name": "smithd"
+    }
+  ]
+}

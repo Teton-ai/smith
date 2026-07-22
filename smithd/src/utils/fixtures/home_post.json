@@ -1,0 +1,47 @@
+{
+  "timestamp": {
+    "secs": 1,
+    "nanos": 500000000
+  },
+  "responses": [
+    {
+      "id": -1,
+      "command": "Pong",
+      "status": 0
+    },
+    {
+      "id": 2,
+      "command": {
+        "FreeForm": {
+          "stdout": "e2e-ok\n",
+          "stderr": ""
+        }
+      },
+      "status": 0
+    },
+    {
+      "id": 3,
+      "command": "Upgraded",
+      "status": 0
+    },
+    {
+      "id": 4,
+      "command": {
+        "UpdateSystemInfo": {
+          "system_info": {
+            "os": "ubuntu"
+          }
+        }
+      },
+      "status": 0
+    }
+  ],
+  "release_id": 42,
+  "service_statuses": [
+    {
+      "id": 1,
+      "active_state": "active",
+      "n_restarts": 2
+    }
+  ]
+}

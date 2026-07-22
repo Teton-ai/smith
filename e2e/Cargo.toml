@@ -1,0 +1,17 @@
+[package]
+name = "smith-e2e"
+description = "End-to-end tests for the smithd daemon against the API, driven through the local compose stack"
+version.workspace = true
+edition.workspace = true
+repository.workspace = true
+authors.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+anyhow.workspace = true
+reqwest = { version = "0.12", features = ["json"] }
+serde_json.workspace = true
+sqlx = { workspace = true, features = ["postgres", "runtime-tokio", "tls-rustls"] }
+tokio = { version = "1.41", features = ["macros", "rt-multi-thread", "time"] }
+uuid = { version = "1.0", features = ["v4"] }

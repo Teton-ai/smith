@@ -17,6 +17,7 @@ services:
       # Mount source code for hot reloading
       - ./api:/app/api
       - ./cli:/app/cli
+      - ./e2e:/app/e2e
       - ./models:/app/models
       - ./smithd:/app/smithd
       - ./updater:/app/updater
@@ -34,7 +35,9 @@ services:
 
   postgres:
     container_name: smith-postgres
-    image: postgres:15
+    build:
+      context: .
+      dockerfile: postgres.Dockerfile
     env_file:
       - .env
     ports:

@@ -36,6 +36,7 @@ schema:
 init:
 	echo "Initializing the repo"
 	test -f .env || cp .env.template .env
+	./scripts/ensure-device-jwt-key.sh
 	test -f dashboard/.env || cp dashboard/.env.template dashboard/.env
 
 gen-api-client:
@@ -43,6 +44,30 @@ gen-api-client:
 
 seed:
 	psql postgres://postgres:postgres@localhost:5432/postgres -f scripts/seed.sql
+
+# Daemon↔API end-to-end tests. Run against the head stack with `make test.e2e`,
+# or against the released API image with:
+#   E2E_COMPOSE_FLAGS="-f compose.yaml -f compose.released-api.yaml" make test.e2e
+# or run the released daemon against the head API with:
+#   ./scripts/build-released-device.sh && E2E_UP_FLAGS=--no-build make test.e2e
+E2E_COMPOSE_FLAGS ?= -f compose.yaml -f compose.e2e.yaml
+E2E_SERVICES = postgres api bore device
+# CI pre-builds images with buildx and sets this to --no-build.
+E2E_UP_FLAGS ?= --build
+
+test.e2e.up:
+	./scripts/ensure-device-jwt-key.sh
+	./scripts/ensure-e2e-auth0-issuer.sh
+	DEVICE_BASE_IMAGE=ubuntu:22.04 docker compose $(E2E_COMPOSE_FLAGS) up -d $(E2E_UP_FLAGS) $(E2E_SERVICES)
+
+test.e2e.run:
+	./scripts/wait-for-api.sh
+	cargo test --package smith-e2e -- --ignored --test-threads=1
+
+test.e2e: test.e2e.up test.e2e.run
+
+test.e2e.down:
+	docker compose $(E2E_COMPOSE_FLAGS) down -v
 
 debug.smithd:
 	cargo build --release -p smith
