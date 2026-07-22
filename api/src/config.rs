@@ -10,27 +10,40 @@ pub struct VictoriaMetricsClient {
 }
 
 impl VictoriaMetricsClient {
-    pub fn new() -> Option<Self> {
-        match (
-            env::var("VICTORIA_METRICS_URL").ok(),
-            env::var("VICTORIA_METRICS_AUTH_TOKEN").ok(),
-        ) {
+    fn from_env(url_var: &str, token_var: &str) -> anyhow::Result<Option<Self>> {
+        match (env::var(url_var).ok(), env::var(token_var).ok()) {
             (Some(url), Some(auth_token)) => {
                 let mut headers = HeaderMap::new();
                 let auth = format!("Basic {}", auth_token);
-                headers.insert("authorization", auth.parse().unwrap());
-                let victoria_client = reqwest::Client::builder()
+                headers.insert(
+                    "authorization",
+                    auth.parse()
+                        .context("built an invalid VictoriaMetrics authorization header")?,
+                );
+                let client = reqwest::Client::builder()
                     .default_headers(headers)
                     .timeout(Duration::from_secs(60))
                     .build()
-                    .unwrap();
-                Some(VictoriaMetricsClient {
-                    client: victoria_client,
-                    url,
-                })
+                    .context("failed to build VictoriaMetrics HTTP client")?;
+                Ok(Some(VictoriaMetricsClient { client, url }))
             }
-            _ => None,
+            _ => Ok(None),
         }
+    }
+
+    pub fn from_env_all() -> anyhow::Result<Vec<Self>> {
+        let mut clients = Vec::new();
+        if let Some(client) = Self::from_env("VICTORIA_METRICS_URL", "VICTORIA_METRICS_AUTH_TOKEN")?
+        {
+            clients.push(client);
+        }
+        if let Some(client) = Self::from_env(
+            "VICTORIA_METRICS_URL_FLEET",
+            "VICTORIA_METRICS_AUTH_TOKEN_FLEET",
+        )? {
+            clients.push(client);
+        }
+        Ok(clients)
     }
 }
 
@@ -64,7 +77,7 @@ pub struct Config {
     pub sentry_url: Option<String>,
     pub slack_hook_url: Option<String>,
     pub deployment_slack_hook_url: Option<String>,
-    pub victoria_metrics_client: Option<VictoriaMetricsClient>,
+    pub victoria_metrics_clients: Vec<VictoriaMetricsClient>,
     pub ip_api_key: Option<String>,
     pub auth0_issuer: String,
     pub auth0_audience: String,
@@ -96,7 +109,7 @@ impl Config {
             sentry_url: env::var("SENTRY_URL").ok(),
             slack_hook_url: env::var("SLACK_HOOK_URL").ok(),
             deployment_slack_hook_url: env::var("DEPLOYMENT_SLACK_HOOK_URL").ok(),
-            victoria_metrics_client: VictoriaMetricsClient::new(),
+            victoria_metrics_clients: VictoriaMetricsClient::from_env_all()?,
             ip_api_key: env::var("IP_API_KEY").ok(),
             auth0_issuer: env::var("AUTH0_ISSUER").context("AUTH0_ISSUER is required.")?,
             auth0_audience: env::var("AUTH0_AUDIENCE").context("AUTH0_AUDIENCE is required.")?,
