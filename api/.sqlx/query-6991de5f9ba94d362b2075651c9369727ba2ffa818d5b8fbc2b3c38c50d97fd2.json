@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO device_service_outage (device_id, service_name, started_at, ended_at)\n             SELECT $1, $2, $3, NOW()\n             WHERE $3 >= (SELECT installed_on FROM _sqlx_migrations WHERE version = $4)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Text",
+        "Timestamptz",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "6991de5f9ba94d362b2075651c9369727ba2ffa818d5b8fbc2b3c38c50d97fd2"
+}

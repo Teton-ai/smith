@@ -520,6 +520,183 @@ pub async fn register_device(
     Err(RegistrationError::NotApprovedDevice)
 }
 
+/// A device pings `/smith/home` every 20s when idle (`smithd/src/postman/mod.rs`),
+/// so this tolerates several consecutive misses before calling it down. Outages
+/// shorter than this are deliberately not recorded.
+const DOWNTIME_STALE_AFTER_SECS: f64 = 90.0;
+
+/// Detection latency does not affect the recorded outage, because `started_at`
+/// is backdated to the last successful ping. Only alerting freshness suffers,
+/// so the sweep can be infrequent.
+const DOWNTIME_SWEEP_INTERVAL_SECS: u64 = 300;
+
+/// After a restart every device looks stale until it pings again. Wait out
+/// several ping cycles before concluding anything.
+const DOWNTIME_STARTUP_GRACE_SECS: u64 = 120;
+
+/// If more than this fraction of the observable fleet looks stale at once, the
+/// API or its network was down rather than the devices. Skipping the sweep is
+/// far better than writing one bogus outage per device on every deploy.
+const DOWNTIME_MASS_STALE_RATIO: f64 = 0.5;
+
+/// Below this fleet size the ratio check is meaningless — one dev device being
+/// switched off would trip it — so it only applies above this many devices.
+const DOWNTIME_MASS_STALE_MIN_FLEET: i64 = 10;
+
+/// Downtime is only meaningful from the moment the API began observing it.
+/// A device last seen before that was never witnessed up, so claiming an
+/// outage for it would be fabrication. This migration's own `installed_on` is
+/// exactly that moment, which beats a config knob that can be set wrong and a
+/// startup timestamp that would drift on every restart.
+const DOWNTIME_EPOCH_MIGRATION_VERSION: i64 = 20260727000000;
+
+/// Device reachability is stored as an outage of smithd itself, which is a real
+/// systemd unit (`smithd/debian/smithd.service`), so one table and one set of
+/// queries cover both reachability and per-service health.
+///
+/// These rows are owned exclusively by the sweeper below. smithd cannot report
+/// its own death, so its state is the only one inferred from silence rather than
+/// read from a device report — see `save_service_statuses`, which refuses to
+/// write this name for exactly that reason.
+pub const SMITHD_SERVICE_NAME: &str = "smithd";
+
+/// Opens an outage row for every non-archived device that has gone silent and
+/// does not already have one open. `started_at` is backdated to the device's
+/// last ping so a coarse sweep interval still yields accurate history.
+///
+/// Safe to run concurrently from several API replicas: the partial unique index
+/// on open rows turns a lost race into a no-op instead of a duplicate.
+pub async fn open_downtime_for_silent_devices(pool: &PgPool) -> anyhow::Result<u64> {
+    let counts = sqlx::query!(
+        r#"
+        SELECT
+            COUNT(*) FILTER (
+                WHERE d.last_ping IS NOT NULL AND d.last_ping >= m.installed_on
+            ) AS "observable!",
+            COUNT(*) FILTER (
+                WHERE d.last_ping IS NOT NULL
+                  AND d.last_ping >= m.installed_on
+                  AND d.last_ping < NOW() - make_interval(secs => $2::double precision)
+            ) AS "stale!"
+        FROM device d
+        CROSS JOIN (
+            SELECT installed_on FROM _sqlx_migrations WHERE version = $1
+        ) m
+        WHERE d.archived = false
+        "#,
+        DOWNTIME_EPOCH_MIGRATION_VERSION,
+        DOWNTIME_STALE_AFTER_SECS,
+    )
+    .fetch_one(pool)
+    .await?;
+
+    if counts.observable >= DOWNTIME_MASS_STALE_MIN_FLEET {
+        let stale_ratio = counts.stale as f64 / counts.observable as f64;
+        if stale_ratio > DOWNTIME_MASS_STALE_RATIO {
+            error!(
+                stale = counts.stale,
+                observable = counts.observable,
+                "Skipping downtime sweep: {:.0}% of the fleet is stale at once, which means the API or its network was down, not the devices",
+                stale_ratio * 100.0
+            );
+            return Ok(0);
+        }
+    }
+
+    let opened = sqlx::query!(
+        r#"
+        INSERT INTO device_service_outage (device_id, service_name, started_at)
+        SELECT d.id, $3, d.last_ping
+        FROM device d
+        CROSS JOIN (
+            SELECT installed_on FROM _sqlx_migrations WHERE version = $1
+        ) m
+        WHERE d.archived = false
+          AND d.last_ping IS NOT NULL
+          AND d.last_ping >= m.installed_on
+          AND d.last_ping < NOW() - make_interval(secs => $2::double precision)
+          AND NOT EXISTS (
+              SELECT 1 FROM device_service_outage o
+              WHERE o.device_id = d.id
+                AND o.service_name = $3
+                AND o.ended_at IS NULL
+          )
+        ON CONFLICT DO NOTHING
+        "#,
+        DOWNTIME_EPOCH_MIGRATION_VERSION,
+        DOWNTIME_STALE_AFTER_SECS,
+        SMITHD_SERVICE_NAME,
+    )
+    .execute(pool)
+    .await?
+    .rows_affected();
+
+    Ok(opened)
+}
+
+/// Runs the downtime sweep on its own task so it never sits in the path of a
+/// device's `/smith/home` request or its command fetch.
+pub fn spawn_downtime_sweeper(pool: PgPool) {
+    tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_secs(DOWNTIME_STARTUP_GRACE_SECS)).await;
+
+        let mut ticker = tokio::time::interval(Duration::from_secs(DOWNTIME_SWEEP_INTERVAL_SECS));
+        ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+
+        loop {
+            ticker.tick().await;
+            match open_downtime_for_silent_devices(&pool).await {
+                Ok(0) => debug!("Downtime sweep found no newly silent devices"),
+                Ok(opened) => info!("Downtime sweep opened {opened} outage(s)"),
+                Err(err) => error!("Downtime sweep failed: {err:?}"),
+            }
+        }
+    });
+}
+
+/// Reconciles the outage a device just recovered from, given the ping timestamp
+/// it replaced.
+///
+/// Runs inside the caller's transaction on purpose: the `UPDATE device` that
+/// produced `previous_last_ping` holds a row lock on that device, which
+/// serializes concurrent pings for the same device and keeps the one-open-row
+/// invariant intact without any extra locking.
+async fn close_open_downtime(
+    device_id: i32,
+    previous_last_ping: DateTime<Utc>,
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+) -> anyhow::Result<()> {
+    let closed = sqlx::query!(
+        "UPDATE device_service_outage SET ended_at = NOW()
+         WHERE device_id = $1 AND service_name = $2 AND ended_at IS NULL",
+        device_id,
+        SMITHD_SERVICE_NAME,
+    )
+    .execute(&mut **tx)
+    .await?
+    .rows_affected();
+
+    if closed == 0 {
+        // The device recovered before any sweep noticed it was gone, so record
+        // the already-finished outage rather than losing it entirely — but only
+        // from the observation epoch onwards, on the same terms as the sweeper.
+        // A ping that replaces a pre-epoch one closes a gap nobody witnessed.
+        sqlx::query!(
+            "INSERT INTO device_service_outage (device_id, service_name, started_at, ended_at)
+             SELECT $1, $2, $3, NOW()
+             WHERE $3 >= (SELECT installed_on FROM _sqlx_migrations WHERE version = $4)",
+            device_id,
+            SMITHD_SERVICE_NAME,
+            previous_last_ping,
+            DOWNTIME_EPOCH_MIGRATION_VERSION,
+        )
+        .execute(&mut **tx)
+        .await?;
+    }
+
+    Ok(())
+}
+
 pub async fn save_last_ping_with_ip(
     device_id: i32,
     ip_address: Option<IpAddr>,
@@ -573,14 +750,34 @@ pub async fn save_last_ping_with_ip(
                 }
             };
 
-            // Update device with IP address ID
-            sqlx::query!(
-                "UPDATE device SET last_ping = NOW(), ip_address_id = $2 WHERE id = $1",
+            // The CTE reads the pre-UPDATE snapshot, so this hands back both the
+            // ping timestamp being replaced and whether the gap was long enough
+            // to have been recorded as an outage — decided on the database
+            // clock, with no extra round trip. For a device pinging on cadence
+            // nothing further runs, which matters at hundreds of pings/sec.
+            let ping = sqlx::query!(
+                r#"
+                WITH prev AS (SELECT last_ping FROM device WHERE id = $1)
+                UPDATE device SET last_ping = NOW(), ip_address_id = $2
+                WHERE id = $1
+                RETURNING
+                    (SELECT last_ping FROM prev) AS previous_last_ping,
+                    (SELECT last_ping < NOW() - make_interval(secs => $3::double precision)
+                     FROM prev) AS was_stale
+                "#,
                 device_id,
-                ip_id
+                ip_id,
+                DOWNTIME_STALE_AFTER_SECS,
             )
-            .execute(&mut *tx)
+            .fetch_optional(&mut *tx)
             .await?;
+
+            if let Some(ping) = ping
+                && ping.was_stale.unwrap_or(false)
+                && let Some(previous) = ping.previous_last_ping
+            {
+                close_open_downtime(device_id, previous, &mut tx).await?;
+            }
 
             tx.commit().await?;
 
@@ -605,12 +802,29 @@ pub async fn save_last_ping_with_ip(
             }
         }
         None => {
-            sqlx::query!(
-                "UPDATE device SET last_ping = NOW() WHERE id = $1",
-                device_id
+            let ping = sqlx::query!(
+                r#"
+                WITH prev AS (SELECT last_ping FROM device WHERE id = $1)
+                UPDATE device SET last_ping = NOW()
+                WHERE id = $1
+                RETURNING
+                    (SELECT last_ping FROM prev) AS previous_last_ping,
+                    (SELECT last_ping < NOW() - make_interval(secs => $2::double precision)
+                     FROM prev) AS was_stale
+                "#,
+                device_id,
+                DOWNTIME_STALE_AFTER_SECS,
             )
-            .execute(&mut *tx)
+            .fetch_optional(&mut *tx)
             .await?;
+
+            if let Some(ping) = ping
+                && ping.was_stale.unwrap_or(false)
+                && let Some(previous) = ping.previous_last_ping
+            {
+                close_open_downtime(device_id, previous, &mut tx).await?;
+            }
+
             tx.commit().await?;
         }
     }

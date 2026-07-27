@@ -5654,7 +5654,7 @@ dependencies = [
 
 [[package]]
 name = "smith-e2e"
-version = "0.2.174"
+version = "0.2.178"
 dependencies = [
  "anyhow",
  "reqwest 0.12.28",

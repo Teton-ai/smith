@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        INSERT INTO device_service_outage (device_id, service_name, started_at)\n        SELECT d.id, $3, d.last_ping\n        FROM device d\n        CROSS JOIN (\n            SELECT installed_on FROM _sqlx_migrations WHERE version = $1\n        ) m\n        WHERE d.archived = false\n          AND d.last_ping IS NOT NULL\n          AND d.last_ping >= m.installed_on\n          AND d.last_ping < NOW() - make_interval(secs => $2::double precision)\n          AND NOT EXISTS (\n              SELECT 1 FROM device_service_outage o\n              WHERE o.device_id = d.id\n                AND o.service_name = $3\n                AND o.ended_at IS NULL\n          )\n        ON CONFLICT DO NOTHING\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Float8",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "df55756a884fd8d191f54b647596bae836e29b8c35272068363f97b18eb305c3"
+}

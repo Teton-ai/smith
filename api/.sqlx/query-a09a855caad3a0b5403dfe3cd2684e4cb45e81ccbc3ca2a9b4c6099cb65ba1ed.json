@@ -1,0 +1,31 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            WITH prev AS (\n                SELECT active_state FROM device_service_status\n                WHERE device_id = $1 AND release_service_id = $2\n            ),\n            upsert AS (\n                INSERT INTO device_service_status\n                    (device_id, release_service_id, active_state, n_restarts, checked_at)\n                VALUES ($1, $2, $3, $4, NOW())\n                ON CONFLICT (device_id, release_service_id)\n                DO UPDATE SET active_state = EXCLUDED.active_state,\n                              n_restarts  = EXCLUDED.n_restarts,\n                              checked_at  = NOW()\n                RETURNING 1\n            )\n            SELECT\n                (SELECT active_state FROM prev) AS previous_active_state,\n                (SELECT service_name FROM release_services WHERE id = $2) AS service_name\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "previous_active_state",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "service_name",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Int4",
+        "Text",
+        "Int4"
+      ]
+    },
+    "nullable": [
+      null,
+      null
+    ]
+  },
+  "hash": "a09a855caad3a0b5403dfe3cd2684e4cb45e81ccbc3ca2a9b4c6099cb65ba1ed"
+}

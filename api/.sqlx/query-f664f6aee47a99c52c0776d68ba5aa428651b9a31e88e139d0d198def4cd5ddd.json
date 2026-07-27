@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                WITH prev AS (SELECT last_ping FROM device WHERE id = $1)\n                UPDATE device SET last_ping = NOW()\n                WHERE id = $1\n                RETURNING\n                    (SELECT last_ping FROM prev) AS previous_last_ping,\n                    (SELECT last_ping < NOW() - make_interval(secs => $2::double precision)\n                     FROM prev) AS was_stale\n                ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "previous_last_ping",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 1,
+        "name": "was_stale",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Float8"
+      ]
+    },
+    "nullable": [
+      null,
+      null
+    ]
+  },
+  "hash": "f664f6aee47a99c52c0776d68ba5aa428651b9a31e88e139d0d198def4cd5ddd"
+}
