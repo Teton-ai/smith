@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT\n            COUNT(*) FILTER (\n                WHERE d.last_ping IS NOT NULL AND d.last_ping >= m.installed_on\n            ) AS \"observable!\",\n            COUNT(*) FILTER (\n                WHERE d.last_ping IS NOT NULL\n                  AND d.last_ping >= m.installed_on\n                  AND d.last_ping < NOW() - make_interval(secs => $2::double precision)\n            ) AS \"stale!\"\n        FROM device d\n        CROSS JOIN (\n            SELECT installed_on FROM _sqlx_migrations WHERE version = $1\n        ) m\n        WHERE d.archived = false\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "observable!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "stale!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Float8"
+      ]
+    },
+    "nullable": [
+      null,
+      null
+    ]
+  },
+  "hash": "625b183f8237e90d7929f22be90c11e42a2636381529d4c9918fd71b3692e223"
+}

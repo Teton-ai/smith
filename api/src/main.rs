@@ -230,6 +230,10 @@ async fn start_main_server(
         device_jwt_signer,
     };
 
+    // An unreachable device cannot report its own absence, so downtime has to be
+    // inferred by polling for silence. Runs on its own task, off the request path.
+    device::spawn_downtime_sweeper(state.pg_pool.clone());
+
     let recorder_handle = metric::setup_metrics_recorder();
 
     let mut api_doc = ApiDoc::openapi();

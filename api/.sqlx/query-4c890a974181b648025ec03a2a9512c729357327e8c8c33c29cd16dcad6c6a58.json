@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO device_service_outage (device_id, service_name, started_at, ended_at)\n             VALUES ($1, $2, $3, NOW())",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Text",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "4c890a974181b648025ec03a2a9512c729357327e8c8c33c29cd16dcad6c6a58"
+}

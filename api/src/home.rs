@@ -1,4 +1,4 @@
-use crate::device::Variable;
+use crate::device::{SMITHD_SERVICE_NAME, Variable};
 use anyhow::Result;
 use serde_json::Value;
 use serde_json::json;
@@ -561,6 +561,15 @@ pub async fn get_commands(
         .collect())
 }
 
+/// systemd states that definitely mean a unit is not running. Everything else is
+/// indeterminate and must never open an outage — in particular smithd reports the
+/// literal `"unknown"` when its `systemctl show` call times out or exits non-zero
+/// (`smithd/src/postman/mod.rs`), so treating anything but these as failure would
+/// fabricate outages on a merely busy device.
+fn is_service_down(active_state: &str) -> bool {
+    matches!(active_state, "failed" | "inactive")
+}
+
 pub async fn save_service_statuses(
     device_id: i32,
     statuses: &[ServiceStatus],
@@ -568,18 +577,74 @@ pub async fn save_service_statuses(
 ) -> Result<()> {
     let mut tx = pool.begin().await?;
     for status in statuses {
-        sqlx::query!(
-            "INSERT INTO device_service_status (device_id, release_service_id, active_state, n_restarts, checked_at)
-             VALUES ($1, $2, $3, $4, NOW())
-             ON CONFLICT (device_id, release_service_id)
-             DO UPDATE SET active_state = EXCLUDED.active_state, n_restarts = EXCLUDED.n_restarts, checked_at = NOW()",
+        // The `prev` CTE reads the pre-upsert snapshot, so a single round trip
+        // yields both the state being replaced and the service's stable name. A
+        // data-modifying CTE always runs to completion whether or not the outer
+        // query reads its output, so the upsert still happens.
+        let reported = sqlx::query!(
+            r#"
+            WITH prev AS (
+                SELECT active_state FROM device_service_status
+                WHERE device_id = $1 AND release_service_id = $2
+            ),
+            upsert AS (
+                INSERT INTO device_service_status
+                    (device_id, release_service_id, active_state, n_restarts, checked_at)
+                VALUES ($1, $2, $3, $4, NOW())
+                ON CONFLICT (device_id, release_service_id)
+                DO UPDATE SET active_state = EXCLUDED.active_state,
+                              n_restarts  = EXCLUDED.n_restarts,
+                              checked_at  = NOW()
+                RETURNING 1
+            )
+            SELECT
+                (SELECT active_state FROM prev) AS previous_active_state,
+                (SELECT service_name FROM release_services WHERE id = $2) AS service_name
+            "#,
             device_id,
             status.id,
             status.active_state,
             status.n_restarts as i32
         )
-        .execute(&mut *tx)
+        .fetch_one(&mut *tx)
         .await?;
+
+        // A release_service row the API no longer has cannot be attributed a
+        // name, and reachability rows belong to the sweeper alone.
+        let Some(service_name) = reported.service_name else {
+            continue;
+        };
+        if service_name == SMITHD_SERVICE_NAME {
+            continue;
+        }
+
+        let previous = reported.previous_active_state.as_deref();
+        let down_now = is_service_down(&status.active_state);
+        let down_before = previous.is_some_and(is_service_down);
+
+        if down_now && !down_before {
+            // Deliberately not backdated: this report is the first moment the
+            // failure was observed, and it could have happened any time since the
+            // previous one. Under-reporting by one ping beats inventing a start.
+            sqlx::query!(
+                "INSERT INTO device_service_outage (device_id, service_name, started_at)
+                 VALUES ($1, $2, NOW())
+                 ON CONFLICT DO NOTHING",
+                device_id,
+                service_name
+            )
+            .execute(&mut *tx)
+            .await?;
+        } else if status.active_state == "active" && previous != Some("active") {
+            sqlx::query!(
+                "UPDATE device_service_outage SET ended_at = NOW()
+                 WHERE device_id = $1 AND service_name = $2 AND ended_at IS NULL",
+                device_id,
+                service_name
+            )
+            .execute(&mut *tx)
+            .await?;
+        }
     }
     tx.commit().await?;
     Ok(())
