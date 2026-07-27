@@ -678,13 +678,17 @@ async fn close_open_downtime(
 
     if closed == 0 {
         // The device recovered before any sweep noticed it was gone, so record
-        // the already-finished outage rather than losing it entirely.
+        // the already-finished outage rather than losing it entirely — but only
+        // from the observation epoch onwards, on the same terms as the sweeper.
+        // A ping that replaces a pre-epoch one closes a gap nobody witnessed.
         sqlx::query!(
             "INSERT INTO device_service_outage (device_id, service_name, started_at, ended_at)
-             VALUES ($1, $2, $3, NOW())",
+             SELECT $1, $2, $3, NOW()
+             WHERE $3 >= (SELECT installed_on FROM _sqlx_migrations WHERE version = $4)",
             device_id,
             SMITHD_SERVICE_NAME,
             previous_last_ping,
+            DOWNTIME_EPOCH_MIGRATION_VERSION,
         )
         .execute(&mut **tx)
         .await?;
