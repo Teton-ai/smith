@@ -3,8 +3,9 @@ use crate::device::debug_ap;
 use crate::device::{
     ApplyIntentResponse, ApproveDeviceBody, ConfiguredNetwork, CreateIntentRequest,
     DebugApCredentials, DeviceHealth, DeviceLedgerItem, DeviceLedgerItemPaginated,
-    DeviceNetworkIntent, DeviceRelease, LabelWithValues, NewVariable, Note, PatchIntentRequest,
-    RawDevice, UpdateDeviceRelease, UpdateDevicesRelease, Variable, WifiScanResult,
+    DeviceNetworkIntent, DeviceRelease, DeviceUptime, LabelWithValues, NewVariable, Note,
+    PatchIntentRequest, RawDevice, SMITHD_SERVICE_NAME, ServiceOutage, UpdateDeviceRelease,
+    UpdateDevicesRelease, Variable, WifiScanResult,
 };
 use crate::event::PublicEvent;
 use crate::handlers::AuthedDevice;
@@ -17,6 +18,7 @@ use axum::extract::Path;
 use axum::http::StatusCode;
 use axum::{Extension, Json};
 use axum_extra::extract::Query;
+use chrono::Duration;
 use models::device::{
     CommandsPaginated, Device, DeviceCommandResponse, DeviceFilter, DeviceNetwork,
 };
@@ -27,6 +29,7 @@ use serde_json::json;
 use smith::utils::schema;
 use smith::utils::schema::SafeCommandRequest;
 use sqlx::types::Json as SqlxJson;
+use sqlx::types::chrono::{DateTime, Utc};
 use std::collections::HashMap;
 use tracing::{error, warn};
 use utoipa::IntoParams;
@@ -466,6 +469,134 @@ pub async fn get_health_for_device(
     let device_health = device_health.ok_or(StatusCode::NOT_FOUND)?;
 
     Ok(Json(device_health))
+}
+
+/// Longest window the uptime endpoint will serve, so a hand-crafted `from` can't
+/// ask Postgres to scan a device's entire outage history.
+const UPTIME_MAX_WINDOW_DAYS: i64 = 31;
+const UPTIME_DEFAULT_WINDOW_HOURS: i64 = 24;
+
+#[derive(Deserialize, Debug, IntoParams)]
+#[into_params(parameter_in = Query)]
+pub struct UptimeWindow {
+    /// Start of the window (RFC 3339). Defaults to 24 hours before `to`.
+    pub from: Option<DateTime<Utc>>,
+    /// End of the window (RFC 3339). Defaults to now.
+    pub to: Option<DateTime<Utc>>,
+}
+
+#[utoipa::path(
+    get,
+    path = "/devices/{device_id}/uptime",
+    params(
+        ("device_id" = String, Path),
+        UptimeWindow
+    ),
+    responses(
+        (status = StatusCode::OK, description = "Service availability over the window", body = DeviceUptime),
+        (status = StatusCode::BAD_REQUEST, description = "Invalid window"),
+        (status = StatusCode::NOT_FOUND, description = "Device not found"),
+        (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to retrieve uptime"),
+    ),
+    security(
+        ("auth_token" = [])
+    ),
+    tag = DEVICES_TAG
+)]
+pub async fn get_uptime_for_device(
+    Path(device_id): Path<String>,
+    Query(window): Query<UptimeWindow>,
+    Extension(state): Extension<State>,
+) -> Result<Json<DeviceUptime>, StatusCode> {
+    let to = window.to.unwrap_or_else(Utc::now);
+    let from = window
+        .from
+        .unwrap_or_else(|| to - Duration::hours(UPTIME_DEFAULT_WINDOW_HOURS));
+
+    if from >= to {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    // Clamp rather than reject: an over-long range is still a sensible request,
+    // it just gets served at the longest span we're willing to scan.
+    let from = from.max(to - Duration::days(UPTIME_MAX_WINDOW_DAYS));
+
+    let device = sqlx::query_scalar!(
+        r#"
+        SELECT id FROM device
+        WHERE
+            CASE
+                WHEN $1 ~ '^[0-9]+$' AND length($1) <= 10 THEN
+                    id = $1::int4
+                ELSE
+                    serial_number = $1
+            END
+        "#,
+        device_id
+    )
+    .fetch_optional(&state.pg_pool)
+    .await
+    .map_err(|err| {
+        error!("Failed to resolve device {device_id}: {err}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?
+    .ok_or(StatusCode::NOT_FOUND)?;
+
+    // A lane per service we know about, not just the ones that have failed, so a
+    // healthy device still shows its services rather than an almost-empty chart.
+    let services = sqlx::query_scalar!(
+        r#"
+        SELECT DISTINCT t.service_name AS "service_name!"
+        FROM (
+            SELECT o.service_name FROM device_service_outage o WHERE o.device_id = $1
+            UNION
+            SELECT rs.service_name
+            FROM device_service_status s
+            JOIN release_services rs ON rs.id = s.release_service_id
+            WHERE s.device_id = $1
+            UNION
+            SELECT $2::text
+        ) t
+        ORDER BY 1
+        "#,
+        device,
+        SMITHD_SERVICE_NAME,
+    )
+    .fetch_all(&state.pg_pool)
+    .await
+    .map_err(|err| {
+        error!("Failed to get services for device {device_id}: {err}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    // Every outage overlapping the window. An open outage runs to NOW(), which is
+    // why it can't just be compared against `ended_at`.
+    let outages = sqlx::query_as!(
+        ServiceOutage,
+        r#"
+        SELECT service_name, started_at, ended_at
+        FROM device_service_outage
+        WHERE device_id = $1
+          AND started_at < $3
+          AND COALESCE(ended_at, NOW()) > $2
+        ORDER BY service_name, started_at
+        "#,
+        device,
+        from,
+        to,
+    )
+    .fetch_all(&state.pg_pool)
+    .await
+    .map_err(|err| {
+        error!("Failed to get outages for device {device_id}: {err}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    Ok(Json(DeviceUptime {
+        from,
+        to,
+        services,
+        outages,
+    }))
 }
 
 #[utoipa::path(

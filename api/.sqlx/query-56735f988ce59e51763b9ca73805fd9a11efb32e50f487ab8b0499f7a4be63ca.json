@@ -1,0 +1,36 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT service_name, started_at, ended_at\n        FROM device_service_outage\n        WHERE device_id = $1\n          AND started_at < $3\n          AND COALESCE(ended_at, NOW()) > $2\n        ORDER BY service_name, started_at\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "service_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "started_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 2,
+        "name": "ended_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Timestamptz",
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "56735f988ce59e51763b9ca73805fd9a11efb32e50f487ab8b0499f7a4be63ca"
+}

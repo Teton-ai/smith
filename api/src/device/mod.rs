@@ -148,6 +148,30 @@ pub struct DeviceHealth {
     pub is_healthy: Option<bool>,
 }
 
+/// One recorded gap in a service's availability. `ended_at` is null while the
+/// outage is still open.
+#[derive(Debug, Serialize, utoipa::ToSchema)]
+pub struct ServiceOutage {
+    pub service_name: String,
+    pub started_at: DateTime<Utc>,
+    pub ended_at: Option<DateTime<Utc>>,
+}
+
+/// Availability of a device's services over a time window.
+///
+/// The outages are returned as intervals rather than a per-bucket up/down
+/// series: the client draws the bands directly, so the payload stays a handful
+/// of rows instead of one per service per bucket.
+#[derive(Debug, Serialize, utoipa::ToSchema)]
+pub struct DeviceUptime {
+    pub from: DateTime<Utc>,
+    pub to: DateTime<Utc>,
+    /// Every service to draw a lane for, including ones that never went down.
+    pub services: Vec<String>,
+    /// Outages overlapping the window, clipped to it by the caller when drawing.
+    pub outages: Vec<ServiceOutage>,
+}
+
 #[derive(Debug, Serialize, utoipa::ToSchema)]
 pub struct LabelWithValues {
     pub key: String,

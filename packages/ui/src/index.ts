@@ -20,6 +20,12 @@ export { PageContainer } from "./page-container";
 export { SearchInput } from "./search-input";
 export { StatCard } from "./stat-card";
 export {
+	StateTimeline,
+	type TimelineLane,
+	type TimelineSpan,
+	type TimelineTone,
+} from "./state-timeline";
+export {
 	type IconComponent,
 	SECTION_THEMES,
 	type SectionTheme,
