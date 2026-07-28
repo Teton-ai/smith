@@ -241,11 +241,14 @@ async fn resolve_devices_from_selector(
         None
     };
 
+    let outdated_filter = selector.outdated.then_some(true);
+
     if selector.ids.is_empty() {
         // No IDs specified, apply filters only
         api.get_devices(DeviceFilter {
             labels: selector.labels.clone(),
             online: online_filter,
+            outdated: outdated_filter,
             ..Default::default()
         })
         .await
@@ -258,6 +261,7 @@ async fn resolve_devices_from_selector(
                 .get_devices(DeviceFilter {
                     labels: selector.labels.clone(),
                     online: online_filter,
+                    outdated: outdated_filter,
                     search: Some(search_term.clone()),
                     ..Default::default()
                 })
@@ -354,6 +358,7 @@ async fn resolve_target_devices(
     labels: Vec<String>,
     online: bool,
     offline: bool,
+    outdated: bool,
     search: bool,
 ) -> anyhow::Result<Vec<Device>> {
     let selector = cli::DeviceSelector {
@@ -361,6 +366,7 @@ async fn resolve_target_devices(
         labels,
         online,
         offline,
+        outdated,
         search,
     };
 
@@ -1151,7 +1157,8 @@ async fn main() -> anyhow::Result<()> {
                     let has_filters = !selector.ids.is_empty()
                         || !selector.labels.is_empty()
                         || selector.online
-                        || selector.offline;
+                        || selector.offline
+                        || selector.outdated;
 
                     if !has_filters {
                         eprintln!(
@@ -1282,7 +1289,8 @@ async fn main() -> anyhow::Result<()> {
                     let has_filters = !selector.ids.is_empty()
                         || !selector.labels.is_empty()
                         || selector.online
-                        || selector.offline;
+                        || selector.offline
+                        || selector.outdated;
 
                     if !has_filters {
                         eprintln!(
@@ -1933,6 +1941,7 @@ async fn main() -> anyhow::Result<()> {
                     selector.labels,
                     selector.online,
                     selector.offline,
+                    selector.outdated,
                     selector.search,
                 )
                 .await?;
@@ -2014,6 +2023,7 @@ async fn main() -> anyhow::Result<()> {
                     selector.labels,
                     selector.online,
                     selector.offline,
+                    selector.outdated,
                     selector.search,
                 )
                 .await?;
@@ -2099,7 +2109,8 @@ async fn main() -> anyhow::Result<()> {
                 let has_filters = !selector.ids.is_empty()
                     || !selector.labels.is_empty()
                     || selector.online
-                    || selector.offline;
+                    || selector.offline
+                    || selector.outdated;
 
                 if !has_filters {
                     eprintln!(
@@ -2219,7 +2230,8 @@ async fn main() -> anyhow::Result<()> {
                 let has_filters = !selector.ids.is_empty()
                     || !selector.labels.is_empty()
                     || selector.online
-                    || selector.offline;
+                    || selector.offline
+                    || selector.outdated;
 
                 if !has_filters {
                     eprintln!(
