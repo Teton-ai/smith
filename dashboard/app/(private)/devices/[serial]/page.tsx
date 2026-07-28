@@ -27,6 +27,7 @@ import { useGetDeviceInfo } from "@/app/api-client";
 import { DeviceDetailLayout } from "./DeviceDetailLayout";
 import DeviceVariables from "./DeviceVariables";
 import SecurityAudit from "./SecurityAudit";
+import ServiceUptime from "./ServiceUptime";
 import WifiPanel from "./WifiPanel";
 
 const LocationMap = lazy(() => import("./LocationMap"));
@@ -416,6 +417,9 @@ const DeviceDetailPage = () => {
 				{/* Variables (secrets) */}
 				<DeviceVariables deviceId={device.id} />
 			</div>
+
+			{/* Service uptime */}
+			<ServiceUptime key={serial} serial={serial} />
 
 			{/* WiFi */}
 			{/* Keyed by serial so filter/reveal state resets when navigating between devices. */}

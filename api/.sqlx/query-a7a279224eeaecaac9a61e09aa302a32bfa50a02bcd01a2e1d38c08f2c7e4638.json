@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT DISTINCT t.service_name AS \"service_name!\"\n        FROM (\n            SELECT o.service_name FROM device_service_outage o WHERE o.device_id = $1\n            UNION\n            SELECT rs.service_name\n            FROM device_service_status s\n            JOIN release_services rs ON rs.id = s.release_service_id\n            WHERE s.device_id = $1\n            UNION\n            SELECT $2::text\n        ) t\n        ORDER BY 1\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "service_name!",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Text"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "a7a279224eeaecaac9a61e09aa302a32bfa50a02bcd01a2e1d38c08f2c7e4638"
+}
