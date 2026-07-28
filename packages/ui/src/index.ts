@@ -24,6 +24,8 @@ export {
 	type TimelineLane,
 	type TimelineSpan,
 	type TimelineTone,
+	UptimeBars,
+	type UptimeBucket,
 } from "./state-timeline";
 export {
 	type IconComponent,
