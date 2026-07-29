@@ -1,5 +1,6 @@
 // Design system primitives. Import from "@teton/smith-ui".
 export { BADGE_COLORS, Badge, type BadgeVariant, LabelChip } from "./badge";
+export { type BreadcrumbSegment, Breadcrumbs } from "./breadcrumbs";
 export {
 	Button,
 	type ButtonSize,

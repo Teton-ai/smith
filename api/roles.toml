@@ -8,6 +8,9 @@
 #   commands:freeform  arbitrary shell commands
 #   commands:tunnel    open / close SSH tunnels
 #   commands:ota       OTA download / start / status
+#   commands:files     browse the device filesystem and download files. smithd
+#                      runs as root, so this is a root-equivalent read of the
+#                      whole disk — keep it out of `default`.
 # Recipe permissions:
 #   recipes:trigger    run a pre-authored recipe against devices
 #   recipes:write      create / update / delete recipes
@@ -32,6 +35,7 @@ permissions = [
     { action = "freeform", resource = "commands" },
     { action = "tunnel", resource = "commands" },
     { action = "ota", resource = "commands" },
+    { action = "files", resource = "commands" },
     { action = "write", resource = "recipes" },
     { action = "read", resource = "users" },
 ]

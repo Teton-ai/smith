@@ -1,5 +1,6 @@
 use crate::auditor::run_audit_checks;
 use crate::downloader::DownloaderHandle;
+use crate::filebrowser::FileBrowserHandle;
 use crate::filemanager::FileManagerHandle;
 use crate::logstream::LogStreamHandle;
 use crate::magic::MagicHandle;
@@ -9,8 +10,9 @@ use crate::updater::UpdaterHandle;
 use crate::utils::schema::{SafeCommandRequest, SafeCommandResponse, SafeCommandRx, SafeCommandTx};
 use std::collections::HashMap;
 use tokio::sync::{mpsc, oneshot};
-use tracing::info;
+use tracing::{info, warn};
 
+mod files;
 mod free;
 mod logs;
 pub(crate) mod network;
@@ -27,6 +29,7 @@ pub struct Handles {
     pub downloader: DownloaderHandle,
     pub filemanager: FileManagerHandle,
     pub logstream: LogStreamHandle,
+    pub filebrowser: FileBrowserHandle,
 }
 
 struct CommandQueueExecutor {
@@ -129,6 +132,26 @@ impl CommandQueueExecutor {
             SafeCommandTx::WifiScan => network::execute_wifi_scan(action.id).await,
             SafeCommandTx::ApplyNetworks { version, networks } => {
                 network::execute_apply_networks(action.id, version, networks).await
+            }
+            SafeCommandTx::OpenFileSession { session_id } => {
+                files::open_session(action.id, &self.handles.filebrowser, session_id).await
+            }
+            SafeCommandTx::CloseFileSession { session_id } => {
+                files::close_session(action.id, &self.handles.filebrowser, session_id).await
+            }
+            // Issued by a newer api than this daemon understands. Report a
+            // failure so the operator sees why the command did nothing instead
+            // of it silently disappearing.
+            SafeCommandTx::Unknown => {
+                warn!(
+                    command_id = action.id,
+                    "Received a command this daemon does not understand; upgrade smithd"
+                );
+                SafeCommandResponse {
+                    id: action.id,
+                    command: SafeCommandRx::Unknown,
+                    status: -1,
+                }
             }
         }
     }

@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        DELETE FROM session_message\n        WHERE id IN (\n            SELECT id FROM session_message\n            WHERE session_id = $1 AND direction = $2\n            ORDER BY id\n        )\n        RETURNING payload\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "payload",
+        "type_info": "Jsonb"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "09a394bd6aae49ec696669e15707c147b3c7dec24dd6f75f41bf8951a7f330b7"
+}

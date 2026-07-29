@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE stream_session SET closed_at = now() WHERE id = $1 AND closed_at IS NULL",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "b65257808634c245bc08c5c63312bf683ee650fd8a405a38a0fbfc76c263de4d"
+}

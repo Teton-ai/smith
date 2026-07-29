@@ -13,6 +13,12 @@ interface LogViewerProps {
 	) => void;
 }
 
+/** Frames the api sends on the dashboard log socket. */
+type LogFrame =
+	| { type: "ready" }
+	| { type: "lines"; lines: string[] }
+	| { type: "error"; message: string };
+
 const LogViewer = ({
 	deviceSerial,
 	serviceName,
@@ -21,9 +27,12 @@ const LogViewer = ({
 	const { getAccessTokenSilently } = useAuth0();
 	const { config } = useConfig();
 	const [logs, setLogs] = useState<string[]>([]);
+	// Stays true until the device actually attaches, not merely until our own
+	// socket opens: the device only sees the queued command on its next poll.
 	const [isConnecting, setIsConnecting] = useState(true);
 	const [isConnected, setIsConnected] = useState(false);
 	const [error, setError] = useState<string | null>(null);
+	const [elapsed, setElapsed] = useState(0);
 	const [copied, setCopied] = useState(false);
 	const logContainerRef = useRef<HTMLPreElement>(null);
 	const wsRef = useRef<WebSocket | null>(null);
@@ -41,6 +50,17 @@ const LogViewer = ({
 	};
 
 	useEffect(() => {
+		if (!isConnecting) return;
+		setElapsed(0);
+		const started = Date.now();
+		const timer = setInterval(
+			() => setElapsed(Math.floor((Date.now() - started) / 1000)),
+			1000,
+		);
+		return () => clearInterval(timer);
+	}, [isConnecting]);
+
+	useEffect(() => {
 		if (!config?.API_BASE_URL) return;
 
 		const connect = async () => {
@@ -56,14 +76,32 @@ const LogViewer = ({
 				wsRef.current = ws;
 
 				ws.onopen = () => {
-					setIsConnecting(false);
-					setIsConnected(true);
 					setLogs([]);
 				};
 
 				ws.onmessage = (event) => {
-					setLogs((prev) => [...prev, event.data]);
-					scrollToBottom();
+					let frame: LogFrame;
+					try {
+						frame = JSON.parse(event.data);
+					} catch {
+						return;
+					}
+
+					switch (frame.type) {
+						case "ready":
+							setIsConnecting(false);
+							setIsConnected(true);
+							break;
+						case "lines":
+							setLogs((prev) => [...prev, ...frame.lines]);
+							scrollToBottom();
+							break;
+						case "error":
+							setError(frame.message);
+							setIsConnecting(false);
+							setIsConnected(false);
+							break;
+					}
 				};
 
 				ws.onerror = () => {
@@ -126,10 +164,13 @@ const LogViewer = ({
 						<div className="flex flex-col items-center gap-2">
 							<Loader2 className="w-6 h-6 text-gray-400 animate-spin" />
 							<span className="text-gray-400 text-sm">
-								Waiting for device...
+								Waiting for device to connect…
 							</span>
 							<span className="text-gray-500 text-xs">
-								Device polls every ~20 seconds
+								Devices check in every ~20 seconds
+							</span>
+							<span className="text-gray-500 text-xs tabular-nums">
+								{elapsed}s
 							</span>
 						</div>
 					</div>

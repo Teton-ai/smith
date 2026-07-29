@@ -1,0 +1,46 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE file_download\n        SET uploaded_at = now()\n        WHERE upload_token = $1 AND uploaded_at IS NULL\n        RETURNING object_key, file_name, size, session_id, op_id\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "object_key",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "file_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "size",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 3,
+        "name": "session_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 4,
+        "name": "op_id",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "9704d8e419acf7817c414eefdbb3efbfc2c967e4e7851ce112e086cd35f6191f"
+}

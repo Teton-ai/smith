@@ -4,6 +4,7 @@ pub mod control;
 pub mod daemon;
 pub mod dbus;
 pub mod downloader;
+pub mod filebrowser;
 pub mod filemanager;
 pub mod logstream;
 pub mod magic;

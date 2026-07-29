@@ -2,6 +2,7 @@ use crate::auditor::AuditorHandle;
 use crate::commander::{CommanderHandle, Handles};
 use crate::dbus::DbusHandle;
 use crate::downloader::DownloaderHandle;
+use crate::filebrowser::FileBrowserHandle;
 use crate::filemanager::FileManagerHandle;
 use crate::logstream::LogStreamHandle;
 use crate::magic::MagicHandle;
@@ -52,6 +53,9 @@ pub async fn run() {
     let logstream =
         LogStreamHandle::new(shutdown.signals(), configuration.clone(), session.clone());
 
+    let filebrowser =
+        FileBrowserHandle::new(shutdown.signals(), configuration.clone(), session.clone());
+
     let commander = CommanderHandle::new(
         shutdown.signals(),
         Handles {
@@ -61,6 +65,7 @@ pub async fn run() {
             downloader: downloader.clone(),
             filemanager: filemanager.clone(),
             logstream: logstream.clone(),
+            filebrowser: filebrowser.clone(),
         },
     );
 

@@ -8,6 +8,7 @@ export type DeviceTab =
 	| "overview"
 	| "commands"
 	| "services"
+	| "files"
 	| "variables"
 	| "network"
 	| "security"
@@ -78,6 +79,12 @@ export function DeviceDetailLayout({
 						label: "Services",
 						to: `/devices/${serial}/services`,
 						active: activeTab === "services",
+						state: backState,
+					},
+					{
+						label: "Files",
+						to: `/devices/${serial}/files`,
+						active: activeTab === "files",
 						state: backState,
 					},
 					{

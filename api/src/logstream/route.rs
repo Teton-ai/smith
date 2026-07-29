@@ -1,6 +1,7 @@
-use super::session::LogStreamSessions;
 use crate::State;
+use crate::handlers::AuthedDevice;
 use crate::home::add_commands;
+use crate::relay::{self, Direction, Kind};
 use crate::user::CurrentUser;
 use axum::{
     Extension,
@@ -13,13 +14,25 @@ use axum::{
 };
 use futures::{SinkExt, StreamExt};
 use serde::Deserialize;
+use serde_json::{Value, json};
 use smith::utils::schema::{SafeCommandRequest, SafeCommandTx};
 use std::time::Duration;
-use tokio::sync::mpsc;
 use tracing::{error, info, warn};
 use uuid::Uuid;
 
+/// How long the dashboard waits for the device to notice the queued command and
+/// dial back. Devices poll every ~20s when idle, so this must comfortably
+/// exceed one poll interval.
 const SESSION_CONNECT_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// Log lines arrive far faster than file operations do, and every relayed frame
+/// is an INSERT plus a NOTIFY. Coalescing what is already buffered into one
+/// frame keeps a chatty unit from turning into thousands of rows per second.
+const BATCH_WINDOW: Duration = Duration::from_millis(100);
+const MAX_BATCH_LINES: usize = 200;
+
+const START_LOG_STREAM_CMD_ID: i32 = -10;
+const STOP_LOG_STREAM_CMD_ID: i32 = -11;
 
 #[derive(Deserialize)]
 pub struct WsAuthQuery {
@@ -28,7 +41,11 @@ pub struct WsAuthQuery {
 
 const LOGSTREAM_TAG: &str = "logstream";
 
-/// WebSocket endpoint for dashboard to receive log stream
+/// WebSocket endpoint for dashboard to receive log stream.
+///
+/// Frames are JSON so the browser can tell the handshake apart from log output:
+/// `{"type":"ready"}` once the device attaches, then
+/// `{"type":"lines","lines":[...]}`, or `{"type":"error","message":...}`.
 #[utoipa::path(
     get,
     path = "/ws/devices/{device_serial}/logs/{service_name}",
@@ -50,12 +67,11 @@ pub async fn dashboard_logs_ws(
     Path((device_serial, service_name)): Path<(String, String)>,
     Query(auth): Query<WsAuthQuery>,
     Extension(state): Extension<State>,
-    Extension(sessions): Extension<LogStreamSessions>,
 ) -> Result<Response, StatusCode> {
     // Validate the JWT token and extract the sub claim for user attribution
     let claims = state
         .jwks_client
-        .decode::<serde_json::Value>(&auth.token, &[&state.config.auth0_audience])
+        .decode::<Value>(&auth.token, &[&state.config.auth0_audience])
         .await
         .map_err(|e| {
             error!("Token validation failed: {}", e);
@@ -76,7 +92,7 @@ pub async fn dashboard_logs_ws(
         }
     };
 
-    let _device = sqlx::query!(
+    let device = sqlx::query!(
         "SELECT id FROM device WHERE serial_number = $1",
         device_serial
     )
@@ -88,7 +104,7 @@ pub async fn dashboard_logs_ws(
     })?
     .ok_or(StatusCode::NOT_FOUND)?;
 
-    let session_id = Uuid::new_v4().to_string();
+    let session_id = Uuid::new_v4();
 
     info!(
         "Dashboard requesting logs for device {} service {} - session {}",
@@ -101,31 +117,53 @@ pub async fn dashboard_logs_ws(
             session_id,
             device_serial,
             service_name,
-            state,
-            sessions,
+            device.id,
             user_id,
+            state,
         )
     }))
 }
 
 async fn handle_dashboard_ws(
     socket: WebSocket,
-    session_id: String,
+    session_id: Uuid,
     device_serial: String,
     service_name: String,
-    state: State,
-    sessions: LogStreamSessions,
+    device_id: i32,
     user_id: i32,
+    state: State,
 ) {
     let (mut ws_tx, mut ws_rx) = socket.split();
-    let (log_tx, mut log_rx) = mpsc::channel::<String>(100);
 
-    sessions.create_session(session_id.clone(), log_tx).await;
+    if let Err(e) =
+        relay::create_session(&state.pg_pool, &session_id, Kind::Logs, device_id, user_id).await
+    {
+        error!("Failed to create log session {session_id}: {e}");
+        return;
+    }
+
+    // Subscribe before queueing, so a device that dials back quickly cannot
+    // publish its ready frame into a channel nobody is listening on yet.
+    let mut inbound = match relay::Subscription::open(
+        &state.pg_pool,
+        &state.config.database_url,
+        &session_id,
+        Direction::ToDashboard,
+    )
+    .await
+    {
+        Ok(subscription) => subscription,
+        Err(e) => {
+            error!("Failed to subscribe to log session {session_id}: {e}");
+            relay::close_session(&state.pg_pool, &session_id).await;
+            return;
+        }
+    };
 
     let command = SafeCommandRequest {
-        id: -10,
+        id: START_LOG_STREAM_CMD_ID,
         command: SafeCommandTx::StreamLogs {
-            session_id: session_id.clone(),
+            session_id: session_id.to_string(),
             service_name: service_name.clone(),
         },
         continue_on_error: false,
@@ -133,68 +171,65 @@ async fn handle_dashboard_ws(
 
     if let Err(e) = add_commands(&device_serial, vec![command], &state.pg_pool, Some(user_id)).await
     {
-        error!("Failed to queue StreamLogs command: {}", e);
-        sessions.remove_session(&session_id).await;
+        error!("Failed to queue StreamLogs command: {e}");
+        relay::close_session(&state.pg_pool, &session_id).await;
         return;
     }
 
-    info!("Queued StreamLogs command for session {}", session_id);
+    info!("Queued StreamLogs command for session {session_id}");
 
-    let session_id_clone = session_id.clone();
-    let sessions_clone = sessions.clone();
-
-    // Wait for device to connect with timeout
-    let device_connected = sessions
-        .wait_for_device(&session_id, SESSION_CONNECT_TIMEOUT)
-        .await;
-    if !device_connected {
-        warn!(
-            "Device did not connect within timeout for session {}",
-            session_id_clone
-        );
-        let _ = ws_tx
-            .send(Message::Text(
-                "[Error: Device did not connect in time]".to_string(),
-            ))
-            .await;
-        sessions_clone.remove_session(&session_id_clone).await;
-        return;
-    }
-
-    let forward_task = tokio::spawn(async move {
-        while let Some(log_line) = log_rx.recv().await {
-            if ws_tx.send(Message::Text(log_line)).await.is_err() {
-                break;
-            }
+    // The device's dial-back publishes a `ready` frame, so waiting for it is
+    // just waiting for the first inbound message.
+    match tokio::time::timeout(SESSION_CONNECT_TIMEOUT, inbound.next()).await {
+        Ok(Some(frame)) => {
+            send_json(&mut ws_tx, &frame).await;
         }
-    });
+        _ => {
+            warn!("Device did not connect to log session {session_id} in time");
+            send_json(
+                &mut ws_tx,
+                &json!({"type": "error", "message": "Device did not connect in time"}),
+            )
+            .await;
+            relay::close_session(&state.pg_pool, &session_id).await;
+            return;
+        }
+    }
 
-    while let Some(msg) = ws_rx.next().await {
-        match msg {
-            Ok(Message::Close(_)) => {
-                info!(
-                    "Dashboard closed WebSocket for session {}",
-                    session_id_clone
-                );
-                break;
-            }
-            Ok(Message::Ping(_)) => {
-                if forward_task.is_finished() {
-                    break;
+    // Relay frames outward until either end goes away. The browser only ever
+    // sends control frames, so its half just watches for the close.
+    loop {
+        tokio::select! {
+            frame = inbound.next() => {
+                match frame {
+                    Some(frame) => {
+                        if !send_json(&mut ws_tx, &frame).await {
+                            break;
+                        }
+                    }
+                    None => break,
                 }
             }
-            Err(e) => {
-                error!("WebSocket error: {}", e);
-                break;
+            msg = ws_rx.next() => {
+                match msg {
+                    Some(Ok(Message::Close(_))) | None => {
+                        info!("Dashboard closed log session {session_id}");
+                        break;
+                    }
+                    Some(Err(e)) => {
+                        error!("Dashboard websocket error on log session {session_id}: {e}");
+                        break;
+                    }
+                    Some(Ok(_)) => {}
+                }
             }
-            _ => {}
         }
     }
 
     let stop_command = SafeCommandRequest {
-        id: -11,
+        id: STOP_LOG_STREAM_CMD_ID,
         command: SafeCommandTx::StopLogStream {
-            session_id: session_id_clone.clone(),
+            session_id: session_id.to_string(),
         },
         continue_on_error: false,
     };
@@ -206,16 +241,12 @@ async fn handle_dashboard_ws(
     )
     .await
     {
-        error!("Failed to queue StopLogStream command: {}", e);
+        error!("Failed to queue StopLogStream command: {e}");
     }
 
-    sessions_clone.remove_session(&session_id_clone).await;
-    forward_task.abort();
+    relay::close_session(&state.pg_pool, &session_id).await;
 
-    info!(
-        "Dashboard log stream ended for session {}",
-        session_id_clone
-    );
+    info!("Dashboard log stream ended for session {session_id}");
 }
 
 /// WebSocket endpoint for device to send log stream
@@ -227,8 +258,8 @@ async fn handle_dashboard_ws(
     ),
     responses(
         (status = StatusCode::SWITCHING_PROTOCOLS, description = "WebSocket connection established"),
-        (status = StatusCode::NOT_FOUND, description = "Session not found"),
-        (status = StatusCode::FORBIDDEN, description = "Device not authorized for this session"),
+        (status = StatusCode::NOT_FOUND, description = "Session not found or already closed"),
+        (status = StatusCode::FORBIDDEN, description = "Session belongs to a different device"),
     ),
     security(
         ("device_token" = [])
@@ -237,52 +268,113 @@ async fn handle_dashboard_ws(
 )]
 pub async fn device_logs_ws(
     ws: WebSocketUpgrade,
-    Path(session_id): Path<String>,
-    Extension(sessions): Extension<LogStreamSessions>,
+    device: AuthedDevice,
+    Path(session_id): Path<Uuid>,
+    Extension(state): Extension<State>,
 ) -> Result<Response, StatusCode> {
-    let tx = sessions
-        .get_session_tx(&session_id)
+    let session = relay::lookup_open(&state.pg_pool, &session_id, Kind::Logs)
         .await
+        .map_err(|e| {
+            error!("Database error looking up log session: {e}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?
         .ok_or(StatusCode::NOT_FOUND)?;
 
-    info!("Device connecting to log stream session {}", session_id);
+    if session.device_id != device.id {
+        warn!(
+            "Device {} tried to attach to log session {session_id} owned by device {}",
+            device.id, session.device_id
+        );
+        return Err(StatusCode::FORBIDDEN);
+    }
 
-    Ok(ws.on_upgrade(move |socket| handle_device_ws(socket, session_id, tx)))
+    info!("Device {} connected to log session {session_id}", device.id);
+
+    Ok(ws.on_upgrade(move |socket| handle_device_ws(socket, session_id, state)))
 }
 
-async fn handle_device_ws(
-    socket: WebSocket,
-    session_id: String,
-    dashboard_tx: mpsc::Sender<String>,
-) {
+async fn handle_device_ws(socket: WebSocket, session_id: Uuid, state: State) {
     let (mut ws_tx, mut ws_rx) = socket.split();
 
-    info!("Device connected to log stream session {}", session_id);
+    relay::mark_device_connected(&state.pg_pool, &session_id)
+        .await
+        .inspect_err(|e| error!("Failed to mark device connected: {e}"))
+        .ok();
 
-    while let Some(msg) = ws_rx.next().await {
-        match msg {
-            Ok(Message::Text(text)) => {
-                if dashboard_tx.send(text).await.is_err() {
-                    info!("Dashboard disconnected, stopping device stream");
-                    break;
+    // Tell the dashboard the session is live. This doubles as the handshake
+    // signal it is blocked waiting on.
+    relay::publish(
+        &state.pg_pool,
+        &session_id,
+        Direction::ToDashboard,
+        &json!({"type": "ready"}),
+    )
+    .await
+    .inspect_err(|e| error!("Failed to publish log session ready: {e}"))
+    .ok();
+
+    let mut batch: Vec<String> = Vec::new();
+    let mut flush = Box::pin(tokio::time::sleep(BATCH_WINDOW));
+
+    loop {
+        tokio::select! {
+            msg = ws_rx.next() => {
+                match msg {
+                    Some(Ok(Message::Text(text))) => {
+                        batch.push(text);
+                        if batch.len() >= MAX_BATCH_LINES
+                            && !publish_lines(&state, &session_id, &mut batch).await
+                        {
+                            break;
+                        }
+                    }
+                    Some(Ok(Message::Ping(data))) => {
+                        if ws_tx.send(Message::Pong(data)).await.is_err() {
+                            break;
+                        }
+                    }
+                    Some(Ok(Message::Close(_))) | None => {
+                        info!("Device closed log session {session_id}");
+                        break;
+                    }
+                    Some(Err(e)) => {
+                        error!("Device websocket error on log session {session_id}: {e}");
+                        break;
+                    }
+                    Some(Ok(_)) => {}
                 }
             }
-            Ok(Message::Close(_)) => {
-                info!("Device closed WebSocket for session {}", session_id);
-                break;
-            }
-            Ok(Message::Ping(data)) => {
-                if ws_tx.send(Message::Pong(data)).await.is_err() {
+            _ = &mut flush => {
+                if !publish_lines(&state, &session_id, &mut batch).await {
                     break;
                 }
+                flush = Box::pin(tokio::time::sleep(BATCH_WINDOW));
             }
-            Err(e) => {
-                error!("Device WebSocket error: {}", e);
-                break;
-            }
-            _ => {}
         }
     }
 
-    info!("Device log stream ended for session {}", session_id);
+    publish_lines(&state, &session_id, &mut batch).await;
+
+    info!("Device log stream ended for session {session_id}");
+}
+
+/// Relay whatever has accumulated as one frame. Returns false if the relay
+/// itself failed, which means the session is no longer usable.
+async fn publish_lines(state: &State, session_id: &Uuid, batch: &mut Vec<String>) -> bool {
+    if batch.is_empty() {
+        return true;
+    }
+
+    let payload = json!({"type": "lines", "lines": std::mem::take(batch)});
+    relay::publish(&state.pg_pool, session_id, Direction::ToDashboard, &payload)
+        .await
+        .inspect_err(|e| error!("Failed to relay log lines for session {session_id}: {e}"))
+        .is_ok()
+}
+
+async fn send_json(
+    ws_tx: &mut futures::stream::SplitSink<WebSocket, Message>,
+    payload: &Value,
+) -> bool {
+    ws_tx.send(Message::Text(payload.to_string())).await.is_ok()
 }

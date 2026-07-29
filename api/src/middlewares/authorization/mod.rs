@@ -30,6 +30,10 @@ pub fn required_permission(command: &SafeCommandTx) -> Permission {
         FreeForm { .. } => "freeform",
         OpenTunnel { .. } | CloseTunnel => "tunnel",
         DownloadOTA { .. } | CheckOTAStatus | StartOTA => "ota",
+        // Root-equivalent read of the whole device filesystem. Kept separate
+        // from `freeform` so it can be granted or revoked on its own, but it is
+        // deliberately not part of `basic`.
+        OpenFileSession { .. } | CloseFileSession { .. } => "files",
         Ping
         | Upgrade
         | Restart
@@ -44,11 +48,26 @@ pub fn required_permission(command: &SafeCommandTx) -> Permission {
         | ReportNMProfiles
         | WifiScan
         | ApplyNetworks { .. } => "basic",
+        // Only ever produced by a daemon deserializing a command it doesn't
+        // recognize; the api never issues it. Gated as `freeform` so that if one
+        // is ever submitted it needs the most privileged action, and rejected
+        // outright at the enqueue path — see `reject_unknown_commands`.
+        Unknown => "freeform",
     };
     Permission {
         action: action.to_string(),
         resource: "commands".to_string(),
     }
+}
+
+/// `SafeCommandTx::Unknown` is a daemon-side deserialization fallback, not a real
+/// command. It reaches here only if a client posts an unrecognized command name,
+/// in which case queueing it would waste a round trip to a device that can only
+/// fail it. Returns false if the bundle contains one.
+pub fn reject_unknown_commands(commands: &[SafeCommandRequest]) -> bool {
+    !commands
+        .iter()
+        .any(|req| matches!(req.command, SafeCommandTx::Unknown))
 }
 
 /// Returns true only if `current_user` is allowed to dispatch every command in

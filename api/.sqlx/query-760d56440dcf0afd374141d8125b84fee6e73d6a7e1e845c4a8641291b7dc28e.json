@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM file_download WHERE upload_token = ANY($1)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "TextArray"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "760d56440dcf0afd374141d8125b84fee6e73d6a7e1e845c4a8641291b7dc28e"
+}
