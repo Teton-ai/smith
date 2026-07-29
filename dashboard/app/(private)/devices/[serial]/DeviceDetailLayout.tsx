@@ -4,28 +4,41 @@ import { useLocation } from "react-router";
 import type { Device } from "@/app/api-client";
 import DeviceHeader from "./DeviceHeader";
 
-export type DeviceTab = "overview" | "commands" | "services";
+export type DeviceTab =
+	| "overview"
+	| "commands"
+	| "services"
+	| "variables"
+	| "network"
+	| "security"
+	| "system";
 
 /**
  * Shared scaffold for the device detail sub-pages (Overview / Commands /
- * Services). Renders the back link, device header and tab bar identically on
- * every tab so switching between them doesn't shift the layout.
+ * Services / Variables / Network / Security / System). Renders the back link,
+ * device header and tab bar identically on every tab so switching between them
+ * doesn't shift the layout.
  *
  * Pass `fill` for pages whose content scrolls internally (e.g. Commands): the
  * content area becomes a flex child that fills the remaining height instead of
  * letting the whole page scroll.
+ *
+ * Pass `tabActions` to put the active tab's own controls on the right of the
+ * tab bar, so the content below doesn't need its own header.
  */
 export function DeviceDetailLayout({
 	serial,
 	device,
 	activeTab,
 	fill = false,
+	tabActions,
 	children,
 }: {
 	serial: string;
 	device?: Device;
 	activeTab: DeviceTab;
 	fill?: boolean;
+	tabActions?: ReactNode;
 	children: ReactNode;
 }) {
 	const back =
@@ -47,6 +60,7 @@ export function DeviceDetailLayout({
 			{device && <DeviceHeader device={device} serial={serial} />}
 
 			<TabNav
+				actions={tabActions}
 				items={[
 					{
 						label: "Overview",
@@ -64,6 +78,30 @@ export function DeviceDetailLayout({
 						label: "Services",
 						to: `/devices/${serial}/services`,
 						active: activeTab === "services",
+						state: backState,
+					},
+					{
+						label: "Variables",
+						to: `/devices/${serial}/variables`,
+						active: activeTab === "variables",
+						state: backState,
+					},
+					{
+						label: "Network",
+						to: `/devices/${serial}/network`,
+						active: activeTab === "network",
+						state: backState,
+					},
+					{
+						label: "Security",
+						to: `/devices/${serial}/security`,
+						active: activeTab === "security",
+						state: backState,
+					},
+					{
+						label: "System",
+						to: `/devices/${serial}/system`,
+						active: activeTab === "system",
 						state: backState,
 					},
 				]}

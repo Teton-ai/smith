@@ -1,13 +1,9 @@
-import { Button, Panel, SECTION_THEMES } from "@teton/smith-ui";
-import {
-	CheckCircle2,
-	MinusCircle,
-	RefreshCw,
-	ShieldCheck,
-	XCircle,
-} from "lucide-react";
-import { useIssueCommandsToDevices } from "@/app/api-client";
-import { type DeviceAudit, useDeviceAudit } from "./audit/useDeviceAudit";
+import { Button, Card } from "@teton/smith-ui";
+import { CheckCircle2, MinusCircle, RefreshCw, XCircle } from "lucide-react";
+import { useParams } from "react-router";
+import { useGetDeviceInfo, useIssueCommandsToDevices } from "@/app/api-client";
+import { type DeviceAudit, useDeviceAudit } from "../audit/useDeviceAudit";
+import { DeviceDetailLayout } from "../DeviceDetailLayout";
 
 /** Renders a yes / no / unknown status pill for a single audit check. */
 const StatusPill = ({ value }: { value: boolean | null }) => {
@@ -32,15 +28,14 @@ const StatusPill = ({ value }: { value: boolean | null }) => {
 	);
 };
 
-/** Security audit panel for the device overview. Self-contained: fetches the
- *  audit, can trigger a fresh run, and reflects the result. */
-const SecurityAudit = ({
-	serial,
-	deviceId,
-}: {
-	serial: string;
-	deviceId?: number;
-}) => {
+/** Security audit tab. Fetches the audit, can trigger a fresh run, and reflects
+ *  the result. The last-checked stamp and the run button live in the tab bar —
+ *  the tab label already names the section, so the list needs no header. */
+const SecurityPage = () => {
+	const params = useParams();
+	const serial = params.serial as string;
+
+	const { data: device } = useGetDeviceInfo(serial);
 	const { data: audit, isLoading, refetch } = useDeviceAudit(serial);
 
 	const { mutate: runAudit, isPending: isRunningAudit } =
@@ -58,10 +53,10 @@ const SecurityAudit = ({
 		});
 
 	const handleRunAudit = () => {
-		if (!deviceId) return;
+		if (!device?.id) return;
 		runAudit({
 			data: {
-				devices: [deviceId],
+				devices: [device.id],
 				commands: [{ id: -1, command: "RunAudit", continue_on_error: false }],
 			},
 		});
@@ -86,56 +81,59 @@ const SecurityAudit = ({
 	];
 
 	return (
-		<Panel
-			title="Security Audit"
-			icon={ShieldCheck}
-			theme={SECTION_THEMES.rose}
-			actions={
-				<Button
-					variant="soft"
-					tone="gray"
-					size="sm"
-					loading={isRunningAudit}
-					onClick={handleRunAudit}
-					icon={<RefreshCw className="w-4 h-4" />}
-				>
-					Run audit now
-				</Button>
+		<DeviceDetailLayout
+			serial={serial}
+			device={device}
+			activeTab="security"
+			tabActions={
+				<>
+					<span className="text-sm text-gray-500">
+						{audit?.checked_at
+							? `Last checked ${new Date(audit.checked_at).toLocaleString()}`
+							: "Never checked"}
+					</span>
+					<Button
+						variant="soft"
+						tone="gray"
+						size="sm"
+						loading={isRunningAudit}
+						onClick={handleRunAudit}
+						icon={<RefreshCw className="w-4 h-4" />}
+					>
+						Run audit now
+					</Button>
+				</>
 			}
 		>
-			<p className="text-sm text-gray-500 mb-3">
-				{audit?.checked_at
-					? `Last checked ${new Date(audit.checked_at).toLocaleString()}`
-					: "Never checked"}
-			</p>
-
-			{isLoading ? (
-				<div className="py-6 text-gray-500">Loading audit...</div>
-			) : (
-				<div className="divide-y divide-gray-100">
-					{checks.map((check) => (
-						<div
-							key={check.name}
-							className="flex items-center justify-between py-3"
-						>
-							<div className="min-w-0">
-								<div className="text-gray-900 font-medium">{check.name}</div>
-								<div className="text-sm text-gray-400">{check.help}</div>
+			<Card className="overflow-hidden">
+				{isLoading ? (
+					<div className="px-4 py-6 text-gray-500">Loading audit...</div>
+				) : (
+					<div className="divide-y divide-gray-100">
+						{checks.map((check) => (
+							<div
+								key={check.name}
+								className="flex items-center justify-between gap-4 px-4 py-3"
+							>
+								<div className="min-w-0">
+									<div className="text-gray-900 font-medium">{check.name}</div>
+									<div className="text-sm text-gray-400">{check.help}</div>
+								</div>
+								<StatusPill value={check.value} />
 							</div>
-							<StatusPill value={check.value} />
-						</div>
-					))}
-				</div>
-			)}
+						))}
+					</div>
+				)}
+			</Card>
 
 			{!isLoading && !audit?.checked_at && (
-				<p className="text-sm text-gray-400 mt-4">
+				<p className="text-sm text-gray-400">
 					This device has not reported an audit yet. It will report on its next
 					12-hour cycle, on restart, or when you run one now.
 				</p>
 			)}
-		</Panel>
+		</DeviceDetailLayout>
 	);
 };
 
-export default SecurityAudit;
+export default SecurityPage;

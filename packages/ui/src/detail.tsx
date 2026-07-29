@@ -44,10 +44,17 @@ export interface TabItem {
 }
 
 /** Underlined tab bar used across the device detail subpages. The active tab
- *  renders as static text; the rest are router links. */
-export function TabNav({ items }: { items: TabItem[] }) {
+ *  renders as static text; the rest are router links. `actions` renders on the
+ *  right of the bar, for controls that belong to the active tab's content. */
+export function TabNav({
+	items,
+	actions,
+}: {
+	items: TabItem[];
+	actions?: ReactNode;
+}) {
 	return (
-		<div className="border-b border-gray-200">
+		<div className="border-b border-gray-200 flex items-end justify-between gap-4">
 			<nav className="-mb-px flex space-x-8">
 				{items.map((item) => {
 					const cls = item.active
@@ -69,6 +76,9 @@ export function TabNav({ items }: { items: TabItem[] }) {
 					);
 				})}
 			</nav>
+			{actions && (
+				<div className="flex items-center gap-2 pb-1.5">{actions}</div>
+			)}
 		</div>
 	);
 }

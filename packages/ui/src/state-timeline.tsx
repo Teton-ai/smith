@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { type ReactNode, useState } from "react";
 
 /** A contiguous stretch of one state within a lane, in absolute time. */
 export interface TimelineSpan {
@@ -29,6 +29,113 @@ const TONES: Record<TimelineTone, string> = {
 };
 
 const pct = (value: number) => `${(value * 100).toFixed(4)}%`;
+
+export interface UptimeBucket {
+	start: Date;
+	end: Date;
+	/** Downtime inside this bucket, in ms. */
+	downMs: number;
+	/** Fraction of the bucket spent up, 0..1. */
+	ratio: number;
+}
+
+/**
+ * Status-page style availability bars: the window is split into equal buckets,
+ * each drawn green with a red portion sized to the downtime inside it.
+ *
+ * The proportion is the point — colouring a whole bucket red for a 30-second
+ * blip makes a flapping device look permanently offline. A red sliver reads as
+ * "briefly down", a full red bar as "down the whole time", with no intermediate
+ * colour whose meaning has to be guessed.
+ */
+export function UptimeBars({
+	from,
+	to,
+	spans,
+	buckets = 48,
+	height = "1.75rem",
+	renderTooltip,
+}: {
+	from: Date;
+	to: Date;
+	/** Down intervals in absolute time; clipped to the window. */
+	spans: TimelineSpan[];
+	buckets?: number;
+	height?: string;
+	/** Hover card contents for a bucket. No tooltip is shown when omitted. */
+	renderTooltip?: (bucket: UptimeBucket) => ReactNode;
+}) {
+	const [hovered, setHovered] = useState<number | null>(null);
+
+	const startMs = from.getTime();
+	const total = to.getTime() - startMs;
+
+	if (!(total > 0)) return null;
+
+	const width = total / buckets;
+	const items = Array.from({ length: buckets }, (_, i): UptimeBucket => {
+		const a = startMs + i * width;
+		const b = a + width;
+		let downMs = 0;
+		for (const s of spans) {
+			const lo = Math.max(s.start.getTime(), a);
+			const hi = Math.min(s.end.getTime(), b);
+			if (hi > lo) downMs += hi - lo;
+		}
+		return {
+			start: new Date(a),
+			end: new Date(b),
+			downMs,
+			ratio: 1 - downMs / width,
+		};
+	});
+
+	// Anchoring: centred on the bar, but pinned to whichever edge it would
+	// otherwise overflow, since the card around it clips horizontally.
+	const anchor = (index: number) => {
+		const center = (index + 0.5) / buckets;
+		if (center < 0.15) return { left: 0 };
+		if (center > 0.85) return { right: 0 };
+		return { left: `${center * 100}%`, transform: "translateX(-50%)" };
+	};
+
+	return (
+		<div className="relative">
+			{hovered !== null && renderTooltip && (
+				<div
+					className="pointer-events-none absolute bottom-full z-10 mb-2 whitespace-nowrap rounded-md bg-gray-900 px-2 py-1.5 text-[11px] leading-tight text-white shadow-lg"
+					style={anchor(hovered)}
+				>
+					{renderTooltip(items[hovered])}
+				</div>
+			)}
+
+			<div
+				className="flex items-stretch gap-[2px]"
+				style={{ height }}
+				onMouseLeave={() => setHovered(null)}
+			>
+				{items.map((bucket, i) => (
+					<div
+						key={bucket.start.getTime()}
+						onMouseEnter={() => setHovered(i)}
+						className={`relative min-w-[2px] flex-1 cursor-pointer overflow-hidden rounded-[2px] bg-emerald-500 transition-opacity ${
+							hovered === i ? "opacity-60" : ""
+						}`}
+					>
+						{bucket.downMs > 0 && (
+							<div
+								className="absolute inset-x-0 bottom-0 bg-red-500"
+								// Floor so a blip too small to round to a pixel is still seen.
+								style={{ height: `max(3px, ${(1 - bucket.ratio) * 100}%)` }}
+							/>
+						)}
+					</div>
+				))}
+			</div>
+		</div>
+	);
+}
 
 /**
  * Horizontal state timeline: one lane per series, spans drawn as coloured bands

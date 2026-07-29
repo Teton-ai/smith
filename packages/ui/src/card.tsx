@@ -73,6 +73,57 @@ export function Panel({
 	);
 }
 
+const ALERT_TONES = {
+	red: { accent: "border-l-red-500", chip: "bg-red-50 text-red-600" },
+	amber: { accent: "border-l-amber-500", chip: "bg-amber-50 text-amber-700" },
+};
+
+export type AlertTone = keyof typeof ALERT_TONES;
+
+/**
+ * Attention banner for a problem the page wants to lead with: colored left
+ * accent, headline plus severity chip, one line of detail, optional action on
+ * the right. Callers render it conditionally — it has no "all clear" state.
+ */
+export function AlertBanner({
+	tone = "red",
+	title,
+	severity,
+	action,
+	children,
+}: {
+	tone?: AlertTone;
+	title: ReactNode;
+	severity?: string;
+	action?: ReactNode;
+	children: ReactNode;
+}) {
+	const { accent, chip } = ALERT_TONES[tone];
+
+	return (
+		<Card className={`border-l-4 ${accent} px-5 py-4`}>
+			<div className="flex items-start justify-between gap-4">
+				{/* Grows so body content that wants the width — bars, timelines — gets
+				    it, rather than shrinking to the length of the text above it. */}
+				<div className="min-w-0 flex-1">
+					<div className="flex items-center gap-2.5 flex-wrap">
+						<h4 className="text-base font-semibold text-gray-900">{title}</h4>
+						{severity && (
+							<span
+								className={`text-[11px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded ${chip}`}
+							>
+								{severity}
+							</span>
+						)}
+					</div>
+					<div className="mt-1 text-sm text-gray-600">{children}</div>
+				</div>
+				{action && <div className="shrink-0 text-sm">{action}</div>}
+			</div>
+		</Card>
+	);
+}
+
 /**
  * Card with a colored, titled header bar — for grouped lists.
  * Right side shows a count pill (when `count` is set) and/or `actions`.

@@ -1021,7 +1021,9 @@ const WifiPanel = ({ serial, device }: WifiPanelProps) => {
 				)}
 			</div>
 
-			<div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+			{/* Splits at xl, not lg: the panel itself only takes two thirds of the
+			    Network tab, so the scan table needs the extra width. */}
+			<div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
 				<div>
 					{/* Last checked */}
 					<div className="flex items-center justify-between gap-2 mb-3">
@@ -1146,7 +1148,7 @@ const WifiPanel = ({ serial, device }: WifiPanelProps) => {
 				</div>
 
 				{/* Scan results */}
-				<div className="border-t border-gray-100 pt-4 lg:border-t-0 lg:pt-0 lg:border-l lg:border-gray-100 lg:pl-6">
+				<div className="border-t border-gray-100 pt-4 xl:border-t-0 xl:pt-0 xl:border-l xl:border-gray-100 xl:pl-6">
 					<div className="flex items-center justify-between gap-2 mb-3">
 						{isScanError ? (
 							<p className="text-sm text-red-500">

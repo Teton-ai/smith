@@ -14,6 +14,18 @@ const DeviceServices = lazy(
 const DeviceCommands = lazy(
 	() => import("@/app/(private)/devices/[serial]/commands/page"),
 );
+const DeviceVariables = lazy(
+	() => import("@/app/(private)/devices/[serial]/variables/page"),
+);
+const DeviceNetwork = lazy(
+	() => import("@/app/(private)/devices/[serial]/network/page"),
+);
+const DeviceSecurity = lazy(
+	() => import("@/app/(private)/devices/[serial]/security/page"),
+);
+const DeviceSystem = lazy(
+	() => import("@/app/(private)/devices/[serial]/system/page"),
+);
 const Distributions = lazy(() => import("@/app/(private)/distributions/page"));
 const DistributionDetail = lazy(
 	() => import("@/app/(private)/distributions/[id]/page"),
@@ -66,6 +78,22 @@ export const router = createBrowserRouter([
 			{
 				path: "/devices/:serial/commands",
 				element: withSuspense(<DeviceCommands />),
+			},
+			{
+				path: "/devices/:serial/variables",
+				element: withSuspense(<DeviceVariables />),
+			},
+			{
+				path: "/devices/:serial/network",
+				element: withSuspense(<DeviceNetwork />),
+			},
+			{
+				path: "/devices/:serial/security",
+				element: withSuspense(<DeviceSecurity />),
+			},
+			{
+				path: "/devices/:serial/system",
+				element: withSuspense(<DeviceSystem />),
 			},
 			{ path: "/distributions", element: withSuspense(<Distributions />) },
 			{

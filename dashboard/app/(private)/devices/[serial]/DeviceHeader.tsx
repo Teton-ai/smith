@@ -1,6 +1,6 @@
 "use client";
 
-import { Button } from "@teton/smith-ui";
+import { Button, DropdownMenu, LabelChip } from "@teton/smith-ui";
 import {
 	BarChart3,
 	Check,
@@ -9,14 +9,13 @@ import {
 	ExternalLink,
 	GitBranch,
 	Power,
-	Router,
 	ScrollText,
-	Signal,
 	Tag,
+	Tags,
 	Terminal,
-	Wifi,
 } from "lucide-react";
 import { useRef, useState } from "react";
+import { Link } from "react-router";
 import {
 	type CommandRecipe,
 	type Device,
@@ -25,8 +24,8 @@ import {
 	useTriggerRecipe,
 } from "@/app/api-client";
 import { Modal } from "@/app/components/modal";
-import NetworkQualityIndicator from "@/app/components/NetworkQualityIndicator";
 import { useConfig } from "@/app/hooks/config";
+import { architectureIcon } from "@/app/utils/release";
 
 const Tooltip = ({
 	children,
@@ -87,6 +86,57 @@ const Tooltip = ({
 				))}
 		</div>
 	);
+};
+
+/** Keeps the header a single line for typical fleets; the rest sit behind a
+ *  "+N" tooltip and the full set stays on the System tab. */
+const VISIBLE_LABELS = 3;
+
+/** A device still off its target release after this long has stopped updating
+ *  and started failing. */
+const UPDATING_GRACE_MINUTES = 30;
+
+/**
+ * Where a device stands against its target release: `updating` while the
+ * upgrade is plausibly in flight, `outdated` once it has clearly failed, and
+ * `null` when the device is already on target.
+ *
+ * Lives here with the grace period rather than in the Overview, which is its
+ * only caller.
+ */
+export const getDeviceUpdateStatus = (
+	device: Device | undefined,
+): { status: "updating" | "outdated"; duration: string } | null => {
+	const pending =
+		device?.release_id &&
+		device.target_release_id &&
+		device.release_id !== device.target_release_id;
+	if (!pending) return null;
+
+	if (!device?.target_release_id_set_at)
+		return { status: "outdated", duration: "" }; // No timestamp = legacy
+
+	const setAt = new Date(device.target_release_id_set_at);
+	const now = new Date();
+	const diffMinutes = Math.floor(
+		(now.getTime() - setAt.getTime()) / (1000 * 60),
+	);
+	const diffHours = Math.floor(diffMinutes / 60);
+	const diffDays = Math.floor(diffHours / 24);
+
+	let duration: string;
+	if (diffDays > 0) {
+		duration = `${diffDays}d`;
+	} else if (diffHours > 0) {
+		duration = `${diffHours}h`;
+	} else {
+		duration = `${diffMinutes}m`;
+	}
+
+	return {
+		status: diffMinutes < UPDATING_GRACE_MINUTES ? "updating" : "outdated",
+		duration,
+	};
 };
 
 interface DeviceHeaderProps {
@@ -218,8 +268,8 @@ const DeviceHeader: React.FC<DeviceHeaderProps> = ({ device, serial }) => {
 		return (
 			<div className="bg-white rounded-lg border border-gray-200 p-4">
 				<div className="flex items-center space-x-3">
-					<div className="p-2 bg-gray-100 text-gray-600 rounded">
-						<Cpu className="w-5 h-5" />
+					<div className="p-2.5 bg-gray-100 text-gray-600 rounded-lg">
+						<Cpu className="w-7 h-7" />
 					</div>
 					<div className="flex-1">
 						<div className="flex items-center space-x-3">
@@ -257,294 +307,162 @@ const DeviceHeader: React.FC<DeviceHeaderProps> = ({ device, serial }) => {
 		return diffMinutes <= 3 ? "online" : "offline";
 	};
 
-	const hasUpdatePending = () => {
-		return (
-			device?.release_id &&
-			device.target_release_id &&
-			device.release_id !== device.target_release_id
-		);
-	};
-
-	const getUpdateStatus = (): {
-		status: "updating" | "outdated";
-		duration: string;
-	} | null => {
-		if (!hasUpdatePending()) return null;
-
-		if (!device?.target_release_id_set_at)
-			return { status: "outdated", duration: "" }; // No timestamp = legacy
-
-		const setAt = new Date(device.target_release_id_set_at);
-		const now = new Date();
-		const diffMinutes = Math.floor(
-			(now.getTime() - setAt.getTime()) / (1000 * 60),
-		);
-		const diffHours = Math.floor(diffMinutes / 60);
-		const diffDays = Math.floor(diffHours / 24);
-
-		let duration: string;
-		if (diffDays > 0) {
-			duration = `${diffDays}d`;
-		} else if (diffHours > 0) {
-			duration = `${diffHours}h`;
-		} else {
-			duration = `${diffMinutes}m`;
-		}
-
-		return {
-			status: diffMinutes < 30 ? "updating" : "outdated",
-			duration,
-		};
-	};
-
-	const getNetworkQualityTooltip = () => {
-		const status = getDeviceStatus();
-		const networkScore = device?.network?.network_score;
-		const downloadSpeed = device?.network?.download_speed_mbps;
-		const uploadSpeed = device?.network?.upload_speed_mbps;
+	// Just reachability. Link type, quality and speeds live on the Network tab,
+	// where they're readable rather than hidden in a header tooltip.
+	const getStatusTooltip = () => {
 		const lastSeenText = device?.last_seen
 			? formatTimeAgo(device.last_seen)
 			: "Never";
-
-		if (status === "offline") {
-			return `Offline\nLast seen: ${lastSeenText}`;
-		}
-
-		if (!networkScore) {
-			return `Online\nLast seen: ${lastSeenText}`;
-		}
-
-		const qualityText =
-			networkScore >= 4 ? "Excellent" : networkScore === 3 ? "Good" : "Poor";
-		const downloadText = downloadSpeed
-			? `↓ ${downloadSpeed.toFixed(1)} Mbps`
-			: "";
-		const uploadText = uploadSpeed ? `↑ ${uploadSpeed.toFixed(1)} Mbps` : "";
-		const speedText =
-			downloadText || uploadText
-				? ` (${[downloadText, uploadText].filter(Boolean).join(" / ")})`
-				: "";
-		const lastTested = device?.network?.updated_at
-			? formatTimeAgo(device.network.updated_at)
-			: "never";
-
-		return `Online - ${qualityText} Network (${networkScore}/5)${speedText}\nLast tested: ${lastTested}\nLast seen: ${lastSeenText}`;
-	};
-
-	const getPrimaryConnectionType = () => {
-		if (!device) return null;
-
-		// If device has a modem, prioritize cellular
-		if (device.modem_id && device.modem) {
-			return "cellular";
-		}
-
-		// Check for active network connections
-		const connectedInterfaces = device.system_info?.connection_statuses?.filter(
-			(conn) => conn.connection_state === "connected",
-		);
-
-		if (!connectedInterfaces || connectedInterfaces.length === 0) {
-			return null;
-		}
-
-		// Prioritize: WiFi > Ethernet > Other
-		if (connectedInterfaces.some((conn) => conn.device_type === "wifi")) {
-			return "wifi";
-		}
-
-		if (connectedInterfaces.some((conn) => conn.device_type === "ethernet")) {
-			return "ethernet";
-		}
-
-		return "other";
-	};
-
-	const getConnectionIcon = (connectionType: string | null) => {
-		switch (connectionType) {
-			case "cellular":
-				return <Signal className="w-4 h-4 text-blue-600" />;
-			case "wifi":
-				return <Wifi className="w-4 h-4 text-green-600" />;
-			case "ethernet":
-				return <Router className="w-4 h-4 text-orange-600" />;
-			default:
-				return null;
-		}
-	};
-
-	const getConnectionTooltip = (connectionType: string | null) => {
-		if (!device) return "";
-
-		switch (connectionType) {
-			case "cellular":
-				return `Cellular Connection${device.modem?.network_provider ? ` - ${device.modem.network_provider}` : ""}${device.modem ? `\nIMEI: ${device.modem.imei}` : ""}${device.modem?.on_dongle ? "\nExternal Dongle" : "\nBuilt-in Modem"}`;
-			case "wifi": {
-				const wifiConnections = device.system_info?.connection_statuses?.filter(
-					(conn) =>
-						conn.connection_state === "connected" &&
-						conn.device_type === "wifi",
-				);
-				const primaryWifi = wifiConnections?.[0];
-				return `WiFi Connection${primaryWifi?.connection_name ? ` - ${primaryWifi.connection_name}` : ""}`;
-			}
-			case "ethernet": {
-				const ethConnections = device.system_info?.connection_statuses?.filter(
-					(conn) =>
-						conn.connection_state === "connected" &&
-						conn.device_type === "ethernet",
-				);
-				return `Ethernet Connection${ethConnections ? ` - ${ethConnections.length} interface(s)` : ""}`;
-			}
-			default:
-				return "No active connection detected";
-		}
+		return `${getDeviceStatus() === "online" ? "Online" : "Offline"}\nLast seen: ${lastSeenText}`;
 	};
 
 	const getDeviceName = () => device?.serial_number || serial;
 
 	const status = getDeviceStatus();
-	const connectionType = getPrimaryConnectionType();
+	const labels = Object.entries(device.labels ?? {});
+	const grafanaUrl = getGrafanaUrl();
+	// The device runs its distribution's build, so that's what its hardware is.
+	const architecture = device.release?.distribution_architecture;
+	const DeviceIcon = architectureIcon(architecture);
 
 	return (
 		<div className="bg-white rounded-lg border border-gray-200 p-4">
 			<div className="flex flex-col gap-3 lg:flex-row lg:items-center">
 				<div className="flex flex-1 items-center space-x-3 min-w-0">
-					<div className="p-2 bg-gray-100 text-gray-600 rounded flex-shrink-0">
-						<Cpu className="w-5 h-5" />
-					</div>
+					<Tooltip
+						content={
+							architecture ? architecture.toUpperCase() : "Unknown architecture"
+						}
+					>
+						<div className="p-2.5 bg-gray-100 text-gray-600 rounded-lg flex-shrink-0 cursor-help">
+							<DeviceIcon className="w-7 h-7" />
+						</div>
+					</Tooltip>
 					<div className="flex-1 min-w-0">
-						<div className="flex items-center space-x-3">
-							<h1 className="text-xl font-bold text-gray-900">
+						{/* No update chips here: a stalled update is the Overview's alert,
+						    and an in-flight one isn't a problem worth a header badge. */}
+						<div className="flex items-center gap-2 min-w-0">
+							<Tooltip content={getStatusTooltip()}>
+								<span
+									className={`block w-2.5 h-2.5 flex-shrink-0 rounded-full cursor-help ${
+										status === "online"
+											? "bg-green-500 animate-pulse"
+											: "bg-red-500"
+									}`}
+								/>
+							</Tooltip>
+							<h1 className="text-xl font-bold text-gray-900 leading-none truncate">
 								{getDeviceName()}
 							</h1>
-							<Tooltip content={getNetworkQualityTooltip()}>
-								<div className="flex-shrink-0 cursor-help">
-									<NetworkQualityIndicator
-										isOnline={status === "online"}
-										networkScore={device?.network?.network_score}
-									/>
-								</div>
-							</Tooltip>
-							{getUpdateStatus()?.status === "updating" && (
-								<Tooltip
-									content={`Updating for ${getUpdateStatus()?.duration}: ${device.release?.distribution_name}@${device.release?.version || device.release_id} → ${device.target_release?.distribution_name}@${device.target_release?.version || device.target_release_id}`}
-								>
-									<span className="px-2 py-1 text-xs font-medium bg-blue-100 text-blue-800 rounded-full cursor-help">
-										Updating {getUpdateStatus()?.duration}
-									</span>
-								</Tooltip>
-							)}
-							{getUpdateStatus()?.status === "outdated" && (
-								<Tooltip
-									content={`Update failed after ${getUpdateStatus()?.duration}: ${device.release?.distribution_name}@${device.release?.version || device.release_id} → ${device.target_release?.distribution_name}@${device.target_release?.version || device.target_release_id}`}
-								>
-									<span className="px-2 py-1 text-xs font-medium bg-orange-100 text-orange-800 rounded-full cursor-help">
-										Update Failed {getUpdateStatus()?.duration}
-									</span>
-								</Tooltip>
-							)}
 						</div>
-						<div className="flex items-center space-x-4 mt-1 text-sm text-gray-600">
+						<div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-sm text-gray-600">
 							{device.release && (
 								<div className="flex items-center space-x-2">
-									<div className="flex items-center space-x-1">
+									<Link
+										to={`/distributions/${device.release.distribution_id}`}
+										className="flex items-center space-x-1 rounded hover:text-blue-600 hover:underline transition-colors"
+									>
 										<GitBranch className="w-4 h-4" />
 										<span className="font-medium">
 											{device.release.distribution_name}
 										</span>
-									</div>
-									<div className="flex items-center space-x-1">
+									</Link>
+									<Link
+										to={`/releases/${device.release.id}`}
+										className="flex items-center space-x-1 rounded hover:text-blue-600 hover:underline transition-colors"
+									>
 										<Tag className="w-4 h-4" />
 										<span>v{device.release.version}</span>
-									</div>
+									</Link>
 								</div>
 							)}
-							{connectionType && (
-								<Tooltip content={getConnectionTooltip(connectionType)}>
-									<div className="flex items-center space-x-1 cursor-help">
-										{getConnectionIcon(connectionType)}
-										<span className="capitalize">{connectionType}</span>
-									</div>
-								</Tooltip>
+							{labels.length > 0 && (
+								<div className="flex flex-wrap items-center gap-1.5">
+									<Tags className="w-4 h-4 text-gray-400 flex-shrink-0" />
+									{labels.slice(0, VISIBLE_LABELS).map(([key, value]) => (
+										<LabelChip key={key} name={key} value={value} />
+									))}
+									{labels.length > VISIBLE_LABELS && (
+										<Tooltip
+											content={labels
+												.slice(VISIBLE_LABELS)
+												.map(([key, value]) => `${key}: ${value}`)
+												.join(", ")}
+										>
+											<span className="text-xs text-gray-500 cursor-help">
+												+{labels.length - VISIBLE_LABELS}
+											</span>
+										</Tooltip>
+									)}
+								</div>
 							)}
+							{/* Link type, SSID and quality moved to the Network tab. */}
 						</div>
 					</div>
 				</div>
-				<div className="flex flex-wrap items-center gap-2 lg:flex-shrink-0 lg:gap-3">
-					<Tooltip content="Run a command on this device">
-						<Button
-							variant="soft"
-							tone="purple"
-							icon={<Terminal className="w-4 h-4" />}
-							onClick={() => setShowRunModal(true)}
-						>
-							Run
-						</Button>
-					</Tooltip>
-					<Tooltip content="Apply a recipe to this device">
-						<Button
-							variant="soft"
-							tone="purple"
-							icon={<ScrollText className="w-4 h-4" />}
-							onClick={() => setShowRecipeModal(true)}
-						>
-							Recipe
-						</Button>
-					</Tooltip>
-					<Tooltip content="Reboot this device">
-						<Button
-							variant="soft"
-							tone="red"
-							icon={<Power className="w-4 h-4" />}
-							onClick={() => setShowRebootModal(true)}
-						>
-							Reboot
-						</Button>
-					</Tooltip>
-					<Tooltip
-						content={
-							sshCopied
-								? "Copied to clipboard!"
-								: `Copy SSH tunnel command: sm tunnel ${device?.serial_number || serial}`
-						}
-					>
-						<Button
-							variant="soft"
-							tone={sshCopied ? "green" : "blue"}
-							onClick={handleSshTunnel}
-							icon={
-								sshCopied ? (
+				<div className="flex items-center lg:flex-shrink-0">
+					<DropdownMenu
+						label="Actions"
+						tone="gray"
+						items={[
+							{
+								label: "Run",
+								description: "Run a command on this device",
+								icon: <Terminal className="w-4 h-4" />,
+								tone: "purple",
+								onClick: () => setShowRunModal(true),
+							},
+							{
+								label: "Recipe",
+								description: "Apply a recipe to this device",
+								icon: <ScrollText className="w-4 h-4" />,
+								tone: "purple",
+								onClick: () => setShowRecipeModal(true),
+							},
+							{
+								label: "Reboot",
+								description: "Restart this device",
+								icon: <Power className="w-4 h-4" />,
+								tone: "red",
+								onClick: () => setShowRebootModal(true),
+							},
+							{
+								label: sshCopied ? "Copied!" : "SSH",
+								description: sshCopied
+									? "Copied to clipboard"
+									: `Copy: sm tunnel ${getDeviceName()}`,
+								icon: sshCopied ? (
 									<Check className="w-4 h-4" />
 								) : (
 									<>
 										<Terminal className="w-4 h-4" />
 										<Copy className="w-3 h-3" />
 									</>
-								)
-							}
-						>
-							{sshCopied ? "Copied!" : "SSH"}
-						</Button>
-					</Tooltip>
-					{getGrafanaUrl() && (
-						<Tooltip content="Open Grafana dashboard">
-							<Button
-								variant="soft"
-								tone="orange"
-								href={getGrafanaUrl()!}
-								target="_blank"
-								icon={
-									<>
-										<BarChart3 className="w-4 h-4" />
-										<ExternalLink className="w-3 h-3" />
-									</>
-								}
-							>
-								Grafana
-							</Button>
-						</Tooltip>
-					)}
+								),
+								tone: sshCopied ? "green" : "blue",
+								// Stay open so the "Copied!" confirmation is actually visible.
+								keepOpen: true,
+								onClick: handleSshTunnel,
+							},
+							...(grafanaUrl
+								? [
+										{
+											label: "Grafana",
+											description: "Open Grafana dashboard",
+											icon: (
+												<>
+													<BarChart3 className="w-4 h-4" />
+													<ExternalLink className="w-3 h-3" />
+												</>
+											),
+											tone: "orange" as const,
+											href: grafanaUrl,
+											target: "_blank",
+										},
+									]
+								: []),
+						]}
+					/>
 				</div>
 			</div>
 
