@@ -321,7 +321,7 @@ checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 
 [[package]]
 name = "api"
-version = "0.2.180"
+version = "0.2.181"
 dependencies = [
  "anyhow",
  "axum 0.7.9",
@@ -1187,7 +1187,7 @@ checksum = "c8d4a3bb8b1e0c1050499d1815f5ab16d04f0959b233085fb31653fbfc9d98f9"
 
 [[package]]
 name = "cli"
-version = "0.2.180"
+version = "0.2.181"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1782,13 +1782,13 @@ dependencies = [
 
 [[package]]
 name = "displaydoc"
-version = "0.2.6"
+version = "0.2.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1ac70aa55017e108007fbaf5aa0f54b021c98f92ff8af59d42eda9da96e3dd4f"
+checksum = "c6232dd377dcc64799954cbd3a9bb882e9cdc1308ccd87b1c098f1fb2eaf82a8"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.119",
+ "syn 3.0.3",
 ]
 
 [[package]]
@@ -3162,7 +3162,7 @@ dependencies = [
  "bitflags 2.13.1",
  "libc",
  "plain",
- "redox_syscall 0.9.0",
+ "redox_syscall 0.9.1",
 ]
 
 [[package]]
@@ -3409,7 +3409,7 @@ dependencies = [
 
 [[package]]
 name = "models"
-version = "0.2.180"
+version = "0.2.181"
 dependencies = [
  "axum 0.7.9",
  "chrono",
@@ -4628,9 +4628,9 @@ dependencies = [
 
 [[package]]
 name = "redox_syscall"
-version = "0.9.0"
+version = "0.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c5102a6aaa05aa011a238e178e6bca86d2cb56fc9f586d37cb80f5bca6e07759"
+checksum = "07507be7b4a5f9f26eeb41eeaebb1f5a7ff29dfb29739facc21d35bf8b11c21e"
 dependencies = [
  "bitflags 2.13.1",
 ]
@@ -5617,7 +5617,7 @@ checksum = "e8e2fb0f499abb4d162f2bedad68f5ef91a1682b5a03596ddb67efd37768d100"
 
 [[package]]
 name = "smith"
-version = "0.2.180"
+version = "0.2.181"
 dependencies = [
  "anyhow",
  "bore-cli",
@@ -5653,7 +5653,7 @@ dependencies = [
 
 [[package]]
 name = "smith-e2e"
-version = "0.2.180"
+version = "0.2.181"
 dependencies = [
  "anyhow",
  "reqwest 0.12.28",
@@ -5665,7 +5665,7 @@ dependencies = [
 
 [[package]]
 name = "smith-updater"
-version = "0.2.180"
+version = "0.2.181"
 dependencies = [
  "anyhow",
  "clap",
