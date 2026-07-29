@@ -101,7 +101,8 @@ const UPDATING_GRACE_MINUTES = 30;
  * upgrade is plausibly in flight, `outdated` once it has clearly failed, and
  * `null` when the device is already on target.
  *
- * Exported so the header chip and the Overview alert can't drift apart.
+ * Lives here with the grace period rather than in the Overview, which is its
+ * only caller.
  */
 export const getDeviceUpdateStatus = (
 	device: Device | undefined,
@@ -306,8 +307,6 @@ const DeviceHeader: React.FC<DeviceHeaderProps> = ({ device, serial }) => {
 		return diffMinutes <= 3 ? "online" : "offline";
 	};
 
-	const getUpdateStatus = () => getDeviceUpdateStatus(device);
-
 	// Just reachability. Link type, quality and speeds live on the Network tab,
 	// where they're readable rather than hidden in a header tooltip.
 	const getStatusTooltip = () => {
@@ -340,32 +339,21 @@ const DeviceHeader: React.FC<DeviceHeaderProps> = ({ device, serial }) => {
 						</div>
 					</Tooltip>
 					<div className="flex-1 min-w-0">
-						<div className="flex items-center space-x-3">
-							<div className="flex items-center gap-2 min-w-0">
-								<Tooltip content={getStatusTooltip()}>
-									<span
-										className={`block w-2.5 h-2.5 flex-shrink-0 rounded-full cursor-help ${
-											status === "online"
-												? "bg-green-500 animate-pulse"
-												: "bg-red-500"
-										}`}
-									/>
-								</Tooltip>
-								<h1 className="text-xl font-bold text-gray-900 leading-none truncate">
-									{getDeviceName()}
-								</h1>
-							</div>
-							{getUpdateStatus()?.status === "updating" && (
-								<Tooltip
-									content={`Updating for ${getUpdateStatus()?.duration}: ${device.release?.distribution_name}@${device.release?.version || device.release_id} → ${device.target_release?.distribution_name}@${device.target_release?.version || device.target_release_id}`}
-								>
-									<span className="px-2 py-1 text-xs font-medium bg-blue-100 text-blue-800 rounded-full cursor-help">
-										Updating {getUpdateStatus()?.duration}
-									</span>
-								</Tooltip>
-							)}
-							{/* No "Update Failed" chip: the Overview alert covers that state
-							    in full. Updating stays — nothing else surfaces it. */}
+						{/* No update chips here: a stalled update is the Overview's alert,
+						    and an in-flight one isn't a problem worth a header badge. */}
+						<div className="flex items-center gap-2 min-w-0">
+							<Tooltip content={getStatusTooltip()}>
+								<span
+									className={`block w-2.5 h-2.5 flex-shrink-0 rounded-full cursor-help ${
+										status === "online"
+											? "bg-green-500 animate-pulse"
+											: "bg-red-500"
+									}`}
+								/>
+							</Tooltip>
+							<h1 className="text-xl font-bold text-gray-900 leading-none truncate">
+								{getDeviceName()}
+							</h1>
 						</div>
 						<div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-sm text-gray-600">
 							{device.release && (

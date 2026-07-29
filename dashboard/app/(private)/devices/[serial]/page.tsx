@@ -19,7 +19,16 @@ import { RelativeTime } from "@/app/components/RelativeTime";
 import { isStableRelease } from "@/app/utils/release";
 import { DeviceDetailLayout } from "./DeviceDetailLayout";
 import { getDeviceUpdateStatus } from "./DeviceHeader";
-import { ReachabilityAlert, useReachabilityProblem } from "./uptime";
+import {
+	type DeviceService,
+	useDownServices,
+} from "./services/useDeviceServices";
+import {
+	formatDuration,
+	ReachabilityAlert,
+	useOpenServiceOutages,
+	useReachabilityProblem,
+} from "./uptime";
 
 const COMMAND_PAGE_SIZE = 50;
 
@@ -107,6 +116,69 @@ const failureReason = (cmd: DeviceCommandResponse): string | null => {
 };
 
 /**
+ * Services the device last reported as not running. One banner for all of them:
+ * a device with three dead units has one problem, not three. Only states that
+ * definitely mean "not running" count — see `isServiceDown` — so a unit whose
+ * state smithd couldn't read never raises this.
+ */
+const ServicesAlert = ({
+	serial,
+	services,
+	downSince,
+}: {
+	serial: string;
+	services: DeviceService[];
+	downSince: Map<string, Date>;
+}) => (
+	<AlertBanner
+		tone="red"
+		title={`${services.length} service${services.length === 1 ? "" : "s"} offline`}
+		action={
+			<Link
+				to={`/devices/${serial}/services`}
+				className="text-blue-600 hover:text-blue-700 transition-colors"
+			>
+				View services
+			</Link>
+		}
+	>
+		<ul className="space-y-1">
+			{services.map((service) => {
+				const since = downSince.get(service.service_name);
+				return (
+					<li
+						key={service.id}
+						className="flex flex-wrap items-center gap-x-1.5 gap-y-1"
+					>
+						<span className="font-mono text-gray-700">
+							{service.service_name}
+						</span>
+						<span className="text-gray-400">·</span>
+						<span>{service.active_state}</span>
+						{since && (
+							<span className="text-gray-500">
+								· down for {formatDuration(Date.now() - since.getTime())}
+							</span>
+						)}
+						{service.n_restarts != null && service.n_restarts > 0 && (
+							<span className="text-gray-500">
+								· {service.n_restarts} restart
+								{service.n_restarts === 1 ? "" : "s"}
+							</span>
+						)}
+						{service.checked_at && (
+							<span className="text-gray-400">
+								· reported <RelativeTime date={service.checked_at} />
+							</span>
+						)}
+					</li>
+				);
+			})}
+		</ul>
+	</AlertBanner>
+);
+
+/**
  * The overview's problem list: every check that fired, or a single all-clear
  * when none did — so the all-clear means the whole list is quiet, not just the
  * update check. Adding a check means adding its condition here.
@@ -125,8 +197,12 @@ const NeedsAttention = ({
 }) => {
 	const update = getDeviceUpdateStatus(device);
 	const failing = update?.status === "outdated";
-	const { problem: unreachable, isLoading: checking } =
+	const { problem: unreachable, isLoading: checkingUptime } =
 		useReachabilityProblem(serial);
+	const { down: downServices, isLoading: checkingServices } =
+		useDownServices(serial);
+	const downSince = useOpenServiceOutages(serial);
+	const checking = checkingUptime || checkingServices;
 
 	const { data: commands } = useGetAllCommandsForDevice(
 		String(device.id),
@@ -200,7 +276,7 @@ const NeedsAttention = ({
 	const last = attempts[0];
 	const reason = last ? failureReason(last) : null;
 
-	if (!failing && !unreachable) {
+	if (!failing && !unreachable && downServices.length === 0) {
 		return (
 			<div>
 				<h3 className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-2">
@@ -226,7 +302,8 @@ const NeedsAttention = ({
 				Needs attention
 			</h3>
 			{/* Update first: a device on the wrong build is a fleet problem, a
-			    flapping link is usually the site's. */}
+			    flapping link is usually the site's. Dead services sit between the
+			    two — a fault on this device, but only on this device. */}
 			<div className="space-y-3">
 				{failing && (
 					<AlertBanner
@@ -278,6 +355,13 @@ const NeedsAttention = ({
 							</div>
 						)}
 					</AlertBanner>
+				)}
+				{downServices.length > 0 && (
+					<ServicesAlert
+						serial={serial}
+						services={downServices}
+						downSince={downSince}
+					/>
 				)}
 				{unreachable && <ReachabilityAlert summary={unreachable} />}
 			</div>

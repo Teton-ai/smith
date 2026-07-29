@@ -64,7 +64,7 @@ const useDeviceUptime = (deviceId: string, hours: number) => {
 	});
 };
 
-const formatDuration = (ms: number) => {
+export const formatDuration = (ms: number) => {
 	const minutes = Math.round(ms / 60000);
 	if (minutes < 1) return "<1m";
 	if (minutes < 60) return `${minutes}m`;
@@ -136,6 +136,30 @@ export const useReachabilityProblem = (serial: string) => {
 	// Callers need the pending state: "all clear" is a claim, and it shouldn't be
 	// made before this check has answered.
 	return { problem, isLoading };
+};
+
+/**
+ * When each still-open service outage began, keyed by service name — so the
+ * overview can say how long a dead unit has been dead. smithd is left out: that
+ * lane is reachability, which has its own alert. Shares the query above with
+ * `useReachabilityProblem`, so it costs no extra request; a service that broke
+ * before the window still reports its true start, but one that has been down
+ * longer than the API keeps outages simply won't appear.
+ */
+export const useOpenServiceOutages = (serial: string) => {
+	const { data } = useDeviceUptime(serial, ALERT_HOURS);
+
+	return useMemo(() => {
+		const started = new Map<string, Date>();
+		for (const outage of data?.outages ?? []) {
+			if (outage.ended_at || outage.service_name === SMITHD_SERVICE_NAME)
+				continue;
+			const start = new Date(outage.started_at);
+			const known = started.get(outage.service_name);
+			if (!known || start < known) started.set(outage.service_name, start);
+		}
+		return started;
+	}, [data]);
 };
 
 const RangePicker = ({
