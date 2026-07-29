@@ -119,7 +119,7 @@ export function UptimeBars({
 					<div
 						key={bucket.start.getTime()}
 						onMouseEnter={() => setHovered(i)}
-						className={`relative min-w-[2px] flex-1 overflow-hidden rounded-[2px] bg-emerald-500 transition-opacity ${
+						className={`relative min-w-[2px] flex-1 cursor-pointer overflow-hidden rounded-[2px] bg-emerald-500 transition-opacity ${
 							hovered === i ? "opacity-60" : ""
 						}`}
 					>

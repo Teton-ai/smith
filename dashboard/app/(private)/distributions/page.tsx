@@ -7,38 +7,14 @@ import {
 	PageContainer,
 	SearchInput,
 } from "@teton/smith-ui";
-import {
-	Check,
-	ChevronDown,
-	ChevronRight,
-	Cpu,
-	HardDrive,
-	Layers,
-	Monitor,
-	Package,
-} from "lucide-react";
+import { Check, ChevronDown, ChevronRight, Layers } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import {
 	type DistributionRolloutStats,
 	useGetDistributionRollouts,
 	useGetDistributions,
 } from "../../api-client";
-
-const getArchIcon = (architecture: string) => {
-	switch (architecture.toLowerCase()) {
-		case "x86_64":
-		case "amd64":
-			return <Monitor className="w-5 h-5" />;
-		case "arm64":
-		case "aarch64":
-			return <Cpu className="w-5 h-5" />;
-		case "armv7":
-		case "arm":
-			return <HardDrive className="w-5 h-5" />;
-		default:
-			return <Package className="w-5 h-5" />;
-	}
-};
+import { architectureIcon } from "../../utils/release";
 
 const getArchVariant = (architecture: string): BadgeVariant => {
 	switch (architecture.toLowerCase()) {
@@ -283,6 +259,7 @@ const DistributionsPage = () => {
 					<div className="divide-y divide-gray-100">
 						{displayedDistributions.map((distribution) => {
 							const archVariant = getArchVariant(distribution.architecture);
+							const ArchIcon = architectureIcon(distribution.architecture);
 							const rollout = rollouts.get(distribution.id);
 							const totalDevices = rollout?.total_devices || 0;
 							const progress =
@@ -300,7 +277,7 @@ const DistributionsPage = () => {
 										<div
 											className={`p-1.5 rounded-lg ${BADGE_COLORS[archVariant]}`}
 										>
-											{getArchIcon(distribution.architecture)}
+											<ArchIcon className="w-5 h-5" />
 										</div>
 										<div className="min-w-0 flex-1">
 											<div className="flex items-center space-x-2">

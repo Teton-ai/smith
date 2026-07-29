@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import {
+	AlertBanner,
 	Panel,
 	SECTION_THEMES,
 	type TimelineSpan,
@@ -112,6 +113,31 @@ const summarize = (data: DeviceUptime, service: string) => {
 	};
 };
 
+type ReachabilitySummary = ReturnType<typeof summarize>;
+
+/** Anything below this over a day is flapping worth acting on, not noise. */
+const DEGRADED_RATIO = 0.99;
+const ALERT_HOURS = 24;
+
+/**
+ * The last day's reachability, but only when it's bad enough to lead with —
+ * null while loading and on a device that stayed put. Kept as a hook so the
+ * overview can decide whether it has anything to report before rendering.
+ */
+export const useReachabilityProblem = (serial: string) => {
+	const { data, isLoading } = useDeviceUptime(serial, ALERT_HOURS);
+
+	const problem = useMemo(() => {
+		if (!data) return null;
+		const summary = summarize(data, SMITHD_SERVICE_NAME);
+		return summary.ratio < DEGRADED_RATIO ? summary : null;
+	}, [data]);
+
+	// Callers need the pending state: "all clear" is a claim, and it shouldn't be
+	// made before this check has answered.
+	return { problem, isLoading };
+};
+
 const RangePicker = ({
 	value,
 	onChange,
@@ -161,6 +187,65 @@ const bucketTooltip = (hours: number) => (bucket: UptimeBucket) => (
 		</div>
 	</>
 );
+
+/** The worst single stretch of silence, clipped to the window. */
+const longestGap = (summary: ReachabilitySummary) =>
+	summary.spans.reduce<{ ms: number; start: Date } | null>((worst, span) => {
+		const start = Math.max(span.start.getTime(), summary.from.getTime());
+		const ms = Math.min(span.end.getTime(), summary.to.getTime()) - start;
+		return worst && worst.ms >= ms ? worst : { ms, start: new Date(start) };
+	}, null);
+
+/**
+ * Flags a device the API keeps losing. Same data as the Reachability panel
+ * below, cut to the headline: how much of the day we heard from it, the worst
+ * gap, and the bars so the shape of the drops is visible.
+ */
+export const ReachabilityAlert = ({
+	summary,
+}: {
+	summary: ReachabilitySummary;
+}) => {
+	const worst = longestGap(summary);
+	const since = summary.since;
+
+	return (
+		<AlertBanner
+			tone={since ? "red" : "amber"}
+			title={
+				since
+					? `Offline for ${formatDuration(Date.now() - since.getTime())}`
+					: `Dropped offline ${summary.count}× in the last ${ALERT_HOURS}h`
+			}
+		>
+			<div className="flex flex-wrap items-center gap-x-1.5 gap-y-1">
+				<span className="tabular-nums">
+					{(summary.ratio * 100).toFixed(1)}% reachable
+				</span>
+				{worst && (
+					<span className="text-gray-500">
+						· longest gap {formatDuration(worst.ms)} at{" "}
+						{clock(worst.start, ALERT_HOURS)}
+					</span>
+				)}
+			</div>
+
+			<div className="mt-3">
+				<UptimeBars
+					from={summary.from}
+					to={summary.to}
+					spans={summary.spans}
+					height="1.5rem"
+					renderTooltip={bucketTooltip(ALERT_HOURS)}
+				/>
+				<div className="mt-1.5 flex justify-between text-[11px] tabular-nums text-gray-400">
+					<span>{ALERT_HOURS}h ago</span>
+					<span>now</span>
+				</div>
+			</div>
+		</AlertBanner>
+	);
+};
 
 /**
  * Reachability panel for the device overview: how much of the window the device

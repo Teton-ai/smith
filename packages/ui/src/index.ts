@@ -6,7 +6,15 @@ export {
 	type ButtonTone,
 	type ButtonVariant,
 } from "./button";
-export { Card, ListRow, Panel, SectionCard, ViewAllFooter } from "./card";
+export {
+	AlertBanner,
+	type AlertTone,
+	Card,
+	ListRow,
+	Panel,
+	SectionCard,
+	ViewAllFooter,
+} from "./card";
 export { CountryFlag } from "./country-flag";
 export {
 	BackLink,
@@ -16,6 +24,7 @@ export {
 	type TabItem,
 	TabNav,
 } from "./detail";
+export { type DropdownItem, DropdownMenu } from "./dropdown";
 export { PageContainer } from "./page-container";
 export { SearchInput } from "./search-input";
 export { StatCard } from "./stat-card";
