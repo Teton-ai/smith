@@ -1,4 +1,5 @@
 use crate::device::{SMITHD_SERVICE_NAME, Variable};
+use crate::network::route::content_credentials;
 use anyhow::Result;
 use serde_json::Value;
 use serde_json::json;
@@ -129,6 +130,42 @@ pub async fn save_responses(
             SafeCommandRx::ReportNMProfiles { ref profiles } if response.status == 0 => {
                 let mut profiles_resolved: Vec<(i32, bool, String)> = Vec::new();
 
+                // Advisory locks taken here are transaction-scoped, so they are all
+                // held until this (long) transaction commits. Taking them in nmcli
+                // report order would deadlock two devices that see the same SSIDs in
+                // a different order (A holds X wants Y, B holds Y wants X). Acquire
+                // every lock up front in a deterministic order instead: the key is a
+                // function of (ssid, hidden, psk), so sorting on that tuple gives
+                // every writer the same sequence. The per-profile work below then
+                // runs in report order, unaffected.
+                //
+                // Race-tested in e2e/tests/daemon_api.rs
+                // (concurrent_identical_network_posts_converge_to_one_row).
+                let mut lock_inputs: Vec<(&str, bool, Option<&str>)> = profiles
+                    .iter()
+                    .filter_map(|p| {
+                        Some((
+                            p.ssid.as_deref()?,
+                            p.hidden.unwrap_or(false),
+                            p.password.as_deref(),
+                        ))
+                    })
+                    .collect();
+                lock_inputs.sort_unstable();
+                lock_inputs.dedup();
+
+                for (ssid, hidden, password) in &lock_inputs {
+                    let credentials = content_credentials(*password);
+                    sqlx::query!(
+                        "SELECT pg_advisory_xact_lock(network_content_lock_key($1, $2, $3))",
+                        ssid,
+                        hidden,
+                        credentials,
+                    )
+                    .execute(&mut *tx)
+                    .await?;
+                }
+
                 for profile in profiles {
                     let ssid = match profile.ssid.as_deref() {
                         Some(s) => s,
@@ -155,37 +192,48 @@ pub async fn save_responses(
                         .eap_identity
                         .as_ref()
                         .map(|u| json!({"username": u}));
+                    let creds_patch = serde_json::Value::Object(creds_patch);
 
+                    // is_network_hidden is NOT NULL on the row; old smithd omitting `hidden`
+                    // resolves to the same default (false) the row would have been created
+                    // with, so a plain `=` match (as network_content_lock_key/find_by_content
+                    // require) is equivalent to the old relaxed-on-NULL match in practice.
+                    let hidden = profile.hidden.unwrap_or(false);
+                    let identity_credentials = content_credentials(profile.password.as_deref());
+
+                    // Shared with create_network (api/src/network/route.rs) so the match
+                    // cannot drift between writers; see network_find_by_content (arch.md).
+                    // ReportNMProfiles only ever describes wifi.
                     let existing_id: Option<i32> = sqlx::query_scalar!(
-                        // ORDER BY id DESC ensures old smithd (NULL discriminators, may match
-                        // multiple rows) picks the newest row, which carries real security_type
-                        // data from new smithd reports rather than the provisional backfill.
-                        r#"SELECT id FROM network
-                           WHERE ssid = $1
-                             AND (password = $2 OR (password IS NULL AND $2 IS NULL))
-                             AND ($3::bool IS NULL OR is_network_hidden = $3)
-                             AND ($4::text IS NULL OR security_type = $4)
-                           ORDER BY id DESC
-                           LIMIT 1"#,
+                        r#"SELECT network_find_by_content($1, $2, $3, $4, 'wifi')"#,
                         ssid,
-                        profile.password,
-                        profile.hidden as Option<bool>,
+                        hidden,
+                        &identity_credentials,
                         mapped_security_type as Option<&str>,
                     )
-                    .fetch_optional(&mut *tx)
+                    .fetch_one(&mut *tx)
                     .await?;
 
                     let network_id: i32 = match existing_id {
                         Some(id) => {
-                            if !creds_patch.is_empty() || identity_val.is_some() {
+                            if creds_patch != json!({})
+                                || identity_val.is_some()
+                                || mapped_security_type.is_some()
+                            {
+                                // COALESCE never overwrites an already-typed row: the relaxed match
+                                // (F4/F6) only lets a typed report reach a NULL row or an
+                                // already-equal typed row, so filling NULL in place is always
+                                // correcting unknown -> known, never clobbering a real value.
                                 sqlx::query!(
                                     r#"UPDATE network
                                        SET credentials = credentials || $2::jsonb,
-                                           identity    = COALESCE($3::jsonb, identity)
+                                           identity    = COALESCE($3::jsonb, identity),
+                                           security_type = COALESCE(security_type, $4)
                                        WHERE id = $1"#,
                                     id,
-                                    serde_json::Value::Object(creds_patch.clone()),
-                                    identity_val.clone() as Option<serde_json::Value>,
+                                    creds_patch,
+                                    identity_val as Option<serde_json::Value>,
+                                    mapped_security_type as Option<&str>,
                                 )
                                 .execute(&mut *tx)
                                 .await?;
@@ -193,31 +241,25 @@ pub async fn save_responses(
                             id
                         }
                         None => {
-                            let mut insert_creds: serde_json::Map<String, serde_json::Value> =
-                                match mapped_security_type {
-                                    Some("wpa-psk") | Some("sae") => {
-                                        if let Some(psk) = &profile.password {
-                                            [("psk".into(), json!(psk))].into_iter().collect()
-                                        } else {
-                                            serde_json::Map::new()
-                                        }
-                                    }
-                                    _ => serde_json::Map::new(),
-                                };
-                            insert_creds.extend(creds_patch);
-                            let insert_credentials = serde_json::Value::Object(insert_creds);
-
+                            // The stored envelope starts from the same identity_credentials the
+                            // lock and the match were computed from, never from security_type:
+                            // deriving it from security_type dropped the psk whenever the type
+                            // was unknown (old smithd, or an nmcli key_mgmt outside map_key_mgmt),
+                            // which made the row unfindable by the key that had just created it,
+                            // so every later report forked another duplicate. The Stage 2 metadata
+                            // patch is merged on top in SQL.
                             sqlx::query_scalar!(
                                 r#"INSERT INTO network
                                        (ssid, password, name, network_type, is_network_hidden,
                                         security_type, credentials, identity)
-                                   VALUES ($1, $2, $1, 'wifi', $3, $4, $5, $6)
+                                   VALUES ($1, $2, $1, 'wifi', $3, $4, $5::jsonb || $6::jsonb, $7)
                                    RETURNING id"#,
                                 ssid,
                                 profile.password,
-                                profile.hidden.unwrap_or(false),
+                                hidden,
                                 mapped_security_type as Option<&str>,
-                                insert_credentials,
+                                identity_credentials,
+                                creds_patch,
                                 identity_val as Option<serde_json::Value>,
                             )
                             .fetch_one(&mut *tx)
