@@ -197,22 +197,28 @@ const WifiPanel = ({ serial, device }: WifiPanelProps) => {
 	const [securityFilter, setSecurityFilter] = useState("all");
 
 	const {
-		data: profiles,
+		data: profilesRaw,
 		isLoading,
 		isError,
 	} = useGetConfiguredNetworksForDevice(serial, {
 		query: { refetchInterval: syncing ? 3000 : 30000 },
 	});
+	// Guard against a non-array body (e.g. an axios "success" resolved from a
+	// terminated request with an empty response): `?? []`/`?.` only catch
+	// null/undefined, so a stray "" or object would make .map/.filter/spread
+	// below throw and surface react-router's error page for a frame.
+	const profiles = Array.isArray(profilesRaw) ? profilesRaw : [];
 
-	const currentNetwork = profiles?.find((p) => p.is_active);
+	const currentNetwork = profiles.find((p) => p.is_active);
 
 	const {
-		data: scanResults,
+		data: scanResultsRaw,
 		isLoading: isScanLoading,
 		isError: isScanError,
 	} = useGetWifiScanForDevice(serial, {
 		query: { refetchInterval: scanSyncing ? 3000 : false },
 	});
+	const scanResults = Array.isArray(scanResultsRaw) ? scanResultsRaw : [];
 
 	const startProfileSync = useCommandSync(
 		syncing,
@@ -251,14 +257,13 @@ const WifiPanel = ({ serial, device }: WifiPanelProps) => {
 	});
 
 	const securityOptions = useMemo(
-		() =>
-			[...new Set((scanResults ?? []).map((r) => r.security ?? "Open"))].sort(),
+		() => [...new Set(scanResults.map((r) => r.security ?? "Open"))].sort(),
 		[scanResults],
 	);
 
 	const filteredResults = useMemo(() => {
 		const query = scanQuery.trim().toLowerCase();
-		return (scanResults ?? []).filter((r) => {
+		return scanResults.filter((r) => {
 			if (
 				query &&
 				!r.ssid?.toLowerCase().includes(query) &&
@@ -299,12 +304,15 @@ const WifiPanel = ({ serial, device }: WifiPanelProps) => {
 		prevSyncing.current = syncing;
 	}, [syncing, queryClient]);
 
-	const { data: intentList } = useGetDeviceIntent(deviceId, {
+	const { data: intentListRaw } = useGetDeviceIntent(deviceId, {
 		query: { refetchInterval: 30_000 },
 	});
 	const sortedIntent = useMemo(
-		() => [...(intentList ?? [])].sort((a, b) => a.priority - b.priority),
-		[intentList],
+		() =>
+			(Array.isArray(intentListRaw) ? [...intentListRaw] : []).sort(
+				(a, b) => a.priority - b.priority,
+			),
+		[intentListRaw],
 	);
 
 	const [applying, setApplying] = useState(false);
@@ -526,9 +534,9 @@ const WifiPanel = ({ serial, device }: WifiPanelProps) => {
 
 	// useGetNetworks returns void in the generated client (missing utoipa response annotation); cast is safe at runtime
 	const { data: catalogRaw } = useGetNetworks();
-	const wifiCatalog = ((catalogRaw ?? []) as CatalogNetwork[]).filter(
-		(n) => n.network_type === "wifi" && n.ssid != null,
-	);
+	const wifiCatalog = (
+		Array.isArray(catalogRaw) ? (catalogRaw as CatalogNetwork[]) : []
+	).filter((n) => n.network_type === "wifi" && n.ssid != null);
 
 	async function swapPriority(indexA: number, indexB: number) {
 		const a = sortedIntent[indexA];
