@@ -8,10 +8,10 @@ use axum::{
 };
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{Value, json};
 use smith::utils::schema::NetworkType;
 use smith::utils::schema::{Network, NetworkInfo, NewNetwork, SpeedSample};
-use tracing::{error, info};
+use tracing::{error, info, warn};
 use utoipa::ToSchema;
 use uuid::Uuid;
 
@@ -170,12 +170,96 @@ pub async fn delete_network_by_id(
     Ok(StatusCode::NO_CONTENT)
 }
 
+/// The one construction of the content-addressing `credentials` envelope.
+///
+/// Both the lock key and the identity match project `->>'psk'`, so a row must be
+/// stored with exactly the envelope it was looked up with. Building it anywhere
+/// else risks inserting a row that the very key which created it cannot find
+/// again, which turns every repeat write into a fresh duplicate.
+pub(crate) fn content_credentials(password: Option<&str>) -> Value {
+    match password {
+        Some(psk) => json!({ "psk": psk }),
+        None => json!({}),
+    }
+}
+
+/// The `network_type` enum label as stored in Postgres, for the text-typed
+/// `p_network_type` argument of `network_find_by_content`.
+fn network_type_label(network_type: &NetworkType) -> &'static str {
+    match network_type {
+        NetworkType::Wifi => "wifi",
+        NetworkType::Ethernet => "ethernet",
+        NetworkType::Dongle => "dongle",
+    }
+}
+
+/// Every failure in `create_network` is an opaque 500 to the caller; only the log
+/// line differs. Keeps the handler readable instead of repeating the same closure.
+fn internal_error(context: &'static str) -> impl Fn(sqlx::Error) -> StatusCode {
+    move |err| {
+        error!("{context}: {err}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    }
+}
+
+/// Maps the App API `wifi_security_enum` to Smith's `security_type` vocabulary.
+/// Tokens verified against `../api/migrations/20250917114752_new_network_tables.sql`
+/// and `../api/src/features/networks/schema.ts` (App API repo). Provisional: to be
+/// re-verified when the App API actually starts sending `security` (Stage 5).
+fn map_app_security(security: &str) -> Option<&'static str> {
+    match security {
+        "open" => Some("open"),
+        "WPA2-Personal" => Some("wpa-psk"),
+        "WPA2-Enterprise" => Some("wpa-eap"),
+        _ => None,
+    }
+}
+
+/// `None` (field omitted) is the only case that falls back to the password
+/// heuristic, for backward compatibility with callers that predate `security`.
+/// An explicit but unrecognized value is rejected rather than silently
+/// downgraded to a guess: persisting the wrong `security_type` would produce
+/// incorrect content matches (see `network_find_by_content`).
+fn resolve_security_type(
+    security: Option<&str>,
+    password: Option<&str>,
+) -> Result<&'static str, ()> {
+    match security {
+        None => Ok(if password.is_none() {
+            "open"
+        } else {
+            "wpa-psk"
+        }),
+        Some(security) => map_app_security(security).ok_or_else(|| {
+            warn!(
+                security,
+                "unknown explicit security value in create_network; rejecting"
+            );
+        }),
+    }
+}
+
+/// `security_type` is WiFi-specific vocabulary (see `NewNetwork::security`); an
+/// Ethernet or Dongle network has no security type, so it stays NULL instead of
+/// getting a meaningless "open"/"wpa-psk" guess from `resolve_security_type`.
+fn security_type_for(
+    network_type: &NetworkType,
+    security: Option<&str>,
+    password: Option<&str>,
+) -> Result<Option<&'static str>, ()> {
+    if *network_type != NetworkType::Wifi {
+        return Ok(None);
+    }
+    resolve_security_type(security, password).map(Some)
+}
+
 #[utoipa::path(
     post,
     path = "/networks",
     responses(
+        (status = 200, description = "Matching network already existed"),
         (status = 201, description = "Network created successfully"),
-        (status = 304, description = "Network was not modified"),
+        (status = 400, description = "Unrecognized `security` value"),
         (status = 500, description = "Failed to create network", body = String),
     ),
     security(
@@ -187,28 +271,215 @@ pub async fn create_network(
     Extension(state): Extension<State>,
     Json(new_network): Json<NewNetwork>,
 ) -> Result<(StatusCode, Json<Network>), StatusCode> {
-    let created_network = sqlx::query_as!(
-        Network,
-        r#"
-        INSERT INTO network (network_type, is_network_hidden, ssid, name, description, password)
-        VALUES ($1, $2, $3, $4, $5, $6)
-        RETURNING id, network_type::TEXT as "network_type", is_network_hidden, ssid, name, description, 'secret' as password
-        "#,
-        new_network.network_type as NetworkType,
-        new_network.is_network_hidden,
-        new_network.ssid,
-        new_network.name,
-        new_network.description,
-        new_network.password,
+    let security_type: Option<&str> = security_type_for(
+        &new_network.network_type,
+        new_network.security.as_deref(),
+        new_network.password.as_deref(),
     )
-    .fetch_one(&state.pg_pool)
-    .await
-    .map_err(|err| {
-      error!("Failed to insert network {err}");
-      StatusCode::INTERNAL_SERVER_ERROR
-    })?;
+    .map_err(|()| StatusCode::BAD_REQUEST)?;
 
-    Ok((StatusCode::CREATED, Json(created_network)))
+    if security_type == Some("open") && new_network.password.is_some() {
+        warn!("create_network got an open network with a password; keeping the credential");
+    }
+
+    // Built unconditionally from the password, never from security_type: the
+    // stored envelope has to be byte-identical to the one the lock and the match
+    // are computed from (see content_credentials).
+    let credentials = content_credentials(new_network.password.as_deref());
+    let network_type_label = network_type_label(&new_network.network_type);
+
+    let mut tx = state
+        .pg_pool
+        .begin()
+        .await
+        .map_err(internal_error("Failed to begin create_network transaction"))?;
+
+    // Race-tested in e2e/tests/daemon_api.rs
+    // (concurrent_identical_network_posts_converge_to_one_row).
+    sqlx::query!(
+        "SELECT pg_advisory_xact_lock(network_content_lock_key($1, $2, $3))",
+        new_network.ssid,
+        new_network.is_network_hidden,
+        credentials,
+    )
+    .execute(&mut *tx)
+    .await
+    .map_err(internal_error("Failed to take network content lock"))?;
+
+    let existing_id: Option<i32> = sqlx::query_scalar!(
+        r#"SELECT network_find_by_content($1, $2, $3, $4, $5)"#,
+        new_network.ssid,
+        new_network.is_network_hidden,
+        credentials,
+        security_type as Option<&str>,
+        network_type_label,
+    )
+    .fetch_one(&mut *tx)
+    .await
+    .map_err(internal_error(
+        "Failed to match existing network by content",
+    ))?;
+
+    let (status, network) = match existing_id {
+        Some(id) => {
+            // Heal in place exactly as ReportNMProfiles does (api/src/home.rs):
+            // the relaxed match can only route a typed caller to a NULL row or an
+            // already-equal typed row, so COALESCE fills unknown -> known and
+            // never clobbers a real value. Folded into the fetch to keep the
+            // matched path at one round trip.
+            let existing = sqlx::query_as!(
+                Network,
+                r#"
+                UPDATE network SET security_type = COALESCE(security_type, $2)
+                WHERE id = $1
+                RETURNING id, network_type::TEXT as "network_type", is_network_hidden, ssid, name, description, 'secret' as password
+                "#,
+                id,
+                security_type as Option<&str>,
+            )
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(internal_error("Failed to fetch matched network"))?;
+            (StatusCode::OK, existing)
+        }
+        None => {
+            let created = sqlx::query_as!(
+                Network,
+                r#"
+                INSERT INTO network (network_type, is_network_hidden, ssid, name, description, password, security_type, credentials)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                RETURNING id, network_type::TEXT as "network_type", is_network_hidden, ssid, name, description, 'secret' as password
+                "#,
+                new_network.network_type as NetworkType,
+                new_network.is_network_hidden,
+                new_network.ssid,
+                new_network.name,
+                new_network.description,
+                new_network.password,
+                security_type as Option<&str>,
+                credentials,
+            )
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(internal_error("Failed to insert network"))?;
+            (StatusCode::CREATED, created)
+        }
+    };
+
+    tx.commit().await.map_err(internal_error(
+        "Failed to commit create_network transaction",
+    ))?;
+
+    Ok((status, Json(network)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        content_credentials, map_app_security, network_type_label, resolve_security_type,
+        security_type_for,
+    };
+    use serde_json::json;
+    use smith::utils::schema::NetworkType;
+
+    /// The whole point of `content_credentials`: what gets stored on the row and
+    /// what the lock/match project must be the same value. A row inserted with a
+    /// different envelope than it was searched with is invisible to the next
+    /// lookup, so every repeat write forks a duplicate.
+    #[test]
+    fn content_credentials_round_trips_the_psk() {
+        assert_eq!(
+            content_credentials(Some("hunter2")),
+            json!({"psk": "hunter2"})
+        );
+        assert_eq!(content_credentials(None), json!({}));
+    }
+
+    /// `->>'psk'` (what the SQL functions actually compare) must agree for the
+    /// no-password case regardless of which writer built the envelope.
+    #[test]
+    fn content_credentials_has_no_psk_key_when_absent() {
+        assert!(content_credentials(None).get("psk").is_none());
+    }
+
+    #[test]
+    fn network_type_label_matches_the_pg_enum_labels() {
+        assert_eq!(network_type_label(&NetworkType::Wifi), "wifi");
+        assert_eq!(network_type_label(&NetworkType::Ethernet), "ethernet");
+        assert_eq!(network_type_label(&NetworkType::Dongle), "dongle");
+    }
+
+    #[test]
+    fn map_app_security_known_values() {
+        assert_eq!(map_app_security("open"), Some("open"));
+        assert_eq!(map_app_security("WPA2-Personal"), Some("wpa-psk"));
+        assert_eq!(map_app_security("WPA2-Enterprise"), Some("wpa-eap"));
+    }
+
+    #[test]
+    fn map_app_security_unknown_returns_none() {
+        assert_eq!(map_app_security("wep"), None);
+        assert_eq!(map_app_security(""), None);
+        assert_eq!(map_app_security("WPA3-Personal"), None);
+    }
+
+    /// Omitting `security` is the only case allowed to fall back to the
+    /// password heuristic (backward compatibility with pre-`security` callers).
+    #[test]
+    fn resolve_security_type_omitted_uses_password_heuristic() {
+        assert_eq!(resolve_security_type(None, None), Ok("open"));
+        assert_eq!(resolve_security_type(None, Some("hunter2")), Ok("wpa-psk"));
+    }
+
+    #[test]
+    fn resolve_security_type_known_explicit_value_is_used_verbatim() {
+        assert_eq!(
+            resolve_security_type(Some("open"), Some("hunter2")),
+            Ok("open")
+        );
+        assert_eq!(
+            resolve_security_type(Some("WPA2-Enterprise"), None),
+            Ok("wpa-eap")
+        );
+    }
+
+    /// An explicit but unrecognized value must be rejected, not silently
+    /// downgraded to a guess (a wrong security_type produces wrong content
+    /// matches; see network_find_by_content).
+    #[test]
+    fn resolve_security_type_rejects_unknown_explicit_value() {
+        assert_eq!(resolve_security_type(Some("WPA3-Personal"), None), Err(()));
+    }
+
+    #[test]
+    fn security_type_for_non_wifi_is_always_null() {
+        assert_eq!(
+            security_type_for(&NetworkType::Ethernet, None, Some("hunter2")),
+            Ok(None)
+        );
+        assert_eq!(
+            security_type_for(&NetworkType::Dongle, Some("open"), None),
+            Ok(None)
+        );
+        // Even an unrecognized explicit value is ignored for non-WiFi types,
+        // since the vocabulary doesn't apply to them in the first place.
+        assert_eq!(
+            security_type_for(&NetworkType::Ethernet, Some("garbage"), None),
+            Ok(None)
+        );
+    }
+
+    #[test]
+    fn security_type_for_wifi_delegates_to_resolve_security_type() {
+        assert_eq!(
+            security_type_for(&NetworkType::Wifi, None, Some("hunter2")),
+            Ok(Some("wpa-psk"))
+        );
+        assert_eq!(
+            security_type_for(&NetworkType::Wifi, Some("garbage"), None),
+            Err(())
+        );
+    }
 }
 
 // Extended network test types and endpoints

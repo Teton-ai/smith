@@ -490,6 +490,10 @@ pub struct NewNetwork {
     pub name: String,
     pub description: Option<String>,
     pub password: Option<String>,
+    /// App API `wifi_security_enum` ("open" | "WPA2-Personal" | "WPA2-Enterprise").
+    /// Absent for older callers; falls back to the password heuristic.
+    #[serde(default)]
+    pub security: Option<String>,
 }
 
 // Extended network test types
