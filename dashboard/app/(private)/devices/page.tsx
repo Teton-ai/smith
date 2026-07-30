@@ -36,6 +36,7 @@ import {
 	useUpdateDevicesTargetRelease,
 } from "../../api-client";
 import { isStableRelease } from "../../utils/release";
+import { ReachabilityCell } from "./[serial]/uptime";
 
 const Tooltip = ({
 	children,
@@ -580,21 +581,6 @@ const DevicesPage = () => {
 
 	const getDeviceName = (device: Device) => device.serial_number;
 
-	const getOSVersion = (device: Device) => {
-		const osRelease = device.system_info?.os_release;
-		if (!osRelease) return "Unknown";
-
-		if (osRelease.pretty_name) {
-			return osRelease.pretty_name;
-		}
-
-		if (osRelease.version_id) {
-			return `Ubuntu ${osRelease.version_id}`;
-		}
-
-		return "Unknown";
-	};
-
 	const getReleaseInfo = (device: Device) => {
 		if (device.release) {
 			return {
@@ -1135,7 +1121,7 @@ const DevicesPage = () => {
 							<div>Device</div>
 							<div>Labels</div>
 							<div>Location</div>
-							<div>OS</div>
+							<div>Reachability (7d)</div>
 							<div>Release</div>
 						</div>
 					</div>
@@ -1302,9 +1288,7 @@ const DevicesPage = () => {
 											})()}
 										</div>
 
-										<div className="text-sm text-gray-600">
-											{getOSVersion(device)}
-										</div>
+										<ReachabilityCell serial={device.serial_number} />
 
 										<div>
 											{getReleaseInfo(device) ? (

@@ -8,7 +8,7 @@ import {
 	type UptimeBucket,
 } from "@teton/smith-ui";
 import { Wifi, WifiOff } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useClientMutator } from "@/app/api-client-mutator";
 
 interface ServiceOutage {
@@ -43,7 +43,11 @@ const UPTIME_RANGES = [
 
 type UptimeRange = (typeof UPTIME_RANGES)[number]["label"];
 
-const useDeviceUptime = (deviceId: string, hours: number) => {
+const useDeviceUptime = (
+	deviceId: string,
+	hours: number,
+	opts?: { enabled?: boolean; refetchInterval?: number | false },
+) => {
 	const fetcher = useClientMutator<DeviceUptime>();
 
 	return useQuery({
@@ -59,8 +63,8 @@ const useDeviceUptime = (deviceId: string, hours: number) => {
 				params: { from: from.toISOString(), to: to.toISOString() },
 			});
 		},
-		enabled: !!deviceId,
-		refetchInterval: 60000,
+		enabled: !!deviceId && (opts?.enabled ?? true),
+		refetchInterval: opts?.refetchInterval ?? 60000,
 	});
 };
 
@@ -268,6 +272,64 @@ export const ReachabilityAlert = ({
 				</div>
 			</div>
 		</AlertBanner>
+	);
+};
+
+const LIST_WINDOW_HOURS = 24 * 7;
+
+/**
+ * Compact 7-day reachability bars for a devices-table row. The fetch is held
+ * back until the row scrolls into view — the list paginates 100 devices at a
+ * time and there is only a per-device uptime endpoint, so fetching eagerly
+ * would fire a request per row up front. Once loaded the data is kept fresh
+ * enough by staleness alone; a 7-day window doesn't need a refetch timer.
+ */
+export const ReachabilityCell = ({ serial }: { serial: string }) => {
+	const ref = useRef<HTMLDivElement>(null);
+	const [visible, setVisible] = useState(false);
+
+	useEffect(() => {
+		const el = ref.current;
+		if (!el) return;
+		const observer = new IntersectionObserver(([entry]) => {
+			if (entry.isIntersecting) setVisible(true);
+		});
+		observer.observe(el);
+		return () => observer.disconnect();
+	}, []);
+
+	const { data, isError } = useDeviceUptime(serial, LIST_WINDOW_HOURS, {
+		enabled: visible,
+		refetchInterval: false,
+	});
+
+	const summary = useMemo(
+		() => (data ? summarize(data, SMITHD_SERVICE_NAME) : null),
+		[data],
+	);
+
+	return (
+		<div ref={ref} className="pr-2">
+			{summary ? (
+				<>
+					<UptimeBars
+						from={summary.from}
+						to={summary.to}
+						spans={summary.spans}
+						buckets={28}
+						height="1rem"
+						renderTooltip={bucketTooltip(LIST_WINDOW_HOURS)}
+					/>
+					<div className="mt-1 text-[10px] tabular-nums text-gray-400">
+						{(summary.ratio * 100).toFixed(1)}%
+					</div>
+				</>
+			) : isError ? (
+				<span className="text-xs text-gray-400">—</span>
+			) : (
+				<div className="h-4 animate-pulse rounded bg-gray-100" />
+			)}
+		</div>
 	);
 };
 
