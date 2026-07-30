@@ -1,0 +1,35 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE file_download\n        SET swept_at = now()\n        WHERE upload_token IN (\n            SELECT upload_token FROM file_download\n            WHERE created_at < now() - make_interval(secs => $1::double precision)\n              AND (swept_at IS NULL\n                   OR swept_at < now() - make_interval(secs => $2::double precision))\n            FOR UPDATE SKIP LOCKED\n        )\n        RETURNING upload_token, object_key, uploaded_at\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "upload_token",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "object_key",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "uploaded_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Float8",
+        "Float8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "12d6fcf523d99b3c2d62d7470ad5ee60710c73311f0c6d2f7c6d2d7c0ed6e3c5"
+}

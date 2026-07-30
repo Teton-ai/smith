@@ -216,6 +216,16 @@ pub enum SafeCommandRx {
         applied_version: i32,
         conditions: Vec<NetworkCondition>,
     },
+    FileSessionStarted {
+        session_id: String,
+    },
+    FileSessionStopped {
+        session_id: String,
+    },
+    FileSessionError {
+        session_id: String,
+        error: String,
+    },
     /// Fallback for any report this build doesn't recognize; ignored by the api.
     Unknown,
 }
@@ -223,8 +233,24 @@ pub enum SafeCommandRx {
 #[derive(Serialize, Deserialize, Default, Debug)]
 pub struct SafeCommandRequest {
     pub id: i32,
+    #[serde(deserialize_with = "deserialize_tx")]
     pub command: SafeCommandTx,
     pub continue_on_error: bool,
+}
+
+/// Tolerate any command variant this build doesn't recognize (e.g. a newer api
+/// issuing a command added after this daemon shipped): fall back to
+/// `SafeCommandTx::Unknown` instead of failing to deserialize the whole
+/// `HomePostResponse`. `Postman::ping_home` parses that response with
+/// `unwrap_or_default()`, so a failed parse would silently discard every other
+/// command in the batch along with `target_release_id` and `services`, leaving
+/// the device unable to converge on its target release.
+fn deserialize_tx<'de, D>(deserializer: D) -> Result<SafeCommandTx, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = Value::deserialize(deserializer)?;
+    Ok(serde_json::from_value(value).unwrap_or(SafeCommandTx::Unknown))
 }
 
 #[derive(Serialize, Deserialize, Default, Debug, Clone)]
@@ -279,6 +305,120 @@ pub enum SafeCommandTx {
         version: i32,
         networks: Vec<IntentNetwork>,
     },
+    /// Dial back to the api and serve filesystem operations for the lifetime of
+    /// the session. Carries no path: every operation is negotiated over the
+    /// resulting websocket so browsing doesn't pay the poll interval per click.
+    OpenFileSession {
+        session_id: String,
+    },
+    CloseFileSession {
+        session_id: String,
+    },
+    /// Fallback for any command this build doesn't recognize. Never issued by
+    /// the api: it is produced locally by `deserialize_tx` and reported back
+    /// with a failure status so the operator sees why nothing happened.
+    Unknown,
+}
+
+/// What a directory entry is, as reported by `lstat` — a symlink is reported as
+/// `Symlink` rather than resolved, so the UI can show the link and its target.
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FileKind {
+    File,
+    Dir,
+    Symlink,
+    Other,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub struct DirEntryInfo {
+    /// Linux filenames are bytes, not UTF-8. A name that isn't valid UTF-8 is
+    /// lossily converted for display and `reachable` is false, because the lossy
+    /// form would not round-trip back to the same file.
+    pub name: String,
+    pub kind: FileKind,
+    /// `st_size`. Meaningless for directories; the UI hides it there.
+    pub size: u64,
+    /// Unix mtime in whole seconds, `None` when the filesystem has none.
+    pub mtime: Option<i64>,
+    /// Permission bits only (`st_mode & 0o7777`).
+    pub mode: u32,
+    pub uid: u32,
+    pub gid: u32,
+    /// Raw, unresolved link target. `Some` only for `FileKind::Symlink`.
+    pub symlink_target: Option<String>,
+    /// False when this entry cannot be acted on — currently only for names that
+    /// aren't valid UTF-8, which would not round-trip back to the same file.
+    pub reachable: bool,
+}
+
+/// Control frames sent api -> device over the file session websocket, as JSON
+/// text. Distinct from `SafeCommandTx`: these never touch the command queue or
+/// Postgres, so they are free of the NUL-stripping and size concerns that apply
+/// to command payloads.
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub enum FileOpRequest {
+    List {
+        op_id: u64,
+        path: String,
+    },
+    /// Resolve, validate and *hold the descriptor open*. Holding it makes the
+    /// later transfer free of a time-of-check/time-of-use race and the reported
+    /// size exact.
+    Open {
+        op_id: u64,
+        path: String,
+    },
+    /// Stream the descriptor held for `op_id` to the api's upload endpoint.
+    StartUpload {
+        op_id: u64,
+        upload_token: String,
+    },
+    /// Release a held descriptor without transferring it.
+    Cancel {
+        op_id: u64,
+    },
+}
+
+/// Control frames sent device -> api over the file session websocket.
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub enum FileOpResponse {
+    Listing {
+        op_id: u64,
+        /// Canonicalized absolute path, so the caller's breadcrumb reflects
+        /// where it actually landed after resolving symlinks.
+        path: String,
+        entries: Vec<DirEntryInfo>,
+        /// True when the directory held more than the daemon will return.
+        truncated: bool,
+    },
+    Opened {
+        op_id: u64,
+        name: String,
+        size: u64,
+    },
+    UploadFinished {
+        op_id: u64,
+        bytes_sent: u64,
+    },
+    Error {
+        op_id: u64,
+        code: FileOpError,
+        message: String,
+    },
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FileOpError {
+    NotFound,
+    PermissionDenied,
+    NotADirectory,
+    /// Character devices, block devices, sockets and FIFOs are refused: opening
+    /// them can block forever or stream without end.
+    NotRegularFile,
+    TooLarge,
+    TooManyOpenFiles,
+    Io,
 }
 
 // RESPONSE THAT IT GETS
@@ -622,5 +762,141 @@ mod tests {
         let json = r#"{"timestamp":{"secs":1,"nanos":0},"commands":[],"target_release_id":null}"#;
         let response: HomePostResponse = serde_json::from_str(json).unwrap();
         assert!(response.services.is_empty());
+    }
+
+    #[test]
+    fn home_post_response_tolerates_unknown_command() {
+        // A newer API issues a command this build predates. `ping_home` parses
+        // with `unwrap_or_default()`, so if the unknown variant poisoned the
+        // whole response the daemon would silently lose every sibling command
+        // plus target_release_id and services for that tick.
+        let json = r#"{
+            "timestamp": {"secs": 1, "nanos": 0},
+            "commands": [
+                {"id": 1, "command": {"NotARealCommand": {"path": "/etc"}}, "continue_on_error": false},
+                {"id": 2, "command": "Ping", "continue_on_error": false}
+            ],
+            "target_release_id": 7,
+            "services": [{"id": 1, "name": "smithd"}]
+        }"#;
+
+        let response: HomePostResponse = serde_json::from_str(json).unwrap();
+
+        assert_eq!(response.target_release_id, Some(7));
+        assert_eq!(response.services.len(), 1);
+        assert_eq!(response.commands.len(), 2);
+        assert!(matches!(
+            response.commands[0].command,
+            SafeCommandTx::Unknown
+        ));
+        assert!(matches!(response.commands[1].command, SafeCommandTx::Ping));
+    }
+
+    #[test]
+    fn file_session_protocol_matches_golden_fixture() {
+        // FileOpRequest/FileOpResponse never touch the command queue, but they
+        // are just as much a cross-version contract as HomePost: an api and a
+        // daemon on different releases must agree on this framing.
+        let request = FileOpRequest::List {
+            op_id: 1,
+            path: "/var/log".to_string(),
+        };
+        let response = FileOpResponse::Listing {
+            op_id: 1,
+            path: "/var/log".to_string(),
+            entries: vec![
+                DirEntryInfo {
+                    name: "syslog".to_string(),
+                    kind: FileKind::File,
+                    size: 4096,
+                    mtime: Some(1_700_000_000),
+                    mode: 0o644,
+                    uid: 0,
+                    gid: 4,
+                    symlink_target: None,
+                    reachable: true,
+                },
+                DirEntryInfo {
+                    name: "journal".to_string(),
+                    kind: FileKind::Dir,
+                    size: 0,
+                    mtime: Some(1_700_000_001),
+                    mode: 0o755,
+                    uid: 0,
+                    gid: 0,
+                    symlink_target: None,
+                    reachable: true,
+                },
+            ],
+            truncated: false,
+        };
+
+        let fixture: Value =
+            serde_json::from_str(include_str!("fixtures/file_session.json")).unwrap();
+        assert_eq!(
+            serde_json::to_value(&request).unwrap(),
+            fixture["request"],
+            "FileOpRequest serialization no longer matches the wire contract"
+        );
+        assert_eq!(
+            serde_json::to_value(&response).unwrap(),
+            fixture["response"],
+            "FileOpResponse serialization no longer matches the wire contract"
+        );
+
+        let parsed: FileOpRequest = serde_json::from_value(fixture["request"].clone()).unwrap();
+        assert!(matches!(parsed, FileOpRequest::List { op_id: 1, .. }));
+
+        let parsed: FileOpResponse = serde_json::from_value(fixture["response"].clone()).unwrap();
+        match parsed {
+            FileOpResponse::Listing {
+                entries, truncated, ..
+            } => {
+                assert_eq!(entries.len(), 2);
+                assert_eq!(entries[0].kind, FileKind::File);
+                assert_eq!(entries[1].kind, FileKind::Dir);
+                assert!(!truncated);
+            }
+            other => panic!("expected a Listing, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn file_op_error_round_trips() {
+        for code in [
+            FileOpError::NotFound,
+            FileOpError::PermissionDenied,
+            FileOpError::NotADirectory,
+            FileOpError::NotRegularFile,
+            FileOpError::TooLarge,
+            FileOpError::TooManyOpenFiles,
+            FileOpError::Io,
+        ] {
+            let encoded = serde_json::to_string(&FileOpResponse::Error {
+                op_id: 3,
+                code,
+                message: "boom".to_string(),
+            })
+            .unwrap();
+            let decoded: FileOpResponse = serde_json::from_str(&encoded).unwrap();
+            match decoded {
+                FileOpResponse::Error { code: got, .. } => assert_eq!(got, code),
+                other => panic!("expected an Error, got {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn unknown_command_variant_round_trips() {
+        // A daemon reporting a failed unknown command must not itself produce a
+        // payload the api can't parse.
+        let request = SafeCommandRequest {
+            id: 9,
+            command: SafeCommandTx::Unknown,
+            continue_on_error: false,
+        };
+        let encoded = serde_json::to_string(&request).unwrap();
+        let decoded: SafeCommandRequest = serde_json::from_str(&encoded).unwrap();
+        assert!(matches!(decoded.command, SafeCommandTx::Unknown));
     }
 }

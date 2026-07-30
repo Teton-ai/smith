@@ -40,6 +40,7 @@ mod device;
 mod distribution;
 mod error;
 mod event;
+mod files;
 mod handlers;
 mod health;
 mod home;
@@ -50,6 +51,7 @@ mod middlewares;
 mod modem;
 pub mod network;
 mod package;
+mod relay;
 mod release;
 mod rollout;
 mod sentry;
@@ -207,8 +209,6 @@ async fn start_main_server(
     let (tx_message, _rx_message) = broadcast::channel::<PublicEvent>(1);
     let tx_message = Arc::new(Mutex::new(tx_message));
 
-    let log_sessions = logstream::LogStreamSessions::new();
-
     // Create JwksClient once at startup
     let jwks_client =
         DebugJwksClient::init(&config.auth0_issuer).expect("Failed to initialize JWKS client");
@@ -233,6 +233,10 @@ async fn start_main_server(
     // An unreachable device cannot report its own absence, so downtime has to be
     // inferred by polling for silence. Runs on its own task, off the request path.
     device::spawn_downtime_sweeper(state.pg_pool.clone());
+
+    // Staged device files are removed within the hour; S3 lifecycle rules only
+    // go down to a day, so the real cleanup has to run here.
+    files::spawn_sweeper(state.pg_pool.clone(), &config.assets_bucket_name);
 
     let recorder_handle = metric::setup_metrics_recorder();
 
@@ -421,6 +425,7 @@ async fn start_main_server(
         .routes(routes!(smith::route::list_release_packages))
         .routes(routes!(smith::route::test_file))
         .routes(routes!(smith::route::test_upload))
+        .routes(routes!(files::route::upload_file))
         .routes(routes!(auth::route::session))
         .split_for_parts();
 
@@ -437,6 +442,8 @@ async fn start_main_server(
     let (ws_router, _ws_api) = OpenApiRouter::with_openapi(ApiDoc::openapi())
         .routes(routes!(logstream::dashboard_logs_ws))
         .routes(routes!(logstream::device_logs_ws))
+        .routes(routes!(files::route::dashboard_files_ws))
+        .routes(routes!(files::route::device_files_ws))
         .split_for_parts();
 
     let app = Router::new()
@@ -473,8 +480,7 @@ async fn start_main_server(
                 )
             }),
         )
-        .layer(Extension(state))
-        .layer(Extension(log_sessions));
+        .layer(Extension(state));
 
     let listener = TcpListener::bind("0.0.0.0:8080")
         .await

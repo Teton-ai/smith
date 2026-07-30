@@ -152,6 +152,10 @@ pub async fn issue_commands_to_devices(
         return Err(StatusCode::BAD_REQUEST);
     }
 
+    if !authorization::reject_unknown_commands(&bundle_commands.commands) {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+
     // Gate each command kind by the caller's permissions (e.g. freeform,
     // tunnel). Recipes go through `trigger_recipe`, which is gated separately.
     if !authorization::authorize_commands(&current_user, &bundle_commands.commands) {

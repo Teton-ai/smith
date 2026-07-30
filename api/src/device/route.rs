@@ -1653,6 +1653,10 @@ pub async fn issue_commands_to_device(
     Extension(current_user): Extension<CurrentUser>,
     Json(commands): Json<Vec<SafeCommandRequest>>,
 ) -> axum::response::Result<StatusCode, StatusCode> {
+    if !authorization::reject_unknown_commands(&commands) {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+
     if !authorization::authorize_commands(&current_user, &commands) {
         return Err(StatusCode::FORBIDDEN);
     }

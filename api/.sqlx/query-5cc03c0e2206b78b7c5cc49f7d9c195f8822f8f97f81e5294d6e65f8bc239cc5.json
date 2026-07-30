@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE stream_session SET device_connected = true WHERE id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "5cc03c0e2206b78b7c5cc49f7d9c195f8822f8f97f81e5294d6e65f8bc239cc5"
+}

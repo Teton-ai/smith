@@ -1,0 +1,39 @@
+{
+  "request": {
+    "List": {
+      "op_id": 1,
+      "path": "/var/log"
+    }
+  },
+  "response": {
+    "Listing": {
+      "op_id": 1,
+      "path": "/var/log",
+      "entries": [
+        {
+          "name": "syslog",
+          "kind": "File",
+          "size": 4096,
+          "mtime": 1700000000,
+          "mode": 420,
+          "uid": 0,
+          "gid": 4,
+          "symlink_target": null,
+          "reachable": true
+        },
+        {
+          "name": "journal",
+          "kind": "Dir",
+          "size": 0,
+          "mtime": 1700000001,
+          "mode": 493,
+          "uid": 0,
+          "gid": 0,
+          "symlink_target": null,
+          "reachable": true
+        }
+      ],
+      "truncated": false
+    }
+  }
+}

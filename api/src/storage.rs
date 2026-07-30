@@ -27,6 +27,49 @@ impl Storage {
         Ok(())
     }
 
+    /// Stream a reader straight into S3 without ever holding the object in
+    /// memory. `put_object_stream` uploads in multipart chunks, so a 512 MiB
+    /// device file costs a chunk of RSS, not 512 MiB — unlike `save_to_s3`,
+    /// which takes a fully-buffered slice.
+    pub async fn stream_to_s3<R>(
+        bucket_name: &str,
+        object_key: &str,
+        reader: &mut R,
+    ) -> anyhow::Result<u16>
+    where
+        R: tokio::io::AsyncRead + Unpin + ?Sized,
+    {
+        let region = Region::from_default_env()?;
+        let credentials = Credentials::default()?;
+        let bucket = Bucket::new(bucket_name, region, credentials)?;
+
+        let status = bucket.put_object_stream(reader, object_key).await?;
+        Ok(status.status_code())
+    }
+
+    /// A time-limited CloudFront URL for an object staged by the file browser.
+    /// The browser fetches straight from the CDN, so the api never sits in the
+    /// byte path on the way out.
+    pub fn signed_url(
+        cdn_domain: &str,
+        cdn_key_pair_id: &str,
+        cdn_private_key: &str,
+        object_key: &str,
+        ttl_seconds: u64,
+    ) -> anyhow::Result<String> {
+        let since_epoch = SystemTime::now().duration_since(UNIX_EPOCH)?;
+
+        let options = SignedOptions {
+            key_pair_id: Cow::from(cdn_key_pair_id.to_string()),
+            private_key: Cow::from(cdn_private_key.to_string()),
+            date_less_than: since_epoch.as_secs() + ttl_seconds,
+            ..Default::default()
+        };
+
+        let url = format!("{cdn_domain}/{object_key}");
+        get_signed_url(&url, &options).map_err(anyhow::Error::from)
+    }
+
     pub async fn delete_from_s3(bucket_name: &str, path: &str) -> anyhow::Result<()> {
         let region = Region::from_default_env()?;
         let credentials = Credentials::default()?;
