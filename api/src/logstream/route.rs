@@ -355,6 +355,22 @@ async fn handle_device_ws(socket: WebSocket, session_id: Uuid, state: State) {
 
     publish_lines(&state, &session_id, &mut batch).await;
 
+    // Device-initiated teardown: without this the dashboard side would sit
+    // blocked on its subscription until the browser gives up or the stale
+    // session sweeper fires. Harmless when the dashboard closed first — the
+    // session is already closed and the frame just ages out with the backlog.
+    relay::publish(
+        &state.pg_pool,
+        &session_id,
+        Direction::ToDashboard,
+        &json!({"type": "error", "message": "Device disconnected"}),
+    )
+    .await
+    .inspect_err(|e| error!("Failed to publish device disconnect for session {session_id}: {e}"))
+    .ok();
+
+    relay::close_session(&state.pg_pool, &session_id).await;
+
     info!("Device log stream ended for session {session_id}");
 }
 

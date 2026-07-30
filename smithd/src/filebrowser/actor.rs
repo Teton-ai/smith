@@ -245,8 +245,6 @@ async fn run_session(
 
                 match msg {
                     Ok(Message::Text(text)) => {
-                        idle = Box::pin(tokio::time::sleep(IDLE_TIMEOUT));
-
                         let request: FileOpRequest = match serde_json::from_str(&text) {
                             Ok(request) => request,
                             Err(e) => {
@@ -271,6 +269,10 @@ async fn run_session(
                                 break;
                             }
                         }
+
+                        // Reset only after the request (possibly a long upload)
+                        // finished, so slow operations don't count as idle time.
+                        idle = Box::pin(tokio::time::sleep(IDLE_TIMEOUT));
                     }
                     Ok(Message::Ping(data)) => {
                         write

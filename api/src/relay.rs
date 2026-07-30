@@ -278,15 +278,11 @@ pub async fn drain_pending(
     session_id: &Uuid,
     direction: Direction,
 ) -> Result<Vec<Value>> {
-    let rows = sqlx::query!(
+    let mut rows = sqlx::query!(
         r#"
         DELETE FROM session_message
-        WHERE id IN (
-            SELECT id FROM session_message
-            WHERE session_id = $1 AND direction = $2
-            ORDER BY id
-        )
-        RETURNING payload
+        WHERE session_id = $1 AND direction = $2
+        RETURNING id, payload
         "#,
         session_id,
         direction.as_str()
@@ -294,5 +290,7 @@ pub async fn drain_pending(
     .fetch_all(pool)
     .await?;
 
+    // DELETE ... RETURNING has no guaranteed row order; sort to replay in publish order.
+    rows.sort_by_key(|row| row.id);
     Ok(rows.into_iter().map(|row| row.payload).collect())
 }

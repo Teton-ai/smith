@@ -530,8 +530,13 @@ async fn relay_device_response(state: &State, session_id: &Uuid, text: &str) -> 
 async fn start_transfer(state: &State, session_id: &Uuid, op_id: u64, name: &str, size: u64) {
     let upload_token = Uuid::new_v4().simple().to_string();
     // The object key includes the session so a bucket listing is attributable,
-    // and the op id so two downloads of the same file don't collide.
-    let object_key = format!("{OBJECT_PREFIX}/{session_id}/{op_id}/{name}");
+    // and the op id so two downloads of the same file don't collide. The
+    // device-chosen file name stays out of the key so a device can't steer
+    // where the object lands; it is stored separately as the display name.
+    let object_key = format!(
+        "{OBJECT_PREFIX}/{session_id}/{op_id}/{}",
+        Uuid::new_v4().simple()
+    );
 
     if let Err(e) = session::create_download(
         &state.pg_pool,
