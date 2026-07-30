@@ -55,6 +55,14 @@ uuid = { version = "1.0", features = ["v4"] }
 xattr = "1.6.1"
 tokio-tungstenite = { version = "0.21", features = ["native-tls"] }
 url = "2.5"
+# Not the workspace axum (0.7): the local control API is served over a Unix
+# socket, and `axum::serve` only accepts a UnixListener from 0.8 onwards.
+axum = "0.8"
+
+[dev-dependencies]
+# test-util enables start_paused so the police tests can drive the clock across
+# the reboot deadline without waiting minutes of wall time.
+tokio = { version = "1.40", features = ["test-util"] }
 
 [package.metadata.deb]
 maintainer-scripts = "debian/"
@@ -63,11 +71,6 @@ assets = [
         "target/release/smithd",
         "/usr/bin/smithd",
         "755",
-    ],
-    [
-        "src/dbus/smithd.conf",
-        "/etc/dbus-1/system.d/smithd.conf",
-        "0644",
     ],
 ]
 

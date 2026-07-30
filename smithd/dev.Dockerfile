@@ -70,10 +70,6 @@ RUN mkdir -p /home/nightingale/.ssh
 RUN chown -R nightingale:nightingale /home/nightingale/.ssh
 RUN chmod 700 /home/nightingale/.ssh
 
-# Copy dbus configuration file
-COPY smithd/src/dbus/smithd.conf /etc/dbus-1/system.d/smithd.conf
-RUN chmod 0644 /etc/dbus-1/system.d/smithd.conf
-
 # Configure SSH server
 RUN mkdir -p /var/run/sshd
 RUN echo 'PermitRootLogin yes' >> /etc/ssh/sshd_config
