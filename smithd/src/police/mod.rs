@@ -34,7 +34,7 @@ const DEFAULT_HOLD_TTL: Duration = Duration::from_secs(10 * 60);
 
 /// Upper bound on a single hold lease. Long-lived holds must be renewed; this
 /// caps how long a vanished holder can keep the watchdog silenced.
-const MAX_HOLD_TTL: Duration = Duration::from_secs(60 * 60);
+const MAX_HOLD_TTL: Duration = Duration::from_secs(10 * 60);
 
 /// Whether a reboot is scheduled, how long is left, and any hold on it.
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
@@ -373,12 +373,14 @@ mod tests {
         assert!(status.elapsed_seconds >= 120);
         assert!(!status.held);
 
-        // A hold outliving the deadline must defer the reboot past it.
+        // A hold outliving the deadline must defer the reboot past it. An
+        // oversized request is clamped to MAX_HOLD_TTL rather than rejected.
         let status = police.hold(Some(3600)).await;
         assert!(status.held);
-        assert!(status.hold_seconds_remaining > 0);
+        assert_eq!(status.hold_seconds_remaining, MAX_HOLD_TTL.as_secs());
 
-        tokio::time::advance(RESTART_DELAY).await;
+        // Reach the original deadline with the hold still live.
+        tokio::time::advance(RESTART_DELAY - Duration::from_secs(120)).await;
         settle().await;
         let status = police.status().await;
         assert!(
