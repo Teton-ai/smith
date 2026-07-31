@@ -179,6 +179,14 @@ async fn serve(socket: &Path, app: Router, shutdown: ShutdownSignals) -> anyhow:
         tokio::fs::create_dir_all(parent)
             .await
             .with_context(|| format!("Failed to create {}", parent.display()))?;
+
+        // bind() creates the socket with the process umask, so it is briefly
+        // world-accessible before the chmod below. Locking the directory down
+        // first closes that window, and also covers a pre-existing directory
+        // created with looser permissions.
+        tokio::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o700))
+            .await
+            .with_context(|| format!("Failed to set permissions on {}", parent.display()))?;
     }
 
     // A hard kill leaves the socket file behind and bind() would then fail with
@@ -257,13 +265,22 @@ mod tests {
         let signals = shutdown.signals();
         tokio::spawn(async move { serve(&serve_socket, app, signals).await });
 
-        // Wait for the socket to be bound before dialling it.
+        let client = reqwest::Client::builder()
+            .unix_socket(socket.as_path())
+            .build()
+            .expect("client");
+
+        // bind() creates the socket file before serve() chmods it, so a serving
+        // response - not the file existing - is what proves setup finished.
+        let mut response = None;
         for _ in 0..100 {
-            if socket.exists() {
+            if let Ok(r) = client.get("http://localhost/watchdog").send().await {
+                response = Some(r);
                 break;
             }
             tokio::time::sleep(std::time::Duration::from_millis(10)).await;
         }
+        let response = response.expect("request");
 
         let mode = std::fs::metadata(&socket)
             .expect("socket metadata")
@@ -271,17 +288,6 @@ mod tests {
             .mode()
             & 0o777;
         assert_eq!(mode, 0o660, "control socket must not be world-accessible");
-
-        let client = reqwest::Client::builder()
-            .unix_socket(socket.as_path())
-            .build()
-            .expect("client");
-
-        let response = client
-            .get("http://localhost/watchdog")
-            .send()
-            .await
-            .expect("request");
 
         assert!(response.status().is_success());
 

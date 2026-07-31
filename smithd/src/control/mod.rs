@@ -70,7 +70,8 @@ enum Commands {
     /// Upgrade the local debian files to run the latest version installed
     Upgrade,
     Status,
-    /// Report whether the daemon has a reboot scheduled
+    /// Report whether the daemon has a reboot scheduled, or place/release a
+    /// hold that defers one
     Watchdog {
         #[command(subcommand)]
         action: Option<WatchdogAction>,
@@ -101,45 +102,46 @@ struct Upload {
     file: String,
 }
 
-pub async fn execute() -> bool {
-    let mut daemon_should_run = false;
+/// What the caller should do once the CLI arguments have been handled.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Outcome {
+    /// No subcommand was given: hand over to the daemon.
+    RunDaemon,
+    /// A control command ran successfully.
+    Success,
+    /// A control command failed; the error has already been logged.
+    Failure,
+}
+
+pub async fn execute() -> Outcome {
     let args = Args::parse();
 
-    match args.command {
-        Some(Commands::Update) => {
-            if let Err(e) = update().await {
-                error!("Failed to schedule update: {e:#}");
-            }
-        }
-        Some(Commands::Upload(upload_args)) => {
-            if let Err(e) = upload::files_upload(&upload_args.file).await {
-                error!("Failed to upload {}: {e:#}", upload_args.file);
-            }
-        }
-        Some(Commands::Upgrade) => {
-            if let Err(e) = upgrade().await {
-                error!("Failed to schedule upgrade: {e:#}");
-            }
-        }
-        Some(Commands::Status) => {
-            if let Err(e) = status().await {
-                error!("Failed to get status: {e:#}");
-            }
-        }
-        Some(Commands::Watchdog { action }) => {
-            if let Err(e) = watchdog(action).await {
-                error!("Failed to query watchdog: {e:#}");
-            }
-        }
-        Some(Commands::Tunnel { port }) => {
-            if let Err(e) = expose_port(port).await {
-                error!("Failed to expose port {port}: {e:#}");
-            }
-        }
-        None => daemon_should_run = true,
-    }
+    let result = match args.command {
+        Some(Commands::Update) => update()
+            .await
+            .inspect_err(|e| error!("Failed to schedule update: {e:#}")),
+        Some(Commands::Upload(upload_args)) => upload::files_upload(&upload_args.file)
+            .await
+            .inspect_err(|e| error!("Failed to upload {}: {e:#}", upload_args.file)),
+        Some(Commands::Upgrade) => upgrade()
+            .await
+            .inspect_err(|e| error!("Failed to schedule upgrade: {e:#}")),
+        Some(Commands::Status) => status()
+            .await
+            .inspect_err(|e| error!("Failed to get status: {e:#}")),
+        Some(Commands::Watchdog { action }) => watchdog(action)
+            .await
+            .inspect_err(|e| error!("Failed to query watchdog: {e:#}")),
+        Some(Commands::Tunnel { port }) => expose_port(port)
+            .await
+            .inspect_err(|e| error!("Failed to expose port {port}: {e:#}")),
+        None => return Outcome::RunDaemon,
+    };
 
-    daemon_should_run
+    match result {
+        Ok(()) => Outcome::Success,
+        Err(_) => Outcome::Failure,
+    }
 }
 
 pub async fn ensure_daemon_mode() -> bool {

@@ -10,7 +10,7 @@ RestartSec=2
 User=root
 # Creates /run/smithd for the local control socket and cleans it up on stop.
 RuntimeDirectory=smithd
-RuntimeDirectoryMode=0755
+RuntimeDirectoryMode=0700
 ExecStart=/usr/bin/smithd
 WorkingDirectory=/etc/smith
 Environment="RUST_LOG=INFO"
