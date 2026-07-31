@@ -8,7 +8,7 @@ use anyhow::Result;
 use tracing::info;
 
 pub async fn status() -> Result<()> {
-    let mut exit_code = 0;
+    let mut mismatched = 0usize;
 
     let reply = super::client()?
         .get(super::control_url("/updater/status"))
@@ -90,9 +90,13 @@ pub async fn status() -> Result<()> {
         );
 
         if magic_toml_version != installed_version {
-            exit_code = -1;
+            mismatched += 1;
         }
     }
 
-    std::process::exit(exit_code);
+    if mismatched > 0 {
+        anyhow::bail!("{mismatched} package(s) do not match the target release");
+    }
+
+    Ok(())
 }
