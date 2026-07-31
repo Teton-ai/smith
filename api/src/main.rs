@@ -25,7 +25,6 @@ use tower_http::cors::CorsLayer;
 use tower_http::decompression::RequestDecompressionLayer;
 use tower_http::trace::TraceLayer;
 use tracing::info;
-use tracing_subscriber::{EnvFilter, prelude::*};
 use utoipa::openapi::security::{Http, HttpAuthScheme, SecurityScheme};
 use utoipa::{Modify, OpenApi};
 use utoipa_axum::{router::OpenApiRouter, routes};
@@ -45,6 +44,7 @@ mod handlers;
 mod health;
 mod home;
 mod ip_address;
+mod logging;
 mod logstream;
 mod metric;
 mod middlewares;
@@ -73,6 +73,8 @@ pub struct State {
 }
 
 fn main() {
+    logging::init_logging();
+
     let roles_path =
         env::var("ROLES_PATH").unwrap_or_else(|_| "/workspace/api/roles.toml".to_string());
 
@@ -98,15 +100,6 @@ fn main() {
     let config: &'static Config = Box::leak(Box::new(
         Config::new().expect("error: failed to construct config"),
     ));
-
-    tracing_subscriber::registry()
-        .with(
-            tracing_subscriber::fmt::layer()
-                .with_line_number(true)
-                .compact(),
-        )
-        .with(EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")))
-        .init();
 
     let _sentry_guard = Sentry::init(config);
 
