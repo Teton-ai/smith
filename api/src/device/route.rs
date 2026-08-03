@@ -2049,6 +2049,9 @@ pub async fn update_device(
     }
 
     if let Some(labels) = payload.labels {
+        // An empty map means "remove every label" and still applies to an
+        // existing device, so only non-empty maps can prove a device is missing
+        let labels_empty = labels.is_empty();
         let mut tx = state.pg_pool.begin().await.map_err(|err| {
             error!("Failed to start transaction {err}");
             StatusCode::INTERNAL_SERVER_ERROR
@@ -2135,7 +2138,7 @@ pub async fn update_device(
             StatusCode::INTERNAL_SERVER_ERROR
         })?;
 
-        if result.rows_affected() == 0 {
+        if !labels_empty && result.rows_affected() == 0 {
             return Err(StatusCode::NOT_FOUND);
         }
     }
