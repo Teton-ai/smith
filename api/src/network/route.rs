@@ -306,6 +306,8 @@ pub async fn create_network(
     .await
     .map_err(internal_error("Failed to take network content lock"))?;
 
+    // NewNetwork carries no identity, so p_identity takes its DEFAULT NULL and
+    // stays relaxed: matches an identified row rather than forking a copy of it.
     let existing_id: Option<i32> = sqlx::query_scalar!(
         r#"SELECT network_find_by_content($1, $2, $3, $4, $5)"#,
         new_network.ssid,

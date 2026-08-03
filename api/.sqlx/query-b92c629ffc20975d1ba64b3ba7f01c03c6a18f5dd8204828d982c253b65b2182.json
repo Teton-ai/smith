@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT network_find_by_content($1, $2, $3, $4, 'wifi')",
+  "query": "SELECT network_find_by_content($1, $2, $3, $4, 'wifi', $5)",
   "describe": {
     "columns": [
       {
@@ -14,12 +14,13 @@
         "Text",
         "Bool",
         "Jsonb",
-        "Text"
+        "Text",
+        "Jsonb"
       ]
     },
     "nullable": [
       null
     ]
   },
-  "hash": "0137af42633aa3582555660ce4c5c937b6cb295107b231b620406de3b349d198"
+  "hash": "b92c629ffc20975d1ba64b3ba7f01c03c6a18f5dd8204828d982c253b65b2182"
 }

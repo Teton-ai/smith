@@ -204,12 +204,15 @@ pub async fn save_responses(
                     // Shared with create_network (api/src/network/route.rs) so the match
                     // cannot drift between writers; see network_find_by_content (arch.md).
                     // ReportNMProfiles only ever describes wifi.
+                    // Only writer that knows an identity. Without it, two devices holding
+                    // different EAP credentials for one SSID match each other's row.
                     let existing_id: Option<i32> = sqlx::query_scalar!(
-                        r#"SELECT network_find_by_content($1, $2, $3, $4, 'wifi')"#,
+                        r#"SELECT network_find_by_content($1, $2, $3, $4, 'wifi', $5)"#,
                         ssid,
                         hidden,
                         &identity_credentials,
                         mapped_security_type as Option<&str>,
+                        identity_val.as_ref() as Option<&serde_json::Value>,
                     )
                     .fetch_one(&mut *tx)
                     .await?;
