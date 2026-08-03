@@ -425,6 +425,7 @@ async fn distinct_eap_identities_on_one_ssid_do_not_match() -> Result<()> {
     let credentials = serde_json::json!({ "eap": "peap", "phase2_auth": "mschapv2" });
     let identity_a = serde_json::json!({ "username": "e2e-box-a" });
     let identity_b = serde_json::json!({ "username": "e2e-box-b" });
+    let identity_c = serde_json::json!({ "username": "e2e-box-c" });
 
     let insert = |identity: Option<serde_json::Value>| {
         let (ssid, credentials) = (ssid.clone(), credentials.clone());
@@ -466,7 +467,9 @@ async fn distinct_eap_identities_on_one_ssid_do_not_match() -> Result<()> {
         matched_b_before_insert: Option<i32>,
         matched_b_after_insert: Option<i32>,
         matched_unknown: Option<i32>,
+        matched_healable: Option<i32>,
         b_id: i32,
+        null_ident_id: i32,
     }
 
     // Wrapped so a failed insert or match still reaches the cleanup below rather
@@ -495,13 +498,25 @@ async fn distinct_eap_identities_on_one_ssid_do_not_match() -> Result<()> {
 
         let matched_unknown = find(None).await.context("matching without an identity")?;
 
+        // Inserted last on purpose: an identity-NULL row is relaxed against every
+        // p_identity, so it would win the ordering tiebreak and change every
+        // assertion above. Identity C matches neither A nor B exactly, leaving the
+        // NULL row as the only candidate, which is the healing direction.
+        let null_ident_id = insert(None).await.context("inserting identity-NULL row")?;
+
+        let matched_healable = find(Some(identity_c.clone()))
+            .await
+            .context("matching a third identity against the identity-NULL row")?;
+
         Ok(Outcome {
             a_id,
             matched_a,
             matched_b_before_insert,
             matched_b_after_insert,
             matched_unknown,
+            matched_healable,
             b_id,
+            null_ident_id,
         })
     }
     .await;
@@ -518,7 +533,9 @@ async fn distinct_eap_identities_on_one_ssid_do_not_match() -> Result<()> {
         matched_b_before_insert,
         matched_b_after_insert,
         matched_unknown,
+        matched_healable,
         b_id,
+        null_ident_id,
     } = outcome?;
 
     ensure!(
@@ -538,6 +555,12 @@ async fn distinct_eap_identities_on_one_ssid_do_not_match() -> Result<()> {
         matched_unknown == Some(b_id),
         "a writer with no identity must stay relaxed and reach the newest row {b_id} \
          (id DESC tiebreak among equally-relaxed matches), got {matched_unknown:?}"
+    );
+    ensure!(
+        matched_healable == Some(null_ident_id),
+        "an identified writer must reach the identity-NULL row {null_ident_id} to heal it, \
+         and must not match rows {a_id} or {b_id} which hold other identities; got \
+         {matched_healable:?}"
     );
 
     Ok(())
