@@ -401,6 +401,148 @@ async fn repeated_untyped_profile_report_does_not_duplicate() -> Result<()> {
     Ok(())
 }
 
+/// Regression guard for the EAP blind spot: with no shared psk, every field the
+/// pre-identity match compared was equal for two EAP rows on one SSID. Distinct
+/// identities must not match each other, and an unknown identity must still reach
+/// an identified row, since POST /networks and old smithd never send one.
+#[tokio::test]
+#[ignore = "requires running compose stack; use make test.e2e"]
+async fn distinct_eap_identities_on_one_ssid_do_not_match() -> Result<()> {
+    let ctx = Ctx::connect().await?;
+    wait_for_api(&ctx).await?;
+
+    if !has_stage3_content_addressing(&ctx).await? {
+        println!(
+            "skipping distinct_eap_identities_on_one_ssid_do_not_match: \
+             network_content_lock_key not present (released-api version-skew job)"
+        );
+        return Ok(());
+    }
+
+    let ssid = format!("e2e-eap-{}", uuid::Uuid::new_v4());
+    // No psk: the psk clause matches trivially, leaving identity as the only field
+    // that can tell the two rows apart.
+    let credentials = serde_json::json!({ "eap": "peap", "phase2_auth": "mschapv2" });
+    let identity_a = serde_json::json!({ "username": "e2e-box-a" });
+    let identity_b = serde_json::json!({ "username": "e2e-box-b" });
+
+    let insert = |identity: Option<serde_json::Value>| {
+        let (ssid, credentials) = (ssid.clone(), credentials.clone());
+        let pool = ctx.db.clone();
+        async move {
+            sqlx::query_scalar::<_, i32>(
+                "INSERT INTO network
+                     (ssid, name, network_type, is_network_hidden,
+                      security_type, credentials, identity)
+                 VALUES ($1, $1, 'wifi', false, 'wpa-eap', $2, $3)
+                 RETURNING id",
+            )
+            .bind(&ssid)
+            .bind(&credentials)
+            .bind(identity)
+            .fetch_one(&pool)
+            .await
+        }
+    };
+
+    let find = |identity: Option<serde_json::Value>| {
+        let (ssid, credentials) = (ssid.clone(), credentials.clone());
+        let pool = ctx.db.clone();
+        async move {
+            sqlx::query_scalar::<_, Option<i32>>(
+                "SELECT network_find_by_content($1, false, $2, 'wpa-eap', 'wifi', $3)",
+            )
+            .bind(&ssid)
+            .bind(&credentials)
+            .bind(identity)
+            .fetch_one(&pool)
+            .await
+        }
+    };
+
+    struct Outcome {
+        a_id: i32,
+        matched_a: Option<i32>,
+        matched_b_before_insert: Option<i32>,
+        matched_b_after_insert: Option<i32>,
+        matched_unknown: Option<i32>,
+        b_id: i32,
+    }
+
+    // Wrapped so a failed insert or match still reaches the cleanup below rather
+    // than leaking the rows inserted up to that point.
+    let outcome: Result<Outcome> = async {
+        let a_id = insert(Some(identity_a.clone()))
+            .await
+            .context("inserting EAP row A")?;
+
+        let matched_a = find(Some(identity_a.clone()))
+            .await
+            .context("matching identity A")?;
+
+        // The bug: with only A present, identity B used to be handed A's id.
+        let matched_b_before_insert = find(Some(identity_b.clone()))
+            .await
+            .context("matching identity B against row A alone")?;
+
+        let b_id = insert(Some(identity_b.clone()))
+            .await
+            .context("inserting EAP row B")?;
+
+        let matched_b_after_insert = find(Some(identity_b.clone()))
+            .await
+            .context("matching identity B with both rows present")?;
+
+        let matched_unknown = find(None).await.context("matching without an identity")?;
+
+        Ok(Outcome {
+            a_id,
+            matched_a,
+            matched_b_before_insert,
+            matched_b_after_insert,
+            matched_unknown,
+            b_id,
+        })
+    }
+    .await;
+
+    sqlx::query("DELETE FROM network WHERE ssid = $1")
+        .bind(&ssid)
+        .execute(&ctx.db)
+        .await
+        .context("cleaning up eap ssid")?;
+
+    let Outcome {
+        a_id,
+        matched_a,
+        matched_b_before_insert,
+        matched_b_after_insert,
+        matched_unknown,
+        b_id,
+    } = outcome?;
+
+    ensure!(
+        matched_a == Some(a_id),
+        "identity A must match its own row {a_id}, got {matched_a:?}"
+    );
+    ensure!(
+        matched_b_before_insert.is_none(),
+        "identity B must not match row {a_id}, which holds identity A; got \
+         {matched_b_before_insert:?}"
+    );
+    ensure!(
+        matched_b_after_insert == Some(b_id),
+        "identity B must match its own row {b_id}, got {matched_b_after_insert:?}"
+    );
+    ensure!(
+        matched_unknown == Some(b_id),
+        "a writer with no identity must stay relaxed and reach the newest row {b_id} \
+         (id DESC tiebreak among equally-relaxed matches), got {matched_unknown:?}"
+    );
+
+    Ok(())
+}
+
 /// Regression guard for the healing half of F4 and for the match ordering that
 /// makes it safe. A typed writer must reach an existing NULL-`security_type` row
 /// (rather than inserting a second one) and fill the type in, but when an exact
