@@ -1997,7 +1997,10 @@ async fn main() -> anyhow::Result<()> {
                 }
             }
             Commands::Label {
-                selector,
+                labels,
+                online,
+                offline,
+                search,
                 devices: device_filters,
                 set_labels,
             } => {
@@ -2008,15 +2011,9 @@ async fn main() -> anyhow::Result<()> {
 
                 let api = SmithAPI::new(secrets, &config);
 
-                let target_devices = resolve_target_devices(
-                    &api,
-                    device_filters,
-                    selector.labels,
-                    selector.online,
-                    selector.offline,
-                    selector.search,
-                )
-                .await?;
+                let target_devices =
+                    resolve_target_devices(&api, device_filters, labels, online, offline, search)
+                        .await?;
 
                 // Deduplicate devices by ID to prevent duplicate label operations
                 let mut seen_ids = HashSet::new();

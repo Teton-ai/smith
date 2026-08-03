@@ -306,8 +306,18 @@ pub enum Commands {
 
     /// Set labels on devices with filters
     Label {
-        #[command(flatten)]
-        selector: DeviceSelector,
+        /// Filter by labels (format: key=value). Can be used multiple times.
+        #[arg(short, long = "label", value_name = "KEY=VALUE")]
+        labels: Vec<String>,
+        /// Show only online devices (last seen < 5 minutes)
+        #[arg(long, conflicts_with = "offline")]
+        online: bool,
+        /// Show only offline devices (last seen >= 5 minutes)
+        #[arg(long, conflicts_with = "online")]
+        offline: bool,
+        /// Use partial matching for device IDs (matches serial number, hostname, or model)
+        #[arg(short, long)]
+        search: bool,
         /// Specific device serial numbers or IDs to target
         #[arg(short, long = "device")]
         devices: Vec<String>,
