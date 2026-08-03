@@ -1,0 +1,25 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT network_find_by_content($1, $2, $3, $4, 'wifi')",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "network_find_by_content",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Bool",
+        "Jsonb",
+        "Text"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "0137af42633aa3582555660ce4c5c937b6cb295107b231b620406de3b349d198"
+}

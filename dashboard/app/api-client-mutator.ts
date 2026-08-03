@@ -6,11 +6,11 @@ import { useConfig } from "./hooks/config";
 // when the refresh token expires.
 let isLoggingOut = false;
 
-export const useClientMutator = <T>() => {
+const useRawFetcher = () => {
 	const { isAuthenticated, getAccessTokenSilently, logout } = useAuth0();
 	const { config } = useConfig();
 
-	const fetcher = async (req: AxiosRequestConfig): Promise<T> => {
+	return async (req: AxiosRequestConfig) => {
 		if (!isAuthenticated) {
 			throw new Error("User not authenticated");
 		}
@@ -38,7 +38,7 @@ export const useClientMutator = <T>() => {
 			throw err;
 		}
 
-		const res = await axios({
+		return axios({
 			...req,
 			paramsSerializer: {
 				indexes: null,
@@ -49,8 +49,29 @@ export const useClientMutator = <T>() => {
 				Authorization: `Bearer ${token}`,
 			},
 		});
+	};
+};
+
+export const useClientMutator = <T>() => {
+	const rawFetcher = useRawFetcher();
+	return async (req: AxiosRequestConfig): Promise<T> => {
+		const res = await rawFetcher(req);
 		return res.data as T;
 	};
+};
 
-	return fetcher;
+/**
+ * Like `useClientMutator`, but also exposes the response status. Needed when a
+ * caller must tell "the server created this" (201) apart from "the server
+ * matched an existing row" (200) - e.g. idempotent POSTs where only the former
+ * is safe to compensate for on a later failure.
+ */
+export const useClientMutatorWithStatus = <T>() => {
+	const rawFetcher = useRawFetcher();
+	return async (
+		req: AxiosRequestConfig,
+	): Promise<{ data: T; status: number }> => {
+		const res = await rawFetcher(req);
+		return { data: res.data as T, status: res.status };
+	};
 };

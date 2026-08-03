@@ -7,6 +7,8 @@ import {
 	Panel,
 	SECTION_THEMES,
 	SearchInput,
+	Toast,
+	type ToastState,
 } from "@teton/smith-ui";
 import { isAxiosError } from "axios";
 import {
@@ -42,7 +44,10 @@ import {
 	useUpdateDeviceIntent,
 	type WifiScanResult,
 } from "@/app/api-client";
-import { useClientMutator } from "@/app/api-client-mutator";
+import {
+	useClientMutator,
+	useClientMutatorWithStatus,
+} from "@/app/api-client-mutator";
 
 const MASK = "••••••••••••";
 
@@ -436,14 +441,19 @@ const WifiPanel = ({ serial, device }: WifiPanelProps) => {
 		},
 	});
 
-	const networkCreator = useClientMutator<{ id: number }>();
+	const networkCreator = useClientMutatorWithStatus<{
+		id: number;
+		name: string;
+	}>();
+	const [toast, setToast] = useState<ToastState | null>(null);
 	const { mutateAsync: deleteNetworkByIdAsync } = useDeleteNetworkById();
 	const { mutate: createNetwork, isPending: isCreatingNetwork } = useMutation({
-		mutationFn: async () => {
+		mutationFn: async (): Promise<{ matchedName: string | null }> => {
+			const requestedName = newNetName.trim();
 			if (sortedIntent.some((e) => e.name === newNetName.trim())) {
 				throw Object.assign(new Error("intent-conflict"), { status: 409 });
 			}
-			const created = await networkCreator({
+			const { data: created, status } = await networkCreator({
 				url: "/networks",
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
@@ -470,13 +480,27 @@ const WifiPanel = ({ serial, device }: WifiPanelProps) => {
 					},
 				});
 			} catch (err) {
-				// Best-effort: remove the catalog entry so it doesn't appear as an orphan.
-				// If this also fails, the entry remains in the catalog but unlinked to any intent.
-				await deleteNetworkByIdAsync({ networkId: created.id }).catch(() => {});
+				// Only compensate when the POST actually created this row (201). A 200
+				// means content-addressing matched an existing row that other devices
+				// may already reference; deleting it would corrupt their intents.
+				if (status === 201) {
+					await deleteNetworkByIdAsync({ networkId: created.id }).catch(
+						() => {},
+					);
+				}
 				throw err;
 			}
+			// A 200 means the POST matched an existing catalog row by content, so
+			// the name the operator typed was discarded in favour of that row's.
+			// Silently showing a different name in the intent list looks like a bug.
+			return {
+				matchedName:
+					status === 200 && created.name !== requestedName
+						? created.name
+						: null,
+			};
 		},
-		onSuccess: () => {
+		onSuccess: ({ matchedName }) => {
 			queryClient.invalidateQueries({ queryKey: getGetNetworksQueryKey() });
 			queryClient.invalidateQueries({
 				queryKey: getGetDeviceIntentQueryKey(deviceId),
@@ -484,6 +508,14 @@ const WifiPanel = ({ serial, device }: WifiPanelProps) => {
 			queryClient.invalidateQueries({
 				queryKey: getGetDeviceInfoQueryKey(serial),
 			});
+			if (matchedName) {
+				setToast({
+					type: "success",
+					message: `Matched the existing network "${matchedName}", which has the same SSID and password.`,
+				});
+			} else {
+				setToast(null);
+			}
 			closeModal();
 		},
 		onError: (err) => {
@@ -570,6 +602,7 @@ const WifiPanel = ({ serial, device }: WifiPanelProps) => {
 
 	return (
 		<Panel title="WiFi" icon={Wifi} theme={SECTION_THEMES.orange}>
+			<Toast toast={toast} onClose={() => setToast(null)} />
 			{/* Intent section */}
 			<div className="mb-6 pb-6 border-b border-gray-100">
 				<div className="flex items-center justify-between gap-2 mb-3">
