@@ -83,6 +83,22 @@ fetch_app_api_device_depts() {
     APP_API_DEV_DEPT_COUNT=$(printf '%s\n' "$APP_API_DEV_DEPT_CSV" | sed '/^$/d' | wc -l | tr -d ' ')
 }
 
+# Sets APP_API_WIFI_CONTENT_CSV. Carries live WiFi passwords, so this is
+# RFC-4180 CSV and MUST be streamed into a quoted heredoc. Never echo it.
+fetch_app_api_wifi_content() {
+    local url="$1"
+    APP_API_WIFI_CONTENT_CSV=$(db_psql "$url" -q -t -A -c \
+        "\copy (SELECT ns.network_wifi_id, w.ssid, w.hidden, NULLIF(w.password, '')
+                FROM network_smith ns JOIN network_wifis w ON w.id = ns.network_wifi_id
+                WHERE ns.network_smith_id IS NOT NULL
+                ORDER BY ns.network_wifi_id) TO STDOUT WITH (FORMAT csv)")
+
+    if [[ -z "$APP_API_WIFI_CONTENT_CSV" ]]; then
+        echo "ERROR: no rows returned from App API network_wifis" >&2
+        return 1
+    fi
+}
+
 # Emitted between QUOTED heredocs so bash never expands a payload.
 copy_block() {
     printf '\\copy %s FROM STDIN WITH (FORMAT csv)\n' "$1"

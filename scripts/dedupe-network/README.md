@@ -1,7 +1,7 @@
 # Network Table Deduplication
 
 One-off tooling to collapse duplicate `network` rows. Read this before running
-anything: phase 3 writes to a database Smith does not own.
+anything: phases 3 and 4 write to a database Smith does not own.
 
 ## Background
 
@@ -32,7 +32,7 @@ already there.
 
 ## The content key
 
-Phases 2 and 3 both group on the same tuple, under **strict** equality (NULL
+Phases 2, 3 and 4 all group on the same tuple, under **strict** equality (NULL
 equal to NULL). It is defined once as `NETWORK_CONTENT_KEY` in `_common.sh`:
 
 ```
@@ -126,8 +126,8 @@ Two details in the delete condition:
 - Empty-string passwords are normalized to NULL first, so open networks compare
   consistently across every phase. `network.password` is still written by the API
   alongside `credentials`, so this is live, not legacy cleanup.
-- The `dup_group` column in the report uses the same content key as phases 2
-  and 3, so a group shown here is the group those phases will act on.
+- The `dup_group` column in the report uses the same content key as phases 2 to
+  4, so a group shown here is the group those phases will act on.
 
 ```bash
 ./scripts/dedupe-network/phase1-delete-unreferenced.sh <app-api-db-url> [<smith-db-url>] [--commit]
@@ -253,9 +253,68 @@ Phase 3 reads four App API tables: `network_smith` (the bridge it rewrites),
 
 Pause `departmentNetworkSmithSync` for this run if you can.
 
+### Phase 4: repair stale bridges (writes to the App API)
+
+`phase4-repair-stale-bridges.sh`
+
+Picks up what phases 1 to 3 could not deal with: the bridges phase 3 classified
+`UNSUPPORTED` and held back. Repoints the ones with a computable destination,
+then deletes the Smith rows that repair leaves unreferenced.
+
+#### The resolution test
+
+A destination is only defensible when two independent things agree:
+
+1. The App API record's **own** content (`ssid`, `hidden`, `password`) matches a
+   content group, and
+2. that group is one the owning department's devices are actually on.
+
+Content alone is what went stale in the first place. Device evidence alone
+cannot say which of several networks a record meant. Requiring both, and
+requiring **exactly one** candidate group, is what makes this a repair rather
+than a guess. Open networks store `password = ''` on the App API side and a NULL
+psk in Smith, so the fetch normalizes with `NULLIF`.
+
+Bridges with zero candidate groups are contradictory, not ambiguous: the record
+describes a network that exists nowhere its devices are, sometimes nowhere in
+Smith at all. Those are printed with the evidence and left untouched.
+
+`security` is deliberately not part of the match. It adds nothing here, since
+ssid plus password plus the device constraint already pin the group, and Smith
+rows may carry a NULL `security_type` that no App API value equals.
+
+#### The delete
+
+Scoped to the rows this run freed. A general sweep is phase 1's job. A row is
+deleted only when it falls to zero references across all six sources and sits
+below the id watermark, which is taken before the first fetch.
+
+The guard excludes the bridges being repaired rather than reading them back from
+the App API, so a dry run reports exactly what a commit would do. Refs are
+re-fetched immediately before the delete to narrow the sync-job race.
+
+#### Order of operations
+
+Same reasoning as phase 3: App API first, so a later failure leaves a bridge
+pointing at a row that still exists, and the same post-update assertion aborts
+the run rather than deleting rows whose bridges did not move.
+
+The canonical rule here is deliberately **not** phase 3's. Phase 3 picks only
+among bridged rows, because in a skipped group every candidate holds a bridge. A
+phase 4 destination group may hold no bridge at all, so the whole group is in
+play and the choice falls to Smith references, then `min(id)`.
+
+```bash
+./scripts/dedupe-network/phase4-repair-stale-bridges.sh <app-api-db-url> [<smith-db-url>] [--commit]
+```
+
+Reads the same four App API tables as phase 3, plus `network_wifis.ssid`,
+`hidden` and `password`. **That payload carries live WiFi passwords**: it is
+streamed as `COPY` data, never echoed, and never interpolated into SQL text.
+
 ## Shared helpers
 
-`_common.sh` is sourced by all three phase scripts, never executed. It provides:
+`_common.sh` is sourced by all four phase scripts, never executed. It provides:
 
 - `db_psql`, the `docker://` handling described above.
 - The App API fetchers. `network_smith_id` is a TEXT column, so integer payloads
@@ -264,7 +323,7 @@ Pause `departmentNetworkSmithSync` for this run if you can.
 - `copy_block`, which emits a `\copy` command, its payload and its terminator
   between quoted heredocs.
 - `NETWORK_CONTENT_KEY` and `emit_referenced`. The content key is written **once**
-  here and used by phases 2 and 3, so the invariant the whole toolchain rests
+  here and used by phases 2, 3 and 4, so the invariant the whole toolchain rests
   on cannot drift between scripts. `emit_referenced` builds `_referenced`, every
   row anything points at with its group and reference counts. It is a temp table
   rather than a view because callers scan it repeatedly and every count is a
