@@ -1,5 +1,5 @@
 import { useAuth0 } from "@auth0/auth0-react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
 import { Button, LabelChip, Toast } from "@teton/smith-ui";
 import {
 	AlertTriangle,
@@ -26,15 +26,16 @@ import { RelativeTime } from "@/app/components/RelativeTime";
 import {
 	type Device,
 	type DistributionRolloutStats,
+	getGetDevicesInfiniteQueryKey,
 	type Release,
 	useApproveDevice,
 	useDeleteDevice,
-	useGetDevicesInfinite,
 	useGetDistributionRollouts,
 	useGetReleases,
 	useIssueCommandsToDevices,
 	useUpdateDevicesTargetRelease,
 } from "../../api-client";
+import { useClientMutator } from "../../api-client-mutator";
 import { isStableRelease } from "../../utils/release";
 import { ReachabilityCell } from "./[serial]/uptime";
 
@@ -205,15 +206,8 @@ const DevicesPage = () => {
 	const approveDeviceHook = useApproveDevice();
 	const deleteDeviceHook = useDeleteDevice();
 
-	const {
-		data: devicesData,
-		isLoading: loading,
-		fetchNextPage,
-		hasNextPage,
-		isFetchingNextPage,
-		queryKey: devicesQueryKey,
-	} = useGetDevicesInfinite(
-		{
+	const deviceFilterParams = useMemo(
+		() => ({
 			labels: labelFilters.length > 0 ? labelFilters : undefined,
 			online:
 				onlineStatusFilter === "online"
@@ -228,18 +222,50 @@ const DevicesPage = () => {
 			release_id: releaseFilter,
 			distribution_id: distributionFilter,
 			limit: PAGE_SIZE,
-		},
-		{
-			query: {
-				enabled: isAuthenticated,
-				initialPageParam: 0,
-				getNextPageParam: (lastPage, allPages) => {
-					if (!lastPage || lastPage.length < PAGE_SIZE) return undefined;
-					return allPages.length * PAGE_SIZE;
-				},
-			},
-		},
+		}),
+		[
+			labelFilters,
+			onlineStatusFilter,
+			debouncedSearchTerm,
+			showOutdatedOnly,
+			showPendingApproval,
+			showServiceDown,
+			releaseFilter,
+			distributionFilter,
+		],
 	);
+
+	const devicesQueryKey = useMemo(
+		() => getGetDevicesInfiniteQueryKey(deviceFilterParams),
+		[deviceFilterParams],
+	);
+
+	// Hand-rolled rather than `useGetDevicesInfinite`: the generated queryFn
+	// ignores `pageParam`, so every page refetched offset 0 and infinite scroll
+	// re-appended the same first page.
+	const fetchDevicesPage = useClientMutator<Device[]>();
+	const {
+		data: devicesData,
+		isLoading: loading,
+		fetchNextPage,
+		hasNextPage,
+		isFetchingNextPage,
+	} = useInfiniteQuery({
+		queryKey: devicesQueryKey,
+		enabled: isAuthenticated,
+		initialPageParam: 0,
+		queryFn: ({ pageParam, signal }) =>
+			fetchDevicesPage({
+				url: "/devices",
+				method: "GET",
+				params: { ...deviceFilterParams, offset: pageParam },
+				signal,
+			}),
+		getNextPageParam: (lastPage, allPages) => {
+			if (!lastPage || lastPage.length < PAGE_SIZE) return undefined;
+			return allPages.length * PAGE_SIZE;
+		},
+	});
 
 	const filteredDevices = useMemo(
 		() =>
