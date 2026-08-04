@@ -61,6 +61,27 @@ export const useClientMutator = <T>() => {
 };
 
 /**
+ * Like `useClientMutator`, but also exposes the `x-total-count` response
+ * header. Paginated list endpoints use it to report how many rows match the
+ * filter regardless of limit/offset, which a page of results cannot tell you.
+ * `null` means the endpoint did not send a usable count.
+ */
+export const useClientMutatorWithTotal = <T>() => {
+	const rawFetcher = useRawFetcher();
+	return async (
+		req: AxiosRequestConfig,
+	): Promise<{ data: T; total: number | null }> => {
+		const res = await rawFetcher(req);
+		const header = res.headers?.["x-total-count"];
+		const total = typeof header === "string" ? Number(header) : Number.NaN;
+		return {
+			data: res.data as T,
+			total: Number.isInteger(total) ? total : null,
+		};
+	};
+};
+
+/**
  * Like `useClientMutator`, but also exposes the response status. Needed when a
  * caller must tell "the server created this" (201) apart from "the server
  * matched an existing row" (200) - e.g. idempotent POSTs where only the former
