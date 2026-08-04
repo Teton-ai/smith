@@ -1,6 +1,6 @@
 use crate::auditor::AuditorHandle;
 use crate::commander::{CommanderHandle, Handles};
-use crate::dbus::DbusHandle;
+use crate::control::ControlHandle;
 use crate::downloader::DownloaderHandle;
 use crate::filebrowser::FileBrowserHandle;
 use crate::filemanager::FileManagerHandle;
@@ -84,12 +84,13 @@ pub async fn run() {
 
     let _nm_watcher = NMWatcherHandle::new(shutdown.signals(), commander.clone());
 
-    let _dbus = DbusHandle::new(
+    let _control = ControlHandle::new(
         shutdown.signals(),
         updater.clone(),
         downloader.clone(),
         tunnel.clone(),
         filemanager.clone(),
+        police.clone(),
     );
 
     // this will ensure we have a token

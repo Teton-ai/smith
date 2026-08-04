@@ -1,22 +1,23 @@
 use std::path::PathBuf;
 
-use crate::dbus::SmithDbusProxy;
 use crate::magic::MagicHandle;
 use crate::magic::structure::ConfigPackage;
 use crate::shutdown::ShutdownHandler;
 use anyhow::Context;
 use anyhow::Result;
 use tracing::info;
-use zbus::Connection;
 
 pub async fn status() -> Result<()> {
-    let mut exit_code = 0;
+    let mut mismatched = 0usize;
 
-    let connection = Connection::system().await?;
-
-    let proxy = SmithDbusProxy::new(&connection).await?;
-
-    let reply = proxy.updater_status().await?;
+    let reply = super::client()?
+        .get(super::control_url("/updater/status"))
+        .send()
+        .await
+        .context("Is the smithd daemon running?")?
+        .error_for_status()?
+        .text()
+        .await?;
 
     println!("{reply}");
 
@@ -89,9 +90,13 @@ pub async fn status() -> Result<()> {
         );
 
         if magic_toml_version != installed_version {
-            exit_code = -1;
+            mismatched += 1;
         }
     }
 
-    std::process::exit(exit_code);
+    if mismatched > 0 {
+        anyhow::bail!("{mismatched} package(s) do not match the target release");
+    }
+
+    Ok(())
 }

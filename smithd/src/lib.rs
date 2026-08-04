@@ -2,7 +2,6 @@ pub mod auditor;
 pub mod commander;
 pub mod control;
 pub mod daemon;
-pub mod dbus;
 pub mod downloader;
 pub mod filebrowser;
 pub mod filemanager;

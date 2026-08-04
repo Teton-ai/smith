@@ -1,5 +1,8 @@
 use crate::utils::schema::{SafeCommandResponse, SafeCommandRx};
 use anyhow::{Context, Result};
+use nix::sys::signal::{Signal, killpg};
+use nix::unistd::Pid;
+use std::process::Stdio;
 use std::time::Duration;
 use tokio::{process::Command, time::timeout};
 
@@ -97,15 +100,42 @@ pub(super) async fn execute(id: i32, request: String) -> SafeCommandResponse {
 }
 
 async fn execute_command(request: &str) -> Result<std::process::Output> {
-    let future = Command::new("sh")
+    // Own process group: on timeout the whole tree can be signalled, not just `sh`,
+    // which would otherwise leave children running and holding the output pipes.
+    let child = Command::new("sh")
         .arg("-c")
-        .kill_on_drop(true)
         .arg(request)
-        .output();
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true)
+        .process_group(0)
+        .spawn()
+        .context("Failed to run command")?;
 
-    match timeout(Duration::from_secs(60), future).await {
+    let pgid = child.id().map(|pid| Pid::from_raw(pid as i32));
+    let wait = child.wait_with_output();
+    tokio::pin!(wait);
+
+    match timeout(Duration::from_secs(60), &mut wait).await {
         Ok(output) => output.context("Failed to run command"),
-        Err(_) => Err(anyhow::anyhow!("Timeout running command (60s)")),
+        Err(_) => {
+            match pgid {
+                Some(pgid) => {
+                    if let Err(e) = killpg(pgid, Signal::SIGKILL) {
+                        tracing::error!("Failed to kill command process group {pgid}: {e}");
+                    }
+                }
+                None => tracing::error!("Timed-out command has no pid; cannot kill its group"),
+            }
+            // Drain the pipes and reap the tree before reporting the timeout.
+            match timeout(Duration::from_secs(5), wait).await {
+                Ok(Ok(_)) => {}
+                Ok(Err(e)) => tracing::error!("Failed to reap timed-out command: {e}"),
+                Err(_) => tracing::error!("Timed out reaping the command process tree"),
+            }
+            Err(anyhow::anyhow!("Timeout running command (60s)"))
+        }
     }
 }
 

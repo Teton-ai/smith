@@ -7,16 +7,21 @@
 //!
 
 use smith::control;
+use smith::control::Outcome;
 use smith::daemon;
+use std::process::ExitCode;
 
 #[tokio::main]
-async fn main() {
+async fn main() -> ExitCode {
     // setup logging
     tracing_subscriber::fmt::init();
 
-    let daemon_should_run = control::execute().await;
-
-    if daemon_should_run {
-        daemon::run().await;
+    match control::execute().await {
+        Outcome::RunDaemon => {
+            daemon::run().await;
+            ExitCode::SUCCESS
+        }
+        Outcome::Success => ExitCode::SUCCESS,
+        Outcome::Failure => ExitCode::FAILURE,
     }
 }
