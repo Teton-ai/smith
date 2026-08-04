@@ -251,7 +251,7 @@ Phase 3 reads four App API tables: `network_smith` (the bridge it rewrites),
 `network_wifis` and `network_surveys` (which department owns each bridge), and
 `device` (the evidence). It writes only `network_smith.network_smith_id`.
 
-Pause `departmentNetworkSmithSync` for this run if you can.
+See "When to run" for the precondition to check first.
 
 ### Phase 4: repair stale bridges (writes to the App API)
 
@@ -344,5 +344,42 @@ Two windows:
 - A row that already existed and is bridged **after** the ref fetch. Narrowed by
   fetching refs twice and taking the union.
 
-Neither substitutes for pausing the job. Window B stays open for the duration of
-the transaction itself, which no client-side scheme can close.
+Window B stays open for the duration of the transaction itself, which no
+client-side scheme can close. What closes it in practice is the precondition
+below, not timing.
+
+## When to run
+
+The dangerous window only exists while the sync job has work to do, and it
+almost never does. It acts on the retry set, `network_wifis` rows whose
+`network_smith` bridge is still NULL, which is only non-empty after someone adds
+a wifi record in the App API. Measured over the bridge table: 85 bridges total,
+4 written in the last 30 days, 1 in the last 7, scattered across four months.
+
+So the precondition is not a time of day, it is that the retry set is empty:
+
+```bash
+psql "$APP_API_URL" -c "
+SELECT count(*) AS unsynced_wifis
+FROM network_wifis w
+LEFT JOIN network_smith ns ON ns.network_wifi_id = w.id
+WHERE ns.network_smith_id IS NULL;"
+```
+
+If that is `0`, the next sync pass will do nothing, and window B cannot open
+while the run is in progress. Check it immediately before starting and again
+after finishing; if it moved, a wifi record was added mid-run and the phase 1
+plan should be re-read before trusting it.
+
+If it is **not** 0, either wait for the job's next pass to drain it, or hold off
+until whoever is adding records is done. Running against a non-empty retry set is
+the one case where pausing the job is worth the trouble.
+
+Two smaller points:
+
+- Run the four phases back to back in one sitting. Each takes its inputs fresh,
+  so a gap between them is a gap in which the fleet moves under the plan you
+  just read.
+- Device reports create new `network` rows at a low rate (3 rows in the 21 hours
+  between two consecutive prod dumps). Those are already covered by the id
+  watermark, so they constrain nothing.
