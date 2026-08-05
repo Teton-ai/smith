@@ -107,7 +107,11 @@ fetch_app_api_wifi_content() {
 # newline can put such a line into the stream, after which the remainder runs as
 # meta-commands (\! included) with the operator's permissions. Refuse instead.
 copy_block() {
-    if printf '%s\n' "$2" | grep -qE '^\\\.[[:space:]]*$'; then
+    # grep -c, not -q: -q exits on the first match, which SIGPIPEs the writer and
+    # fails the pipeline under pipefail, silently skipping the check.
+    local terminators
+    terminators=$(printf '%s\n' "$2" | grep -cE '^\\\.[[:space:]]*$' || true)
+    if [[ "$terminators" != 0 ]]; then
         echo "ERROR: payload for $1 contains a COPY terminator line; refusing to continue." >&2
         echo "       Inspect the source rows before re-running; this is not valid data." >&2
         return 1

@@ -128,9 +128,10 @@ of the key questions are settled.
 
 Two details in the delete condition:
 
-- The id watermark is taken **before** the ref fetch, not after, so any row
-  created while the run is in progress is out of scope for the delete no matter
-  how long the run takes.
+- The id watermark is taken **before** the ref fetch, not after, so the delete is
+  bounded to ids that existed at that point. It is a bound on the id range, not a
+  guarantee that every row created during the run is excluded; see "Races against
+  the sync job" for what it does and does not cover.
 - Empty-string passwords are normalized to NULL first, so open networks compare
   consistently across every phase. `network.password` is still written by the API
   alongside `credentials`, so this is live, not legacy cleanup. This is scoped to
