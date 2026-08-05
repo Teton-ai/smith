@@ -27,11 +27,12 @@ DEV_SMITH_DB_URL="docker://smith-postgres"
 APP_API_DB_URL="$DEV_APP_API_DB_URL"
 SMITH_DB_URL="$DEV_SMITH_DB_URL"
 COMMIT=""
+_APP_API_SET=""
 
 for arg in "$@"; do
     if [[ "$arg" == "--commit" ]]; then
         COMMIT="--commit"
-    elif [[ -z "${_APP_API_SET:-}" ]]; then
+    elif [[ -z "$_APP_API_SET" ]]; then
         APP_API_DB_URL="$arg"
         _APP_API_SET=1
     else

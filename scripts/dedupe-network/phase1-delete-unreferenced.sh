@@ -63,7 +63,10 @@ echo "==> Running phase 1 cleanup on Smith DB..."
 smith_psql -v ON_ERROR_STOP=1 <<SQL
 BEGIN;
 
-UPDATE network SET password = NULL WHERE password = '';
+\echo '=== EMPTY PASSWORDS NORMALIZED TO NULL ==='
+SELECT COUNT(*) AS rows_normalized FROM network WHERE password = '' AND id <= $WATERMARK;
+
+UPDATE network SET password = NULL WHERE password = '' AND id <= $WATERMARK;
 
 CREATE TEMP TABLE _app_api_refs (network_wifi_id int, network_smith_id int);
 \copy _app_api_refs (network_wifi_id, network_smith_id) FROM STDIN WITH (FORMAT csv)
@@ -129,14 +132,8 @@ LEFT JOIN _groups g ON g.ssid IS NOT DISTINCT FROM k.ssid AND g.hidden = k.hidde
      AND g.sec IS NOT DISTINCT FROM k.sec AND g.identval IS NOT DISTINCT FROM k.identval
 ORDER BY dup_group, k.ssid, k.id;
 
-DELETE FROM network n
-WHERE NOT EXISTS (SELECT 1 FROM _app_api_refs a WHERE a.network_smith_id = n.id)
-  AND NOT EXISTS (SELECT 1 FROM device WHERE network_id = n.id)
-  AND NOT EXISTS (SELECT 1 FROM device WHERE current_network_id = n.id)
-  AND NOT EXISTS (SELECT 1 FROM device_configured_network WHERE network_id = n.id)
-  AND NOT EXISTS (SELECT 1 FROM device_network_intent WHERE network_id = n.id)
-  AND NOT EXISTS (SELECT 1 FROM network_reference WHERE network_id = n.id)
-  AND n.id <= $WATERMARK;
+-- Driven from the staged set so the report above is exactly what gets deleted.
+DELETE FROM network n WHERE EXISTS (SELECT 1 FROM _to_delete d WHERE d.id = n.id);
 
 SELECT COUNT(*) AS remaining_rows FROM network;
 

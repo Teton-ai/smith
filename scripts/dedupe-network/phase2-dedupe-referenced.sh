@@ -164,6 +164,37 @@ ORDER BY c.canonical_id;
 
 -- ── Mutations ────────────────────────────────────────────────────────────────
 
+CREATE TEMP TABLE _all_remap AS
+SELECT old_id, canonical_id FROM _to_remap
+UNION ALL
+SELECT old_id, canonical_id FROM _skipped_device_remap;
+
+-- device_network_intent is UNIQUE (device_id, network_id), so remapping would
+-- abort where a device holds intents on several rows of one group. Only rows
+-- being remapped are dropped, so an intent already on the canonical row keeps
+-- its priority; among remapped ones the oldest survives.
+CREATE TEMP TABLE _intent_conflicts AS
+SELECT i.id
+FROM device_network_intent i
+JOIN _all_remap r ON i.network_id = r.old_id
+WHERE EXISTS (
+    SELECT 1
+    FROM device_network_intent j
+    LEFT JOIN _all_remap r2 ON j.network_id = r2.old_id
+    WHERE j.device_id = i.device_id
+      AND coalesce(r2.canonical_id, j.network_id) = r.canonical_id
+      AND (j.network_id = r.canonical_id OR j.id < i.id));
+
+\echo ''
+\echo '=== DUPLICATE INTENTS DROPPED (device already has one for the canonical row) ==='
+SELECT i.id, i.device_id, i.network_id AS points_at, r.canonical_id AS would_become
+FROM device_network_intent i
+JOIN _intent_conflicts c ON c.id = i.id
+JOIN _all_remap r ON r.old_id = i.network_id
+ORDER BY i.device_id, i.id;
+
+DELETE FROM device_network_intent WHERE id IN (SELECT id FROM _intent_conflicts);
+
 UPDATE device SET network_id = r.canonical_id
 FROM _to_remap r WHERE device.network_id = r.old_id;
 

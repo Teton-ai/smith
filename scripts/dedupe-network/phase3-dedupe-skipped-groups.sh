@@ -29,11 +29,12 @@ DEV_SMITH_DB_URL="docker://smith-postgres"
 APP_API_DB_URL="$DEV_APP_API_DB_URL"
 SMITH_DB_URL="$DEV_SMITH_DB_URL"
 COMMIT=""
+_APP_API_SET=""
 
 for arg in "$@"; do
     if [[ "$arg" == "--commit" ]]; then
         COMMIT="--commit"
-    elif [[ -z "${_APP_API_SET:-}" ]]; then
+    elif [[ -z "$_APP_API_SET" ]]; then
         APP_API_DB_URL="$arg"
         _APP_API_SET=1
     else
@@ -306,6 +307,12 @@ SQL
 } | app_api_psql -v ON_ERROR_STOP=1
 
 # ── Smith mutations ─────────────────────────────────────────────────────────
+# Refs re-fetched after the App API commit so the guard below sees anything the
+# sync job bridged since the run started, as phase 4 does before its delete.
+
+ORIG_REF_CSV="$APP_API_REF_CSV"
+echo "==> Re-fetching refs before the Smith step..."
+refresh_app_api_refs "$APP_API_DB_URL"
 
 echo "==> Running phase 3 on Smith DB..."
 {
@@ -316,6 +323,47 @@ CREATE TEMP TABLE _to_remap (old_id int, canonical_id int);
 SQL
     copy_block "_to_remap (old_id, canonical_id)" "$REMAP_CSV"
     cat <<'SQL'
+CREATE TEMP TABLE _refs (network_wifi_id int, network_smith_id int);
+SQL
+    copy_block "_refs (network_wifi_id, network_smith_id)" "$APP_API_REF_CSV"
+    cat <<'SQL'
+CREATE TEMP TABLE _orig_refs (network_wifi_id int, network_smith_id int);
+SQL
+    copy_block "_orig_refs (network_wifi_id, network_smith_id)" "$ORIG_REF_CSV"
+    cat <<'SQL'
+
+-- The App API UPDATE moved every bridge this run knew about off its old row, so
+-- a ref still on an old row that the run never saw is one the sync job created
+-- in between. Deleting that row would strand it, so drop the whole remap for it.
+CREATE TEMP TABLE _blocked AS
+SELECT DISTINCT r.old_id
+FROM _to_remap r
+WHERE EXISTS (
+    SELECT 1 FROM _refs a
+    WHERE a.network_smith_id = r.old_id
+      AND a.network_wifi_id NOT IN (SELECT o.network_wifi_id FROM _orig_refs o
+                                    WHERE o.network_smith_id = r.old_id));
+
+\echo ''
+\echo '=== HELD BACK: a new bridge landed on these rows after the App API commit ==='
+SELECT b.old_id, n.ssid FROM _blocked b JOIN network n ON n.id = b.old_id ORDER BY b.old_id;
+
+DELETE FROM _to_remap WHERE old_id IN (SELECT old_id FROM _blocked);
+
+-- device_network_intent is UNIQUE (device_id, network_id), so remapping would
+-- abort where a device holds intents on several rows of one group. Only rows
+-- being remapped are dropped, so an intent already on the canonical row keeps
+-- its priority; among remapped ones the oldest survives.
+DELETE FROM device_network_intent i
+USING _to_remap r
+WHERE i.network_id = r.old_id
+  AND EXISTS (
+      SELECT 1
+      FROM device_network_intent j
+      LEFT JOIN _to_remap r2 ON j.network_id = r2.old_id
+      WHERE j.device_id = i.device_id
+        AND coalesce(r2.canonical_id, j.network_id) = r.canonical_id
+        AND (j.network_id = r.canonical_id OR j.id < i.id));
 
 UPDATE device SET network_id = r.canonical_id
 FROM _to_remap r WHERE device.network_id = r.old_id;
