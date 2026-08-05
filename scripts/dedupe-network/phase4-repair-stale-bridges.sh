@@ -57,6 +57,8 @@ fetch_app_api_device_depts "$APP_API_DB_URL"
 fetch_app_api_wifi_content "$APP_API_DB_URL"
 echo "==> $APP_API_REF_COUNT bridges, $APP_API_DEV_DEPT_COUNT devices."
 
+DANGLING_BEFORE=$(dangling_bridges "$SMITH_DB_URL" "$APP_API_REF_CSV")
+
 emit_inputs() {
     cat <<'SQL'
 CREATE TEMP TABLE _refs (network_wifi_id int, network_smith_id int);
@@ -306,5 +308,7 @@ SELECT COUNT(*) AS remaining_rows FROM network;
 SQL
     printf '%s\n' "$FINAL_STATEMENT"
 } | smith_psql -v ON_ERROR_STOP=1
+
+verify_no_new_dangling "$APP_API_DB_URL" "$SMITH_DB_URL" "$DANGLING_BEFORE"
 
 echo "==> Done."

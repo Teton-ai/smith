@@ -42,6 +42,8 @@ echo "==> Fetching App API network_smith refs..."
 fetch_app_api_refs "$APP_API_DB_URL"
 echo "==> Got $APP_API_REF_COUNT App API refs."
 
+DANGLING_BEFORE=$(dangling_bridges "$SMITH_DB_URL" "$APP_API_REF_CSV")
+
 if [[ "$COMMIT" == "--commit" ]]; then
     FINAL_STATEMENT="COMMIT;"
     echo "==> Running in COMMIT mode."
@@ -268,5 +270,7 @@ SELECT COUNT(*) AS remaining_rows FROM network;
 SQL
     printf '%s\n' "$FINAL_STATEMENT"
 } | smith_psql -v ON_ERROR_STOP=1
+
+verify_no_new_dangling "$APP_API_DB_URL" "$SMITH_DB_URL" "$DANGLING_BEFORE"
 
 echo "==> Done."

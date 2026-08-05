@@ -51,6 +51,8 @@ echo "==> Re-fetching refs to narrow the bridge-write race..."
 refresh_app_api_refs "$APP_API_DB_URL"
 echo "==> $APP_API_REF_COUNT refs after union."
 
+DANGLING_BEFORE=$(dangling_bridges "$SMITH_DB_URL" "$APP_API_REF_CSV")
+
 if [[ "$COMMIT" == "--commit" ]]; then
     FINAL_STATEMENT="COMMIT;"
     echo "==> Running in COMMIT mode."
@@ -139,5 +141,7 @@ SELECT COUNT(*) AS remaining_rows FROM network;
 
 $FINAL_STATEMENT
 SQL
+
+verify_no_new_dangling "$APP_API_DB_URL" "$SMITH_DB_URL" "$DANGLING_BEFORE"
 
 echo "==> Done."

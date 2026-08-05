@@ -166,6 +166,59 @@ smith_watermark() {
     db_psql "$1" -tAc "SELECT coalesce(max(id), 0) FROM network;" | tr -d '[:space:]'
 }
 
+# ── Post-run verification ────────────────────────────────────────────────────
+
+# Bridges pointing at a Smith row that no longer exists, one "wifi_id,smith_id"
+# per line. Read-only against both databases.
+dangling_bridges() {
+    local smith_url="$1" refs_csv="$2"
+    {
+        printf 'CREATE TEMP TABLE _dang (network_wifi_id int, network_smith_id int);\n'
+        copy_block "_dang (network_wifi_id, network_smith_id)" "$refs_csv"
+        cat <<'SQL'
+SELECT a.network_wifi_id || ',' || a.network_smith_id
+FROM _dang a
+WHERE NOT EXISTS (SELECT 1 FROM network n WHERE n.id = a.network_smith_id)
+ORDER BY a.network_wifi_id;
+SQL
+    } | db_psql "$smith_url" -q -t -A -v ON_ERROR_STOP=1 | sed '/^$/d'
+}
+
+# Re-reads the bridges and fails if this run stranded any that were not already
+# stranded. Repair is left to the operator: nulling a bridge makes the sync job
+# recreate the network, which is a write to a fleet-facing database.
+verify_no_new_dangling() {
+    local app_url="$1" smith_url="$2" before="$3" after new
+    fetch_app_api_refs "$app_url" || return 1
+    after=$(dangling_bridges "$smith_url" "$APP_API_REF_CSV") || return 1
+
+    # LC_ALL=C throughout: comm requires the exact collation sort produced.
+    new=$(LC_ALL=C comm -13 \
+        <(printf '%s\n' "$before" | sed '/^$/d' | LC_ALL=C sort) \
+        <(printf '%s\n' "$after"  | sed '/^$/d' | LC_ALL=C sort))
+
+    if [[ -z "$new" ]]; then
+        echo "==> Verified: no bridge was stranded by this run."
+        [[ -n "$(printf '%s' "$before" | tr -d '[:space:]')" ]] &&
+            echo "    ($(printf '%s\n' "$before" | sed '/^$/d' | wc -l | tr -d ' ') were already stranded beforehand, unchanged.)"
+        return 0
+    fi
+
+    echo "" >&2
+    echo "!!! $(printf '%s\n' "$new" | wc -l | tr -d ' ') bridge(s) were stranded by this run." >&2
+    echo "    The Smith rows below were deleted while the App API still pointed at them." >&2
+    printf '%s\n' "$new" | sed 's/^/      network_wifi_id,network_smith_id = /' >&2
+    echo "" >&2
+    echo "    This is recoverable. Nulling the bridge puts the record back in the" >&2
+    echo "    sync job's retry set, and the next pass recreates the network:" >&2
+    echo "" >&2
+    echo "      UPDATE network_smith SET network_smith_id = NULL" >&2
+    echo "      WHERE network_wifi_id IN ($(printf '%s\n' "$new" | cut -d, -f1 | paste -sd, -));" >&2
+    echo "" >&2
+    echo "    Run it against the App API only after checking the rows are what you expect." >&2
+    return 1
+}
+
 # Call immediately before the mutating transaction.
 refresh_app_api_refs() {
     local url="$1"
