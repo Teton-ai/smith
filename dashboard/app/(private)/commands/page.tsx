@@ -1,12 +1,19 @@
-import { Badge, type BadgeVariant, Button, Card } from "@teton/smith-ui";
-import { Loader2, Send, Terminal } from "lucide-react";
+import {
+	Badge,
+	type BadgeVariant,
+	Button,
+	Card,
+	Select,
+} from "@teton/smith-ui";
+import { AlertCircle, Loader2, Send, Terminal } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link } from "react-router";
+import { Link, useSearchParams } from "react-router";
 import {
 	type BundleWithCommands,
 	type BundleWithCommandsPaginated,
 	type DeviceCommandResponse,
 	useGetBundleCommandsInfinite,
+	useGetUsers,
 } from "@/app/api-client";
 import { useClientMutator } from "@/app/api-client-mutator";
 import { RelativeTime } from "@/app/components/RelativeTime";
@@ -295,15 +302,27 @@ const BundleDetail = ({ bundle }: { bundle: BundleWithCommands }) => {
 
 const CommandsPage = () => {
 	const fetcher = useClientMutator<BundleWithCommandsPaginated>();
+	const [searchParams, setSearchParams] = useSearchParams();
+
+	// null = All. Otherwise "people", "system", or a user id.
+	const triggeredBy = searchParams.get("by");
+
+	// Listing users needs `users:read`, which reading commands does not, so this
+	// is allowed to fail: the per-person options just disappear.
+	const { data: users } = useGetUsers();
 
 	const {
 		data: bundleData,
 		isLoading,
+		isError,
 		fetchNextPage,
 		hasNextPage,
 		isFetchingNextPage,
 	} = useGetBundleCommandsInfinite({
 		query: {
+			// The generated key is static, so it has to carry the filter or React
+			// Query serves the previous filter's pages.
+			queryKey: ["/commands/bundles", triggeredBy],
 			initialPageParam: undefined as string | undefined,
 			getNextPageParam: (lastPage) => {
 				if (!lastPage?.next) return undefined;
@@ -315,9 +334,11 @@ const CommandsPage = () => {
 				fetcher({
 					url: "/commands/bundles",
 					method: "GET",
-					params: pageParam
-						? { starting_after: pageParam, limit: PAGE_SIZE }
-						: { limit: PAGE_SIZE },
+					params: {
+						limit: PAGE_SIZE,
+						...(pageParam ? { starting_after: pageParam } : {}),
+						...(triggeredBy ? { triggered_by: triggeredBy } : {}),
+					},
 					signal,
 				}),
 			refetchInterval: 5000,
@@ -345,6 +366,15 @@ const CommandsPage = () => {
 		});
 	}, [bundleData]);
 
+	// The previous filter's selection is meaningless once the list changes.
+	// Adjusted during render, not in an effect, so it covers every path the
+	// filter can change by (select, back/forward, pasted URL).
+	const [filterOfSelection, setFilterOfSelection] = useState(triggeredBy);
+	if (filterOfSelection !== triggeredBy) {
+		setFilterOfSelection(triggeredBy);
+		setSelectedUuid(null);
+	}
+
 	// Auto-select first bundle
 	useEffect(() => {
 		if (bundles.length > 0 && selectedUuid === null) {
@@ -354,125 +384,213 @@ const CommandsPage = () => {
 
 	const selectedBundle = bundles.find((b) => b.uuid === selectedUuid) ?? null;
 
+	const setFilter = (value: string) => {
+		const next = new URLSearchParams(searchParams);
+		if (value) next.set("by", value);
+		else next.delete("by");
+		setSearchParams(next);
+	};
+
+	// Accounts without an email would render as blank rows, so drop them.
+	const userOptions = useMemo(
+		() =>
+			(users ?? [])
+				.flatMap((user) => {
+					const email = user.email?.trim();
+					return email ? [{ id: user.id, email }] : [];
+				})
+				.sort((a, b) => a.email.localeCompare(b.email)),
+		[users],
+	);
+
+	// A hand-edited or stale `?by=` would otherwise match no option and display
+	// as "All" while the list stays filtered.
+	const unknownFilter =
+		triggeredBy != null &&
+		triggeredBy !== "people" &&
+		triggeredBy !== "system" &&
+		!userOptions.some((user) => String(user.id) === triggeredBy)
+			? triggeredBy
+			: null;
+
+	const filterBar = (
+		<div className="flex items-center gap-3 mb-4 shrink-0">
+			<label htmlFor="triggered-by" className="text-sm text-gray-500">
+				Triggered by
+			</label>
+			<Select id="triggered-by" value={triggeredBy ?? ""} onChange={setFilter}>
+				<option value="">All</option>
+				<option value="people">People</option>
+				<option value="system">System</option>
+				{userOptions.length > 0 && (
+					<optgroup label="Individual users">
+						{userOptions.map((user) => (
+							<option key={user.id} value={String(user.id)}>
+								{user.email}
+							</option>
+						))}
+					</optgroup>
+				)}
+				{unknownFilter && (
+					<option value={unknownFilter}>Unknown user ({unknownFilter})</option>
+				)}
+			</Select>
+		</div>
+	);
+
+	const wrap = (children: React.ReactNode) => (
+		<div className="flex-1 overflow-hidden p-4 sm:p-6 lg:p-8 flex flex-col">
+			{filterBar}
+			{children}
+		</div>
+	);
+
 	if (isLoading) {
-		return (
+		return wrap(
 			<div className="flex items-center justify-center py-12">
 				<Loader2 className="w-6 h-6 animate-spin text-gray-400" />
-			</div>
+			</div>,
+		);
+	}
+
+	// A failed background refetch also sets `isError`, so gate on having nothing
+	// to show: never blank a rendered list because one 5s poll blipped.
+	if (isError && bundles.length === 0) {
+		return wrap(
+			<Card className="text-center py-12">
+				<AlertCircle className="w-12 h-12 text-red-300 mx-auto mb-3" />
+				<p className="text-gray-500">Failed to load commands</p>
+				<p className="text-sm text-gray-400 mt-1">
+					The request did not complete. It will retry automatically.
+				</p>
+			</Card>,
 		);
 	}
 
 	if (bundles.length === 0) {
-		return (
-			<div className="px-4 sm:px-6 lg:px-8 py-6">
-				<Card className="text-center py-12">
-					<Send className="w-12 h-12 text-gray-300 mx-auto mb-3" />
-					<p className="text-gray-500">
-						No bulk commands have been executed yet
-					</p>
-					<p className="text-sm text-gray-400 mt-1">
-						Select devices and run a command to see results here
-					</p>
-				</Card>
-			</div>
+		return wrap(
+			<Card className="text-center py-12">
+				<Send className="w-12 h-12 text-gray-300 mx-auto mb-3" />
+				{triggeredBy ? (
+					<>
+						<p className="text-gray-500">No commands match this filter</p>
+						<Button
+							variant="soft"
+							tone="gray"
+							size="sm"
+							className="mt-3"
+							onClick={() => setFilter("")}
+						>
+							Clear filter
+						</Button>
+					</>
+				) : (
+					<>
+						<p className="text-gray-500">
+							No bulk commands have been executed yet
+						</p>
+						<p className="text-sm text-gray-400 mt-1">
+							Select devices and run a command to see results here
+						</p>
+					</>
+				)}
+			</Card>,
 		);
 	}
 
-	return (
-		<div className="flex-1 overflow-hidden p-4 sm:p-6 lg:p-8 flex flex-col">
-			<Card className="flex-1 overflow-hidden flex">
-				{/* Left: bundle list (1/3) */}
-				<div className="w-1/5 border-r border-gray-200 shrink-0 flex flex-col overflow-hidden">
-					<div
-						ref={scrollRef}
-						onScroll={handleScroll}
-						className="flex-1 overflow-y-auto overflow-x-hidden"
-					>
-						{bundles.map((bundle) => {
-							const stats = getBundleStats(bundle.responses);
-							const firstCommand = bundle.responses[0];
-							const { label: commandLabel } = firstCommand
-								? getTxLabel(firstCommand.cmd_data)
-								: { label: "Unknown Command" };
-							const isSelected = bundle.uuid === selectedUuid;
+	return wrap(
+		<Card className="flex-1 overflow-hidden flex">
+			{/* Left: bundle list (1/3) */}
+			<div className="w-1/5 border-r border-gray-200 shrink-0 flex flex-col overflow-hidden">
+				<div
+					ref={scrollRef}
+					onScroll={handleScroll}
+					className="flex-1 overflow-y-auto overflow-x-hidden"
+				>
+					{bundles.map((bundle) => {
+						const stats = getBundleStats(bundle.responses);
+						const firstCommand = bundle.responses[0];
+						const { label: commandLabel } = firstCommand
+							? getTxLabel(firstCommand.cmd_data)
+							: { label: "Unknown Command" };
+						const isSelected = bundle.uuid === selectedUuid;
 
-							return (
-								<button
-									key={bundle.uuid}
-									type="button"
-									onClick={() => setSelectedUuid(bundle.uuid)}
-									className={`w-full text-left px-4 py-3 border-b border-gray-100 last:border-b-0 transition-colors cursor-pointer ${
-										isSelected
-											? "bg-blue-50 border-l-2 border-l-blue-500"
-											: "hover:bg-gray-50 border-l-2 border-l-transparent"
-									}`}
-								>
-									<div className="flex items-center gap-2 mb-1 min-w-0">
-										<Terminal
-											className={`w-3.5 h-3.5 shrink-0 ${isSelected ? "text-blue-500" : "text-purple-500"}`}
-										/>
-										<span
-											className={`text-sm font-medium truncate min-w-0 ${isSelected ? "text-blue-900" : "text-gray-900"}`}
-										>
-											{commandLabel}
-										</span>
+						return (
+							<button
+								key={bundle.uuid}
+								type="button"
+								onClick={() => setSelectedUuid(bundle.uuid)}
+								className={`w-full text-left px-4 py-3 border-b border-gray-100 last:border-b-0 transition-colors cursor-pointer ${
+									isSelected
+										? "bg-blue-50 border-l-2 border-l-blue-500"
+										: "hover:bg-gray-50 border-l-2 border-l-transparent"
+								}`}
+							>
+								<div className="flex items-center gap-2 mb-1 min-w-0">
+									<Terminal
+										className={`w-3.5 h-3.5 shrink-0 ${isSelected ? "text-blue-500" : "text-purple-500"}`}
+									/>
+									<span
+										className={`text-sm font-medium truncate min-w-0 ${isSelected ? "text-blue-900" : "text-gray-900"}`}
+									>
+										{commandLabel}
+									</span>
+								</div>
+								<div className="flex items-center justify-between gap-2">
+									<div className="flex items-center gap-1.5 flex-wrap">
+										{stats.success > 0 && (
+											<Badge variant="green" pill>
+												{stats.success} ok
+											</Badge>
+										)}
+										{stats.failed > 0 && (
+											<Badge variant="red" pill>
+												{stats.failed} failed
+											</Badge>
+										)}
+										{stats.pending > 0 && (
+											<Badge variant="yellow" pill>
+												{stats.pending} pending
+											</Badge>
+										)}
+										{stats.executing > 0 && (
+											<Badge variant="blue" pill>
+												{stats.executing} executing
+											</Badge>
+										)}
 									</div>
-									<div className="flex items-center justify-between gap-2">
-										<div className="flex items-center gap-1.5 flex-wrap">
-											{stats.success > 0 && (
-												<Badge variant="green" pill>
-													{stats.success} ok
-												</Badge>
-											)}
-											{stats.failed > 0 && (
-												<Badge variant="red" pill>
-													{stats.failed} failed
-												</Badge>
-											)}
-											{stats.pending > 0 && (
-												<Badge variant="yellow" pill>
-													{stats.pending} pending
-												</Badge>
-											)}
-											{stats.executing > 0 && (
-												<Badge variant="blue" pill>
-													{stats.executing} executing
-												</Badge>
-											)}
-										</div>
-										<span className="text-xs text-gray-400 shrink-0 truncate max-w-[50%] text-right">
-											{bundle.user_email ?? "System"}
-										</span>
-									</div>
-									<div className="flex justify-end mt-0.5">
-										<RelativeTime
-											date={bundle.created_on}
-											className="text-xs text-gray-400 shrink-0"
-										/>
-									</div>
-								</button>
-							);
-						})}
+									<span className="text-xs text-gray-400 shrink-0 truncate max-w-[50%] text-right">
+										{bundle.user_email ?? "System"}
+									</span>
+								</div>
+								<div className="flex justify-end mt-0.5">
+									<RelativeTime
+										date={bundle.created_on}
+										className="text-xs text-gray-400 shrink-0"
+									/>
+								</div>
+							</button>
+						);
+					})}
+				</div>
+				{isFetchingNextPage && (
+					<div className="flex items-center justify-center py-3 border-t border-gray-200 shrink-0">
+						<Loader2 className="w-4 h-4 animate-spin text-gray-400" />
 					</div>
-					{isFetchingNextPage && (
-						<div className="flex items-center justify-center py-3 border-t border-gray-200 shrink-0">
-							<Loader2 className="w-4 h-4 animate-spin text-gray-400" />
-						</div>
-					)}
-				</div>
+				)}
+			</div>
 
-				{/* Right: bundle detail (2/3) */}
-				<div className="w-4/5 overflow-hidden">
-					{selectedBundle != null ? (
-						<BundleDetail bundle={selectedBundle} />
-					) : (
-						<div className="flex items-center justify-center h-full text-gray-400 text-sm">
-							Select a bundle to see its details
-						</div>
-					)}
-				</div>
-			</Card>
-		</div>
+			{/* Right: bundle detail (2/3) */}
+			<div className="w-4/5 overflow-hidden">
+				{selectedBundle != null ? (
+					<BundleDetail bundle={selectedBundle} />
+				) : (
+					<div className="flex items-center justify-center h-full text-gray-400 text-sm">
+						Select a bundle to see its details
+					</div>
+				)}
+			</div>
+		</Card>,
 	);
 };
 

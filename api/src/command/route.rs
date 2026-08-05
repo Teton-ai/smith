@@ -178,7 +178,18 @@ pub struct PaginationUuid {
     pub starting_after: Option<Uuid>,
     pub ending_before: Option<Uuid>,
     pub limit: Option<i32>,
+    /// Who triggered the bundle: absent for no filter, `people` for anything a
+    /// person triggered, `system` for api-generated bundles, or a user id.
+    pub triggered_by: Option<String>,
 }
+
+/// Restricts bundles to one triggerer: `$2` user id, `$3` system-only, `$4`
+/// People-only. Static SQL so the has-more queries can carry the same predicate
+/// and stay compile-time checked macros; those need literals, so this text is
+/// duplicated at both call sites and the parameter positions must match.
+const TRIGGERER_FILTER: &str = "($2::int IS NULL OR user_id = $2)
+            AND (NOT $3::bool OR user_id IS NULL)
+            AND (NOT $4::bool OR user_id IS NOT NULL)";
 
 #[utoipa::path(
     get,
@@ -202,6 +213,18 @@ pub async fn get_bundle_commands(
         return Err(StatusCode::BAD_REQUEST);
     }
 
+    // A well-formed id for a user that no longer exists is valid input with zero
+    // results; only unparseable values are rejected.
+    let (filter_user_id, filter_system, filter_people) = match pagination.triggered_by.as_deref() {
+        None => (None, false, false),
+        Some("people") => (None, false, true),
+        Some("system") => (None, true, false),
+        Some(other) => match other.parse::<i32>() {
+            Ok(id) => (Some(id), false, false),
+            Err(_) => return Err(StatusCode::BAD_REQUEST),
+        },
+    };
+
     let mut tx = state.pg_pool.begin().await.map_err(|err| {
         error!("Failed to start transaction {err}");
         StatusCode::INTERNAL_SERVER_ERROR
@@ -209,25 +232,32 @@ pub async fn get_bundle_commands(
 
     let limit = pagination.limit.unwrap_or(100).clamp(0, 100);
 
-    let where_clause = if let Some(starting_after) = pagination.starting_after {
-        format!(
-            "WHERE created_on <= (SELECT created_on FROM command_bundles WHERE uuid = '{}') ORDER BY created_on DESC",
-            starting_after
-        )
+    // Conditions and ordering are kept apart so filters can be appended.
+    let mut conditions: Vec<String> = Vec::new();
+    let order_by = if let Some(starting_after) = pagination.starting_after {
+        conditions.push(format!(
+            "created_on <= (SELECT created_on FROM command_bundles WHERE uuid = '{starting_after}')"
+        ));
+        "ORDER BY created_on DESC"
     } else if let Some(ending_before) = pagination.ending_before {
-        format!(
-            "WHERE created_on > (SELECT created_on FROM command_bundles WHERE uuid = '{}') ORDER BY created_on ASC",
-            ending_before
-        )
+        conditions.push(format!(
+            "created_on > (SELECT created_on FROM command_bundles WHERE uuid = '{ending_before}')"
+        ));
+        "ORDER BY created_on ASC"
     } else {
-        "ORDER BY created_on DESC".to_string()
+        "ORDER BY created_on DESC"
     };
+
+    conditions.push(TRIGGERER_FILTER.to_string());
+
+    let where_clause = format!("WHERE {}", conditions.join(" AND "));
 
     let raw_bundles: Vec<BundleWithRawResponsesExplicit> = sqlx::query_as(&format!(
         r#"WITH latest_bundles AS (
             SELECT *
             FROM command_bundles
             {where_clause}
+            {order_by}
             LIMIT $1
         )
         SELECT
@@ -253,10 +283,16 @@ pub async fn get_bundle_commands(
         LEFT JOIN device d ON cq.device_id = d.id
         ORDER BY b.created_on DESC;"#,
     ))
-    .bind(limit) // Bind the limit parameter
+    .bind(limit)
+    .bind(filter_user_id)
+    .bind(filter_system)
+    .bind(filter_people)
     .fetch_all(&mut *tx)
     .await
-    .unwrap_or_default();
+    .map_err(|err| {
+        error!("Failed to retrieve command bundles {err}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
 
     let mut map_responses: HashMap<(Uuid, _), (Option<String>, Vec<DeviceCommandResponse>)> =
         HashMap::new();
@@ -316,10 +352,16 @@ pub async fn get_bundle_commands(
                 where created_on > (
                     select created_on from command_bundles where uuid = $1
                 )
+                and ($2::int is null or user_id = $2)
+                and (not $3::bool or user_id is null)
+                and (not $4::bool or user_id is not null)
                 order by created_on asc
                 limit 1
             )"#,
-            first_id
+            first_id,
+            filter_user_id,
+            filter_system,
+            filter_people
         )
         .fetch_one(&mut *tx)
         .await
@@ -340,10 +382,16 @@ pub async fn get_bundle_commands(
                 where created_on < (
                     select created_on from command_bundles where uuid = $1
                 )
+                and ($2::int is null or user_id = $2)
+                and (not $3::bool or user_id is null)
+                and (not $4::bool or user_id is not null)
                 order by created_on desc
                 limit 1
             )"#,
-            last_id
+            last_id,
+            filter_user_id,
+            filter_system,
+            filter_people
         )
         .fetch_one(&mut *tx)
         .await
@@ -362,27 +410,29 @@ pub async fn get_bundle_commands(
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
 
-    let next = if has_more_last_id {
-        Some(format!(
-            "https://{}/commands/bundles?starting_after={}&limit={}",
-            host.0,
-            last_id.expect("error: failed to get last id"),
-            limit
-        ))
-    } else {
-        None
+    // The filter must travel with the cursor or `next` silently widens back to
+    // every triggerer. Rebuilt from the parsed values rather than echoed: `+5`
+    // parses as 5 but decodes back as " 5", which would 400 our own link.
+    let filter_query = match (filter_user_id, filter_system, filter_people) {
+        (Some(user_id), _, _) => format!("&triggered_by={user_id}"),
+        (_, true, _) => "&triggered_by=system".to_string(),
+        (_, _, true) => "&triggered_by=people".to_string(),
+        _ => String::new(),
     };
 
-    let previous = if has_more_first_id {
-        Some(format!(
-            "https://{}/commands/bundles?ending_before={}&limit={}",
-            host.0,
-            first_id.expect("error: failed to get first id"),
-            limit
-        ))
-    } else {
-        None
-    };
+    let next = last_id.filter(|_| has_more_last_id).map(|last_id| {
+        format!(
+            "https://{}/commands/bundles?starting_after={last_id}&limit={limit}{filter_query}",
+            host.0
+        )
+    });
+
+    let previous = first_id.filter(|_| has_more_first_id).map(|first_id| {
+        format!(
+            "https://{}/commands/bundles?ending_before={first_id}&limit={limit}{filter_query}",
+            host.0
+        )
+    });
 
     let bundles_paginated = BundleWithCommandsPaginated {
         bundles,
