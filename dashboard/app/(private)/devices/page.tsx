@@ -263,7 +263,10 @@ const DevicesPage = () => {
 			}),
 		getNextPageParam: (lastPage, allPages) => {
 			if (!lastPage || lastPage.data.length < PAGE_SIZE) return undefined;
-			return allPages.length * PAGE_SIZE;
+			const loaded = allPages.length * PAGE_SIZE;
+			// Saves one empty request when the total lands on a page boundary.
+			if (lastPage.total != null && loaded >= lastPage.total) return undefined;
+			return loaded;
 		},
 	});
 

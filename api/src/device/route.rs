@@ -267,8 +267,10 @@ pub async fn get_devices(
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
 
-    // No rows means nothing matched, so the window function has no value to give.
-    let total_count = devices.first().map(|row| row.total_count).unwrap_or(0);
+    // A page is empty either because nothing matched or because the offset is
+    // past the end, and the window function cannot tell those apart. Report no
+    // count at all rather than a zero that would be wrong in the second case.
+    let total_count = devices.first().map(|row| row.total_count);
 
     let devices: Vec<Device> = devices
         .into_iter()
@@ -392,11 +394,13 @@ pub async fn get_devices(
         .collect();
 
     let mut headers = HeaderMap::new();
-    match HeaderValue::from_str(&total_count.to_string()) {
-        Ok(value) => {
-            headers.insert("x-total-count", value);
+    if let Some(total_count) = total_count {
+        match HeaderValue::from_str(&total_count.to_string()) {
+            Ok(value) => {
+                headers.insert("x-total-count", value);
+            }
+            Err(err) => error!("Failed to build x-total-count header: {err}"),
         }
-        Err(err) => error!("Failed to build x-total-count header: {err}"),
     }
 
     Ok((headers, Json(devices)))
