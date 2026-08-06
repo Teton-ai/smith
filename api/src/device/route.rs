@@ -15,7 +15,7 @@ use crate::slack::send_slack_notification;
 use crate::user::CurrentUser;
 use axum::extract::Host;
 use axum::extract::Path;
-use axum::http::StatusCode;
+use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::{Extension, Json};
 use axum_extra::extract::Query;
 use chrono::Duration;
@@ -107,7 +107,14 @@ pub async fn get_device(
         DeviceFilter
     ),
     responses(
-        (status = StatusCode::OK, description = "List of devices retrieved successfully", body = Vec<Device>),
+        (
+            status = StatusCode::OK,
+            description = "List of devices retrieved successfully",
+            body = Vec<Device>,
+            headers(
+                ("x-total-count" = i64, description = "Total devices matching the filter, ignoring limit/offset"),
+            ),
+        ),
         (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to retrieve devices"),
     ),
     security(
@@ -118,7 +125,7 @@ pub async fn get_device(
 pub async fn get_devices(
     Extension(state): Extension<State>,
     filter: Query<DeviceFilter>,
-) -> axum::response::Result<Json<Vec<Device>>, StatusCode> {
+) -> axum::response::Result<(HeaderMap, Json<Vec<Device>>), StatusCode> {
     #[allow(deprecated)]
     let devices = sqlx::query!(
         r#"SELECT
@@ -185,7 +192,10 @@ pub async fn get_devices(
             d.intent_version,
             d.observed_intent_version,
             d.network_conditions,
-            COALESCE(JSONB_OBJECT_AGG(l.name, dl.value) FILTER (WHERE l.name IS NOT NULL), '{}') as "labels!: SqlxJson<HashMap<String, String>>"
+            COALESCE(JSONB_OBJECT_AGG(l.name, dl.value) FILTER (WHERE l.name IS NOT NULL), '{}') as "labels!: SqlxJson<HashMap<String, String>>",
+            -- Evaluated after GROUP BY but before LIMIT/OFFSET, so this counts
+            -- every device matching the filter, not just the ones on this page.
+            COUNT(*) OVER () as "total_count!"
         FROM device d
         LEFT JOIN ip_address ip ON d.ip_address_id = ip.id
         LEFT JOIN modem m ON d.modem_id = m.id
@@ -256,6 +266,11 @@ pub async fn get_devices(
         error!("Failed to get devices {err}");
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
+
+    // A page is empty either because nothing matched or because the offset is
+    // past the end, and the window function cannot tell those apart. Report no
+    // count at all rather than a zero that would be wrong in the second case.
+    let total_count = devices.first().map(|row| row.total_count);
 
     let devices: Vec<Device> = devices
         .into_iter()
@@ -378,7 +393,17 @@ pub async fn get_devices(
         })
         .collect();
 
-    Ok(Json(devices))
+    let mut headers = HeaderMap::new();
+    if let Some(total_count) = total_count {
+        match HeaderValue::from_str(&total_count.to_string()) {
+            Ok(value) => {
+                headers.insert("x-total-count", value);
+            }
+            Err(err) => error!("Failed to build x-total-count header: {err}"),
+        }
+    }
+
+    Ok((headers, Json(devices)))
 }
 
 #[utoipa::path(

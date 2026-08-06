@@ -1,5 +1,5 @@
 import { useAuth0 } from "@auth0/auth0-react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
 import { Button, LabelChip, Toast } from "@teton/smith-ui";
 import {
 	AlertTriangle,
@@ -26,15 +26,16 @@ import { RelativeTime } from "@/app/components/RelativeTime";
 import {
 	type Device,
 	type DistributionRolloutStats,
+	getGetDevicesInfiniteQueryKey,
 	type Release,
 	useApproveDevice,
 	useDeleteDevice,
-	useGetDevicesInfinite,
 	useGetDistributionRollouts,
 	useGetReleases,
 	useIssueCommandsToDevices,
 	useUpdateDevicesTargetRelease,
 } from "../../api-client";
+import { useClientMutatorWithTotal } from "../../api-client-mutator";
 import { isStableRelease } from "../../utils/release";
 import { ReachabilityCell } from "./[serial]/uptime";
 
@@ -205,15 +206,8 @@ const DevicesPage = () => {
 	const approveDeviceHook = useApproveDevice();
 	const deleteDeviceHook = useDeleteDevice();
 
-	const {
-		data: devicesData,
-		isLoading: loading,
-		fetchNextPage,
-		hasNextPage,
-		isFetchingNextPage,
-		queryKey: devicesQueryKey,
-	} = useGetDevicesInfinite(
-		{
+	const deviceFilterParams = useMemo(
+		() => ({
 			labels: labelFilters.length > 0 ? labelFilters : undefined,
 			online:
 				onlineStatusFilter === "online"
@@ -228,22 +222,58 @@ const DevicesPage = () => {
 			release_id: releaseFilter,
 			distribution_id: distributionFilter,
 			limit: PAGE_SIZE,
-		},
-		{
-			query: {
-				enabled: isAuthenticated,
-				initialPageParam: 0,
-				getNextPageParam: (lastPage, allPages) => {
-					if (!lastPage || lastPage.length < PAGE_SIZE) return undefined;
-					return allPages.length * PAGE_SIZE;
-				},
-			},
-		},
+		}),
+		[
+			labelFilters,
+			onlineStatusFilter,
+			debouncedSearchTerm,
+			showOutdatedOnly,
+			showPendingApproval,
+			showServiceDown,
+			releaseFilter,
+			distributionFilter,
+		],
 	);
+
+	const devicesQueryKey = useMemo(
+		() => getGetDevicesInfiniteQueryKey(deviceFilterParams),
+		[deviceFilterParams],
+	);
+
+	// Hand-rolled rather than `useGetDevicesInfinite`: the generated queryFn
+	// ignores `pageParam` (so every page would refetch offset 0) and drops
+	// response headers, which is where the filtered total lives.
+	const fetchDevicesPage = useClientMutatorWithTotal<Device[]>();
+	const {
+		data: devicesData,
+		isLoading: loading,
+		fetchNextPage,
+		hasNextPage,
+		isFetchingNextPage,
+	} = useInfiniteQuery({
+		queryKey: devicesQueryKey,
+		enabled: isAuthenticated,
+		initialPageParam: 0,
+		queryFn: ({ pageParam, signal }) =>
+			fetchDevicesPage({
+				url: "/devices",
+				method: "GET",
+				params: { ...deviceFilterParams, offset: pageParam },
+				signal,
+			}),
+		getNextPageParam: (lastPage, allPages) => {
+			if (!lastPage || lastPage.data.length < PAGE_SIZE) return undefined;
+			const loaded = allPages.length * PAGE_SIZE;
+			// Saves one empty request when the total lands on a page boundary.
+			if (lastPage.total != null && loaded >= lastPage.total) return undefined;
+			return loaded;
+		},
+	});
 
 	const filteredDevices = useMemo(
 		() =>
 			(devicesData?.pages || [])
+				.map((page) => page?.data)
 				.filter((page): page is Device[] => Array.isArray(page))
 				.flat()
 				.filter(
@@ -251,6 +281,9 @@ const DevicesPage = () => {
 				),
 		[devicesData],
 	);
+
+	// Every page carries the same filter-wide total; the first one is enough.
+	const totalDeviceCount = devicesData?.pages?.[0]?.total ?? null;
 
 	// Infinite scroll: trigger fetchNextPage whenever the sentinel is visible
 	// and there are more pages to load. Re-runs when hasNextPage changes so
@@ -1071,6 +1104,13 @@ const DevicesPage = () => {
 
 			{/* Device List — scrollable */}
 			<div className="flex-1 overflow-y-auto px-4 sm:px-6 lg:px-8 pb-6 min-h-0">
+				<div className="pb-2 text-sm text-gray-500">
+					{loading
+						? "Loading devices…"
+						: totalDeviceCount == null
+							? `${filteredDevices.length} device${filteredDevices.length === 1 ? "" : "s"}`
+							: `${totalDeviceCount} device${totalDeviceCount === 1 ? "" : "s"}`}
+				</div>
 				<div className="border border-gray-200/80 rounded-xl overflow-hidden bg-white shadow-sm">
 					<div className="sticky top-0 z-10 bg-gray-50 px-4 py-3 border-b border-gray-200">
 						<div className="grid grid-cols-[auto_2fr_2fr_2fr_1fr_1fr] gap-4 text-xs font-medium text-gray-500 uppercase tracking-wide items-center">
