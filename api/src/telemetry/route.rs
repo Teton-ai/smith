@@ -26,10 +26,11 @@ pub async fn victoria(
     Extension(state): Extension<State>,
     req: Request<Body>,
 ) -> Result<StatusCode, StatusCode> {
-    let clients = &state.config.victoria_metrics_clients;
-    let Some((primary, secondaries)) = clients.split_first() else {
-        return Err(StatusCode::NOT_IMPLEMENTED);
-    };
+    let client_config = state
+        .config
+        .victoria_metrics_client
+        .as_ref()
+        .ok_or(StatusCode::NOT_IMPLEMENTED)?;
 
     let (parts, body) = req.into_parts();
     let method = parts.method;
@@ -41,45 +42,30 @@ pub async fn victoria(
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
 
-    for secondary in secondaries {
-        let client = secondary.client.clone();
-        let url = secondary.url.clone();
-        let headers = headers.clone();
-        let body_bytes = body_bytes.clone();
-        let method = method.clone();
-        let serial_number = device.serial_number.clone();
-        tokio::spawn(async move {
-            if let Err(err) = client
-                .request(method, &url)
-                .headers(headers)
-                .body(body_bytes)
-                .send()
-                .await
-            {
-                error!(
-                    error = %err,
-                    serial_number,
-                    "Failed to forward telemetry to secondary VictoriaMetrics target"
-                );
-            }
-        });
-    }
-
-    let response = primary
+    let response = client_config
         .client
-        .request(method, &primary.url)
+        .request(method, &client_config.url)
         .headers(headers)
         .body(body_bytes)
         .send()
         .await;
 
+    // Best-effort: keep the single-instance target off the device's critical path.
     match response {
-        Ok(res) => Ok(res.status()),
+        Ok(res) if !res.status().is_success() => {
+            error!(
+                status = %res.status(),
+                serial_number = device.serial_number,
+                "VictoriaMetrics rejected telemetry"
+            );
+        }
+        Ok(_) => {}
         Err(err) => {
             error!(error = %err, "Failed to forward request to VictoriaMetrics");
-            Err(StatusCode::INTERNAL_SERVER_ERROR)
         }
     }
+
+    Ok(StatusCode::OK)
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
