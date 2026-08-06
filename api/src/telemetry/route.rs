@@ -40,10 +40,17 @@ pub async fn victoria(
     let mut headers = parts.headers;
 
     headers.remove("authorization");
-    let body_bytes = to_bytes(body, usize::MAX).await.map_err(|err| {
-        error!("Failed to read body bytes: {}", err);
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
+    // A device hanging up mid-upload is not a server fault, and answering 500 only makes
+    // it retry the same payload.
+    let Ok(body_bytes) = to_bytes(body, usize::MAX).await.inspect_err(|err| {
+        warn!(
+            error = %err,
+            serial_number = %device.serial_number,
+            "Client disconnected before telemetry body was fully read"
+        );
+    }) else {
+        return Ok(StatusCode::OK);
+    };
 
     let response = client_config
         .client
