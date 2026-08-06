@@ -1997,7 +1997,10 @@ async fn main() -> anyhow::Result<()> {
                 }
             }
             Commands::Label {
-                selector,
+                labels,
+                online,
+                offline,
+                search,
                 devices: device_filters,
                 set_labels,
             } => {
@@ -2008,15 +2011,9 @@ async fn main() -> anyhow::Result<()> {
 
                 let api = SmithAPI::new(secrets, &config);
 
-                let target_devices = resolve_target_devices(
-                    &api,
-                    device_filters,
-                    selector.labels,
-                    selector.online,
-                    selector.offline,
-                    selector.search,
-                )
-                .await?;
+                let target_devices =
+                    resolve_target_devices(&api, device_filters, labels, online, offline, search)
+                        .await?;
 
                 // Deduplicate devices by ID to prevent duplicate label operations
                 let mut seen_ids = HashSet::new();
@@ -2032,13 +2029,33 @@ async fn main() -> anyhow::Result<()> {
 
                 let new_labels_map = parse_label_filters(set_labels)?.unwrap_or_default();
 
+                // Empty values mean "remove this label" rather than "set it to ''"
+                let labels_to_remove: Vec<_> = new_labels_map
+                    .iter()
+                    .filter(|(_, value)| value.is_empty())
+                    .map(|(key, _)| key.clone())
+                    .collect();
+                let labels_to_set: Vec<_> = new_labels_map
+                    .iter()
+                    .filter(|(_, value)| !value.is_empty())
+                    .map(|(key, value)| (key.clone(), value.clone()))
+                    .collect();
+
                 println!("Setting labels on {} device(s):", target_devices.len());
                 for device in &target_devices {
                     println!("  - {}", device.serial_number);
                 }
-                println!("\nLabels to set:");
-                for (key, value) in &new_labels_map {
-                    println!("  {}={}", key, value);
+                if !labels_to_set.is_empty() {
+                    println!("\nLabels to set:");
+                    for (key, value) in &labels_to_set {
+                        println!("  {}={}", key, value);
+                    }
+                }
+                if !labels_to_remove.is_empty() {
+                    println!("\nLabels to remove:");
+                    for key in &labels_to_remove {
+                        println!("  {}", key);
+                    }
                 }
 
                 print!("\nProceed? [y/N]: ");
@@ -2061,11 +2078,16 @@ async fn main() -> anyhow::Result<()> {
                     let mut device_labels = device
                         .labels
                         .iter()
+                        // Drop stale empty-valued labels so they are not re-sent
+                        .filter(|(_, v)| !v.is_empty())
                         .map(|(k, v)| (k.clone(), v.to_string()))
                         .collect::<std::collections::HashMap<String, String>>();
 
-                    for (key, value) in &new_labels_map {
+                    for (key, value) in &labels_to_set {
                         device_labels.insert(key.clone(), value.clone());
+                    }
+                    for key in &labels_to_remove {
+                        device_labels.remove(key);
                     }
 
                     match api

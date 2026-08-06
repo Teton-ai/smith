@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            DELETE FROM device_label\n            USING device d\n            WHERE\n                d.id = device_label.device_id AND\n                CASE\n                    WHEN $1 ~ '^[0-9]+$' AND length($1) <= 10 THEN\n                        d.id = $1::int4\n                    ELSE\n                        d.serial_number = $1\n                END\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "a2c540a0f0955b0fcfe1534904eb2ea1695371efa7fe2292519d4c59228018e5"
+}
