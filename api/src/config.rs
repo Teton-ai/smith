@@ -12,13 +12,26 @@ pub struct VictoriaMetricsClient {
 
 impl VictoriaMetricsClient {
     pub fn from_env() -> anyhow::Result<Option<Self>> {
-        let (Some(url), Some(auth_token)) = (
-            env::var("VICTORIA_METRICS_URL_FLEET").ok(),
-            env::var("VICTORIA_METRICS_AUTH_TOKEN_FLEET").ok(),
-        ) else {
-            warn!(
-                "VictoriaMetrics is not configured: VICTORIA_METRICS_URL_FLEET and VICTORIA_METRICS_AUTH_TOKEN_FLEET must both be set"
-            );
+        Self::from_vars(
+            "VICTORIA_METRICS_URL_FLEET",
+            "VICTORIA_METRICS_AUTH_TOKEN_FLEET",
+        )
+    }
+
+    /// Reads use a separate vmauth user: the writer credential is scoped to
+    /// `/opentelemetry/v1/metrics` and is rejected on the query paths. The URL
+    /// here is the vmauth base, not a specific endpoint.
+    pub fn from_env_read() -> anyhow::Result<Option<Self>> {
+        Self::from_vars(
+            "VICTORIA_METRICS_READ_URL_FLEET",
+            "VICTORIA_METRICS_READ_AUTH_TOKEN_FLEET",
+        )
+    }
+
+    fn from_vars(url_var: &str, token_var: &str) -> anyhow::Result<Option<Self>> {
+        let (Some(url), Some(auth_token)) = (env::var(url_var).ok(), env::var(token_var).ok())
+        else {
+            warn!("VictoriaMetrics is not configured: {url_var} and {token_var} must both be set");
             return Ok(None);
         };
 
@@ -35,7 +48,7 @@ impl VictoriaMetricsClient {
             .build()
             .context("failed to build VictoriaMetrics HTTP client")?;
 
-        info!(url = %url, "Configured VictoriaMetrics target");
+        info!(url = %url, "Configured VictoriaMetrics target ({url_var})");
         Ok(Some(VictoriaMetricsClient { client, url }))
     }
 }
@@ -71,6 +84,7 @@ pub struct Config {
     pub slack_hook_url: Option<String>,
     pub deployment_slack_hook_url: Option<String>,
     pub victoria_metrics_client: Option<VictoriaMetricsClient>,
+    pub victoria_metrics_read_client: Option<VictoriaMetricsClient>,
     pub ip_api_key: Option<String>,
     pub auth0_issuer: String,
     pub auth0_audience: String,
@@ -103,6 +117,7 @@ impl Config {
             slack_hook_url: env::var("SLACK_HOOK_URL").ok(),
             deployment_slack_hook_url: env::var("DEPLOYMENT_SLACK_HOOK_URL").ok(),
             victoria_metrics_client: VictoriaMetricsClient::from_env()?,
+            victoria_metrics_read_client: VictoriaMetricsClient::from_env_read()?,
             ip_api_key: env::var("IP_API_KEY").ok(),
             auth0_issuer: env::var("AUTH0_ISSUER").context("AUTH0_ISSUER is required.")?,
             auth0_audience: env::var("AUTH0_AUDIENCE").context("AUTH0_AUDIENCE is required.")?,

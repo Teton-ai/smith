@@ -278,6 +278,8 @@ async fn start_main_server(
         ))
         .routes(routes!(device::route::get_health_for_device))
         .routes(routes!(device::route::get_uptime_for_device))
+        .routes(routes!(telemetry::route::get_telemetry_for_device))
+        .routes(routes!(telemetry::route::get_telemetry_for_devices))
         .routes(routes!(
             package::route::get_packages,
             package::route::release_package
