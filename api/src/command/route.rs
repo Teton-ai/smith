@@ -233,19 +233,23 @@ pub async fn get_bundle_commands(
     let limit = pagination.limit.unwrap_or(100).clamp(0, 100);
 
     // Conditions and ordering are kept apart so filters can be appended.
+    // The cursor is the (created_on, uuid) tuple because `created_on` is not
+    // unique: ordering on it alone leaves the page boundary undefined and can
+    // strand a tied bundle. An exact boundary can also be exclusive, so the
+    // cursor bundle is not repeated on the next page.
     let mut conditions: Vec<String> = Vec::new();
     let order_by = if let Some(starting_after) = pagination.starting_after {
         conditions.push(format!(
-            "created_on <= (SELECT created_on FROM command_bundles WHERE uuid = '{starting_after}')"
+            "(created_on, uuid) < (SELECT created_on, uuid FROM command_bundles WHERE uuid = '{starting_after}')"
         ));
-        "ORDER BY created_on DESC"
+        "ORDER BY created_on DESC, uuid DESC"
     } else if let Some(ending_before) = pagination.ending_before {
         conditions.push(format!(
-            "created_on > (SELECT created_on FROM command_bundles WHERE uuid = '{ending_before}')"
+            "(created_on, uuid) > (SELECT created_on, uuid FROM command_bundles WHERE uuid = '{ending_before}')"
         ));
-        "ORDER BY created_on ASC"
+        "ORDER BY created_on ASC, uuid ASC"
     } else {
-        "ORDER BY created_on DESC"
+        "ORDER BY created_on DESC, uuid DESC"
     };
 
     conditions.push(TRIGGERER_FILTER.to_string());
@@ -339,8 +343,13 @@ pub async fn get_bundle_commands(
         })
         .collect();
 
-    // Sort by timestamp (most recent first).
-    bundles.sort_by(|a, b| b.created_on.cmp(&a.created_on));
+    // Must match the SQL ordering: `first_id` / `last_id` become the
+    // neighbouring pages' cursors.
+    bundles.sort_by(|a, b| {
+        b.created_on
+            .cmp(&a.created_on)
+            .then_with(|| b.uuid.cmp(&a.uuid))
+    });
 
     let first_id = bundles.first().map(|c| c.uuid);
     let last_id = bundles.last().map(|c| c.uuid);
@@ -349,8 +358,8 @@ pub async fn get_bundle_commands(
         let more = sqlx::query_scalar!(
             r#"select exists(
                 select 1 from command_bundles
-                where created_on > (
-                    select created_on from command_bundles where uuid = $1
+                where (created_on, uuid) > (
+                    select created_on, uuid from command_bundles where uuid = $1
                 )
                 and ($2::int is null or user_id = $2)
                 and (not $3::bool or user_id is null)
@@ -379,8 +388,8 @@ pub async fn get_bundle_commands(
         let more = sqlx::query_scalar!(
             r#"select exists(
                 select 1 from command_bundles
-                where created_on < (
-                    select created_on from command_bundles where uuid = $1
+                where (created_on, uuid) < (
+                    select created_on, uuid from command_bundles where uuid = $1
                 )
                 and ($2::int is null or user_id = $2)
                 and (not $3::bool or user_id is null)
