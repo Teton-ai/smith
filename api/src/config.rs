@@ -16,8 +16,6 @@ impl VictoriaMetricsClient {
             env::var("VICTORIA_METRICS_URL_FLEET").ok(),
             env::var("VICTORIA_METRICS_AUTH_TOKEN_FLEET").ok(),
         ) else {
-            // Without this the target is dropped silently, which makes a missing
-            // env var indistinguishable from telemetry being forwarded fine.
             warn!(
                 "VictoriaMetrics is not configured: VICTORIA_METRICS_URL_FLEET and VICTORIA_METRICS_AUTH_TOKEN_FLEET must both be set"
             );

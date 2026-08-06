@@ -50,24 +50,22 @@ pub async fn victoria(
         .send()
         .await;
 
+    // Best-effort: keep the single-instance target off the device's critical path.
     match response {
-        Ok(res) => {
-            // A rejected write is only visible to the device otherwise, so a
-            // misconfigured target drops telemetry with nothing in the logs.
-            if !res.status().is_success() {
-                error!(
-                    status = %res.status(),
-                    serial_number = device.serial_number,
-                    "VictoriaMetrics rejected telemetry"
-                );
-            }
-            Ok(res.status())
+        Ok(res) if !res.status().is_success() => {
+            error!(
+                status = %res.status(),
+                serial_number = device.serial_number,
+                "VictoriaMetrics rejected telemetry"
+            );
         }
+        Ok(_) => {}
         Err(err) => {
             error!(error = %err, "Failed to forward request to VictoriaMetrics");
-            Err(StatusCode::INTERNAL_SERVER_ERROR)
         }
     }
+
+    Ok(StatusCode::OK)
 }
 
 #[derive(Debug, Deserialize, ToSchema)]

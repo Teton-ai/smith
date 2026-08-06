@@ -37,12 +37,12 @@ These integrations are optional and can be enabled by setting specific environme
 **Purpose:** Time-series database and monitoring solution for collecting and visualizing API metrics.
 
 **Configuration:**
-- Set the `VICTORIA_METRICS_URL` environment variable with your Victoria Metrics instance URL
-- Set the `VICTORIA_METRICS_AUTH_TOKEN` environment variable with your authentication token
+- Set the `VICTORIA_METRICS_URL_FLEET` environment variable with your Victoria Metrics instance URL
+- Set the `VICTORIA_METRICS_AUTH_TOKEN_FLEET` environment variable with your authentication token
 - Example:
   ```
-  VICTORIA_METRICS_URL=https://your-vm-instance.example.com
-  VICTORIA_METRICS_AUTH_TOKEN=your-auth-token
+  VICTORIA_METRICS_URL_FLEET=https://your-vm-instance.example.com
+  VICTORIA_METRICS_AUTH_TOKEN_FLEET=your-auth-token
   ```
 
 **Benefits:**
@@ -92,8 +92,8 @@ SENTRY_URL=https://your-sentry-dsn
 SLACK_HOOK_URL=https://hooks.slack.com/services/your-webhook-url
 
 # Metrics and Monitoring
-VICTORIA_METRICS_URL=https://your-vm-instance.example.com
-VICTORIA_METRICS_AUTH_TOKEN=your-auth-token
+VICTORIA_METRICS_URL_FLEET=https://your-vm-instance.example.com
+VICTORIA_METRICS_AUTH_TOKEN_FLEET=your-auth-token
 
 # IP Geolocation
 IP_API_KEY=your-pro-api-key
