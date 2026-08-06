@@ -28,6 +28,7 @@ export {
 export { type DropdownItem, DropdownMenu } from "./dropdown";
 export { PageContainer } from "./page-container";
 export { SearchInput } from "./search-input";
+export { Select } from "./select";
 export { StatCard } from "./stat-card";
 export {
 	StateTimeline,
