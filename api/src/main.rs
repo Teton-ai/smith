@@ -278,7 +278,6 @@ async fn start_main_server(
             device::route::delete_device,
             device::route::update_device
         ))
-        .routes(routes!(device::route::get_debug_ap_password))
         .routes(routes!(
             device::route::get_labels,
             device::route::delete_label
