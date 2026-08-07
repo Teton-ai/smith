@@ -39,27 +39,31 @@ pub async fn victoria(
     let (mut parts, body) = req.into_parts();
     parts.headers.remove(header::AUTHORIZATION);
 
-    if let Some(len) = parts.headers.get(header::CONTENT_LENGTH)
+    if let Some(len) = parts
+        .headers
+        .get(header::CONTENT_LENGTH)
         .and_then(|v| v.to_str().ok())
         .and_then(|v| v.parse::<usize>().ok())
+        && len > MAX_TELEMETRY_BYTES
     {
-        if len > MAX_TELEMETRY_BYTES {
-            warn!(
-                content_length = len,
-                serial_number = %device.serial_number,
-                "Rejecting oversized telemetry payload"
-            );
-            return StatusCode::PAYLOAD_TOO_LARGE;
-        }
+        warn!(
+            content_length = len,
+            serial_number = %device.serial_number,
+            "Rejecting oversized telemetry payload"
+        );
+        return StatusCode::PAYLOAD_TOO_LARGE;
     }
 
-    let Ok(body_bytes) = to_bytes(body, MAX_TELEMETRY_BYTES).await.inspect_err(|err| {
-        warn!(
-            error = %err,
-            serial_number = %device.serial_number,
-            "Client disconnected before telemetry body was fully read"
-        );
-    }) else {
+    let Ok(body_bytes) = to_bytes(body, MAX_TELEMETRY_BYTES)
+        .await
+        .inspect_err(|err| {
+            warn!(
+                error = %err,
+                serial_number = %device.serial_number,
+                "Client disconnected before telemetry body was fully read"
+            );
+        })
+    else {
         return StatusCode::OK;
     };
 
