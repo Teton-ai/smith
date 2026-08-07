@@ -3451,6 +3451,11 @@ pub async fn apply_device_intent(
         return Err(StatusCode::BAD_REQUEST);
     }
 
+    // ApplyNetworks is a NetworkManager wifi-profile command (key_mgmt/psk); an
+    // intent pointing at an Ethernet/Dongle row has no such profile to build, so
+    // it's excluded here rather than reaching the credentials match below. This
+    // also makes security_type provably non-null: network_security_type_wifi_check
+    // guarantees it for every wifi row, hence the "!" override.
     let networks = sqlx::query!(
         r#"
         SELECT
@@ -3458,11 +3463,11 @@ pub async fn apply_device_intent(
             n.ssid,
             n.name,
             n.password,
-            n.security_type,
+            n.security_type as "security_type!",
             n.credentials ->> 'psk' AS credentials_psk
         FROM device_network_intent dni
         JOIN network n ON n.id = dni.network_id
-        WHERE dni.device_id = $1
+        WHERE dni.device_id = $1 AND n.network_type = 'wifi'
         ORDER BY dni.priority ASC
         "#,
         resolved_id
@@ -3504,22 +3509,11 @@ pub async fn apply_device_intent(
     let applyable_networks: Vec<serde_json::Value> = networks
         .iter()
         .filter_map(|n| {
-            let credentials = match n.security_type.as_deref() {
-                Some(security_type) => {
-                    wire_credentials(security_type, n.credentials_psk.as_deref())
-                }
-                // Legacy rows with no backfilled security_type: preserve the
-                // original password-null inference exactly.
-                None => Some(if let Some(psk) = n.password.as_deref() {
-                    serde_json::json!({ "key_mgmt": "wpa-psk", "psk": psk })
-                } else {
-                    serde_json::json!({ "key_mgmt": "none" })
-                }),
-            };
+            let credentials = wire_credentials(&n.security_type, n.credentials_psk.as_deref());
             let Some(credentials) = credentials else {
                 warn!(
                     device_id = resolved_id,
-                    security_type = n.security_type.as_deref().unwrap_or("<null>"),
+                    security_type = n.security_type.as_str(),
                     "skipping network in ApplyNetworks: security type not applyable by smithd"
                 );
                 return None;
@@ -3658,13 +3652,9 @@ mod tests {
             Some(legacy_credentials(password))
         );
 
-        // NULL security_type row (new insert from an unupdated writer):
-        // the dual-read builder falls back to the legacy heuristic verbatim,
-        // so the output is the legacy output by definition. Verify both shapes.
-        assert_eq!(legacy_credentials(None), json!({ "key_mgmt": "none" }));
-        assert_eq!(
-            legacy_credentials(Some("pw")),
-            json!({ "key_mgmt": "wpa-psk", "psk": "pw" })
-        );
+        // security_type is never NULL here: network_security_type_wifi_check
+        // guarantees it for every wifi row, and the intent query's
+        // `WHERE n.network_type = 'wifi'` guarantees every row this function
+        // sees is one.
     }
 }
