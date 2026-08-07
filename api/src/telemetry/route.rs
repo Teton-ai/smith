@@ -204,10 +204,7 @@ impl TelemetryMetric {
 /// is rejected rather than escaped — a `"` or `}` would otherwise let a caller
 /// rewrite the query the registry built.
 fn is_safe_serial(serial: &str) -> bool {
-    !serial.is_empty()
-        && serial
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+    !serial.is_empty() && serial.chars().all(|c| c.is_ascii_alphanumeric())
 }
 
 #[derive(Debug, Deserialize, IntoParams)]
@@ -228,9 +225,14 @@ pub struct TelemetryQuery {
 pub struct TelemetryBatchQuery {
     /// Comma-separated serial numbers.
     pub serials: String,
-    #[serde(flatten)]
-    #[param(inline)]
-    pub window: TelemetryQuery,
+    /// Metric to read, e.g. `cpu`, `temperature`, `disk_temperature`.
+    pub metric: TelemetryMetric,
+    /// Start of the window (RFC 3339). Defaults to one hour before `to`.
+    pub from: Option<DateTime<Utc>>,
+    /// End of the window (RFC 3339). Defaults to now.
+    pub to: Option<DateTime<Utc>>,
+    /// Resolution in seconds. Defaults to 60.
+    pub step: Option<u32>,
 }
 
 /// Normalized, clamped window shared by both handlers.
@@ -240,11 +242,13 @@ struct ResolvedWindow {
     step: u32,
 }
 
-fn resolve_window(query: &TelemetryQuery) -> Result<ResolvedWindow, StatusCode> {
-    let to = query.to.unwrap_or_else(Utc::now);
-    let from = query
-        .from
-        .unwrap_or_else(|| to - Duration::hours(TELEMETRY_DEFAULT_WINDOW_HOURS));
+fn resolve_window(
+    from: Option<DateTime<Utc>>,
+    to: Option<DateTime<Utc>>,
+    step: Option<u32>,
+) -> Result<ResolvedWindow, StatusCode> {
+    let to = to.unwrap_or_else(Utc::now);
+    let from = from.unwrap_or_else(|| to - Duration::hours(TELEMETRY_DEFAULT_WINDOW_HOURS));
 
     if from >= to {
         return Err(StatusCode::BAD_REQUEST);
@@ -252,8 +256,7 @@ fn resolve_window(query: &TelemetryQuery) -> Result<ResolvedWindow, StatusCode> 
     // Clamp rather than reject: an over-long range is still a sensible request,
     // it just gets served at the longest span we're willing to scan.
     let from = from.max(to - Duration::days(TELEMETRY_MAX_WINDOW_DAYS));
-    let step = query
-        .step
+    let step = step
         .unwrap_or(TELEMETRY_DEFAULT_STEP_SECONDS)
         .max(TELEMETRY_MIN_STEP_SECONDS);
 
@@ -336,7 +339,7 @@ pub async fn get_telemetry_for_device(
     Query(query): Query<TelemetryQuery>,
     Extension(state): Extension<State>,
 ) -> Result<Response, StatusCode> {
-    let window = resolve_window(&query)?;
+    let window = resolve_window(query.from, query.to, query.step)?;
 
     let serial_number = sqlx::query_scalar!(
         r#"
@@ -393,7 +396,7 @@ pub async fn get_telemetry_for_devices(
     Query(query): Query<TelemetryBatchQuery>,
     Extension(state): Extension<State>,
 ) -> Result<Response, StatusCode> {
-    let window = resolve_window(&query.window)?;
+    let window = resolve_window(query.from, query.to, query.step)?;
 
     let serials: Vec<&str> = query
         .serials
@@ -409,11 +412,10 @@ pub async fn get_telemetry_for_devices(
         return Err(StatusCode::BAD_REQUEST);
     }
 
-    let promql = query
-        .window
-        .metric
-        .batch_template()
-        .replace("$SEL", &format!(r#"serial_number=~"{}""#, serials.join("|")));
+    let promql = query.metric.batch_template().replace(
+        "$SEL",
+        &format!(r#"serial_number=~"{}""#, serials.join("|")),
+    );
 
     query_range(&state, promql, window).await
 }
@@ -435,11 +437,14 @@ mod tests {
 
     #[test]
     fn rejects_serials_that_could_escape_a_label_matcher() {
-        assert!(is_safe_serial("SN-123_abc"));
+        assert!(is_safe_serial("SN123abc"));
         assert!(!is_safe_serial(""));
         assert!(!is_safe_serial(r#"a" or up{"#));
         assert!(!is_safe_serial("a|b"));
         assert!(!is_safe_serial("a.*"));
+        // Serials are alphanumeric; separators are rejected rather than escaped.
+        assert!(!is_safe_serial("SN-123"));
+        assert!(!is_safe_serial("SN_123"));
     }
 
     #[test]
@@ -476,24 +481,13 @@ mod tests {
     #[test]
     fn window_defaults_to_the_last_hour_and_clamps_long_ranges() {
         let to = Utc::now();
-        let resolved = resolve_window(&TelemetryQuery {
-            metric: TelemetryMetric::Cpu,
-            from: None,
-            to: Some(to),
-            step: None,
-        })
-        .expect("defaults are valid");
+        let resolved = resolve_window(None, Some(to), None).expect("defaults are valid");
         assert_eq!(resolved.to, to);
         assert_eq!(resolved.from, to - Duration::hours(1));
         assert_eq!(resolved.step, TELEMETRY_DEFAULT_STEP_SECONDS);
 
-        let clamped = resolve_window(&TelemetryQuery {
-            metric: TelemetryMetric::Cpu,
-            from: Some(to - Duration::days(365)),
-            to: Some(to),
-            step: Some(1),
-        })
-        .expect("an over-long range is clamped, not rejected");
+        let clamped = resolve_window(Some(to - Duration::days(365)), Some(to), Some(1))
+            .expect("an over-long range is clamped, not rejected");
         assert_eq!(clamped.from, to - Duration::days(TELEMETRY_MAX_WINDOW_DAYS));
         assert_eq!(clamped.step, TELEMETRY_MIN_STEP_SECONDS);
     }
@@ -501,14 +495,6 @@ mod tests {
     #[test]
     fn rejects_an_inverted_window() {
         let to = Utc::now();
-        assert!(
-            resolve_window(&TelemetryQuery {
-                metric: TelemetryMetric::Cpu,
-                from: Some(to),
-                to: Some(to - Duration::hours(1)),
-                step: None,
-            })
-            .is_err()
-        );
+        assert!(resolve_window(Some(to), Some(to - Duration::hours(1)), None).is_err());
     }
 }
