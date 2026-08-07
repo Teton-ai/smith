@@ -345,11 +345,23 @@ pub async fn create_network(
             (StatusCode::OK, existing)
         }
         None => {
+            // ON CONFLICT is a defensive fallback for a lock-bypass race, not
+            // the primary matching mechanism: the advisory lock above already
+            // makes that race structurally impossible for the writers that
+            // take it, so this exists only to fail safely rather than 500 if
+            // that assumption is ever broken. It deliberately does not
+            // replicate network_find_by_content's relaxed identity matching
+            // (Postgres conflict detection is exact-equality only) - see
+            // arch.md's rejected-alternatives note. Safe today because this
+            // caller never supplies an identity or an enterprise security_type,
+            // so it can only ever conflict with another identity-NULL row.
             let created = sqlx::query_as!(
                 Network,
                 r#"
                 INSERT INTO network (network_type, is_network_hidden, ssid, name, description, password, security_type, credentials)
                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                ON CONFLICT ON CONSTRAINT network_ident_uq
+                DO UPDATE SET ssid = EXCLUDED.ssid
                 RETURNING id, network_type::TEXT as "network_type", is_network_hidden, ssid, name, description, 'secret' as password
                 "#,
                 new_network.network_type as NetworkType,
