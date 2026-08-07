@@ -321,7 +321,7 @@ checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 
 [[package]]
 name = "api"
-version = "0.2.187"
+version = "0.2.188"
 dependencies = [
  "anyhow",
  "axum 0.7.9",
@@ -1196,7 +1196,7 @@ checksum = "c8d4a3bb8b1e0c1050499d1815f5ab16d04f0959b233085fb31653fbfc9d98f9"
 
 [[package]]
 name = "cli"
-version = "0.2.187"
+version = "0.2.188"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3418,7 +3418,7 @@ dependencies = [
 
 [[package]]
 name = "models"
-version = "0.2.187"
+version = "0.2.188"
 dependencies = [
  "axum 0.7.9",
  "chrono",
@@ -5626,7 +5626,7 @@ checksum = "e8e2fb0f499abb4d162f2bedad68f5ef91a1682b5a03596ddb67efd37768d100"
 
 [[package]]
 name = "smith"
-version = "0.2.187"
+version = "0.2.188"
 dependencies = [
  "anyhow",
  "axum 0.8.9",
@@ -5663,7 +5663,7 @@ dependencies = [
 
 [[package]]
 name = "smith-e2e"
-version = "0.2.187"
+version = "0.2.188"
 dependencies = [
  "anyhow",
  "reqwest 0.12.28",
@@ -5675,7 +5675,7 @@ dependencies = [
 
 [[package]]
 name = "smith-updater"
-version = "0.2.187"
+version = "0.2.188"
 dependencies = [
  "anyhow",
  "clap",
