@@ -122,96 +122,51 @@ const TELEMETRY_MIN_STEP_SECONDS: u32 = 5;
 /// request can't build an unbounded regex alternation.
 const TELEMETRY_MAX_SERIALS: usize = 500;
 
-/// Metric names callers may ask for. PromQL itself never crosses the wire — an
-/// unknown name fails deserialization and the request is rejected, so a caller
-/// can't reach series the registry doesn't expose.
-#[derive(Debug, Clone, Copy, Deserialize, ToSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum TelemetryMetric {
-    Cpu,
-    Memory,
-    Temperature,
-    DiskTemperature,
-    DiskFree,
-    NetworkRx,
-    GpuLoad,
-    FanSpeed,
+fn is_safe_metric_name(metric: &str) -> bool {
+    let mut chars = metric.chars();
+    match chars.next() {
+        Some(c) if c.is_ascii_alphabetic() || c == '_' || c == ':' => {}
+        _ => return false,
+    }
+    chars.all(|c| c.is_ascii_alphanumeric() || c == '_' || c == ':')
 }
 
-impl TelemetryMetric {
-    /// One device: `$SEL` becomes an equality matcher on the serial.
-    fn single_template(self) -> &'static str {
-        match self {
-            Self::Cpu => "avg by (serial_number) (plex_system_cpu_usage_percent{$SEL})",
-            Self::Memory => "plex_system_memory_usage_bytes{$SEL} / 1024 / 1024",
-            Self::Temperature => "plex_system_temperature_celsius{$SEL}",
-            // Some NVMe report SMART temp in deci-Celsius (371 = 37.1C) and some
-            // in plain Celsius. Real disks top out near 80C, so >= 150 can only
-            // be deci-Celsius — dividing unconditionally would turn a genuinely
-            // dangerous 102C disk into a healthy-looking 10.2C. `* 1` on the
-            // second branch is not a no-op: arithmetic drops `__name__`, and
-            // without it a disk crossing the threshold mid-window comes back as
-            // two series with mismatched labels instead of one.
-            Self::DiskTemperature => {
-                "(plex_system_disk_temperature_celsius{$SEL} >= 150) / 10 \
-                 or (plex_system_disk_temperature_celsius{$SEL} < 150) * 1"
-            }
-            Self::DiskFree => "plex_system_disk_available_space_bytes{$SEL} / 1024 / 1024 / 1024",
-            Self::NetworkRx => "rate(plex_system_network_rx_bytes{$SEL}[5m])",
-            Self::GpuLoad => "avg by (serial_number) (plex_system_gpu_load_percent{$SEL})",
-            Self::FanSpeed => "avg by (serial_number) (plex_system_fan_speed_percent{$SEL})",
-        }
-    }
-
-    /// Many devices: `$SEL` becomes a regex matcher, and every form reduces to
-    /// one series per `serial_number`. `last_over_time` carries the most recent
-    /// sample forward so a device reporting on a slow interval still lands in
-    /// the result instead of dropping out between scrapes.
-    fn batch_template(self) -> &'static str {
-        match self {
-            Self::Cpu => {
-                "max by (serial_number) (last_over_time(plex_system_cpu_usage_percent{$SEL}[5m]))"
-            }
-            Self::Memory => {
-                "max by (serial_number) (last_over_time(plex_system_memory_usage_bytes{$SEL}[5m])) \
-                 / 1024 / 1024"
-            }
-            Self::Temperature => {
-                "max by (serial_number) (last_over_time(plex_system_temperature_celsius{$SEL}[5m]))"
-            }
-            Self::DiskTemperature => {
-                "(max by (serial_number) (last_over_time(plex_system_disk_temperature_celsius{$SEL}[5m])) >= 150) / 10 \
-                 or (max by (serial_number) (last_over_time(plex_system_disk_temperature_celsius{$SEL}[5m])) < 150) * 1"
-            }
-            Self::DiskFree => {
-                "max by (serial_number) (last_over_time(plex_system_disk_available_space_bytes{$SEL}[5m])) \
-                 / 1024 / 1024 / 1024"
-            }
-            Self::NetworkRx => {
-                "max by (serial_number) (rate(plex_system_network_rx_bytes{$SEL}[5m]))"
-            }
-            Self::GpuLoad => {
-                "max by (serial_number) (last_over_time(plex_system_gpu_load_percent{$SEL}[5m]))"
-            }
-            Self::FanSpeed => {
-                "max by (serial_number) (last_over_time(plex_system_fan_speed_percent{$SEL}[5m]))"
-            }
-        }
-    }
-}
-
-/// Serials reach PromQL as label-matcher literals, so anything outside this set
-/// is rejected rather than escaped — a `"` or `}` would otherwise let a caller
-/// rewrite the query the registry built.
 fn is_safe_serial(serial: &str) -> bool {
     !serial.is_empty() && serial.chars().all(|c| c.is_ascii_alphanumeric())
+}
+
+/// One device, reduced to a single line. A device that exports the same metric
+/// once per core, disk, or fan would otherwise come back as several series that
+/// the caller has no way to tell apart.
+fn single_query(metric: &str, selector: &str, rate: bool) -> String {
+    let inner = if rate {
+        format!("rate({metric}{{{selector}}}[5m])")
+    } else {
+        format!("{metric}{{{selector}}}")
+    };
+    format!("avg by (serial_number) ({inner})")
+}
+
+/// Many devices, reduced to one series per `serial_number`. `last_over_time`
+/// carries the most recent sample forward so a device reporting on a slow
+/// interval still lands in the result between scrapes.
+fn batch_query(metric: &str, selector: &str, rate: bool) -> String {
+    let inner = if rate {
+        format!("rate({metric}{{{selector}}}[5m])")
+    } else {
+        format!("last_over_time({metric}{{{selector}}}[5m])")
+    };
+    format!("max by (serial_number) ({inner})")
 }
 
 #[derive(Debug, Deserialize, IntoParams)]
 #[into_params(parameter_in = Query)]
 pub struct TelemetryQuery {
-    /// Metric to read, e.g. `cpu`, `temperature`, `disk_temperature`.
-    pub metric: TelemetryMetric,
+    /// Name of the series to read, e.g. `node_cpu_usage_percent`.
+    pub metric: String,
+    /// Set when the series is a counter, so it is read as a per-second rate.
+    #[serde(default)]
+    pub rate: bool,
     /// Start of the window (RFC 3339). Defaults to one hour before `to`.
     pub from: Option<DateTime<Utc>>,
     /// End of the window (RFC 3339). Defaults to now.
@@ -225,8 +180,11 @@ pub struct TelemetryQuery {
 pub struct TelemetryBatchQuery {
     /// Comma-separated serial numbers.
     pub serials: String,
-    /// Metric to read, e.g. `cpu`, `temperature`, `disk_temperature`.
-    pub metric: TelemetryMetric,
+    /// Name of the series to read, e.g. `node_cpu_usage_percent`.
+    pub metric: String,
+    /// Set when the series is a counter, so it is read as a per-second rate.
+    #[serde(default)]
+    pub rate: bool,
     /// Start of the window (RFC 3339). Defaults to one hour before `to`.
     pub from: Option<DateTime<Utc>>,
     /// End of the window (RFC 3339). Defaults to now.
@@ -341,6 +299,10 @@ pub async fn get_telemetry_for_device(
 ) -> Result<Response, StatusCode> {
     let window = resolve_window(query.from, query.to, query.step)?;
 
+    if !is_safe_metric_name(&query.metric) {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+
     let serial_number = sqlx::query_scalar!(
         r#"
         SELECT serial_number FROM device
@@ -369,10 +331,11 @@ pub async fn get_telemetry_for_device(
         return Err(StatusCode::INTERNAL_SERVER_ERROR);
     }
 
-    let promql = query
-        .metric
-        .single_template()
-        .replace("$SEL", &format!(r#"serial_number="{serial_number}""#));
+    let promql = single_query(
+        &query.metric,
+        &format!(r#"serial_number="{serial_number}""#),
+        query.rate,
+    );
 
     query_range(&state, promql, window).await
 }
@@ -411,10 +374,14 @@ pub async fn get_telemetry_for_devices(
     if !serials.iter().all(|s| is_safe_serial(s)) {
         return Err(StatusCode::BAD_REQUEST);
     }
+    if !is_safe_metric_name(&query.metric) {
+        return Err(StatusCode::BAD_REQUEST);
+    }
 
-    let promql = query.metric.batch_template().replace(
-        "$SEL",
+    let promql = batch_query(
+        &query.metric,
         &format!(r#"serial_number=~"{}""#, serials.join("|")),
+        query.rate,
     );
 
     query_range(&state, promql, window).await
@@ -423,17 +390,6 @@ pub async fn get_telemetry_for_devices(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    const ALL_METRICS: [TelemetryMetric; 8] = [
-        TelemetryMetric::Cpu,
-        TelemetryMetric::Memory,
-        TelemetryMetric::Temperature,
-        TelemetryMetric::DiskTemperature,
-        TelemetryMetric::DiskFree,
-        TelemetryMetric::NetworkRx,
-        TelemetryMetric::GpuLoad,
-        TelemetryMetric::FanSpeed,
-    ];
 
     #[test]
     fn rejects_serials_that_could_escape_a_label_matcher() {
@@ -448,34 +404,47 @@ mod tests {
     }
 
     #[test]
-    fn every_metric_template_carries_the_selector_placeholder() {
-        for metric in ALL_METRICS {
-            assert!(metric.single_template().contains("$SEL"), "{metric:?}");
-            assert!(metric.batch_template().contains("$SEL"), "{metric:?}");
-        }
+    fn rejects_metric_names_that_could_append_an_expression() {
+        assert!(is_safe_metric_name("node_cpu_usage_percent"));
+        assert!(is_safe_metric_name("_leading_underscore"));
+        assert!(is_safe_metric_name("namespace:recorded:rule"));
+        assert!(!is_safe_metric_name(""));
+        // A metric name is not an expression: no selectors, operators, or calls.
+        assert!(!is_safe_metric_name("up} or something{"));
+        assert!(!is_safe_metric_name("up + up"));
+        assert!(!is_safe_metric_name("rate(up[5m])"));
+        assert!(!is_safe_metric_name("1_starts_with_digit"));
     }
 
     #[test]
-    fn batch_templates_reduce_to_one_series_per_device() {
-        for metric in ALL_METRICS {
-            assert!(
-                metric.batch_template().contains("by (serial_number)"),
-                "{metric:?}"
-            );
-        }
+    fn one_device_reduces_to_one_line() {
+        // A device exporting the metric per core or per disk would otherwise
+        // come back as several series the caller can't tell apart.
+        assert_eq!(
+            single_query("node_temp_celsius", r#"serial_number="SN1""#, false),
+            r#"avg by (serial_number) (node_temp_celsius{serial_number="SN1"})"#
+        );
     }
 
     #[test]
-    fn disk_temperature_only_divides_deci_celsius_readings() {
-        // A 102C disk is a real emergency; it must not be reported as 10.2C.
-        for promql in [
-            TelemetryMetric::DiskTemperature.single_template(),
-            TelemetryMetric::DiskTemperature.batch_template(),
-        ] {
-            assert!(promql.contains(">= 150"));
-            assert!(promql.contains("< 150"));
-            assert!(!promql.contains("celsius{$SEL} / 10"));
-        }
+    fn reads_counters_as_a_rate() {
+        // Rating has to happen in PromQL: it is what handles counter resets.
+        assert_eq!(
+            single_query("node_rx_bytes", r#"serial_number="SN1""#, true),
+            r#"avg by (serial_number) (rate(node_rx_bytes{serial_number="SN1"}[5m]))"#
+        );
+    }
+
+    #[test]
+    fn batch_reduces_to_one_series_per_device() {
+        assert_eq!(
+            batch_query("node_temp", r#"serial_number=~"A|B""#, false),
+            r#"max by (serial_number) (last_over_time(node_temp{serial_number=~"A|B"}[5m]))"#
+        );
+        assert_eq!(
+            batch_query("node_rx_bytes", r#"serial_number=~"A|B""#, true),
+            r#"max by (serial_number) (rate(node_rx_bytes{serial_number=~"A|B"}[5m]))"#
+        );
     }
 
     #[test]
