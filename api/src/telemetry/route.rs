@@ -13,11 +13,14 @@ use utoipa::{IntoParams, ToSchema};
 
 const TELEMETRY_TAG: &str = "telemetry";
 
+const MAX_TELEMETRY_BYTES: usize = 8 * 1024 * 1024;
+
 #[utoipa::path(
     post,
     path = "/smith/telemetry/victoria",
     responses(
         (status = 200, description = "Victoria metrics data forwarded successfully"),
+        (status = 413, description = "Telemetry payload too large"),
         (status = 501, description = "Victoria metrics not implemented")
     ),
     security(
@@ -28,47 +31,61 @@ pub async fn victoria(
     device: AuthedDevice,
     Extension(state): Extension<State>,
     req: Request<Body>,
-) -> Result<StatusCode, StatusCode> {
-    let client_config = state
-        .config
-        .victoria_metrics_client
-        .as_ref()
-        .ok_or(StatusCode::NOT_IMPLEMENTED)?;
+) -> StatusCode {
+    let Some(client_config) = state.config.victoria_metrics_client.as_ref() else {
+        return StatusCode::NOT_IMPLEMENTED;
+    };
 
-    let (parts, body) = req.into_parts();
-    let method = parts.method;
-    let mut headers = parts.headers;
+    let (mut parts, body) = req.into_parts();
+    parts.headers.remove(header::AUTHORIZATION);
 
-    headers.remove("authorization");
-    let body_bytes = to_bytes(body, usize::MAX).await.map_err(|err| {
-        error!("Failed to read body bytes: {}", err);
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
-
-    let response = client_config
-        .client
-        .request(method, &client_config.url)
-        .headers(headers)
-        .body(body_bytes)
-        .send()
-        .await;
-
-    // Best-effort: keep the single-instance target off the device's critical path.
-    match response {
-        Ok(res) if !res.status().is_success() => {
-            error!(
-                status = %res.status(),
-                serial_number = device.serial_number,
-                "VictoriaMetrics rejected telemetry"
-            );
-        }
-        Ok(_) => {}
-        Err(err) => {
-            error!(error = %err, "Failed to forward request to VictoriaMetrics");
-        }
+    if let Some(len) = parts
+        .headers
+        .get(header::CONTENT_LENGTH)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.parse::<usize>().ok())
+        && len > MAX_TELEMETRY_BYTES
+    {
+        warn!(
+            content_length = len,
+            serial_number = %device.serial_number,
+            "Rejecting oversized telemetry payload"
+        );
+        return StatusCode::PAYLOAD_TOO_LARGE;
     }
 
-    Ok(StatusCode::OK)
+    let Ok(body_bytes) = to_bytes(body, MAX_TELEMETRY_BYTES)
+        .await
+        .inspect_err(|err| {
+            warn!(
+                error = %err,
+                serial_number = %device.serial_number,
+                "Client disconnected before telemetry body was fully read"
+            );
+        })
+    else {
+        return StatusCode::OK;
+    };
+
+    // Best-effort: keep the single-instance target off the device's critical path.
+    let forwarded = client_config
+        .client
+        .request(parts.method, &client_config.url)
+        .headers(parts.headers)
+        .body(body_bytes)
+        .send()
+        .await
+        .and_then(reqwest::Response::error_for_status);
+
+    if let Err(err) = forwarded {
+        error!(
+            error = %err,
+            serial_number = %device.serial_number,
+            "Failed to forward telemetry to VictoriaMetrics"
+        );
+    }
+
+    StatusCode::OK
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
