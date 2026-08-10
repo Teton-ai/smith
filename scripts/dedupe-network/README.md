@@ -24,7 +24,7 @@ already there.
 Phases 2, 3 and 4 all group on the same tuple, under **strict** equality (NULL
 equal to NULL). It is defined once as `NETWORK_CONTENT_KEY` in `_common.sh`:
 
-```
+```sql
 (ssid, is_network_hidden, credentials->>'psk', network_type, security_type, identity)
 ```
 
@@ -60,6 +60,14 @@ Two consequences worth knowing:
 Phases 2 and 3 both remap the four device-side FKs (`device.network_id`,
 `device.current_network_id`, `device_configured_network.network_id`,
 `device_network_intent.network_id`) with a plain `UPDATE` before deleting.
+
+`device_network_intent` is `UNIQUE (device_id, network_id)`, so the plain
+`UPDATE` aborts where one device holds intents on several rows of the same group.
+Both scripts delete the losing intents first. Only rows being remapped are
+eligible for deletion, so an intent already sitting on the canonical row keeps
+its priority; among remapped ones the oldest survives. `device_configured_network`
+needs no such handling: its primary key is `(device_id, profile_name)` and does
+not involve `network_id`.
 
 `network_reference` needs different handling. Its FK is `ON DELETE RESTRICT`, so
 it must be repointed before the delete or the whole transaction aborts, and its
@@ -114,7 +122,13 @@ Two details in the delete condition:
   how long the run takes.
 - Empty-string passwords are normalized to NULL first, so open networks compare
   consistently across every phase. `network.password` is still written by the API
-  alongside `credentials`, so this is live, not legacy cleanup.
+  alongside `credentials`, so this is live, not legacy cleanup. This is scoped to
+  the same watermark, so the phase never writes to a row it would not delete, and
+  the report prints how many rows it touched.
+- The delete is driven from the staged `_to_delete` table rather than
+  re-evaluating the condition, so the printed plan is exactly what is deleted.
+  Under `READ COMMITTED` each statement takes its own snapshot, so re-evaluating
+  could delete a row the report never showed.
 - The `dup_group` column in the report uses the same content key as phases 2 to
   4, so a group shown here is the group those phases will act on.
 
@@ -218,7 +232,14 @@ This matters because the two commits cannot be atomic:
    points at a row the next step deletes. The assertion `RAISE`s rather than
    printing a count, so a partial update aborts the run instead of letting the
    Smith step strand the bridges it missed.
-4. Remap Smith FKs, fold credentials, delete non-canonical Smith rows.
+4. Re-fetch the refs, then remap Smith FKs, fold credentials, and delete
+   non-canonical Smith rows.
+
+The step 4 re-fetch is a guard, not a refresh: step 3 moved every bridge this run
+knew about off its old row, so a ref still sitting on an old row is one the sync
+job created in between. Deleting that row would strand it, so the whole remap for
+that row is dropped and reported under `HELD BACK`. Re-running converges. Phase 4
+guards its own delete the same way.
 
 App API goes first so a failure fails recoverably: the bridge points at the
 canonical row, which still exists, and re-running converges. The reverse order
@@ -231,6 +252,15 @@ Every payload is streamed into psql from a **quoted** heredoc. Device serial
 numbers are free text and real values contain spaces, commas, `+` and `/`, so an
 unquoted heredoc would let bash expand a serial containing `$` or a backtick.
 Values reach the server as `COPY` data and never become SQL program text.
+
+The quoting stops bash, not psql. psql ends COPY data at a line holding only
+`\.`, before the server sees any of it, and reads whatever follows as psql input.
+CSV quoting is no defence: a free-text value containing a newline can put such a
+line into the stream, and everything after it then runs as meta-commands, `\!`
+included, with the permissions of whoever is running the script. `copy_block`
+therefore refuses any payload containing that line rather than trying to escape
+it. Writing the payload to a file instead would only half fix it: it stops the
+meta-commands but still truncates the data at the same point.
 
 ```bash
 ./scripts/dedupe-network/phase3-dedupe-skipped-groups.sh <app-api-db-url> [<smith-db-url>] [--commit]
@@ -299,7 +329,10 @@ play and the choice falls to Smith references, then `min(id)`.
 
 Reads the same four App API tables as phase 3, plus `network_wifis.ssid`,
 `hidden` and `password`. **That payload carries live WiFi passwords**: it is
-streamed as `COPY` data, never echoed, and never interpolated into SQL text.
+streamed as `COPY` data, never echoed, never interpolated into SQL text, and
+never written to disk. It goes through the same `copy_block` check as every other
+payload, which matters most here: a password is the field an outside user
+controls most directly.
 
 ## Shared helpers
 
@@ -310,7 +343,8 @@ streamed as `COPY` data, never echoed, and never interpolated into SQL text.
   are validated as such; the device and wifi-content payloads are free text and
   are streamed instead.
 - `copy_block`, which emits a `\copy` command, its payload and its terminator
-  between quoted heredocs.
+  between quoted heredocs, after rejecting any payload that carries a `\.` line
+  of its own. See "Payload handling" for why that check is the whole defence.
 - `NETWORK_CONTENT_KEY` and `emit_referenced`. The content key is written **once**
   here and used by phases 2, 3 and 4, so the invariant the whole toolchain rests
   on cannot drift between scripts. `emit_referenced` builds `_referenced`, every
@@ -327,15 +361,35 @@ dedupe run in that window can delete a row the App API is about to point at.
 
 Two windows:
 
-- A row created **after** the run started. Closed deterministically by an id
-  watermark (`network.id` is `generated always as identity`, so it is monotonic;
-  the table has no `created_at`).
+- A row created **after** the run started. Bounded, but not closed, by an id
+  watermark (`network.id` is `generated always as identity`; the table has no
+  `created_at`).
 - A row that already existed and is bridged **after** the ref fetch. Narrowed by
   fetching refs twice and taking the union.
 
-Window B stays open for the duration of the transaction itself, which no
-client-side scheme can close. What closes it in practice is the precondition
-below, not timing.
+The watermark is weaker than it looks, and deliberately so. Sequences are
+non-transactional, so a row can be allocated a low id, commit late, and land
+below a watermark read in between. It is therefore a bound on which rows are in
+**scope**, not a guarantee that a new row is safe.
+
+Locking `network` does not fix this, which is why it is not done. Whether the
+lock is held across the whole transaction or only around the watermark read, the
+late-committing row is still below the watermark and still unbridged, so it is
+deleted either way. All the lock adds is blocking: lock requests are granted
+FIFO, so ordinary inserts queue behind a waiting request even though they do not
+conflict with whatever it is waiting for. Measured at 6.1s for one unrelated
+insert while a single writer held an open transaction.
+
+Pinning a `REPEATABLE READ` snapshot **before** the App API ref fetch would be
+correct, since a row committing afterwards is invisible and cannot be deleted.
+It needs the psql connection held open across the App API round-trip, which the
+current one-shot pipe cannot do. Deferred on cost, not rejected on merit.
+
+What actually defends this is the ref refresh, the precondition below, and an
+operational freeze. The real window is "the row exists and its bridge is not
+written yet", and only reading the bridges addresses that. If a hard fix is ever wanted, it is
+`track_commit_timestamp = on` plus `pg_xact_commit_timestamp(xmin)`, which
+supplies the `created_at` this table lacks.
 
 ## When to run
 
@@ -370,5 +424,5 @@ Two smaller points:
   so a gap between them is a gap in which the fleet moves under the plan you
   just read.
 - Device reports create new `network` rows at a low rate (3 rows in the 21 hours
-  between two consecutive prod dumps). Those are already covered by the id
-  watermark, so they constrain nothing.
+  between two consecutive prod dumps). Nothing prevents those, and nothing needs
+  to: a row a device report creates is re-reported on the next cycle.

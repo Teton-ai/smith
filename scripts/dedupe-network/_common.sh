@@ -100,7 +100,18 @@ fetch_app_api_wifi_content() {
 }
 
 # Emitted between QUOTED heredocs so bash never expands a payload.
+#
+# psql ends COPY data at a line holding only \., before the server sees it, and
+# resumes reading the rest as psql input. CSV quoting does not protect against
+# this: ssids, passwords and serials are free text and a value containing a
+# newline can put such a line into the stream, after which the remainder runs as
+# meta-commands (\! included) with the operator's permissions. Refuse instead.
 copy_block() {
+    if printf '%s\n' "$2" | grep -qE '^\\\.[[:space:]]*$'; then
+        echo "ERROR: payload for $1 contains a COPY terminator line; refusing to continue." >&2
+        echo "       Inspect the source rows before re-running; this is not valid data." >&2
+        return 1
+    fi
     printf '\\copy %s FROM STDIN WITH (FORMAT csv)\n' "$1"
     printf '%s\n' "$2"
     printf '\\.\n'
