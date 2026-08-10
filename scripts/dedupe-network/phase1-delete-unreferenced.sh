@@ -68,7 +68,14 @@ BEGIN;
 \echo '=== EMPTY PASSWORDS NORMALIZED TO NULL ==='
 SELECT COUNT(*) AS rows_normalized FROM network WHERE password = '' AND id <= $WATERMARK;
 
-UPDATE network SET password = NULL WHERE password = '' AND id <= $WATERMARK;
+-- Grouping compares credentials->>'psk', not password (see NETWORK_CONTENT_KEY
+-- in _common.sh), so both have to move together or an old empty-string row
+-- never merges with a NULL row of the same content, in this phase or any later
+-- one. content_credentials() in route.rs never writes psk = '' for a fresh
+-- row, only {} or a real value, so dropping the key here (not nulling it)
+-- matches what a current writer would have produced.
+UPDATE network SET password = NULL, credentials = credentials - 'psk'
+WHERE password = '' AND id <= $WATERMARK;
 
 CREATE TEMP TABLE _app_api_refs (network_wifi_id int, network_smith_id int);
 \copy _app_api_refs (network_wifi_id, network_smith_id) FROM STDIN WITH (FORMAT csv)

@@ -121,11 +121,15 @@ Two details in the delete condition:
   bounded to ids that existed at that point. It is a bound on the id range, not a
   guarantee that every row created during the run is excluded; see "Races against
   the sync job" for what it does and does not cover.
-- Empty-string passwords are normalized to NULL first, so open networks compare
-  consistently across every phase. `network.password` is still written by the API
-  alongside `credentials`, so this is live, not legacy cleanup. This is scoped to
-  the same watermark, so the phase never writes to a row it would not delete, and
-  the report prints how many rows it touched.
+- Empty-string passwords are normalized to NULL first, and `credentials`'s `psk`
+  key is dropped alongside it, since grouping compares `credentials ->> 'psk'`
+  (`NETWORK_CONTENT_KEY`), not `password`; touching only `password` would leave
+  the actual comparison untouched. `network.password` is still written by the API
+  alongside `credentials`, so this is live, not legacy cleanup. Scoped to rows
+  under the watermark rather than just `_to_delete`, because a kept row left
+  unnormalized would still fail to merge in phases 2 to 4, which re-read
+  `credentials` fresh and have no normalization step of their own. The report
+  prints how many rows it touched.
 - The delete is driven from the staged `_to_delete` table rather than
   re-evaluating the condition, so the printed plan is exactly what is deleted.
   Under `READ COMMITTED` each statement takes its own snapshot, so re-evaluating
@@ -406,7 +410,7 @@ a wifi record in the App API. Measured over the bridge table: 85 bridges total,
 So the precondition is not a time of day, it is that the retry set is empty:
 
 ```bash
-psql "$APP_API_URL" -c "
+psql "<app-api-db-url>" -c "
 SELECT count(*) AS unsynced_wifis
 FROM network_wifis w
 LEFT JOIN network_smith ns ON ns.network_wifi_id = w.id
@@ -433,8 +437,18 @@ Two smaller points:
 
 Only three people create `network` rows through the dashboard or CLI, so asking
 them to hold off for the length of a run is a real freeze rather than a hope.
-Combined with an empty retry set, that leaves device reports as the only writer,
-which is the case the verification below covers.
+Combined with an empty retry set, that leaves device reports as the only writer.
+
+Device reports are a race the verification below does **not** cover: it only
+re-reads the App API bridge, and a device report never touches that table. The
+same allocation-before-commit ordering can strand a race-created row's device
+side instead, and two of its four FKs fail silently rather than raising:
+`device_configured_network.network_id` is `ON DELETE CASCADE`, so the profile
+row is deleted along with it, and `device.current_network_id` is `ON DELETE SET
+NULL`. Neither leaves anything to detect afterwards. It is tolerated rather than
+guarded because it is self-healing: the same device re-reports on its next
+cycle and recreates both. `device.network_id` and `device_network_intent` are
+`ON DELETE RESTRICT`, so those abort the delete outright instead.
 
 ## Verification
 
@@ -443,10 +457,10 @@ bridges already point at a missing Smith row, and after committing it re-reads
 the bridges and compares. Anything newly stranded is reported and the script
 exits non-zero.
 
-This is the only failure mode these scripts can produce that the plan output
-cannot show you, because it depends on what the App API did while the run was in
-flight. It is also the cheapest one to recover from, so the check matters more
-than any of the races above.
+This is the failure mode most likely to matter: an App API bridge stranding is
+easy to cause (the sync job runs every 15 minutes) and easy to fix by hand once
+seen. The device-report race under "When to run" is rarer and self-healing, so
+it is accepted rather than checked.
 
 The repair is deliberately **not** automated. Nulling a bridge is a write to a
 fleet-facing database that makes the sync job recreate a network, so the script
