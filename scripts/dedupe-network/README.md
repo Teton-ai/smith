@@ -445,7 +445,7 @@ same allocation-before-commit ordering can strand a race-created row's device
 side instead, and two of its four FKs fail silently rather than raising:
 `device_configured_network.network_id` is `ON DELETE CASCADE`, so the profile
 row is deleted along with it, and `device.current_network_id` is `ON DELETE SET
-NULL`. Neither leaves anything to detect afterwards. It is tolerated rather than
+NULL`. Neither leaves anything to detect afterward. It is tolerated rather than
 guarded because it is self-healing: the same device re-reports on its next
 cycle and recreates both. `device.network_id` and `device_network_intent` are
 `ON DELETE RESTRICT`, so those abort the delete outright instead.
