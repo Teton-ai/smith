@@ -351,6 +351,8 @@ controls most directly.
   row anything points at with its group and reference counts. It is a temp table
   rather than a view because callers scan it repeatedly and every count is a
   correlated subquery.
+- `dangling_bridges` and `verify_no_new_dangling`, the post-run check described
+  under "Verification".
 - The race mitigations below.
 
 ## Races against the sync job
@@ -385,9 +387,10 @@ correct, since a row committing afterwards is invisible and cannot be deleted.
 It needs the psql connection held open across the App API round-trip, which the
 current one-shot pipe cannot do. Deferred on cost, not rejected on merit.
 
-What actually defends this is the ref refresh, the precondition below, and an
-operational freeze. The real window is "the row exists and its bridge is not
-written yet", and only reading the bridges addresses that. If a hard fix is ever wanted, it is
+What actually defends this is the ref refresh, the precondition below, an
+operational freeze, and the post-run check under "Verification". The real window
+is "the row exists and its bridge is not written yet", and only reading the
+bridges addresses that. If a hard fix is ever wanted, it is
 `track_commit_timestamp = on` plus `pg_xact_commit_timestamp(xmin)`, which
 supplies the `created_at` this table lacks.
 
@@ -426,3 +429,35 @@ Two smaller points:
 - Device reports create new `network` rows at a low rate (3 rows in the 21 hours
   between two consecutive prod dumps). Nothing prevents those, and nothing needs
   to: a row a device report creates is re-reported on the next cycle.
+
+Only three people create `network` rows through the dashboard or CLI, so asking
+them to hold off for the length of a run is a real freeze rather than a hope.
+Combined with an empty retry set, that leaves device reports as the only writer,
+which is the case the verification below covers.
+
+## Verification
+
+Every phase checks itself. Before touching anything it records which App API
+bridges already point at a missing Smith row, and after committing it re-reads
+the bridges and compares. Anything newly stranded is reported and the script
+exits non-zero.
+
+This is the only failure mode these scripts can produce that the plan output
+cannot show you, because it depends on what the App API did while the run was in
+flight. It is also the cheapest one to recover from, so the check matters more
+than any of the races above.
+
+The repair is deliberately **not** automated. Nulling a bridge is a write to a
+fleet-facing database that makes the sync job recreate a network, so the script
+prints the statement and stops:
+
+```sql
+UPDATE network_smith SET network_smith_id = NULL WHERE network_wifi_id IN (...);
+```
+
+The record re-enters the sync job's retry set (`getUnsyncedNetworkWifis` selects
+on `network_smith_id IS NULL`) and the next pass recreates the network and
+rewrites the bridge. Check the rows are what you expect before running it.
+
+Pre-existing stranded bridges are counted and reported but never treated as a
+failure, since the run did not cause them.
