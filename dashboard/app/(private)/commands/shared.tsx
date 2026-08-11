@@ -1,5 +1,6 @@
 "use client";
 
+import { Badge } from "@teton/smith-ui";
 import { Check, Copy, X } from "lucide-react";
 import { type ReactNode, useState } from "react";
 import type { DeviceCommandResponse } from "@/app/api-client";
@@ -69,6 +70,9 @@ export const SIMPLE_COMMANDS = [
 	"CheckOTAStatus",
 	"StartOTA",
 	"TestNetwork",
+	"WifiScan",
+	"ReportNMProfiles",
+	"RunAudit",
 ] as const;
 
 // ---------------------------------------------------------------------------
@@ -87,6 +91,15 @@ export type CmdRxUpdatePackage = {
 export type CmdRxWifiConnect = {
 	WifiConnect: { stdout: string; stderr: string };
 };
+export type WifiNetwork = {
+	ssid: string | null;
+	bssid: string;
+	signal: number | null;
+	rate: number | null;
+	security: string | null;
+	channel: number | null;
+};
+export type CmdRxWifiScan = { WifiScan: { networks: WifiNetwork[] } };
 export type CmdRxCheckOTAStatus = { CheckOTAStatus: { status: string } };
 export type CmdRxTestNetwork = {
 	TestNetwork: {
@@ -442,6 +455,12 @@ export const getTxLabel = (
 			return { label: "Start OTA", mono: false };
 		case "TestNetwork":
 			return { label: "Test Network", mono: false };
+		case "WifiScan":
+			return { label: "WiFi Scan", mono: false };
+		case "ReportNMProfiles":
+			return { label: "Report NM Profiles", mono: false };
+		case "RunAudit":
+			return { label: "Run Audit", mono: false };
 		case "FreeForm": {
 			const p = (parsed.tx as CmdTxFreeForm).FreeForm;
 			return { label: p.cmd, mono: true };
@@ -732,6 +751,90 @@ export const renderRxDetail = (response: unknown) => {
 							labelClassName="text-red-400"
 						/>
 					)}
+				</div>
+			);
+		}
+		case "WifiScan": {
+			const { networks } = parsed.payload as CmdRxWifiScan["WifiScan"];
+			if (networks.length === 0) {
+				return (
+					<p className="text-sm text-gray-400 italic">No networks found.</p>
+				);
+			}
+			return (
+				<div className="overflow-x-auto">
+					<table className="min-w-full divide-y divide-gray-200">
+						<thead>
+							<tr>
+								<th
+									scope="col"
+									className="text-xs font-medium text-gray-500 uppercase tracking-wider text-left pb-2"
+								>
+									Network
+								</th>
+								<th
+									scope="col"
+									className="text-xs font-medium text-gray-500 uppercase tracking-wider px-2 pb-2"
+								>
+									Channel
+								</th>
+								<th
+									scope="col"
+									className="text-xs font-medium text-gray-500 uppercase tracking-wider px-2 pb-2 text-right"
+								>
+									Signal
+								</th>
+								<th
+									scope="col"
+									className="text-xs font-medium text-gray-500 uppercase tracking-wider px-2 pb-2 text-right"
+								>
+									Rate
+								</th>
+								<th
+									scope="col"
+									className="text-xs font-medium text-gray-500 uppercase tracking-wider pl-2 pb-2"
+								>
+									Security
+								</th>
+							</tr>
+						</thead>
+						<tbody className="divide-y divide-gray-100">
+							{networks.map((n) => (
+								<tr key={`${n.bssid}-${n.channel}`}>
+									<td className="py-2 pr-2 max-w-0 w-full">
+										<div className="flex flex-col min-w-0">
+											{n.ssid ? (
+												<span className="text-sm font-medium text-gray-900 truncate">
+													{n.ssid}
+												</span>
+											) : (
+												<span className="text-sm italic text-gray-400 truncate">
+													&lt;hidden&gt;
+												</span>
+											)}
+											<span className="text-xs text-gray-500 font-mono truncate">
+												{n.bssid}
+											</span>
+										</div>
+									</td>
+									<td className="px-2 py-2 text-xs text-gray-500 whitespace-nowrap">
+										{n.channel ?? "—"}
+									</td>
+									<td className="px-2 py-2 text-xs text-gray-500 text-right whitespace-nowrap">
+										{n.signal != null ? `${n.signal}%` : "—"}
+									</td>
+									<td className="px-2 py-2 text-xs text-gray-500 text-right whitespace-nowrap">
+										{n.rate != null ? `${n.rate} Mbps` : "—"}
+									</td>
+									<td className="pl-2 py-2 whitespace-nowrap">
+										<Badge variant="gray" pill>
+											{n.security ?? "Open"}
+										</Badge>
+									</td>
+								</tr>
+							))}
+						</tbody>
+					</table>
 				</div>
 			);
 		}
