@@ -114,11 +114,13 @@ function groupScanResults(results: WifiScanResult[]): ScanGroup[] {
 	return hidden ? [...visible, hidden] : visible;
 }
 
-type SecurityClass = "open" | "psk" | "sae" | "owe" | "enterprise";
+type SecurityClass = "open" | "wep" | "psk" | "sae" | "owe" | "enterprise";
 
 /** A scan security string can name more than one mode at once (nmcli reports
  *  transitional APs as e.g. "WPA1 WPA2"), so a group can match more than one
- *  class. */
+ *  class. WEP gets its own class: it's not WPA-PSK, and NM key-mgmt can't
+ *  distinguish it from "open" on the catalog side (see catalogSecurityClass),
+ *  so a WEP AP must never badge-match a WPA-PSK-configured network. */
 function scanSecurityClasses(security: string | null): Set<SecurityClass> {
 	if (!security) return new Set<SecurityClass>(["open"]);
 	const s = security.toUpperCase();
@@ -126,8 +128,8 @@ function scanSecurityClasses(security: string | null): Set<SecurityClass> {
 	if (s.includes("OWE")) classes.add("owe");
 	if (s.includes("802.1X") || s.includes("EAP")) classes.add("enterprise");
 	if (s.includes("SAE") || s.includes("WPA3")) classes.add("sae");
-	if (s.includes("WPA1") || s.includes("WPA2") || s.includes("WEP"))
-		classes.add("psk");
+	if (s.includes("WPA1") || s.includes("WPA2")) classes.add("psk");
+	if (s.includes("WEP")) classes.add("wep");
 	if (classes.size === 0) classes.add("open");
 	return classes;
 }
