@@ -43,6 +43,14 @@ export type CmdTxStreamLogs = {
 	StreamLogs: { session_id: string; service_name: string };
 };
 export type CmdTxStopLogStream = { StopLogStream: { session_id: string } };
+export type CmdTxGetLogs = {
+	GetLogs: {
+		unit?: string | null;
+		since?: string | null;
+		until?: string | null;
+		grep?: string | null;
+	};
+};
 
 export type SafeCommandTx =
 	| CmdTxPing
@@ -59,7 +67,8 @@ export type SafeCommandTx =
 	| CmdTxDownloadOTA
 	| CmdTxExtendedNetworkTest
 	| CmdTxStreamLogs
-	| CmdTxStopLogStream;
+	| CmdTxStopLogStream
+	| CmdTxGetLogs;
 
 // TX command variants that carry no parameters (unit variants).
 export const SIMPLE_COMMANDS = [
@@ -153,6 +162,10 @@ export type EditableCommand = {
 	payload: string;
 	rate: string;
 	duration_minutes: string;
+	unit: string;
+	since: string;
+	until: string;
+	grep: string;
 };
 
 export const emptyCommand = (variant = "Ping"): EditableCommand => ({
@@ -166,6 +179,10 @@ export const emptyCommand = (variant = "Ping"): EditableCommand => ({
 	payload: "",
 	rate: "",
 	duration_minutes: "",
+	unit: "",
+	since: "",
+	until: "",
+	grep: "",
 });
 
 // Build the SafeCommandTx shape that smithd expects from the editable form.
@@ -195,6 +212,15 @@ export function buildCommand(ec: EditableCommand): unknown {
 					duration_minutes: Number(ec.duration_minutes),
 				},
 			};
+		case "GetLogs":
+			return {
+				GetLogs: {
+					unit: ec.unit.trim() || null,
+					since: ec.since.trim() || null,
+					until: ec.until.trim() || null,
+					grep: ec.grep.trim() || null,
+				},
+			};
 		default:
 			return ec.variant;
 	}
@@ -221,6 +247,10 @@ export function parseCommand(
 		ec.rate = p.rate != null ? String(p.rate) : "";
 		ec.duration_minutes =
 			p.duration_minutes != null ? String(p.duration_minutes) : "";
+		ec.unit = (p.unit as string) ?? "";
+		ec.since = (p.since as string) ?? "";
+		ec.until = (p.until as string) ?? "";
+		ec.grep = (p.grep as string) ?? "";
 		return ec;
 	}
 	return emptyCommand();
@@ -351,6 +381,39 @@ export function CommandFields({
 					placeholder="duration (minutes)"
 					className={fieldClass}
 				/>
+			)}
+
+			{command.variant === "GetLogs" && (
+				<div className="grid grid-cols-2 gap-2">
+					<input
+						type="text"
+						value={command.unit}
+						onChange={(e) => set({ unit: e.target.value })}
+						placeholder="unit (optional, e.g. smithd)"
+						className={fieldClass}
+					/>
+					<input
+						type="text"
+						value={command.grep}
+						onChange={(e) => set({ grep: e.target.value })}
+						placeholder="grep (optional)"
+						className={fieldClass}
+					/>
+					<input
+						type="text"
+						value={command.since}
+						onChange={(e) => set({ since: e.target.value })}
+						placeholder="since (optional, e.g. 1h ago)"
+						className={fieldClass}
+					/>
+					<input
+						type="text"
+						value={command.until}
+						onChange={(e) => set({ until: e.target.value })}
+						placeholder="until (optional)"
+						className={fieldClass}
+					/>
+				</div>
 			)}
 
 			<label className="flex items-center gap-2 text-xs text-gray-600">
@@ -495,6 +558,10 @@ export const getTxLabel = (
 		}
 		case "StopLogStream":
 			return { label: "Stop Log Stream", mono: false };
+		case "GetLogs": {
+			const p = (parsed.tx as CmdTxGetLogs).GetLogs;
+			return { label: `Get Logs${p.unit ? `: ${p.unit}` : ""}`, mono: false };
+		}
 		default:
 			return { label: parsed.variant, mono: false };
 	}
@@ -688,6 +755,20 @@ export const renderTxDetail = (cmd_data: unknown) => {
 		case "StopLogStream": {
 			const p = (parsed.tx as CmdTxStopLogStream).StopLogStream;
 			return <KVTable rows={[{ key: "Session ID", value: p.session_id }]} />;
+		}
+		case "GetLogs": {
+			const p = (parsed.tx as CmdTxGetLogs).GetLogs;
+			const rows = [
+				p.unit ? { key: "Unit", value: p.unit } : null,
+				p.since ? { key: "Since", value: p.since } : null,
+				p.until ? { key: "Until", value: p.until } : null,
+				p.grep ? { key: "Grep", value: p.grep } : null,
+			].filter(Boolean) as { key: string; value: string }[];
+			return rows.length > 0 ? (
+				<KVTable rows={rows} />
+			) : (
+				<p className="text-sm text-gray-400 italic">No filters</p>
+			);
 		}
 		default:
 			return (
