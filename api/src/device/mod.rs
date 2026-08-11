@@ -185,6 +185,7 @@ pub struct ConfiguredNetwork {
     pub ssid: Option<String>,
     pub name: String,
     pub password: Option<String>,
+    pub security_type: Option<String>,
     pub is_active: bool,
     pub updated_at: DateTime<Utc>,
 }
@@ -209,6 +210,7 @@ pub struct DeviceNetworkIntent {
     pub ssid: Option<String>,
     pub name: String,
     pub network_type: String,
+    pub security_type: Option<String>,
     pub priority: i32,
     pub managed_by: String,
     pub created_at: DateTime<Utc>,

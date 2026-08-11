@@ -2878,7 +2878,7 @@ pub async fn get_configured_networks_for_device(
 
     let rows = sqlx::query!(
         r#"
-        SELECT dcn.network_id, dcn.profile_name, n.ssid, n.name, n.password, dcn.is_active, dcn.updated_at
+        SELECT dcn.network_id, dcn.profile_name, n.ssid, n.name, n.password, n.security_type, dcn.is_active, dcn.updated_at
         FROM device_configured_network dcn
         JOIN network n ON n.id = dcn.network_id
         WHERE dcn.device_id = $1
@@ -2901,6 +2901,7 @@ pub async fn get_configured_networks_for_device(
             ssid: r.ssid,
             name: r.name,
             password: r.password,
+            security_type: r.security_type,
             is_active: r.is_active,
             updated_at: r.updated_at,
         })
@@ -3048,7 +3049,8 @@ pub async fn get_device_intent(
             dni.updated_at,
             n.ssid,
             n.name,
-            n.network_type::TEXT as "network_type!"
+            n.network_type::TEXT as "network_type!",
+            n.security_type
         FROM device_network_intent dni
         JOIN network n ON n.id = dni.network_id
         WHERE dni.device_id = $1
@@ -3188,7 +3190,8 @@ pub async fn create_device_intent(
             dni.updated_at,
             n.ssid,
             n.name,
-            n.network_type::TEXT as "network_type!"
+            n.network_type::TEXT as "network_type!",
+            n.security_type
         FROM device_network_intent dni
         JOIN network n ON n.id = dni.network_id
         WHERE dni.id = $1
@@ -3295,7 +3298,8 @@ pub async fn update_device_intent(
             dni.updated_at,
             n.ssid,
             n.name,
-            n.network_type::TEXT as "network_type!"
+            n.network_type::TEXT as "network_type!",
+            n.security_type
         FROM device_network_intent dni
         JOIN network n ON n.id = dni.network_id
         WHERE dni.id = $1
