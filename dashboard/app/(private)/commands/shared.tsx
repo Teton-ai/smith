@@ -84,6 +84,21 @@ export const SIMPLE_COMMANDS = [
 	"RunAudit",
 ] as const;
 
+// Curated subset of SIMPLE_COMMANDS/COMMAND_OPTIONS safe to dispatch in bulk to
+// many devices at once from the devices-page modal. Deliberately excludes
+// anything session-based, parameterized, or that can brick connectivity/flash
+// a device (UpdateNetwork, StartOTA, DownloadOTA, OpenTunnel, StreamLogs, ...).
+export const BULK_COMMAND_OPTIONS = [
+	"WifiScan",
+	"Ping",
+	"TestNetwork",
+	"ExtendedNetworkTest",
+	"RunAudit",
+	"ReportNMProfiles",
+	"GetLogs",
+	"FreeForm",
+] as const;
+
 // ---------------------------------------------------------------------------
 // SafeCommandRx types (mirrors smithd/src/utils/schema.rs)
 // ---------------------------------------------------------------------------
