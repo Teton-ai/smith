@@ -1,6 +1,6 @@
 "use client";
 
-import { Check, Copy } from "lucide-react";
+import { Check, Copy, X } from "lucide-react";
 import { type ReactNode, useState } from "react";
 import type { DeviceCommandResponse } from "@/app/api-client";
 
@@ -114,6 +114,283 @@ export type CmdRxLogStreamStopped = {
 export type CmdRxLogStreamError = {
 	LogStreamError: { session_id: string; error: string };
 };
+
+// ---------------------------------------------------------------------------
+// Editable command builder (used by the recipes page and the devices bulk-
+// command modal to build a SafeCommandTx from a form)
+// ---------------------------------------------------------------------------
+
+// Full set of command variants a recipe can store.
+export const COMMAND_OPTIONS = [
+	...SIMPLE_COMMANDS,
+	"FreeForm",
+	"OpenTunnel",
+	"DownloadOTA",
+	"ExtendedNetworkTest",
+];
+
+export type EditableCommand = {
+	variant: string;
+	continue_on_error: boolean;
+	cmd: string;
+	port: string;
+	user: string;
+	pub_key: string;
+	tools: string;
+	payload: string;
+	rate: string;
+	duration_minutes: string;
+};
+
+export const emptyCommand = (variant = "Ping"): EditableCommand => ({
+	variant,
+	continue_on_error: false,
+	cmd: "",
+	port: "",
+	user: "",
+	pub_key: "",
+	tools: "",
+	payload: "",
+	rate: "",
+	duration_minutes: "",
+});
+
+// Build the SafeCommandTx shape that smithd expects from the editable form.
+export function buildCommand(ec: EditableCommand): unknown {
+	switch (ec.variant) {
+		case "FreeForm":
+			return { FreeForm: { cmd: ec.cmd } };
+		case "OpenTunnel":
+			return {
+				OpenTunnel: {
+					port: ec.port.trim() ? Number(ec.port) : null,
+					user: ec.user.trim() || null,
+					pub_key: ec.pub_key.trim() || null,
+				},
+			};
+		case "DownloadOTA":
+			return {
+				DownloadOTA: {
+					tools: ec.tools,
+					payload: ec.payload,
+					rate: Number(ec.rate),
+				},
+			};
+		case "ExtendedNetworkTest":
+			return {
+				ExtendedNetworkTest: {
+					duration_minutes: Number(ec.duration_minutes),
+				},
+			};
+		default:
+			return ec.variant;
+	}
+}
+
+// Parse a stored command back into the editable form (for editing a recipe).
+export function parseCommand(
+	cmd: unknown,
+	continue_on_error: boolean,
+): EditableCommand {
+	if (typeof cmd === "string")
+		return { ...emptyCommand(cmd), continue_on_error };
+	if (cmd && typeof cmd === "object") {
+		const variant = Object.keys(cmd)[0];
+		const p = (cmd as Record<string, Record<string, unknown>>)[variant] ?? {};
+		const ec = emptyCommand(variant);
+		ec.continue_on_error = continue_on_error;
+		ec.cmd = (p.cmd as string) ?? "";
+		ec.port = p.port != null ? String(p.port) : "";
+		ec.user = (p.user as string) ?? "";
+		ec.pub_key = (p.pub_key as string) ?? "";
+		ec.tools = (p.tools as string) ?? "";
+		ec.payload = (p.payload as string) ?? "";
+		ec.rate = p.rate != null ? String(p.rate) : "";
+		ec.duration_minutes =
+			p.duration_minutes != null ? String(p.duration_minutes) : "";
+		return ec;
+	}
+	return emptyCommand();
+}
+
+const isFiniteNumber = (v: string): boolean =>
+	v.trim().length > 0 && Number.isFinite(Number(v));
+
+export function commandIsValid(ec: EditableCommand): boolean {
+	switch (ec.variant) {
+		case "FreeForm":
+			return ec.cmd.trim().length > 0;
+		case "DownloadOTA":
+			return (
+				ec.tools.trim().length > 0 &&
+				ec.payload.trim().length > 0 &&
+				isFiniteNumber(ec.rate)
+			);
+		case "ExtendedNetworkTest":
+			return (
+				isFiniteNumber(ec.duration_minutes) && Number(ec.duration_minutes) > 0
+			);
+		default:
+			return true;
+	}
+}
+
+const fieldClass =
+	"w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-gray-900 placeholder-gray-400 text-sm";
+
+// Variant picker + variant-specific inputs + continue-on-error checkbox. No
+// list-row chrome (index, remove button) so it can be used standalone by
+// callers that only ever hold one command, like the devices bulk-command modal.
+export function CommandFields({
+	command,
+	options,
+	onChange,
+}: {
+	command: EditableCommand;
+	options: readonly string[];
+	onChange: (next: EditableCommand) => void;
+}) {
+	const set = (patch: Partial<EditableCommand>) =>
+		onChange({ ...command, ...patch });
+
+	return (
+		<div className="space-y-3">
+			<select
+				value={command.variant}
+				onChange={(e) => set({ variant: e.target.value })}
+				className={fieldClass}
+			>
+				{[...options].sort().map((opt) => (
+					<option key={opt} value={opt}>
+						{opt}
+					</option>
+				))}
+			</select>
+
+			{command.variant === "FreeForm" && (
+				<input
+					type="text"
+					value={command.cmd}
+					onChange={(e) => set({ cmd: e.target.value })}
+					placeholder="e.g., ls -la /var/log"
+					className={`${fieldClass} font-mono`}
+				/>
+			)}
+
+			{command.variant === "OpenTunnel" && (
+				<div className="grid grid-cols-3 gap-2">
+					<input
+						type="number"
+						value={command.port}
+						onChange={(e) => set({ port: e.target.value })}
+						placeholder="port (optional)"
+						className={fieldClass}
+					/>
+					<input
+						type="text"
+						value={command.user}
+						onChange={(e) => set({ user: e.target.value })}
+						placeholder="user (optional)"
+						className={fieldClass}
+					/>
+					<input
+						type="text"
+						value={command.pub_key}
+						onChange={(e) => set({ pub_key: e.target.value })}
+						placeholder="public key (optional)"
+						className={fieldClass}
+					/>
+				</div>
+			)}
+
+			{command.variant === "DownloadOTA" && (
+				<div className="grid grid-cols-3 gap-2">
+					<input
+						type="text"
+						value={command.tools}
+						onChange={(e) => set({ tools: e.target.value })}
+						placeholder="tools"
+						className={fieldClass}
+					/>
+					<input
+						type="text"
+						value={command.payload}
+						onChange={(e) => set({ payload: e.target.value })}
+						placeholder="payload"
+						className={fieldClass}
+					/>
+					<input
+						type="number"
+						step="any"
+						value={command.rate}
+						onChange={(e) => set({ rate: e.target.value })}
+						placeholder="rate"
+						className={fieldClass}
+					/>
+				</div>
+			)}
+
+			{command.variant === "ExtendedNetworkTest" && (
+				<input
+					type="number"
+					value={command.duration_minutes}
+					onChange={(e) => set({ duration_minutes: e.target.value })}
+					placeholder="duration (minutes)"
+					className={fieldClass}
+				/>
+			)}
+
+			<label className="flex items-center gap-2 text-xs text-gray-600">
+				<input
+					type="checkbox"
+					checked={command.continue_on_error}
+					onChange={(e) => set({ continue_on_error: e.target.checked })}
+				/>
+				Continue running the bundle if this command fails
+			</label>
+		</div>
+	);
+}
+
+// One editable command inside a repeatable list (recipes page): adds the
+// index label and a remove button around CommandFields.
+export function CommandRow({
+	command,
+	index,
+	onChange,
+	onRemove,
+}: {
+	command: EditableCommand;
+	index: number;
+	onChange: (next: EditableCommand) => void;
+	onRemove: () => void;
+}) {
+	return (
+		<div className="border border-gray-200/80 rounded-lg p-3 space-y-3">
+			<div className="flex items-start gap-2">
+				<span className="text-xs font-medium text-gray-400 w-5 mt-2">
+					{index + 1}.
+				</span>
+				<div className="flex-1">
+					<CommandFields
+						command={command}
+						options={COMMAND_OPTIONS}
+						onChange={onChange}
+					/>
+				</div>
+				<button
+					type="button"
+					onClick={onRemove}
+					aria-label="Remove command"
+					className="text-gray-400 hover:text-red-600 cursor-pointer p-1 mt-1"
+					title="Remove command"
+				>
+					<X className="w-4 h-4" />
+				</button>
+			</div>
+		</div>
+	);
+}
 
 // ---------------------------------------------------------------------------
 // Parsers
