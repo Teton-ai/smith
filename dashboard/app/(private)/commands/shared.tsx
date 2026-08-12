@@ -86,10 +86,12 @@ export const SIMPLE_COMMANDS = [
 	"RunAudit",
 ] as const;
 
-// Curated subset of SIMPLE_COMMANDS/COMMAND_OPTIONS safe to dispatch in bulk to
-// many devices at once from the devices-page modal. Deliberately excludes
-// anything session-based, parameterized, or that can brick connectivity/flash
-// a device (UpdateNetwork, StartOTA, DownloadOTA, OpenTunnel, StreamLogs, ...).
+// Curated subset of SIMPLE_COMMANDS/COMMAND_OPTIONS offered in the devices-page
+// bulk-dispatch modal. A UI curation, not a safety boundary: ExtendedNetworkTest
+// and GetLogs take parameters, and FreeForm can run arbitrary shell commands
+// (gated server-side by the `freeform` permission, not by this list). Excludes
+// anything session-based or that can brick connectivity/flash a device
+// (UpdateNetwork, StartOTA, DownloadOTA, OpenTunnel, StreamLogs, ...).
 export const BULK_COMMAND_OPTIONS = [
 	"WifiScan",
 	"Ping",
@@ -166,6 +168,7 @@ export const COMMAND_OPTIONS = [
 	"OpenTunnel",
 	"DownloadOTA",
 	"ExtendedNetworkTest",
+	"GetLogs",
 ];
 
 export type EditableCommand = {
@@ -318,6 +321,7 @@ export function CommandFields({
 			<select
 				value={command.variant}
 				onChange={(e) => set({ variant: e.target.value })}
+				aria-label="Command variant"
 				className={fieldClass}
 			>
 				{[...options].sort().map((opt) => (
@@ -1007,7 +1011,9 @@ export const renderRxDetail = (response: unknown) => {
 			);
 		}
 		case "WifiScan": {
-			const { networks } = parsed.payload as CmdRxWifiScan["WifiScan"];
+			const networks =
+				(parsed.payload as CmdRxWifiScan["WifiScan"] | undefined)?.networks ??
+				[];
 			return <WifiScanRxTable networks={networks} />;
 		}
 		case "Restart": {
