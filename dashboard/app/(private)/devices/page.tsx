@@ -1196,8 +1196,9 @@ const DevicesPage = () => {
 							<div>Labels</div>
 							<div>Location</div>
 							<div className="flex items-center gap-2">
-								<span>Reachability</span>
+								<label htmlFor="reachability-range">Reachability</label>
 								<Select
+									id="reachability-range"
 									value={reachabilityRange}
 									onChange={(v) => setReachabilityRange(v as UptimeRange)}
 									className="w-auto px-1.5 py-0.5 text-[11px] normal-case tracking-normal"
