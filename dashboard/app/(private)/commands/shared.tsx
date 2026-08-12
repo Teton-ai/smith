@@ -1,8 +1,11 @@
 "use client";
 
-import { Check, Copy } from "lucide-react";
-import { type ReactNode, useState } from "react";
+import { Badge } from "@teton/smith-ui";
+import { Check, ChevronDown, ChevronRight, Copy, X } from "lucide-react";
+import { Fragment, type ReactNode, useMemo, useState } from "react";
 import type { DeviceCommandResponse } from "@/app/api-client";
+import { Tooltip } from "@/app/components/tooltip";
+import { deriveBand, groupScanResults, SignalBar } from "@/app/utils/wifiScan";
 
 // ---------------------------------------------------------------------------
 // SafeCommandTx types (mirrors smithd/src/utils/schema.rs)
@@ -42,6 +45,14 @@ export type CmdTxStreamLogs = {
 	StreamLogs: { session_id: string; service_name: string };
 };
 export type CmdTxStopLogStream = { StopLogStream: { session_id: string } };
+export type CmdTxGetLogs = {
+	GetLogs: {
+		unit?: string | null;
+		since?: string | null;
+		until?: string | null;
+		grep?: string | null;
+	};
+};
 
 export type SafeCommandTx =
 	| CmdTxPing
@@ -58,7 +69,8 @@ export type SafeCommandTx =
 	| CmdTxDownloadOTA
 	| CmdTxExtendedNetworkTest
 	| CmdTxStreamLogs
-	| CmdTxStopLogStream;
+	| CmdTxStopLogStream
+	| CmdTxGetLogs;
 
 // TX command variants that carry no parameters (unit variants).
 export const SIMPLE_COMMANDS = [
@@ -69,6 +81,26 @@ export const SIMPLE_COMMANDS = [
 	"CheckOTAStatus",
 	"StartOTA",
 	"TestNetwork",
+	"WifiScan",
+	"ReportNMProfiles",
+	"RunAudit",
+] as const;
+
+// Curated subset of SIMPLE_COMMANDS/COMMAND_OPTIONS offered in the devices-page
+// bulk-dispatch modal. A UI curation, not a safety boundary: ExtendedNetworkTest
+// and GetLogs take parameters, and FreeForm can run arbitrary shell commands
+// (gated server-side by the `freeform` permission, not by this list). Excludes
+// anything session-based or that can brick connectivity/flash a device
+// (UpdateNetwork, StartOTA, DownloadOTA, OpenTunnel, StreamLogs, ...).
+export const BULK_COMMAND_OPTIONS = [
+	"WifiScan",
+	"Ping",
+	"TestNetwork",
+	"ExtendedNetworkTest",
+	"RunAudit",
+	"ReportNMProfiles",
+	"GetLogs",
+	"FreeForm",
 ] as const;
 
 // ---------------------------------------------------------------------------
@@ -87,6 +119,15 @@ export type CmdRxUpdatePackage = {
 export type CmdRxWifiConnect = {
 	WifiConnect: { stdout: string; stderr: string };
 };
+export type WifiNetwork = {
+	ssid: string | null;
+	bssid: string;
+	signal: number | null;
+	rate: number | null;
+	security: string | null;
+	channel: number | null;
+};
+export type CmdRxWifiScan = { WifiScan: { networks: WifiNetwork[] } };
 export type CmdRxCheckOTAStatus = { CheckOTAStatus: { status: string } };
 export type CmdRxTestNetwork = {
 	TestNetwork: {
@@ -114,6 +155,339 @@ export type CmdRxLogStreamStopped = {
 export type CmdRxLogStreamError = {
 	LogStreamError: { session_id: string; error: string };
 };
+
+// ---------------------------------------------------------------------------
+// Editable command builder (used by the recipes page and the devices bulk-
+// command modal to build a SafeCommandTx from a form)
+// ---------------------------------------------------------------------------
+
+// Full set of command variants a recipe can store.
+export const COMMAND_OPTIONS = [
+	...SIMPLE_COMMANDS,
+	"FreeForm",
+	"OpenTunnel",
+	"DownloadOTA",
+	"ExtendedNetworkTest",
+	"GetLogs",
+];
+
+export type EditableCommand = {
+	variant: string;
+	continue_on_error: boolean;
+	cmd: string;
+	port: string;
+	user: string;
+	pub_key: string;
+	tools: string;
+	payload: string;
+	rate: string;
+	duration_minutes: string;
+	unit: string;
+	since: string;
+	until: string;
+	grep: string;
+};
+
+export const emptyCommand = (variant = "Ping"): EditableCommand => ({
+	variant,
+	continue_on_error: false,
+	cmd: "",
+	port: "",
+	user: "",
+	pub_key: "",
+	tools: "",
+	payload: "",
+	rate: "",
+	duration_minutes: "",
+	unit: "",
+	since: "",
+	until: "",
+	grep: "",
+});
+
+// Build the SafeCommandTx shape that smithd expects from the editable form.
+export function buildCommand(ec: EditableCommand): unknown {
+	switch (ec.variant) {
+		case "FreeForm":
+			return { FreeForm: { cmd: ec.cmd } };
+		case "OpenTunnel":
+			return {
+				OpenTunnel: {
+					port: ec.port.trim() ? Number(ec.port) : null,
+					user: ec.user.trim() || null,
+					pub_key: ec.pub_key.trim() || null,
+				},
+			};
+		case "DownloadOTA":
+			return {
+				DownloadOTA: {
+					tools: ec.tools,
+					payload: ec.payload,
+					rate: Number(ec.rate),
+				},
+			};
+		case "ExtendedNetworkTest":
+			return {
+				ExtendedNetworkTest: {
+					duration_minutes: Number(ec.duration_minutes),
+				},
+			};
+		case "GetLogs":
+			return {
+				GetLogs: {
+					unit: ec.unit.trim() || null,
+					since: ec.since.trim() || null,
+					until: ec.until.trim() || null,
+					grep: ec.grep.trim() || null,
+				},
+			};
+		default:
+			return ec.variant;
+	}
+}
+
+// Parse a stored command back into the editable form (for editing a recipe).
+export function parseCommand(
+	cmd: unknown,
+	continue_on_error: boolean,
+): EditableCommand {
+	if (typeof cmd === "string")
+		return { ...emptyCommand(cmd), continue_on_error };
+	if (cmd && typeof cmd === "object") {
+		const variant = Object.keys(cmd)[0];
+		const p = (cmd as Record<string, Record<string, unknown>>)[variant] ?? {};
+		const ec = emptyCommand(variant);
+		ec.continue_on_error = continue_on_error;
+		ec.cmd = (p.cmd as string) ?? "";
+		ec.port = p.port != null ? String(p.port) : "";
+		ec.user = (p.user as string) ?? "";
+		ec.pub_key = (p.pub_key as string) ?? "";
+		ec.tools = (p.tools as string) ?? "";
+		ec.payload = (p.payload as string) ?? "";
+		ec.rate = p.rate != null ? String(p.rate) : "";
+		ec.duration_minutes =
+			p.duration_minutes != null ? String(p.duration_minutes) : "";
+		ec.unit = (p.unit as string) ?? "";
+		ec.since = (p.since as string) ?? "";
+		ec.until = (p.until as string) ?? "";
+		ec.grep = (p.grep as string) ?? "";
+		return ec;
+	}
+	return emptyCommand();
+}
+
+const isFiniteNumber = (v: string): boolean =>
+	v.trim().length > 0 && Number.isFinite(Number(v));
+
+export function commandIsValid(ec: EditableCommand): boolean {
+	switch (ec.variant) {
+		case "FreeForm":
+			return ec.cmd.trim().length > 0;
+		case "DownloadOTA":
+			return (
+				ec.tools.trim().length > 0 &&
+				ec.payload.trim().length > 0 &&
+				isFiniteNumber(ec.rate)
+			);
+		case "ExtendedNetworkTest":
+			return (
+				isFiniteNumber(ec.duration_minutes) && Number(ec.duration_minutes) > 0
+			);
+		default:
+			return true;
+	}
+}
+
+const fieldClass =
+	"w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-gray-900 placeholder-gray-400 text-sm";
+
+// Variant picker + variant-specific inputs + continue-on-error checkbox. No
+// list-row chrome (index, remove button) so it can be used standalone by
+// callers that only ever hold one command, like the devices bulk-command modal.
+export function CommandFields({
+	command,
+	options,
+	onChange,
+}: {
+	command: EditableCommand;
+	options: readonly string[];
+	onChange: (next: EditableCommand) => void;
+}) {
+	const set = (patch: Partial<EditableCommand>) =>
+		onChange({ ...command, ...patch });
+
+	return (
+		<div className="space-y-3">
+			<select
+				value={command.variant}
+				onChange={(e) => set({ variant: e.target.value })}
+				aria-label="Command variant"
+				className={fieldClass}
+			>
+				{[...options].sort().map((opt) => (
+					<option key={opt} value={opt}>
+						{opt}
+					</option>
+				))}
+			</select>
+
+			{command.variant === "FreeForm" && (
+				<input
+					type="text"
+					value={command.cmd}
+					onChange={(e) => set({ cmd: e.target.value })}
+					placeholder="e.g., ls -la /var/log"
+					className={`${fieldClass} font-mono`}
+				/>
+			)}
+
+			{command.variant === "OpenTunnel" && (
+				<div className="grid grid-cols-3 gap-2">
+					<input
+						type="number"
+						value={command.port}
+						onChange={(e) => set({ port: e.target.value })}
+						placeholder="port (optional)"
+						className={fieldClass}
+					/>
+					<input
+						type="text"
+						value={command.user}
+						onChange={(e) => set({ user: e.target.value })}
+						placeholder="user (optional)"
+						className={fieldClass}
+					/>
+					<input
+						type="text"
+						value={command.pub_key}
+						onChange={(e) => set({ pub_key: e.target.value })}
+						placeholder="public key (optional)"
+						className={fieldClass}
+					/>
+				</div>
+			)}
+
+			{command.variant === "DownloadOTA" && (
+				<div className="grid grid-cols-3 gap-2">
+					<input
+						type="text"
+						value={command.tools}
+						onChange={(e) => set({ tools: e.target.value })}
+						placeholder="tools"
+						className={fieldClass}
+					/>
+					<input
+						type="text"
+						value={command.payload}
+						onChange={(e) => set({ payload: e.target.value })}
+						placeholder="payload"
+						className={fieldClass}
+					/>
+					<input
+						type="number"
+						step="any"
+						value={command.rate}
+						onChange={(e) => set({ rate: e.target.value })}
+						placeholder="rate"
+						className={fieldClass}
+					/>
+				</div>
+			)}
+
+			{command.variant === "ExtendedNetworkTest" && (
+				<input
+					type="number"
+					value={command.duration_minutes}
+					onChange={(e) => set({ duration_minutes: e.target.value })}
+					placeholder="duration (minutes)"
+					className={fieldClass}
+				/>
+			)}
+
+			{command.variant === "GetLogs" && (
+				<div className="grid grid-cols-2 gap-2">
+					<input
+						type="text"
+						value={command.unit}
+						onChange={(e) => set({ unit: e.target.value })}
+						placeholder="unit (optional, e.g. smithd)"
+						className={fieldClass}
+					/>
+					<input
+						type="text"
+						value={command.grep}
+						onChange={(e) => set({ grep: e.target.value })}
+						placeholder="grep (optional)"
+						className={fieldClass}
+					/>
+					<input
+						type="text"
+						value={command.since}
+						onChange={(e) => set({ since: e.target.value })}
+						placeholder="since (optional, e.g. 1h ago)"
+						className={fieldClass}
+					/>
+					<input
+						type="text"
+						value={command.until}
+						onChange={(e) => set({ until: e.target.value })}
+						placeholder="until (optional)"
+						className={fieldClass}
+					/>
+				</div>
+			)}
+
+			<label className="flex items-center gap-2 text-xs text-gray-600">
+				<input
+					type="checkbox"
+					checked={command.continue_on_error}
+					onChange={(e) => set({ continue_on_error: e.target.checked })}
+				/>
+				Continue running the bundle if this command fails
+			</label>
+		</div>
+	);
+}
+
+// One editable command inside a repeatable list (recipes page): adds the
+// index label and a remove button around CommandFields.
+export function CommandRow({
+	command,
+	index,
+	onChange,
+	onRemove,
+}: {
+	command: EditableCommand;
+	index: number;
+	onChange: (next: EditableCommand) => void;
+	onRemove: () => void;
+}) {
+	return (
+		<div className="border border-gray-200/80 rounded-lg p-3 space-y-3">
+			<div className="flex items-start gap-2">
+				<span className="text-xs font-medium text-gray-400 w-5 mt-2">
+					{index + 1}.
+				</span>
+				<div className="flex-1">
+					<CommandFields
+						command={command}
+						options={COMMAND_OPTIONS}
+						onChange={onChange}
+					/>
+				</div>
+				<button
+					type="button"
+					onClick={onRemove}
+					aria-label="Remove command"
+					className="text-gray-400 hover:text-red-600 cursor-pointer p-1 mt-1"
+					title="Remove command"
+				>
+					<X className="w-4 h-4" />
+				</button>
+			</div>
+		</div>
+	);
+}
 
 // ---------------------------------------------------------------------------
 // Parsers
@@ -165,6 +539,12 @@ export const getTxLabel = (
 			return { label: "Start OTA", mono: false };
 		case "TestNetwork":
 			return { label: "Test Network", mono: false };
+		case "WifiScan":
+			return { label: "WiFi Scan", mono: false };
+		case "ReportNMProfiles":
+			return { label: "Report NM Profiles", mono: false };
+		case "RunAudit":
+			return { label: "Run Audit", mono: false };
 		case "FreeForm": {
 			const p = (parsed.tx as CmdTxFreeForm).FreeForm;
 			return { label: p.cmd, mono: true };
@@ -199,6 +579,10 @@ export const getTxLabel = (
 		}
 		case "StopLogStream":
 			return { label: "Stop Log Stream", mono: false };
+		case "GetLogs": {
+			const p = (parsed.tx as CmdTxGetLogs).GetLogs;
+			return { label: `Get Logs${p.unit ? `: ${p.unit}` : ""}`, mono: false };
+		}
 		default:
 			return { label: parsed.variant, mono: false };
 	}
@@ -307,6 +691,160 @@ export const KVTable = ({
 	</dl>
 );
 
+// Groups a WifiScan response the same way the device Network page groups its
+// persisted scan (dashboard/app/utils/wifiScan.ts): by SSID+security, best
+// signal first, hidden APs collapsed into one group last. No relationship
+// badges (Active/Configured/In intent) here — those need the device's
+// configured profiles and intent, which aren't available in this context and
+// a bundle response can cover many different devices at once.
+const WifiScanRxTable = ({ networks }: { networks: WifiNetwork[] }) => {
+	const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
+
+	const groups = useMemo(
+		() =>
+			groupScanResults(
+				networks.map((n) => ({ ...n, band: deriveBand(n.channel) })),
+			),
+		[networks],
+	);
+
+	if (networks.length === 0) {
+		return <p className="text-sm text-gray-400 italic">No networks found.</p>;
+	}
+
+	const toggleGroup = (key: string) =>
+		setExpandedGroups((prev) => {
+			const next = new Set(prev);
+			if (next.has(key)) next.delete(key);
+			else next.add(key);
+			return next;
+		});
+
+	return (
+		<div className="overflow-x-auto">
+			<table className="min-w-full divide-y divide-gray-200">
+				<thead>
+					<tr>
+						<th
+							scope="col"
+							className="text-xs font-medium text-gray-500 uppercase tracking-wider text-left pb-2"
+						>
+							Network
+						</th>
+						<th
+							scope="col"
+							className="text-xs font-medium text-gray-500 uppercase tracking-wider px-2 pb-2"
+						>
+							Signal
+						</th>
+						<th
+							scope="col"
+							className="text-xs font-medium text-gray-500 uppercase tracking-wider px-2 pb-2 text-right"
+						>
+							APs
+						</th>
+						<th
+							scope="col"
+							className="text-xs font-medium text-gray-500 uppercase tracking-wider px-2 pb-2"
+						>
+							Bands
+						</th>
+						<th
+							scope="col"
+							className="text-xs font-medium text-gray-500 uppercase tracking-wider pl-2 pb-2"
+						>
+							Security
+						</th>
+					</tr>
+				</thead>
+				<tbody className="divide-y divide-gray-100">
+					{groups.map((group) => {
+						const hidden = group.ssid == null;
+						const expanded = expandedGroups.has(group.key);
+						return (
+							<Fragment key={group.key}>
+								<tr>
+									<td className="py-2 pr-2 max-w-0 w-full">
+										<button
+											type="button"
+											onClick={() => toggleGroup(group.key)}
+											aria-expanded={expanded}
+											aria-label={`${expanded ? "Collapse" : "Expand"} ${
+												hidden ? "hidden networks" : group.ssid
+											}`}
+											className="flex items-center gap-1.5 min-w-0 w-full text-left cursor-pointer"
+										>
+											{expanded ? (
+												<ChevronDown className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
+											) : (
+												<ChevronRight className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
+											)}
+											{hidden ? (
+												<span className="text-sm italic text-gray-500 truncate">
+													{group.aps.length} hidden AP
+													{group.aps.length === 1 ? "" : "s"} seen
+												</span>
+											) : (
+												<span className="text-sm font-medium text-gray-900 truncate">
+													{group.ssid}
+												</span>
+											)}
+										</button>
+									</td>
+									<td className="px-2 py-2 text-center whitespace-nowrap">
+										<SignalBar value={group.bestSignal} />
+									</td>
+									<td className="px-2 py-2 text-xs text-gray-500 text-right whitespace-nowrap tabular-nums">
+										×{group.aps.length}
+									</td>
+									<td className="px-2 py-2 whitespace-nowrap">
+										<span className="inline-flex gap-1">
+											{group.bands.map((band) => (
+												<Badge key={band} variant="gray">
+													{band}
+												</Badge>
+											))}
+										</span>
+									</td>
+									<td className="pl-2 py-2 whitespace-nowrap">
+										{!hidden && (
+											<Badge variant="gray" pill>
+												{group.security ?? "Open"}
+											</Badge>
+										)}
+									</td>
+								</tr>
+								{expanded &&
+									group.aps.map((ap) => (
+										<tr key={ap.bssid} className="bg-gray-50">
+											<td className="py-1.5 pr-2 pl-8 text-xs font-mono text-gray-500 whitespace-nowrap">
+												{ap.bssid}
+											</td>
+											<td className="px-2 py-1.5 text-center whitespace-nowrap">
+												<SignalBar value={ap.signal} />
+											</td>
+											<td />
+											<td className="px-2 py-1.5 text-xs text-gray-500 whitespace-nowrap">
+												<Tooltip content={`Channel ${ap.channel ?? "—"}`}>
+													<span className="border-b border-dotted border-gray-500 cursor-default">
+														{ap.band ?? "—"}
+													</span>
+												</Tooltip>
+											</td>
+											<td className="pl-2 py-1.5 text-right text-xs text-gray-500 tabular-nums whitespace-nowrap">
+												{ap.rate != null ? `${ap.rate} Mbps` : "—"}
+											</td>
+										</tr>
+									))}
+							</Fragment>
+						);
+					})}
+				</tbody>
+			</table>
+		</div>
+	);
+};
+
 // ---------------------------------------------------------------------------
 // TX detail renderer
 // ---------------------------------------------------------------------------
@@ -393,6 +931,20 @@ export const renderTxDetail = (cmd_data: unknown) => {
 			const p = (parsed.tx as CmdTxStopLogStream).StopLogStream;
 			return <KVTable rows={[{ key: "Session ID", value: p.session_id }]} />;
 		}
+		case "GetLogs": {
+			const p = (parsed.tx as CmdTxGetLogs).GetLogs;
+			const rows = [
+				p.unit ? { key: "Unit", value: p.unit } : null,
+				p.since ? { key: "Since", value: p.since } : null,
+				p.until ? { key: "Until", value: p.until } : null,
+				p.grep ? { key: "Grep", value: p.grep } : null,
+			].filter(Boolean) as { key: string; value: string }[];
+			return rows.length > 0 ? (
+				<KVTable rows={rows} />
+			) : (
+				<p className="text-sm text-gray-400 italic">No filters</p>
+			);
+		}
 		default:
 			return (
 				<CodeBlock
@@ -457,6 +1009,12 @@ export const renderRxDetail = (response: unknown) => {
 					)}
 				</div>
 			);
+		}
+		case "WifiScan": {
+			const networks =
+				(parsed.payload as CmdRxWifiScan["WifiScan"] | undefined)?.networks ??
+				[];
+			return <WifiScanRxTable networks={networks} />;
 		}
 		case "Restart": {
 			const p = parsed.payload as CmdRxRestart["Restart"];
