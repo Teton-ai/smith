@@ -211,6 +211,11 @@ pub(crate) async fn execute_report_nm_profiles(id: i32) -> SafeCommandResponse {
 
 const WIFI_SCAN_FIELDS: usize = 6;
 
+// Directed probes are sequential nmcli calls (60s timeout each); cap keeps a scan
+// bounded (~5 min worst case) instead of growing with however many hidden
+// profiles a device has accumulated.
+const MAX_HIDDEN_PROBES: usize = 5;
+
 pub(crate) async fn execute_wifi_scan(id: i32) -> SafeCommandResponse {
     let mut cmd = Command::new("nmcli");
     cmd.args([
@@ -227,7 +232,10 @@ pub(crate) async fn execute_wifi_scan(id: i32) -> SafeCommandResponse {
     match execute_nmcli_command(cmd).await {
         Ok(output) if output.status.success() => {
             let stdout = String::from_utf8_lossy(&output.stdout);
-            let networks = stdout.lines().filter_map(parse_wifi_scan_line).collect();
+            let broadcast: Vec<WifiNetwork> =
+                stdout.lines().filter_map(parse_wifi_scan_line).collect();
+            let probes = probe_hidden_ssids().await;
+            let networks = merge_scan_results(broadcast, probes);
             SafeCommandResponse {
                 id,
                 command: SafeCommandRx::WifiScan { networks },
@@ -252,6 +260,148 @@ pub(crate) async fn execute_wifi_scan(id: i32) -> SafeCommandResponse {
             }
         }
     }
+}
+
+/// Hidden networks don't answer a broadcast scan; NM only learns their SSID via
+/// a directed probe (`wifi list ssid <SSID>`). We already know the SSIDs of any
+/// hidden network configured on this device (from its own NM profiles), so probe
+/// those directly instead of leaving them anonymous in the scan.
+async fn probe_hidden_ssids() -> Vec<Vec<WifiNetwork>> {
+    let profiles = match get_nm_wifi_profiles().await {
+        Ok(profiles) => profiles,
+        Err(e) => {
+            tracing::warn!("Failed to enumerate NM profiles for hidden-SSID probing: {e:#}");
+            return Vec::new();
+        }
+    };
+
+    let mut candidates: Vec<(String, Option<i32>)> = Vec::new();
+    let mut seen = HashSet::new();
+    for profile in profiles {
+        if profile.hidden != Some(true) {
+            continue;
+        }
+        let Some(ssid) = profile.ssid else {
+            continue;
+        };
+        if seen.insert(ssid.clone()) {
+            candidates.push((ssid, profile.autoconnect_priority));
+        }
+    }
+    // Highest priority first; profiles without a priority probed last.
+    candidates.sort_by(|a, b| b.1.cmp(&a.1));
+
+    if candidates.len() > MAX_HIDDEN_PROBES {
+        let skipped: Vec<&str> = candidates[MAX_HIDDEN_PROBES..]
+            .iter()
+            .map(|(ssid, _)| ssid.as_str())
+            .collect();
+        tracing::warn!(
+            "Skipping {} hidden SSID probe(s) beyond the cap of {MAX_HIDDEN_PROBES}: {skipped:?}",
+            skipped.len()
+        );
+    }
+
+    let mut probes = Vec::new();
+    for (ssid, _) in candidates.into_iter().take(MAX_HIDDEN_PROBES) {
+        probes.push(probe_ssid(&ssid).await);
+    }
+    probes
+}
+
+// `device wifi rescan ssid <SSID>` only *requests* the directed probe over
+// D-Bus and returns immediately (unlike `device wifi list --rescan yes`,
+// which blocks until the scan completes); `wifi list` also has no `ssid`
+// filter in this nmcli version, so a probe reads back the whole environment.
+// The fixed sleep stands in for the blocking wait the combined old syntax
+// used to give us for free.
+const PROBE_SCAN_SETTLE: Duration = Duration::from_secs(3);
+
+async fn probe_ssid(ssid: &str) -> Vec<WifiNetwork> {
+    let mut rescan_cmd = Command::new("nmcli");
+    rescan_cmd.args(["device", "wifi", "rescan", "ssid", ssid]);
+
+    match execute_nmcli_command(rescan_cmd).await {
+        Ok(output) if output.status.success() => {}
+        Ok(output) => {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            tracing::warn!("nmcli device wifi rescan ssid {ssid} failed: {stderr}");
+            return Vec::new();
+        }
+        Err(e) => {
+            tracing::warn!("Failed to request directed rescan for hidden SSID {ssid}: {e}");
+            return Vec::new();
+        }
+    }
+
+    sleep(PROBE_SCAN_SETTLE).await;
+
+    let mut list_cmd = Command::new("nmcli");
+    list_cmd.args([
+        "-t",
+        "-f",
+        "SSID,BSSID,SIGNAL,RATE,SECURITY,CHAN",
+        "device",
+        "wifi",
+        "list",
+    ]);
+
+    match execute_nmcli_command(list_cmd).await {
+        Ok(output) if output.status.success() => {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            stdout.lines().filter_map(parse_wifi_scan_line).collect()
+        }
+        Ok(output) => {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            tracing::warn!("nmcli device wifi list after rescan ssid {ssid} failed: {stderr}");
+            Vec::new()
+        }
+        Err(e) => {
+            tracing::warn!("Failed to read wifi list after probing hidden SSID {ssid}: {e}");
+            Vec::new()
+        }
+    }
+}
+
+/// Merges a broadcast scan with directed-probe results for hidden SSIDs, indexed
+/// by BSSID. A broadcast row with an unresolved (empty) SSID is replaced by the
+/// first probe that resolves that BSSID; a BSSID a probe resolves that the
+/// broadcast scan never saw is appended. Once a BSSID's SSID is resolved
+/// (whether by the broadcast scan or an earlier probe), later probes never
+/// overwrite it.
+fn merge_scan_results(
+    broadcast: Vec<WifiNetwork>,
+    probes: Vec<Vec<WifiNetwork>>,
+) -> Vec<WifiNetwork> {
+    let mut order = Vec::new();
+    let mut by_bssid: HashMap<String, WifiNetwork> = HashMap::new();
+
+    for network in broadcast {
+        order.push(network.bssid.clone());
+        by_bssid.insert(network.bssid.clone(), network);
+    }
+
+    for probe in probes {
+        for network in probe {
+            match by_bssid.get(&network.bssid) {
+                Some(existing) if existing.ssid.is_some() => {
+                    // Already resolved (broadcast or an earlier probe): first wins.
+                }
+                Some(_) => {
+                    by_bssid.insert(network.bssid.clone(), network);
+                }
+                None => {
+                    order.push(network.bssid.clone());
+                    by_bssid.insert(network.bssid.clone(), network);
+                }
+            }
+        }
+    }
+
+    order
+        .into_iter()
+        .filter_map(|bssid| by_bssid.remove(&bssid))
+        .collect()
 }
 
 fn parse_wifi_scan_line(line: &str) -> Option<WifiNetwork> {
@@ -341,6 +491,7 @@ fn parse_nm_profile_detail(stdout: &str) -> NMProfile {
     let mut phase2_auth = None;
     let mut anonymous_identity = None;
     let mut eap_identity = None;
+    let mut raw_autoconnect_priority: Option<String> = None;
 
     for line in stdout.lines() {
         if let Some(val) = line.strip_prefix("802-11-wireless.ssid:") {
@@ -387,6 +538,11 @@ fn parse_nm_profile_detail(stdout: &str) -> NMProfile {
             && val != "--"
         {
             eap_identity = Some(unescape_terse(val));
+        } else if let Some(val) = line.strip_prefix("connection.autoconnect-priority:")
+            && !val.is_empty()
+            && val != "--"
+        {
+            raw_autoconnect_priority = Some(unescape_terse(val));
         }
     }
 
@@ -400,6 +556,14 @@ fn parse_nm_profile_detail(stdout: &str) -> NMProfile {
         _ => None,
     });
 
+    let autoconnect_priority = raw_autoconnect_priority.as_deref().and_then(|v| {
+        v.parse::<i32>()
+            .inspect_err(|e| {
+                tracing::warn!("Unparseable connection.autoconnect-priority {v:?}: {e}")
+            })
+            .ok()
+    });
+
     NMProfile {
         ssid,
         password,
@@ -410,6 +574,7 @@ fn parse_nm_profile_detail(stdout: &str) -> NMProfile {
         phase2_auth,
         anonymous_identity,
         eap_identity,
+        autoconnect_priority,
         ..Default::default()
     }
 }
@@ -1843,6 +2008,85 @@ OpenNet:802-11-wireless:OpenNet:--:--";
         assert_eq!(p.phase2_auth, None);
         assert_eq!(p.anonymous_identity, None);
         assert_eq!(p.eap_identity, None);
+    }
+
+    #[test]
+    fn nm_profile_detail_autoconnect_priority_present() {
+        let stdout = "802-11-wireless.ssid:CorpWifi\n\
+connection.autoconnect-priority:500\n";
+        let p = parse_nm_profile_detail(stdout);
+        assert_eq!(p.autoconnect_priority, Some(500));
+    }
+
+    #[test]
+    fn nm_profile_detail_autoconnect_priority_absent() {
+        let p = parse_nm_profile_detail("802-11-wireless.ssid:CorpWifi\n");
+        assert_eq!(p.autoconnect_priority, None);
+    }
+
+    #[test]
+    fn nm_profile_detail_autoconnect_priority_dash() {
+        let p = parse_nm_profile_detail("connection.autoconnect-priority:--\n");
+        assert_eq!(p.autoconnect_priority, None);
+    }
+
+    #[test]
+    fn nm_profile_detail_autoconnect_priority_non_numeric() {
+        let p = parse_nm_profile_detail("connection.autoconnect-priority:not-a-number\n");
+        assert_eq!(p.autoconnect_priority, None);
+    }
+
+    fn wifi_net(ssid: Option<&str>, bssid: &str, signal: i32) -> WifiNetwork {
+        WifiNetwork {
+            ssid: ssid.map(String::from),
+            bssid: bssid.to_string(),
+            signal: Some(signal),
+            rate: Some(100),
+            security: Some("WPA2".to_string()),
+            channel: Some(6),
+        }
+    }
+
+    #[test]
+    fn merge_resolves_empty_ssid_bssid_from_probe() {
+        let broadcast = vec![wifi_net(None, "AA:AA:AA:AA:AA:AA", 40)];
+        let probes = vec![vec![wifi_net(Some("Hidden"), "AA:AA:AA:AA:AA:AA", 40)]];
+        let merged = merge_scan_results(broadcast, probes);
+        assert_eq!(merged.len(), 1);
+        assert_eq!(merged[0].ssid, Some("Hidden".to_string()));
+    }
+
+    #[test]
+    fn merge_appends_probe_only_bssid() {
+        let broadcast = vec![wifi_net(Some("Visible"), "AA:AA:AA:AA:AA:AA", 60)];
+        let probes = vec![vec![wifi_net(Some("Hidden"), "BB:BB:BB:BB:BB:BB", 30)]];
+        let merged = merge_scan_results(broadcast, probes);
+        assert_eq!(merged.len(), 2);
+        assert!(
+            merged
+                .iter()
+                .any(|n| n.bssid == "BB:BB:BB:BB:BB:BB" && n.ssid == Some("Hidden".to_string()))
+        );
+    }
+
+    #[test]
+    fn merge_first_probe_wins_on_conflicting_bssid() {
+        let probes = vec![
+            vec![wifi_net(Some("First"), "CC:CC:CC:CC:CC:CC", 50)],
+            vec![wifi_net(Some("Second"), "CC:CC:CC:CC:CC:CC", 55)],
+        ];
+        let merged = merge_scan_results(vec![], probes);
+        assert_eq!(merged.len(), 1);
+        assert_eq!(merged[0].ssid, Some("First".to_string()));
+    }
+
+    #[test]
+    fn merge_never_overwrites_broadcast_resolved_ssid() {
+        let broadcast = vec![wifi_net(Some("Real"), "DD:DD:DD:DD:DD:DD", 70)];
+        let probes = vec![vec![wifi_net(Some("Other"), "DD:DD:DD:DD:DD:DD", 20)]];
+        let merged = merge_scan_results(broadcast, probes);
+        assert_eq!(merged.len(), 1);
+        assert_eq!(merged[0].ssid, Some("Real".to_string()));
     }
 
     #[test]

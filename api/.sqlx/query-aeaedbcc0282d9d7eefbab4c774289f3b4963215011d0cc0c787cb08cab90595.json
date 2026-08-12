@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT\n            dni.id,\n            dni.device_id,\n            dni.network_id,\n            dni.priority,\n            dni.managed_by,\n            dni.created_at,\n            dni.updated_at,\n            n.ssid,\n            n.name,\n            n.network_type::TEXT as \"network_type!\"\n        FROM device_network_intent dni\n        JOIN network n ON n.id = dni.network_id\n        WHERE dni.device_id = $1\n        ORDER BY dni.priority ASC\n        ",
+  "query": "\n        SELECT\n            dni.id,\n            dni.device_id,\n            dni.network_id,\n            dni.priority,\n            dni.managed_by,\n            dni.created_at,\n            dni.updated_at,\n            n.ssid,\n            n.name,\n            n.network_type::TEXT as \"network_type!\",\n            n.security_type\n        FROM device_network_intent dni\n        JOIN network n ON n.id = dni.network_id\n        WHERE dni.id = $1\n        ",
   "describe": {
     "columns": [
       {
@@ -52,6 +52,11 @@
         "ordinal": 9,
         "name": "network_type!",
         "type_info": "Text"
+      },
+      {
+        "ordinal": 10,
+        "name": "security_type",
+        "type_info": "Text"
       }
     ],
     "parameters": {
@@ -69,8 +74,9 @@
       false,
       true,
       false,
-      null
+      null,
+      true
     ]
   },
-  "hash": "ded97843415d347975e5002ee4575bd2ee5e0d7bff896422ef07f774d7dda8cd"
+  "hash": "aeaedbcc0282d9d7eefbab4c774289f3b4963215011d0cc0c787cb08cab90595"
 }

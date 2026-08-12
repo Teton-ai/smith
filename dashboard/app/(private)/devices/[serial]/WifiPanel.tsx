@@ -14,6 +14,7 @@ import { isAxiosError } from "axios";
 import {
 	ArrowLeft,
 	ChevronDown,
+	ChevronRight,
 	ChevronUp,
 	Eye,
 	EyeOff,
@@ -25,10 +26,11 @@ import {
 	WifiOff,
 	X,
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import {
 	type ConfiguredNetwork,
 	type Device,
+	type DeviceNetworkIntent,
 	getGetDeviceInfoQueryKey,
 	getGetDeviceIntentQueryKey,
 	getGetNetworksQueryKey,
@@ -48,22 +50,187 @@ import {
 	useClientMutator,
 	useClientMutatorWithStatus,
 } from "@/app/api-client-mutator";
+import { Tooltip } from "@/app/components/tooltip";
 
 const MASK = "••••••••••••";
 
 const filterFieldClass =
 	"px-2 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm text-gray-900";
 
-const SCAN_COLUMNS = [
-	{ label: "Network", className: "py-2 pr-2 text-left" },
-	{ label: "Band", className: "px-2 py-2 text-left" },
-	{ label: "Signal", className: "px-2 py-2 text-right" },
-	{ label: "Rate", className: "px-2 py-2 text-right" },
-	{ label: "Security", className: "pl-2 py-2 text-left" },
-];
-
 const getProfileTimestamp = (p: ConfiguredNetwork) => p.updated_at;
 const getScanTimestamp = (r: WifiScanResult) => r.scanned_at;
+
+/** One row per (SSID, security) pair the scan saw: APs sharing an SSID but
+ *  differing in security are different networks, so they get separate rows.
+ *  Hidden APs (no SSID) all collapse into a single group regardless of
+ *  security, since there is nothing more specific to group them by. */
+interface ScanGroup {
+	key: string;
+	ssid: string | null;
+	/** Raw scan security string (e.g. "WPA1 WPA2"); null = open. Meaningless
+	 *  for the hidden group, which mixes securities. */
+	security: string | null;
+	bestSignal: number | null;
+	bands: string[];
+	aps: WifiScanResult[];
+}
+
+const HIDDEN_GROUP_KEY = "\0hidden";
+
+function groupScanResults(results: WifiScanResult[]): ScanGroup[] {
+	const groups = new Map<string, ScanGroup>();
+	for (const r of results) {
+		const key =
+			r.ssid == null ? HIDDEN_GROUP_KEY : `${r.ssid}\0${r.security ?? ""}`;
+		let group = groups.get(key);
+		if (!group) {
+			group = {
+				key,
+				ssid: r.ssid ?? null,
+				security: r.ssid == null ? null : (r.security ?? null),
+				bestSignal: null,
+				bands: [],
+				aps: [],
+			};
+			groups.set(key, group);
+		}
+		group.aps.push(r);
+	}
+
+	for (const group of groups.values()) {
+		group.aps.sort((a, b) => (b.signal ?? -1) - (a.signal ?? -1));
+		group.bestSignal = group.aps[0]?.signal ?? null;
+		group.bands = [
+			...new Set(
+				group.aps.map((ap) => ap.band).filter((b): b is string => !!b),
+			),
+		];
+	}
+
+	const visible = [...groups.values()]
+		.filter((g) => g.ssid != null)
+		.sort((a, b) => (b.bestSignal ?? -1) - (a.bestSignal ?? -1));
+	const hidden = groups.get(HIDDEN_GROUP_KEY);
+	return hidden ? [...visible, hidden] : visible;
+}
+
+type SecurityClass = "open" | "wep" | "psk" | "sae" | "owe" | "enterprise";
+
+/** A scan security string can name more than one mode at once (nmcli reports
+ *  transitional APs as e.g. "WPA1 WPA2"), so a group can match more than one
+ *  class. WEP gets its own class: it's not WPA-PSK, and NM key-mgmt can't
+ *  distinguish it from "open" on the catalog side (see catalogSecurityClass),
+ *  so a WEP AP must never badge-match a WPA-PSK-configured network. */
+function scanSecurityClasses(security: string | null): Set<SecurityClass> {
+	if (!security) return new Set<SecurityClass>(["open"]);
+	const s = security.toUpperCase();
+	const classes = new Set<SecurityClass>();
+	if (s.includes("OWE")) classes.add("owe");
+	if (s.includes("802.1X") || s.includes("EAP")) classes.add("enterprise");
+	if (s.includes("SAE") || s.includes("WPA3")) classes.add("sae");
+	if (s.includes("WPA1") || s.includes("WPA2")) classes.add("psk");
+	if (s.includes("WEP")) classes.add("wep");
+	if (classes.size === 0) classes.add("open");
+	return classes;
+}
+
+/** Mirrors api's `map_key_mgmt` (api/src/home.rs). */
+function catalogSecurityClass(securityType?: string): SecurityClass | null {
+	switch (securityType) {
+		case "open":
+			return "open";
+		case "wpa-psk":
+			return "psk";
+		case "sae":
+			return "sae";
+		case "owe":
+			return "owe";
+		case "wpa-eap":
+			return "enterprise";
+		default:
+			return null;
+	}
+}
+
+/** SSID must match; security only narrows further when we actually know the
+ *  catalog network's security_type (older rows predate that column and fall
+ *  back to SSID-only matching). */
+function recordMatchesGroup(
+	record: { ssid?: string; security_type?: string },
+	group: ScanGroup,
+	groupClasses: Set<SecurityClass>,
+): boolean {
+	if (group.ssid == null || record.ssid !== group.ssid) return false;
+	if (record.security_type == null) return true;
+	const cls = catalogSecurityClass(record.security_type);
+	return cls != null && groupClasses.has(cls);
+}
+
+type RelationshipBadge = "active" | "configured" | "intent" | null;
+
+function groupBadge(
+	group: ScanGroup,
+	profiles: ConfiguredNetwork[],
+	intent: DeviceNetworkIntent[],
+): RelationshipBadge {
+	if (group.ssid == null) return null;
+	const classes = scanSecurityClasses(group.security);
+	const matchingProfiles = profiles.filter((p) =>
+		recordMatchesGroup(p, group, classes),
+	);
+	if (matchingProfiles.some((p) => p.is_active)) return "active";
+	if (matchingProfiles.length > 0) return "configured";
+	if (intent.some((i) => recordMatchesGroup(i, group, classes)))
+		return "intent";
+	return null;
+}
+
+function RelationshipBadgePill({ badge }: { badge: RelationshipBadge }) {
+	if (badge === "active")
+		return (
+			<Badge variant="green" pill>
+				Active
+			</Badge>
+		);
+	if (badge === "configured")
+		return (
+			<Badge variant="blue" pill>
+				Configured
+			</Badge>
+		);
+	if (badge === "intent")
+		return (
+			<Badge variant="orange" pill>
+				In intent
+			</Badge>
+		);
+	return null;
+}
+
+function SignalBar({ value }: { value: number | null }) {
+	const pct = value ?? 0;
+	const color =
+		value == null
+			? "bg-gray-200"
+			: pct >= 60
+				? "bg-green-500"
+				: pct >= 35
+					? "bg-yellow-500"
+					: "bg-orange-500";
+	return (
+		<span className="inline-flex items-center gap-2 min-w-[110px]">
+			<span className="flex-1 h-1.5 min-w-[56px] rounded-full bg-gray-100 overflow-hidden">
+				<span
+					className={`block h-full rounded-full ${color}`}
+					style={{ width: `${Math.max(pct, value == null ? 0 : 2)}%` }}
+				/>
+			</span>
+			<span className="text-xs text-gray-500 tabular-nums w-9 text-right">
+				{value != null ? `${value}%` : "—"}
+			</span>
+		</span>
+	);
+}
 
 interface NetworkCondition {
 	profile_name: string;
@@ -200,6 +367,19 @@ const WifiPanel = ({ serial, device }: WifiPanelProps) => {
 	const [scanQuery, setScanQuery] = useState("");
 	const [bandFilter, setBandFilter] = useState("all");
 	const [securityFilter, setSecurityFilter] = useState("all");
+	const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
+
+	function toggleGroup(key: string) {
+		setExpandedGroups((prev) => {
+			const next = new Set(prev);
+			if (next.has(key)) {
+				next.delete(key);
+			} else {
+				next.add(key);
+			}
+			return next;
+		});
+	}
 
 	const {
 		data: profilesRaw,
@@ -266,22 +446,65 @@ const WifiPanel = ({ serial, device }: WifiPanelProps) => {
 		[scanResults],
 	);
 
-	const filteredResults = useMemo(() => {
+	const scanGroups = useMemo(
+		() => groupScanResults(scanResults),
+		[scanResults],
+	);
+
+	// A group matches if any of its APs matches (FR-A8): filtering an SSID down
+	// to a subset of its BSSIDs would misrepresent the group's own aggregates
+	// (best signal, AP count, bands). But once a group is shown, expanding it
+	// shouldn't dump every AP back in: `visibleAps` narrows the drill-down to
+	// the APs that actually satisfy each active filter. The text query is the
+	// one exception: it's also matched against the SSID name, and when that's
+	// what matched, narrowing by BSSID text would hide every AP.
+	const filteredGroups = useMemo(() => {
 		const query = scanQuery.trim().toLowerCase();
-		return scanResults.filter((r) => {
-			if (
-				query &&
-				!r.ssid?.toLowerCase().includes(query) &&
-				!r.bssid.toLowerCase().includes(query)
-			) {
-				return false;
-			}
-			if (bandFilter !== "all" && r.band !== bandFilter) return false;
-			if (securityFilter !== "all" && (r.security ?? "Open") !== securityFilter)
-				return false;
-			return true;
-		});
-	}, [scanResults, scanQuery, bandFilter, securityFilter]);
+		return scanGroups
+			.filter((group) => {
+				if (query) {
+					const matches =
+						group.ssid?.toLowerCase().includes(query) ||
+						group.aps.some((ap) => ap.bssid.toLowerCase().includes(query));
+					if (!matches) return false;
+				}
+				if (
+					bandFilter !== "all" &&
+					!group.aps.some((ap) => ap.band === bandFilter)
+				) {
+					return false;
+				}
+				if (
+					securityFilter !== "all" &&
+					!group.aps.some((ap) => (ap.security ?? "Open") === securityFilter)
+				) {
+					return false;
+				}
+				return true;
+			})
+			.map((group) => {
+				const ssidMatchedQuery =
+					query !== "" && (group.ssid?.toLowerCase().includes(query) ?? false);
+				const visibleAps = group.aps.filter((ap) => {
+					if (
+						query &&
+						!ssidMatchedQuery &&
+						!ap.bssid.toLowerCase().includes(query)
+					) {
+						return false;
+					}
+					if (bandFilter !== "all" && ap.band !== bandFilter) return false;
+					if (
+						securityFilter !== "all" &&
+						(ap.security ?? "Open") !== securityFilter
+					) {
+						return false;
+					}
+					return true;
+				});
+				return { ...group, visibleAps };
+			});
+	}, [scanGroups, scanQuery, bandFilter, securityFilter]);
 
 	const toggleReveal = (profileName: string) => {
 		setRevealedIds((prev) => {
@@ -319,6 +542,15 @@ const WifiPanel = ({ serial, device }: WifiPanelProps) => {
 			),
 		[intentListRaw],
 	);
+
+	const badgeByGroupKey = useMemo(() => {
+		const map = new Map<string, RelationshipBadge>();
+		for (const group of scanGroups) {
+			const badge = groupBadge(group, profiles, sortedIntent);
+			if (badge) map.set(group.key, badge);
+		}
+		return map;
+	}, [scanGroups, profiles, sortedIntent]);
 
 	const [applying, setApplying] = useState(false);
 	const { data: polledDevice } = useGetDeviceInfo(serial, {
@@ -1260,7 +1492,7 @@ const WifiPanel = ({ serial, device }: WifiPanelProps) => {
 									))}
 								</select>
 							</div>
-							{filteredResults.length === 0 ? (
+							{filteredGroups.length === 0 ? (
 								<p className="text-sm text-gray-500">
 									No networks match the filters.
 								</p>
@@ -1269,7 +1501,22 @@ const WifiPanel = ({ serial, device }: WifiPanelProps) => {
 									<table className="min-w-full divide-y divide-gray-200">
 										<thead>
 											<tr>
-												{SCAN_COLUMNS.map((col) => (
+												{[
+													{
+														label: "Network",
+														className: "py-2 pr-2 text-left",
+													},
+													{
+														label: "Signal",
+														className: "px-2 py-2 text-center",
+													},
+													{ label: "APs", className: "px-2 py-2 text-right" },
+													{ label: "Bands", className: "px-2 py-2 text-left" },
+													{
+														label: "Security",
+														className: "pl-2 py-2 text-left",
+													},
+												].map((col) => (
 													<th
 														key={col.label}
 														scope="col"
@@ -1281,40 +1528,98 @@ const WifiPanel = ({ serial, device }: WifiPanelProps) => {
 											</tr>
 										</thead>
 										<tbody className="divide-y divide-gray-100">
-											{filteredResults.map((result: WifiScanResult) => (
-												<tr key={`${result.bssid}-${result.channel}`}>
-													<td className="py-2 pr-2 max-w-0 w-full">
-														<div className="flex flex-col min-w-0">
-															{result.ssid ? (
-																<span className="text-sm font-medium text-gray-900 truncate">
-																	{result.ssid}
+											{filteredGroups.map((group) => {
+												const expanded = expandedGroups.has(group.key);
+												const hidden = group.ssid == null;
+												const badge = badgeByGroupKey.get(group.key) ?? null;
+												return (
+													<Fragment key={group.key}>
+														<tr>
+															<td className="py-2 pr-2 max-w-0 w-full">
+																<button
+																	type="button"
+																	onClick={() => toggleGroup(group.key)}
+																	aria-expanded={expanded}
+																	aria-label={`${expanded ? "Collapse" : "Expand"} ${
+																		hidden ? "hidden networks" : group.ssid
+																	}`}
+																	className="flex items-center gap-1.5 min-w-0 w-full text-left cursor-pointer"
+																>
+																	{expanded ? (
+																		<ChevronDown className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
+																	) : (
+																		<ChevronRight className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
+																	)}
+																	<span className="flex flex-col min-w-0">
+																		{hidden ? (
+																			<span className="text-sm italic text-gray-500 truncate">
+																				{group.aps.length} hidden AP
+																				{group.aps.length === 1 ? "" : "s"} seen
+																			</span>
+																		) : (
+																			<span className="flex items-center gap-1.5 min-w-0">
+																				<span className="text-sm font-medium text-gray-900 truncate">
+																					{group.ssid}
+																				</span>
+																				<RelationshipBadgePill badge={badge} />
+																			</span>
+																		)}
+																	</span>
+																</button>
+															</td>
+															<td className="px-2 py-2 text-center whitespace-nowrap">
+																<SignalBar value={group.bestSignal} />
+															</td>
+															<td className="px-2 py-2 text-xs text-gray-500 text-right whitespace-nowrap tabular-nums">
+																×{group.aps.length}
+															</td>
+															<td className="px-2 py-2 whitespace-nowrap">
+																<span className="inline-flex gap-1">
+																	{group.bands.map((band) => (
+																		<Badge key={band} variant="gray">
+																			{band}
+																		</Badge>
+																	))}
 																</span>
-															) : (
-																<span className="text-sm italic text-gray-400 truncate">
-																	&lt;hidden&gt;
-																</span>
-															)}
-															<span className="text-xs text-gray-500 font-mono truncate">
-																{result.bssid}
-															</span>
-														</div>
-													</td>
-													<td className="px-2 py-2 text-xs text-gray-500 whitespace-nowrap">
-														{result.band ?? "—"}
-													</td>
-													<td className="px-2 py-2 text-xs text-gray-500 text-right whitespace-nowrap">
-														{result.signal != null ? `${result.signal}%` : "—"}
-													</td>
-													<td className="px-2 py-2 text-xs text-gray-500 text-right whitespace-nowrap">
-														{result.rate != null ? `${result.rate} Mbps` : "—"}
-													</td>
-													<td className="pl-2 py-2 whitespace-nowrap">
-														<Badge variant="gray" pill>
-															{result.security ?? "Open"}
-														</Badge>
-													</td>
-												</tr>
-											))}
+															</td>
+															<td className="pl-2 py-2 whitespace-nowrap">
+																{!hidden && (
+																	<Badge variant="gray" pill>
+																		{group.security ?? "Open"}
+																	</Badge>
+																)}
+															</td>
+														</tr>
+														{expanded &&
+															group.visibleAps.map((ap: WifiScanResult) => (
+																<tr
+																	key={`${ap.bssid}-${ap.channel}`}
+																	className="bg-gray-50"
+																>
+																	<td className="py-1.5 pr-2 pl-8 text-xs font-mono text-gray-500 whitespace-nowrap">
+																		{ap.bssid}
+																	</td>
+																	<td className="px-2 py-1.5 text-center whitespace-nowrap">
+																		<SignalBar value={ap.signal ?? null} />
+																	</td>
+																	<td />
+																	<td className="px-2 py-1.5 text-xs text-gray-500 whitespace-nowrap">
+																		<Tooltip
+																			content={`Channel ${ap.channel ?? "—"}`}
+																		>
+																			<span className="border-b border-dotted border-gray-500 cursor-default">
+																				{ap.band ?? "—"}
+																			</span>
+																		</Tooltip>
+																	</td>
+																	<td className="pl-2 py-1.5 text-right text-xs text-gray-500 tabular-nums whitespace-nowrap">
+																		{ap.rate != null ? `${ap.rate} Mbps` : "—"}
+																	</td>
+																</tr>
+															))}
+													</Fragment>
+												);
+											})}
 										</tbody>
 									</table>
 								</div>

@@ -94,6 +94,8 @@ pub struct NMProfile {
     pub phase2_auth: Option<String>,
     pub anonymous_identity: Option<String>,
     pub eap_identity: Option<String>,
+    #[serde(default)]
+    pub autoconnect_priority: Option<i32>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]

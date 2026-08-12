@@ -276,33 +276,39 @@ const NetworkPage = () => {
 
 	return (
 		<DeviceDetailLayout serial={serial} device={device} activeTab="network">
-			{/* Whether we heard from the device, not what its interfaces report */}
-			<DeviceReachability key={serial} serial={serial} />
-
 			{!device ? (
-				<Card className="p-5">
-					<div className="py-6 text-gray-500">
-						Loading network information...
-					</div>
-				</Card>
+				<>
+					{/* Whether we heard from the device, not what its interfaces report */}
+					<DeviceReachability key={serial} serial={serial} />
+					<Card className="p-5">
+						<div className="py-6 text-gray-500">
+							Loading network information...
+						</div>
+					</Card>
+				</>
 			) : (
-				/* Connections is a narrow list, WiFi carries the intent/profile/scan
-				   tables — so it gets two thirds of the row. */
-				<div className="grid grid-cols-1 lg:grid-cols-3 gap-4 items-start">
-					<Panel
-						title="Network Connections"
-						icon={Wifi}
-						theme={SECTION_THEMES.green}
-					>
-						<LinkSummary device={device} />
-						<hr className="my-3 border-gray-100" />
-						<NetworkConnections device={device} />
-					</Panel>
+				<div className="space-y-4">
+					{/* Connections is a narrow, fixed-size list; Reachability fills
+					    whatever width is left beside it. */}
+					<div className="grid grid-cols-1 lg:grid-cols-3 gap-4 items-start">
+						<Panel
+							title="Network Connections"
+							icon={Wifi}
+							theme={SECTION_THEMES.green}
+						>
+							<LinkSummary device={device} />
+							<hr className="my-3 border-gray-100" />
+							<NetworkConnections device={device} />
+						</Panel>
 
-					{/* Keyed by serial so filter/reveal state resets when navigating between devices. */}
-					<div className="lg:col-span-2">
-						<WifiPanel key={serial} serial={serial} device={device} />
+						<div className="lg:col-span-2">
+							<DeviceReachability key={serial} serial={serial} />
+						</div>
 					</div>
+
+					{/* Full width: intent/profile/scan need the room. Keyed by serial
+					    so filter/reveal state resets when navigating between devices. */}
+					<WifiPanel key={serial} serial={serial} device={device} />
 				</div>
 			)}
 		</DeviceDetailLayout>
