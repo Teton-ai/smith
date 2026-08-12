@@ -1,9 +1,11 @@
 "use client";
 
 import { Badge } from "@teton/smith-ui";
-import { Check, Copy, X } from "lucide-react";
-import { type ReactNode, useState } from "react";
+import { Check, ChevronDown, ChevronRight, Copy, X } from "lucide-react";
+import { Fragment, type ReactNode, useMemo, useState } from "react";
 import type { DeviceCommandResponse } from "@/app/api-client";
+import { Tooltip } from "@/app/components/tooltip";
+import { deriveBand, groupScanResults, SignalBar } from "@/app/utils/wifiScan";
 
 // ---------------------------------------------------------------------------
 // SafeCommandTx types (mirrors smithd/src/utils/schema.rs)
@@ -685,6 +687,160 @@ export const KVTable = ({
 	</dl>
 );
 
+// Groups a WifiScan response the same way the device Network page groups its
+// persisted scan (dashboard/app/utils/wifiScan.ts): by SSID+security, best
+// signal first, hidden APs collapsed into one group last. No relationship
+// badges (Active/Configured/In intent) here — those need the device's
+// configured profiles and intent, which aren't available in this context and
+// a bundle response can cover many different devices at once.
+const WifiScanRxTable = ({ networks }: { networks: WifiNetwork[] }) => {
+	const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
+
+	const groups = useMemo(
+		() =>
+			groupScanResults(
+				networks.map((n) => ({ ...n, band: deriveBand(n.channel) })),
+			),
+		[networks],
+	);
+
+	if (networks.length === 0) {
+		return <p className="text-sm text-gray-400 italic">No networks found.</p>;
+	}
+
+	const toggleGroup = (key: string) =>
+		setExpandedGroups((prev) => {
+			const next = new Set(prev);
+			if (next.has(key)) next.delete(key);
+			else next.add(key);
+			return next;
+		});
+
+	return (
+		<div className="overflow-x-auto">
+			<table className="min-w-full divide-y divide-gray-200">
+				<thead>
+					<tr>
+						<th
+							scope="col"
+							className="text-xs font-medium text-gray-500 uppercase tracking-wider text-left pb-2"
+						>
+							Network
+						</th>
+						<th
+							scope="col"
+							className="text-xs font-medium text-gray-500 uppercase tracking-wider px-2 pb-2"
+						>
+							Signal
+						</th>
+						<th
+							scope="col"
+							className="text-xs font-medium text-gray-500 uppercase tracking-wider px-2 pb-2 text-right"
+						>
+							APs
+						</th>
+						<th
+							scope="col"
+							className="text-xs font-medium text-gray-500 uppercase tracking-wider px-2 pb-2"
+						>
+							Bands
+						</th>
+						<th
+							scope="col"
+							className="text-xs font-medium text-gray-500 uppercase tracking-wider pl-2 pb-2"
+						>
+							Security
+						</th>
+					</tr>
+				</thead>
+				<tbody className="divide-y divide-gray-100">
+					{groups.map((group) => {
+						const hidden = group.ssid == null;
+						const expanded = expandedGroups.has(group.key);
+						return (
+							<Fragment key={group.key}>
+								<tr>
+									<td className="py-2 pr-2 max-w-0 w-full">
+										<button
+											type="button"
+											onClick={() => toggleGroup(group.key)}
+											aria-expanded={expanded}
+											aria-label={`${expanded ? "Collapse" : "Expand"} ${
+												hidden ? "hidden networks" : group.ssid
+											}`}
+											className="flex items-center gap-1.5 min-w-0 w-full text-left cursor-pointer"
+										>
+											{expanded ? (
+												<ChevronDown className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
+											) : (
+												<ChevronRight className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
+											)}
+											{hidden ? (
+												<span className="text-sm italic text-gray-500 truncate">
+													{group.aps.length} hidden AP
+													{group.aps.length === 1 ? "" : "s"} seen
+												</span>
+											) : (
+												<span className="text-sm font-medium text-gray-900 truncate">
+													{group.ssid}
+												</span>
+											)}
+										</button>
+									</td>
+									<td className="px-2 py-2 text-center whitespace-nowrap">
+										<SignalBar value={group.bestSignal} />
+									</td>
+									<td className="px-2 py-2 text-xs text-gray-500 text-right whitespace-nowrap tabular-nums">
+										×{group.aps.length}
+									</td>
+									<td className="px-2 py-2 whitespace-nowrap">
+										<span className="inline-flex gap-1">
+											{group.bands.map((band) => (
+												<Badge key={band} variant="gray">
+													{band}
+												</Badge>
+											))}
+										</span>
+									</td>
+									<td className="pl-2 py-2 whitespace-nowrap">
+										{!hidden && (
+											<Badge variant="gray" pill>
+												{group.security ?? "Open"}
+											</Badge>
+										)}
+									</td>
+								</tr>
+								{expanded &&
+									group.aps.map((ap) => (
+										<tr key={ap.bssid} className="bg-gray-50">
+											<td className="py-1.5 pr-2 pl-8 text-xs font-mono text-gray-500 whitespace-nowrap">
+												{ap.bssid}
+											</td>
+											<td className="px-2 py-1.5 text-center whitespace-nowrap">
+												<SignalBar value={ap.signal} />
+											</td>
+											<td />
+											<td className="px-2 py-1.5 text-xs text-gray-500 whitespace-nowrap">
+												<Tooltip content={`Channel ${ap.channel ?? "—"}`}>
+													<span className="border-b border-dotted border-gray-500 cursor-default">
+														{ap.band ?? "—"}
+													</span>
+												</Tooltip>
+											</td>
+											<td className="pl-2 py-1.5 text-right text-xs text-gray-500 tabular-nums whitespace-nowrap">
+												{ap.rate != null ? `${ap.rate} Mbps` : "—"}
+											</td>
+										</tr>
+									))}
+							</Fragment>
+						);
+					})}
+				</tbody>
+			</table>
+		</div>
+	);
+};
+
 // ---------------------------------------------------------------------------
 // TX detail renderer
 // ---------------------------------------------------------------------------
@@ -852,87 +1008,7 @@ export const renderRxDetail = (response: unknown) => {
 		}
 		case "WifiScan": {
 			const { networks } = parsed.payload as CmdRxWifiScan["WifiScan"];
-			if (networks.length === 0) {
-				return (
-					<p className="text-sm text-gray-400 italic">No networks found.</p>
-				);
-			}
-			return (
-				<div className="overflow-x-auto">
-					<table className="min-w-full divide-y divide-gray-200">
-						<thead>
-							<tr>
-								<th
-									scope="col"
-									className="text-xs font-medium text-gray-500 uppercase tracking-wider text-left pb-2"
-								>
-									Network
-								</th>
-								<th
-									scope="col"
-									className="text-xs font-medium text-gray-500 uppercase tracking-wider px-2 pb-2"
-								>
-									Channel
-								</th>
-								<th
-									scope="col"
-									className="text-xs font-medium text-gray-500 uppercase tracking-wider px-2 pb-2 text-right"
-								>
-									Signal
-								</th>
-								<th
-									scope="col"
-									className="text-xs font-medium text-gray-500 uppercase tracking-wider px-2 pb-2 text-right"
-								>
-									Rate
-								</th>
-								<th
-									scope="col"
-									className="text-xs font-medium text-gray-500 uppercase tracking-wider pl-2 pb-2"
-								>
-									Security
-								</th>
-							</tr>
-						</thead>
-						<tbody className="divide-y divide-gray-100">
-							{networks.map((n) => (
-								<tr key={`${n.bssid}-${n.channel}`}>
-									<td className="py-2 pr-2 max-w-0 w-full">
-										<div className="flex flex-col min-w-0">
-											{n.ssid ? (
-												<span className="text-sm font-medium text-gray-900 truncate">
-													{n.ssid}
-												</span>
-											) : (
-												<span className="text-sm italic text-gray-400 truncate">
-													&lt;hidden&gt;
-												</span>
-											)}
-											<span className="text-xs text-gray-500 font-mono truncate">
-												{n.bssid}
-											</span>
-										</div>
-									</td>
-									<td className="px-2 py-2 text-xs text-gray-500 whitespace-nowrap">
-										{n.channel ?? "—"}
-									</td>
-									<td className="px-2 py-2 text-xs text-gray-500 text-right whitespace-nowrap">
-										{n.signal != null ? `${n.signal}%` : "—"}
-									</td>
-									<td className="px-2 py-2 text-xs text-gray-500 text-right whitespace-nowrap">
-										{n.rate != null ? `${n.rate} Mbps` : "—"}
-									</td>
-									<td className="pl-2 py-2 whitespace-nowrap">
-										<Badge variant="gray" pill>
-											{n.security ?? "Open"}
-										</Badge>
-									</td>
-								</tr>
-							))}
-						</tbody>
-					</table>
-				</div>
-			);
+			return <WifiScanRxTable networks={networks} />;
 		}
 		case "Restart": {
 			const p = parsed.payload as CmdRxRestart["Restart"];

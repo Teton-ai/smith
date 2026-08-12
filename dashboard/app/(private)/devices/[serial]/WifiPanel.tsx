@@ -51,6 +51,11 @@ import {
 	useClientMutatorWithStatus,
 } from "@/app/api-client-mutator";
 import { Tooltip } from "@/app/components/tooltip";
+import {
+	groupScanResults,
+	type ScanGroup,
+	SignalBar,
+} from "@/app/utils/wifiScan";
 
 const MASK = "••••••••••••";
 
@@ -59,60 +64,6 @@ const filterFieldClass =
 
 const getProfileTimestamp = (p: ConfiguredNetwork) => p.updated_at;
 const getScanTimestamp = (r: WifiScanResult) => r.scanned_at;
-
-/** One row per (SSID, security) pair the scan saw: APs sharing an SSID but
- *  differing in security are different networks, so they get separate rows.
- *  Hidden APs (no SSID) all collapse into a single group regardless of
- *  security, since there is nothing more specific to group them by. */
-interface ScanGroup {
-	key: string;
-	ssid: string | null;
-	/** Raw scan security string (e.g. "WPA1 WPA2"); null = open. Meaningless
-	 *  for the hidden group, which mixes securities. */
-	security: string | null;
-	bestSignal: number | null;
-	bands: string[];
-	aps: WifiScanResult[];
-}
-
-const HIDDEN_GROUP_KEY = "\0hidden";
-
-function groupScanResults(results: WifiScanResult[]): ScanGroup[] {
-	const groups = new Map<string, ScanGroup>();
-	for (const r of results) {
-		const key =
-			r.ssid == null ? HIDDEN_GROUP_KEY : `${r.ssid}\0${r.security ?? ""}`;
-		let group = groups.get(key);
-		if (!group) {
-			group = {
-				key,
-				ssid: r.ssid ?? null,
-				security: r.ssid == null ? null : (r.security ?? null),
-				bestSignal: null,
-				bands: [],
-				aps: [],
-			};
-			groups.set(key, group);
-		}
-		group.aps.push(r);
-	}
-
-	for (const group of groups.values()) {
-		group.aps.sort((a, b) => (b.signal ?? -1) - (a.signal ?? -1));
-		group.bestSignal = group.aps[0]?.signal ?? null;
-		group.bands = [
-			...new Set(
-				group.aps.map((ap) => ap.band).filter((b): b is string => !!b),
-			),
-		];
-	}
-
-	const visible = [...groups.values()]
-		.filter((g) => g.ssid != null)
-		.sort((a, b) => (b.bestSignal ?? -1) - (a.bestSignal ?? -1));
-	const hidden = groups.get(HIDDEN_GROUP_KEY);
-	return hidden ? [...visible, hidden] : visible;
-}
 
 type SecurityClass = "open" | "wep" | "psk" | "sae" | "owe" | "enterprise";
 
@@ -205,31 +156,6 @@ function RelationshipBadgePill({ badge }: { badge: RelationshipBadge }) {
 			</Badge>
 		);
 	return null;
-}
-
-function SignalBar({ value }: { value: number | null }) {
-	const pct = value ?? 0;
-	const color =
-		value == null
-			? "bg-gray-200"
-			: pct >= 60
-				? "bg-green-500"
-				: pct >= 35
-					? "bg-yellow-500"
-					: "bg-orange-500";
-	return (
-		<span className="inline-flex items-center gap-2 min-w-[110px]">
-			<span className="flex-1 h-1.5 min-w-[56px] rounded-full bg-gray-100 overflow-hidden">
-				<span
-					className={`block h-full rounded-full ${color}`}
-					style={{ width: `${Math.max(pct, value == null ? 0 : 2)}%` }}
-				/>
-			</span>
-			<span className="text-xs text-gray-500 tabular-nums w-9 text-right">
-				{value != null ? `${value}%` : "—"}
-			</span>
-		</span>
-	);
 }
 
 interface NetworkCondition {
