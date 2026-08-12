@@ -97,15 +97,21 @@ function RecipeEditor({
 
 	const isPending = createMut.isPending || updateMut.isPending;
 
-	const builtCommands = commands.map((ec) => ({
-		command: buildCommand(ec),
-		continue_on_error: ec.continue_on_error,
-	}));
-
 	const isValid =
 		name.trim().length > 0 &&
 		commands.length > 0 &&
 		commands.every(commandIsValid);
+
+	// Only build once every row is valid: buildCommand's Number() conversions on
+	// an in-progress, not-yet-valid row (e.g. empty duration_minutes) would
+	// otherwise produce NaN, which JSON.stringify silently turns into null in
+	// the isDirty comparison below.
+	const builtCommands = isValid
+		? commands.map((ec) => ({
+				command: buildCommand(ec),
+				continue_on_error: ec.continue_on_error,
+			}))
+		: [];
 
 	// Whether the form differs from the saved recipe. A new (unsaved) recipe is
 	// always considered dirty so it can be created.
