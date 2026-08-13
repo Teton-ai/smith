@@ -321,7 +321,7 @@ checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 
 [[package]]
 name = "api"
-version = "0.2.188"
+version = "0.2.189"
 dependencies = [
  "anyhow",
  "axum 0.7.9",
@@ -1202,7 +1202,7 @@ checksum = "c8d4a3bb8b1e0c1050499d1815f5ab16d04f0959b233085fb31653fbfc9d98f9"
 
 [[package]]
 name = "cli"
-version = "0.2.188"
+version = "0.2.189"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2590,9 +2590,9 @@ dependencies = [
 
 [[package]]
 name = "http-body-util"
-version = "0.1.4"
+version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e9f41fd6a08e4d4ec69df65976da761afd5ad5e58a9d4acb46bd1c953a9e3ff2"
+checksum = "23169fe34a5fbcdd3f3862e78fb9b6fccd5f02a6dc6f732547005d45631ce71c"
 dependencies = [
  "bytes",
  "futures-core",
@@ -3177,7 +3177,7 @@ dependencies = [
  "bitflags 2.13.1",
  "libc",
  "plain",
- "redox_syscall 0.9.1",
+ "redox_syscall 0.9.2",
 ]
 
 [[package]]
@@ -3424,7 +3424,7 @@ dependencies = [
 
 [[package]]
 name = "models"
-version = "0.2.188"
+version = "0.2.189"
 dependencies = [
  "axum 0.7.9",
  "chrono",
@@ -4643,9 +4643,9 @@ dependencies = [
 
 [[package]]
 name = "redox_syscall"
-version = "0.9.1"
+version = "0.9.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "07507be7b4a5f9f26eeb41eeaebb1f5a7ff29dfb29739facc21d35bf8b11c21e"
+checksum = "f1c93da5bb2c5d4e6c0ef7abeead62c89169a0a4882bfb83ac892f2423aea2fe"
 dependencies = [
  "bitflags 2.13.1",
 ]
@@ -5632,7 +5632,7 @@ checksum = "e8e2fb0f499abb4d162f2bedad68f5ef91a1682b5a03596ddb67efd37768d100"
 
 [[package]]
 name = "smith"
-version = "0.2.188"
+version = "0.2.189"
 dependencies = [
  "anyhow",
  "axum 0.8.9",
@@ -5669,7 +5669,7 @@ dependencies = [
 
 [[package]]
 name = "smith-e2e"
-version = "0.2.188"
+version = "0.2.189"
 dependencies = [
  "anyhow",
  "reqwest 0.12.28",
@@ -5681,7 +5681,7 @@ dependencies = [
 
 [[package]]
 name = "smith-updater"
-version = "0.2.188"
+version = "0.2.189"
 dependencies = [
  "anyhow",
  "clap",
