@@ -34,14 +34,14 @@ interface DeviceUptime {
  */
 const SMITHD_SERVICE_NAME = "smithd";
 
-const UPTIME_RANGES = [
-	{ label: "1h", hours: 1 },
-	{ label: "6h", hours: 6 },
-	{ label: "24h", hours: 24 },
-	{ label: "7d", hours: 24 * 7 },
+export const UPTIME_RANGES = [
+	{ label: "1h", hours: 1, listBuckets: 12 },
+	{ label: "6h", hours: 6, listBuckets: 18 },
+	{ label: "24h", hours: 24, listBuckets: 24 },
+	{ label: "7d", hours: 24 * 7, listBuckets: 28 },
 ] as const;
 
-type UptimeRange = (typeof UPTIME_RANGES)[number]["label"];
+export type UptimeRange = (typeof UPTIME_RANGES)[number]["label"];
 
 const useDeviceUptime = (
 	deviceId: string,
@@ -166,7 +166,7 @@ export const useOpenServiceOutages = (serial: string) => {
 	}, [data]);
 };
 
-const RangePicker = ({
+export const RangePicker = ({
 	value,
 	onChange,
 }: {
@@ -275,16 +275,21 @@ export const ReachabilityAlert = ({
 	);
 };
 
-const LIST_WINDOW_HOURS = 24 * 7;
-
 /**
- * Compact 7-day reachability bars for a devices-table row. The fetch is held
- * back until the row scrolls into view — the list paginates 100 devices at a
- * time and there is only a per-device uptime endpoint, so fetching eagerly
- * would fire a request per row up front. Once loaded the data is kept fresh
- * enough by staleness alone; a 7-day window doesn't need a refetch timer.
+ * Compact reachability bars for a devices-table row, at whatever range the
+ * table's shared picker is set to. The fetch is held back until the row
+ * scrolls into view — the list paginates 100 devices at a time and there is
+ * only a per-device uptime endpoint, so fetching eagerly would fire a request
+ * per row up front. Once loaded the data is kept fresh enough by staleness
+ * alone; the list doesn't need a refetch timer at any range.
  */
-export const ReachabilityCell = ({ serial }: { serial: string }) => {
+export const ReachabilityCell = ({
+	serial,
+	range,
+}: {
+	serial: string;
+	range: UptimeRange;
+}) => {
 	const ref = useRef<HTMLDivElement>(null);
 	const [visible, setVisible] = useState(false);
 
@@ -298,7 +303,10 @@ export const ReachabilityCell = ({ serial }: { serial: string }) => {
 		return () => observer.disconnect();
 	}, []);
 
-	const { data, isError } = useDeviceUptime(serial, LIST_WINDOW_HOURS, {
+	const { hours, listBuckets } =
+		UPTIME_RANGES.find((r) => r.label === range) ?? UPTIME_RANGES[3];
+
+	const { data, isError } = useDeviceUptime(serial, hours, {
 		enabled: visible,
 		refetchInterval: false,
 	});
@@ -316,9 +324,9 @@ export const ReachabilityCell = ({ serial }: { serial: string }) => {
 						from={summary.from}
 						to={summary.to}
 						spans={summary.spans}
-						buckets={28}
+						buckets={listBuckets}
 						height="1rem"
-						renderTooltip={bucketTooltip(LIST_WINDOW_HOURS)}
+						renderTooltip={bucketTooltip(hours)}
 					/>
 					<div className="mt-1 text-[10px] tabular-nums text-gray-400">
 						{(summary.ratio * 100).toFixed(1)}%

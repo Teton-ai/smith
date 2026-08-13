@@ -1,6 +1,6 @@
 import { useAuth0 } from "@auth0/auth0-react";
 import { useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
-import { Button, LabelChip, Toast } from "@teton/smith-ui";
+import { Button, LabelChip, Select, Toast } from "@teton/smith-ui";
 import { isAxiosError } from "axios";
 import {
 	AlertTriangle,
@@ -46,7 +46,11 @@ import {
 } from "../../api-client";
 import { useClientMutatorWithTotal } from "../../api-client-mutator";
 import { isStableRelease } from "../../utils/release";
-import { ReachabilityCell } from "./[serial]/uptime";
+import {
+	ReachabilityCell,
+	UPTIME_RANGES,
+	type UptimeRange,
+} from "./[serial]/uptime";
 
 const Tooltip = ({
 	children,
@@ -178,6 +182,8 @@ const DevicesPage = () => {
 	const releaseDropdownRef = useRef<HTMLDivElement>(null);
 	const sentinelRef = useRef<HTMLDivElement>(null);
 	const searchInputRef = useRef<HTMLInputElement>(null);
+
+	const [reachabilityRange, setReachabilityRange] = useState<UptimeRange>("7d");
 
 	// Bulk deploy state
 	const [selectedDeviceIds, setSelectedDeviceIds] = useState<Set<number>>(
@@ -1189,7 +1195,21 @@ const DevicesPage = () => {
 							<div>Device</div>
 							<div>Labels</div>
 							<div>Location</div>
-							<div>Reachability (7d)</div>
+							<div className="flex items-center gap-2">
+								<label htmlFor="reachability-range">Reachability</label>
+								<Select
+									id="reachability-range"
+									value={reachabilityRange}
+									onChange={(v) => setReachabilityRange(v as UptimeRange)}
+									className="w-auto px-1.5 py-0.5 text-[11px] normal-case tracking-normal"
+								>
+									{UPTIME_RANGES.map((r) => (
+										<option key={r.label} value={r.label}>
+											{r.label}
+										</option>
+									))}
+								</Select>
+							</div>
 							<div>Release</div>
 						</div>
 					</div>
@@ -1356,7 +1376,10 @@ const DevicesPage = () => {
 											})()}
 										</div>
 
-										<ReachabilityCell serial={device.serial_number} />
+										<ReachabilityCell
+											serial={device.serial_number}
+											range={reachabilityRange}
+										/>
 
 										<div>
 											{getReleaseInfo(device) ? (
