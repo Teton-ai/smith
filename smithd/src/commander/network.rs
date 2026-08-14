@@ -136,6 +136,23 @@ fn parse_nm_connection_list_line(line: &str) -> Option<(String, bool, String)> {
     }
 }
 
+// Empirically ~2-4% of secret-detail reads for wpa-psk/sae profiles come back
+// missing the psk even though it's genuinely stored (psk-flags=0), in short
+// bursts that self-clear within ~1s. A bounded retry catches most of these
+// before they reach the API and fork a duplicate `network` row (see ADR 0002
+// amendment, 2026-08-14).
+const DETAIL_RETRY_ATTEMPTS: u32 = 3;
+const DETAIL_RETRY_DELAY: Duration = Duration::from_millis(500);
+
+/// True only for the specific, empirically-diagnosed failure this retry exists
+/// for: a wpa-psk/sae profile (which always structurally has a psk) whose
+/// detail query came back without one. Never true for wpa-eap (out of scope,
+/// unverified) or open/unknown key-mgmt (nothing to retrieve).
+fn missing_required_psk(profile: &NMProfile) -> bool {
+    matches!(profile.key_mgmt.as_deref(), Some("wpa-psk") | Some("sae"))
+        && profile.password.is_none()
+}
+
 async fn get_nm_wifi_profiles() -> Result<Vec<NMProfile>> {
     let mut list_cmd = Command::new("nmcli");
     // Include UUID so each profile is queried by UUID in step 2, avoiding ambiguous
@@ -159,24 +176,41 @@ async fn get_nm_wifi_profiles() -> Result<Vec<NMProfile>> {
 
     let mut profiles = Vec::new();
     for (name, is_active, uuid) in entries {
-        let mut detail_cmd = Command::new("nmcli");
-        detail_cmd.args(["--show-secrets", "-t", "connection", "show", "uuid", &uuid]);
+        let mut detail = NMProfile::default();
+        for attempt in 1..=DETAIL_RETRY_ATTEMPTS {
+            let mut detail_cmd = Command::new("nmcli");
+            detail_cmd.args(["--show-secrets", "-t", "connection", "show", "uuid", &uuid]);
 
-        let detail = match execute_nmcli_command(detail_cmd).await {
-            Ok(output) if output.status.success() => {
-                let stdout = String::from_utf8_lossy(&output.stdout);
-                parse_nm_profile_detail(&stdout)
+            detail = match execute_nmcli_command(detail_cmd).await {
+                Ok(output) if output.status.success() => {
+                    let stdout = String::from_utf8_lossy(&output.stdout);
+                    parse_nm_profile_detail(&stdout)
+                }
+                Ok(output) => {
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    tracing::warn!("nmcli connection show uuid {uuid} failed: {stderr}");
+                    break; // command-error shape: not retried, see requirements.md FR3
+                }
+                Err(e) => {
+                    tracing::warn!("Failed to run nmcli connection show uuid {uuid}: {e}");
+                    break; // command-error shape: not retried, see requirements.md FR3
+                }
+            };
+
+            if !missing_required_psk(&detail) {
+                if attempt > 1 {
+                    tracing::debug!("psk read for uuid {uuid} recovered on attempt {attempt}");
+                }
+                break;
             }
-            Ok(output) => {
-                let stderr = String::from_utf8_lossy(&output.stderr);
-                tracing::warn!("nmcli connection show uuid {uuid} failed: {stderr}");
-                NMProfile::default()
+            if attempt < DETAIL_RETRY_ATTEMPTS {
+                sleep(DETAIL_RETRY_DELAY).await;
+            } else {
+                tracing::warn!(
+                    "psk still missing for uuid {uuid} ({name}) after {DETAIL_RETRY_ATTEMPTS} attempts"
+                );
             }
-            Err(e) => {
-                tracing::warn!("Failed to run nmcli connection show uuid {uuid}: {e}");
-                NMProfile::default()
-            }
-        };
+        }
 
         profiles.push(NMProfile {
             name,
