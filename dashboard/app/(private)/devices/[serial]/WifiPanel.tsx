@@ -158,6 +158,107 @@ function RelationshipBadgePill({ badge }: { badge: RelationshipBadge }) {
 	return null;
 }
 
+const SECURITY_LABELS: Record<SecurityClass, string> = {
+	open: "Open",
+	wep: "WEP",
+	psk: "WPA-PSK",
+	sae: "SAE",
+	owe: "OWE",
+	enterprise: "WPA-Enterprise",
+};
+
+/** Deliberately plain gray: `RelationshipBadgePill` above already uses
+ *  green/blue/orange to mean this scan result's relationship to the device,
+ *  so a security/hidden badge reusing those colors here would read as the
+ *  same signal. */
+function SecurityBadge({ securityType }: { securityType?: string }) {
+	const cls = catalogSecurityClass(securityType);
+	return (
+		<Badge variant="gray" pill>
+			{cls ? SECURITY_LABELS[cls] : "Unknown"}
+		</Badge>
+	);
+}
+
+function HiddenBadge() {
+	return (
+		<Badge variant="gray" pill>
+			Hidden
+		</Badge>
+	);
+}
+
+/** `identity` is freeform jsonb (smithd/home.rs only ever writes `{"username":
+ *  ...}` today, see api/src/home.rs). Fall back to the raw JSON rather than
+ *  assume that shape holds. */
+function formatIdentity(identity: unknown): string | null {
+	if (identity == null) return null;
+	if (typeof identity === "object") {
+		const username = (identity as Record<string, unknown>).username;
+		if (typeof username === "string") return username;
+	}
+	return JSON.stringify(identity);
+}
+
+/** Field:value list for a network's `credentials` envelope. Only `psk` is a
+ *  secret worth masking; everything else (`eap`, `phase2_auth`,
+ *  `anonymous_identity`, `pmf`, ...) is metadata, always shown plain. One
+ *  reveal toggle per row, not per field, to match the existing MASK/Eye
+ *  convention used elsewhere on this panel. */
+function CredentialsReveal({
+	credentials,
+	revealed,
+	onToggle,
+}: {
+	credentials: unknown;
+	revealed: boolean;
+	onToggle: () => void;
+}) {
+	const record =
+		credentials && typeof credentials === "object"
+			? (credentials as Record<string, unknown>)
+			: {};
+	const entries = Object.entries(record);
+	if (entries.length === 0) return null;
+	const hasSecret = "psk" in record;
+
+	return (
+		<div className="flex items-center gap-2 flex-wrap">
+			{entries.map(([key, value]) => {
+				const display =
+					typeof value === "string" ? value : JSON.stringify(value);
+				const masked = key === "psk" && !revealed;
+				return (
+					<span key={key} className="font-mono text-xs text-gray-700">
+						{key}: {masked ? MASK : display}
+					</span>
+				);
+			})}
+			{hasSecret && (
+				<button
+					type="button"
+					onClick={onToggle}
+					className="text-gray-400 hover:text-gray-600"
+					aria-label={revealed ? "Hide credentials" : "Reveal credentials"}
+					aria-pressed={revealed}
+				>
+					{revealed ? (
+						<EyeOff className="w-3.5 h-3.5" />
+					) : (
+						<Eye className="w-3.5 h-3.5" />
+					)}
+				</button>
+			)}
+		</div>
+	);
+}
+
+/** Appends to the bottom of the priority-ordered intent list: one past
+ *  whatever the highest priority currently is, or 1 if the list is empty. */
+function nextIntentPriority(intent: DeviceNetworkIntent[]): number {
+	return intent.length > 0 ? Math.max(...intent.map((i) => i.priority)) + 1 : 1;
+}
+
 interface NetworkCondition {
 	profile_name: string;
 	state: "Applied" | "Failed";
@@ -288,6 +389,19 @@ interface WifiPanelProps {
 
 const WifiPanel = ({ serial, device }: WifiPanelProps) => {
 	const [revealedIds, setRevealedIds] = useState<Set<string>>(new Set());
+	// Separate from revealedIds (keyed by profile_name): intent rows are keyed
+	// by their numeric id, so a shared Set would risk an accidental key clash.
+	const [revealedIntentIds, setRevealedIntentIds] = useState<Set<number>>(
+		new Set(),
+	);
+	// Tracked per network_id rather than off the single shared createIntent
+	// mutation's isPending/variables: that hook instance only remembers its
+	// latest call, so adding from two different rows in quick succession would
+	// make the first row's button look "done" while its request is still in
+	// flight. A Set lets every row's pending state be independently correct.
+	const [pendingAddNetworkIds, setPendingAddNetworkIds] = useState<Set<number>>(
+		new Set(),
+	);
 	const [syncing, setSyncing] = useState(false);
 	const [scanSyncing, setScanSyncing] = useState(false);
 	const [scanQuery, setScanQuery] = useState("");
@@ -444,6 +558,18 @@ const WifiPanel = ({ serial, device }: WifiPanelProps) => {
 		});
 	};
 
+	const toggleIntentReveal = (intentId: number) => {
+		setRevealedIntentIds((prev) => {
+			const next = new Set(prev);
+			if (next.has(intentId)) {
+				next.delete(intentId);
+			} else {
+				next.add(intentId);
+			}
+			return next;
+		});
+	};
+
 	const isBusy = isLoading || isDispatching || syncing;
 
 	// Intent section
@@ -467,6 +593,16 @@ const WifiPanel = ({ serial, device }: WifiPanelProps) => {
 				(a, b) => a.priority - b.priority,
 			),
 		[intentListRaw],
+	);
+	// Computed once per intent-list change, not per Configured-profile row:
+	// membership as a Set (O(1) lookup) and the next append priority.
+	const intentNetworkIds = useMemo(
+		() => new Set(sortedIntent.map((i) => i.network_id)),
+		[sortedIntent],
+	);
+	const nextPriority = useMemo(
+		() => nextIntentPriority(sortedIntent),
+		[sortedIntent],
 	);
 
 	const badgeByGroupKey = useMemo(() => {
@@ -599,6 +735,29 @@ const WifiPanel = ({ serial, device }: WifiPanelProps) => {
 		},
 	});
 
+	function addToIntent(networkId: number) {
+		setPendingAddNetworkIds((prev) => new Set(prev).add(networkId));
+		createIntent(
+			{
+				deviceId,
+				data: {
+					network_id: networkId,
+					priority: nextPriority,
+					managed_by: "operator",
+				},
+			},
+			{
+				onSettled: () => {
+					setPendingAddNetworkIds((prev) => {
+						const next = new Set(prev);
+						next.delete(networkId);
+						return next;
+					});
+				},
+			},
+		);
+	}
+
 	const networkCreator = useClientMutatorWithStatus<{
 		id: number;
 		name: string;
@@ -624,16 +783,12 @@ const WifiPanel = ({ serial, device }: WifiPanelProps) => {
 					password: newNetPassword || null,
 				},
 			});
-			const maxPriority =
-				sortedIntent.length > 0
-					? Math.max(...sortedIntent.map((e) => e.priority))
-					: 0;
 			try {
 				await createIntentAsync({
 					deviceId,
 					data: {
 						network_id: created.id,
-						priority: maxPriority + 1,
+						priority: nextIntentPriority(sortedIntent),
 						managed_by: "operator",
 					},
 				});
@@ -788,73 +943,95 @@ const WifiPanel = ({ serial, device }: WifiPanelProps) => {
 					</p>
 				) : (
 					<div className="divide-y divide-gray-100 mb-3">
-						{sortedIntent.map((entry, idx) => (
-							<div key={entry.id} className="py-2.5 flex items-center gap-2">
-								<div className="flex flex-col">
-									<button
-										type="button"
-										disabled={idx === 0}
-										onClick={() => swapPriority(idx, idx - 1)}
-										className="text-gray-400 hover:text-gray-600 disabled:opacity-30 disabled:cursor-not-allowed"
-										aria-label="Move up"
-									>
-										<ChevronUp className="w-3.5 h-3.5" />
-									</button>
-									<button
-										type="button"
-										disabled={idx === sortedIntent.length - 1}
-										onClick={() => swapPriority(idx, idx + 1)}
-										className="text-gray-400 hover:text-gray-600 disabled:opacity-30 disabled:cursor-not-allowed"
-										aria-label="Move down"
-									>
-										<ChevronDown className="w-3.5 h-3.5" />
-									</button>
-								</div>
-								<span className="text-xs text-gray-400 w-4 text-center select-none">
-									{idx + 1}
-								</span>
-								<div className="flex-1 min-w-0">
-									<span className="text-sm font-medium text-gray-900">
-										{entry.name}
+						{sortedIntent.map((entry, idx) => {
+							const identityText = formatIdentity(entry.identity);
+							return (
+								<div
+									key={entry.id}
+									className="py-2.5 grid grid-cols-[auto_auto_1fr_auto] items-center gap-2"
+								>
+									<div className="flex flex-col">
+										<button
+											type="button"
+											disabled={idx === 0}
+											onClick={() => swapPriority(idx, idx - 1)}
+											className="text-gray-400 hover:text-gray-600 disabled:opacity-30 disabled:cursor-not-allowed"
+											aria-label="Move up"
+										>
+											<ChevronUp className="w-3.5 h-3.5" />
+										</button>
+										<button
+											type="button"
+											disabled={idx === sortedIntent.length - 1}
+											onClick={() => swapPriority(idx, idx + 1)}
+											className="text-gray-400 hover:text-gray-600 disabled:opacity-30 disabled:cursor-not-allowed"
+											aria-label="Move down"
+										>
+											<ChevronDown className="w-3.5 h-3.5" />
+										</button>
+									</div>
+									<span className="text-xs text-gray-400 w-4 text-center select-none">
+										{idx + 1}
 									</span>
-									{entry.ssid && (
-										<span className="text-xs text-gray-500 font-mono ml-2">
-											{entry.ssid}
+									<div className="flex-1 min-w-0">
+										<div className="flex items-center gap-1.5 flex-wrap">
+											<span className="text-sm font-medium text-gray-900">
+												{entry.name}
+											</span>
+											<SecurityBadge securityType={entry.security_type} />
+											{entry.is_network_hidden && <HiddenBadge />}
+										</div>
+										{entry.ssid && (
+											<span className="text-xs text-gray-500 font-mono">
+												{entry.ssid}
+											</span>
+										)}
+									</div>
+									{confirmDeleteId === entry.id ? (
+										<span className="inline-flex items-center gap-1.5 text-xs">
+											<span className="text-red-600 font-medium">Remove?</span>
+											<button
+												type="button"
+												onClick={() =>
+													deleteIntent({ deviceId, intentId: entry.id })
+												}
+												className="text-red-600 hover:text-red-800 font-medium"
+											>
+												Confirm
+											</button>
+											<button
+												type="button"
+												onClick={() => setConfirmDeleteId(null)}
+												className="text-gray-500 hover:text-gray-700"
+											>
+												Cancel
+											</button>
 										</span>
+									) : (
+										<button
+											type="button"
+											onClick={() => setConfirmDeleteId(entry.id)}
+											className="text-gray-400 hover:text-red-500 transition-colors"
+											aria-label={`Remove ${entry.name}`}
+										>
+											<Trash2 className="w-3.5 h-3.5" />
+										</button>
 									)}
+									<div className="col-start-3 flex flex-col gap-1">
+										<CredentialsReveal
+											credentials={entry.credentials}
+											revealed={revealedIntentIds.has(entry.id)}
+											onToggle={() => toggleIntentReveal(entry.id)}
+										/>
+										{identityText && (
+											<span className="text-xs text-gray-500">
+												Identity: {identityText}
+											</span>
+										)}
+									</div>
 								</div>
-								{confirmDeleteId === entry.id ? (
-									<span className="inline-flex items-center gap-1.5 text-xs">
-										<span className="text-red-600 font-medium">Remove?</span>
-										<button
-											type="button"
-											onClick={() =>
-												deleteIntent({ deviceId, intentId: entry.id })
-											}
-											className="text-red-600 hover:text-red-800 font-medium"
-										>
-											Confirm
-										</button>
-										<button
-											type="button"
-											onClick={() => setConfirmDeleteId(null)}
-											className="text-gray-500 hover:text-gray-700"
-										>
-											Cancel
-										</button>
-									</span>
-								) : (
-									<button
-										type="button"
-										onClick={() => setConfirmDeleteId(entry.id)}
-										className="text-gray-400 hover:text-red-500 transition-colors"
-										aria-label={`Remove ${entry.name}`}
-									>
-										<Trash2 className="w-3.5 h-3.5" />
-									</button>
-								)}
-							</div>
-						))}
+							);
+						})}
 					</div>
 				)}
 
@@ -1184,24 +1361,17 @@ const WifiPanel = ({ serial, device }: WifiPanelProps) => {
 																		variant="soft"
 																		tone="blue"
 																		size="sm"
-																		onClick={() => {
-																			const maxPriority =
-																				sortedIntent.length > 0
-																					? Math.max(
-																							...sortedIntent.map(
-																								(e) => e.priority,
-																							),
-																						)
-																					: 0;
+																		onClick={() =>
 																			createIntent({
 																				deviceId,
 																				data: {
 																					network_id: n.id,
-																					priority: maxPriority + 1,
+																					priority:
+																						nextIntentPriority(sortedIntent),
 																					managed_by: "operator",
 																				},
-																			});
-																		}}
+																			})
+																		}
 																	>
 																		Add
 																	</Button>
@@ -1294,6 +1464,11 @@ const WifiPanel = ({ serial, device }: WifiPanelProps) => {
 							<div className="divide-y divide-gray-100">
 								{profiles.map((profile: ConfiguredNetwork) => {
 									const revealed = revealedIds.has(profile.profile_name);
+									const identityText = formatIdentity(profile.identity);
+									const inIntent = intentNetworkIds.has(profile.network_id);
+									const addPending = pendingAddNetworkIds.has(
+										profile.network_id,
+									);
 									return (
 										<div
 											key={profile.profile_name}
@@ -1301,9 +1476,15 @@ const WifiPanel = ({ serial, device }: WifiPanelProps) => {
 										>
 											<div className="flex items-center justify-between gap-2">
 												<div className="flex flex-col min-w-0">
-													<span className="text-sm font-medium text-gray-900 truncate">
-														{profile.profile_name}
-													</span>
+													<div className="flex items-center gap-1.5 flex-wrap">
+														<span className="text-sm font-medium text-gray-900 truncate">
+															{profile.profile_name}
+														</span>
+														<SecurityBadge
+															securityType={profile.security_type}
+														/>
+														{profile.is_network_hidden && <HiddenBadge />}
+													</div>
 													{profile.ssid && (
 														<span className="text-xs text-gray-500 font-mono truncate">
 															{profile.ssid}
@@ -1316,27 +1497,33 @@ const WifiPanel = ({ serial, device }: WifiPanelProps) => {
 															Active
 														</Badge>
 													)}
+													{inIntent ? (
+														<Badge variant="blue" pill>
+															In intent
+														</Badge>
+													) : (
+														<Button
+															variant="soft"
+															tone="orange"
+															size="sm"
+															disabled={addPending}
+															loading={addPending}
+															onClick={() => addToIntent(profile.network_id)}
+														>
+															Add to intent
+														</Button>
+													)}
 												</div>
 											</div>
-											{profile.password && (
-												<div className="flex items-center gap-2">
-													<span className="font-mono text-sm text-gray-700">
-														{revealed ? profile.password : MASK}
-													</span>
-													<button
-														type="button"
-														onClick={() => toggleReveal(profile.profile_name)}
-														className="text-gray-400 hover:text-gray-600"
-														aria-label={`${revealed ? "Hide" : "Reveal"} password for ${profile.profile_name}`}
-														aria-pressed={revealed}
-													>
-														{revealed ? (
-															<EyeOff className="w-3.5 h-3.5" />
-														) : (
-															<Eye className="w-3.5 h-3.5" />
-														)}
-													</button>
-												</div>
+											<CredentialsReveal
+												credentials={profile.credentials}
+												revealed={revealed}
+												onToggle={() => toggleReveal(profile.profile_name)}
+											/>
+											{identityText && (
+												<span className="text-xs text-gray-500">
+													Identity: {identityText}
+												</span>
 											)}
 										</div>
 									);
