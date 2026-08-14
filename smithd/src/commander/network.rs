@@ -1981,6 +1981,69 @@ OpenNet:802-11-wireless:OpenNet:--:--";
     }
 
     #[test]
+    fn missing_required_psk_true_for_wpa_psk_without_password() {
+        let profile = NMProfile {
+            key_mgmt: Some("wpa-psk".to_string()),
+            password: None,
+            ..Default::default()
+        };
+        assert!(missing_required_psk(&profile));
+    }
+
+    #[test]
+    fn missing_required_psk_false_for_wpa_psk_with_password() {
+        let profile = NMProfile {
+            key_mgmt: Some("wpa-psk".to_string()),
+            password: Some("secret123".to_string()),
+            ..Default::default()
+        };
+        assert!(!missing_required_psk(&profile));
+    }
+
+    #[test]
+    fn missing_required_psk_true_for_sae_without_password() {
+        let profile = NMProfile {
+            key_mgmt: Some("sae".to_string()),
+            password: None,
+            ..Default::default()
+        };
+        assert!(missing_required_psk(&profile));
+    }
+
+    #[test]
+    fn missing_required_psk_false_for_open_without_password() {
+        let profile = NMProfile {
+            key_mgmt: Some("open".to_string()),
+            password: None,
+            ..Default::default()
+        };
+        assert!(!missing_required_psk(&profile));
+    }
+
+    #[test]
+    fn missing_required_psk_false_for_wpa_eap_without_identity() {
+        // wpa-eap is deliberately out of scope for this retry (requirements.md
+        // FR4): the diagnosed failure and its fix are scoped to wpa-psk/sae only.
+        let profile = NMProfile {
+            key_mgmt: Some("wpa-eap".to_string()),
+            password: None,
+            eap_identity: None,
+            ..Default::default()
+        };
+        assert!(!missing_required_psk(&profile));
+    }
+
+    #[test]
+    fn missing_required_psk_false_for_unknown_key_mgmt() {
+        let profile = NMProfile {
+            key_mgmt: None,
+            password: None,
+            ..Default::default()
+        };
+        assert!(!missing_required_psk(&profile));
+    }
+
+    #[test]
     fn nm_profile_detail_open_network_no_security_block_sets_sentinel() {
         // No 802-11-wireless-security lines at all: sentinel "open" must be set.
         let stdout = "802-11-wireless.ssid:FreeWifi\n\
