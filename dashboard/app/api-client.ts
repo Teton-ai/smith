@@ -138,7 +138,16 @@ export interface CommandsPaginated {
 }
 
 export interface ConfiguredNetwork {
+	/**
+	 * Full credential envelope smithd/home.rs writes: `psk` for PSK/SAE networks,
+	 * plus `pmf`/`eap`/`phase2_auth`/`anonymous_identity` for EAP profiles. Distinct
+	 * from `password` above (a convenience mirror of `credentials->>'psk'` only).
+	 */
+	credentials: unknown;
+	/** EAP username (`{"username": "..."}`), set only for enterprise profiles. */
+	identity?: unknown;
 	is_active: boolean;
+	is_network_hidden: boolean;
 	name: string;
 	network_id: number;
 	password?: string;
@@ -402,8 +411,16 @@ export interface DeviceLedgerItemPaginated {
 
 export interface DeviceNetworkIntent {
 	created_at: string;
+	/**
+	 * Full credential envelope smithd/home.rs writes: `psk` for PSK/SAE networks,
+	 * plus `pmf`/`eap`/`phase2_auth`/`anonymous_identity` for EAP profiles.
+	 */
+	credentials: unknown;
 	device_id: number;
 	id: number;
+	/** EAP username (`{"username": "..."}`), set only for enterprise profiles. */
+	identity?: unknown;
+	is_network_hidden: boolean;
 	managed_by: string;
 	name: string;
 	network_id: number;
@@ -800,6 +817,30 @@ export type GetAllCommandsForDeviceParams = {
 	limit?: number;
 };
 
+export type GetTelemetryForDeviceParams = {
+	/**
+	 * Name of the series to read, e.g. `node_cpu_usage_percent`.
+	 */
+	metric: string;
+	/**
+	 * Set when the series is a counter, so it is read as a per-second rate.
+	 */
+	rate?: boolean;
+	/**
+	 * Start of the window (RFC 3339). Defaults to one hour before `to`.
+	 */
+	from?: string;
+	/**
+	 * End of the window (RFC 3339). Defaults to now.
+	 */
+	to?: string;
+	/**
+	 * Resolution in seconds. Defaults to 60.
+	 * @minimum 0
+	 */
+	step?: number;
+};
+
 export type GetUptimeForDeviceParams = {
 	/**
 	 * Start of the window (RFC 3339). Defaults to 24 hours before `to`.
@@ -841,6 +882,34 @@ export type DownloadPackageParams = {
 
 export type GetSignedPackageLinkParams = {
 	name: string;
+};
+
+export type GetTelemetryForDevicesParams = {
+	/**
+	 * Comma-separated serial numbers.
+	 */
+	serials: string;
+	/**
+	 * Name of the series to read, e.g. `node_cpu_usage_percent`.
+	 */
+	metric: string;
+	/**
+	 * Set when the series is a counter, so it is read as a per-second rate.
+	 */
+	rate?: boolean;
+	/**
+	 * Start of the window (RFC 3339). Defaults to one hour before `to`.
+	 */
+	from?: string;
+	/**
+	 * End of the window (RFC 3339). Defaults to now.
+	 */
+	to?: string;
+	/**
+	 * Resolution in seconds. Defaults to 60.
+	 * @minimum 0
+	 */
+	step?: number;
 };
 
 /**
@@ -8727,6 +8796,363 @@ export function useGetServicesForDevice<
 	queryKey: DataTag<QueryKey, TData, TError>;
 } {
 	const queryOptions = useGetServicesForDeviceQueryOptions(deviceId, options);
+
+	const query = useQuery(queryOptions, queryClient) as UseQueryResult<
+		TData,
+		TError
+	> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+	return { ...query, queryKey: queryOptions.queryKey };
+}
+
+export const useGetTelemetryForDeviceHook = () => {
+	const getTelemetryForDevice = useClientMutator<void>();
+
+	return useCallback(
+		(
+			deviceId: string,
+			params: GetTelemetryForDeviceParams,
+			signal?: AbortSignal,
+		) => {
+			return getTelemetryForDevice({
+				url: `/devices/${deviceId}/telemetry`,
+				method: "GET",
+				params,
+				signal,
+			});
+		},
+		[getTelemetryForDevice],
+	);
+};
+
+export const getGetTelemetryForDeviceInfiniteQueryKey = (
+	deviceId: string,
+	params?: GetTelemetryForDeviceParams,
+) => {
+	return [
+		"infinite",
+		`/devices/${deviceId}/telemetry`,
+		...(params ? [params] : []),
+	] as const;
+};
+
+export const getGetTelemetryForDeviceQueryKey = (
+	deviceId: string,
+	params?: GetTelemetryForDeviceParams,
+) => {
+	return [
+		`/devices/${deviceId}/telemetry`,
+		...(params ? [params] : []),
+	] as const;
+};
+
+export const useGetTelemetryForDeviceInfiniteQueryOptions = <
+	TData = InfiniteData<
+		Awaited<ReturnType<ReturnType<typeof useGetTelemetryForDeviceHook>>>
+	>,
+	TError = void,
+>(
+	deviceId: string,
+	params: GetTelemetryForDeviceParams,
+	options?: {
+		query?: Partial<
+			UseInfiniteQueryOptions<
+				Awaited<ReturnType<ReturnType<typeof useGetTelemetryForDeviceHook>>>,
+				TError,
+				TData
+			>
+		>;
+	},
+) => {
+	const { query: queryOptions } = options ?? {};
+
+	const queryKey =
+		queryOptions?.queryKey ??
+		getGetTelemetryForDeviceInfiniteQueryKey(deviceId, params);
+
+	const getTelemetryForDevice = useGetTelemetryForDeviceHook();
+
+	const queryFn: QueryFunction<
+		Awaited<ReturnType<ReturnType<typeof useGetTelemetryForDeviceHook>>>
+	> = ({ signal }) => getTelemetryForDevice(deviceId, params, signal);
+
+	return {
+		queryKey,
+		queryFn,
+		enabled: deviceId !== null && deviceId !== undefined,
+		...queryOptions,
+	} as UseInfiniteQueryOptions<
+		Awaited<ReturnType<ReturnType<typeof useGetTelemetryForDeviceHook>>>,
+		TError,
+		TData
+	> & { queryKey: DataTag<QueryKey, TData, TError> };
+};
+
+export type GetTelemetryForDeviceInfiniteQueryResult = NonNullable<
+	Awaited<ReturnType<ReturnType<typeof useGetTelemetryForDeviceHook>>>
+>;
+export type GetTelemetryForDeviceInfiniteQueryError = void;
+
+export function useGetTelemetryForDeviceInfinite<
+	TData = InfiniteData<
+		Awaited<ReturnType<ReturnType<typeof useGetTelemetryForDeviceHook>>>
+	>,
+	TError = void,
+>(
+	deviceId: string,
+	params: GetTelemetryForDeviceParams,
+	options: {
+		query: Partial<
+			UseInfiniteQueryOptions<
+				Awaited<ReturnType<ReturnType<typeof useGetTelemetryForDeviceHook>>>,
+				TError,
+				TData
+			>
+		> &
+			Pick<
+				DefinedInitialDataOptions<
+					Awaited<ReturnType<ReturnType<typeof useGetTelemetryForDeviceHook>>>,
+					TError,
+					Awaited<ReturnType<ReturnType<typeof useGetTelemetryForDeviceHook>>>
+				>,
+				"initialData"
+			>;
+	},
+	queryClient?: QueryClient,
+): DefinedUseInfiniteQueryResult<TData, TError> & {
+	queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useGetTelemetryForDeviceInfinite<
+	TData = InfiniteData<
+		Awaited<ReturnType<ReturnType<typeof useGetTelemetryForDeviceHook>>>
+	>,
+	TError = void,
+>(
+	deviceId: string,
+	params: GetTelemetryForDeviceParams,
+	options?: {
+		query?: Partial<
+			UseInfiniteQueryOptions<
+				Awaited<ReturnType<ReturnType<typeof useGetTelemetryForDeviceHook>>>,
+				TError,
+				TData
+			>
+		> &
+			Pick<
+				UndefinedInitialDataOptions<
+					Awaited<ReturnType<ReturnType<typeof useGetTelemetryForDeviceHook>>>,
+					TError,
+					Awaited<ReturnType<ReturnType<typeof useGetTelemetryForDeviceHook>>>
+				>,
+				"initialData"
+			>;
+	},
+	queryClient?: QueryClient,
+): UseInfiniteQueryResult<TData, TError> & {
+	queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useGetTelemetryForDeviceInfinite<
+	TData = InfiniteData<
+		Awaited<ReturnType<ReturnType<typeof useGetTelemetryForDeviceHook>>>
+	>,
+	TError = void,
+>(
+	deviceId: string,
+	params: GetTelemetryForDeviceParams,
+	options?: {
+		query?: Partial<
+			UseInfiniteQueryOptions<
+				Awaited<ReturnType<ReturnType<typeof useGetTelemetryForDeviceHook>>>,
+				TError,
+				TData
+			>
+		>;
+	},
+	queryClient?: QueryClient,
+): UseInfiniteQueryResult<TData, TError> & {
+	queryKey: DataTag<QueryKey, TData, TError>;
+};
+
+export function useGetTelemetryForDeviceInfinite<
+	TData = InfiniteData<
+		Awaited<ReturnType<ReturnType<typeof useGetTelemetryForDeviceHook>>>
+	>,
+	TError = void,
+>(
+	deviceId: string,
+	params: GetTelemetryForDeviceParams,
+	options?: {
+		query?: Partial<
+			UseInfiniteQueryOptions<
+				Awaited<ReturnType<ReturnType<typeof useGetTelemetryForDeviceHook>>>,
+				TError,
+				TData
+			>
+		>;
+	},
+	queryClient?: QueryClient,
+): UseInfiniteQueryResult<TData, TError> & {
+	queryKey: DataTag<QueryKey, TData, TError>;
+} {
+	const queryOptions = useGetTelemetryForDeviceInfiniteQueryOptions(
+		deviceId,
+		params,
+		options,
+	);
+
+	const query = useInfiniteQuery(
+		queryOptions,
+		queryClient,
+	) as UseInfiniteQueryResult<TData, TError> & {
+		queryKey: DataTag<QueryKey, TData, TError>;
+	};
+
+	return { ...query, queryKey: queryOptions.queryKey };
+}
+
+export const useGetTelemetryForDeviceQueryOptions = <
+	TData = Awaited<ReturnType<ReturnType<typeof useGetTelemetryForDeviceHook>>>,
+	TError = void,
+>(
+	deviceId: string,
+	params: GetTelemetryForDeviceParams,
+	options?: {
+		query?: Partial<
+			UseQueryOptions<
+				Awaited<ReturnType<ReturnType<typeof useGetTelemetryForDeviceHook>>>,
+				TError,
+				TData
+			>
+		>;
+	},
+) => {
+	const { query: queryOptions } = options ?? {};
+
+	const queryKey =
+		queryOptions?.queryKey ??
+		getGetTelemetryForDeviceQueryKey(deviceId, params);
+
+	const getTelemetryForDevice = useGetTelemetryForDeviceHook();
+
+	const queryFn: QueryFunction<
+		Awaited<ReturnType<ReturnType<typeof useGetTelemetryForDeviceHook>>>
+	> = ({ signal }) => getTelemetryForDevice(deviceId, params, signal);
+
+	return {
+		queryKey,
+		queryFn,
+		enabled: deviceId !== null && deviceId !== undefined,
+		...queryOptions,
+	} as UseQueryOptions<
+		Awaited<ReturnType<ReturnType<typeof useGetTelemetryForDeviceHook>>>,
+		TError,
+		TData
+	> & { queryKey: DataTag<QueryKey, TData, TError> };
+};
+
+export type GetTelemetryForDeviceQueryResult = NonNullable<
+	Awaited<ReturnType<ReturnType<typeof useGetTelemetryForDeviceHook>>>
+>;
+export type GetTelemetryForDeviceQueryError = void;
+
+export function useGetTelemetryForDevice<
+	TData = Awaited<ReturnType<ReturnType<typeof useGetTelemetryForDeviceHook>>>,
+	TError = void,
+>(
+	deviceId: string,
+	params: GetTelemetryForDeviceParams,
+	options: {
+		query: Partial<
+			UseQueryOptions<
+				Awaited<ReturnType<ReturnType<typeof useGetTelemetryForDeviceHook>>>,
+				TError,
+				TData
+			>
+		> &
+			Pick<
+				DefinedInitialDataOptions<
+					Awaited<ReturnType<ReturnType<typeof useGetTelemetryForDeviceHook>>>,
+					TError,
+					Awaited<ReturnType<ReturnType<typeof useGetTelemetryForDeviceHook>>>
+				>,
+				"initialData"
+			>;
+	},
+	queryClient?: QueryClient,
+): DefinedUseQueryResult<TData, TError> & {
+	queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useGetTelemetryForDevice<
+	TData = Awaited<ReturnType<ReturnType<typeof useGetTelemetryForDeviceHook>>>,
+	TError = void,
+>(
+	deviceId: string,
+	params: GetTelemetryForDeviceParams,
+	options?: {
+		query?: Partial<
+			UseQueryOptions<
+				Awaited<ReturnType<ReturnType<typeof useGetTelemetryForDeviceHook>>>,
+				TError,
+				TData
+			>
+		> &
+			Pick<
+				UndefinedInitialDataOptions<
+					Awaited<ReturnType<ReturnType<typeof useGetTelemetryForDeviceHook>>>,
+					TError,
+					Awaited<ReturnType<ReturnType<typeof useGetTelemetryForDeviceHook>>>
+				>,
+				"initialData"
+			>;
+	},
+	queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+	queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useGetTelemetryForDevice<
+	TData = Awaited<ReturnType<ReturnType<typeof useGetTelemetryForDeviceHook>>>,
+	TError = void,
+>(
+	deviceId: string,
+	params: GetTelemetryForDeviceParams,
+	options?: {
+		query?: Partial<
+			UseQueryOptions<
+				Awaited<ReturnType<ReturnType<typeof useGetTelemetryForDeviceHook>>>,
+				TError,
+				TData
+			>
+		>;
+	},
+	queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+	queryKey: DataTag<QueryKey, TData, TError>;
+};
+
+export function useGetTelemetryForDevice<
+	TData = Awaited<ReturnType<ReturnType<typeof useGetTelemetryForDeviceHook>>>,
+	TError = void,
+>(
+	deviceId: string,
+	params: GetTelemetryForDeviceParams,
+	options?: {
+		query?: Partial<
+			UseQueryOptions<
+				Awaited<ReturnType<ReturnType<typeof useGetTelemetryForDeviceHook>>>,
+				TError,
+				TData
+			>
+		>;
+	},
+	queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+	queryKey: DataTag<QueryKey, TData, TError>;
+} {
+	const queryOptions = useGetTelemetryForDeviceQueryOptions(
+		deviceId,
+		params,
+		options,
+	);
 
 	const query = useQuery(queryOptions, queryClient) as UseQueryResult<
 		TData,
@@ -21481,6 +21907,327 @@ export function useGetRoles<
 	queryKey: DataTag<QueryKey, TData, TError>;
 } {
 	const queryOptions = useGetRolesQueryOptions(options);
+
+	const query = useQuery(queryOptions, queryClient) as UseQueryResult<
+		TData,
+		TError
+	> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+	return { ...query, queryKey: queryOptions.queryKey };
+}
+
+export const useGetTelemetryForDevicesHook = () => {
+	const getTelemetryForDevices = useClientMutator<void>();
+
+	return useCallback(
+		(params: GetTelemetryForDevicesParams, signal?: AbortSignal) => {
+			return getTelemetryForDevices({
+				url: `/telemetry/devices`,
+				method: "GET",
+				params,
+				signal,
+			});
+		},
+		[getTelemetryForDevices],
+	);
+};
+
+export const getGetTelemetryForDevicesInfiniteQueryKey = (
+	params?: GetTelemetryForDevicesParams,
+) => {
+	return [
+		"infinite",
+		`/telemetry/devices`,
+		...(params ? [params] : []),
+	] as const;
+};
+
+export const getGetTelemetryForDevicesQueryKey = (
+	params?: GetTelemetryForDevicesParams,
+) => {
+	return [`/telemetry/devices`, ...(params ? [params] : [])] as const;
+};
+
+export const useGetTelemetryForDevicesInfiniteQueryOptions = <
+	TData = InfiniteData<
+		Awaited<ReturnType<ReturnType<typeof useGetTelemetryForDevicesHook>>>
+	>,
+	TError = void,
+>(
+	params: GetTelemetryForDevicesParams,
+	options?: {
+		query?: Partial<
+			UseInfiniteQueryOptions<
+				Awaited<ReturnType<ReturnType<typeof useGetTelemetryForDevicesHook>>>,
+				TError,
+				TData
+			>
+		>;
+	},
+) => {
+	const { query: queryOptions } = options ?? {};
+
+	const queryKey =
+		queryOptions?.queryKey ?? getGetTelemetryForDevicesInfiniteQueryKey(params);
+
+	const getTelemetryForDevices = useGetTelemetryForDevicesHook();
+
+	const queryFn: QueryFunction<
+		Awaited<ReturnType<ReturnType<typeof useGetTelemetryForDevicesHook>>>
+	> = ({ signal }) => getTelemetryForDevices(params, signal);
+
+	return { queryKey, queryFn, ...queryOptions } as UseInfiniteQueryOptions<
+		Awaited<ReturnType<ReturnType<typeof useGetTelemetryForDevicesHook>>>,
+		TError,
+		TData
+	> & { queryKey: DataTag<QueryKey, TData, TError> };
+};
+
+export type GetTelemetryForDevicesInfiniteQueryResult = NonNullable<
+	Awaited<ReturnType<ReturnType<typeof useGetTelemetryForDevicesHook>>>
+>;
+export type GetTelemetryForDevicesInfiniteQueryError = void;
+
+export function useGetTelemetryForDevicesInfinite<
+	TData = InfiniteData<
+		Awaited<ReturnType<ReturnType<typeof useGetTelemetryForDevicesHook>>>
+	>,
+	TError = void,
+>(
+	params: GetTelemetryForDevicesParams,
+	options: {
+		query: Partial<
+			UseInfiniteQueryOptions<
+				Awaited<ReturnType<ReturnType<typeof useGetTelemetryForDevicesHook>>>,
+				TError,
+				TData
+			>
+		> &
+			Pick<
+				DefinedInitialDataOptions<
+					Awaited<ReturnType<ReturnType<typeof useGetTelemetryForDevicesHook>>>,
+					TError,
+					Awaited<ReturnType<ReturnType<typeof useGetTelemetryForDevicesHook>>>
+				>,
+				"initialData"
+			>;
+	},
+	queryClient?: QueryClient,
+): DefinedUseInfiniteQueryResult<TData, TError> & {
+	queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useGetTelemetryForDevicesInfinite<
+	TData = InfiniteData<
+		Awaited<ReturnType<ReturnType<typeof useGetTelemetryForDevicesHook>>>
+	>,
+	TError = void,
+>(
+	params: GetTelemetryForDevicesParams,
+	options?: {
+		query?: Partial<
+			UseInfiniteQueryOptions<
+				Awaited<ReturnType<ReturnType<typeof useGetTelemetryForDevicesHook>>>,
+				TError,
+				TData
+			>
+		> &
+			Pick<
+				UndefinedInitialDataOptions<
+					Awaited<ReturnType<ReturnType<typeof useGetTelemetryForDevicesHook>>>,
+					TError,
+					Awaited<ReturnType<ReturnType<typeof useGetTelemetryForDevicesHook>>>
+				>,
+				"initialData"
+			>;
+	},
+	queryClient?: QueryClient,
+): UseInfiniteQueryResult<TData, TError> & {
+	queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useGetTelemetryForDevicesInfinite<
+	TData = InfiniteData<
+		Awaited<ReturnType<ReturnType<typeof useGetTelemetryForDevicesHook>>>
+	>,
+	TError = void,
+>(
+	params: GetTelemetryForDevicesParams,
+	options?: {
+		query?: Partial<
+			UseInfiniteQueryOptions<
+				Awaited<ReturnType<ReturnType<typeof useGetTelemetryForDevicesHook>>>,
+				TError,
+				TData
+			>
+		>;
+	},
+	queryClient?: QueryClient,
+): UseInfiniteQueryResult<TData, TError> & {
+	queryKey: DataTag<QueryKey, TData, TError>;
+};
+
+export function useGetTelemetryForDevicesInfinite<
+	TData = InfiniteData<
+		Awaited<ReturnType<ReturnType<typeof useGetTelemetryForDevicesHook>>>
+	>,
+	TError = void,
+>(
+	params: GetTelemetryForDevicesParams,
+	options?: {
+		query?: Partial<
+			UseInfiniteQueryOptions<
+				Awaited<ReturnType<ReturnType<typeof useGetTelemetryForDevicesHook>>>,
+				TError,
+				TData
+			>
+		>;
+	},
+	queryClient?: QueryClient,
+): UseInfiniteQueryResult<TData, TError> & {
+	queryKey: DataTag<QueryKey, TData, TError>;
+} {
+	const queryOptions = useGetTelemetryForDevicesInfiniteQueryOptions(
+		params,
+		options,
+	);
+
+	const query = useInfiniteQuery(
+		queryOptions,
+		queryClient,
+	) as UseInfiniteQueryResult<TData, TError> & {
+		queryKey: DataTag<QueryKey, TData, TError>;
+	};
+
+	return { ...query, queryKey: queryOptions.queryKey };
+}
+
+export const useGetTelemetryForDevicesQueryOptions = <
+	TData = Awaited<ReturnType<ReturnType<typeof useGetTelemetryForDevicesHook>>>,
+	TError = void,
+>(
+	params: GetTelemetryForDevicesParams,
+	options?: {
+		query?: Partial<
+			UseQueryOptions<
+				Awaited<ReturnType<ReturnType<typeof useGetTelemetryForDevicesHook>>>,
+				TError,
+				TData
+			>
+		>;
+	},
+) => {
+	const { query: queryOptions } = options ?? {};
+
+	const queryKey =
+		queryOptions?.queryKey ?? getGetTelemetryForDevicesQueryKey(params);
+
+	const getTelemetryForDevices = useGetTelemetryForDevicesHook();
+
+	const queryFn: QueryFunction<
+		Awaited<ReturnType<ReturnType<typeof useGetTelemetryForDevicesHook>>>
+	> = ({ signal }) => getTelemetryForDevices(params, signal);
+
+	return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+		Awaited<ReturnType<ReturnType<typeof useGetTelemetryForDevicesHook>>>,
+		TError,
+		TData
+	> & { queryKey: DataTag<QueryKey, TData, TError> };
+};
+
+export type GetTelemetryForDevicesQueryResult = NonNullable<
+	Awaited<ReturnType<ReturnType<typeof useGetTelemetryForDevicesHook>>>
+>;
+export type GetTelemetryForDevicesQueryError = void;
+
+export function useGetTelemetryForDevices<
+	TData = Awaited<ReturnType<ReturnType<typeof useGetTelemetryForDevicesHook>>>,
+	TError = void,
+>(
+	params: GetTelemetryForDevicesParams,
+	options: {
+		query: Partial<
+			UseQueryOptions<
+				Awaited<ReturnType<ReturnType<typeof useGetTelemetryForDevicesHook>>>,
+				TError,
+				TData
+			>
+		> &
+			Pick<
+				DefinedInitialDataOptions<
+					Awaited<ReturnType<ReturnType<typeof useGetTelemetryForDevicesHook>>>,
+					TError,
+					Awaited<ReturnType<ReturnType<typeof useGetTelemetryForDevicesHook>>>
+				>,
+				"initialData"
+			>;
+	},
+	queryClient?: QueryClient,
+): DefinedUseQueryResult<TData, TError> & {
+	queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useGetTelemetryForDevices<
+	TData = Awaited<ReturnType<ReturnType<typeof useGetTelemetryForDevicesHook>>>,
+	TError = void,
+>(
+	params: GetTelemetryForDevicesParams,
+	options?: {
+		query?: Partial<
+			UseQueryOptions<
+				Awaited<ReturnType<ReturnType<typeof useGetTelemetryForDevicesHook>>>,
+				TError,
+				TData
+			>
+		> &
+			Pick<
+				UndefinedInitialDataOptions<
+					Awaited<ReturnType<ReturnType<typeof useGetTelemetryForDevicesHook>>>,
+					TError,
+					Awaited<ReturnType<ReturnType<typeof useGetTelemetryForDevicesHook>>>
+				>,
+				"initialData"
+			>;
+	},
+	queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+	queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useGetTelemetryForDevices<
+	TData = Awaited<ReturnType<ReturnType<typeof useGetTelemetryForDevicesHook>>>,
+	TError = void,
+>(
+	params: GetTelemetryForDevicesParams,
+	options?: {
+		query?: Partial<
+			UseQueryOptions<
+				Awaited<ReturnType<ReturnType<typeof useGetTelemetryForDevicesHook>>>,
+				TError,
+				TData
+			>
+		>;
+	},
+	queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+	queryKey: DataTag<QueryKey, TData, TError>;
+};
+
+export function useGetTelemetryForDevices<
+	TData = Awaited<ReturnType<ReturnType<typeof useGetTelemetryForDevicesHook>>>,
+	TError = void,
+>(
+	params: GetTelemetryForDevicesParams,
+	options?: {
+		query?: Partial<
+			UseQueryOptions<
+				Awaited<ReturnType<ReturnType<typeof useGetTelemetryForDevicesHook>>>,
+				TError,
+				TData
+			>
+		>;
+	},
+	queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+	queryKey: DataTag<QueryKey, TData, TError>;
+} {
+	const queryOptions = useGetTelemetryForDevicesQueryOptions(params, options);
 
 	const query = useQuery(queryOptions, queryClient) as UseQueryResult<
 		TData,
