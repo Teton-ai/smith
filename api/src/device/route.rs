@@ -3412,14 +3412,17 @@ pub async fn delete_device_intent(
 
 /// Map a stored `security_type` (and its psk, if any) to the wire credential
 /// object smithd's applier consumes. Capability-bounded: it only ever emits a
-/// `key_mgmt` smithd can currently apply (`none`/`wpa-psk`), degrading `sae` to
-/// `wpa-psk` and `owe` to `none`. Returns `None` when smithd cannot apply the
-/// type yet (`wpa-eap`, unknown) or a psk-requiring type has no psk, so the
-/// caller can skip the network rather than emit an unusable credential.
+/// `key_mgmt` smithd can currently apply (`none`/`wpa-psk`). Returns `None`
+/// when smithd cannot apply the type yet (`sae`, `owe`, `wpa-eap`, unknown) or
+/// a psk-requiring type has no psk, so the caller can skip the network rather
+/// than emit an unusable or silently-downgraded credential. `sae`/`owe` used
+/// to degrade to `wpa-psk`/`none`, but that silently applies weaker security
+/// than the network is configured for (WPA3 loses forward secrecy, OWE loses
+/// its only encryption entirely) — refused instead.
 fn wire_credentials(security_type: &str, psk: Option<&str>) -> Option<serde_json::Value> {
     match security_type {
-        "open" | "owe" => Some(serde_json::json!({ "key_mgmt": "none" })),
-        "wpa-psk" | "sae" => {
+        "open" => Some(serde_json::json!({ "key_mgmt": "none" })),
+        "wpa-psk" => {
             let psk = psk?;
             Some(serde_json::json!({ "key_mgmt": "wpa-psk", "psk": psk }))
         }
@@ -3484,6 +3487,7 @@ pub async fn apply_device_intent(
             n.name,
             n.password,
             n.security_type,
+            n.is_network_hidden,
             n.credentials ->> 'psk' AS credentials_psk
         FROM device_network_intent dni
         JOIN network n ON n.id = dni.network_id
@@ -3520,26 +3524,38 @@ pub async fn apply_device_intent(
     //     "version": <intent_version: i32>,
     //     "networks": [
     //       { "profile_name": "<catalog name>", "ssid": "<ssid>", "priority": <i32>,
+    //         "hidden": <bool>, "security_type": "wpa-psk",
     //         "credentials": { "key_mgmt": "wpa-psk", "psk": "<password>" } }
     //       { "profile_name": "<catalog name>", "ssid": "<ssid>", "priority": <i32>,
+    //         "hidden": <bool>, "security_type": "open",
     //         "credentials": { "key_mgmt": "none" } }  // open network
     //     ]
     //   }
     // }
+    // `hidden`/`security_type` are siblings of `credentials`, not nested in it:
+    // `credentials` stays exactly the shape smithd applies, the other two are
+    // purely for smithd's own existing-profile identity matching.
     let applyable_networks: Vec<serde_json::Value> = networks
         .iter()
         .filter_map(|n| {
-            let credentials = match n.security_type.as_deref() {
-                Some(security_type) => {
-                    wire_credentials(security_type, n.credentials_psk.as_deref())
-                }
+            let (credentials, applied_security_type) = match n.security_type.as_deref() {
+                Some(security_type) => (
+                    wire_credentials(security_type, n.credentials_psk.as_deref()),
+                    security_type,
+                ),
                 // Legacy rows with no backfilled security_type: preserve the
-                // original password-null inference exactly.
-                None => Some(if let Some(psk) = n.password.as_deref() {
-                    serde_json::json!({ "key_mgmt": "wpa-psk", "psk": psk })
-                } else {
-                    serde_json::json!({ "key_mgmt": "none" })
-                }),
+                // original password-null inference exactly, for both credentials
+                // and the security_type now echoed alongside it.
+                None => {
+                    if let Some(psk) = n.password.as_deref() {
+                        (
+                            Some(serde_json::json!({ "key_mgmt": "wpa-psk", "psk": psk })),
+                            "wpa-psk",
+                        )
+                    } else {
+                        (Some(serde_json::json!({ "key_mgmt": "none" })), "open")
+                    }
+                }
             };
             let Some(credentials) = credentials else {
                 warn!(
@@ -3553,6 +3569,8 @@ pub async fn apply_device_intent(
                 "profile_name": n.name,
                 "ssid": n.ssid.as_deref().unwrap_or(""),
                 "priority": n.priority,
+                "hidden": n.is_network_hidden,
+                "security_type": applied_security_type,
                 "credentials": credentials
             }))
         })
@@ -3619,31 +3637,17 @@ mod tests {
     }
 
     #[test]
-    fn open_and_owe_map_to_none() {
+    fn open_maps_to_none() {
         assert_eq!(
             wire_credentials("open", None),
-            Some(json!({ "key_mgmt": "none" }))
-        );
-        assert_eq!(
-            wire_credentials("owe", None),
-            Some(json!({ "key_mgmt": "none" }))
-        );
-        // psk is ignored for open-family types
-        assert_eq!(
-            wire_credentials("owe", Some("ignored")),
             Some(json!({ "key_mgmt": "none" }))
         );
     }
 
     #[test]
-    fn wpa_psk_and_sae_map_to_wpa_psk_with_psk() {
+    fn wpa_psk_maps_to_wpa_psk_with_psk() {
         assert_eq!(
             wire_credentials("wpa-psk", Some("secret")),
-            Some(json!({ "key_mgmt": "wpa-psk", "psk": "secret" }))
-        );
-        // sae degrades to wpa-psk (works on WPA2/WPA3-mixed APs smithd can apply)
-        assert_eq!(
-            wire_credentials("sae", Some("secret")),
             Some(json!({ "key_mgmt": "wpa-psk", "psk": "secret" }))
         );
     }
@@ -3651,11 +3655,13 @@ mod tests {
     #[test]
     fn psk_required_but_missing_is_skipped() {
         assert_eq!(wire_credentials("wpa-psk", None), None);
-        assert_eq!(wire_credentials("sae", None), None);
     }
 
     #[test]
     fn unapplyable_types_are_skipped() {
+        // WPA3 and Enhanced Open have no correct nmcli-applicable degradation
+        assert_eq!(wire_credentials("sae", Some("secret")), None);
+        assert_eq!(wire_credentials("owe", None), None);
         // enterprise not applyable by smithd yet
         assert_eq!(wire_credentials("wpa-eap", Some("secret")), None);
         // unknown / unmodelled types
