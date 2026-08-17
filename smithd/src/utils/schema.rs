@@ -103,11 +103,9 @@ pub struct IntentNetwork {
     pub profile_name: String,
     pub ssid: String,
     pub priority: i32,
-    // Defaulted: an updated smithd may receive a command queued before the API
-    // rolled out these fields, and must still apply it rather than drop it.
-    // "" is not a value `profile_security_type` ever produces, so a missing
-    // security_type just disables adopt-matching for that network instead of
-    // coincidentally matching an existing profile.
+    // Defaulted: a command queued before the API rolled out these fields must
+    // still deserialize. "" is a value profile_security_type never produces,
+    // so a missing security_type just disables adopt-matching, not a false match.
     #[serde(default)]
     pub hidden: bool,
     #[serde(default)]

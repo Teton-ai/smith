@@ -3411,14 +3411,12 @@ pub async fn delete_device_intent(
 }
 
 /// Map a stored `security_type` (and its psk, if any) to the wire credential
-/// object smithd's applier consumes. Capability-bounded: it only ever emits a
-/// `key_mgmt` smithd can currently apply (`none`/`wpa-psk`). Returns `None`
-/// when smithd cannot apply the type yet (`sae`, `owe`, `wpa-eap`, unknown) or
-/// a psk-requiring type has no psk, so the caller can skip the network rather
-/// than emit an unusable or silently-downgraded credential. `sae`/`owe` used
-/// to degrade to `wpa-psk`/`none`, but that silently applies weaker security
-/// than the network is configured for (WPA3 loses forward secrecy, OWE loses
-/// its only encryption entirely) — refused instead.
+/// object smithd's applier consumes. Capability-bounded: only ever emits a
+/// `key_mgmt` smithd can apply (`none`/`wpa-psk`). Returns `None` when smithd
+/// can't apply the type yet (`sae`, `owe`, `wpa-eap`, unknown) or a
+/// psk-requiring type has no psk. `sae`/`owe` used to degrade to
+/// `wpa-psk`/`none`, but that silently applies weaker security than the
+/// network is actually configured for — refused instead.
 fn wire_credentials(security_type: &str, psk: Option<&str>) -> Option<serde_json::Value> {
     match security_type {
         "open" => Some(serde_json::json!({ "key_mgmt": "none" })),
@@ -3532,9 +3530,8 @@ pub async fn apply_device_intent(
     //     ]
     //   }
     // }
-    // `hidden`/`security_type` are siblings of `credentials`, not nested in it:
-    // `credentials` stays exactly the shape smithd applies, the other two are
-    // purely for smithd's own existing-profile identity matching.
+    // hidden/security_type sit alongside credentials, not inside it: they're
+    // for smithd's existing-profile matching, not the applied shape itself.
     let applyable_networks: Vec<serde_json::Value> = networks
         .iter()
         .filter_map(|n| {
