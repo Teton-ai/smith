@@ -138,13 +138,9 @@ export interface CommandsPaginated {
 }
 
 export interface ConfiguredNetwork {
-	/**
-	 * Full credential envelope smithd/home.rs writes: `psk` for PSK/SAE networks,
-	 * plus `pmf`/`eap`/`phase2_auth`/`anonymous_identity` for EAP profiles. Distinct
-	 * from `password` above (a convenience mirror of `credentials->>'psk'` only).
-	 */
+	/** Full credential envelope; `password` above only mirrors its `psk` key. */
 	credentials: unknown;
-	/** EAP username (`{"username": "..."}`), set only for enterprise profiles. */
+	/** EAP username, set only for enterprise profiles. */
 	identity?: unknown;
 	is_active: boolean;
 	is_network_hidden: boolean;
@@ -410,14 +406,11 @@ export interface DeviceLedgerItemPaginated {
 
 export interface DeviceNetworkIntent {
 	created_at: string;
-	/**
-	 * Full credential envelope smithd/home.rs writes: `psk` for PSK/SAE networks,
-	 * plus `pmf`/`eap`/`phase2_auth`/`anonymous_identity` for EAP profiles.
-	 */
+	/** Full credential envelope from the network's `credentials` column. */
 	credentials: unknown;
 	device_id: number;
 	id: number;
-	/** EAP username (`{"username": "..."}`), set only for enterprise profiles. */
+	/** EAP username, set only for enterprise profiles. */
 	identity?: unknown;
 	is_network_hidden: boolean;
 	managed_by: string;
