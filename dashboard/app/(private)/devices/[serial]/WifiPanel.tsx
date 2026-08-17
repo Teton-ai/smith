@@ -747,6 +747,20 @@ const WifiPanel = ({ serial, device }: WifiPanelProps) => {
 				},
 			},
 			{
+				// Configured rows aren't inside the add-picker modal, so the shared
+				// mutation's onError (which sets modal-only listAddError state) never
+				// surfaces here. A per-call toast gives this call site its own
+				// feedback without touching the modal's error path.
+				onError: (err) => {
+					const status = isAxiosError(err) ? err.response?.status : undefined;
+					setToast({
+						type: "error",
+						message:
+							status === 409
+								? "A network with this name is already in the intent."
+								: "Failed to add network to intent.",
+					});
+				},
 				onSettled: () => {
 					setPendingAddNetworkIds((prev) => {
 						const next = new Set(prev);
