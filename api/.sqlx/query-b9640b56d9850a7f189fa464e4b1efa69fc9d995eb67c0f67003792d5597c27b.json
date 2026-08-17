@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT dcn.network_id, dcn.profile_name, n.ssid, n.name, n.password, n.security_type, dcn.is_active, dcn.updated_at\n        FROM device_configured_network dcn\n        JOIN network n ON n.id = dcn.network_id\n        WHERE dcn.device_id = $1\n        ORDER BY dcn.is_active DESC, dcn.profile_name ASC\n        ",
+  "query": "\n        SELECT dcn.network_id, dcn.profile_name, n.ssid, n.name, n.password, n.security_type,\n               n.is_network_hidden, n.credentials, n.identity, dcn.is_active, dcn.updated_at\n        FROM device_configured_network dcn\n        JOIN network n ON n.id = dcn.network_id\n        WHERE dcn.device_id = $1\n        ORDER BY dcn.is_active DESC, dcn.profile_name ASC\n        ",
   "describe": {
     "columns": [
       {
@@ -35,11 +35,26 @@
       },
       {
         "ordinal": 6,
-        "name": "is_active",
+        "name": "is_network_hidden",
         "type_info": "Bool"
       },
       {
         "ordinal": 7,
+        "name": "credentials",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 8,
+        "name": "identity",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 9,
+        "name": "is_active",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 10,
         "name": "updated_at",
         "type_info": "Timestamptz"
       }
@@ -57,8 +72,11 @@
       true,
       true,
       false,
+      false,
+      true,
+      false,
       false
     ]
   },
-  "hash": "25fc4f67969dc1fd44ae10fd5bc6a336438f1ab6827c90b6b5408b45a68dbdad"
+  "hash": "b9640b56d9850a7f189fa464e4b1efa69fc9d995eb67c0f67003792d5597c27b"
 }

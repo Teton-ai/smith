@@ -186,6 +186,11 @@ pub struct ConfiguredNetwork {
     pub name: String,
     pub password: Option<String>,
     pub security_type: Option<String>,
+    pub is_network_hidden: bool,
+    /// Full credential envelope; `password` above only mirrors its `psk` key.
+    pub credentials: Value,
+    /// EAP username, set only for enterprise profiles.
+    pub identity: Option<Value>,
     pub is_active: bool,
     pub updated_at: DateTime<Utc>,
 }
@@ -211,6 +216,11 @@ pub struct DeviceNetworkIntent {
     pub name: String,
     pub network_type: String,
     pub security_type: Option<String>,
+    pub is_network_hidden: bool,
+    /// Full credential envelope from the network's `credentials` column.
+    pub credentials: Value,
+    /// EAP username, set only for enterprise profiles.
+    pub identity: Option<Value>,
     pub priority: i32,
     pub managed_by: String,
     pub created_at: DateTime<Utc>,
@@ -220,7 +230,6 @@ pub struct DeviceNetworkIntent {
 #[derive(Debug, Deserialize, utoipa::ToSchema)]
 pub struct CreateIntentRequest {
     pub network_id: i32,
-    pub priority: i32,
     pub managed_by: String,
 }
 
