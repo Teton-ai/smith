@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        INSERT INTO device_network_intent (device_id, network_id, priority, managed_by)\n        VALUES (\n            $1,\n            $2,\n            COALESCE((SELECT MAX(priority) FROM device_network_intent WHERE device_id = $1), 0) + 1,\n            $3\n        )\n        RETURNING id\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Int4",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "987263fdfd2fb7672530259d2dfebc510731475d0b009bced62536fa28f8a79f"
+}

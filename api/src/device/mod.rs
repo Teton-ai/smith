@@ -233,7 +233,6 @@ pub struct DeviceNetworkIntent {
 #[derive(Debug, Deserialize, utoipa::ToSchema)]
 pub struct CreateIntentRequest {
     pub network_id: i32,
-    pub priority: i32,
     pub managed_by: String,
 }
 
