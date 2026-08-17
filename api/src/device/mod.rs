@@ -187,11 +187,9 @@ pub struct ConfiguredNetwork {
     pub password: Option<String>,
     pub security_type: Option<String>,
     pub is_network_hidden: bool,
-    /// Full credential envelope smithd/home.rs writes: `psk` for PSK/SAE networks,
-    /// plus `pmf`/`eap`/`phase2_auth`/`anonymous_identity` for EAP profiles. Distinct
-    /// from `password` above (a convenience mirror of `credentials->>'psk'` only).
+    /// Full credential envelope; `password` above only mirrors its `psk` key.
     pub credentials: Value,
-    /// EAP username (`{"username": "..."}`), set only for enterprise profiles.
+    /// EAP username, set only for enterprise profiles.
     pub identity: Option<Value>,
     pub is_active: bool,
     pub updated_at: DateTime<Utc>,
@@ -219,10 +217,9 @@ pub struct DeviceNetworkIntent {
     pub network_type: String,
     pub security_type: Option<String>,
     pub is_network_hidden: bool,
-    /// Full credential envelope smithd/home.rs writes: `psk` for PSK/SAE networks,
-    /// plus `pmf`/`eap`/`phase2_auth`/`anonymous_identity` for EAP profiles.
+    /// Full credential envelope from the network's `credentials` column.
     pub credentials: Value,
-    /// EAP username (`{"username": "..."}`), set only for enterprise profiles.
+    /// EAP username, set only for enterprise profiles.
     pub identity: Option<Value>,
     pub priority: i32,
     pub managed_by: String,

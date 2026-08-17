@@ -167,10 +167,8 @@ const SECURITY_LABELS: Record<SecurityClass, string> = {
 	enterprise: "WPA-Enterprise",
 };
 
-/** Deliberately plain gray: `RelationshipBadgePill` above already uses
- *  green/blue/orange to mean this scan result's relationship to the device,
- *  so a security/hidden badge reusing those colors here would read as the
- *  same signal. */
+/** Plain gray: green/blue/orange are already `RelationshipBadgePill`'s colors
+ *  on this panel, so reusing them here would read as that same signal. */
 function SecurityBadge({ securityType }: { securityType?: string }) {
 	const cls = catalogSecurityClass(securityType);
 	return (
@@ -188,9 +186,8 @@ function HiddenBadge() {
 	);
 }
 
-/** `identity` is freeform jsonb (smithd/home.rs only ever writes `{"username":
- *  ...}` today, see api/src/home.rs). Fall back to the raw JSON rather than
- *  assume that shape holds. */
+/** `identity` is freeform jsonb; fall back to the raw JSON rather than assume
+ *  the `{"username": ...}` shape smithd/home.rs writes today always holds. */
 function formatIdentity(identity: unknown): string | null {
 	if (identity == null) return null;
 	if (typeof identity === "object") {
@@ -201,10 +198,7 @@ function formatIdentity(identity: unknown): string | null {
 }
 
 /** Field:value list for a network's `credentials` envelope. Only `psk` is a
- *  secret worth masking; everything else (`eap`, `phase2_auth`,
- *  `anonymous_identity`, `pmf`, ...) is metadata, always shown plain. One
- *  reveal toggle per row, not per field, to match the existing MASK/Eye
- *  convention used elsewhere on this panel. */
+ *  secret worth masking; the rest is metadata, always shown plain. */
 function CredentialsReveal({
 	credentials,
 	revealed,
@@ -383,16 +377,13 @@ interface WifiPanelProps {
 
 const WifiPanel = ({ serial, device }: WifiPanelProps) => {
 	const [revealedIds, setRevealedIds] = useState<Set<string>>(new Set());
-	// Separate from revealedIds (keyed by profile_name): intent rows are keyed
-	// by their numeric id, so a shared Set would risk an accidental key clash.
+	// Separate from revealedIds: intent rows are keyed by numeric id, not
+	// profile_name, so a shared Set would risk an accidental key clash.
 	const [revealedIntentIds, setRevealedIntentIds] = useState<Set<number>>(
 		new Set(),
 	);
-	// Tracked per network_id rather than off the single shared createIntent
-	// mutation's isPending/variables: that hook instance only remembers its
-	// latest call, so adding from two different rows in quick succession would
-	// make the first row's button look "done" while its request is still in
-	// flight. A Set lets every row's pending state be independently correct.
+	// Per network_id, not the shared mutation's isPending/variables (which only
+	// remembers its latest call): lets each row's pending state stay independent.
 	const [pendingAddNetworkIds, setPendingAddNetworkIds] = useState<Set<number>>(
 		new Set(),
 	);
@@ -588,8 +579,7 @@ const WifiPanel = ({ serial, device }: WifiPanelProps) => {
 			),
 		[intentListRaw],
 	);
-	// Computed once per intent-list change, not per Configured-profile row:
-	// membership as a Set (O(1) lookup) for the "already in intent" check.
+	// Set for O(1) "already in intent" lookups per Configured-profile row.
 	const intentNetworkIds = useMemo(
 		() => new Set(sortedIntent.map((i) => i.network_id)),
 		[sortedIntent],
@@ -736,10 +726,8 @@ const WifiPanel = ({ serial, device }: WifiPanelProps) => {
 				},
 			},
 			{
-				// Configured rows aren't inside the add-picker modal, so the shared
-				// mutation's onError (which sets modal-only listAddError state) never
-				// surfaces here. A per-call toast gives this call site its own
-				// feedback without touching the modal's error path.
+				// The shared mutation's onError sets modal-only error state, which
+				// this (non-modal) call site can't show; use a toast instead.
 				onError: (err) => {
 					const status = isAxiosError(err) ? err.response?.status : undefined;
 					setToast({

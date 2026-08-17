@@ -3148,13 +3148,10 @@ pub async fn create_device_intent(
         return Err(StatusCode::CONFLICT);
     }
 
-    // Priority is computed here, not taken from the request: every caller only
-    // ever wants "append to the end," and computing it client-side let two
-    // concurrent adds race to the same value (harmless for the DB row itself,
-    // but that tie flows into smithd's autoconnect-priority via array order,
-    // making which network the device prefers non-deterministic). The device
-    // row lock above already serializes concurrent inserts for this device, so
-    // this MAX+1 is race-free.
+    // Computed server-side, not taken from the request: a client-computed
+    // value let concurrent adds race to the same priority, which smithd turns
+    // into a non-deterministic autoconnect order. The device row lock above
+    // makes this MAX+1 race-free.
     let intent_id = sqlx::query_scalar!(
         r#"
         INSERT INTO device_network_intent (device_id, network_id, priority, managed_by)
