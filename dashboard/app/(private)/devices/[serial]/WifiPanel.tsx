@@ -253,12 +253,6 @@ function CredentialsReveal({
 	);
 }
 
-/** Appends to the bottom of the priority-ordered intent list: one past
- *  whatever the highest priority currently is, or 1 if the list is empty. */
-function nextIntentPriority(intent: DeviceNetworkIntent[]): number {
-	return intent.length > 0 ? Math.max(...intent.map((i) => i.priority)) + 1 : 1;
-}
-
 interface NetworkCondition {
 	profile_name: string;
 	state: "Applied" | "Failed";
@@ -595,13 +589,9 @@ const WifiPanel = ({ serial, device }: WifiPanelProps) => {
 		[intentListRaw],
 	);
 	// Computed once per intent-list change, not per Configured-profile row:
-	// membership as a Set (O(1) lookup) and the next append priority.
+	// membership as a Set (O(1) lookup) for the "already in intent" check.
 	const intentNetworkIds = useMemo(
 		() => new Set(sortedIntent.map((i) => i.network_id)),
-		[sortedIntent],
-	);
-	const nextPriority = useMemo(
-		() => nextIntentPriority(sortedIntent),
 		[sortedIntent],
 	);
 
@@ -742,7 +732,6 @@ const WifiPanel = ({ serial, device }: WifiPanelProps) => {
 				deviceId,
 				data: {
 					network_id: networkId,
-					priority: nextPriority,
 					managed_by: "operator",
 				},
 			},
@@ -802,7 +791,6 @@ const WifiPanel = ({ serial, device }: WifiPanelProps) => {
 					deviceId,
 					data: {
 						network_id: created.id,
-						priority: nextIntentPriority(sortedIntent),
 						managed_by: "operator",
 					},
 				});
@@ -1380,8 +1368,6 @@ const WifiPanel = ({ serial, device }: WifiPanelProps) => {
 																				deviceId,
 																				data: {
 																					network_id: n.id,
-																					priority:
-																						nextIntentPriority(sortedIntent),
 																					managed_by: "operator",
 																				},
 																			})

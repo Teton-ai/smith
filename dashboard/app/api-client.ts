@@ -167,7 +167,6 @@ export interface ConnectionStatus {
 export interface CreateIntentRequest {
 	managed_by: string;
 	network_id: number;
-	priority: number;
 }
 
 export interface Dashboard {
