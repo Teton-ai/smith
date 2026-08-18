@@ -801,7 +801,33 @@ export type GetDevicesParams = {
 	 * Filter by service health. If true, only devices with at least one monitored service not in 'active' state.
 	 */
 	service_not_running?: boolean;
+	/**
+	 * Column to sort the device list by. If None, devices are ordered by
+	 * last_ping (most recently seen first).
+	 */
+	sort?: GetDevicesSort;
+	/**
+	 * Sort direction for `DeviceFilter::sort`. Defaults to ascending when
+	 * `sort` is set but `order` is not.
+	 */
+	order?: GetDevicesOrder;
 };
+
+export type GetDevicesSort =
+	(typeof GetDevicesSort)[keyof typeof GetDevicesSort];
+
+export const GetDevicesSort = {
+	serial_number: "serial_number",
+	labels: "labels",
+} as const;
+
+export type GetDevicesOrder =
+	(typeof GetDevicesOrder)[keyof typeof GetDevicesOrder];
+
+export const GetDevicesOrder = {
+	asc: "asc",
+	desc: "desc",
+} as const;
 
 export type GetAllCommandsForDeviceParams = {
 	starting_after?: number;
