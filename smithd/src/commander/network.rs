@@ -1417,6 +1417,24 @@ fn psk_matches(existing: Option<&str>, intent: Option<&str>, is_open: bool) -> b
     }
 }
 
+/// True when nothing about an active profile needs to change, so
+/// execute_apply_networks can just bump priority instead of touching the
+/// connection. `hidden` must be checked here too: it doesn't affect ssid/psk
+/// equality, so a hidden-only change was previously invisible to this check.
+fn active_profile_matches(
+    profile: &NMProfile,
+    ssid: &str,
+    hidden: bool,
+    psk: Option<&str>,
+) -> bool {
+    let ssid_matches = profile.ssid.as_deref() == Some(ssid);
+    let hidden_matches = profile.hidden.unwrap_or(false) == hidden;
+    match psk {
+        None => ssid_matches && hidden_matches,
+        Some(psk) => ssid_matches && hidden_matches && profile.password.as_deref() == Some(psk),
+    }
+}
+
 /// Finds a pre-existing NM profile that's the same network under a different
 /// name, so execute_apply_networks can adopt (rename) it instead of creating
 /// a duplicate. Matches on the same identity fields the DB's
@@ -1778,8 +1796,7 @@ pub(crate) async fn execute_apply_networks(
         let result = match resolved {
             Some(profile) if profile.is_active => {
                 if is_open {
-                    let ssid_matches = profile.ssid.as_deref() == Some(ssid.as_str());
-                    if ssid_matches {
+                    if active_profile_matches(profile, ssid, network.hidden, None) {
                         nmcli_update_priority(profile_name, priority)
                             .await
                             .map_err(|e| {
@@ -1801,9 +1818,7 @@ pub(crate) async fn execute_apply_networks(
                 } else {
                     // psk is guaranteed Some by the pre-match guard above.
                     let psk = psk.expect("wpa-psk with None psk reached active branch");
-                    let ssid_matches = profile.ssid.as_deref() == Some(ssid.as_str());
-                    let psk_matches = profile.password.as_deref() == Some(psk);
-                    if ssid_matches && psk_matches {
+                    if active_profile_matches(profile, ssid, network.hidden, Some(psk)) {
                         // Nothing changed: only update priority to avoid an unnecessary reconnect.
                         // profile.password can still come back None on a rare post-retry read
                         // flake (missing_required_psk); this check just misses and falls to
@@ -2404,6 +2419,54 @@ connection.autoconnect-priority:500\n";
             is_active,
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn active_profile_matches_open_same_ssid_and_hidden() {
+        let profile = nm_profile("n", "OpenNet", "open", None, false, true);
+        assert!(active_profile_matches(&profile, "OpenNet", false, None));
+    }
+
+    #[test]
+    fn active_profile_matches_open_hidden_mismatch_is_not_a_match() {
+        // Same SSID both ways, but hidden state flips: must not read as unchanged.
+        let profile = nm_profile("n", "OpenNet", "open", None, true, true);
+        assert!(!active_profile_matches(&profile, "OpenNet", false, None));
+        let profile = nm_profile("n", "OpenNet", "open", None, false, true);
+        assert!(!active_profile_matches(&profile, "OpenNet", true, None));
+    }
+
+    #[test]
+    fn active_profile_matches_secured_same_ssid_psk_and_hidden() {
+        let profile = nm_profile("n", "HC-Teton", "wpa-psk", Some("secret"), false, true);
+        assert!(active_profile_matches(
+            &profile,
+            "HC-Teton",
+            false,
+            Some("secret")
+        ));
+    }
+
+    #[test]
+    fn active_profile_matches_secured_hidden_mismatch_is_not_a_match() {
+        let profile = nm_profile("n", "HC-Teton", "wpa-psk", Some("secret"), true, true);
+        assert!(!active_profile_matches(
+            &profile,
+            "HC-Teton",
+            false,
+            Some("secret")
+        ));
+    }
+
+    #[test]
+    fn active_profile_matches_secured_psk_mismatch_is_not_a_match() {
+        let profile = nm_profile("n", "HC-Teton", "wpa-psk", Some("old"), false, true);
+        assert!(!active_profile_matches(
+            &profile,
+            "HC-Teton",
+            false,
+            Some("new")
+        ));
     }
 
     #[test]
