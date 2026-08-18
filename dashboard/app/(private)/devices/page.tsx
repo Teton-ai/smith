@@ -7,6 +7,8 @@ import {
 	Calendar,
 	CheckCircle,
 	ChevronDown,
+	ChevronsUpDown,
+	ChevronUp,
 	Cpu,
 	GitBranch,
 	Layers,
@@ -19,7 +21,7 @@ import {
 	XCircle,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useLocation, useNavigate, useSearchParams } from "react-router";
+import { Link, useLocation, useNavigate, useSearchParams } from "react-router";
 import {
 	BULK_COMMAND_OPTIONS,
 	buildCommand,
@@ -35,6 +37,8 @@ import { RelativeTime } from "@/app/components/RelativeTime";
 import {
 	type Device,
 	type DistributionRolloutStats,
+	GetDevicesOrder,
+	GetDevicesSort,
 	getGetDevicesInfiniteQueryKey,
 	type Release,
 	useApproveDevice,
@@ -55,9 +59,15 @@ import {
 const Tooltip = ({
 	children,
 	content,
+	forcePosition,
+	className = "",
 }: {
 	children: React.ReactNode;
 	content: string;
+	// Auto "top" placement gets clipped by an overflow-hidden ancestor near the top of a page.
+	forcePosition?: "bottom";
+	// e.g. "relative z-10", to win stacking against a sibling overlay.
+	className?: string;
 }) => {
 	const [isVisible, setIsVisible] = useState(false);
 	const [position, setPosition] = useState<"top" | "right">("top");
@@ -77,22 +87,29 @@ const Tooltip = ({
 		}
 	};
 
+	const effectivePosition = forcePosition ?? position;
+
 	return (
 		<div
 			ref={containerRef}
-			className="relative inline-block"
+			className={`relative inline-block ${className}`}
 			onMouseEnter={handleMouseEnter}
 			onMouseLeave={() => setIsVisible(false)}
 		>
 			{children}
 			{isVisible &&
-				(position === "top" ? (
-					<div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-2 py-1 text-xs text-white bg-gray-800 rounded shadow-lg whitespace-nowrap z-50">
+				(effectivePosition === "top" ? (
+					<div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-2 py-1 text-xs normal-case text-white bg-gray-800 rounded shadow-lg whitespace-nowrap z-50">
 						{content}
 						<div className="absolute top-full left-1/2 transform -translate-x-1/2 w-0 h-0 border-l-4 border-r-4 border-t-4 border-l-transparent border-r-transparent border-t-gray-800"></div>
 					</div>
+				) : effectivePosition === "bottom" ? (
+					<div className="absolute top-full left-1/2 transform -translate-x-1/2 mt-2 px-2 py-1 text-xs normal-case text-white bg-gray-800 rounded shadow-lg whitespace-nowrap z-50">
+						{content}
+						<div className="absolute bottom-full left-1/2 transform -translate-x-1/2 w-0 h-0 border-l-4 border-r-4 border-b-4 border-l-transparent border-r-transparent border-b-gray-800"></div>
+					</div>
 				) : (
-					<div className="absolute left-full top-1/2 transform -translate-y-1/2 ml-2 px-2 py-1 text-xs text-white bg-gray-800 rounded shadow-lg whitespace-nowrap z-50">
+					<div className="absolute left-full top-1/2 transform -translate-y-1/2 ml-2 px-2 py-1 text-xs normal-case text-white bg-gray-800 rounded shadow-lg whitespace-nowrap z-50">
 						{content}
 						<div className="absolute right-full top-1/2 transform -translate-y-1/2 w-0 h-0 border-t-4 border-b-4 border-r-4 border-t-transparent border-b-transparent border-r-gray-800"></div>
 					</div>
@@ -153,6 +170,57 @@ const LoadingSkeleton = () => (
 	</div>
 );
 
+const SortableHeader = ({
+	label,
+	field,
+	activeField,
+	direction,
+	onSort,
+}: {
+	label: string;
+	field: GetDevicesSort;
+	activeField: GetDevicesSort | null;
+	direction: GetDevicesOrder;
+	onSort: (field: GetDevicesSort) => void;
+}) => {
+	// Computed once so the tooltip text and chevron below stay in sync.
+	const sortState: "none" | "asc" | "desc" =
+		activeField !== field
+			? "none"
+			: direction === GetDevicesOrder.asc
+				? "asc"
+				: "desc";
+	const tooltipContent =
+		sortState === "asc"
+			? "Sort descending"
+			: sortState === "desc"
+				? "Clear sort"
+				: "Sort ascending";
+
+	return (
+		<div className="justify-self-start">
+			<Tooltip content={tooltipContent} forcePosition="bottom">
+				<button
+					type="button"
+					onClick={() => onSort(field)}
+					className="flex items-center gap-1 hover:text-gray-700 cursor-pointer"
+				>
+					{label}
+					{sortState === "asc" && (
+						<ChevronUp className="w-3.5 h-3.5 text-blue-600" />
+					)}
+					{sortState === "desc" && (
+						<ChevronDown className="w-3.5 h-3.5 text-blue-600" />
+					)}
+					{sortState === "none" && (
+						<ChevronsUpDown className="w-3.5 h-3.5 text-gray-300" />
+					)}
+				</button>
+			</Tooltip>
+		</div>
+	);
+};
+
 const PAGE_SIZE = 100;
 
 const DevicesPage = () => {
@@ -184,6 +252,11 @@ const DevicesPage = () => {
 	const searchInputRef = useRef<HTMLInputElement>(null);
 
 	const [reachabilityRange, setReachabilityRange] = useState<UptimeRange>("7d");
+
+	const [sortField, setSortField] = useState<GetDevicesSort | null>(null);
+	const [sortDirection, setSortDirection] = useState<GetDevicesOrder>(
+		GetDevicesOrder.asc,
+	);
 
 	// Bulk deploy state
 	const [selectedDeviceIds, setSelectedDeviceIds] = useState<Set<number>>(
@@ -239,6 +312,8 @@ const DevicesPage = () => {
 			service_not_running: showServiceDown || undefined,
 			release_id: releaseFilter,
 			distribution_id: distributionFilter,
+			sort: sortField ?? undefined,
+			order: sortField ? sortDirection : undefined,
 			limit: PAGE_SIZE,
 		}),
 		[
@@ -250,6 +325,8 @@ const DevicesPage = () => {
 			showServiceDown,
 			releaseFilter,
 			distributionFilter,
+			sortField,
+			sortDirection,
 		],
 	);
 
@@ -581,6 +658,8 @@ const DevicesPage = () => {
 		const releaseIdParam = searchParams.get("release_id");
 		const distributionIdParam = searchParams.get("distribution_id");
 		const approvedParam = searchParams.get("approved");
+		const sortParam = searchParams.get("sort");
+		const orderParam = searchParams.get("order");
 
 		if (outdated === "true") {
 			setShowOutdatedOnly(true);
@@ -616,6 +695,17 @@ const DevicesPage = () => {
 			if (!Number.isNaN(parsedDistributionId)) {
 				setDistributionFilter(parsedDistributionId);
 			}
+		}
+
+		if (
+			sortParam === GetDevicesSort.serial_number ||
+			sortParam === GetDevicesSort.labels
+		) {
+			setSortField(sortParam);
+		}
+
+		if (orderParam === GetDevicesOrder.desc) {
+			setSortDirection(GetDevicesOrder.desc);
 		}
 	}, [searchParams]);
 
@@ -725,6 +815,25 @@ const DevicesPage = () => {
 		const newValue = !showServiceDown;
 		setShowServiceDown(newValue);
 		updateURL({ service_not_running: newValue ? "true" : undefined });
+	};
+
+	const handleSort = (field: GetDevicesSort) => {
+		if (sortField !== field) {
+			setSortField(field);
+			setSortDirection(GetDevicesOrder.asc);
+			updateURL({ sort: field, order: GetDevicesOrder.asc });
+			return;
+		}
+
+		if (sortDirection === GetDevicesOrder.asc) {
+			setSortDirection(GetDevicesOrder.desc);
+			updateURL({ sort: field, order: GetDevicesOrder.desc });
+			return;
+		}
+
+		setSortField(null);
+		setSortDirection(GetDevicesOrder.asc);
+		updateURL({ sort: undefined, order: undefined });
 	};
 
 	const handleApproveAndAssign = async () => {
@@ -1192,8 +1301,20 @@ const DevicesPage = () => {
 									)}
 								</button>
 							</div>
-							<div>Device</div>
-							<div>Labels</div>
+							<SortableHeader
+								label="Device"
+								field={GetDevicesSort.serial_number}
+								activeField={sortField}
+								direction={sortDirection}
+								onSort={handleSort}
+							/>
+							<SortableHeader
+								label="Labels"
+								field={GetDevicesSort.labels}
+								activeField={sortField}
+								direction={sortDirection}
+								onSort={handleSort}
+							/>
 							<div>Location</div>
 							<div className="flex items-center gap-2">
 								<label htmlFor="reachability-range">Reachability</label>
@@ -1221,15 +1342,17 @@ const DevicesPage = () => {
 							{filteredDevices.map((device) => (
 								<div
 									key={device.id}
-									className="block px-4 py-3 hover:bg-gray-50 cursor-pointer transition-colors"
-									onClick={() =>
-										navigate(`/devices/${device.serial_number}`, {
-											state: { back: location.pathname + location.search },
-										})
-									}
+									className="relative block px-4 py-3 hover:bg-gray-50 cursor-pointer transition-colors"
 								>
+									{/* z-0 doesn't reliably beat z-index:auto siblings; interactive row content needs z-10+ to stay above this. */}
+									<Link
+										to={`/devices/${device.serial_number}`}
+										state={{ back: location.pathname + location.search }}
+										className="absolute inset-0 z-[1]"
+										aria-label={`Open device ${device.serial_number}`}
+									/>
 									<div className="grid grid-cols-[auto_2fr_2fr_2fr_1fr_1fr] gap-4 items-center">
-										<div className="w-6 flex items-center justify-center">
+										<div className="relative z-10 w-6 flex items-center justify-center">
 											<button
 												onClick={(e) => {
 													e.stopPropagation();
@@ -1269,15 +1392,24 @@ const DevicesPage = () => {
 												<Cpu className="w-4 h-4 text-gray-400 flex-shrink-0" />
 												<div className="min-w-0 flex-1">
 													<div className="flex items-center space-x-2">
-														<Tooltip content={getStatusTooltip(device)}>
-															<div className="flex-shrink-0 cursor-help">
+														<Tooltip
+															content={getStatusTooltip(device)}
+															className="z-10"
+														>
+															<Link
+																to={`/devices/${device.serial_number}`}
+																state={{
+																	back: location.pathname + location.search,
+																}}
+																className="flex-shrink-0 cursor-help"
+															>
 																<NetworkQualityIndicator
 																	isOnline={
 																		getDeviceStatus(device) === "online"
 																	}
 																	networkScore={device.network?.network_score}
 																/>
-															</div>
+															</Link>
 														</Tooltip>
 														<div className="flex items-center space-x-2 min-w-0 flex-1">
 															<div className="text-sm font-medium text-gray-900 truncate">
@@ -1286,10 +1418,17 @@ const DevicesPage = () => {
 															{hasUpdatePending(device) && (
 																<Tooltip
 																	content={`Update pending: Release ${device.release_id} → ${device.target_release_id}`}
+																	className="z-10"
 																>
-																	<span className="px-1.5 py-0.5 text-xs font-medium bg-orange-100 text-orange-800 rounded-full cursor-help flex-shrink-0">
+																	<Link
+																		to={`/devices/${device.serial_number}`}
+																		state={{
+																			back: location.pathname + location.search,
+																		}}
+																		className="px-1.5 py-0.5 text-xs font-medium bg-orange-100 text-orange-800 rounded-full cursor-help flex-shrink-0 inline-block"
+																	>
 																		Outdated
-																	</span>
+																	</Link>
 																</Tooltip>
 															)}
 														</div>
@@ -1298,7 +1437,7 @@ const DevicesPage = () => {
 											</div>
 										</div>
 
-										<div>
+										<div className="relative z-10">
 											{device.labels &&
 											Object.keys(device.labels).length > 0 ? (
 												<div className="flex flex-wrap gap-1.5">
