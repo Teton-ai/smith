@@ -143,6 +143,7 @@ pub async fn api_confirm_full_rollout(
         &state.pg_pool,
         state.config,
         user_email.as_deref(),
+        Some(current_user.user_id),
     )
     .await
     .map_err(|err| {

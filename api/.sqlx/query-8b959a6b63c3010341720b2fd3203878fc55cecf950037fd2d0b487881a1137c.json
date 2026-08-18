@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT MAX(created_at) FROM distribution_pointer_history\n          WHERE distribution_id = $1 AND pointer = 'latest' AND new_release_id = $2",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "max",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Int4"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "8b959a6b63c3010341720b2fd3203878fc55cecf950037fd2d0b487881a1137c"
+}

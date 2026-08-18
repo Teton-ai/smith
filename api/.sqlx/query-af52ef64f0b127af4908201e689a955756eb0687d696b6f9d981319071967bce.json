@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT COUNT(*)\n             FROM device d\n             LEFT JOIN release r\n               ON r.id = COALESCE(d.pinned_release_id, d.target_release_id, d.release_id)\n             WHERE d.follows_latest\n               AND d.archived = false\n               AND r.distribution_id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "af52ef64f0b127af4908201e689a955756eb0687d696b6f9d981319071967bce"
+}

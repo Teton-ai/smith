@@ -255,6 +255,7 @@ pub async fn confirm_full_rollout(
     pg_pool: &PgPool,
     config: &Config,
     user_email: Option<&str>,
+    user_id: Option<i32>,
 ) -> anyhow::Result<Deployment> {
     let mut tx = pg_pool.begin().await?;
 
@@ -365,23 +366,35 @@ pub async fn confirm_full_rollout(
         .fetch_one(&mut *tx)
         .await?;
 
+    // Devices that will converge on this release. Membership is derived the
+    // same way the resolver derives it, so this count matches what the fleet
+    // actually does rather than what a bulk UPDATE happened to touch.
     let device_count = sqlx::query_scalar!(
         "SELECT COUNT(*)
-             FROM device
-             WHERE device.release_id IN (
-                SELECT id FROM release WHERE distribution_id = $1
-             )",
+             FROM device d
+             LEFT JOIN release r
+               ON r.id = COALESCE(d.pinned_release_id, d.target_release_id, d.release_id)
+             WHERE d.follows_latest
+               AND d.archived = false
+               AND r.distribution_id = $1",
+        release.distribution_id
+    )
+    .fetch_one(&mut *tx)
+    .await?;
+
+    // Moving the pointer is the whole rollout. Followers pick the new release
+    // up on their next ping, so there is no fleet-wide device write here --
+    // that write is also what made a promotion indistinguishable from someone
+    // pinning every device by hand.
+    let previous_release_id = sqlx::query_scalar!(
+        "SELECT latest_release_id FROM distribution WHERE id = $1",
         release.distribution_id
     )
     .fetch_one(&mut *tx)
     .await?;
 
     sqlx::query!(
-        "UPDATE device
-             SET target_release_id = $1, target_release_id_set_at = NOW()
-             WHERE device.release_id IN (
-                SELECT id FROM release WHERE distribution_id = $2
-             )",
+        "UPDATE distribution SET latest_release_id = $1 WHERE id = $2",
         release_id,
         release.distribution_id
     )
@@ -389,9 +402,14 @@ pub async fn confirm_full_rollout(
     .await?;
 
     sqlx::query!(
-        "UPDATE distribution SET latest_release_id = $1 WHERE id = $2",
+        "INSERT INTO distribution_pointer_history
+            (distribution_id, pointer, previous_release_id, new_release_id, user_id, reason)
+         VALUES ($1, 'latest', $2, $3, $4, $5)",
+        release.distribution_id,
+        previous_release_id,
         release_id,
-        release.distribution_id
+        user_id,
+        "full rollout confirmed"
     )
     .execute(&mut *tx)
     .await?;

@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT COUNT(*)\n           FROM device d\n          WHERE d.release_id = $1\n            AND d.archived = false\n            AND NOT EXISTS (\n                SELECT 1 FROM release_services rs\n                 WHERE rs.release_id = $1 AND rs.watchdog_sec IS NOT NULL\n                   AND NOT EXISTS (\n                       SELECT 1 FROM device_service_status dss\n                        WHERE dss.device_id = d.id\n                          AND dss.release_service_id = rs.id\n                          AND dss.active_state = 'active'\n                   )\n            )",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "f46e54405fece1747f2f85239efba764597bb08899e41fdaa7ff4ed6a9632be2"
+}

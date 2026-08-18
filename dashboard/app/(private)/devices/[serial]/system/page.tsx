@@ -11,6 +11,7 @@ import { lazy, Suspense } from "react";
 import { Link, useParams } from "react-router";
 import { useGetDeviceInfo } from "@/app/api-client";
 import { DeviceDetailLayout } from "../DeviceDetailLayout";
+import { ReleaseIntentCard } from "./ReleaseIntentCard";
 
 const LocationMap = lazy(() => import("../LocationMap"));
 
@@ -251,6 +252,11 @@ const SystemPage = () => {
 							</div>
 						)}
 					</Panel>
+
+					<ReleaseIntentCard
+						deviceId={device.id}
+						currentReleaseId={device.release_id}
+					/>
 				</div>
 			)}
 		</DeviceDetailLayout>

@@ -90,7 +90,42 @@ pub struct UpdateDeviceRelease {
 
 #[derive(Debug, Deserialize, Serialize, utoipa::ToSchema)]
 pub struct ApproveDeviceBody {
+    /// Pin the device to this distribution's base release. Preferred over
+    /// `target_release_id`: the approver picks a distribution and the pointer
+    /// decides the build, so nobody needs to know which release is current.
+    pub distribution_id: Option<i32>,
+    /// Explicit release to pin to. Kept for callers that already send it.
     pub target_release_id: Option<i32>,
+}
+
+/// Move a device between the two intent states. Exactly one field applies:
+/// `follows_latest: true` releases it onto the stream, `pinned_release_id`
+/// holds it at one build.
+#[derive(Debug, Deserialize, Serialize, utoipa::ToSchema)]
+pub struct UpdateDeviceReleaseIntent {
+    #[serde(default)]
+    pub follows_latest: bool,
+    pub pinned_release_id: Option<i32>,
+}
+
+/// Same, for a set of devices.
+#[derive(Debug, Deserialize, Serialize, utoipa::ToSchema)]
+pub struct BulkDeviceReleaseIntent {
+    #[serde(default)]
+    pub follows_latest: bool,
+    pub pinned_release_id: Option<i32>,
+    pub devices: Vec<i32>,
+}
+
+/// A device's resolved release intent, for the device page.
+#[derive(Debug, Serialize, utoipa::ToSchema)]
+pub struct DeviceReleaseIntent {
+    pub follows_latest: bool,
+    pub pinned_release_id: Option<i32>,
+    pub target_release_id: Option<i32>,
+    pub release_id: Option<i32>,
+    /// `pinned`, `following`, or `unmanaged` for devices with neither set.
+    pub state: String,
 }
 
 #[derive(Debug, Deserialize, Serialize, utoipa::ToSchema)]
@@ -855,17 +890,54 @@ pub async fn save_last_ping_with_ip(
     Ok(())
 }
 
+/// Resolve what this device should be running, in precedence order:
+///
+/// 1. `pinned_release_id` — held here on purpose.
+/// 2. `distribution.latest_release_id`, when the device follows the stream.
+/// 3. `target_release_id` — devices not yet migrated to an explicit intent.
+///
+/// The device's distribution is derived from its pin (falling back to its
+/// cached target, then to what it is actually running), so a device knows its
+/// distribution from approval rather than only after its first update.
+///
+/// The resolved value is written back to `target_release_id` so every existing
+/// query over that column keeps working; the write only fires when the value
+/// actually changed, which keeps a 20s poll from writing a row per ping.
 pub async fn get_target_release(device_id: i32, pool: &PgPool) -> Option<i32> {
-    if let Ok(device) = sqlx::query!(
-        "SELECT target_release_id FROM device WHERE id = $1",
+    let resolved = sqlx::query!(
+        r#"
+        WITH resolved AS (
+            SELECT d.id,
+                   COALESCE(
+                       d.pinned_release_id,
+                       CASE WHEN d.follows_latest THEN dist.latest_release_id END,
+                       d.target_release_id
+                   ) AS release_id
+            FROM device d
+            LEFT JOIN release r
+                ON r.id = COALESCE(d.pinned_release_id, d.target_release_id, d.release_id)
+            LEFT JOIN distribution dist ON dist.id = r.distribution_id
+            WHERE d.id = $1
+        ),
+        synced AS (
+            UPDATE device d
+            SET target_release_id = resolved.release_id,
+                target_release_id_set_at = NOW()
+            FROM resolved
+            WHERE d.id = resolved.id
+              AND d.target_release_id IS DISTINCT FROM resolved.release_id
+            RETURNING d.id
+        )
+        SELECT release_id FROM resolved
+        "#,
         &device_id
     )
-    .fetch_one(pool)
+    .fetch_optional(pool)
     .await
-    {
-        return device.target_release_id;
-    }
-    None
+    .inspect_err(|err| error!("Failed to resolve target release for device {device_id}: {err}"))
+    .ok()?;
+
+    resolved.and_then(|row| row.release_id)
 }
 
 pub async fn save_release_id(

@@ -297,6 +297,10 @@ async fn start_main_server(
         ))
         .routes(routes!(distribution::route::update_distribution_archived))
         .routes(routes!(
+            distribution::route::get_distribution_base_release,
+            distribution::route::set_distribution_base_release
+        ))
+        .routes(routes!(
             distribution::route::get_distribution_releases,
             distribution::route::create_distribution_release,
         ))
@@ -387,6 +391,11 @@ async fn start_main_server(
         ))
         .routes(routes!(device::route::delete_token))
         .routes(routes!(device::route::update_devices_target_release))
+        .routes(routes!(
+            device::route::get_device_release_intent,
+            device::route::set_device_release_intent
+        ))
+        .routes(routes!(device::route::update_devices_release_intent))
         .routes(routes!(device::route::get_variables))
         .routes(routes!(
             command::route::get_bundle_commands,

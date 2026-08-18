@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE device\n                SET pinned_release_id = $1,\n                    follows_latest = false,\n                    target_release_id = $1,\n                    target_release_id_set_at = NOW()\n              WHERE id = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "895f66f03fec31f2778097ca50ebb78d346b5ceeed2ed1035b759dd9e661de9c"
+}

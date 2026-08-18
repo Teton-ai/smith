@@ -25,6 +25,7 @@ import {
 	Eye,
 	Loader2,
 	Package as PackageIcon,
+	Pin,
 	Plus,
 	Rocket,
 	Search,
@@ -38,18 +39,21 @@ import { useNavigate, useParams } from "react-router";
 import {
 	type DeploymentRequest,
 	type Device,
+	getGetDistributionBaseReleaseQueryKey,
 	type Package,
 	useAddPackageToRelease,
 	useApiGetReleaseDeployment,
 	useApiReleaseDeployment,
 	useDeletePackageForRelease,
 	useGetDevices,
+	useGetDistributionBaseRelease,
 	useGetDistributionById,
 	useGetDistributionReleasePackages,
 	useGetPackages,
 	useGetRelease,
 	useGetReleaseServices,
 	usePatchRelease,
+	useSetDistributionBaseRelease,
 } from "@/app/api-client";
 import LabelAutocomplete from "@/app/components/LabelAutocomplete";
 import { Modal } from "@/app/components/modal";
@@ -99,6 +103,8 @@ const ReleaseDetailPage = () => {
 		useState("");
 	const [deployStep, setDeployStep] = useState<1 | 2>(1);
 	const [showYankModal, setShowYankModal] = useState(false);
+	const [showBaseModal, setShowBaseModal] = useState(false);
+	const [baseGateReason, setBaseGateReason] = useState<string | null>(null);
 	const [yanking, setYanking] = useState(false);
 	const [yankReason, setYankReason] = useState("");
 	const [toast, setToast] = useState<ToastState | null>(null);
@@ -478,6 +484,45 @@ const ReleaseDetailPage = () => {
 		}
 	};
 
+	const distributionId = release?.distribution_id;
+	const { data: distributionBase } = useGetDistributionBaseRelease(
+		distributionId as number,
+		{ query: { enabled: distributionId != null, retry: false } },
+	);
+	const isBase = distributionBase?.id === releaseId;
+
+	const setBaseHook = useSetDistributionBaseRelease();
+
+	/** Promote this release to the distribution's base: what the production
+	 *  line flashes and what new devices are pinned to at approval. Nothing
+	 *  already in the field moves. */
+	const handleSetBase = async (force: boolean) => {
+		if (distributionId == null || setBaseHook.isPending) return;
+		try {
+			await setBaseHook.mutateAsync({
+				distributionId,
+				data: { release_id: releaseId, force },
+			});
+			queryClient.invalidateQueries({
+				queryKey: getGetDistributionBaseReleaseQueryKey(distributionId),
+			});
+			setShowBaseModal(false);
+			setToast({
+				message: "Release is now the base for new devices",
+				type: "success",
+			});
+		} catch (error: any) {
+			// The soak gate replies with the specific condition that failed;
+			// showing it verbatim is the whole point of gating.
+			const detail = error?.response?.data;
+			setBaseGateReason(
+				typeof detail === "string" && detail.length > 0
+					? detail
+					: error?.message || "Could not set this release as base",
+			);
+		}
+	};
+
 	const getPackageNameForService = (packageId?: number): string | null => {
 		if (packageId == null) return null;
 		const pkg = packages.find((p) => p.id === packageId);
@@ -608,6 +653,23 @@ const ReleaseDetailPage = () => {
 									>
 										Yank
 									</Button>
+									{isBase ? (
+										<Badge variant="purple" pill>
+											Base for new devices
+										</Badge>
+									) : (
+										<Button
+											variant="soft"
+											tone="purple"
+											icon={<Pin className="w-4 h-4" />}
+											onClick={() => {
+												setBaseGateReason(null);
+												setShowBaseModal(true);
+											}}
+										>
+											Set as Base
+										</Button>
+									)}
 									{existingDeployment?.status === "InProgress" ? (
 										<Button
 											variant="solid"
@@ -1032,6 +1094,83 @@ const ReleaseDetailPage = () => {
 						</div>
 					</div>
 				)}
+			</Modal>
+
+			{/* Set as Base Modal */}
+			<Modal
+				open={showBaseModal}
+				onClose={() => {
+					setShowBaseModal(false);
+					setBaseGateReason(null);
+				}}
+				title={`Set v${release.version} as Base`}
+				width="w-[520px]"
+				footer={
+					<>
+						<Button
+							variant="soft"
+							tone="gray"
+							disabled={setBaseHook.isPending}
+							onClick={() => {
+								setShowBaseModal(false);
+								setBaseGateReason(null);
+							}}
+						>
+							Cancel
+						</Button>
+						{baseGateReason ? (
+							<Button
+								variant="solid"
+								tone="red"
+								loading={setBaseHook.isPending}
+								icon={<AlertTriangle className="w-4 h-4" />}
+								onClick={() => handleSetBase(true)}
+							>
+								Override and Set as Base
+							</Button>
+						) : (
+							<Button
+								variant="solid"
+								tone="purple"
+								loading={setBaseHook.isPending}
+								icon={<Pin className="w-4 h-4" />}
+								onClick={() => handleSetBase(false)}
+							>
+								{setBaseHook.isPending ? "Setting..." : "Set as Base"}
+							</Button>
+						)}
+					</>
+				}
+			>
+				<div className="space-y-4">
+					<div className="bg-purple-50 border border-purple-200 rounded-lg p-4">
+						<p className="text-sm text-purple-900">
+							New devices will be pinned to this release when they are approved,
+							and the production line image should be built from it.
+						</p>
+						<p className="mt-2 text-sm text-purple-800">
+							Nothing already in the field moves. Devices following the
+							distribution stay on the deployed release.
+						</p>
+					</div>
+
+					{baseGateReason && (
+						<div className="bg-red-50 border border-red-200 rounded-lg p-4">
+							<div className="flex items-start gap-2">
+								<AlertTriangle className="w-4 h-4 text-red-600 mt-0.5 flex-shrink-0" />
+								<div>
+									<p className="text-sm font-medium text-red-900">
+										This release is not eligible yet
+									</p>
+									<p className="mt-1 text-sm text-red-800">{baseGateReason}</p>
+									<p className="mt-2 text-xs text-red-700">
+										Overriding is recorded against your account.
+									</p>
+								</div>
+							</div>
+						</div>
+					)}
+				</div>
 			</Modal>
 
 			{/* Yank Release Modal */}

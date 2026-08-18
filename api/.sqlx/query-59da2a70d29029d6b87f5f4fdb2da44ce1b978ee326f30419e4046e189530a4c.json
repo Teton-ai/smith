@@ -1,0 +1,40 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT pinned_release_id, follows_latest, target_release_id, release_id\n           FROM device WHERE id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "pinned_release_id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "follows_latest",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 2,
+        "name": "target_release_id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 3,
+        "name": "release_id",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4"
+      ]
+    },
+    "nullable": [
+      true,
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "59da2a70d29029d6b87f5f4fdb2da44ce1b978ee326f30419e4046e189530a4c"
+}

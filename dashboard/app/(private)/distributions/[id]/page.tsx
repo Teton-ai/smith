@@ -30,6 +30,7 @@ import {
 	type Package as PackageType,
 	type Release,
 	useCreateDistributionRelease,
+	useGetDistributionBaseRelease,
 	useGetDistributionById,
 	useGetDistributionLatestRelease,
 	useGetDistributionReleasePackages,
@@ -78,6 +79,7 @@ interface ReleaseRowProps {
 	isSelected: boolean;
 	selectionLabel: string | null;
 	isDeployed: boolean;
+	isBase: boolean;
 	onSelect: (id: number) => void;
 }
 
@@ -87,6 +89,7 @@ const ReleaseRow = React.memo(function ReleaseRow({
 	isSelected,
 	selectionLabel,
 	isDeployed,
+	isBase,
 	onSelect,
 }: ReleaseRowProps) {
 	const inner = (
@@ -115,6 +118,11 @@ const ReleaseRow = React.memo(function ReleaseRow({
 						{isDeployed && (
 							<Badge variant="green" pill>
 								Deployed
+							</Badge>
+						)}
+						{isBase && (
+							<Badge variant="purple" pill>
+								Base
 							</Badge>
 						)}
 						{release.draft && (
@@ -190,6 +198,14 @@ const DistributionDetailPage = () => {
 
 	const { data: deployedRelease } =
 		useGetDistributionLatestRelease(distributionId);
+
+	// The release the production line flashes and new devices are pinned to.
+	// It trails the deployed release on purpose, so it is shown separately
+	// rather than folded into "Deployed".
+	const { data: distributionBase } = useGetDistributionBaseRelease(
+		distributionId,
+		{ query: { retry: false } },
+	);
 
 	// Use the most recent stable release as the base for new drafts
 	const baseRelease = releases.find(isStableRelease) || releases[0];
@@ -664,6 +680,7 @@ const DistributionDetailPage = () => {
 												: null
 									}
 									isDeployed={deployedRelease?.id === release.id}
+									isBase={distributionBase?.id === release.id}
 									onSelect={toggleCompareSelection}
 								/>
 							);

@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT EXISTS (\n            SELECT 1\n              FROM distribution d\n              JOIN release latest ON latest.id = d.latest_release_id\n             WHERE d.id = $1 AND latest.created_at < $2\n         )",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "exists",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "54d41c43dfc80e37a5cf5560e78bd79055f6634399d34a033517d6a7fce67ebe"
+}

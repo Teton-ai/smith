@@ -46,3 +46,28 @@ pub async fn get_latest_distribution_release(
     .fetch_optional(pg_pool)
     .await
 }
+
+/// The release the production line flashes and new devices are pinned to.
+/// Deliberately trails `latest_release_id`.
+pub async fn get_base_distribution_release(
+    distribution_id: i32,
+    pg_pool: &sqlx::PgPool,
+) -> Result<Option<Release>, sqlx::Error> {
+    sqlx::query_as!(
+        Release,
+        "
+        SELECT release.*,
+        distribution.name AS distribution_name,
+        distribution.architecture AS distribution_architecture,
+        auth.users.email AS user_email
+        FROM release
+        JOIN distribution ON release.distribution_id = distribution.id
+            AND distribution.base_release_id = release.id
+        LEFT JOIN auth.users ON release.user_id = auth.users.id
+        WHERE distribution_id = $1
+        ",
+        distribution_id
+    )
+    .fetch_optional(pg_pool)
+    .await
+}

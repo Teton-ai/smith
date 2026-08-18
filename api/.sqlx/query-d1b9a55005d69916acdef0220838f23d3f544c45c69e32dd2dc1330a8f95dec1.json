@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        WITH resolved AS (\n            SELECT d.id,\n                   COALESCE(\n                       d.pinned_release_id,\n                       CASE WHEN d.follows_latest THEN dist.latest_release_id END,\n                       d.target_release_id\n                   ) AS release_id\n            FROM device d\n            LEFT JOIN release r\n                ON r.id = COALESCE(d.pinned_release_id, d.target_release_id, d.release_id)\n            LEFT JOIN distribution dist ON dist.id = r.distribution_id\n            WHERE d.id = $1\n        ),\n        synced AS (\n            UPDATE device d\n            SET target_release_id = resolved.release_id,\n                target_release_id_set_at = NOW()\n            FROM resolved\n            WHERE d.id = resolved.id\n              AND d.target_release_id IS DISTINCT FROM resolved.release_id\n            RETURNING d.id\n        )\n        SELECT release_id FROM resolved\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "release_id",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "d1b9a55005d69916acdef0220838f23d3f544c45c69e32dd2dc1330a8f95dec1"
+}

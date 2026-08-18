@@ -1,10 +1,11 @@
 use crate::State;
 use crate::device::debug_ap;
 use crate::device::{
-    ApplyIntentResponse, ApproveDeviceBody, ConfiguredNetwork, CreateIntentRequest,
-    DebugApCredentials, DeviceHealth, DeviceLedgerItem, DeviceLedgerItemPaginated,
-    DeviceNetworkIntent, DeviceRelease, DeviceUptime, LabelWithValues, NewVariable, Note,
-    PatchIntentRequest, RawDevice, SMITHD_SERVICE_NAME, ServiceOutage, UpdateDeviceRelease,
+    ApplyIntentResponse, ApproveDeviceBody, BulkDeviceReleaseIntent, ConfiguredNetwork,
+    CreateIntentRequest, DebugApCredentials, DeviceHealth, DeviceLedgerItem,
+    DeviceLedgerItemPaginated, DeviceNetworkIntent, DeviceRelease, DeviceReleaseIntent,
+    DeviceUptime, LabelWithValues, NewVariable, Note, PatchIntentRequest, RawDevice,
+    SMITHD_SERVICE_NAME, ServiceOutage, UpdateDeviceRelease, UpdateDeviceReleaseIntent,
     UpdateDevicesRelease, Variable, WifiScanResult,
 };
 use crate::event::PublicEvent;
@@ -1508,8 +1509,16 @@ pub async fn update_device_target_release(
         return Err(StatusCode::NOT_FOUND);
     }
 
+    // Setting a release on one device is a pin, and is now recorded as one --
+    // the reason this used to warn about drift is that the schema could not
+    // tell a deliberate hold from a device that had silently fallen behind.
     sqlx::query!(
-        "UPDATE device SET target_release_id = $1, target_release_id_set_at = NOW() WHERE id = $2",
+        "UPDATE device
+            SET pinned_release_id = $1,
+                follows_latest = false,
+                target_release_id = $1,
+                target_release_id_set_at = NOW()
+          WHERE id = $2",
         target_release_id,
         device_id
     )
@@ -1553,7 +1562,7 @@ pub async fn update_device_target_release(
                         "text": {
                             "type": "mrkdwn",
                             "text": format!(
-                                ":warning: *Direct Device Deployment - Risk of Drift*\n\n*Device:* {}\n*Target Version:* {} v{}\n*Triggered by:* {}\n\n_This deployment bypasses the canary rollout process._",
+                                ":pushpin: *Device Pinned Directly*\n\n*Device:* {}\n*Pinned Version:* {} v{}\n*Triggered by:* {}\n\n_Bypasses the canary rollout. The device is held at this release until it is released back onto the stream._",
                                 info.serial_number,
                                 info.distribution_name,
                                 info.version,
@@ -1608,7 +1617,12 @@ pub async fn update_devices_target_release(
     }
 
     sqlx::query!(
-        "UPDATE device SET target_release_id = $1, target_release_id_set_at = NOW() WHERE id = ANY($2)",
+        "UPDATE device
+            SET pinned_release_id = $1,
+                follows_latest = false,
+                target_release_id = $1,
+                target_release_id_set_at = NOW()
+          WHERE id = ANY($2)",
         target_release_id,
         &devices_release.devices
     )
@@ -1640,7 +1654,7 @@ pub async fn update_devices_target_release(
                     "text": {
                         "type": "mrkdwn",
                         "text": format!(
-                            ":warning: *Direct Bulk Deployment - Risk of Drift*\n\n*Devices affected:* {}\n*Target Version:* {} v{}\n*Triggered by:* {}\n\n_This deployment bypasses the canary rollout process._",
+                            ":pushpin: *Devices Pinned Directly*\n\n*Devices affected:* {}\n*Pinned Version:* {} v{}\n*Triggered by:* {}\n\n_Bypasses the canary rollout. These devices are held at this release until they are released back onto the stream._",
                             device_count,
                             target_release.distribution_name,
                             target_release.version,
@@ -2234,7 +2248,47 @@ pub async fn approve_device(
     Extension(state): Extension<State>,
     body: Option<Json<ApproveDeviceBody>>,
 ) -> axum::response::Result<Json<bool>, StatusCode> {
-    let target_release_id = body.and_then(|b| b.target_release_id);
+    let body = body.map(|Json(b)| b);
+    let distribution_id = body.as_ref().and_then(|b| b.distribution_id);
+    let explicit_release_id = body.as_ref().and_then(|b| b.target_release_id);
+
+    // A device is born pinned to its distribution's base release, so first
+    // connect downloads nothing and the unit never resolves "latest" by
+    // accident. Resolving the pointer here rather than at image build time is
+    // what lets stock that has sat flashed in a cupboard self-correct.
+    let target_release_id = match (distribution_id, explicit_release_id) {
+        (Some(_), Some(_)) => {
+            error!(
+                "Cannot approve device {device_id} with both distribution_id and target_release_id"
+            );
+            return Err(StatusCode::BAD_REQUEST);
+        }
+        (Some(distribution_id), None) => {
+            let base = sqlx::query_scalar!(
+                "SELECT base_release_id FROM distribution WHERE id = $1",
+                distribution_id
+            )
+            .fetch_optional(&state.pg_pool)
+            .await
+            .map_err(|err| {
+                error!("Failed to read base release for distribution {distribution_id}: {err}");
+                StatusCode::INTERNAL_SERVER_ERROR
+            })?
+            .ok_or_else(|| {
+                error!("Distribution {distribution_id} not found");
+                StatusCode::NOT_FOUND
+            })?;
+
+            // Fail loudly rather than approving into the old silent-null state,
+            // where the device would never update and would also be invisible
+            // to every full rollout.
+            Some(base.ok_or_else(|| {
+                error!("Distribution {distribution_id} has no base release set");
+                StatusCode::CONFLICT
+            })?)
+        }
+        (None, explicit) => explicit,
+    };
 
     if let Some(release_id) = target_release_id {
         let releases = sqlx::query!("SELECT COUNT(*) FROM release WHERE id = $1", release_id)
@@ -2271,7 +2325,12 @@ pub async fn approve_device(
 
     if let Some(release_id) = target_release_id {
         sqlx::query!(
-            "UPDATE device SET target_release_id = $1, target_release_id_set_at = NOW() WHERE id = $2",
+            "UPDATE device
+                SET pinned_release_id = $1,
+                    follows_latest = false,
+                    target_release_id = $1,
+                    target_release_id_set_at = NOW()
+              WHERE id = $2",
             release_id,
             device_id
         )
@@ -3667,4 +3726,191 @@ mod tests {
             json!({ "key_mgmt": "wpa-psk", "psk": "pw" })
         );
     }
+}
+
+/// Shared validation for a release a device is about to be pinned to.
+async fn validate_pin_target(
+    release_id: i32,
+    pool: &sqlx::PgPool,
+) -> axum::response::Result<(), StatusCode> {
+    let release = get_release_by_id(release_id, pool)
+        .await
+        .map_err(|err| {
+            error!("Failed to get release {release_id}: {err}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?
+        .ok_or_else(|| {
+            error!("Release {release_id} not found");
+            StatusCode::NOT_FOUND
+        })?;
+
+    if release.draft || release.yanked {
+        error!("Release {release_id} is draft or yanked and cannot be pinned");
+        return Err(StatusCode::CONFLICT);
+    }
+
+    Ok(())
+}
+
+#[utoipa::path(
+    get,
+    path = "/devices/{device_id}/release-intent",
+    params(
+        ("device_id" = i32, Path),
+    ),
+    responses(
+        (status = StatusCode::OK, description = "Device release intent", body = DeviceReleaseIntent),
+        (status = StatusCode::NOT_FOUND, description = "Device not found"),
+        (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to get device intent"),
+    ),
+    security(
+        ("auth_token" = [])
+    ),
+    tag = DEVICES_TAG
+)]
+pub async fn get_device_release_intent(
+    Path(device_id): Path<i32>,
+    Extension(state): Extension<State>,
+) -> axum::response::Result<Json<DeviceReleaseIntent>, StatusCode> {
+    let row = sqlx::query!(
+        "SELECT pinned_release_id, follows_latest, target_release_id, release_id
+           FROM device WHERE id = $1",
+        device_id
+    )
+    .fetch_optional(&state.pg_pool)
+    .await
+    .map_err(|err| {
+        error!("Failed to get intent for device {device_id}: {err}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?
+    .ok_or(StatusCode::NOT_FOUND)?;
+
+    let state_label = if row.pinned_release_id.is_some() {
+        "pinned"
+    } else if row.follows_latest {
+        "following"
+    } else {
+        "unmanaged"
+    };
+
+    Ok(Json(DeviceReleaseIntent {
+        follows_latest: row.follows_latest,
+        pinned_release_id: row.pinned_release_id,
+        target_release_id: row.target_release_id,
+        release_id: row.release_id,
+        state: state_label.to_string(),
+    }))
+}
+
+#[utoipa::path(
+    post,
+    path = "/devices/{device_id}/release-intent",
+    params(
+        ("device_id" = i32, Path),
+    ),
+    request_body = UpdateDeviceReleaseIntent,
+    responses(
+        (status = StatusCode::OK, description = "Device intent updated"),
+        (status = StatusCode::BAD_REQUEST, description = "Both or neither state requested"),
+        (status = StatusCode::NOT_FOUND, description = "Device or release not found"),
+        (status = StatusCode::CONFLICT, description = "Release is draft or yanked"),
+        (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to update device intent"),
+    ),
+    security(
+        ("auth_token" = [])
+    ),
+    tag = DEVICES_TAG
+)]
+pub async fn set_device_release_intent(
+    Path(device_id): Path<i32>,
+    Extension(state): Extension<State>,
+    Json(intent): Json<UpdateDeviceReleaseIntent>,
+) -> axum::response::Result<StatusCode, StatusCode> {
+    // The two states are exclusive in the schema, so reject the ambiguous
+    // request here rather than letting the CHECK constraint decide.
+    if intent.follows_latest == intent.pinned_release_id.is_some() {
+        error!("Device intent must be exactly one of follows_latest or pinned_release_id");
+        return Err(StatusCode::BAD_REQUEST);
+    }
+
+    if let Some(release_id) = intent.pinned_release_id {
+        validate_pin_target(release_id, &state.pg_pool).await?;
+    }
+
+    let updated = sqlx::query!(
+        "UPDATE device
+            SET follows_latest = $1,
+                pinned_release_id = $2
+          WHERE id = $3
+        RETURNING id",
+        intent.follows_latest,
+        intent.pinned_release_id,
+        device_id
+    )
+    .fetch_optional(&state.pg_pool)
+    .await
+    .map_err(|err| {
+        error!("Failed to update intent for device {device_id}: {err}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    if updated.is_none() {
+        return Err(StatusCode::NOT_FOUND);
+    }
+
+    // target_release_id is a cache of the resolved answer; it is refreshed on
+    // the device's next ping, so nothing is written here.
+    Ok(StatusCode::OK)
+}
+
+#[utoipa::path(
+    put,
+    path = "/devices/release-intent",
+    request_body = BulkDeviceReleaseIntent,
+    responses(
+        (status = StatusCode::OK, description = "Devices intent updated", body = i64),
+        (status = StatusCode::BAD_REQUEST, description = "Both or neither state requested"),
+        (status = StatusCode::NOT_FOUND, description = "Release not found"),
+        (status = StatusCode::CONFLICT, description = "Release is draft or yanked"),
+        (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to update devices intent"),
+    ),
+    security(
+        ("auth_token" = [])
+    ),
+    tag = DEVICES_TAG
+)]
+pub async fn update_devices_release_intent(
+    Extension(state): Extension<State>,
+    Json(intent): Json<BulkDeviceReleaseIntent>,
+) -> axum::response::Result<Json<i64>, StatusCode> {
+    if intent.follows_latest == intent.pinned_release_id.is_some() {
+        error!("Device intent must be exactly one of follows_latest or pinned_release_id");
+        return Err(StatusCode::BAD_REQUEST);
+    }
+
+    if let Some(release_id) = intent.pinned_release_id {
+        validate_pin_target(release_id, &state.pg_pool).await?;
+    }
+
+    let updated = sqlx::query_scalar!(
+        "WITH updated AS (
+            UPDATE device
+               SET follows_latest = $1,
+                   pinned_release_id = $2
+             WHERE id = ANY($3)
+            RETURNING id
+        )
+        SELECT COUNT(*) FROM updated",
+        intent.follows_latest,
+        intent.pinned_release_id,
+        &intent.devices
+    )
+    .fetch_one(&state.pg_pool)
+    .await
+    .map_err(|err| {
+        error!("Failed to update intent for devices: {err}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    Ok(Json(updated.unwrap_or(0)))
 }

@@ -124,6 +124,30 @@ pub async fn update_release(
         })?;
     }
     if let Some(yanked) = update_release.yanked {
+        // Yanking a release that a pointer still targets would leave the
+        // production line flashing, or the fleet converging on, a build that
+        // was just declared bad. Make the caller move the pointer first.
+        if yanked {
+            let pointing = sqlx::query_scalar!(
+                "SELECT COUNT(*) FROM distribution
+                  WHERE latest_release_id = $1 OR base_release_id = $1",
+                release_id
+            )
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(|err| {
+                error!("Failed to check pointers for release {release_id}: {err}");
+                StatusCode::INTERNAL_SERVER_ERROR
+            })?;
+
+            if pointing.unwrap_or(0) > 0 {
+                error!(
+                    "Release {release_id} is still targeted by a distribution pointer; move base/latest before yanking"
+                );
+                return Err(StatusCode::CONFLICT);
+            }
+        }
+
         sqlx::query!(
             "UPDATE release SET yanked = $1 WHERE id = $2",
             yanked,

@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT EXISTS (\n            SELECT 1 FROM distribution\n             WHERE id = $1 AND latest_release_id = $2\n            UNION ALL\n            SELECT 1 FROM distribution_pointer_history\n             WHERE distribution_id = $1 AND pointer = 'latest' AND new_release_id = $2\n         )",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "exists",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Int4"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "678d3c336025d1c30ad3510a8bc5dfefa61aec7de225f82e3ac518ac59c89a4a"
+}

@@ -1,12 +1,12 @@
 use crate::State;
 use crate::package::extract_services_from_deb;
-use crate::release::get_latest_distribution_release;
+use crate::release::{get_base_distribution_release, get_latest_distribution_release};
 use crate::storage::Storage;
 use crate::user::CurrentUser;
 use axum::extract::{Path, Query};
 use axum::http::StatusCode;
 use axum::{Extension, Json};
-use models::distribution::{Distribution, NewDistributionRelease};
+use models::distribution::{Distribution, NewDistributionRelease, SetBaseRelease};
 use models::release::Release;
 use serde::Deserialize;
 use smith::utils::schema::Package;
@@ -47,6 +47,8 @@ pub async fn get_distributions(
             d.description,
             d.architecture,
             d.archived,
+            d.latest_release_id,
+            d.base_release_id,
             (
                 SELECT COUNT(*)
                 FROM release_packages rp
@@ -147,6 +149,8 @@ pub async fn get_distribution_by_id(
             d.description,
             d.architecture,
             d.archived,
+            d.latest_release_id,
+            d.base_release_id,
             (
                 SELECT COUNT(*)
                 FROM release_packages rp
@@ -460,4 +464,297 @@ pub async fn update_distribution_archived(
     })?;
 
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// How long a release must have been `latest` before it can become `base`,
+/// and how many devices must be healthy on it. Base decides what every future
+/// unit ships with, so the gate is evidence-based rather than a rubber stamp;
+/// tune these as the fleet grows.
+const MIN_BASE_SOAK_DAYS: i64 = 7;
+const MIN_BASE_HEALTHY_DEVICES: i64 = 5;
+
+/// Everything that has to be true before a release can become base. Returns
+/// the reason it cannot, so the caller can say which gate failed rather than
+/// returning a bare 409.
+async fn check_base_eligibility(
+    distribution_id: i32,
+    release_id: i32,
+    pg_pool: &sqlx::PgPool,
+) -> Result<Option<String>, sqlx::Error> {
+    let candidate = sqlx::query!(
+        "SELECT distribution_id, draft, yanked, release_candidate, created_at
+           FROM release WHERE id = $1",
+        release_id
+    )
+    .fetch_optional(pg_pool)
+    .await?;
+
+    let Some(candidate) = candidate else {
+        return Ok(Some(format!("Release {release_id} not found")));
+    };
+
+    if candidate.distribution_id != distribution_id {
+        return Ok(Some(format!(
+            "Release {release_id} belongs to distribution {}, not {distribution_id}",
+            candidate.distribution_id
+        )));
+    }
+    if candidate.draft {
+        return Ok(Some("Release is still a draft".to_string()));
+    }
+    if candidate.yanked {
+        return Ok(Some("Release is yanked".to_string()));
+    }
+    if candidate.release_candidate {
+        return Ok(Some("Release is a release candidate".to_string()));
+    }
+
+    // Base adopts only what the following fleet has already run, so the
+    // release must be latest now or have been latest at some point.
+    let was_latest = sqlx::query_scalar!(
+        "SELECT EXISTS (
+            SELECT 1 FROM distribution
+             WHERE id = $1 AND latest_release_id = $2
+            UNION ALL
+            SELECT 1 FROM distribution_pointer_history
+             WHERE distribution_id = $1 AND pointer = 'latest' AND new_release_id = $2
+         )",
+        distribution_id,
+        release_id
+    )
+    .fetch_one(pg_pool)
+    .await?;
+
+    if !was_latest.unwrap_or(false) {
+        return Ok(Some(
+            "Release has never been the distribution's latest; roll it out to the fleet first"
+                .to_string(),
+        ));
+    }
+
+    // Base must not run ahead of latest -- otherwise new units are born on a
+    // build the existing fleet has not reached.
+    let ahead_of_latest = sqlx::query_scalar!(
+        "SELECT EXISTS (
+            SELECT 1
+              FROM distribution d
+              JOIN release latest ON latest.id = d.latest_release_id
+             WHERE d.id = $1 AND latest.created_at < $2
+         )",
+        distribution_id,
+        candidate.created_at
+    )
+    .fetch_one(pg_pool)
+    .await?;
+
+    if ahead_of_latest.unwrap_or(false) {
+        return Ok(Some(
+            "Release is newer than the distribution's latest; base must not run ahead".to_string(),
+        ));
+    }
+
+    let became_latest_at = sqlx::query_scalar!(
+        "SELECT MAX(created_at) FROM distribution_pointer_history
+          WHERE distribution_id = $1 AND pointer = 'latest' AND new_release_id = $2",
+        distribution_id,
+        release_id
+    )
+    .fetch_one(pg_pool)
+    .await?
+    .unwrap_or(candidate.created_at);
+
+    let soaked_days = (chrono::Utc::now() - became_latest_at).num_days();
+    if soaked_days < MIN_BASE_SOAK_DAYS {
+        return Ok(Some(format!(
+            "Release has only been latest for {soaked_days} day(s); {MIN_BASE_SOAK_DAYS} required"
+        )));
+    }
+
+    // The same evidence the canary gate uses, over the whole fleet: devices
+    // actually running the release, with no watchdog service reporting
+    // anything other than active.
+    let healthy_devices = sqlx::query_scalar!(
+        "SELECT COUNT(*)
+           FROM device d
+          WHERE d.release_id = $1
+            AND d.archived = false
+            AND NOT EXISTS (
+                SELECT 1 FROM release_services rs
+                 WHERE rs.release_id = $1 AND rs.watchdog_sec IS NOT NULL
+                   AND NOT EXISTS (
+                       SELECT 1 FROM device_service_status dss
+                        WHERE dss.device_id = d.id
+                          AND dss.release_service_id = rs.id
+                          AND dss.active_state = 'active'
+                   )
+            )",
+        release_id
+    )
+    .fetch_one(pg_pool)
+    .await?
+    .unwrap_or(0);
+
+    if healthy_devices < MIN_BASE_HEALTHY_DEVICES {
+        return Ok(Some(format!(
+            "Only {healthy_devices} device(s) are healthy on this release; {MIN_BASE_HEALTHY_DEVICES} required"
+        )));
+    }
+
+    Ok(None)
+}
+
+#[utoipa::path(
+    get,
+    path = "/distributions/{distribution_id}/base",
+    params(
+        ("distribution_id" = i32, Path),
+    ),
+    responses(
+        (status = StatusCode::OK, description = "The distribution's base release", body = Release),
+        (status = StatusCode::NOT_FOUND, description = "No base release set"),
+        (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to get base release"),
+    ),
+    security(
+        ("auth_token" = [])
+    ),
+    tag = DISTRIBUTIONS_TAG
+)]
+pub async fn get_distribution_base_release(
+    Path(distribution_id): Path<i32>,
+    Extension(state): Extension<State>,
+) -> axum::response::Result<Json<Release>, StatusCode> {
+    let release = get_base_distribution_release(distribution_id, &state.pg_pool)
+        .await
+        .map_err(|err| {
+            error!("Failed to get base release {err}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?
+        .ok_or(StatusCode::NOT_FOUND)?;
+
+    Ok(Json(release))
+}
+
+#[utoipa::path(
+    put,
+    path = "/distributions/{distribution_id}/base",
+    params(
+        ("distribution_id" = i32, Path),
+    ),
+    request_body = SetBaseRelease,
+    responses(
+        (status = StatusCode::OK, description = "Base release updated", body = Release),
+        (status = StatusCode::CONFLICT, description = "Release is not eligible to be base", body = String),
+        (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to set base release", body = String),
+    ),
+    security(
+        ("auth_token" = [])
+    ),
+    tag = DISTRIBUTIONS_TAG
+)]
+pub async fn set_distribution_base_release(
+    Path(distribution_id): Path<i32>,
+    Extension(state): Extension<State>,
+    Extension(current_user): Extension<CurrentUser>,
+    Json(request): Json<SetBaseRelease>,
+) -> axum::response::Result<Json<Release>, (StatusCode, String)> {
+    let ineligible = check_base_eligibility(distribution_id, request.release_id, &state.pg_pool)
+        .await
+        .map_err(|err| {
+            error!("Failed to check base eligibility: {err}");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to check base eligibility".to_string(),
+            )
+        })?;
+
+    if let Some(reason) = ineligible {
+        if !request.force {
+            return Err((StatusCode::CONFLICT, reason));
+        }
+        warn!(
+            "Base release gate bypassed for distribution {distribution_id} release {} by user {}: {reason}",
+            request.release_id, current_user.user_id
+        );
+    }
+
+    let mut tx = state.pg_pool.begin().await.map_err(|err| {
+        error!("Failed to start transaction: {err}");
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to set base release".to_string(),
+        )
+    })?;
+
+    let previous_release_id = sqlx::query_scalar!(
+        "SELECT base_release_id FROM distribution WHERE id = $1",
+        distribution_id
+    )
+    .fetch_one(&mut *tx)
+    .await
+    .map_err(|err| {
+        error!("Failed to read current base release: {err}");
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to set base release".to_string(),
+        )
+    })?;
+
+    sqlx::query!(
+        "UPDATE distribution SET base_release_id = $1 WHERE id = $2",
+        request.release_id,
+        distribution_id
+    )
+    .execute(&mut *tx)
+    .await
+    .map_err(|err| {
+        error!("Failed to set base release: {err}");
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to set base release".to_string(),
+        )
+    })?;
+
+    sqlx::query!(
+        "INSERT INTO distribution_pointer_history
+            (distribution_id, pointer, previous_release_id, new_release_id, user_id, reason)
+         VALUES ($1, 'base', $2, $3, $4, $5)",
+        distribution_id,
+        previous_release_id,
+        request.release_id,
+        current_user.user_id,
+        request.reason
+    )
+    .execute(&mut *tx)
+    .await
+    .map_err(|err| {
+        error!("Failed to record base pointer move: {err}");
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to set base release".to_string(),
+        )
+    })?;
+
+    tx.commit().await.map_err(|err| {
+        error!("Failed to commit base release change: {err}");
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to set base release".to_string(),
+        )
+    })?;
+
+    let release = get_base_distribution_release(distribution_id, &state.pg_pool)
+        .await
+        .map_err(|err| {
+            error!("Failed to read back base release: {err}");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to set base release".to_string(),
+            )
+        })?
+        .ok_or((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Base release missing after update".to_string(),
+        ))?;
+
+    Ok(Json(release))
 }

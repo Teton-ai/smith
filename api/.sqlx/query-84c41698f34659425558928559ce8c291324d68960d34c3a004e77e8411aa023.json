@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO distribution_pointer_history\n            (distribution_id, pointer, previous_release_id, new_release_id, user_id, reason)\n         VALUES ($1, 'latest', $2, $3, $4, $5)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Int4",
+        "Int4",
+        "Int4",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "84c41698f34659425558928559ce8c291324d68960d34c3a004e77e8411aa023"
+}
