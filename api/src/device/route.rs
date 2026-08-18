@@ -254,8 +254,22 @@ pub async fn get_devices(
         ORDER BY
             CASE WHEN $15 THEN d.serial_number END ASC NULLS LAST,
             CASE WHEN $16 THEN d.serial_number END DESC NULLS LAST,
-            CASE WHEN $17 THEN MIN(l.name || '=' || dl.value) FILTER (WHERE l.name IS NOT NULL) END ASC NULLS LAST,
-            CASE WHEN $18 THEN MIN(l.name || '=' || dl.value) FILTER (WHERE l.name IS NOT NULL) END DESC NULLS LAST,
+            -- Correlated subquery, not the outer dl/l join: an active label
+            -- filter (see $4 above) restricts that join to matching rows
+            -- only, which would make every filtered device tie on the same
+            -- filtered label instead of sorting by its actual first label.
+            CASE WHEN $17 THEN (
+                SELECT MIN(l2.name || '=' || dl2.value)
+                FROM device_label dl2
+                JOIN label l2 ON l2.id = dl2.label_id
+                WHERE dl2.device_id = d.id
+            ) END ASC NULLS LAST,
+            CASE WHEN $18 THEN (
+                SELECT MIN(l2.name || '=' || dl2.value)
+                FROM device_label dl2
+                JOIN label l2 ON l2.id = dl2.label_id
+                WHERE dl2.device_id = d.id
+            ) END DESC NULLS LAST,
             d.last_ping DESC NULLS LAST,
             d.serial_number
         LIMIT $8
