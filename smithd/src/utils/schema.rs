@@ -103,6 +103,13 @@ pub struct IntentNetwork {
     pub profile_name: String,
     pub ssid: String,
     pub priority: i32,
+    // Defaulted: a command queued before the API rolled out these fields must
+    // still deserialize. "" is a value profile_security_type never produces,
+    // so a missing security_type just disables adopt-matching, not a false match.
+    #[serde(default)]
+    pub hidden: bool,
+    #[serde(default)]
+    pub security_type: String,
     pub credentials: NetworkCredentials,
 }
 
@@ -572,6 +579,17 @@ mod tests {
             }
             _ => panic!("expected GetLogs variant"),
         }
+    }
+
+    #[test]
+    fn intent_network_omitted_hidden_and_security_type_default() {
+        // A command queued before the API rolled out these fields must still
+        // deserialize, not get dropped.
+        let json = r#"{"profile_name":"HC-Teton","ssid":"HC-Teton","priority":10,
+            "credentials":{"key_mgmt":"wpa-psk","psk":"secret"}}"#;
+        let network: IntentNetwork = serde_json::from_str(json).unwrap();
+        assert!(!network.hidden);
+        assert_eq!(network.security_type, "");
     }
 
     #[test]
