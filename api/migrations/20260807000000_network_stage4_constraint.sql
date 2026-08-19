@@ -14,8 +14,15 @@
 -- Postgres's default treats every NULL identity as distinct from every other,
 -- so open/wpa-psk rows (the overwhelming majority, all NULL identity) would
 -- never conflict with each other at all.
+--
+-- network_type is part of the key because network_find_by_content's match
+-- already treats it that way (api/migrations/20260730000000_..., "a NULL
+-- matches nothing... leaving it out would let a POST for an ethernet network
+-- match a wifi row"). Without it here, two distinct Ethernet/Dongle rows -
+-- both NULL ssid/security_type/identity, default '{}' credentials - would
+-- collide under NULLS NOT DISTINCT even though they aren't the same network.
 CREATE UNIQUE INDEX network_ident_uq_idx ON network
-    (ssid, is_network_hidden, security_type, credentials, identity) NULLS NOT DISTINCT;
+    (network_type, ssid, is_network_hidden, security_type, credentials, identity) NULLS NOT DISTINCT;
 
 ALTER TABLE network ADD CONSTRAINT network_ident_uq UNIQUE USING INDEX network_ident_uq_idx;
 
