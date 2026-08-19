@@ -21,6 +21,7 @@ use axum_extra::extract::Query;
 use chrono::Duration;
 use models::device::{
     CommandsPaginated, Device, DeviceCommandResponse, DeviceFilter, DeviceNetwork,
+    DeviceSortDirection, DeviceSortField,
 };
 use models::modem::Modem;
 use models::release::Release;
@@ -126,6 +127,15 @@ pub async fn get_devices(
     Extension(state): Extension<State>,
     filter: Query<DeviceFilter>,
 ) -> axum::response::Result<(HeaderMap, Json<Vec<Device>>), StatusCode> {
+    let sort_serial_asc = matches!(filter.sort, Some(DeviceSortField::SerialNumber))
+        && !matches!(filter.order, Some(DeviceSortDirection::Desc));
+    let sort_serial_desc = matches!(filter.sort, Some(DeviceSortField::SerialNumber))
+        && matches!(filter.order, Some(DeviceSortDirection::Desc));
+    let sort_labels_asc = matches!(filter.sort, Some(DeviceSortField::Labels))
+        && !matches!(filter.order, Some(DeviceSortDirection::Desc));
+    let sort_labels_desc = matches!(filter.sort, Some(DeviceSortField::Labels))
+        && matches!(filter.order, Some(DeviceSortDirection::Desc));
+
     #[allow(deprecated)]
     let devices = sqlx::query!(
         r#"SELECT
@@ -241,7 +251,27 @@ pub async fn get_devices(
                      AND dss.active_state != 'active'
                )))
         GROUP BY d.id, ip.id, m.id, r.id, rd.id, tr.id, trd.id, dn.device_id
-        ORDER BY d.last_ping DESC NULLS LAST, d.serial_number
+        ORDER BY
+            CASE WHEN $15 THEN d.serial_number END ASC NULLS LAST,
+            CASE WHEN $16 THEN d.serial_number END DESC NULLS LAST,
+            -- Correlated subquery, not the outer dl/l join: an active label
+            -- filter (see $4 above) restricts that join to matching rows
+            -- only, which would make every filtered device tie on the same
+            -- filtered label instead of sorting by its actual first label.
+            CASE WHEN $17 THEN (
+                SELECT MIN(l2.name || '=' || dl2.value)
+                FROM device_label dl2
+                JOIN label l2 ON l2.id = dl2.label_id
+                WHERE dl2.device_id = d.id
+            ) END ASC NULLS LAST,
+            CASE WHEN $18 THEN (
+                SELECT MIN(l2.name || '=' || dl2.value)
+                FROM device_label dl2
+                JOIN label l2 ON l2.id = dl2.label_id
+                WHERE dl2.device_id = d.id
+            ) END DESC NULLS LAST,
+            d.last_ping DESC NULLS LAST,
+            d.serial_number
         LIMIT $8
         OFFSET $9
         "#,
@@ -258,7 +288,11 @@ pub async fn get_devices(
         filter.release_id,
         filter.outdated_minutes,
         filter.distribution_id,
-        filter.service_not_running
+        filter.service_not_running,
+        sort_serial_asc,
+        sort_serial_desc,
+        sort_labels_asc,
+        sort_labels_desc,
     )
     .fetch_all(&state.pg_pool)
     .await
