@@ -31,6 +31,14 @@ pub struct Session {
     session: client::Handle<Client>,
 }
 
+fn ssh_term(term: Option<&str>) -> &str {
+    match term {
+        Some("xterm-ghostty") => "xterm-256color",
+        Some(term) => term,
+        None => "xterm",
+    }
+}
+
 impl Session {
     pub async fn connect<P: AsRef<Path>, A: ToSocketAddrs>(
         key_path: P,
@@ -89,10 +97,11 @@ impl Session {
         let (w, h) = termion::terminal_size()?;
 
         // Request an interactive PTY from the server
+        let term = env::var("TERM").ok();
         channel
             .request_pty(
                 false,
-                &env::var("TERM").unwrap_or("xterm".into()),
+                ssh_term(term.as_deref()),
                 w as u32,
                 h as u32,
                 0,
@@ -152,5 +161,17 @@ impl Session {
             .disconnect(Disconnect::ByApplication, "", "English")
             .await?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ssh_term;
+
+    #[test]
+    fn uses_remote_compatible_term_for_ghostty() {
+        assert_eq!(ssh_term(Some("xterm-ghostty")), "xterm-256color");
+        assert_eq!(ssh_term(Some("screen-256color")), "screen-256color");
+        assert_eq!(ssh_term(None), "xterm");
     }
 }
