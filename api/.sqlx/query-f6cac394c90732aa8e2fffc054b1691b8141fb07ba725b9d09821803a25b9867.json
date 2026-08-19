@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT\n            dni.priority,\n            n.ssid,\n            n.name,\n            n.password,\n            n.security_type as \"security_type!\",\n            n.is_network_hidden,\n            n.credentials ->> 'psk' AS credentials_psk\n        FROM device_network_intent dni\n        JOIN network n ON n.id = dni.network_id\n        WHERE dni.device_id = $1 AND n.network_type = 'wifi'\n        ORDER BY dni.priority ASC\n        ",
+  "query": "\n        SELECT\n            dni.priority,\n            n.ssid,\n            n.name,\n            n.security_type as \"security_type!\",\n            n.is_network_hidden,\n            n.credentials ->> 'psk' AS credentials_psk\n        FROM device_network_intent dni\n        JOIN network n ON n.id = dni.network_id\n        WHERE dni.device_id = $1 AND n.network_type = 'wifi'\n        ORDER BY dni.priority ASC\n        ",
   "describe": {
     "columns": [
       {
@@ -20,21 +20,16 @@
       },
       {
         "ordinal": 3,
-        "name": "password",
-        "type_info": "Text"
-      },
-      {
-        "ordinal": 4,
         "name": "security_type!",
         "type_info": "Text"
       },
       {
-        "ordinal": 5,
+        "ordinal": 4,
         "name": "is_network_hidden",
         "type_info": "Bool"
       },
       {
-        "ordinal": 6,
+        "ordinal": 5,
         "name": "credentials_psk",
         "type_info": "Text"
       }
@@ -49,10 +44,9 @@
       true,
       false,
       true,
-      true,
       false,
       null
     ]
   },
-  "hash": "53ad61c0fe1afcff2d3aab2b2785160941760c817587f598154f1d67420d2773"
+  "hash": "f6cac394c90732aa8e2fffc054b1691b8141fb07ba725b9d09821803a25b9867"
 }

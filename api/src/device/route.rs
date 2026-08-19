@@ -3522,7 +3522,6 @@ pub async fn apply_device_intent(
             dni.priority,
             n.ssid,
             n.name,
-            n.password,
             n.security_type as "security_type!",
             n.is_network_hidden,
             n.credentials ->> 'psk' AS credentials_psk
