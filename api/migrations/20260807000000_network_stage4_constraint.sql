@@ -21,23 +21,26 @@
 -- match a wifi row"). Without it here, two distinct Ethernet/Dongle rows -
 -- both NULL ssid/security_type/identity, default '{}' credentials - would
 -- collide under NULLS NOT DISTINCT even though they aren't the same network.
+--
+-- Backfill runs before the index is built, not after: this is the same
+-- provisional heuristic as the Stage 1 backfill (20260720000001), scoped to
+-- wifi only, healing the two NULL-security_type stragglers ReportNMProfiles
+-- can still land when a device reports a key_mgmt Smith doesn't recognize
+-- (api/src/home.rs, map_key_mgmt's `other => None` branch is a permanent,
+-- anticipated case, not a transient one, so unlike Stage 1 this can't be
+-- treated as a closed backlog). If a healed row's new key collides with an
+-- existing one, the index build below is the single point that catches it
+-- and aborts the (transactional) migration - same accepted failure mode as
+-- an unresolved dedupe precondition, not a second, less-defined failure path
+-- from a backfill UPDATE tripping a constraint that already exists.
+UPDATE network
+   SET security_type = CASE WHEN credentials ->> 'psk' IS NULL THEN 'open' ELSE 'wpa-psk' END
+ WHERE network_type = 'wifi' AND security_type IS NULL;
+
 CREATE UNIQUE INDEX network_ident_uq_idx ON network
     (network_type, ssid, is_network_hidden, security_type, credentials, identity) NULLS NOT DISTINCT;
 
 ALTER TABLE network ADD CONSTRAINT network_ident_uq UNIQUE USING INDEX network_ident_uq_idx;
-
--- Same provisional heuristic as the Stage 1 backfill (20260720000001), scoped
--- to wifi only: ReportNMProfiles can still land a wifi row with no
--- security_type when a device reports a key_mgmt Smith doesn't recognize
--- (api/src/home.rs, map_key_mgmt's `other => None` branch is a permanent,
--- anticipated case, not a transient one), so unlike Stage 1 this cannot be
--- treated as a closed backlog. Two such rows exist in prod as of this
--- migration; this heals them the same way a later, recognized report would
--- (network_find_by_content's relaxed match + COALESCE), so it is a no-op for
--- any row a real report reaches first.
-UPDATE network
-   SET security_type = CASE WHEN credentials ->> 'psk' IS NULL THEN 'open' ELSE 'wpa-psk' END
- WHERE network_type = 'wifi' AND security_type IS NULL;
 
 -- security_type is WiFi-specific vocabulary (see security_type_for,
 -- api/src/network/route.rs); Ethernet/Dongle rows have none, so the check is
