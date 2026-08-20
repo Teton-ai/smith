@@ -225,7 +225,7 @@ pub async fn release_reference(
         .await
         .map_err(internal_error("Failed to take network lock"))?;
 
-    sqlx::query!(
+    let released = sqlx::query!(
         "DELETE FROM network_reference WHERE holder = $1 AND external_key = $2 AND network_id = $3",
         holder,
         body.external_key,
@@ -233,13 +233,20 @@ pub async fn release_reference(
     )
     .execute(&mut *tx)
     .await
-    .map_err(internal_error("Failed to delete network reference"))?;
+    .map_err(internal_error("Failed to delete network reference"))?
+    .rows_affected()
+        > 0;
 
-    // The caller does not decide and does not inspect internal FK state - 204
-    // either way, whether or not this actually collected the row.
-    collect_network(&mut tx, network_id)
-        .await
-        .map_err(internal_error("Failed to attempt network collection"))?;
+    // Collection is only attempted for a hold this call actually released -
+    // otherwise any authenticated holder could use a network_id/external_key
+    // it never registered to trigger collection of a network it has no
+    // relationship to. Still 204 either way, and the caller still never
+    // inspects internal FK state or whether collection actually happened.
+    if released {
+        collect_network(&mut tx, network_id)
+            .await
+            .map_err(internal_error("Failed to attempt network collection"))?;
+    }
 
     tx.commit().await.map_err(internal_error(
         "Failed to commit release_reference transaction",

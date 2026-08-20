@@ -852,29 +852,33 @@ async fn release_last_reference_collects_unreferenced_network() -> Result<()> {
             .bind(i64::from(network_id))
             .execute(&mut *tx)
             .await?;
-        sqlx::query(
+        let rows_affected = sqlx::query(
             "DELETE FROM network_reference WHERE holder = $1 AND external_key = $2 AND network_id = $3",
         )
         .bind("app_api")
         .bind(&ssid)
         .bind(network_id)
         .execute(&mut *tx)
-        .await?;
-        let has_ledger_ref: bool =
-            sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM network_reference WHERE network_id = $1)")
-                .bind(network_id)
-                .fetch_one(&mut *tx)
-                .await?;
-        let has_internal_ref: bool =
-            sqlx::query_scalar("SELECT network_has_internal_reference($1)")
-                .bind(network_id)
-                .fetch_one(&mut *tx)
-                .await?;
-        if !has_ledger_ref && !has_internal_ref {
-            sqlx::query("DELETE FROM network WHERE id = $1")
-                .bind(network_id)
-                .execute(&mut *tx)
-                .await?;
+        .await?
+        .rows_affected();
+        if rows_affected > 0 {
+            let has_ledger_ref: bool = sqlx::query_scalar(
+                "SELECT EXISTS(SELECT 1 FROM network_reference WHERE network_id = $1)",
+            )
+            .bind(network_id)
+            .fetch_one(&mut *tx)
+            .await?;
+            let has_internal_ref: bool =
+                sqlx::query_scalar("SELECT network_has_internal_reference($1)")
+                    .bind(network_id)
+                    .fetch_one(&mut *tx)
+                    .await?;
+            if !has_ledger_ref && !has_internal_ref {
+                sqlx::query("DELETE FROM network WHERE id = $1")
+                    .bind(network_id)
+                    .execute(&mut *tx)
+                    .await?;
+            }
         }
         tx.commit().await?;
 
@@ -900,6 +904,83 @@ async fn release_last_reference_collects_unreferenced_network() -> Result<()> {
     ensure!(
         !outcome?,
         "network with zero ledger and zero internal references should have been collected"
+    );
+    Ok(())
+}
+
+/// A release whose `(holder, external_key, network_id)` matches no row must
+/// not attempt collection at all - otherwise any authenticated holder could
+/// use a network_id/external_key it never registered to garbage-collect a
+/// network it has no relationship to, merely because that network happened
+/// to be at zero references already.
+#[tokio::test]
+#[ignore = "requires running compose stack; use make test.e2e"]
+async fn release_of_an_unheld_reference_does_not_collect() -> Result<()> {
+    let ctx = Ctx::connect().await?;
+    wait_for_api(&ctx).await?;
+    if !has_reference_ledger(&ctx).await? {
+        println!(
+            "skipping release_of_an_unheld_reference_does_not_collect: \
+             ledger not present (version-skew job)"
+        );
+        return Ok(());
+    }
+
+    let ssid = format!("e2e-ledger-unheld-release-{}", uuid::Uuid::new_v4());
+    let outcome: Result<bool> = async {
+        // No insert_reference call: this network already has zero ledger and
+        // zero internal references from the moment it's created - exactly
+        // the state a buggy/unauthorized release must not be able to exploit.
+        let network_id = insert_test_network(&ctx, &ssid).await?;
+
+        let mut tx = ctx.db.begin().await?;
+        sqlx::query("SELECT pg_advisory_xact_lock($1)")
+            .bind(i64::from(network_id))
+            .execute(&mut *tx)
+            .await?;
+        let rows_affected = sqlx::query(
+            "DELETE FROM network_reference WHERE holder = $1 AND external_key = $2 AND network_id = $3",
+        )
+        .bind("app_api")
+        .bind("never-registered-key")
+        .bind(network_id)
+        .execute(&mut *tx)
+        .await?
+        .rows_affected();
+        if rows_affected > 0 {
+            let has_ledger_ref: bool = sqlx::query_scalar(
+                "SELECT EXISTS(SELECT 1 FROM network_reference WHERE network_id = $1)",
+            )
+            .bind(network_id)
+            .fetch_one(&mut *tx)
+            .await?;
+            let has_internal_ref: bool =
+                sqlx::query_scalar("SELECT network_has_internal_reference($1)")
+                    .bind(network_id)
+                    .fetch_one(&mut *tx)
+                    .await?;
+            if !has_ledger_ref && !has_internal_ref {
+                sqlx::query("DELETE FROM network WHERE id = $1")
+                    .bind(network_id)
+                    .execute(&mut *tx)
+                    .await?;
+            }
+        }
+        tx.commit().await?;
+
+        network_exists(&ctx, network_id).await
+    }
+    .await;
+
+    sqlx::query("DELETE FROM network WHERE ssid = $1")
+        .bind(&ssid)
+        .execute(&ctx.db)
+        .await
+        .context("cleaning up unheld-release network")?;
+
+    ensure!(
+        outcome?,
+        "a release matching no hold must not collect an unrelated network"
     );
     Ok(())
 }
