@@ -652,6 +652,7 @@ const DevicesPage = () => {
 
 	// Sync URL parameters with component state
 	useEffect(() => {
+		const searchParam = searchParams.get("search");
 		const outdated = searchParams.get("outdated");
 		const online = searchParams.get("online");
 		const labelsParam = searchParams.get("labels");
@@ -660,6 +661,12 @@ const DevicesPage = () => {
 		const approvedParam = searchParams.get("approved");
 		const sortParam = searchParams.get("sort");
 		const orderParam = searchParams.get("order");
+
+		if (searchParam) {
+			// Bypass the debounce so the URL's term is in the first query, not 300ms later.
+			setSearchTerm(searchParam);
+			setDebouncedSearchTerm(searchParam);
+		}
 
 		if (outdated === "true") {
 			setShowOutdatedOnly(true);
@@ -725,6 +732,12 @@ const DevicesPage = () => {
 		const query = search ? `?${search}` : "";
 		navigate(`/devices${query}`, { replace: true });
 	};
+
+	// Keep the term in the URL so it survives a back navigation from a device's detail page.
+	// biome-ignore lint/correctness/useExhaustiveDependencies: updateURL reads searchParams via closure; including it would re-run this on every unrelated filter change, not just the search term.
+	useEffect(() => {
+		updateURL({ search: debouncedSearchTerm || undefined });
+	}, [debouncedSearchTerm]);
 
 	const getDeviceStatus = (device: Device) => {
 		if (!device.last_seen) return "offline";
