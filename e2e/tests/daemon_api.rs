@@ -909,10 +909,9 @@ async fn release_last_reference_collects_unreferenced_network() -> Result<()> {
 }
 
 /// A release whose `(holder, external_key, network_id)` matches no row must
-/// not attempt collection at all - otherwise any authenticated holder could
-/// use a network_id/external_key it never registered to garbage-collect a
-/// network it has no relationship to, merely because that network happened
-/// to be at zero references already.
+/// not attempt collection - otherwise any holder could garbage-collect a
+/// network it has no relationship to, just by guessing a network_id/
+/// external_key it never registered.
 #[tokio::test]
 #[ignore = "requires running compose stack; use make test.e2e"]
 async fn release_of_an_unheld_reference_does_not_collect() -> Result<()> {
@@ -928,9 +927,8 @@ async fn release_of_an_unheld_reference_does_not_collect() -> Result<()> {
 
     let ssid = format!("e2e-ledger-unheld-release-{}", uuid::Uuid::new_v4());
     let outcome: Result<bool> = async {
-        // No insert_reference call: this network already has zero ledger and
-        // zero internal references from the moment it's created - exactly
-        // the state a buggy/unauthorized release must not be able to exploit.
+        // No insert_reference call: this network has zero references from
+        // creation - the exact state an unauthorized release must not exploit.
         let network_id = insert_test_network(&ctx, &ssid).await?;
 
         let mut tx = ctx.db.begin().await?;

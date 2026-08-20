@@ -38,9 +38,9 @@ pub struct ReconcileRequest {
 }
 
 /// Generous headroom over a holder's actual fleet size (App API's is in the
-/// low thousands), not a tuned business limit - just a guard against a
-/// malformed or runaway request locking an unbounded number of network ids
-/// in one transaction. Same convention as `TELEMETRY_MAX_SERIALS`.
+/// low thousands) - a guard against a malformed/runaway request locking an
+/// unbounded number of network ids, not a tuned business limit. Same
+/// convention as `TELEMETRY_MAX_SERIALS`.
 const RECONCILE_MAX_KEYS: usize = 10_000;
 
 async fn lock_network(tx: &mut PgConnection, network_id: i32) -> Result<(), sqlx::Error> {
@@ -238,10 +238,9 @@ pub async fn release_reference(
         > 0;
 
     // Collection is only attempted for a hold this call actually released -
-    // otherwise any authenticated holder could use a network_id/external_key
-    // it never registered to trigger collection of a network it has no
-    // relationship to. Still 204 either way, and the caller still never
-    // inspects internal FK state or whether collection actually happened.
+    // otherwise any holder could trigger collection of a network it has no
+    // relationship to via a network_id/external_key it never registered.
+    // Response is still 204 either way.
     if released {
         collect_network(&mut tx, network_id)
             .await
@@ -358,12 +357,10 @@ pub async fn reconcile_references(
     let diff = ReconcileDiff::compute(&current, &desired);
 
     // Checked separately from the insert loop below, same reasoning as
-    // acquire_reference's existence check: an FK violation on insert_reference
-    // would otherwise surface as an opaque 500 for what is really a caller
-    // error (a pushed network_id that doesn't exist), and would do so only
-    // after the locks above are already held. All to_add ids are already
-    // locked (they come from body.keys, included in lock_ids above), so this
-    // read is consistent with the insert loop that follows it.
+    // acquire_reference's existence check: an FK violation here would surface
+    // as an opaque 500 for what is really a caller error. All to_add ids are
+    // already locked (from lock_ids above), so this read is consistent with
+    // the insert loop that follows.
     let to_add_ids: Vec<i32> = diff.to_add.iter().map(|(_, id)| *id).collect();
     if !to_add_ids.is_empty() {
         let existing: HashSet<i32> =
