@@ -826,8 +826,9 @@ async fn acquire_reference_is_idempotent() -> Result<()> {
 }
 
 /// Mirrors `release_reference`: delete the ledger row, then `collect_network`'s
-/// check. With zero ledger rows and zero internal FK references, the network
-/// row itself must be deleted as a side effect.
+/// check (hand-copied - keep in sync). With zero ledger rows and zero
+/// internal FK references, the network row itself must be deleted as a
+/// side effect.
 #[tokio::test]
 #[ignore = "requires running compose stack; use make test.e2e"]
 async fn release_last_reference_collects_unreferenced_network() -> Result<()> {
@@ -1096,6 +1097,10 @@ async fn hard_delete_fails_on_a_held_network() -> Result<()> {
 /// real concurrency. N tasks lock the *same two* network ids in ascending
 /// order, racing on which gets there first; drop the ordering and this
 /// reliably deadlocks, keep it and every task completes.
+///
+/// Simulates the invariant rather than calling `reconcile_references`'s own
+/// `.sort_unstable()` (same reason as every other test in this section): a
+/// regression that drops that call from `ledger.rs` would slip past this.
 #[tokio::test]
 #[ignore = "requires running compose stack; use make test.e2e"]
 async fn ascending_lock_order_avoids_deadlock_under_concurrency() -> Result<()> {

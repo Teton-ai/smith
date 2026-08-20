@@ -43,6 +43,23 @@ async fn lock_network(tx: &mut PgConnection, network_id: i32) -> Result<(), sqlx
     Ok(())
 }
 
+/// Serializes every `network_reference` mutation for one holder against every
+/// other mutation for that holder. Without it, reconcile's read of what a
+/// holder currently holds could race a concurrent acquire/create adding a row
+/// on a `network_id` nothing has locked via `lock_network` yet - this makes
+/// that read-then-act atomic per holder. Salted (`1`) to avoid colliding with
+/// `network_content_lock_key`'s unsalted (`0`) hash in the same
+/// `pg_advisory_xact_lock(bigint)` keyspace.
+pub(crate) async fn lock_holder(tx: &mut PgConnection, holder: &str) -> Result<(), sqlx::Error> {
+    sqlx::query!(
+        "SELECT pg_advisory_xact_lock(pg_catalog.hashtextextended($1, 1))",
+        holder
+    )
+    .execute(tx)
+    .await?;
+    Ok(())
+}
+
 /// The one construction of a `network_reference` insert; shared verbatim by
 /// `acquire_reference` and `create_network`'s `reference` field so the two
 /// insert paths cannot silently diverge. Idempotent: re-registering an
@@ -76,6 +93,9 @@ pub(crate) async fn insert_reference(
 /// `network_reference`'s `ON DELETE RESTRICT` FK is why this order matters:
 /// both counts are verified zero first, so the delete below can never be the
 /// thing that would have violated it.
+///
+/// `e2e/tests/daemon_api.rs` hand-copies this check (can't call it directly -
+/// see that file's header); keep the two in sync.
 pub(crate) async fn collect_network(
     tx: &mut PgConnection,
     network_id: i32,
@@ -132,6 +152,9 @@ pub async fn acquire_reference(
         "Failed to begin acquire_reference transaction",
     ))?;
 
+    lock_holder(&mut tx, &holder)
+        .await
+        .map_err(internal_error("Failed to take holder lock"))?;
     lock_network(&mut tx, network_id)
         .await
         .map_err(internal_error("Failed to take network lock"))?;
@@ -188,6 +211,9 @@ pub async fn release_reference(
         "Failed to begin release_reference transaction",
     ))?;
 
+    lock_holder(&mut tx, &holder)
+        .await
+        .map_err(internal_error("Failed to take holder lock"))?;
     lock_network(&mut tx, network_id)
         .await
         .map_err(internal_error("Failed to take network lock"))?;
@@ -277,22 +303,23 @@ pub async fn reconcile_references(
         "Failed to begin reconcile_references transaction",
     ))?;
 
-    // Unlocked first pass: gather every network_id this call could touch (the
-    // pushed set plus whatever this holder currently holds) so every lock below
-    // can be taken in one ascending sweep, avoiding deadlock against another
-    // reconcile/acquire/release touching an overlapping set. A hold landing on
-    // a network_id in neither set, in the gap between this read and the locks
-    // below, is a known accepted residual race: the next scheduled reconcile
-    // call converges it regardless.
-    let current_before = fetch_holder_references(&mut tx, &holder)
+    // Taken before the read below, not after: that's what makes the read a
+    // complete, stable view of this holder's rows (see lock_holder's doc).
+    lock_holder(&mut tx, &holder)
         .await
-        .map_err(internal_error("Failed to read current references"))?;
+        .map_err(internal_error("Failed to take holder lock"))?;
+
+    let current: HashSet<(String, i32)> = fetch_holder_references(&mut tx, &holder)
+        .await
+        .map_err(internal_error("Failed to read current references"))?
+        .into_iter()
+        .collect();
 
     let mut lock_ids: Vec<i32> = body
         .keys
         .iter()
         .map(|k| k.network_id)
-        .chain(current_before.iter().map(|(_, id)| *id))
+        .chain(current.iter().map(|(_, id)| *id))
         .collect();
     lock_ids.sort_unstable();
     lock_ids.dedup();
@@ -302,12 +329,6 @@ pub async fn reconcile_references(
             .await
             .map_err(internal_error("Failed to take network lock"))?;
     }
-
-    let current: HashSet<(String, i32)> = fetch_holder_references(&mut tx, &holder)
-        .await
-        .map_err(internal_error("Failed to read current references"))?
-        .into_iter()
-        .collect();
 
     let desired: HashSet<(String, i32)> = body
         .keys

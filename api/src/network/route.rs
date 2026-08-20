@@ -17,7 +17,7 @@ use utoipa::ToSchema;
 use uuid::Uuid;
 
 use super::evaluation::{Evaluation, evaluate};
-use super::ledger::insert_reference;
+use super::ledger::{insert_reference, lock_holder};
 
 pub(crate) const NETWORKS_TAG: &str = "networks";
 const EXTENDED_TEST_TAG: &str = "extended-network-test";
@@ -305,6 +305,18 @@ pub async fn create_network(
         .await
         .map_err(internal_error("Failed to begin create_network transaction"))?;
 
+    // Taken before the content lock so a concurrent reconcile's read of this
+    // holder's rows can't miss the one this call is about to add (see
+    // lock_holder's doc). `holder` is `Some` by construction - the guard
+    // above already rejected `reference.is_some() && holder.is_none()`.
+    if new_network.reference.is_some()
+        && let Some(holder) = &holder
+    {
+        lock_holder(&mut tx, holder)
+            .await
+            .map_err(internal_error("Failed to take holder lock"))?;
+    }
+
     // Race-tested in e2e/tests/daemon_api.rs
     // (concurrent_identical_network_posts_converge_to_one_row).
     sqlx::query!(
@@ -390,10 +402,13 @@ pub async fn create_network(
 
     // Same transaction as the upsert above: the network row and its ledger
     // hold either both exist after this call or neither does. `holder` is
-    // Some here by construction - checked at the top of this function before
-    // any DB work happened.
+    // `Some` here by construction (guard above), but this fails safe instead
+    // of unwrapping in case that guard is ever weakened or reordered.
     if let Some(reference) = new_network.reference {
-        let holder = holder.expect("checked before create_network's transaction began");
+        let Some(holder) = holder else {
+            error!("create_network reached the reference-insert step with no holder");
+            return Err(StatusCode::INTERNAL_SERVER_ERROR);
+        };
         insert_reference(&mut tx, &holder, &reference.external_key, network.id)
             .await
             .map_err(internal_error("Failed to insert network reference"))?;
