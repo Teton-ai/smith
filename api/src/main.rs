@@ -42,6 +42,7 @@ mod event;
 mod files;
 mod handlers;
 mod health;
+mod holder;
 mod home;
 mod ip_address;
 mod logging;
