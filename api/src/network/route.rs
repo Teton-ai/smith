@@ -1,4 +1,5 @@
 use crate::State;
+use crate::holder::Holder;
 use crate::user::CurrentUser;
 use axum::http::StatusCode;
 use axum::response::Result;
@@ -16,8 +17,9 @@ use utoipa::ToSchema;
 use uuid::Uuid;
 
 use super::evaluation::{Evaluation, evaluate};
+use super::ledger::insert_reference;
 
-const NETWORKS_TAG: &str = "networks";
+pub(crate) const NETWORKS_TAG: &str = "networks";
 const EXTENDED_TEST_TAG: &str = "extended-network-test";
 
 #[derive(Debug, serde::Deserialize)]
@@ -193,9 +195,10 @@ fn network_type_label(network_type: &NetworkType) -> &'static str {
     }
 }
 
-/// Every failure in `create_network` is an opaque 500 to the caller; only the log
-/// line differs. Keeps the handler readable instead of repeating the same closure.
-fn internal_error(context: &'static str) -> impl Fn(sqlx::Error) -> StatusCode {
+/// Every failure in `create_network` (and, reused, the ledger handlers in
+/// `super::ledger`) is an opaque 500 to the caller; only the log line differs.
+/// Keeps handlers readable instead of repeating the same closure.
+pub(crate) fn internal_error(context: &'static str) -> impl Fn(sqlx::Error) -> StatusCode {
     move |err| {
         error!("{context}: {err}");
         StatusCode::INTERNAL_SERVER_ERROR
@@ -269,8 +272,16 @@ fn security_type_for(
 )]
 pub async fn create_network(
     Extension(state): Extension<State>,
+    Extension(Holder(holder)): Extension<Holder>,
     Json(new_network): Json<NewNetwork>,
 ) -> Result<(StatusCode, Json<Network>), StatusCode> {
+    // Checked before any DB work: a caller with no resolved holder cannot
+    // register a reference, full stop, regardless of what else the call would
+    // have done.
+    if new_network.reference.is_some() && holder.is_none() {
+        return Err(StatusCode::FORBIDDEN);
+    }
+
     let security_type: Option<&str> = security_type_for(
         &new_network.network_type,
         new_network.security.as_deref(),
@@ -376,6 +387,17 @@ pub async fn create_network(
             (StatusCode::CREATED, created)
         }
     };
+
+    // Same transaction as the upsert above: the network row and its ledger
+    // hold either both exist after this call or neither does. `holder` is
+    // Some here by construction - checked at the top of this function before
+    // any DB work happened.
+    if let Some(reference) = new_network.reference {
+        let holder = holder.expect("checked before create_network's transaction began");
+        insert_reference(&mut tx, &holder, &reference.external_key, network.id)
+            .await
+            .map_err(internal_error("Failed to insert network reference"))?;
+    }
 
     tx.commit().await.map_err(internal_error(
         "Failed to commit create_network transaction",
