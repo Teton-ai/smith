@@ -43,7 +43,10 @@ pub struct ReconcileRequest {
 /// convention as `TELEMETRY_MAX_SERIALS`.
 const RECONCILE_MAX_KEYS: usize = 10_000;
 
-async fn lock_network(tx: &mut PgConnection, network_id: i32) -> Result<(), sqlx::Error> {
+pub(crate) async fn lock_network(
+    tx: &mut PgConnection,
+    network_id: i32,
+) -> Result<(), sqlx::Error> {
     sqlx::query!("SELECT pg_advisory_xact_lock($1)", i64::from(network_id))
         .execute(tx)
         .await?;

@@ -12,12 +12,13 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use smith::utils::schema::NetworkType;
 use smith::utils::schema::{Network, NetworkInfo, NewNetwork, SpeedSample};
+use sqlx::PgConnection;
 use tracing::{error, info, warn};
 use utoipa::ToSchema;
 use uuid::Uuid;
 
 use super::evaluation::{Evaluation, evaluate};
-use super::ledger::{insert_reference, lock_holder};
+use super::ledger::{insert_reference, lock_holder, lock_network};
 
 pub(crate) const NETWORKS_TAG: &str = "networks";
 const EXTENDED_TEST_TAG: &str = "extended-network-test";
@@ -256,6 +257,40 @@ fn security_type_for(
     resolve_security_type(security, password).map(Some)
 }
 
+/// The one construction of the insert-or-adopt-existing upsert; shared by both
+/// arms of `create_network`'s match (no prior match, and a matched row that
+/// turned out to have been collected before it could be touched). Safe by
+/// construction against a concurrent insert of the same content: Postgres's
+/// own conflict handling on `network_ident_uq` serializes that, no advisory
+/// lock needed here the way the matched-row path needs one.
+async fn insert_or_conflict_network(
+    tx: &mut PgConnection,
+    new_network: &NewNetwork,
+    security_type: Option<&str>,
+    credentials: &Value,
+) -> Result<Network, sqlx::Error> {
+    sqlx::query_as!(
+        Network,
+        r#"
+        INSERT INTO network (network_type, is_network_hidden, ssid, name, description, password, security_type, credentials)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        ON CONFLICT ON CONSTRAINT network_ident_uq
+        DO UPDATE SET ssid = EXCLUDED.ssid
+        RETURNING id, network_type::TEXT as "network_type", is_network_hidden, ssid, name, description, 'secret' as password
+        "#,
+        new_network.network_type.clone() as NetworkType,
+        new_network.is_network_hidden,
+        new_network.ssid,
+        new_network.name,
+        new_network.description,
+        new_network.password,
+        security_type,
+        credentials,
+    )
+    .fetch_one(tx)
+    .await
+}
+
 #[utoipa::path(
     post,
     path = "/networks",
@@ -347,6 +382,20 @@ pub async fn create_network(
 
     let (status, network) = match existing_id {
         Some(id) => {
+            // The content lock above only protects the match query itself; it
+            // does not stop a concurrent release_reference/collect_network
+            // from deleting this exact matched row before the UPDATE below
+            // runs. Taking the same per-network_id lock every ledger mutation
+            // uses (see ledger::lock_network's callers) serializes against
+            // that: either this call proceeds first and the row survives to
+            // be updated, or a concurrent collection wins first and the
+            // fetch_optional below sees it gone. Without this, a release
+            // racing this exact match could 500 on the ON DELETE RESTRICT
+            // violation once this call's later insert_reference lands.
+            lock_network(&mut tx, id)
+                .await
+                .map_err(internal_error("Failed to take network lock"))?;
+
             // Heal in place exactly as ReportNMProfiles does (api/src/home.rs):
             // the relaxed match can only route a typed caller to a NULL row or an
             // already-equal typed row, so COALESCE fills unknown -> known and
@@ -362,10 +411,23 @@ pub async fn create_network(
                 id,
                 security_type as Option<&str>,
             )
-            .fetch_one(&mut *tx)
+            .fetch_optional(&mut *tx)
             .await
             .map_err(internal_error("Failed to fetch matched network"))?;
-            (StatusCode::OK, existing)
+
+            match existing {
+                Some(existing) => (StatusCode::OK, existing),
+                // The matched row was collected out from under us in the gap
+                // between the unlocked match query and the lock above - the
+                // same insert-or-conflict path the "no match" case uses is
+                // safe to fall back to here too.
+                None => (
+                    StatusCode::CREATED,
+                    insert_or_conflict_network(&mut tx, &new_network, security_type, &credentials)
+                        .await
+                        .map_err(internal_error("Failed to insert network"))?,
+                ),
+            }
         }
         None => {
             // Defensive fallback for a lock-bypass race the advisory lock above
@@ -375,27 +437,10 @@ pub async fn create_network(
             // conflict detection is exact-equality only) - see arch.md's
             // rejected-alternatives note. Only safe because this caller never
             // supplies identity/enterprise security_type; revisit if it ever does.
-            let created = sqlx::query_as!(
-                Network,
-                r#"
-                INSERT INTO network (network_type, is_network_hidden, ssid, name, description, password, security_type, credentials)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-                ON CONFLICT ON CONSTRAINT network_ident_uq
-                DO UPDATE SET ssid = EXCLUDED.ssid
-                RETURNING id, network_type::TEXT as "network_type", is_network_hidden, ssid, name, description, 'secret' as password
-                "#,
-                new_network.network_type as NetworkType,
-                new_network.is_network_hidden,
-                new_network.ssid,
-                new_network.name,
-                new_network.description,
-                new_network.password,
-                security_type as Option<&str>,
-                credentials,
-            )
-            .fetch_one(&mut *tx)
-            .await
-            .map_err(internal_error("Failed to insert network"))?;
+            let created =
+                insert_or_conflict_network(&mut tx, &new_network, security_type, &credentials)
+                    .await
+                    .map_err(internal_error("Failed to insert network"))?;
             (StatusCode::CREATED, created)
         }
     };
