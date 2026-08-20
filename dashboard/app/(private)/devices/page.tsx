@@ -970,7 +970,7 @@ const DevicesPage = () => {
 								<input
 									ref={searchInputRef}
 									type="text"
-									placeholder="Search devices..."
+									placeholder="Search devices... (comma-separated)"
 									value={searchTerm}
 									onChange={(e) => setSearchTerm(e.target.value)}
 									className="pl-10 pr-10 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm text-gray-900 placeholder-gray-400"
