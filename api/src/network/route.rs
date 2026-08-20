@@ -257,12 +257,11 @@ fn security_type_for(
     resolve_security_type(security, password).map(Some)
 }
 
-/// The one construction of the insert-or-adopt-existing upsert; shared by both
-/// arms of `create_network`'s match (no prior match, and a matched row that
-/// turned out to have been collected before it could be touched). Safe by
-/// construction against a concurrent insert of the same content: Postgres's
-/// own conflict handling on `network_ident_uq` serializes that, no advisory
-/// lock needed here the way the matched-row path needs one.
+/// The one construction of the insert-or-adopt-existing upsert, shared by
+/// both arms of `create_network`'s match. Safe against a concurrent insert of
+/// the same content by construction - Postgres's own conflict handling on
+/// `network_ident_uq` serializes that, no advisory lock needed here the way
+/// the matched-row path needs one.
 async fn insert_or_conflict_network(
     tx: &mut PgConnection,
     new_network: &NewNetwork,
@@ -382,16 +381,13 @@ pub async fn create_network(
 
     let (status, network) = match existing_id {
         Some(id) => {
-            // The content lock above only protects the match query itself; it
-            // does not stop a concurrent release_reference/collect_network
-            // from deleting this exact matched row before the UPDATE below
-            // runs. Taking the same per-network_id lock every ledger mutation
-            // uses (see ledger::lock_network's callers) serializes against
-            // that: either this call proceeds first and the row survives to
-            // be updated, or a concurrent collection wins first and the
-            // fetch_optional below sees it gone. Without this, a release
-            // racing this exact match could 500 on the ON DELETE RESTRICT
-            // violation once this call's later insert_reference lands.
+            // The content lock above only protects the match query; it
+            // doesn't stop a concurrent release_reference/collect_network
+            // from deleting this exact matched row before the UPDATE below.
+            // This is the same per-network_id lock every other ledger
+            // mutation uses (see lock_network's other callers) - without it,
+            // a release racing this match could 500 on the ON DELETE
+            // RESTRICT violation once this call's insert_reference lands.
             lock_network(&mut tx, id)
                 .await
                 .map_err(internal_error("Failed to take network lock"))?;
@@ -417,10 +413,9 @@ pub async fn create_network(
 
             match existing {
                 Some(existing) => (StatusCode::OK, existing),
-                // The matched row was collected out from under us in the gap
-                // between the unlocked match query and the lock above - the
-                // same insert-or-conflict path the "no match" case uses is
-                // safe to fall back to here too.
+                // Collected out from under us in the gap between the unlocked
+                // match and the lock above - the "no match" case's
+                // insert-or-conflict path is a safe fallback.
                 None => (
                     StatusCode::CREATED,
                     insert_or_conflict_network(&mut tx, &new_network, security_type, &credentials)
