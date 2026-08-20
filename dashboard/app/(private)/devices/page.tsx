@@ -635,14 +635,21 @@ const DevicesPage = () => {
 	}, []);
 
 	// Debounce search term
+	// A ref, not just `isSearching` state: the URL-sync effect below reads this
+	// without depending on it, so it doesn't rerun the instant the debounce
+	// settles and race the URL update, wiping the just-typed term.
+	const isSearchDebouncePendingRef = useRef(false);
 	useEffect(() => {
 		if (!searchTerm) {
+			isSearchDebouncePendingRef.current = false;
 			setDebouncedSearchTerm("");
 			setIsSearching(false);
 			return;
 		}
+		isSearchDebouncePendingRef.current = true;
 		setIsSearching(true);
 		const timer = setTimeout(() => {
+			isSearchDebouncePendingRef.current = false;
 			setDebouncedSearchTerm(searchTerm);
 			setIsSearching(false);
 		}, 300);
@@ -663,10 +670,13 @@ const DevicesPage = () => {
 		const orderParam = searchParams.get("order");
 
 		// Bypass the debounce so the URL's term is in the first query, not 300ms later.
-		// Always assign (not just when present) so navigating to a URL without
-		// `search` (e.g. the sidebar's plain /devices link) clears a stale term.
-		setSearchTerm(searchParam ?? "");
-		setDebouncedSearchTerm(searchParam ?? "");
+		// Always assign (not just when present) so navigating to a URL without `search`
+		// (e.g. the sidebar's plain /devices link) clears a stale term. Skipped while a
+		// debounce is pending — see isSearchDebouncePendingRef above.
+		if (!isSearchDebouncePendingRef.current) {
+			setSearchTerm(searchParam ?? "");
+			setDebouncedSearchTerm(searchParam ?? "");
+		}
 
 		if (outdated === "true") {
 			setShowOutdatedOnly(true);
