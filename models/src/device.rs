@@ -90,7 +90,10 @@ pub struct DeviceFilter {
     pub limit: Option<i64>,
     /// Number of devices to skip. Used for pagination.
     pub offset: Option<i64>,
-    /// Search term to filter devices by serial number, hostname, or model.
+    /// Search terms to filter devices by serial number, hostname, or model.
+    /// A device matching any term is included. Multiple terms are
+    /// comma-separated (e.g. "abc,def"); at most 50 terms are matched, the
+    /// rest are ignored.
     pub search: Option<String>,
     /// Filter by release ID. Only devices with this release_id are included.
     pub release_id: Option<i32>,
