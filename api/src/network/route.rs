@@ -345,11 +345,20 @@ pub async fn create_network(
             (StatusCode::OK, existing)
         }
         None => {
+            // Defensive fallback for a lock-bypass race the advisory lock above
+            // already makes structurally impossible; fails safe rather than 500
+            // if that assumption ever breaks. Deliberately doesn't replicate
+            // network_find_by_content's relaxed identity matching (Postgres
+            // conflict detection is exact-equality only) - see arch.md's
+            // rejected-alternatives note. Only safe because this caller never
+            // supplies identity/enterprise security_type; revisit if it ever does.
             let created = sqlx::query_as!(
                 Network,
                 r#"
                 INSERT INTO network (network_type, is_network_hidden, ssid, name, description, password, security_type, credentials)
                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                ON CONFLICT ON CONSTRAINT network_ident_uq
+                DO UPDATE SET ssid = EXCLUDED.ssid
                 RETURNING id, network_type::TEXT as "network_type", is_network_hidden, ssid, name, description, 'secret' as password
                 "#,
                 new_network.network_type as NetworkType,
