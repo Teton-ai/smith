@@ -802,6 +802,15 @@ async fn acquire_reference_is_idempotent() -> Result<()> {
     }
     .await;
 
+    // network_reference's ON DELETE RESTRICT means the network row can't go
+    // first: this test leaves a real, committed reference behind (unlike
+    // e.g. release_last_reference_collects_unreferenced_network, which clears
+    // its own reference as part of what it's testing).
+    sqlx::query("DELETE FROM network_reference WHERE external_key = $1")
+        .bind(&ssid)
+        .execute(&ctx.db)
+        .await
+        .context("cleaning up acquire-idempotency reference")?;
     sqlx::query("DELETE FROM network WHERE ssid = $1")
         .bind(&ssid)
         .execute(&ctx.db)
