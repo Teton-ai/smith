@@ -882,6 +882,15 @@ async fn release_last_reference_collects_unreferenced_network() -> Result<()> {
     }
     .await;
 
+    // In the expected (success) path the reference is already gone by the
+    // time the transaction above commits, but if the test body errors before
+    // that commit, the reference `insert_reference` created up front is still
+    // real and committed - same reasoning as acquire_reference_is_idempotent.
+    sqlx::query("DELETE FROM network_reference WHERE external_key = $1")
+        .bind(&ssid)
+        .execute(&ctx.db)
+        .await
+        .context("cleaning up collect-on-release reference")?;
     sqlx::query("DELETE FROM network WHERE ssid = $1")
         .bind(&ssid)
         .execute(&ctx.db)
@@ -959,6 +968,13 @@ async fn release_does_not_collect_while_internal_reference_remains() -> Result<(
         .execute(&ctx.db)
         .await
         .context("cleaning up configured-network row")?;
+    // Same reasoning as the sibling collect-on-release test above: a
+    // committed reference can outlive an errored test body.
+    sqlx::query("DELETE FROM network_reference WHERE external_key = $1")
+        .bind(&ssid)
+        .execute(&ctx.db)
+        .await
+        .context("cleaning up internal-reference reference")?;
     sqlx::query("DELETE FROM network WHERE ssid = $1")
         .bind(&ssid)
         .execute(&ctx.db)
@@ -972,9 +988,12 @@ async fn release_does_not_collect_while_internal_reference_remains() -> Result<(
     Ok(())
 }
 
-/// Mirrors `reconcile_references`' atomicity: one bad element (a `network_id`
-/// with no matching `network` row, tripping the FK) must roll back every
-/// insert the same call already staged, not just skip the bad one.
+/// Mirrors the transaction-level guarantee `reconcile_references` relies on:
+/// an insert referencing a nonexistent `network_id` must roll back every
+/// insert the same transaction already staged, not just skip the bad one.
+/// `reconcile_references` itself now pre-validates `to_add` network_ids and
+/// returns `400` before this FK path is ever reached in practice; this test
+/// exercises the underlying DB guarantee directly as a backstop.
 #[tokio::test]
 #[ignore = "requires running compose stack; use make test.e2e"]
 async fn reconcile_rolls_back_entirely_on_invalid_element() -> Result<()> {
@@ -1023,8 +1042,8 @@ async fn reconcile_rolls_back_entirely_on_invalid_element() -> Result<()> {
             bad_insert.is_err(),
             "inserting a reference for a nonexistent network_id should violate the FK"
         );
-        // A real reconcile call would map this into a 500 and let axum/sqlx
-        // drop (roll back) the transaction; explicit here for clarity.
+        // Explicit for clarity; a dropped, uncommitted transaction rolls back
+        // the same way.
         tx.rollback().await?;
 
         network_reference_count(&ctx, network_id).await

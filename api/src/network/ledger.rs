@@ -16,6 +16,7 @@ use axum::http::StatusCode;
 use serde::Deserialize;
 use sqlx::PgConnection;
 use std::collections::{BTreeSet, HashSet};
+use tracing::warn;
 use utoipa::ToSchema;
 
 use super::route::{NETWORKS_TAG, internal_error};
@@ -35,6 +36,12 @@ pub struct ReconcileKey {
 pub struct ReconcileRequest {
     pub keys: Vec<ReconcileKey>,
 }
+
+/// Generous headroom over a holder's actual fleet size (App API's is in the
+/// low thousands), not a tuned business limit - just a guard against a
+/// malformed or runaway request locking an unbounded number of network ids
+/// in one transaction. Same convention as `TELEMETRY_MAX_SERIALS`.
+const RECONCILE_MAX_KEYS: usize = 10_000;
 
 async fn lock_network(tx: &mut PgConnection, network_id: i32) -> Result<(), sqlx::Error> {
     sqlx::query!("SELECT pg_advisory_xact_lock($1)", i64::from(network_id))
@@ -286,6 +293,7 @@ impl ReconcileDiff {
     request_body = ReconcileRequest,
     responses(
         (status = 204, description = "This holder's ledger rows now exactly match the pushed key set"),
+        (status = 400, description = "Too many keys, or `keys` references a network_id that doesn't exist"),
         (status = 403, description = "Caller has no resolved ledger holder identity"),
         (status = 500, description = "Failed to reconcile references", body = String),
     ),
@@ -298,6 +306,10 @@ pub async fn reconcile_references(
     Json(body): Json<ReconcileRequest>,
 ) -> Result<StatusCode, StatusCode> {
     let holder = holder.ok_or(StatusCode::FORBIDDEN)?;
+
+    if body.keys.len() > RECONCILE_MAX_KEYS {
+        return Err(StatusCode::BAD_REQUEST);
+    }
 
     let mut tx = state.pg_pool.begin().await.map_err(internal_error(
         "Failed to begin reconcile_references transaction",
@@ -337,6 +349,33 @@ pub async fn reconcile_references(
         .collect();
 
     let diff = ReconcileDiff::compute(&current, &desired);
+
+    // Checked separately from the insert loop below, same reasoning as
+    // acquire_reference's existence check: an FK violation on insert_reference
+    // would otherwise surface as an opaque 500 for what is really a caller
+    // error (a pushed network_id that doesn't exist), and would do so only
+    // after the locks above are already held. All to_add ids are already
+    // locked (they come from body.keys, included in lock_ids above), so this
+    // read is consistent with the insert loop that follows it.
+    let to_add_ids: Vec<i32> = diff.to_add.iter().map(|(_, id)| *id).collect();
+    if !to_add_ids.is_empty() {
+        let existing: HashSet<i32> =
+            sqlx::query_scalar!("SELECT id FROM network WHERE id = ANY($1)", &to_add_ids)
+                .fetch_all(&mut *tx)
+                .await
+                .map_err(internal_error("Failed to validate pushed network ids"))?
+                .into_iter()
+                .collect();
+        let missing: Vec<i32> = to_add_ids
+            .iter()
+            .filter(|id| !existing.contains(id))
+            .copied()
+            .collect();
+        if !missing.is_empty() {
+            warn!(?missing, %holder, "reconcile pushed unknown network_id(s)");
+            return Err(StatusCode::BAD_REQUEST);
+        }
+    }
 
     for (external_key, network_id) in &diff.to_add {
         insert_reference(&mut tx, &holder, external_key, *network_id)
