@@ -662,11 +662,11 @@ const DevicesPage = () => {
 		const sortParam = searchParams.get("sort");
 		const orderParam = searchParams.get("order");
 
-		if (searchParam) {
-			// Bypass the debounce so the URL's term is in the first query, not 300ms later.
-			setSearchTerm(searchParam);
-			setDebouncedSearchTerm(searchParam);
-		}
+		// Bypass the debounce so the URL's term is in the first query, not 300ms later.
+		// Always assign (not just when present) so navigating to a URL without
+		// `search` (e.g. the sidebar's plain /devices link) clears a stale term.
+		setSearchTerm(searchParam ?? "");
+		setDebouncedSearchTerm(searchParam ?? "");
 
 		if (outdated === "true") {
 			setShowOutdatedOnly(true);
@@ -734,9 +734,14 @@ const DevicesPage = () => {
 	};
 
 	// Keep the term in the URL so it survives a back navigation from a device's detail page.
+	// A comma/whitespace-only value (e.g. ",") parses to zero terms on the API side, so
+	// treat it the same as empty rather than leaving a no-op `search=,` in the URL.
 	// biome-ignore lint/correctness/useExhaustiveDependencies: updateURL reads searchParams via closure; including it would re-run this on every unrelated filter change, not just the search term.
 	useEffect(() => {
-		updateURL({ search: debouncedSearchTerm || undefined });
+		const hasTerm = debouncedSearchTerm
+			.split(",")
+			.some((term) => term.trim().length > 0);
+		updateURL({ search: hasTerm ? debouncedSearchTerm : undefined });
 	}, [debouncedSearchTerm]);
 
 	const getDeviceStatus = (device: Device) => {
