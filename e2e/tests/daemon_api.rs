@@ -566,20 +566,21 @@ async fn distinct_eap_identities_on_one_ssid_do_not_match() -> Result<()> {
     Ok(())
 }
 
-/// Regression guard for the healing half of F4 and for the match ordering that
-/// makes it safe. A typed writer must reach an existing NULL-`security_type` row
-/// (rather than inserting a second one) and fill the type in, but when an exact
-/// twin also exists it must prefer that twin instead of "healing" the NULL row
-/// into a duplicate of it.
+/// Regression guard for `network_find_by_content`'s match ordering: a typed
+/// writer must prefer an exact `security_type` twin over a same-SSID row with a
+/// different type, even a newer one (`id DESC` alone would pick that instead).
+///
+/// Used to also cover NULL-`security_type` "healing", dropped because
+/// `network_security_type_wifi_check` now makes that state unreachable.
 #[tokio::test]
 #[ignore = "requires running compose stack; use make test.e2e"]
-async fn typed_match_prefers_exact_row_over_null_row() -> Result<()> {
+async fn typed_match_prefers_exact_row_over_mismatched_type() -> Result<()> {
     let ctx = Ctx::connect().await?;
     wait_for_api(&ctx).await?;
 
     if !has_stage3_content_addressing(&ctx).await? {
         println!(
-            "skipping typed_match_prefers_exact_row_over_null_row: \
+            "skipping typed_match_prefers_exact_row_over_mismatched_type: \
              network_content_lock_key not present (released-api version-skew job)"
         );
         return Ok(());
@@ -588,7 +589,7 @@ async fn typed_match_prefers_exact_row_over_null_row() -> Result<()> {
     let ssid = format!("e2e-order-{}", uuid::Uuid::new_v4());
     let credentials = serde_json::json!({ "psk": "e2e-order-password" });
 
-    let insert = |security_type: Option<&'static str>| {
+    let insert = |security_type: &'static str| {
         let (ssid, credentials) = (ssid.clone(), credentials.clone());
         let pool = ctx.db.clone();
         async move {
@@ -609,28 +610,28 @@ async fn typed_match_prefers_exact_row_over_null_row() -> Result<()> {
     };
 
     /// Every value the final assertions need, produced by the fallible section
-    /// below. Named fields instead of a positional tuple since there are seven
+    /// below. Named fields instead of a positional tuple since there are five
     /// of them.
     struct Outcome {
         matched_exact: Option<i32>,
-        matched_against_newer_null: Option<i32>,
-        matched_untyped: Option<i32>,
+        matched_against_newer_mismatch: Option<i32>,
         matched_ethernet: Option<i32>,
-        null_id: i32,
-        typed_id: i32,
-        newer_null_id: i32,
+        exact_id: i32,
+        mismatch_id: i32,
     }
 
     // Wrapped so a failed insert or match query still reaches the cleanup
     // below, not just a failing assertion: any early `?` return here would
     // otherwise leak the rows already inserted at that point.
     let outcome: Result<Outcome> = async {
-        // NULL row first, typed twin second, so `id DESC` alone would still
-        // pick the typed one. Insert them the other way round too, below.
-        let null_id = insert(None).await.context("inserting NULL-security row")?;
-        let typed_id = insert(Some("wpa-psk"))
+        // Exact-type row first, mismatch second, so `id DESC` alone would pick
+        // the mismatch.
+        let exact_id = insert("wpa-psk")
             .await
-            .context("inserting typed row")?;
+            .context("inserting exact-type row")?;
+        let mismatch_id = insert("open")
+            .await
+            .context("inserting mismatched-type row")?;
 
         let matched_exact: Option<i32> =
             sqlx::query_scalar("SELECT network_find_by_content($1, false, $2, 'wpa-psk', 'wifi')")
@@ -640,28 +641,18 @@ async fn typed_match_prefers_exact_row_over_null_row() -> Result<()> {
                 .await
                 .context("matching with a typed security")?;
 
-        // With the typed row now older than the NULL row, `id DESC` on its own
-        // would return the NULL row; only the exact-match preference gets this
-        // right.
-        let newer_null_id = insert(None)
+        // A third distinct type: repeating "open" would collide with the
+        // first mismatch under network_ident_uq.
+        let _newer_mismatch_id = insert("wpa-eap")
             .await
-            .context("inserting second NULL-security row")?;
-        let matched_against_newer_null: Option<i32> =
+            .context("inserting second mismatched-type row")?;
+        let matched_against_newer_mismatch: Option<i32> =
             sqlx::query_scalar("SELECT network_find_by_content($1, false, $2, 'wpa-psk', 'wifi')")
                 .bind(&ssid)
                 .bind(&credentials)
                 .fetch_one(&ctx.db)
                 .await
-                .context("matching with a typed security against a newer NULL row")?;
-
-        // The relaxation is bidirectional: an untyped writer still reaches a row.
-        let matched_untyped: Option<i32> =
-            sqlx::query_scalar("SELECT network_find_by_content($1, false, $2, NULL, 'wifi')")
-                .bind(&ssid)
-                .bind(&credentials)
-                .fetch_one(&ctx.db)
-                .await
-                .context("matching with an unknown security")?;
+                .context("matching with a typed security against a newer mismatch")?;
 
         // network_type is part of the identity: the same content under a
         // different type is a different network, not a match.
@@ -676,12 +667,10 @@ async fn typed_match_prefers_exact_row_over_null_row() -> Result<()> {
 
         Ok(Outcome {
             matched_exact,
-            matched_against_newer_null,
-            matched_untyped,
+            matched_against_newer_mismatch,
             matched_ethernet,
-            null_id,
-            typed_id,
-            newer_null_id,
+            exact_id,
+            mismatch_id,
         })
     }
     .await;
@@ -694,26 +683,19 @@ async fn typed_match_prefers_exact_row_over_null_row() -> Result<()> {
 
     let Outcome {
         matched_exact,
-        matched_against_newer_null,
-        matched_untyped,
+        matched_against_newer_mismatch,
         matched_ethernet,
-        null_id,
-        typed_id,
-        newer_null_id,
+        exact_id,
+        mismatch_id,
     } = outcome?;
 
     ensure!(
-        matched_exact == Some(typed_id),
-        "a typed writer should prefer the exact row {typed_id} over the NULL row {null_id}, got {matched_exact:?}"
+        matched_exact == Some(exact_id),
+        "a typed writer should prefer the exact row {exact_id} over the mismatched row {mismatch_id}, got {matched_exact:?}"
     );
     ensure!(
-        matched_against_newer_null == Some(typed_id),
-        "exact match {typed_id} must win over the newer NULL row {newer_null_id}, got {matched_against_newer_null:?}"
-    );
-    ensure!(
-        matched_untyped == Some(newer_null_id),
-        "an untyped writer should match the newest NULL-security row {newer_null_id} (id DESC \
-         tiebreak among equally-relaxed matches), got {matched_untyped:?}"
+        matched_against_newer_mismatch == Some(exact_id),
+        "exact match {exact_id} must win over a newer mismatched row, got {matched_against_newer_mismatch:?}"
     );
     ensure!(
         matched_ethernet.is_none(),
