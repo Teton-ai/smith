@@ -42,6 +42,7 @@ mod event;
 mod files;
 mod handlers;
 mod health;
+mod holder;
 mod home;
 mod ip_address;
 mod logging;
@@ -260,6 +261,11 @@ async fn start_main_server(
             network::route::get_network_by_id,
             network::route::delete_network_by_id
         ))
+        .routes(routes!(
+            network::ledger::acquire_reference,
+            network::ledger::release_reference
+        ))
+        .routes(routes!(network::ledger::reconcile_references))
         .routes(routes!(network::route::start_extended_network_test))
         .routes(routes!(network::route::get_extended_test_status))
         .routes(routes!(network::route::list_extended_test_sessions))
