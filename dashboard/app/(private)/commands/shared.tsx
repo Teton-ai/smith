@@ -1,8 +1,15 @@
 "use client";
 
 import { Badge } from "@teton/smith-ui";
+import { isAxiosError } from "axios";
 import { Check, ChevronDown, ChevronRight, Copy, X } from "lucide-react";
-import { Fragment, type ReactNode, useMemo, useState } from "react";
+import {
+	Fragment,
+	type ReactNode,
+	useCallback,
+	useMemo,
+	useState,
+} from "react";
 import type { DeviceCommandResponse } from "@/app/api-client";
 import { Tooltip } from "@/app/components/tooltip";
 import { deriveBand, groupScanResults, SignalBar } from "@/app/utils/wifiScan";
@@ -298,6 +305,37 @@ export function commandIsValid(ec: EditableCommand): boolean {
 	}
 }
 
+// The state a Run Command modal needs: the editable command plus its
+// dispatch-error banner, with a single `reset` back to a fresh command of
+// `variant` covering every open/cancel/success reset site. Used by both the
+// devices bulk-command modal and the device-detail Run modal.
+export function useCommandForm(variant = "Ping") {
+	const [command, setCommand] = useState<EditableCommand>(() =>
+		emptyCommand(variant),
+	);
+	const [error, setError] = useState<string | null>(null);
+	const reset = useCallback(() => {
+		setCommand(emptyCommand(variant));
+		setError(null);
+	}, [variant]);
+	return { command, setCommand, error, setError, reset };
+}
+
+// Turn a failed command-dispatch mutation into a user-facing message. FreeForm
+// is the only BULK_COMMAND_OPTIONS variant gated behind the admin-only
+// `freeform` permission, so a 403 on it gets a specific message.
+export function getCommandErrorMessage(
+	error: unknown,
+	variant: string,
+): string {
+	if (isAxiosError(error) && error.response?.status === 403) {
+		return variant === "FreeForm"
+			? "You don't have permission to run FreeForm commands"
+			: "You don't have permission to run this command";
+	}
+	return "Failed to dispatch command";
+}
+
 const fieldClass =
 	"w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-gray-900 placeholder-gray-400 text-sm";
 
@@ -308,16 +346,32 @@ export function CommandFields({
 	command,
 	options,
 	onChange,
+	onSubmit,
+	showContinueOnError = true,
 }: {
 	command: EditableCommand;
 	options: readonly string[];
 	onChange: (next: EditableCommand) => void;
+	/** Enter-to-submit, matching a plain text input's native behavior. */
+	onSubmit?: () => void;
+	/** Hide where only one command is ever dispatched (e.g. the device-detail
+	 * Run modal): "continue if this fails" implies a next command in the same
+	 * bundle, which doesn't exist there. */
+	showContinueOnError?: boolean;
 }) {
 	const set = (patch: Partial<EditableCommand>) =>
 		onChange({ ...command, ...patch });
 
 	return (
-		<div className="space-y-3">
+		<div
+			className="space-y-3"
+			onKeyDown={(e) => {
+				if (e.key === "Enter" && onSubmit) {
+					e.preventDefault();
+					onSubmit();
+				}
+			}}
+		>
 			<select
 				value={command.variant}
 				onChange={(e) => set({ variant: e.target.value })}
@@ -437,14 +491,16 @@ export function CommandFields({
 				</div>
 			)}
 
-			<label className="flex items-center gap-2 text-xs text-gray-600">
-				<input
-					type="checkbox"
-					checked={command.continue_on_error}
-					onChange={(e) => set({ continue_on_error: e.target.checked })}
-				/>
-				Continue running the bundle if this command fails
-			</label>
+			{showContinueOnError && (
+				<label className="flex items-center gap-2 text-xs text-gray-600">
+					<input
+						type="checkbox"
+						checked={command.continue_on_error}
+						onChange={(e) => set({ continue_on_error: e.target.checked })}
+					/>
+					Continue running the bundle if this command fails
+				</label>
+			)}
 		</div>
 	);
 }
