@@ -1,7 +1,6 @@
 import { useAuth0 } from "@auth0/auth0-react";
 import { useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
 import { Button, LabelChip, Select, Toast } from "@teton/smith-ui";
-import { isAxiosError } from "axios";
 import {
 	AlertTriangle,
 	Calendar,
@@ -27,8 +26,8 @@ import {
 	buildCommand,
 	CommandFields,
 	commandIsValid,
-	type EditableCommand,
-	emptyCommand,
+	getCommandErrorMessage,
+	useCommandForm,
 } from "@/app/(private)/commands/shared";
 import LabelAutocomplete from "@/app/components/LabelAutocomplete";
 import { Modal } from "@/app/components/modal";
@@ -269,10 +268,13 @@ const DevicesPage = () => {
 	const [bulkDeployReleaseSearch, setBulkDeployReleaseSearch] = useState("");
 	// Bulk command state
 	const [showBulkCommandModal, setShowBulkCommandModal] = useState(false);
-	const [bulkCommand, setBulkCommand] = useState<EditableCommand>(() =>
-		emptyCommand("Ping"),
-	);
-	const [bulkCommandError, setBulkCommandError] = useState<string | null>(null);
+	const {
+		command: bulkCommand,
+		setCommand: setBulkCommand,
+		error: bulkCommandError,
+		setError: setBulkCommandError,
+		reset: resetBulkCommand,
+	} = useCommandForm("Ping");
 
 	// Approval state
 	const [approveModalDevice, setApproveModalDevice] = useState<Device | null>(
@@ -573,25 +575,16 @@ const DevicesPage = () => {
 				onSuccess: () => {
 					setShowBulkCommandModal(false);
 					setSelectedDeviceIds(new Set());
-					setBulkCommand(emptyCommand("Ping"));
-					setBulkCommandError(null);
+					resetBulkCommand();
 					navigate("/commands");
 				},
 				onError: (error) => {
 					console.error("Failed to issue commands:", error);
-					if (isAxiosError(error) && error.response?.status === 403) {
-						// The bulk modal only ever dispatches one command, so the variant
-						// still held in state is the one that got rejected. FreeForm is
-						// the only variant in BULK_COMMAND_OPTIONS gated behind the
-						// admin-only `freeform` permission, so it gets a specific message.
-						setBulkCommandError(
-							bulkCommand.variant === "FreeForm"
-								? "You don't have permission to run FreeForm commands"
-								: "You don't have permission to run this command",
-						);
-					} else {
-						setBulkCommandError("Failed to dispatch command");
-					}
+					// The bulk modal only ever dispatches one command, so the variant
+					// still held in state is the one that got rejected.
+					setBulkCommandError(
+						getCommandErrorMessage(error, bulkCommand.variant),
+					);
 				},
 			},
 		});
@@ -1663,8 +1656,7 @@ const DevicesPage = () => {
 									tone="purple"
 									icon={<Terminal className="w-4 h-4" />}
 									onClick={() => {
-										setBulkCommand(emptyCommand("Ping"));
-										setBulkCommandError(null);
+										resetBulkCommand();
 										setShowBulkCommandModal(true);
 									}}
 								>
@@ -1896,8 +1888,7 @@ const DevicesPage = () => {
 				open={showBulkCommandModal}
 				onClose={() => {
 					setShowBulkCommandModal(false);
-					setBulkCommand(emptyCommand("Ping"));
-					setBulkCommandError(null);
+					resetBulkCommand();
 				}}
 				title="Run Command on Selected Devices"
 				footer={
@@ -1908,8 +1899,7 @@ const DevicesPage = () => {
 							disabled={isIssuingCommands}
 							onClick={() => {
 								setShowBulkCommandModal(false);
-								setBulkCommand(emptyCommand("Ping"));
-								setBulkCommandError(null);
+								resetBulkCommand();
 							}}
 						>
 							Cancel
@@ -1958,6 +1948,7 @@ const DevicesPage = () => {
 						command={bulkCommand}
 						options={BULK_COMMAND_OPTIONS}
 						onChange={setBulkCommand}
+						onSubmit={handleBulkCommand}
 					/>
 					<p className="mt-1 text-xs text-gray-500">
 						Runs on all selected devices
