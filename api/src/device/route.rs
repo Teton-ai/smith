@@ -101,6 +101,19 @@ pub async fn get_device(
     Ok(Json(device))
 }
 
+/// Split a raw `search` query param into individual terms: comma-separated,
+/// each trimmed, empty terms dropped. Capped at 50 terms so an unbounded
+/// paste can't grow the query's `text[]` param without limit.
+fn parse_search_terms(search: &str) -> Vec<String> {
+    search
+        .split(',')
+        .map(str::trim)
+        .filter(|term| !term.is_empty())
+        .take(50)
+        .map(String::from)
+        .collect()
+}
+
 #[utoipa::path(
     get,
     path = "/devices",
@@ -135,6 +148,7 @@ pub async fn get_devices(
         && !matches!(filter.order, Some(DeviceSortDirection::Desc));
     let sort_labels_desc = matches!(filter.sort, Some(DeviceSortField::Labels))
         && matches!(filter.order, Some(DeviceSortDirection::Desc));
+    let search_terms = parse_search_terms(filter.search.as_deref().unwrap_or(""));
 
     #[allow(deprecated)]
     let devices = sqlx::query!(
@@ -234,10 +248,11 @@ pub async fn get_devices(
               WHERE edl.device_id = d.id
               AND el.name || '=' || edl.value = ANY($7)
           ))
-          AND ($10::text IS NULL OR $10 = '' OR (
-              POSITION(LOWER($10) IN LOWER(d.serial_number)) > 0 OR
-              POSITION(LOWER($10) IN LOWER(COALESCE(d.system_info->>'hostname', ''))) > 0 OR
-              POSITION(LOWER($10) IN LOWER(COALESCE(d.system_info->'device_tree'->>'model', ''))) > 0
+          AND (CARDINALITY($10::text[]) = 0 OR EXISTS (
+              SELECT 1 FROM unnest($10::text[]) AS term
+              WHERE POSITION(LOWER(term) IN LOWER(d.serial_number)) > 0
+                 OR POSITION(LOWER(term) IN LOWER(COALESCE(d.system_info->>'hostname', ''))) > 0
+                 OR POSITION(LOWER(term) IN LOWER(COALESCE(d.system_info->'device_tree'->>'model', ''))) > 0
           ))
           AND ($11::int IS NULL OR d.release_id = $11)
           AND ($13::int IS NULL OR rd.id = $13)
@@ -284,7 +299,7 @@ pub async fn get_devices(
         filter.exclude_labels.as_slice(),
         filter.limit.unwrap_or(100).clamp(1, 1000),
         filter.offset.unwrap_or(0).max(0),
-        filter.search,
+        search_terms.as_slice(),
         filter.release_id,
         filter.outdated_minutes,
         filter.distribution_id,
@@ -3639,7 +3654,7 @@ pub async fn apply_device_intent(
 
 #[cfg(test)]
 mod tests {
-    use super::wire_credentials;
+    use super::{parse_search_terms, wire_credentials};
     use serde_json::json;
 
     // Mirrors the legacy inline heuristic in apply_device_intent exactly.
@@ -3710,5 +3725,49 @@ mod tests {
         // guarantees it for every wifi row, and the intent query's
         // `WHERE n.network_type = 'wifi'` guarantees every row this function
         // sees is one.
+    }
+
+    #[test]
+    fn single_term_is_unchanged() {
+        assert_eq!(parse_search_terms("abc123"), vec!["abc123"]);
+    }
+
+    #[test]
+    fn multiple_terms_are_split_on_comma() {
+        assert_eq!(parse_search_terms("abc,def,ghi"), vec!["abc", "def", "ghi"]);
+    }
+
+    #[test]
+    fn terms_are_trimmed() {
+        assert_eq!(parse_search_terms(" abc , def "), vec!["abc", "def"]);
+    }
+
+    #[test]
+    fn multi_word_term_is_kept_intact() {
+        // Comma is the only delimiter, so a value with internal spaces
+        // (e.g. a device-tree model) still matches as one term.
+        assert_eq!(
+            parse_search_terms("NVIDIA Jetson Orin NX"),
+            vec!["NVIDIA Jetson Orin NX"]
+        );
+    }
+
+    #[test]
+    fn empty_terms_from_repeated_or_trailing_commas_are_dropped() {
+        assert_eq!(parse_search_terms("abc,,def,"), vec!["abc", "def"]);
+        assert_eq!(parse_search_terms(",,,"), Vec::<String>::new());
+    }
+
+    #[test]
+    fn empty_string_yields_no_terms() {
+        assert_eq!(parse_search_terms(""), Vec::<String>::new());
+    }
+
+    #[test]
+    fn more_than_fifty_terms_are_truncated() {
+        let search = (0..60).map(|n| n.to_string()).collect::<Vec<_>>().join(",");
+        assert_eq!(parse_search_terms(&search).len(), 50);
+        assert_eq!(parse_search_terms(&search)[0], "0");
+        assert_eq!(parse_search_terms(&search)[49], "49");
     }
 }

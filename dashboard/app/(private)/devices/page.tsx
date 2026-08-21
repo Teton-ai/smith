@@ -635,14 +635,21 @@ const DevicesPage = () => {
 	}, []);
 
 	// Debounce search term
+	// A ref, not just `isSearching` state: the URL-sync effect below reads this
+	// without depending on it, so it doesn't rerun the instant the debounce
+	// settles and race the URL update, wiping the just-typed term.
+	const isSearchDebouncePendingRef = useRef(false);
 	useEffect(() => {
 		if (!searchTerm) {
+			isSearchDebouncePendingRef.current = false;
 			setDebouncedSearchTerm("");
 			setIsSearching(false);
 			return;
 		}
+		isSearchDebouncePendingRef.current = true;
 		setIsSearching(true);
 		const timer = setTimeout(() => {
+			isSearchDebouncePendingRef.current = false;
 			setDebouncedSearchTerm(searchTerm);
 			setIsSearching(false);
 		}, 300);
@@ -652,6 +659,7 @@ const DevicesPage = () => {
 
 	// Sync URL parameters with component state
 	useEffect(() => {
+		const searchParam = searchParams.get("search");
 		const outdated = searchParams.get("outdated");
 		const online = searchParams.get("online");
 		const labelsParam = searchParams.get("labels");
@@ -660,6 +668,15 @@ const DevicesPage = () => {
 		const approvedParam = searchParams.get("approved");
 		const sortParam = searchParams.get("sort");
 		const orderParam = searchParams.get("order");
+
+		// Bypass the debounce so the URL's term is in the first query, not 300ms later.
+		// Always assign (not just when present) so navigating to a URL without `search`
+		// (e.g. the sidebar's plain /devices link) clears a stale term. Skipped while a
+		// debounce is pending — see isSearchDebouncePendingRef above.
+		if (!isSearchDebouncePendingRef.current) {
+			setSearchTerm(searchParam ?? "");
+			setDebouncedSearchTerm(searchParam ?? "");
+		}
 
 		if (outdated === "true") {
 			setShowOutdatedOnly(true);
@@ -725,6 +742,17 @@ const DevicesPage = () => {
 		const query = search ? `?${search}` : "";
 		navigate(`/devices${query}`, { replace: true });
 	};
+
+	// Keep the term in the URL so it survives a back navigation from a device's detail page.
+	// A comma/whitespace-only value (e.g. ",") parses to zero terms on the API side, so
+	// treat it the same as empty rather than leaving a no-op `search=,` in the URL.
+	// biome-ignore lint/correctness/useExhaustiveDependencies: updateURL reads searchParams via closure; including it would re-run this on every unrelated filter change, not just the search term.
+	useEffect(() => {
+		const hasTerm = debouncedSearchTerm
+			.split(",")
+			.some((term) => term.trim().length > 0);
+		updateURL({ search: hasTerm ? debouncedSearchTerm : undefined });
+	}, [debouncedSearchTerm]);
 
 	const getDeviceStatus = (device: Device) => {
 		if (!device.last_seen) return "offline";
@@ -970,7 +998,7 @@ const DevicesPage = () => {
 								<input
 									ref={searchInputRef}
 									type="text"
-									placeholder="Search devices..."
+									placeholder="Search devices... (comma-separated)"
 									value={searchTerm}
 									onChange={(e) => setSearchTerm(e.target.value)}
 									className="pl-10 pr-10 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm text-gray-900 placeholder-gray-400"
