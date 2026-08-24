@@ -1632,7 +1632,10 @@ const DevicesPage = () => {
 									tone="purple"
 									icon={<Terminal className="w-4 h-4" />}
 									onClick={() => {
-										resetBulkCommand();
+										// Reopening while a previous dispatch is still pending (e.g.
+										// closed via Escape/backdrop mid-request) must not wipe the
+										// form the eventual onError still needs to correlate with.
+										if (!isIssuingCommands) resetBulkCommand();
 										setShowBulkCommandModal(true);
 									}}
 								>
