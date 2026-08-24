@@ -87,12 +87,12 @@ async fn updater_check(State(state): State<ControlState>) -> Json<CheckResponse>
 }
 
 async fn updater_upgrade(State(state): State<ControlState>) -> Json<MessageResponse> {
-    let scheduled = state.updater.install_prepared_release().await;
+    let accepted = state.updater.install_prepared_release().await;
     Json(MessageResponse {
-        message: if scheduled {
-            "Packages upgrade scheduled".to_owned()
+        message: if accepted {
+            "Packages upgrade accepted".to_owned()
         } else {
-            "Unable to schedule packages upgrade".to_owned()
+            "No prepared packages upgrade is available".to_owned()
         },
     })
 }

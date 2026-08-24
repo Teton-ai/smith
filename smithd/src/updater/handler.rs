@@ -51,11 +51,22 @@ impl Handler {
     }
 
     pub async fn install_prepared_release(&self) -> bool {
-        if let Err(err) = self.sender.send(ActorMessage::InstallPrepared).await {
+        let (rpc, receiver) = oneshot::channel();
+        if let Err(err) = self
+            .sender
+            .send(ActorMessage::InstallPrepared { rpc })
+            .await
+        {
             warn!("Unable to schedule prepared release installation: {}", err);
             return false;
         }
-        true
+        match receiver.await {
+            Ok(accepted) => accepted,
+            Err(err) => {
+                warn!("Unable to receive release installation acceptance: {}", err);
+                false
+            }
+        }
     }
 
     pub async fn status(&self) -> String {

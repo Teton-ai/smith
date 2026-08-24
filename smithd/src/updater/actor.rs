@@ -128,7 +128,7 @@ async fn remove_file_and_count(path: &Path, bytes_freed: &mut u64) -> bool {
 pub enum ActorMessage {
     Apply,
     Prepare { rpc: oneshot::Sender<bool> },
-    InstallPrepared,
+    InstallPrepared { rpc: oneshot::Sender<bool> },
     Check,
     StatusReport { rpc: oneshot::Sender<String> },
 }
@@ -343,12 +343,20 @@ impl Actor {
                     }
                 }
             }
-            ActorMessage::InstallPrepared => match self.prepared_release_id {
+            ActorMessage::InstallPrepared { rpc } => match self.prepared_release_id {
                 Some(target_release_id) => {
+                    if rpc.send(true).is_err() {
+                        warn!("Release installation caller stopped waiting for acceptance");
+                    }
                     self.upgrade(target_release_id).await;
                     self.prepared_release_id = None;
                 }
-                None => warn!("Cannot install release because no prepared target is pinned"),
+                None => {
+                    warn!("Cannot install release because no prepared target is pinned");
+                    if rpc.send(false).is_err() {
+                        warn!("Release installation caller stopped waiting for rejection");
+                    }
+                }
             },
             ActorMessage::Check => {
                 let release_id = self.magic.get_release_id().await.ok();
