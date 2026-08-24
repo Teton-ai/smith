@@ -503,6 +503,16 @@ pub struct NewNetwork {
     /// Absent for older callers; falls back to the password heuristic.
     #[serde(default)]
     pub security: Option<String>,
+    /// Atomically register a ledger hold on the returned network id, in the
+    /// same transaction as the upsert. Never carries `holder`: that is derived
+    /// server-side from the caller's M2M identity, not client-supplied.
+    #[serde(default)]
+    pub reference: Option<NewReference>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct NewReference {
+    pub external_key: String,
 }
 
 // Extended network test types

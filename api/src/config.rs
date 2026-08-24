@@ -1,5 +1,6 @@
 use anyhow::Context;
 use axum::http::HeaderMap;
+use std::collections::HashMap;
 use std::env;
 use std::time::Duration;
 use tracing::{info, warn};
@@ -98,6 +99,31 @@ pub struct Config {
     pub device_jwt_issuer: String,
     /// Lifetime of issued device JWTs.
     pub device_jwt_ttl_seconds: u64,
+    /// Maps an M2M token's Auth0 `sub` claim (e.g. `"<client_id>@clients"`) to
+    /// the network-reference-ledger `holder` name it is trusted to act as.
+    /// `holder` is never client-supplied: this map is the sole source of truth
+    /// for who a caller is allowed to hold references as.
+    pub known_holders: HashMap<String, String>,
+}
+
+/// Builds the M2M-sub -> holder map from one env var per known holder. Missing
+/// (unset in dev/CI, where no App API integration is exercised) only warns,
+/// matching how every other optional integration in this file behaves
+/// (`VictoriaMetricsClient`, `ip_api_key`, ...); a misconfigured production
+/// deploy is caught operationally (App API's ledger calls 403) rather than by
+/// refusing to boot the whole API over one holder's credentials.
+fn known_holders_from_env() -> HashMap<String, String> {
+    let mut holders = HashMap::new();
+    match env::var("APP_API_M2M_CLIENT_ID") {
+        Ok(client_id) => {
+            holders.insert(format!("{client_id}@clients"), "app_api".to_string());
+        }
+        Err(_) => warn!(
+            "APP_API_M2M_CLIENT_ID is not set: App API's ledger calls (acquire/release/reconcile, \
+             POST /networks with `reference`) will all 403"
+        ),
+    }
+    holders
 }
 
 impl Config {
@@ -134,6 +160,7 @@ impl Config {
                 .ok()
                 .and_then(|s| s.parse().ok())
                 .unwrap_or(3600),
+            known_holders: known_holders_from_env(),
         })
     }
 }

@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        INSERT INTO network_reference (holder, external_key, network_id)\n        VALUES ($1, $2, $3)\n        ON CONFLICT (holder, external_key, network_id) DO NOTHING\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "17fe2e60bd718d5a33d2080405d6ff175f3233168e2fb7c88ddd0e6fd9834d13"
+}

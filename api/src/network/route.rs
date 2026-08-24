@@ -1,4 +1,5 @@
 use crate::State;
+use crate::holder::Holder;
 use crate::user::CurrentUser;
 use axum::http::StatusCode;
 use axum::response::Result;
@@ -11,13 +12,15 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use smith::utils::schema::NetworkType;
 use smith::utils::schema::{Network, NetworkInfo, NewNetwork, SpeedSample};
+use sqlx::PgConnection;
 use tracing::{error, info, warn};
 use utoipa::ToSchema;
 use uuid::Uuid;
 
 use super::evaluation::{Evaluation, evaluate};
+use super::ledger::{insert_reference, lock_holder, lock_network};
 
-const NETWORKS_TAG: &str = "networks";
+pub(crate) const NETWORKS_TAG: &str = "networks";
 const EXTENDED_TEST_TAG: &str = "extended-network-test";
 
 #[derive(Debug, serde::Deserialize)]
@@ -193,9 +196,10 @@ fn network_type_label(network_type: &NetworkType) -> &'static str {
     }
 }
 
-/// Every failure in `create_network` is an opaque 500 to the caller; only the log
-/// line differs. Keeps the handler readable instead of repeating the same closure.
-fn internal_error(context: &'static str) -> impl Fn(sqlx::Error) -> StatusCode {
+/// Every failure in `create_network` (and, reused, the ledger handlers in
+/// `super::ledger`) is an opaque 500 to the caller; only the log line differs.
+/// Keeps handlers readable instead of repeating the same closure.
+pub(crate) fn internal_error(context: &'static str) -> impl Fn(sqlx::Error) -> StatusCode {
     move |err| {
         error!("{context}: {err}");
         StatusCode::INTERNAL_SERVER_ERROR
@@ -253,6 +257,39 @@ fn security_type_for(
     resolve_security_type(security, password).map(Some)
 }
 
+/// The one construction of the insert-or-adopt-existing upsert, shared by
+/// both arms of `create_network`'s match. Safe against a concurrent insert of
+/// the same content by construction - Postgres's own conflict handling on
+/// `network_ident_uq` serializes that, no advisory lock needed here the way
+/// the matched-row path needs one.
+async fn insert_or_conflict_network(
+    tx: &mut PgConnection,
+    new_network: &NewNetwork,
+    security_type: Option<&str>,
+    credentials: &Value,
+) -> Result<Network, sqlx::Error> {
+    sqlx::query_as!(
+        Network,
+        r#"
+        INSERT INTO network (network_type, is_network_hidden, ssid, name, description, password, security_type, credentials)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        ON CONFLICT ON CONSTRAINT network_ident_uq
+        DO UPDATE SET ssid = EXCLUDED.ssid
+        RETURNING id, network_type::TEXT as "network_type", is_network_hidden, ssid, name, description, 'secret' as password
+        "#,
+        new_network.network_type.clone() as NetworkType,
+        new_network.is_network_hidden,
+        new_network.ssid,
+        new_network.name,
+        new_network.description,
+        new_network.password,
+        security_type,
+        credentials,
+    )
+    .fetch_one(tx)
+    .await
+}
+
 #[utoipa::path(
     post,
     path = "/networks",
@@ -269,8 +306,16 @@ fn security_type_for(
 )]
 pub async fn create_network(
     Extension(state): Extension<State>,
+    Extension(Holder(holder)): Extension<Holder>,
     Json(new_network): Json<NewNetwork>,
 ) -> Result<(StatusCode, Json<Network>), StatusCode> {
+    // Checked before any DB work: a caller with no resolved holder cannot
+    // register a reference, full stop, regardless of what else the call would
+    // have done.
+    if new_network.reference.is_some() && holder.is_none() {
+        return Err(StatusCode::FORBIDDEN);
+    }
+
     let security_type: Option<&str> = security_type_for(
         &new_network.network_type,
         new_network.security.as_deref(),
@@ -293,6 +338,18 @@ pub async fn create_network(
         .begin()
         .await
         .map_err(internal_error("Failed to begin create_network transaction"))?;
+
+    // Taken before the content lock so a concurrent reconcile's read of this
+    // holder's rows can't miss the one this call is about to add (see
+    // lock_holder's doc). `holder` is `Some` by construction - the guard
+    // above already rejected `reference.is_some() && holder.is_none()`.
+    if new_network.reference.is_some()
+        && let Some(holder) = &holder
+    {
+        lock_holder(&mut tx, holder)
+            .await
+            .map_err(internal_error("Failed to take holder lock"))?;
+    }
 
     // Race-tested in e2e/tests/daemon_api.rs
     // (concurrent_identical_network_posts_converge_to_one_row).
@@ -324,6 +381,17 @@ pub async fn create_network(
 
     let (status, network) = match existing_id {
         Some(id) => {
+            // The content lock above only protects the match query; it
+            // doesn't stop a concurrent release_reference/collect_network
+            // from deleting this exact matched row before the UPDATE below.
+            // This is the same per-network_id lock every other ledger
+            // mutation uses (see lock_network's other callers) - without it,
+            // a release racing this match could 500 on the ON DELETE
+            // RESTRICT violation once this call's insert_reference lands.
+            lock_network(&mut tx, id)
+                .await
+                .map_err(internal_error("Failed to take network lock"))?;
+
             // Heal in place exactly as ReportNMProfiles does (api/src/home.rs):
             // the relaxed match can only route a typed caller to a NULL row or an
             // already-equal typed row, so COALESCE fills unknown -> known and
@@ -339,10 +407,22 @@ pub async fn create_network(
                 id,
                 security_type as Option<&str>,
             )
-            .fetch_one(&mut *tx)
+            .fetch_optional(&mut *tx)
             .await
             .map_err(internal_error("Failed to fetch matched network"))?;
-            (StatusCode::OK, existing)
+
+            match existing {
+                Some(existing) => (StatusCode::OK, existing),
+                // Collected out from under us in the gap between the unlocked
+                // match and the lock above - the "no match" case's
+                // insert-or-conflict path is a safe fallback.
+                None => (
+                    StatusCode::CREATED,
+                    insert_or_conflict_network(&mut tx, &new_network, security_type, &credentials)
+                        .await
+                        .map_err(internal_error("Failed to insert network"))?,
+                ),
+            }
         }
         None => {
             // Defensive fallback for a lock-bypass race the advisory lock above
@@ -352,30 +432,27 @@ pub async fn create_network(
             // conflict detection is exact-equality only) - see arch.md's
             // rejected-alternatives note. Only safe because this caller never
             // supplies identity/enterprise security_type; revisit if it ever does.
-            let created = sqlx::query_as!(
-                Network,
-                r#"
-                INSERT INTO network (network_type, is_network_hidden, ssid, name, description, password, security_type, credentials)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-                ON CONFLICT ON CONSTRAINT network_ident_uq
-                DO UPDATE SET ssid = EXCLUDED.ssid
-                RETURNING id, network_type::TEXT as "network_type", is_network_hidden, ssid, name, description, 'secret' as password
-                "#,
-                new_network.network_type as NetworkType,
-                new_network.is_network_hidden,
-                new_network.ssid,
-                new_network.name,
-                new_network.description,
-                new_network.password,
-                security_type as Option<&str>,
-                credentials,
-            )
-            .fetch_one(&mut *tx)
-            .await
-            .map_err(internal_error("Failed to insert network"))?;
+            let created =
+                insert_or_conflict_network(&mut tx, &new_network, security_type, &credentials)
+                    .await
+                    .map_err(internal_error("Failed to insert network"))?;
             (StatusCode::CREATED, created)
         }
     };
+
+    // Same transaction as the upsert above: the network row and its ledger
+    // hold either both exist after this call or neither does. `holder` is
+    // `Some` here by construction (guard above), but this fails safe instead
+    // of unwrapping in case that guard is ever weakened or reordered.
+    if let Some(reference) = new_network.reference {
+        let Some(holder) = holder else {
+            error!("create_network reached the reference-insert step with no holder");
+            return Err(StatusCode::INTERNAL_SERVER_ERROR);
+        };
+        insert_reference(&mut tx, &holder, &reference.external_key, network.id)
+            .await
+            .map_err(internal_error("Failed to insert network reference"))?;
+    }
 
     tx.commit().await.map_err(internal_error(
         "Failed to commit create_network transaction",
