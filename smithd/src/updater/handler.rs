@@ -27,15 +27,26 @@ impl Handler {
         Self { sender }
     }
 
+    pub async fn apply_release(&self) -> bool {
+        if let Err(err) = self.sender.send(ActorMessage::Apply).await {
+            warn!("Unable to schedule release apply: {}", err);
+            return false;
+        }
+        true
+    }
+
     pub async fn check_for_updates(&self) -> bool {
-        // unwrap because if this fails then we are in a bad state
-        self.sender.send(ActorMessage::Update).await.unwrap();
+        if let Err(err) = self.sender.send(ActorMessage::Prepare).await {
+            warn!("Unable to schedule release preparation: {}", err);
+            return false;
+        }
         true
     }
 
     pub async fn upgrade_device(&self) {
-        // unwrap because if this fails then we are in a bad state
-        self.sender.send(ActorMessage::Upgrade).await.unwrap();
+        if let Err(err) = self.sender.send(ActorMessage::InstallPrepared).await {
+            warn!("Unable to schedule prepared release installation: {}", err);
+        }
     }
 
     pub async fn status(&self) -> String {

@@ -133,10 +133,33 @@ async fn remove_file_and_count(path: &Path, bytes_freed: &mut u64) -> bool {
 
 #[derive(Debug)]
 pub enum ActorMessage {
-    Update,
-    Upgrade,
+    Apply,
+    Prepare,
+    InstallPrepared,
     Check,
     StatusReport { rpc: oneshot::Sender<String> },
+}
+
+#[derive(Debug, PartialEq)]
+enum CheckAction {
+    InstallPrepared(i32),
+    Apply(i32),
+}
+
+fn check_action(
+    current_release_id: Option<i32>,
+    target_release_id: Option<i32>,
+    prepared_release_id: Option<i32>,
+) -> Option<CheckAction> {
+    if let Some(prepared_release_id) = prepared_release_id
+        && current_release_id != Some(prepared_release_id)
+    {
+        return Some(CheckAction::InstallPrepared(prepared_release_id));
+    }
+
+    target_release_id
+        .filter(|target_release_id| current_release_id != Some(*target_release_id))
+        .map(CheckAction::Apply)
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -166,6 +189,7 @@ pub struct Actor {
     network: NetworkClient,
     last_update: Option<Result<time::Instant>>,
     last_upgrade: Option<Result<time::Instant>>,
+    prepared_release_id: Option<i32>,
     downloader: DownloaderHandle,
     install_failures: HashMap<String, PackageFailure>,
     packages_dir: PathBuf,
@@ -194,6 +218,7 @@ impl Actor {
             status: Status::Idle,
             last_update: None,
             last_upgrade: None,
+            prepared_release_id: None,
             downloader,
             install_failures: HashMap::new(),
             packages_dir,
@@ -258,26 +283,65 @@ impl Actor {
 
     async fn handle_message(&mut self, msg: ActorMessage) {
         match msg {
-            ActorMessage::Update => {
-                self.update().await;
+            ActorMessage::Apply => {
+                if let Some(prepared_release_id) = self.prepared_release_id {
+                    info!(
+                        prepared_release_id,
+                        "Applying the already prepared release instead of replacing its pinned target"
+                    );
+                    self.upgrade(prepared_release_id).await;
+                    self.prepared_release_id = None;
+                } else {
+                    match self.magic.get_target_release_id().await {
+                        Ok(target_release_id) => self.apply_release(target_release_id).await,
+                        Err(err) => error!(
+                            error = ?err,
+                            "Cannot apply release because no target release is available"
+                        ),
+                    }
+                }
             }
-            ActorMessage::Upgrade => {
-                self.upgrade().await;
+            ActorMessage::Prepare => {
+                if let Some(prepared_release_id) = self.prepared_release_id {
+                    info!(
+                        prepared_release_id,
+                        "A release is already prepared; keeping its pinned target"
+                    );
+                } else {
+                    match self.magic.get_target_release_id().await {
+                        Ok(target_release_id) => self.update(target_release_id).await,
+                        Err(err) => error!(
+                            error = ?err,
+                            "Cannot prepare release because no target release is available"
+                        ),
+                    }
+                }
             }
+            ActorMessage::InstallPrepared => match self.prepared_release_id {
+                Some(target_release_id) => {
+                    self.upgrade(target_release_id).await;
+                    self.prepared_release_id = None;
+                }
+                None => warn!("Cannot install release because no prepared target is pinned"),
+            },
             ActorMessage::Check => {
                 let release_id = self.magic.get_release_id().await.ok();
                 let target_release_id = self.magic.get_target_release_id().await.ok();
 
-                if release_id != target_release_id {
-                    self.install_failures.clear();
-
-                    self.update().await;
-
-                    if matches!(self.last_update, Some(Err(_)) | None) {
-                        return;
+                match check_action(release_id, target_release_id, self.prepared_release_id) {
+                    Some(CheckAction::InstallPrepared(prepared_release_id)) => {
+                        info!(
+                            prepared_release_id,
+                            latest_target_release_id = ?target_release_id,
+                            "Finishing the already prepared release before considering a newer target"
+                        );
+                        self.upgrade(prepared_release_id).await;
+                        self.prepared_release_id = None;
                     }
-
-                    self.upgrade().await;
+                    Some(CheckAction::Apply(target_release_id)) => {
+                        self.apply_release(target_release_id).await;
+                    }
+                    None => {}
                 }
             }
             ActorMessage::StatusReport { rpc } => {
@@ -321,20 +385,50 @@ impl Actor {
         }
     }
 
+    async fn apply_release(&mut self, target_release_id: i32) {
+        info!(
+            target_release_id,
+            "Starting updater transaction for pinned target release"
+        );
+        self.install_failures.clear();
+        self.update(target_release_id).await;
+
+        if self.prepared_release_id != Some(target_release_id) {
+            warn!(
+                target_release_id,
+                "Release preparation failed; installation will not start"
+            );
+            return;
+        }
+
+        self.upgrade(target_release_id).await;
+        self.prepared_release_id = None;
+    }
+
     #[tracing::instrument(skip(self))]
-    async fn update(&mut self) {
-        info!("Checking for updates");
+    async fn update(&mut self, target_release_id: i32) {
+        info!(target_release_id, "Preparing release update");
         self.status = Status::Updating;
-        let res = self.check_for_updates().await.map(|_| time::Instant::now());
+        self.prepared_release_id = None;
+        let res = self
+            .check_for_updates(target_release_id)
+            .await
+            .map(|_| time::Instant::now());
+        if res.is_ok() {
+            self.prepared_release_id = Some(target_release_id);
+        }
         info!("Updating result: {:?}", res);
         self.last_update = Some(res);
         self.status = Status::Idle;
     }
 
-    async fn upgrade(&mut self) {
-        info!("Upgrading device");
+    async fn upgrade(&mut self, target_release_id: i32) {
+        info!(target_release_id, "Upgrading device to pinned release");
         self.status = Status::Upgrading;
-        let res = self.upgrade_device().await.map(|_| time::Instant::now());
+        let res = self
+            .upgrade_device(target_release_id)
+            .await
+            .map(|_| time::Instant::now());
         info!("Upgrading result: {:?}", res);
         self.last_upgrade = Some(res);
         self.status = Status::Idle;
@@ -455,7 +549,7 @@ impl Actor {
     }
 
     #[tracing::instrument(skip(self))]
-    async fn check_for_updates(&self) -> Result<()> {
+    async fn check_for_updates(&self, target_release_id: i32) -> Result<()> {
         // apt update on check for updates with timeout
         info!("Running apt update with 5 minute timeout");
         let apt_update_future = Command::new("sh")
@@ -490,12 +584,6 @@ impl Actor {
             }
         }
 
-        let target_release_id = self
-            .magic
-            .get_target_release_id()
-            .await
-            .with_context(|| "Failed to get Target Release ID")?;
-
         self.ensure_release_cache(target_release_id)
             .await
             .with_context(|| "Failed to ensure target release cache")?;
@@ -503,7 +591,7 @@ impl Actor {
         Ok(())
     }
 
-    async fn upgrade_device(&mut self) -> Result<()> {
+    async fn upgrade_device(&mut self, target_release_id: i32) -> Result<()> {
         // Check if previous update was successful
         match self.last_update {
             Some(Ok(time)) => {
@@ -532,12 +620,6 @@ impl Actor {
                 None
             }
         };
-
-        let target_release_id = self
-            .magic
-            .get_target_release_id()
-            .await
-            .with_context(|| "Failed to get Target Release ID")?;
 
         let blobs = self.packages_dir.join("blobs");
         let release_cache = self
@@ -660,9 +742,32 @@ impl Actor {
             }
         }
 
-        self.are_packages_up_to_date().await?;
+        self.are_packages_up_to_date(target_release_id).await?;
 
         self.magic.set_release_id(target_release_id).await;
+
+        match self.magic.get_target_release_id().await {
+            Ok(latest_target_release_id) if latest_target_release_id != target_release_id => {
+                warn!(
+                    installed_release_id = target_release_id,
+                    latest_target_release_id,
+                    "Target release changed during the upgrade; committed the pinned installed release and will process the newer target on the next check"
+                );
+            }
+            Ok(_) => {
+                info!(
+                    target_release_id,
+                    "Pinned target remained stable throughout the upgrade"
+                );
+            }
+            Err(err) => {
+                warn!(
+                    error = ?err,
+                    installed_release_id = target_release_id,
+                    "Could not read the latest target after committing the pinned installed release"
+                );
+            }
+        }
 
         if let Some(previous_release_id) = previous_release_id
             && previous_release_id != target_release_id
@@ -836,6 +941,7 @@ impl Actor {
             .into_iter()
             .chain(history)
             .filter(|release_id| seen_releases.insert(*release_id))
+            .take(RETAINED_RELEASES)
             .collect::<Vec<_>>();
         let history_contents = release_history
             .iter()
@@ -880,12 +986,31 @@ impl Actor {
         // or malformed, retaining the whole cache is safer than losing fast rollback.
         for release_id in &retained_releases {
             let manifest_path = versions_dir.join(release_id.to_string());
-            let manifest = tokio::fs::read_to_string(&manifest_path)
-                .await
-                .with_context(|| {
-                    format!("reading retained manifest {}", manifest_path.display())
-                })?;
-            retained_blobs.extend(manifest_blob_paths(&manifest, &blobs_dir)?);
+            let manifest = match tokio::fs::read_to_string(&manifest_path).await {
+                Ok(manifest) => manifest,
+                Err(err) => {
+                    warn!(
+                        error = ?err,
+                        release_id,
+                        manifest = %manifest_path.display(),
+                        "Skipping package cache cleanup because a protected release manifest cannot be read"
+                    );
+                    return Ok(());
+                }
+            };
+            let manifest_blobs = match manifest_blob_paths(&manifest, &blobs_dir) {
+                Ok(manifest_blobs) => manifest_blobs,
+                Err(err) => {
+                    warn!(
+                        error = ?err,
+                        release_id,
+                        manifest = %manifest_path.display(),
+                        "Skipping package cache cleanup because a protected release manifest is invalid"
+                    );
+                    return Ok(());
+                }
+            };
+            retained_blobs.extend(manifest_blobs);
         }
         info!(
             ?retained_releases,
@@ -1001,13 +1126,7 @@ impl Actor {
     /// Checks whether packages are up to date.
     ///
     /// Returns `Ok` if all packages are, `Err` otherwise.
-    async fn are_packages_up_to_date(&self) -> Result<()> {
-        let target_release_id = self
-            .magic
-            .get_target_release_id()
-            .await
-            .with_context(|| "Failed to get Target Release ID")?;
-
+    async fn are_packages_up_to_date(&self, target_release_id: i32) -> Result<()> {
         let release_cache = self
             .packages_dir
             .join("versions")
@@ -1094,6 +1213,22 @@ impl Actor {
 mod tests {
     use super::*;
 
+    #[test]
+    fn prepared_release_wins_when_postman_changes_target() {
+        assert_eq!(
+            check_action(Some(10), Some(12), Some(11)),
+            Some(CheckAction::InstallPrepared(11))
+        );
+    }
+
+    #[test]
+    fn latest_target_is_applied_after_prepared_release_is_current() {
+        assert_eq!(
+            check_action(Some(11), Some(12), Some(11)),
+            Some(CheckAction::Apply(12))
+        );
+    }
+
     #[tokio::test]
     async fn cleanup_retains_current_and_actual_previous_release() -> Result<()> {
         let temp = tempfile::tempdir()?;
@@ -1142,6 +1277,10 @@ mod tests {
         assert!(!blobs.join("app-11.deb").exists());
         assert!(!blobs.join("abandoned.deb.part").exists());
         assert!(!packages.join("legacy.deb").exists());
+        assert_eq!(
+            tokio::fs::read_to_string(packages.join(RELEASE_HISTORY_FILE)).await?,
+            "12\n8\n10\n9\n"
+        );
 
         Ok(())
     }
@@ -1162,7 +1301,7 @@ mod tests {
 
         let result = Actor::clean_up_old_packages_with_reserve(&packages, 12, 8, u64::MAX).await;
 
-        assert!(result.is_err());
+        assert!(result.is_ok());
         assert!(versions.join("11").exists());
         assert!(blobs.join("app-11.deb").exists());
 
