@@ -340,6 +340,7 @@ dependencies = [
  "metrics-exporter-prometheus",
  "models",
  "oauth2",
+ "rand 0.10.2",
  "reqwest 0.12.28",
  "rust-s3",
  "sentry",

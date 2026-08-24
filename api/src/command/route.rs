@@ -8,16 +8,72 @@ use crate::user::CurrentUser;
 use axum::Json;
 use axum::extract::{Host, Path, Query};
 use axum::{Extension, http::StatusCode, response::Result};
+use chrono::{DateTime, Utc};
 use models::command::{BundleReceipt, BundleWithCommands, CommandRecipe, QueuedCommand};
 use models::device::DeviceCommandResponse;
+use rand::seq::SliceRandom;
 use sentry::types::Uuid;
 use serde::Deserialize;
 use smith::utils::schema::{SafeCommandRequest, SafeCommandTx};
 use sqlx::PgPool;
 use std::collections::HashMap;
+use std::time::Duration;
 use tracing::error;
 
 use crate::command::redact_cmd_data;
+
+/// `wave_size` devices become eligible together, then the next `wave_size`
+/// after `wave_duration`, spreading out contention for a shared resource.
+struct StaggerPolicy {
+    wave_size: u32,
+    wave_duration: Duration,
+}
+
+/// `None` for anything that doesn't contend for a shared physical resource.
+fn stagger_policy(cmd: &SafeCommandTx) -> Option<StaggerPolicy> {
+    match cmd {
+        SafeCommandTx::WifiScan => Some(StaggerPolicy {
+            wave_size: 2,
+            wave_duration: Duration::from_secs(10),
+        }),
+        _ => None,
+    }
+}
+
+/// Strictest policy across `commands`: smallest wave, longest duration.
+fn merged_stagger_policy(commands: &[SafeCommandRequest]) -> Option<StaggerPolicy> {
+    commands
+        .iter()
+        .filter_map(|c| stagger_policy(&c.command))
+        .reduce(|a, b| StaggerPolicy {
+            wave_size: a.wave_size.min(b.wave_size),
+            wave_duration: a.wave_duration.max(b.wave_duration),
+        })
+}
+
+/// Shuffled once so wave membership doesn't correlate with caller order.
+/// `None` per device when `policy` is `None` (use the column's default).
+fn assign_wave_availabilities(
+    devices: &[i32],
+    policy: Option<&StaggerPolicy>,
+    now: DateTime<Utc>,
+) -> Vec<(i32, Option<DateTime<Utc>>)> {
+    let Some(policy) = policy else {
+        return devices.iter().map(|&device_id| (device_id, None)).collect();
+    };
+
+    let mut ordered_devices: Vec<i32> = devices.to_vec();
+    ordered_devices.shuffle(&mut rand::rng());
+
+    ordered_devices
+        .into_iter()
+        .enumerate()
+        .map(|(wave_index, device_id)| {
+            let offset = policy.wave_duration * (wave_index as u32 / policy.wave_size);
+            (device_id, Some(now + offset))
+        })
+        .collect()
+}
 
 /// Queue `commands` against every device in `devices` as a single bundle.
 /// Shared by raw bundle issuing and recipe triggering so both produce identical
@@ -44,27 +100,32 @@ async fn queue_commands_bundle(
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
 
+    let policy = merged_stagger_policy(commands);
+    let availabilities = assign_wave_availabilities(devices, policy.as_ref(), Utc::now());
+
     let mut queued = Vec::with_capacity(devices.len() * commands.len());
-    for device_id in devices {
+    for (device_id, available_at) in &availabilities {
         for command in commands {
             let cmd = serde_json::to_value(command.command.clone()).map_err(|err| {
                 error!("Failed to serialize command into JSON {err}");
                 StatusCode::INTERNAL_SERVER_ERROR
             })?;
             let row = sqlx::query!(
-                r#"INSERT INTO command_queue (device_id, cmd, continue_on_error, canceled, bundle)
+                r#"INSERT INTO command_queue (device_id, cmd, continue_on_error, canceled, bundle, available_at)
                 VALUES (
                     $1,
                     $2::jsonb,
                     $3,
                     false,
-                    $4
+                    $4,
+                    COALESCE($5, now())
                 )
                 RETURNING id"#,
                 device_id,
                 cmd,
                 command.continue_on_error,
-                bundle_id.uuid
+                bundle_id.uuid,
+                *available_at
             )
             .fetch_one(&mut *tx)
             .await
@@ -785,4 +846,81 @@ pub async fn trigger_recipe(
     .await?;
 
     Ok((StatusCode::CREATED, Json(receipt)))
+}
+
+#[cfg(test)]
+mod stagger_tests {
+    use super::*;
+
+    fn request(command: SafeCommandTx) -> SafeCommandRequest {
+        SafeCommandRequest {
+            id: -1,
+            command,
+            continue_on_error: false,
+        }
+    }
+
+    #[test]
+    fn wifi_scan_has_a_pacing_policy() {
+        let policy = stagger_policy(&SafeCommandTx::WifiScan).expect("WifiScan should be paced");
+        assert_eq!(policy.wave_size, 2);
+        assert_eq!(policy.wave_duration, Duration::from_secs(10));
+    }
+
+    #[test]
+    fn unpaced_commands_have_no_policy() {
+        assert!(stagger_policy(&SafeCommandTx::Ping).is_none());
+    }
+
+    #[test]
+    fn merge_picks_up_the_only_policied_command_in_a_mixed_bundle() {
+        let commands = [
+            request(SafeCommandTx::Ping),
+            request(SafeCommandTx::WifiScan),
+        ];
+        let policy = merged_stagger_policy(&commands).expect("bundle contains a policied command");
+        assert_eq!(policy.wave_size, 2);
+        assert_eq!(policy.wave_duration, Duration::from_secs(10));
+    }
+
+    #[test]
+    fn merge_returns_none_when_nothing_in_the_bundle_is_policied() {
+        let commands = [request(SafeCommandTx::Ping)];
+        assert!(merged_stagger_policy(&commands).is_none());
+    }
+
+    #[test]
+    fn no_policy_leaves_every_device_at_the_column_default() {
+        let devices = [1, 2, 3, 4, 5];
+        let availabilities = assign_wave_availabilities(&devices, None, Utc::now());
+
+        assert_eq!(availabilities.len(), devices.len());
+        assert!(availabilities.iter().all(|(_, at)| at.is_none()));
+    }
+
+    #[test]
+    fn waves_group_devices_into_ceil_n_over_k_distinct_slots() {
+        let devices: Vec<i32> = (0..5).collect();
+        let policy = StaggerPolicy {
+            wave_size: 2,
+            wave_duration: Duration::from_secs(10),
+        };
+        let now = Utc::now();
+        let availabilities = assign_wave_availabilities(&devices, Some(&policy), now);
+
+        // Shuffling must not drop or duplicate any device.
+        let mut assigned_devices: Vec<i32> = availabilities.iter().map(|(d, _)| *d).collect();
+        assigned_devices.sort();
+        assert_eq!(assigned_devices, devices);
+
+        // 5 devices at wave_size 2 -> ceil(5/2) = 3 distinct waves, sizes 2, 2, 1.
+        let mut counts: HashMap<DateTime<Utc>, usize> = HashMap::new();
+        for (_, at) in &availabilities {
+            *counts.entry(at.expect("policy is Some")).or_default() += 1;
+        }
+        assert_eq!(counts.len(), 3);
+        let mut sizes: Vec<usize> = counts.values().copied().collect();
+        sizes.sort_unstable();
+        assert_eq!(sizes, vec![1, 2, 2]);
+    }
 }
