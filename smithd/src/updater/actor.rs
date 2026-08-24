@@ -460,11 +460,23 @@ impl Actor {
             }
         };
 
-        self.ensure_smith_updater_for_release(pending_release_id)
+        info!(
+            pending_release_id,
+            requested_release_id,
+            "Preparing a marker-capable Smith updater from the requested release before resuming the pinned Smith update"
+        );
+        self.ensure_release_cache(requested_release_id)
             .await
             .with_context(|| {
                 format!(
-                    "Cannot resume Smith self-update to release {pending_release_id} because its updater prerequisite is unavailable"
+                    "Cannot prepare release {requested_release_id} to bootstrap a marker-capable Smith updater"
+                )
+            })?;
+        self.ensure_smith_updater_for_release(requested_release_id)
+            .await
+            .with_context(|| {
+                format!(
+                    "Cannot resume Smith self-update to release {pending_release_id} because release {requested_release_id} did not provide a marker-capable updater"
                 )
             })?;
 
@@ -519,12 +531,19 @@ impl Actor {
             && status == "ii"
             && version == updater_package.version
         {
-            info!(
+            if Self::smith_updater_supports_pinned_release().await {
+                info!(
+                    release_id,
+                    version = %updater_package.version,
+                    "Marker-capable Smith updater prerequisite is already installed"
+                );
+                return Ok(());
+            }
+            warn!(
                 release_id,
                 version = %updater_package.version,
-                "Smith updater prerequisite is already installed"
+                "Installed Smith updater matches the release but does not support pinned targets"
             );
-            return Ok(());
         }
 
         if self.should_skip_install(&updater_package.name) {
@@ -560,13 +579,36 @@ impl Actor {
                 updater_package.version
             ));
         }
+        if !Self::smith_updater_supports_pinned_release().await {
+            return Err(anyhow::anyhow!(
+                "smith-updater {} does not support pinned release targets",
+                updater_package.version
+            ));
+        }
 
         info!(
             release_id,
             version = %updater_package.version,
-            "Smith updater prerequisite installed and verified"
+            "Marker-capable Smith updater prerequisite installed and verified"
         );
         Ok(())
+    }
+
+    async fn smith_updater_supports_pinned_release() -> bool {
+        match Command::new("/usr/bin/smith-updater")
+            .arg("--check-pinned-release-support")
+            .output()
+            .await
+        {
+            Ok(output) => output.status.success(),
+            Err(err) => {
+                warn!(
+                    error = ?err,
+                    "Could not check whether smith-updater supports pinned releases"
+                );
+                false
+            }
+        }
     }
 
     #[tracing::instrument(skip(self))]
