@@ -134,7 +134,7 @@ async fn remove_file_and_count(path: &Path, bytes_freed: &mut u64) -> bool {
 #[derive(Debug)]
 pub enum ActorMessage {
     Apply,
-    Prepare,
+    Prepare { rpc: oneshot::Sender<bool> },
     InstallPrepared,
     Check,
     StatusReport { rpc: oneshot::Sender<String> },
@@ -301,19 +301,43 @@ impl Actor {
                     }
                 }
             }
-            ActorMessage::Prepare => {
+            ActorMessage::Prepare { rpc } => {
                 if let Some(prepared_release_id) = self.prepared_release_id {
                     info!(
                         prepared_release_id,
                         "A release is already prepared; keeping its pinned target"
                     );
+                    if rpc.send(true).is_err() {
+                        warn!("Release preparation caller stopped waiting for the result");
+                    }
                 } else {
+                    let current_release_id = self.magic.get_release_id().await.ok();
                     match self.magic.get_target_release_id().await {
-                        Ok(target_release_id) => self.update(target_release_id).await,
-                        Err(err) => error!(
-                            error = ?err,
-                            "Cannot prepare release because no target release is available"
-                        ),
+                        Ok(target_release_id) if current_release_id == Some(target_release_id) => {
+                            info!(
+                                target_release_id,
+                                "Release preparation skipped because the target is already active"
+                            );
+                            if rpc.send(false).is_err() {
+                                warn!("Release preparation caller stopped waiting for the result");
+                            }
+                        }
+                        Ok(target_release_id) => {
+                            self.update(target_release_id).await;
+                            let prepared = self.prepared_release_id == Some(target_release_id);
+                            if rpc.send(prepared).is_err() {
+                                warn!("Release preparation caller stopped waiting for the result");
+                            }
+                        }
+                        Err(err) => {
+                            error!(
+                                error = ?err,
+                                "Cannot prepare release because no target release is available"
+                            );
+                            if rpc.send(false).is_err() {
+                                warn!("Release preparation caller stopped waiting for the result");
+                            }
+                        }
                     }
                 }
             }
@@ -434,13 +458,17 @@ impl Actor {
         self.status = Status::Idle;
     }
 
-    async fn write_manifest(&self, path: &Path, contents: &str) -> Result<()> {
+    async fn write_manifest(path: &Path, contents: &str) -> Result<()> {
         if let Some(parent) = path.parent() {
             tokio::fs::create_dir_all(parent).await?;
         }
-        tokio::fs::write(path, contents)
+        let part_path = path.with_extension("part");
+        tokio::fs::write(&part_path, contents)
             .await
-            .with_context(|| format!("writing manifest to {}", path.display()))?;
+            .with_context(|| format!("writing manifest to {}", part_path.display()))?;
+        tokio::fs::rename(&part_path, path)
+            .await
+            .with_context(|| format!("publishing manifest {}", path.display()))?;
         Ok(())
     }
 
@@ -513,7 +541,6 @@ impl Actor {
 
         let blobs = self.packages_dir.join("blobs");
         let mut manifest = String::new();
-        let mut all_cached = true;
 
         for package in &release_packages {
             info!("Processing package: {}", package.file);
@@ -521,29 +548,21 @@ impl Actor {
 
             if self.blob_is_valid(&blob_path).await? {
                 info!("blob present in cache");
-                writeln!(
-                    manifest,
-                    "{} {} {}",
-                    package.name, package.version, package.file
-                )?;
-                continue;
+            } else {
+                self.fetch_blob(package, &blob_path)
+                    .await
+                    .with_context(|| format!("fetching blob for package {}", package.file))?;
             }
 
-            self.fetch_blob(package, &blob_path)
-                .await
-                .with_context(|| format!("fetching blob for package {}", package.file))?;
-            all_cached = false;
+            writeln!(
+                manifest,
+                "{} {} {}",
+                package.name, package.version, package.file
+            )?;
         }
 
-        if all_cached {
-            self.write_manifest(&release_cache, &manifest).await?;
-            info!(release_id, "release cache ready");
-        } else {
-            info!(
-                release_id,
-                "blobs being fetched; manifest write deferred to next call"
-            );
-        }
+        Self::write_manifest(&release_cache, &manifest).await?;
+        info!(release_id, "release cache ready");
 
         Ok(())
     }
@@ -1251,6 +1270,22 @@ mod tests {
     #[test]
     fn no_action_when_current_release_matches_target() {
         assert_eq!(check_action(Some(12), Some(12), None), None);
+    }
+
+    #[tokio::test]
+    async fn release_manifest_is_published_before_preparation_succeeds() -> Result<()> {
+        let temp = tempfile::tempdir()?;
+        let manifest_path = temp.path().join("versions").join("12");
+
+        Actor::write_manifest(&manifest_path, "app 12 app-12.deb\n").await?;
+
+        assert_eq!(
+            tokio::fs::read_to_string(&manifest_path).await?,
+            "app 12 app-12.deb\n"
+        );
+        assert!(!manifest_path.with_extension("part").exists());
+
+        Ok(())
     }
 
     #[tokio::test]
