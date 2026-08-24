@@ -531,19 +531,12 @@ impl Actor {
             && status == "ii"
             && version == updater_package.version
         {
-            if Self::smith_updater_supports_pinned_release().await {
-                info!(
-                    release_id,
-                    version = %updater_package.version,
-                    "Marker-capable Smith updater prerequisite is already installed"
-                );
-                return Ok(());
-            }
-            warn!(
+            info!(
                 release_id,
                 version = %updater_package.version,
-                "Installed Smith updater matches the release but does not support pinned targets"
+                "Smith updater prerequisite from the requested release is already installed"
             );
+            return Ok(());
         }
 
         if self.should_skip_install(&updater_package.name) {
@@ -579,36 +572,13 @@ impl Actor {
                 updater_package.version
             ));
         }
-        if !Self::smith_updater_supports_pinned_release().await {
-            return Err(anyhow::anyhow!(
-                "smith-updater {} does not support pinned release targets",
-                updater_package.version
-            ));
-        }
 
         info!(
             release_id,
             version = %updater_package.version,
-            "Marker-capable Smith updater prerequisite installed and verified"
+            "Smith updater prerequisite from the requested release installed and verified"
         );
         Ok(())
-    }
-
-    async fn smith_updater_supports_pinned_release() -> bool {
-        match Command::new("/usr/bin/smith-updater")
-            .arg("--check-pinned-release-support")
-            .output()
-            .await
-        {
-            Ok(output) => output.status.success(),
-            Err(err) => {
-                warn!(
-                    error = ?err,
-                    "Could not check whether smith-updater supports pinned releases"
-                );
-                false
-            }
-        }
     }
 
     #[tracing::instrument(skip(self))]

@@ -9,10 +9,7 @@ use tracing::{error, info, warn};
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
-struct Args {
-    #[arg(long, hide = true)]
-    check_pinned_release_support: bool,
-}
+struct Args;
 
 async fn find_latest_smith_deb(packages_dir: &Path) -> anyhow::Result<(PathBuf, ConfigPackage)> {
     let mut entries = tokio::fs::read_dir(packages_dir)
@@ -68,10 +65,7 @@ async fn find_latest_smith_deb(packages_dir: &Path) -> anyhow::Result<(PathBuf, 
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let args = Args::parse();
-    if args.check_pinned_release_support {
-        return Ok(());
-    }
+    Args::parse();
     tracing_subscriber::fmt::init();
     info!("Smith Updater Starting");
 
