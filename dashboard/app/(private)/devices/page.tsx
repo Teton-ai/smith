@@ -568,6 +568,11 @@ const DevicesPage = () => {
 		});
 	};
 
+	// The variant actually dispatched, captured at submit time: `onError` fires
+	// after the form may have been edited (or reset by closing the modal), so
+	// reading `bulkCommand.variant` there could name the wrong command.
+	const submittedBulkVariantRef = useRef(bulkCommand.variant);
+
 	// Bulk command mutation
 	const { mutate: issueCommands, isPending: isIssuingCommands } =
 		useIssueCommandsToDevices({
@@ -580,10 +585,8 @@ const DevicesPage = () => {
 				},
 				onError: (error) => {
 					console.error("Failed to issue commands:", error);
-					// The bulk modal only ever dispatches one command, so the variant
-					// still held in state is the one that got rejected.
 					setBulkCommandError(
-						getCommandErrorMessage(error, bulkCommand.variant),
+						getCommandErrorMessage(error, submittedBulkVariantRef.current),
 					);
 				},
 			},
@@ -593,6 +596,7 @@ const DevicesPage = () => {
 		if (!commandIsValid(bulkCommand) || isIssuingCommands) return;
 
 		setBulkCommandError(null);
+		submittedBulkVariantRef.current = bulkCommand.variant;
 		issueCommands({
 			data: {
 				devices: Array.from(selectedDeviceIds),
@@ -1860,7 +1864,10 @@ const DevicesPage = () => {
 				open={showBulkCommandModal}
 				onClose={() => {
 					setShowBulkCommandModal(false);
-					resetBulkCommand();
+					// Escape/backdrop/X bypass the Cancel button's isIssuingCommands
+					// guard: don't reset while a dispatch is in flight, or the
+					// eventual onError lands its banner on an already-reset form.
+					if (!isIssuingCommands) resetBulkCommand();
 				}}
 				title="Run Command on Selected Devices"
 				footer={

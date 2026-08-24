@@ -204,6 +204,11 @@ const DeviceHeader: React.FC<DeviceHeaderProps> = ({ device, serial }) => {
 		);
 	};
 
+	// The variant actually dispatched, captured at submit time: `onError` fires
+	// after the form may have been edited (or reset by closing the modal), so
+	// reading `runCommandState.variant` there could name the wrong command.
+	const submittedVariantRef = useRef(runCommandState.variant);
+
 	const { mutate: issueCommands, isPending: isIssuingCommands } =
 		useIssueCommandsToDevices({
 			mutation: {
@@ -215,7 +220,7 @@ const DeviceHeader: React.FC<DeviceHeaderProps> = ({ device, serial }) => {
 				onError: (error) => {
 					console.error("Failed to issue command:", error);
 					setRunCommandError(
-						getCommandErrorMessage(error, runCommandState.variant),
+						getCommandErrorMessage(error, submittedVariantRef.current),
 					);
 				},
 			},
@@ -237,6 +242,7 @@ const DeviceHeader: React.FC<DeviceHeaderProps> = ({ device, serial }) => {
 		if (!commandIsValid(runCommandState) || !device?.id || isIssuingCommands)
 			return;
 		setRunCommandError(null);
+		submittedVariantRef.current = runCommandState.variant;
 		issueCommands({
 			data: {
 				devices: [device.id],
@@ -492,7 +498,10 @@ const DeviceHeader: React.FC<DeviceHeaderProps> = ({ device, serial }) => {
 				open={showRunModal}
 				onClose={() => {
 					setShowRunModal(false);
-					resetRunCommand();
+					// Escape/backdrop/X bypass the Cancel button's isIssuingCommands
+					// guard: don't reset while a dispatch is in flight, or the
+					// eventual onError lands its banner on an already-reset form.
+					if (!isIssuingCommands) resetRunCommand();
 				}}
 				title="Run Command"
 				footer={
