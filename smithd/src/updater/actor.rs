@@ -89,27 +89,79 @@ fn classify_install_failure(stderr: &str) -> InstallFailureKind {
     InstallFailureKind::Unknown
 }
 
-fn manifest_blob_paths(manifest: &str, blobs_dir: &Path) -> Result<HashSet<PathBuf>> {
+fn validate_manifest_field(field: &str, value: &str) -> Result<()> {
+    if value.is_empty() || value.chars().any(char::is_whitespace) {
+        return Err(anyhow::anyhow!(
+            "invalid {field} in package manifest: {value:?}"
+        ));
+    }
+    Ok(())
+}
+
+fn safe_package_path(base: &Path, file: &str) -> Result<PathBuf> {
+    validate_manifest_field("package file", file)?;
+    let relative_path = Path::new(file);
+    if relative_path
+        .components()
+        .any(|component| !matches!(component, Component::Normal(_)))
+    {
+        return Err(anyhow::anyhow!("unsafe package file path: {file}"));
+    }
+    Ok(base.join(relative_path))
+}
+
+fn parse_release_manifest(manifest: &str) -> Result<Vec<ConfigPackage>> {
     manifest
         .lines()
         .filter(|line| !line.trim().is_empty())
         .map(|line| {
-            let file = line
-                .splitn(3, ' ')
-                .nth(2)
-                .ok_or_else(|| anyhow::anyhow!("malformed package manifest line: {line}"))?;
-            let relative_path = Path::new(file);
-            if relative_path.as_os_str().is_empty()
-                || relative_path
-                    .components()
-                    .any(|component| !matches!(component, Component::Normal(_)))
-            {
+            let mut fields = line.split_whitespace();
+            let name = fields
+                .next()
+                .ok_or_else(|| anyhow::anyhow!("missing package name in manifest"))?;
+            let version = fields
+                .next()
+                .ok_or_else(|| anyhow::anyhow!("missing package version in manifest"))?;
+            let file = fields
+                .next()
+                .ok_or_else(|| anyhow::anyhow!("missing package file in manifest"))?;
+            if fields.next().is_some() {
                 return Err(anyhow::anyhow!(
-                    "unsafe blob path in package manifest: {file}"
+                    "too many fields in package manifest line: {line}"
                 ));
             }
-            Ok(blobs_dir.join(relative_path))
+
+            validate_manifest_field("package name", name)?;
+            validate_manifest_field("package version", version)?;
+            safe_package_path(Path::new(""), file)?;
+            Ok(ConfigPackage {
+                name: name.to_string(),
+                version: version.to_string(),
+                file: file.to_string(),
+            })
         })
+        .collect()
+}
+
+fn serialize_release_manifest(packages: &[ConfigPackage]) -> Result<String> {
+    let mut manifest = String::new();
+    for package in packages {
+        validate_manifest_field("package name", &package.name)?;
+        validate_manifest_field("package version", &package.version)?;
+        safe_package_path(Path::new(""), &package.file)?;
+        writeln!(
+            manifest,
+            "{} {} {}",
+            package.name, package.version, package.file
+        )?;
+    }
+    Ok(manifest)
+}
+
+fn manifest_blob_paths(manifest: &str, blobs_dir: &Path) -> Result<HashSet<PathBuf>> {
+    parse_release_manifest(manifest)?
+        .into_iter()
+        .map(|package| safe_package_path(blobs_dir, &package.file))
         .collect()
 }
 
@@ -478,7 +530,7 @@ impl Actor {
         }
 
         // TODO: remove when legacy /packages layout is fully migrated.
-        let legacy_path = self.packages_dir.join(&package.file);
+        let legacy_path = safe_package_path(&self.packages_dir, &package.file)?;
         if legacy_path.exists() {
             warn!(?legacy_path, ?blob_path, "migrating from legacy layout");
             tokio::fs::rename(&legacy_path, blob_path).await?;
@@ -540,11 +592,13 @@ impl Actor {
             .with_context(|| "failed to fetch release packages manifest")?;
 
         let blobs = self.packages_dir.join("blobs");
-        let mut manifest = String::new();
+        // Serialize first so unsafe server metadata is rejected before any path
+        // construction, migration, or download can touch the filesystem.
+        let manifest = serialize_release_manifest(&release_packages)?;
 
         for package in &release_packages {
             info!("Processing package: {}", package.file);
-            let blob_path = blobs.join(&package.file);
+            let blob_path = safe_package_path(&blobs, &package.file)?;
 
             if self.blob_is_valid(&blob_path).await? {
                 info!("blob present in cache");
@@ -553,12 +607,6 @@ impl Actor {
                     .await
                     .with_context(|| format!("fetching blob for package {}", package.file))?;
             }
-
-            writeln!(
-                manifest,
-                "{} {} {}",
-                package.name, package.version, package.file
-            )?;
         }
 
         Self::write_manifest(&release_cache, &manifest).await?;
@@ -650,27 +698,7 @@ impl Actor {
         let content = tokio::fs::read(&release_cache).await?;
         let content = std::str::from_utf8(&content)?;
 
-        let packages: Vec<ConfigPackage> = content
-            .lines()
-            .filter(|line| !line.trim().is_empty())
-            .map(|line| {
-                let mut parts = line.splitn(3, ' ');
-                Ok::<_, anyhow::Error>(ConfigPackage {
-                    name: parts
-                        .next()
-                        .ok_or_else(|| anyhow::anyhow!("missing name"))?
-                        .to_string(),
-                    version: parts
-                        .next()
-                        .ok_or_else(|| anyhow::anyhow!("missing version"))?
-                        .to_string(),
-                    file: parts
-                        .next()
-                        .ok_or_else(|| anyhow::anyhow!("missing file"))?
-                        .to_string(),
-                })
-            })
-            .collect::<Result<_, _>>()?;
+        let packages = parse_release_manifest(content)?;
 
         // check if all packages are available locally
         for package in &packages {
@@ -679,7 +707,7 @@ impl Actor {
             let package_file = &package.file;
 
             // check if package is available locally
-            let package_file = blobs.join(package_file);
+            let package_file = safe_package_path(&blobs, package_file)?;
 
             if package_file.exists() {
                 info!("Package {} exists locally", package_name);
@@ -718,7 +746,7 @@ impl Actor {
                     update_smith = true;
                     continue;
                 }
-                let blob_path = blobs.join(&package.file);
+                let blob_path = safe_package_path(&blobs, &package.file)?;
                 to_install.push((package.name, blob_path));
             }
         }
@@ -1174,27 +1202,7 @@ impl Actor {
         let content = tokio::fs::read(&release_cache).await?;
         let content = std::str::from_utf8(&content)?;
 
-        let packages: Vec<ConfigPackage> = content
-            .lines()
-            .filter(|line| !line.trim().is_empty())
-            .map(|line| {
-                let mut parts = line.splitn(3, ' ');
-                Ok::<_, anyhow::Error>(ConfigPackage {
-                    name: parts
-                        .next()
-                        .ok_or_else(|| anyhow::anyhow!("missing name"))?
-                        .to_string(),
-                    version: parts
-                        .next()
-                        .ok_or_else(|| anyhow::anyhow!("missing version"))?
-                        .to_string(),
-                    file: parts
-                        .next()
-                        .ok_or_else(|| anyhow::anyhow!("missing file"))?
-                        .to_string(),
-                })
-            })
-            .collect::<Result<_, _>>()?;
+        let packages = parse_release_manifest(content)?;
 
         // check the system version of the packages in the magic file
         for package in packages {
@@ -1418,5 +1426,22 @@ mod tests {
         assert!(manifest_blob_paths("app 1 ../../etc/passwd\n", blobs).is_err());
         assert!(manifest_blob_paths("app 1 /etc/passwd\n", blobs).is_err());
         assert!(manifest_blob_paths("app 1\n", blobs).is_err());
+    }
+
+    #[test]
+    fn server_package_metadata_is_validated_before_serialization() {
+        let unsafe_package = ConfigPackage {
+            name: "app".to_string(),
+            version: "1".to_string(),
+            file: "../../etc/passwd".to_string(),
+        };
+        let injected_package = ConfigPackage {
+            name: "app".to_string(),
+            version: "1".to_string(),
+            file: "app.deb\nother 1 other.deb".to_string(),
+        };
+
+        assert!(serialize_release_manifest(&[unsafe_package]).is_err());
+        assert!(serialize_release_manifest(&[injected_package]).is_err());
     }
 }
