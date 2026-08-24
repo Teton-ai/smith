@@ -234,7 +234,8 @@ const DeviceHeader: React.FC<DeviceHeaderProps> = ({ device, serial }) => {
 		});
 
 	const handleRunCommand = () => {
-		if (!commandIsValid(runCommandState) || !device?.id) return;
+		if (!commandIsValid(runCommandState) || !device?.id || isIssuingCommands)
+			return;
 		setRunCommandError(null);
 		issueCommands({
 			data: {

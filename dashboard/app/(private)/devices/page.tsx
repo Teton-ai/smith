@@ -590,7 +590,7 @@ const DevicesPage = () => {
 		});
 
 	const handleBulkCommand = () => {
-		if (!commandIsValid(bulkCommand)) return;
+		if (!commandIsValid(bulkCommand) || isIssuingCommands) return;
 
 		setBulkCommandError(null);
 		issueCommands({
