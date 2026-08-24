@@ -334,7 +334,6 @@ dependencies = [
  "dotenvy",
  "ed25519-dalek",
  "futures",
- "hmac",
  "jsonwebtoken 9.3.1",
  "jwks_client_rs",
  "metrics",
