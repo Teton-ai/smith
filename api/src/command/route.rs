@@ -51,16 +51,31 @@ fn merged_stagger_policy(commands: &[SafeCommandRequest]) -> Option<StaggerPolic
         })
 }
 
+/// `None` means no policy applies; leaves `available_at` unbound so the
+/// INSERT falls back to `COALESCE($5, now())`.
+struct DeviceAvailability {
+    device_id: i32,
+    available_at: Option<DateTime<Utc>>,
+}
+
 /// Shuffled once so wave membership doesn't correlate with caller order.
-/// `None` per device when `policy` is `None` (use the column's default).
 fn assign_wave_availabilities(
     devices: &[i32],
     policy: Option<&StaggerPolicy>,
     now: DateTime<Utc>,
-) -> Vec<(i32, Option<DateTime<Utc>>)> {
+) -> Vec<DeviceAvailability> {
     let Some(policy) = policy else {
-        return devices.iter().map(|&device_id| (device_id, None)).collect();
+        return devices
+            .iter()
+            .map(|&device_id| DeviceAvailability {
+                device_id,
+                available_at: None,
+            })
+            .collect();
     };
+
+    // Avoid a div-by-zero if a future policy sets wave_size to 0.
+    let wave_size = policy.wave_size.max(1);
 
     let mut ordered_devices: Vec<i32> = devices.to_vec();
     ordered_devices.shuffle(&mut rand::rng());
@@ -69,8 +84,11 @@ fn assign_wave_availabilities(
         .into_iter()
         .enumerate()
         .map(|(wave_index, device_id)| {
-            let offset = policy.wave_duration * (wave_index as u32 / policy.wave_size);
-            (device_id, Some(now + offset))
+            let offset = policy.wave_duration * (wave_index as u32 / wave_size);
+            DeviceAvailability {
+                device_id,
+                available_at: Some(now + offset),
+            }
         })
         .collect()
 }
@@ -104,7 +122,11 @@ async fn queue_commands_bundle(
     let availabilities = assign_wave_availabilities(devices, policy.as_ref(), Utc::now());
 
     let mut queued = Vec::with_capacity(devices.len() * commands.len());
-    for (device_id, available_at) in &availabilities {
+    for DeviceAvailability {
+        device_id,
+        available_at,
+    } in &availabilities
+    {
         for command in commands {
             let cmd = serde_json::to_value(command.command.clone()).map_err(|err| {
                 error!("Failed to serialize command into JSON {err}");
@@ -895,7 +917,7 @@ mod stagger_tests {
         let availabilities = assign_wave_availabilities(&devices, None, Utc::now());
 
         assert_eq!(availabilities.len(), devices.len());
-        assert!(availabilities.iter().all(|(_, at)| at.is_none()));
+        assert!(availabilities.iter().all(|a| a.available_at.is_none()));
     }
 
     #[test]
@@ -909,14 +931,16 @@ mod stagger_tests {
         let availabilities = assign_wave_availabilities(&devices, Some(&policy), now);
 
         // Shuffling must not drop or duplicate any device.
-        let mut assigned_devices: Vec<i32> = availabilities.iter().map(|(d, _)| *d).collect();
+        let mut assigned_devices: Vec<i32> = availabilities.iter().map(|a| a.device_id).collect();
         assigned_devices.sort();
         assert_eq!(assigned_devices, devices);
 
         // 5 devices at wave_size 2 -> ceil(5/2) = 3 distinct waves, sizes 2, 2, 1.
         let mut counts: HashMap<DateTime<Utc>, usize> = HashMap::new();
-        for (_, at) in &availabilities {
-            *counts.entry(at.expect("policy is Some")).or_default() += 1;
+        for a in &availabilities {
+            *counts
+                .entry(a.available_at.expect("policy is Some"))
+                .or_default() += 1;
         }
         assert_eq!(counts.len(), 3);
         let mut sizes: Vec<usize> = counts.values().copied().collect();
