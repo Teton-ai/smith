@@ -14,17 +14,7 @@ use thiserror::Error;
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
-pub mod debug_ap;
 pub mod route;
-
-/// Credentials for a device's debug-access WiFi AP (`<serial>-tunnel`).
-/// Derived from the device's secret token; the token itself is never included.
-#[derive(Debug, Serialize, utoipa::ToSchema)]
-pub struct DebugApCredentials {
-    pub serial_number: String,
-    pub ssid: String,
-    pub password: String,
-}
 
 // TODO: Change this, this needs to be device and the other is PublicDevice, API type
 #[derive(Debug, Serialize, utoipa::ToSchema, Clone)]
@@ -220,6 +210,12 @@ pub struct ConfiguredNetwork {
     pub ssid: Option<String>,
     pub name: String,
     pub password: Option<String>,
+    pub security_type: Option<String>,
+    pub is_network_hidden: bool,
+    /// Full credential envelope; `password` above only mirrors its `psk` key.
+    pub credentials: Value,
+    /// EAP username, set only for enterprise profiles.
+    pub identity: Option<Value>,
     pub is_active: bool,
     pub updated_at: DateTime<Utc>,
 }
@@ -244,6 +240,12 @@ pub struct DeviceNetworkIntent {
     pub ssid: Option<String>,
     pub name: String,
     pub network_type: String,
+    pub security_type: Option<String>,
+    pub is_network_hidden: bool,
+    /// Full credential envelope from the network's `credentials` column.
+    pub credentials: Value,
+    /// EAP username, set only for enterprise profiles.
+    pub identity: Option<Value>,
     pub priority: i32,
     pub managed_by: String,
     pub created_at: DateTime<Utc>,
@@ -253,7 +255,6 @@ pub struct DeviceNetworkIntent {
 #[derive(Debug, Deserialize, utoipa::ToSchema)]
 pub struct CreateIntentRequest {
     pub network_id: i32,
-    pub priority: i32,
     pub managed_by: String,
 }
 

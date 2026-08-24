@@ -154,11 +154,17 @@ export interface CommandsPaginated {
 }
 
 export interface ConfiguredNetwork {
+	/** Full credential envelope; `password` above only mirrors its `psk` key. */
+	credentials: unknown;
+	/** EAP username, set only for enterprise profiles. */
+	identity?: unknown;
 	is_active: boolean;
+	is_network_hidden: boolean;
 	name: string;
 	network_id: number;
 	password?: string;
 	profile_name: string;
+	security_type?: string;
 	ssid?: string;
 	updated_at: string;
 }
@@ -173,7 +179,6 @@ export interface ConnectionStatus {
 export interface CreateIntentRequest {
 	managed_by: string;
 	network_id: number;
-	priority: number;
 }
 
 export interface Dashboard {
@@ -417,13 +422,19 @@ export interface DeviceLedgerItemPaginated {
 
 export interface DeviceNetworkIntent {
 	created_at: string;
+	/** Full credential envelope from the network's `credentials` column. */
+	credentials: unknown;
 	device_id: number;
 	id: number;
+	/** EAP username, set only for enterprise profiles. */
+	identity?: unknown;
+	is_network_hidden: boolean;
 	managed_by: string;
 	name: string;
 	network_id: number;
 	network_type: string;
 	priority: number;
+	security_type?: string;
 	ssid?: string;
 	updated_at: string;
 }
@@ -845,7 +856,33 @@ export type GetDevicesParams = {
 	 * Filter by service health. If true, only devices with at least one monitored service not in 'active' state.
 	 */
 	service_not_running?: boolean;
+	/**
+	 * Column to sort the device list by. If None, devices are ordered by
+	 * last_ping (most recently seen first).
+	 */
+	sort?: GetDevicesSort;
+	/**
+	 * Sort direction for `DeviceFilter::sort`. Defaults to ascending when
+	 * `sort` is set but `order` is not.
+	 */
+	order?: GetDevicesOrder;
 };
+
+export type GetDevicesSort =
+	(typeof GetDevicesSort)[keyof typeof GetDevicesSort];
+
+export const GetDevicesSort = {
+	serial_number: "serial_number",
+	labels: "labels",
+} as const;
+
+export type GetDevicesOrder =
+	(typeof GetDevicesOrder)[keyof typeof GetDevicesOrder];
+
+export const GetDevicesOrder = {
+	asc: "asc",
+	desc: "desc",
+} as const;
 
 export type GetAllCommandsForDeviceParams = {
 	starting_after?: number;

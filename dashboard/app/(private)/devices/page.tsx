@@ -1,11 +1,14 @@
 import { useAuth0 } from "@auth0/auth0-react";
 import { useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
-import { Button, LabelChip, Toast } from "@teton/smith-ui";
+import { Button, LabelChip, Select, Toast } from "@teton/smith-ui";
+import { isAxiosError } from "axios";
 import {
 	AlertTriangle,
 	Calendar,
 	CheckCircle,
 	ChevronDown,
+	ChevronsUpDown,
+	ChevronUp,
 	Cpu,
 	GitBranch,
 	Layers,
@@ -18,7 +21,15 @@ import {
 	XCircle,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useLocation, useNavigate, useSearchParams } from "react-router";
+import { Link, useLocation, useNavigate, useSearchParams } from "react-router";
+import {
+	BULK_COMMAND_OPTIONS,
+	buildCommand,
+	CommandFields,
+	commandIsValid,
+	type EditableCommand,
+	emptyCommand,
+} from "@/app/(private)/commands/shared";
 import LabelAutocomplete from "@/app/components/LabelAutocomplete";
 import { Modal } from "@/app/components/modal";
 import NetworkQualityIndicator from "@/app/components/NetworkQualityIndicator";
@@ -26,6 +37,8 @@ import { RelativeTime } from "@/app/components/RelativeTime";
 import {
 	type Device,
 	type DistributionRolloutStats,
+	GetDevicesOrder,
+	GetDevicesSort,
 	getGetDevicesInfiniteQueryKey,
 	type Release,
 	useApproveDevice,
@@ -37,14 +50,24 @@ import {
 } from "../../api-client";
 import { useClientMutatorWithTotal } from "../../api-client-mutator";
 import { isStableRelease } from "../../utils/release";
-import { ReachabilityCell } from "./[serial]/uptime";
+import {
+	ReachabilityCell,
+	UPTIME_RANGES,
+	type UptimeRange,
+} from "./[serial]/uptime";
 
 const Tooltip = ({
 	children,
 	content,
+	forcePosition,
+	className = "",
 }: {
 	children: React.ReactNode;
 	content: string;
+	// Auto "top" placement gets clipped by an overflow-hidden ancestor near the top of a page.
+	forcePosition?: "bottom";
+	// e.g. "relative z-10", to win stacking against a sibling overlay.
+	className?: string;
 }) => {
 	const [isVisible, setIsVisible] = useState(false);
 	const [position, setPosition] = useState<"top" | "right">("top");
@@ -64,22 +87,29 @@ const Tooltip = ({
 		}
 	};
 
+	const effectivePosition = forcePosition ?? position;
+
 	return (
 		<div
 			ref={containerRef}
-			className="relative inline-block"
+			className={`relative inline-block ${className}`}
 			onMouseEnter={handleMouseEnter}
 			onMouseLeave={() => setIsVisible(false)}
 		>
 			{children}
 			{isVisible &&
-				(position === "top" ? (
-					<div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-2 py-1 text-xs text-white bg-gray-800 rounded shadow-lg whitespace-nowrap z-50">
+				(effectivePosition === "top" ? (
+					<div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-2 py-1 text-xs normal-case text-white bg-gray-800 rounded shadow-lg whitespace-nowrap z-50">
 						{content}
 						<div className="absolute top-full left-1/2 transform -translate-x-1/2 w-0 h-0 border-l-4 border-r-4 border-t-4 border-l-transparent border-r-transparent border-t-gray-800"></div>
 					</div>
+				) : effectivePosition === "bottom" ? (
+					<div className="absolute top-full left-1/2 transform -translate-x-1/2 mt-2 px-2 py-1 text-xs normal-case text-white bg-gray-800 rounded shadow-lg whitespace-nowrap z-50">
+						{content}
+						<div className="absolute bottom-full left-1/2 transform -translate-x-1/2 w-0 h-0 border-l-4 border-r-4 border-b-4 border-l-transparent border-r-transparent border-b-gray-800"></div>
+					</div>
 				) : (
-					<div className="absolute left-full top-1/2 transform -translate-y-1/2 ml-2 px-2 py-1 text-xs text-white bg-gray-800 rounded shadow-lg whitespace-nowrap z-50">
+					<div className="absolute left-full top-1/2 transform -translate-y-1/2 ml-2 px-2 py-1 text-xs normal-case text-white bg-gray-800 rounded shadow-lg whitespace-nowrap z-50">
 						{content}
 						<div className="absolute right-full top-1/2 transform -translate-y-1/2 w-0 h-0 border-t-4 border-b-4 border-r-4 border-t-transparent border-b-transparent border-r-gray-800"></div>
 					</div>
@@ -140,6 +170,57 @@ const LoadingSkeleton = () => (
 	</div>
 );
 
+const SortableHeader = ({
+	label,
+	field,
+	activeField,
+	direction,
+	onSort,
+}: {
+	label: string;
+	field: GetDevicesSort;
+	activeField: GetDevicesSort | null;
+	direction: GetDevicesOrder;
+	onSort: (field: GetDevicesSort) => void;
+}) => {
+	// Computed once so the tooltip text and chevron below stay in sync.
+	const sortState: "none" | "asc" | "desc" =
+		activeField !== field
+			? "none"
+			: direction === GetDevicesOrder.asc
+				? "asc"
+				: "desc";
+	const tooltipContent =
+		sortState === "asc"
+			? "Sort descending"
+			: sortState === "desc"
+				? "Clear sort"
+				: "Sort ascending";
+
+	return (
+		<div className="justify-self-start">
+			<Tooltip content={tooltipContent} forcePosition="bottom">
+				<button
+					type="button"
+					onClick={() => onSort(field)}
+					className="flex items-center gap-1 hover:text-gray-700 cursor-pointer"
+				>
+					{label}
+					{sortState === "asc" && (
+						<ChevronUp className="w-3.5 h-3.5 text-blue-600" />
+					)}
+					{sortState === "desc" && (
+						<ChevronDown className="w-3.5 h-3.5 text-blue-600" />
+					)}
+					{sortState === "none" && (
+						<ChevronsUpDown className="w-3.5 h-3.5 text-gray-300" />
+					)}
+				</button>
+			</Tooltip>
+		</div>
+	);
+};
+
 const PAGE_SIZE = 100;
 
 const DevicesPage = () => {
@@ -170,6 +251,13 @@ const DevicesPage = () => {
 	const sentinelRef = useRef<HTMLDivElement>(null);
 	const searchInputRef = useRef<HTMLInputElement>(null);
 
+	const [reachabilityRange, setReachabilityRange] = useState<UptimeRange>("7d");
+
+	const [sortField, setSortField] = useState<GetDevicesSort | null>(null);
+	const [sortDirection, setSortDirection] = useState<GetDevicesOrder>(
+		GetDevicesOrder.asc,
+	);
+
 	// Bulk deploy state
 	const [selectedDeviceIds, setSelectedDeviceIds] = useState<Set<number>>(
 		new Set(),
@@ -181,7 +269,10 @@ const DevicesPage = () => {
 	const [bulkDeployReleaseSearch, setBulkDeployReleaseSearch] = useState("");
 	// Bulk command state
 	const [showBulkCommandModal, setShowBulkCommandModal] = useState(false);
-	const [freeFormCommand, setFreeFormCommand] = useState("");
+	const [bulkCommand, setBulkCommand] = useState<EditableCommand>(() =>
+		emptyCommand("Ping"),
+	);
+	const [bulkCommandError, setBulkCommandError] = useState<string | null>(null);
 
 	// Approval state
 	const [approveModalDevice, setApproveModalDevice] = useState<Device | null>(
@@ -221,6 +312,8 @@ const DevicesPage = () => {
 			service_not_running: showServiceDown || undefined,
 			release_id: releaseFilter,
 			distribution_id: distributionFilter,
+			sort: sortField ?? undefined,
+			order: sortField ? sortDirection : undefined,
 			limit: PAGE_SIZE,
 		}),
 		[
@@ -232,6 +325,8 @@ const DevicesPage = () => {
 			showServiceDown,
 			releaseFilter,
 			distributionFilter,
+			sortField,
+			sortDirection,
 		],
 	);
 
@@ -478,25 +573,41 @@ const DevicesPage = () => {
 				onSuccess: () => {
 					setShowBulkCommandModal(false);
 					setSelectedDeviceIds(new Set());
-					setFreeFormCommand("");
+					setBulkCommand(emptyCommand("Ping"));
+					setBulkCommandError(null);
+					navigate("/commands");
 				},
 				onError: (error) => {
 					console.error("Failed to issue commands:", error);
+					if (isAxiosError(error) && error.response?.status === 403) {
+						// The bulk modal only ever dispatches one command, so the variant
+						// still held in state is the one that got rejected. FreeForm is
+						// the only variant in BULK_COMMAND_OPTIONS gated behind the
+						// admin-only `freeform` permission, so it gets a specific message.
+						setBulkCommandError(
+							bulkCommand.variant === "FreeForm"
+								? "You don't have permission to run FreeForm commands"
+								: "You don't have permission to run this command",
+						);
+					} else {
+						setBulkCommandError("Failed to dispatch command");
+					}
 				},
 			},
 		});
 
 	const handleBulkCommand = () => {
-		if (!freeFormCommand.trim()) return;
+		if (!commandIsValid(bulkCommand)) return;
 
+		setBulkCommandError(null);
 		issueCommands({
 			data: {
 				devices: Array.from(selectedDeviceIds),
 				commands: [
 					{
 						id: -1,
-						command: { FreeForm: { cmd: freeFormCommand } },
-						continue_on_error: false,
+						command: buildCommand(bulkCommand),
+						continue_on_error: bulkCommand.continue_on_error,
 					},
 				],
 			},
@@ -524,14 +635,21 @@ const DevicesPage = () => {
 	}, []);
 
 	// Debounce search term
+	// A ref, not just `isSearching` state: the URL-sync effect below reads this
+	// without depending on it, so it doesn't rerun the instant the debounce
+	// settles and race the URL update, wiping the just-typed term.
+	const isSearchDebouncePendingRef = useRef(false);
 	useEffect(() => {
 		if (!searchTerm) {
+			isSearchDebouncePendingRef.current = false;
 			setDebouncedSearchTerm("");
 			setIsSearching(false);
 			return;
 		}
+		isSearchDebouncePendingRef.current = true;
 		setIsSearching(true);
 		const timer = setTimeout(() => {
+			isSearchDebouncePendingRef.current = false;
 			setDebouncedSearchTerm(searchTerm);
 			setIsSearching(false);
 		}, 300);
@@ -541,12 +659,24 @@ const DevicesPage = () => {
 
 	// Sync URL parameters with component state
 	useEffect(() => {
+		const searchParam = searchParams.get("search");
 		const outdated = searchParams.get("outdated");
 		const online = searchParams.get("online");
 		const labelsParam = searchParams.get("labels");
 		const releaseIdParam = searchParams.get("release_id");
 		const distributionIdParam = searchParams.get("distribution_id");
 		const approvedParam = searchParams.get("approved");
+		const sortParam = searchParams.get("sort");
+		const orderParam = searchParams.get("order");
+
+		// Bypass the debounce so the URL's term is in the first query, not 300ms later.
+		// Always assign (not just when present) so navigating to a URL without `search`
+		// (e.g. the sidebar's plain /devices link) clears a stale term. Skipped while a
+		// debounce is pending — see isSearchDebouncePendingRef above.
+		if (!isSearchDebouncePendingRef.current) {
+			setSearchTerm(searchParam ?? "");
+			setDebouncedSearchTerm(searchParam ?? "");
+		}
 
 		if (outdated === "true") {
 			setShowOutdatedOnly(true);
@@ -583,6 +713,17 @@ const DevicesPage = () => {
 				setDistributionFilter(parsedDistributionId);
 			}
 		}
+
+		if (
+			sortParam === GetDevicesSort.serial_number ||
+			sortParam === GetDevicesSort.labels
+		) {
+			setSortField(sortParam);
+		}
+
+		if (orderParam === GetDevicesOrder.desc) {
+			setSortDirection(GetDevicesOrder.desc);
+		}
 	}, [searchParams]);
 
 	// Update URL when filters change
@@ -601,6 +742,17 @@ const DevicesPage = () => {
 		const query = search ? `?${search}` : "";
 		navigate(`/devices${query}`, { replace: true });
 	};
+
+	// Keep the term in the URL so it survives a back navigation from a device's detail page.
+	// A comma/whitespace-only value (e.g. ",") parses to zero terms on the API side, so
+	// treat it the same as empty rather than leaving a no-op `search=,` in the URL.
+	// biome-ignore lint/correctness/useExhaustiveDependencies: updateURL reads searchParams via closure; including it would re-run this on every unrelated filter change, not just the search term.
+	useEffect(() => {
+		const hasTerm = debouncedSearchTerm
+			.split(",")
+			.some((term) => term.trim().length > 0);
+		updateURL({ search: hasTerm ? debouncedSearchTerm : undefined });
+	}, [debouncedSearchTerm]);
 
 	const getDeviceStatus = (device: Device) => {
 		if (!device.last_seen) return "offline";
@@ -691,6 +843,25 @@ const DevicesPage = () => {
 		const newValue = !showServiceDown;
 		setShowServiceDown(newValue);
 		updateURL({ service_not_running: newValue ? "true" : undefined });
+	};
+
+	const handleSort = (field: GetDevicesSort) => {
+		if (sortField !== field) {
+			setSortField(field);
+			setSortDirection(GetDevicesOrder.asc);
+			updateURL({ sort: field, order: GetDevicesOrder.asc });
+			return;
+		}
+
+		if (sortDirection === GetDevicesOrder.asc) {
+			setSortDirection(GetDevicesOrder.desc);
+			updateURL({ sort: field, order: GetDevicesOrder.desc });
+			return;
+		}
+
+		setSortField(null);
+		setSortDirection(GetDevicesOrder.asc);
+		updateURL({ sort: undefined, order: undefined });
 	};
 
 	const handleApproveAndAssign = async () => {
@@ -827,7 +998,7 @@ const DevicesPage = () => {
 								<input
 									ref={searchInputRef}
 									type="text"
-									placeholder="Search devices..."
+									placeholder="Search devices... (comma-separated)"
 									value={searchTerm}
 									onChange={(e) => setSearchTerm(e.target.value)}
 									className="pl-10 pr-10 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm text-gray-900 placeholder-gray-400"
@@ -1158,10 +1329,36 @@ const DevicesPage = () => {
 									)}
 								</button>
 							</div>
-							<div>Device</div>
-							<div>Labels</div>
+							<SortableHeader
+								label="Device"
+								field={GetDevicesSort.serial_number}
+								activeField={sortField}
+								direction={sortDirection}
+								onSort={handleSort}
+							/>
+							<SortableHeader
+								label="Labels"
+								field={GetDevicesSort.labels}
+								activeField={sortField}
+								direction={sortDirection}
+								onSort={handleSort}
+							/>
 							<div>Location</div>
-							<div>Reachability (7d)</div>
+							<div className="flex items-center gap-2">
+								<label htmlFor="reachability-range">Reachability</label>
+								<Select
+									id="reachability-range"
+									value={reachabilityRange}
+									onChange={(v) => setReachabilityRange(v as UptimeRange)}
+									className="w-auto px-1.5 py-0.5 text-[11px] normal-case tracking-normal"
+								>
+									{UPTIME_RANGES.map((r) => (
+										<option key={r.label} value={r.label}>
+											{r.label}
+										</option>
+									))}
+								</Select>
+							</div>
 							<div>Release</div>
 						</div>
 					</div>
@@ -1173,15 +1370,17 @@ const DevicesPage = () => {
 							{filteredDevices.map((device) => (
 								<div
 									key={device.id}
-									className="block px-4 py-3 hover:bg-gray-50 cursor-pointer transition-colors"
-									onClick={() =>
-										navigate(`/devices/${device.serial_number}`, {
-											state: { back: location.pathname + location.search },
-										})
-									}
+									className="relative block px-4 py-3 hover:bg-gray-50 cursor-pointer transition-colors"
 								>
+									{/* z-0 doesn't reliably beat z-index:auto siblings; interactive row content needs z-10+ to stay above this. */}
+									<Link
+										to={`/devices/${device.serial_number}`}
+										state={{ back: location.pathname + location.search }}
+										className="absolute inset-0 z-[1]"
+										aria-label={`Open device ${device.serial_number}`}
+									/>
 									<div className="grid grid-cols-[auto_2fr_2fr_2fr_1fr_1fr] gap-4 items-center">
-										<div className="w-6 flex items-center justify-center">
+										<div className="relative z-10 w-6 flex items-center justify-center">
 											<button
 												onClick={(e) => {
 													e.stopPropagation();
@@ -1221,15 +1420,24 @@ const DevicesPage = () => {
 												<Cpu className="w-4 h-4 text-gray-400 flex-shrink-0" />
 												<div className="min-w-0 flex-1">
 													<div className="flex items-center space-x-2">
-														<Tooltip content={getStatusTooltip(device)}>
-															<div className="flex-shrink-0 cursor-help">
+														<Tooltip
+															content={getStatusTooltip(device)}
+															className="z-10"
+														>
+															<Link
+																to={`/devices/${device.serial_number}`}
+																state={{
+																	back: location.pathname + location.search,
+																}}
+																className="flex-shrink-0 cursor-help"
+															>
 																<NetworkQualityIndicator
 																	isOnline={
 																		getDeviceStatus(device) === "online"
 																	}
 																	networkScore={device.network?.network_score}
 																/>
-															</div>
+															</Link>
 														</Tooltip>
 														<div className="flex items-center space-x-2 min-w-0 flex-1">
 															<div className="text-sm font-medium text-gray-900 truncate">
@@ -1238,10 +1446,17 @@ const DevicesPage = () => {
 															{hasUpdatePending(device) && (
 																<Tooltip
 																	content={`Update pending: Release ${device.release_id} → ${device.target_release_id}`}
+																	className="z-10"
 																>
-																	<span className="px-1.5 py-0.5 text-xs font-medium bg-orange-100 text-orange-800 rounded-full cursor-help flex-shrink-0">
+																	<Link
+																		to={`/devices/${device.serial_number}`}
+																		state={{
+																			back: location.pathname + location.search,
+																		}}
+																		className="px-1.5 py-0.5 text-xs font-medium bg-orange-100 text-orange-800 rounded-full cursor-help flex-shrink-0 inline-block"
+																	>
 																		Outdated
-																	</span>
+																	</Link>
 																</Tooltip>
 															)}
 														</div>
@@ -1250,7 +1465,7 @@ const DevicesPage = () => {
 											</div>
 										</div>
 
-										<div>
+										<div className="relative z-10">
 											{device.labels &&
 											Object.keys(device.labels).length > 0 ? (
 												<div className="flex flex-wrap gap-1.5">
@@ -1328,7 +1543,10 @@ const DevicesPage = () => {
 											})()}
 										</div>
 
-										<ReachabilityCell serial={device.serial_number} />
+										<ReachabilityCell
+											serial={device.serial_number}
+											range={reachabilityRange}
+										/>
 
 										<div>
 											{getReleaseInfo(device) ? (
@@ -1444,7 +1662,11 @@ const DevicesPage = () => {
 									variant="solid"
 									tone="purple"
 									icon={<Terminal className="w-4 h-4" />}
-									onClick={() => setShowBulkCommandModal(true)}
+									onClick={() => {
+										setBulkCommand(emptyCommand("Ping"));
+										setBulkCommandError(null);
+										setShowBulkCommandModal(true);
+									}}
 								>
 									Run Command
 								</Button>
@@ -1674,7 +1896,8 @@ const DevicesPage = () => {
 				open={showBulkCommandModal}
 				onClose={() => {
 					setShowBulkCommandModal(false);
-					setFreeFormCommand("");
+					setBulkCommand(emptyCommand("Ping"));
+					setBulkCommandError(null);
 				}}
 				title="Run Command on Selected Devices"
 				footer={
@@ -1685,7 +1908,8 @@ const DevicesPage = () => {
 							disabled={isIssuingCommands}
 							onClick={() => {
 								setShowBulkCommandModal(false);
-								setFreeFormCommand("");
+								setBulkCommand(emptyCommand("Ping"));
+								setBulkCommandError(null);
 							}}
 						>
 							Cancel
@@ -1694,7 +1918,7 @@ const DevicesPage = () => {
 							variant="solid"
 							tone="purple"
 							loading={isIssuingCommands}
-							disabled={!freeFormCommand.trim()}
+							disabled={!commandIsValid(bulkCommand)}
 							onClick={handleBulkCommand}
 						>
 							{isIssuingCommands ? "Sending..." : "Run Command"}
@@ -1719,20 +1943,24 @@ const DevicesPage = () => {
 					</div>
 				</div>
 
-				{/* Command Input */}
+				{bulkCommandError && (
+					<div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg p-3 mb-4">
+						{bulkCommandError}
+					</div>
+				)}
+
+				{/* Command */}
 				<div>
 					<label className="block text-sm font-medium text-gray-700 mb-2">
 						Command
 					</label>
-					<input
-						type="text"
-						value={freeFormCommand}
-						onChange={(e) => setFreeFormCommand(e.target.value)}
-						placeholder="e.g., ls -la /var/log"
-						className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-purple-500 focus:border-purple-500 text-gray-900 placeholder-gray-400"
+					<CommandFields
+						command={bulkCommand}
+						options={BULK_COMMAND_OPTIONS}
+						onChange={setBulkCommand}
 					/>
 					<p className="mt-1 text-xs text-gray-500">
-						Enter a shell command to execute on the selected devices
+						Runs on all selected devices
 					</p>
 				</div>
 			</Modal>

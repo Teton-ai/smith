@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT\n            dni.id,\n            dni.device_id,\n            dni.network_id,\n            dni.priority,\n            dni.managed_by,\n            dni.created_at,\n            dni.updated_at,\n            n.ssid,\n            n.name,\n            n.network_type::TEXT as \"network_type!\"\n        FROM device_network_intent dni\n        JOIN network n ON n.id = dni.network_id\n        WHERE dni.device_id = $1\n        ORDER BY dni.priority ASC\n        ",
+  "query": "\n        SELECT\n            dni.id,\n            dni.device_id,\n            dni.network_id,\n            dni.priority,\n            dni.managed_by,\n            dni.created_at,\n            dni.updated_at,\n            n.ssid,\n            n.name,\n            n.network_type::TEXT as \"network_type!\",\n            n.security_type,\n            n.is_network_hidden,\n            n.credentials,\n            n.identity\n        FROM device_network_intent dni\n        JOIN network n ON n.id = dni.network_id\n        WHERE dni.device_id = $1\n        ORDER BY dni.priority ASC\n        ",
   "describe": {
     "columns": [
       {
@@ -52,6 +52,26 @@
         "ordinal": 9,
         "name": "network_type!",
         "type_info": "Text"
+      },
+      {
+        "ordinal": 10,
+        "name": "security_type",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 11,
+        "name": "is_network_hidden",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 12,
+        "name": "credentials",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 13,
+        "name": "identity",
+        "type_info": "Jsonb"
       }
     ],
     "parameters": {
@@ -69,8 +89,12 @@
       false,
       true,
       false,
-      null
+      null,
+      true,
+      false,
+      false,
+      true
     ]
   },
-  "hash": "ded97843415d347975e5002ee4575bd2ee5e0d7bff896422ef07f774d7dda8cd"
+  "hash": "65c4e39644972cd6740b52210dfcd44ec66c9d38f5e35869c93f30fbf02e6f0e"
 }

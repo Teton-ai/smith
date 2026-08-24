@@ -136,6 +136,23 @@ fn parse_nm_connection_list_line(line: &str) -> Option<(String, bool, String)> {
     }
 }
 
+// Empirically ~2-4% of secret-detail reads for wpa-psk/sae profiles come back
+// missing the psk even though it's genuinely stored (psk-flags=0), in short
+// bursts that self-clear within ~1s. A bounded retry catches most of these
+// before they reach the API and fork a duplicate `network` row (see ADR 0002
+// amendment, 2026-08-14).
+const DETAIL_RETRY_ATTEMPTS: u32 = 3;
+const DETAIL_RETRY_DELAY: Duration = Duration::from_millis(500);
+
+/// True only for the specific, empirically-diagnosed failure this retry exists
+/// for: a wpa-psk/sae profile (which always structurally has a psk) whose
+/// detail query came back without one. Never true for wpa-eap (out of scope,
+/// unverified) or open/unknown key-mgmt (nothing to retrieve).
+fn missing_required_psk(profile: &NMProfile) -> bool {
+    matches!(profile.key_mgmt.as_deref(), Some("wpa-psk") | Some("sae"))
+        && profile.password.is_none()
+}
+
 async fn get_nm_wifi_profiles() -> Result<Vec<NMProfile>> {
     let mut list_cmd = Command::new("nmcli");
     // Include UUID so each profile is queried by UUID in step 2, avoiding ambiguous
@@ -159,24 +176,41 @@ async fn get_nm_wifi_profiles() -> Result<Vec<NMProfile>> {
 
     let mut profiles = Vec::new();
     for (name, is_active, uuid) in entries {
-        let mut detail_cmd = Command::new("nmcli");
-        detail_cmd.args(["--show-secrets", "-t", "connection", "show", "uuid", &uuid]);
+        let mut detail = NMProfile::default();
+        for attempt in 1..=DETAIL_RETRY_ATTEMPTS {
+            let mut detail_cmd = Command::new("nmcli");
+            detail_cmd.args(["--show-secrets", "-t", "connection", "show", "uuid", &uuid]);
 
-        let detail = match execute_nmcli_command(detail_cmd).await {
-            Ok(output) if output.status.success() => {
-                let stdout = String::from_utf8_lossy(&output.stdout);
-                parse_nm_profile_detail(&stdout)
+            detail = match execute_nmcli_command(detail_cmd).await {
+                Ok(output) if output.status.success() => {
+                    let stdout = String::from_utf8_lossy(&output.stdout);
+                    parse_nm_profile_detail(&stdout)
+                }
+                Ok(output) => {
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    tracing::warn!("nmcli connection show uuid {uuid} failed: {stderr}");
+                    break; // command-error shape: not retried, see requirements.md FR3
+                }
+                Err(e) => {
+                    tracing::warn!("Failed to run nmcli connection show uuid {uuid}: {e}");
+                    break; // command-error shape: not retried, see requirements.md FR3
+                }
+            };
+
+            if !missing_required_psk(&detail) {
+                if attempt > 1 {
+                    tracing::debug!("psk read for uuid {uuid} recovered on attempt {attempt}");
+                }
+                break;
             }
-            Ok(output) => {
-                let stderr = String::from_utf8_lossy(&output.stderr);
-                tracing::warn!("nmcli connection show uuid {uuid} failed: {stderr}");
-                NMProfile::default()
+            if attempt < DETAIL_RETRY_ATTEMPTS {
+                sleep(DETAIL_RETRY_DELAY).await;
+            } else {
+                tracing::warn!(
+                    "psk still missing for uuid {uuid} ({name}) after {DETAIL_RETRY_ATTEMPTS} attempts"
+                );
             }
-            Err(e) => {
-                tracing::warn!("Failed to run nmcli connection show uuid {uuid}: {e}");
-                NMProfile::default()
-            }
-        };
+        }
 
         profiles.push(NMProfile {
             name,
@@ -211,6 +245,11 @@ pub(crate) async fn execute_report_nm_profiles(id: i32) -> SafeCommandResponse {
 
 const WIFI_SCAN_FIELDS: usize = 6;
 
+// Directed probes are sequential nmcli calls (60s timeout each); cap keeps a scan
+// bounded (~5 min worst case) instead of growing with however many hidden
+// profiles a device has accumulated.
+const MAX_HIDDEN_PROBES: usize = 5;
+
 pub(crate) async fn execute_wifi_scan(id: i32) -> SafeCommandResponse {
     let mut cmd = Command::new("nmcli");
     cmd.args([
@@ -227,7 +266,10 @@ pub(crate) async fn execute_wifi_scan(id: i32) -> SafeCommandResponse {
     match execute_nmcli_command(cmd).await {
         Ok(output) if output.status.success() => {
             let stdout = String::from_utf8_lossy(&output.stdout);
-            let networks = stdout.lines().filter_map(parse_wifi_scan_line).collect();
+            let broadcast: Vec<WifiNetwork> =
+                stdout.lines().filter_map(parse_wifi_scan_line).collect();
+            let probes = probe_hidden_ssids().await;
+            let networks = merge_scan_results(broadcast, probes);
             SafeCommandResponse {
                 id,
                 command: SafeCommandRx::WifiScan { networks },
@@ -252,6 +294,148 @@ pub(crate) async fn execute_wifi_scan(id: i32) -> SafeCommandResponse {
             }
         }
     }
+}
+
+/// Hidden networks don't answer a broadcast scan; NM only learns their SSID via
+/// a directed probe (`wifi list ssid <SSID>`). We already know the SSIDs of any
+/// hidden network configured on this device (from its own NM profiles), so probe
+/// those directly instead of leaving them anonymous in the scan.
+async fn probe_hidden_ssids() -> Vec<Vec<WifiNetwork>> {
+    let profiles = match get_nm_wifi_profiles().await {
+        Ok(profiles) => profiles,
+        Err(e) => {
+            tracing::warn!("Failed to enumerate NM profiles for hidden-SSID probing: {e:#}");
+            return Vec::new();
+        }
+    };
+
+    let mut candidates: Vec<(String, Option<i32>)> = Vec::new();
+    let mut seen = HashSet::new();
+    for profile in profiles {
+        if profile.hidden != Some(true) {
+            continue;
+        }
+        let Some(ssid) = profile.ssid else {
+            continue;
+        };
+        if seen.insert(ssid.clone()) {
+            candidates.push((ssid, profile.autoconnect_priority));
+        }
+    }
+    // Highest priority first; profiles without a priority probed last.
+    candidates.sort_by(|a, b| b.1.cmp(&a.1));
+
+    if candidates.len() > MAX_HIDDEN_PROBES {
+        let skipped: Vec<&str> = candidates[MAX_HIDDEN_PROBES..]
+            .iter()
+            .map(|(ssid, _)| ssid.as_str())
+            .collect();
+        tracing::warn!(
+            "Skipping {} hidden SSID probe(s) beyond the cap of {MAX_HIDDEN_PROBES}: {skipped:?}",
+            skipped.len()
+        );
+    }
+
+    let mut probes = Vec::new();
+    for (ssid, _) in candidates.into_iter().take(MAX_HIDDEN_PROBES) {
+        probes.push(probe_ssid(&ssid).await);
+    }
+    probes
+}
+
+// `device wifi rescan ssid <SSID>` only *requests* the directed probe over
+// D-Bus and returns immediately (unlike `device wifi list --rescan yes`,
+// which blocks until the scan completes); `wifi list` also has no `ssid`
+// filter in this nmcli version, so a probe reads back the whole environment.
+// The fixed sleep stands in for the blocking wait the combined old syntax
+// used to give us for free.
+const PROBE_SCAN_SETTLE: Duration = Duration::from_secs(3);
+
+async fn probe_ssid(ssid: &str) -> Vec<WifiNetwork> {
+    let mut rescan_cmd = Command::new("nmcli");
+    rescan_cmd.args(["device", "wifi", "rescan", "ssid", ssid]);
+
+    match execute_nmcli_command(rescan_cmd).await {
+        Ok(output) if output.status.success() => {}
+        Ok(output) => {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            tracing::warn!("nmcli device wifi rescan ssid {ssid} failed: {stderr}");
+            return Vec::new();
+        }
+        Err(e) => {
+            tracing::warn!("Failed to request directed rescan for hidden SSID {ssid}: {e}");
+            return Vec::new();
+        }
+    }
+
+    sleep(PROBE_SCAN_SETTLE).await;
+
+    let mut list_cmd = Command::new("nmcli");
+    list_cmd.args([
+        "-t",
+        "-f",
+        "SSID,BSSID,SIGNAL,RATE,SECURITY,CHAN",
+        "device",
+        "wifi",
+        "list",
+    ]);
+
+    match execute_nmcli_command(list_cmd).await {
+        Ok(output) if output.status.success() => {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            stdout.lines().filter_map(parse_wifi_scan_line).collect()
+        }
+        Ok(output) => {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            tracing::warn!("nmcli device wifi list after rescan ssid {ssid} failed: {stderr}");
+            Vec::new()
+        }
+        Err(e) => {
+            tracing::warn!("Failed to read wifi list after probing hidden SSID {ssid}: {e}");
+            Vec::new()
+        }
+    }
+}
+
+/// Merges a broadcast scan with directed-probe results for hidden SSIDs, indexed
+/// by BSSID. A broadcast row with an unresolved (empty) SSID is replaced by the
+/// first probe that resolves that BSSID; a BSSID a probe resolves that the
+/// broadcast scan never saw is appended. Once a BSSID's SSID is resolved
+/// (whether by the broadcast scan or an earlier probe), later probes never
+/// overwrite it.
+fn merge_scan_results(
+    broadcast: Vec<WifiNetwork>,
+    probes: Vec<Vec<WifiNetwork>>,
+) -> Vec<WifiNetwork> {
+    let mut order = Vec::new();
+    let mut by_bssid: HashMap<String, WifiNetwork> = HashMap::new();
+
+    for network in broadcast {
+        order.push(network.bssid.clone());
+        by_bssid.insert(network.bssid.clone(), network);
+    }
+
+    for probe in probes {
+        for network in probe {
+            match by_bssid.get(&network.bssid) {
+                Some(existing) if existing.ssid.is_some() => {
+                    // Already resolved (broadcast or an earlier probe): first wins.
+                }
+                Some(_) => {
+                    by_bssid.insert(network.bssid.clone(), network);
+                }
+                None => {
+                    order.push(network.bssid.clone());
+                    by_bssid.insert(network.bssid.clone(), network);
+                }
+            }
+        }
+    }
+
+    order
+        .into_iter()
+        .filter_map(|bssid| by_bssid.remove(&bssid))
+        .collect()
 }
 
 fn parse_wifi_scan_line(line: &str) -> Option<WifiNetwork> {
@@ -341,6 +525,7 @@ fn parse_nm_profile_detail(stdout: &str) -> NMProfile {
     let mut phase2_auth = None;
     let mut anonymous_identity = None;
     let mut eap_identity = None;
+    let mut raw_autoconnect_priority: Option<String> = None;
 
     for line in stdout.lines() {
         if let Some(val) = line.strip_prefix("802-11-wireless.ssid:") {
@@ -387,6 +572,11 @@ fn parse_nm_profile_detail(stdout: &str) -> NMProfile {
             && val != "--"
         {
             eap_identity = Some(unescape_terse(val));
+        } else if let Some(val) = line.strip_prefix("connection.autoconnect-priority:")
+            && !val.is_empty()
+            && val != "--"
+        {
+            raw_autoconnect_priority = Some(unescape_terse(val));
         }
     }
 
@@ -400,6 +590,14 @@ fn parse_nm_profile_detail(stdout: &str) -> NMProfile {
         _ => None,
     });
 
+    let autoconnect_priority = raw_autoconnect_priority.as_deref().and_then(|v| {
+        v.parse::<i32>()
+            .inspect_err(|e| {
+                tracing::warn!("Unparseable connection.autoconnect-priority {v:?}: {e}")
+            })
+            .ok()
+    });
+
     NMProfile {
         ssid,
         password,
@@ -410,6 +608,7 @@ fn parse_nm_profile_detail(stdout: &str) -> NMProfile {
         phase2_auth,
         anonymous_identity,
         eap_identity,
+        autoconnect_priority,
         ..Default::default()
     }
 }
@@ -1124,6 +1323,7 @@ async fn nmcli_modify_profile(
     ssid: &str,
     psk: Option<&str>,
     priority: i32,
+    hidden: bool,
 ) -> Result<()> {
     let mut cmd = Command::new("nmcli");
     cmd.args([
@@ -1132,6 +1332,8 @@ async fn nmcli_modify_profile(
         name,
         "802-11-wireless.ssid",
         ssid,
+        "802-11-wireless.hidden",
+        if hidden { "yes" } else { "no" },
         "connection.autoconnect",
         "yes",
         "connection.autoconnect-priority",
@@ -1155,6 +1357,7 @@ async fn nmcli_create_profile(
     ssid: &str,
     psk: Option<&str>,
     priority: i32,
+    hidden: bool,
 ) -> Result<()> {
     let mut cmd = Command::new("nmcli");
     cmd.args([
@@ -1166,6 +1369,8 @@ async fn nmcli_create_profile(
         profile_name,
         "ssid",
         ssid,
+        "802-11-wireless.hidden",
+        if hidden { "yes" } else { "no" },
         "autoconnect",
         "yes",
         "connection.autoconnect-priority",
@@ -1184,6 +1389,86 @@ async fn nmcli_create_profile(
     Ok(())
 }
 
+/// The profile's true security type, in the same vocabulary `map_key_mgmt`
+/// uses server-side — distinct from the already-degraded `credentials.key_mgmt`
+/// an intent entry carries.
+fn profile_security_type(p: &NMProfile) -> Option<&'static str> {
+    match p.key_mgmt.as_deref() {
+        Some("open") | Some("none") => Some("open"),
+        Some("wpa-psk") => Some("wpa-psk"),
+        Some("sae") => Some("sae"),
+        Some("owe") => Some("owe"),
+        Some("wpa-eap") => Some("wpa-eap"),
+        _ => None,
+    }
+}
+
+/// Open networks ignore PSK. For secured ones, an unreadable existing PSK
+/// (`None`) is a wildcard rather than a mismatch — get_nm_wifi_profiles
+/// already retries the secret read, so `None` here is a rare residual, not
+/// the routine case.
+fn psk_matches(existing: Option<&str>, intent: Option<&str>, is_open: bool) -> bool {
+    if is_open {
+        return true;
+    }
+    match existing {
+        None => true,
+        Some(x) => Some(x) == intent,
+    }
+}
+
+/// True when nothing about an active profile needs to change, so
+/// execute_apply_networks can just bump priority instead of touching the
+/// connection. `hidden` must be checked here too: it doesn't affect ssid/psk
+/// equality, so a hidden-only change was previously invisible to this check.
+fn active_profile_matches(
+    profile: &NMProfile,
+    ssid: &str,
+    hidden: bool,
+    psk: Option<&str>,
+) -> bool {
+    let ssid_matches = profile.ssid.as_deref() == Some(ssid);
+    let hidden_matches = profile.hidden.unwrap_or(false) == hidden;
+    match psk {
+        None => ssid_matches && hidden_matches,
+        Some(psk) => ssid_matches && hidden_matches && profile.password.as_deref() == Some(psk),
+    }
+}
+
+/// Finds a pre-existing NM profile that's the same network under a different
+/// name, so execute_apply_networks can adopt (rename) it instead of creating
+/// a duplicate. Matches on the same identity fields the DB's
+/// network_find_by_content uses (ssid, hidden, security_type, psk), so
+/// smithd's notion of "same network" can't diverge from the catalog's.
+#[allow(clippy::too_many_arguments)]
+fn select_adoption_candidate<'a>(
+    current_profiles: &'a HashMap<String, NMProfile>,
+    intent_profile_names: &HashSet<String>,
+    claimed: &HashSet<String>,
+    profile_name: &str,
+    ssid: &str,
+    hidden: bool,
+    security_type: &str,
+    intent_psk: Option<&str>,
+) -> Option<&'a NMProfile> {
+    let is_open = security_type == "open";
+    current_profiles
+        .values()
+        .filter(|p| {
+            p.name != profile_name
+                && !intent_profile_names.contains(&p.name)
+                && !claimed.contains(&p.name)
+                && p.ssid.as_deref() == Some(ssid)
+                && p.hidden.unwrap_or(false) == hidden
+                && profile_security_type(p) == Some(security_type)
+                && psk_matches(p.password.as_deref(), intent_psk, is_open)
+        })
+        // Prefer the active candidate (lower disruption); otherwise fall back
+        // to the lexically-first name for a deterministic pick, since HashMap
+        // iteration order isn't.
+        .max_by_key(|p| (p.is_active, std::cmp::Reverse(p.name.clone())))
+}
+
 fn classify_connect_error(stderr: &str) -> ConditionReason {
     let lower = stderr.to_lowercase();
     if lower.contains("secrets") || lower.contains("psk") || lower.contains("authentication") {
@@ -1200,6 +1485,7 @@ async fn connectivity_guard(
     ssid: &str,
     psk: &str,
     priority: i32,
+    hidden: bool,
 ) -> Result<(), ConditionReason> {
     let tmp_name = format!("tmp-{profile_name}");
 
@@ -1214,6 +1500,8 @@ async fn connectivity_guard(
         &tmp_name,
         "ssid",
         ssid,
+        "802-11-wireless.hidden",
+        if hidden { "yes" } else { "no" },
         "autoconnect",
         "no",
         "connection.autoconnect-priority",
@@ -1317,6 +1605,40 @@ async fn connectivity_guard(
     }
 }
 
+/// Renames a profile picked by select_adoption_candidate to the intent's
+/// profile_name, merging it in place instead of creating a duplicate. Same
+/// connection.id rename primitive connectivity_guard already uses on a live
+/// active connection. `ssid` is log-only, already verified by the caller.
+async fn adopt_matching_profile(
+    old_name: &str,
+    new_name: &str,
+    ssid: &str,
+) -> Result<(), ConditionReason> {
+    let mut rename_cmd = Command::new("nmcli");
+    rename_cmd.args(["connection", "modify", old_name, "connection.id", new_name]);
+    match execute_nmcli_command(rename_cmd).await {
+        Ok(out) if out.status.success() => {
+            tracing::info!(
+                "execute_apply_networks: adopted existing profile {old_name} as {new_name} (same ssid {ssid})"
+            );
+            Ok(())
+        }
+        Ok(out) => {
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            tracing::error!(
+                "execute_apply_networks: failed to rename {old_name} to {new_name}: {stderr}"
+            );
+            Err(ConditionReason::NmcliError)
+        }
+        Err(e) => {
+            tracing::error!(
+                "execute_apply_networks: failed to rename {old_name} to {new_name}: {e:#}"
+            );
+            Err(ConditionReason::NmcliError)
+        }
+    }
+}
+
 async fn try_connect_to_fallback(
     active_profile_name: &str,
     networks: &[IntentNetwork],
@@ -1396,6 +1718,9 @@ pub(crate) async fn execute_apply_networks(
         networks.iter().map(|nw| nw.profile_name.clone()).collect();
     let mut conditions: Vec<NetworkCondition> = Vec::new();
     let mut applied_profile_names: Vec<String> = Vec::new();
+    // Pre-existing profiles adopted (renamed) into an intent name this pass, so a
+    // later intent entry doesn't try to adopt the same one.
+    let mut claimed: HashSet<String> = HashSet::new();
 
     for (index, network) in networks.iter().enumerate() {
         let priority = ((n - index) * 10) as i32;
@@ -1434,11 +1759,44 @@ pub(crate) async fn execute_apply_networks(
             continue;
         }
 
-        let result = match current_profiles.get(profile_name.as_str()) {
+        // Exact-name match first; otherwise adopt a pre-existing profile for the
+        // same network under a different name, so it doesn't get duplicated.
+        let exact_match = current_profiles.get(profile_name.as_str());
+        let adoption_candidate = if exact_match.is_none() {
+            select_adoption_candidate(
+                &current_profiles,
+                &intent_profile_names,
+                &claimed,
+                profile_name,
+                ssid,
+                network.hidden,
+                &network.security_type,
+                psk,
+            )
+        } else {
+            None
+        };
+
+        if let Some(candidate) = adoption_candidate {
+            // ssid already verified by select_adoption_candidate
+            if let Err(reason) = adopt_matching_profile(&candidate.name, profile_name, ssid).await {
+                conditions.push(NetworkCondition {
+                    profile_name: profile_name.clone(),
+                    state: ConditionState::Failed,
+                    reason: Some(reason),
+                    message: None,
+                });
+                continue;
+            }
+            claimed.insert(candidate.name.clone());
+        }
+
+        let resolved: Option<&NMProfile> = exact_match.or(adoption_candidate);
+
+        let result = match resolved {
             Some(profile) if profile.is_active => {
                 if is_open {
-                    let ssid_matches = profile.ssid.as_deref() == Some(ssid.as_str());
-                    if ssid_matches {
+                    if active_profile_matches(profile, ssid, network.hidden, None) {
                         nmcli_update_priority(profile_name, priority)
                             .await
                             .map_err(|e| {
@@ -1448,7 +1806,7 @@ pub(crate) async fn execute_apply_networks(
                                 ConditionReason::NmcliError
                             })
                     } else {
-                        nmcli_modify_profile(profile_name, ssid, psk, priority)
+                        nmcli_modify_profile(profile_name, ssid, psk, priority, network.hidden)
                             .await
                             .map_err(|e| {
                                 tracing::error!(
@@ -1460,13 +1818,11 @@ pub(crate) async fn execute_apply_networks(
                 } else {
                     // psk is guaranteed Some by the pre-match guard above.
                     let psk = psk.expect("wpa-psk with None psk reached active branch");
-                    let ssid_matches = profile.ssid.as_deref() == Some(ssid.as_str());
-                    let psk_matches = profile.password.as_deref() == Some(psk);
-                    if ssid_matches && psk_matches {
+                    if active_profile_matches(profile, ssid, network.hidden, Some(psk)) {
                         // Nothing changed: only update priority to avoid an unnecessary reconnect.
-                        // Note: profile.password is None when the PSK is stored in a system keyring
-                        // rather than the NM config file. In that case this check always misses and
-                        // the guard runs with the same PSK, which succeeds harmlessly.
+                        // profile.password can still come back None on a rare post-retry read
+                        // flake (missing_required_psk); this check just misses and falls to
+                        // connectivity_guard with the same PSK, which succeeds harmlessly.
                         nmcli_update_priority(profile_name, priority)
                             .await
                             .map_err(|e| {
@@ -1478,13 +1834,13 @@ pub(crate) async fn execute_apply_networks(
                     } else {
                         // SSID or PSK changed on an active profile: use connectivity guard to
                         // validate new credentials before committing (avoids stranding the device).
-                        connectivity_guard(profile_name, ssid, psk, priority).await
+                        connectivity_guard(profile_name, ssid, psk, priority, network.hidden).await
                     }
                 }
             }
             Some(_) => {
                 // Inactive profile: overwrite SSID, credentials, and priority in place.
-                nmcli_modify_profile(profile_name, ssid, psk, priority)
+                nmcli_modify_profile(profile_name, ssid, psk, priority, network.hidden)
                     .await
                     .map_err(|e| {
                         tracing::error!(
@@ -1493,7 +1849,7 @@ pub(crate) async fn execute_apply_networks(
                         ConditionReason::NmcliError
                     })
             }
-            None => nmcli_create_profile(profile_name, ssid, psk, priority)
+            None => nmcli_create_profile(profile_name, ssid, psk, priority, network.hidden)
                 .await
                 .map_err(|e| {
                     tracing::error!("execute_apply_networks: create {profile_name} failed: {e:#}");
@@ -1782,6 +2138,69 @@ OpenNet:802-11-wireless:OpenNet:--:--";
     }
 
     #[test]
+    fn missing_required_psk_true_for_wpa_psk_without_password() {
+        let profile = NMProfile {
+            key_mgmt: Some("wpa-psk".to_string()),
+            password: None,
+            ..Default::default()
+        };
+        assert!(missing_required_psk(&profile));
+    }
+
+    #[test]
+    fn missing_required_psk_false_for_wpa_psk_with_password() {
+        let profile = NMProfile {
+            key_mgmt: Some("wpa-psk".to_string()),
+            password: Some("secret123".to_string()),
+            ..Default::default()
+        };
+        assert!(!missing_required_psk(&profile));
+    }
+
+    #[test]
+    fn missing_required_psk_true_for_sae_without_password() {
+        let profile = NMProfile {
+            key_mgmt: Some("sae".to_string()),
+            password: None,
+            ..Default::default()
+        };
+        assert!(missing_required_psk(&profile));
+    }
+
+    #[test]
+    fn missing_required_psk_false_for_open_without_password() {
+        let profile = NMProfile {
+            key_mgmt: Some("open".to_string()),
+            password: None,
+            ..Default::default()
+        };
+        assert!(!missing_required_psk(&profile));
+    }
+
+    #[test]
+    fn missing_required_psk_false_for_wpa_eap_without_identity() {
+        // wpa-eap is deliberately out of scope for this retry (requirements.md
+        // FR4): the diagnosed failure and its fix are scoped to wpa-psk/sae only.
+        let profile = NMProfile {
+            key_mgmt: Some("wpa-eap".to_string()),
+            password: None,
+            eap_identity: None,
+            ..Default::default()
+        };
+        assert!(!missing_required_psk(&profile));
+    }
+
+    #[test]
+    fn missing_required_psk_false_for_unknown_key_mgmt() {
+        let profile = NMProfile {
+            key_mgmt: None,
+            password: None,
+            ..Default::default()
+        };
+        assert!(!missing_required_psk(&profile));
+    }
+
+    #[test]
     fn nm_profile_detail_open_network_no_security_block_sets_sentinel() {
         // No 802-11-wireless-security lines at all: sentinel "open" must be set.
         let stdout = "802-11-wireless.ssid:FreeWifi\n\
@@ -1846,6 +2265,85 @@ OpenNet:802-11-wireless:OpenNet:--:--";
     }
 
     #[test]
+    fn nm_profile_detail_autoconnect_priority_present() {
+        let stdout = "802-11-wireless.ssid:CorpWifi\n\
+connection.autoconnect-priority:500\n";
+        let p = parse_nm_profile_detail(stdout);
+        assert_eq!(p.autoconnect_priority, Some(500));
+    }
+
+    #[test]
+    fn nm_profile_detail_autoconnect_priority_absent() {
+        let p = parse_nm_profile_detail("802-11-wireless.ssid:CorpWifi\n");
+        assert_eq!(p.autoconnect_priority, None);
+    }
+
+    #[test]
+    fn nm_profile_detail_autoconnect_priority_dash() {
+        let p = parse_nm_profile_detail("connection.autoconnect-priority:--\n");
+        assert_eq!(p.autoconnect_priority, None);
+    }
+
+    #[test]
+    fn nm_profile_detail_autoconnect_priority_non_numeric() {
+        let p = parse_nm_profile_detail("connection.autoconnect-priority:not-a-number\n");
+        assert_eq!(p.autoconnect_priority, None);
+    }
+
+    fn wifi_net(ssid: Option<&str>, bssid: &str, signal: i32) -> WifiNetwork {
+        WifiNetwork {
+            ssid: ssid.map(String::from),
+            bssid: bssid.to_string(),
+            signal: Some(signal),
+            rate: Some(100),
+            security: Some("WPA2".to_string()),
+            channel: Some(6),
+        }
+    }
+
+    #[test]
+    fn merge_resolves_empty_ssid_bssid_from_probe() {
+        let broadcast = vec![wifi_net(None, "AA:AA:AA:AA:AA:AA", 40)];
+        let probes = vec![vec![wifi_net(Some("Hidden"), "AA:AA:AA:AA:AA:AA", 40)]];
+        let merged = merge_scan_results(broadcast, probes);
+        assert_eq!(merged.len(), 1);
+        assert_eq!(merged[0].ssid, Some("Hidden".to_string()));
+    }
+
+    #[test]
+    fn merge_appends_probe_only_bssid() {
+        let broadcast = vec![wifi_net(Some("Visible"), "AA:AA:AA:AA:AA:AA", 60)];
+        let probes = vec![vec![wifi_net(Some("Hidden"), "BB:BB:BB:BB:BB:BB", 30)]];
+        let merged = merge_scan_results(broadcast, probes);
+        assert_eq!(merged.len(), 2);
+        assert!(
+            merged
+                .iter()
+                .any(|n| n.bssid == "BB:BB:BB:BB:BB:BB" && n.ssid == Some("Hidden".to_string()))
+        );
+    }
+
+    #[test]
+    fn merge_first_probe_wins_on_conflicting_bssid() {
+        let probes = vec![
+            vec![wifi_net(Some("First"), "CC:CC:CC:CC:CC:CC", 50)],
+            vec![wifi_net(Some("Second"), "CC:CC:CC:CC:CC:CC", 55)],
+        ];
+        let merged = merge_scan_results(vec![], probes);
+        assert_eq!(merged.len(), 1);
+        assert_eq!(merged[0].ssid, Some("First".to_string()));
+    }
+
+    #[test]
+    fn merge_never_overwrites_broadcast_resolved_ssid() {
+        let broadcast = vec![wifi_net(Some("Real"), "DD:DD:DD:DD:DD:DD", 70)];
+        let probes = vec![vec![wifi_net(Some("Other"), "DD:DD:DD:DD:DD:DD", 20)]];
+        let merged = merge_scan_results(broadcast, probes);
+        assert_eq!(merged.len(), 1);
+        assert_eq!(merged[0].ssid, Some("Real".to_string()));
+    }
+
+    #[test]
     fn parse_wifi_scan_normal_ap() {
         let net =
             parse_wifi_scan_line("CorpWifi:AA\\:46\\:8D\\:29\\:A7\\:16:82:130 Mbit/s:WPA2:11")
@@ -1902,5 +2400,462 @@ OpenNet:802-11-wireless:OpenNet:--:--";
         // Too few fields.
         assert!(parse_wifi_scan_line("Net:AA\\:BB\\:CC\\:DD\\:EE\\:FF:60").is_none());
         assert!(parse_wifi_scan_line("").is_none());
+    }
+
+    fn nm_profile(
+        name: &str,
+        ssid: &str,
+        key_mgmt: &str,
+        password: Option<&str>,
+        hidden: bool,
+        is_active: bool,
+    ) -> NMProfile {
+        NMProfile {
+            name: name.to_string(),
+            ssid: Some(ssid.to_string()),
+            password: password.map(str::to_string),
+            key_mgmt: Some(key_mgmt.to_string()),
+            hidden: Some(hidden),
+            is_active,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn active_profile_matches_open_same_ssid_and_hidden() {
+        let profile = nm_profile("n", "OpenNet", "open", None, false, true);
+        assert!(active_profile_matches(&profile, "OpenNet", false, None));
+    }
+
+    #[test]
+    fn active_profile_matches_open_hidden_mismatch_is_not_a_match() {
+        // Same SSID both ways, but hidden state flips: must not read as unchanged.
+        let profile = nm_profile("n", "OpenNet", "open", None, true, true);
+        assert!(!active_profile_matches(&profile, "OpenNet", false, None));
+        let profile = nm_profile("n", "OpenNet", "open", None, false, true);
+        assert!(!active_profile_matches(&profile, "OpenNet", true, None));
+    }
+
+    #[test]
+    fn active_profile_matches_secured_same_ssid_psk_and_hidden() {
+        let profile = nm_profile("n", "HC-Teton", "wpa-psk", Some("secret"), false, true);
+        assert!(active_profile_matches(
+            &profile,
+            "HC-Teton",
+            false,
+            Some("secret")
+        ));
+    }
+
+    #[test]
+    fn active_profile_matches_secured_hidden_mismatch_is_not_a_match() {
+        let profile = nm_profile("n", "HC-Teton", "wpa-psk", Some("secret"), true, true);
+        assert!(!active_profile_matches(
+            &profile,
+            "HC-Teton",
+            false,
+            Some("secret")
+        ));
+    }
+
+    #[test]
+    fn active_profile_matches_secured_psk_mismatch_is_not_a_match() {
+        let profile = nm_profile("n", "HC-Teton", "wpa-psk", Some("old"), false, true);
+        assert!(!active_profile_matches(
+            &profile,
+            "HC-Teton",
+            false,
+            Some("new")
+        ));
+    }
+
+    #[test]
+    fn profile_security_type_maps_known_key_mgmt() {
+        assert_eq!(
+            profile_security_type(&nm_profile("n", "s", "open", None, false, false)),
+            Some("open")
+        );
+        assert_eq!(
+            profile_security_type(&nm_profile("n", "s", "none", None, false, false)),
+            Some("open")
+        );
+        assert_eq!(
+            profile_security_type(&nm_profile("n", "s", "wpa-psk", None, false, false)),
+            Some("wpa-psk")
+        );
+        assert_eq!(
+            profile_security_type(&nm_profile("n", "s", "sae", None, false, false)),
+            Some("sae")
+        );
+        assert_eq!(
+            profile_security_type(&nm_profile("n", "s", "owe", None, false, false)),
+            Some("owe")
+        );
+        assert_eq!(
+            profile_security_type(&nm_profile("n", "s", "wpa-eap", None, false, false)),
+            Some("wpa-eap")
+        );
+    }
+
+    #[test]
+    fn profile_security_type_unknown_key_mgmt_is_none() {
+        let mut p = nm_profile("n", "s", "wep", None, false, false);
+        assert_eq!(profile_security_type(&p), None);
+        p.key_mgmt = None;
+        assert_eq!(profile_security_type(&p), None);
+    }
+
+    #[test]
+    fn psk_matches_open_ignores_psk() {
+        assert!(psk_matches(Some("a"), Some("b"), true));
+        assert!(psk_matches(None, None, true));
+    }
+
+    #[test]
+    fn psk_matches_secured_none_is_wildcard() {
+        assert!(psk_matches(None, Some("secret"), false));
+    }
+
+    #[test]
+    fn psk_matches_secured_equal_matches() {
+        assert!(psk_matches(Some("secret"), Some("secret"), false));
+    }
+
+    #[test]
+    fn psk_matches_secured_unequal_does_not_match() {
+        assert!(!psk_matches(Some("old"), Some("new"), false));
+    }
+
+    #[test]
+    fn select_adoption_candidate_finds_matching_profile_under_different_name() {
+        let mut current_profiles = HashMap::new();
+        current_profiles.insert(
+            "hazeldene-house-new".to_string(),
+            nm_profile(
+                "hazeldene-house-new",
+                "HC-Teton",
+                "wpa-psk",
+                Some("secret"),
+                false,
+                false,
+            ),
+        );
+        let intent_profile_names = HashSet::new();
+        let claimed = HashSet::new();
+
+        let candidate = select_adoption_candidate(
+            &current_profiles,
+            &intent_profile_names,
+            &claimed,
+            "HC-Teton",
+            "HC-Teton",
+            false,
+            "wpa-psk",
+            Some("secret"),
+        );
+
+        assert_eq!(
+            candidate.map(|p| p.name.as_str()),
+            Some("hazeldene-house-new")
+        );
+    }
+
+    #[test]
+    fn select_adoption_candidate_excludes_profile_owned_by_another_intent_entry() {
+        let mut current_profiles = HashMap::new();
+        current_profiles.insert(
+            "other-owner".to_string(),
+            nm_profile(
+                "other-owner",
+                "HC-Teton",
+                "wpa-psk",
+                Some("secret"),
+                false,
+                false,
+            ),
+        );
+        let mut intent_profile_names = HashSet::new();
+        intent_profile_names.insert("other-owner".to_string());
+        let claimed = HashSet::new();
+
+        let candidate = select_adoption_candidate(
+            &current_profiles,
+            &intent_profile_names,
+            &claimed,
+            "HC-Teton",
+            "HC-Teton",
+            false,
+            "wpa-psk",
+            Some("secret"),
+        );
+
+        assert!(candidate.is_none());
+    }
+
+    #[test]
+    fn select_adoption_candidate_excludes_already_claimed_profile() {
+        let mut current_profiles = HashMap::new();
+        current_profiles.insert(
+            "already-claimed".to_string(),
+            nm_profile(
+                "already-claimed",
+                "HC-Teton",
+                "wpa-psk",
+                Some("secret"),
+                false,
+                false,
+            ),
+        );
+        let intent_profile_names = HashSet::new();
+        let mut claimed = HashSet::new();
+        claimed.insert("already-claimed".to_string());
+
+        let candidate = select_adoption_candidate(
+            &current_profiles,
+            &intent_profile_names,
+            &claimed,
+            "HC-Teton",
+            "HC-Teton",
+            false,
+            "wpa-psk",
+            Some("secret"),
+        );
+
+        assert!(candidate.is_none());
+    }
+
+    #[test]
+    fn select_adoption_candidate_excludes_ssid_mismatch() {
+        let mut current_profiles = HashMap::new();
+        current_profiles.insert(
+            "other-net".to_string(),
+            nm_profile(
+                "other-net",
+                "SomeOtherSSID",
+                "wpa-psk",
+                Some("secret"),
+                false,
+                false,
+            ),
+        );
+
+        let candidate = select_adoption_candidate(
+            &current_profiles,
+            &HashSet::new(),
+            &HashSet::new(),
+            "HC-Teton",
+            "HC-Teton",
+            false,
+            "wpa-psk",
+            Some("secret"),
+        );
+
+        assert!(candidate.is_none());
+    }
+
+    #[test]
+    fn select_adoption_candidate_excludes_hidden_mismatch() {
+        let mut current_profiles = HashMap::new();
+        current_profiles.insert(
+            "hidden-net".to_string(),
+            nm_profile(
+                "hidden-net",
+                "HC-Teton",
+                "wpa-psk",
+                Some("secret"),
+                true,
+                false,
+            ),
+        );
+
+        let candidate = select_adoption_candidate(
+            &current_profiles,
+            &HashSet::new(),
+            &HashSet::new(),
+            "HC-Teton",
+            "HC-Teton",
+            false,
+            "wpa-psk",
+            Some("secret"),
+        );
+
+        assert!(candidate.is_none());
+    }
+
+    #[test]
+    fn select_adoption_candidate_never_adopts_sae_or_owe() {
+        // sae/owe are refused upstream, so a surviving intent entry's
+        // security_type is never sae/owe, and this must never match one.
+        let mut current_profiles = HashMap::new();
+        current_profiles.insert(
+            "wpa3-net".to_string(),
+            nm_profile("wpa3-net", "HC-Teton", "sae", Some("secret"), false, false),
+        );
+
+        let candidate = select_adoption_candidate(
+            &current_profiles,
+            &HashSet::new(),
+            &HashSet::new(),
+            "HC-Teton",
+            "HC-Teton",
+            false,
+            "wpa-psk",
+            Some("secret"),
+        );
+
+        assert!(candidate.is_none());
+    }
+
+    #[test]
+    fn select_adoption_candidate_excludes_psk_mismatch_for_secured_network() {
+        let mut current_profiles = HashMap::new();
+        current_profiles.insert(
+            "wrong-psk".to_string(),
+            nm_profile(
+                "wrong-psk",
+                "HC-Teton",
+                "wpa-psk",
+                Some("old-secret"),
+                false,
+                false,
+            ),
+        );
+
+        let candidate = select_adoption_candidate(
+            &current_profiles,
+            &HashSet::new(),
+            &HashSet::new(),
+            "HC-Teton",
+            "HC-Teton",
+            false,
+            "wpa-psk",
+            Some("new-secret"),
+        );
+
+        assert!(candidate.is_none());
+    }
+
+    #[test]
+    fn select_adoption_candidate_includes_unreadable_psk_as_wildcard() {
+        let mut current_profiles = HashMap::new();
+        current_profiles.insert(
+            "unreadable-psk".to_string(),
+            nm_profile("unreadable-psk", "HC-Teton", "wpa-psk", None, false, false),
+        );
+
+        let candidate = select_adoption_candidate(
+            &current_profiles,
+            &HashSet::new(),
+            &HashSet::new(),
+            "HC-Teton",
+            "HC-Teton",
+            false,
+            "wpa-psk",
+            Some("secret"),
+        );
+
+        assert_eq!(candidate.map(|p| p.name.as_str()), Some("unreadable-psk"));
+    }
+
+    #[test]
+    fn select_adoption_candidate_open_network_ignores_psk() {
+        let mut current_profiles = HashMap::new();
+        current_profiles.insert(
+            "open-net".to_string(),
+            nm_profile("open-net", "OpenGuest", "open", None, false, false),
+        );
+
+        let candidate = select_adoption_candidate(
+            &current_profiles,
+            &HashSet::new(),
+            &HashSet::new(),
+            "OpenGuest",
+            "OpenGuest",
+            false,
+            "open",
+            None,
+        );
+
+        assert_eq!(candidate.map(|p| p.name.as_str()), Some("open-net"));
+    }
+
+    #[test]
+    fn select_adoption_candidate_tie_break_prefers_active() {
+        let mut current_profiles = HashMap::new();
+        current_profiles.insert(
+            "inactive-one".to_string(),
+            nm_profile(
+                "inactive-one",
+                "HC-Teton",
+                "wpa-psk",
+                Some("secret"),
+                false,
+                false,
+            ),
+        );
+        current_profiles.insert(
+            "active-one".to_string(),
+            nm_profile(
+                "active-one",
+                "HC-Teton",
+                "wpa-psk",
+                Some("secret"),
+                false,
+                true,
+            ),
+        );
+
+        let candidate = select_adoption_candidate(
+            &current_profiles,
+            &HashSet::new(),
+            &HashSet::new(),
+            "HC-Teton",
+            "HC-Teton",
+            false,
+            "wpa-psk",
+            Some("secret"),
+        );
+
+        assert_eq!(candidate.map(|p| p.name.as_str()), Some("active-one"));
+    }
+
+    #[test]
+    fn select_adoption_candidate_tie_break_falls_back_to_lexically_first_name() {
+        let mut current_profiles = HashMap::new();
+        current_profiles.insert(
+            "zzz-profile".to_string(),
+            nm_profile(
+                "zzz-profile",
+                "HC-Teton",
+                "wpa-psk",
+                Some("secret"),
+                false,
+                false,
+            ),
+        );
+        current_profiles.insert(
+            "aaa-profile".to_string(),
+            nm_profile(
+                "aaa-profile",
+                "HC-Teton",
+                "wpa-psk",
+                Some("secret"),
+                false,
+                false,
+            ),
+        );
+
+        let candidate = select_adoption_candidate(
+            &current_profiles,
+            &HashSet::new(),
+            &HashSet::new(),
+            "HC-Teton",
+            "HC-Teton",
+            false,
+            "wpa-psk",
+            Some("secret"),
+        );
+
+        assert_eq!(candidate.map(|p| p.name.as_str()), Some("aaa-profile"));
     }
 }

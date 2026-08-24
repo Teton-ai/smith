@@ -1,12 +1,10 @@
 use crate::State;
-use crate::device::debug_ap;
 use crate::device::{
     ApplyIntentResponse, ApproveDeviceBody, BulkDeviceReleaseIntent, ConfiguredNetwork,
-    CreateIntentRequest, DebugApCredentials, DeviceHealth, DeviceLedgerItem,
-    DeviceLedgerItemPaginated, DeviceNetworkIntent, DeviceRelease, DeviceReleaseIntent,
-    DeviceUptime, LabelWithValues, NewVariable, Note, PatchIntentRequest, RawDevice,
-    SMITHD_SERVICE_NAME, ServiceOutage, UpdateDeviceRelease, UpdateDeviceReleaseIntent,
-    UpdateDevicesRelease, Variable, WifiScanResult,
+    CreateIntentRequest, DeviceHealth, DeviceLedgerItem, DeviceLedgerItemPaginated,
+    DeviceNetworkIntent, DeviceRelease, DeviceReleaseIntent, DeviceUptime, LabelWithValues,
+    NewVariable, Note, PatchIntentRequest, RawDevice, SMITHD_SERVICE_NAME, ServiceOutage,
+    UpdateDeviceRelease, UpdateDeviceReleaseIntent, UpdateDevicesRelease, Variable, WifiScanResult,
 };
 use crate::event::PublicEvent;
 use crate::handlers::AuthedDevice;
@@ -22,6 +20,7 @@ use axum_extra::extract::Query;
 use chrono::Duration;
 use models::device::{
     CommandsPaginated, Device, DeviceCommandResponse, DeviceFilter, DeviceNetwork,
+    DeviceSortDirection, DeviceSortField,
 };
 use models::modem::Modem;
 use models::release::Release;
@@ -101,6 +100,19 @@ pub async fn get_device(
     Ok(Json(device))
 }
 
+/// Split a raw `search` query param into individual terms: comma-separated,
+/// each trimmed, empty terms dropped. Capped at 50 terms so an unbounded
+/// paste can't grow the query's `text[]` param without limit.
+fn parse_search_terms(search: &str) -> Vec<String> {
+    search
+        .split(',')
+        .map(str::trim)
+        .filter(|term| !term.is_empty())
+        .take(50)
+        .map(String::from)
+        .collect()
+}
+
 #[utoipa::path(
     get,
     path = "/devices",
@@ -127,6 +139,16 @@ pub async fn get_devices(
     Extension(state): Extension<State>,
     filter: Query<DeviceFilter>,
 ) -> axum::response::Result<(HeaderMap, Json<Vec<Device>>), StatusCode> {
+    let sort_serial_asc = matches!(filter.sort, Some(DeviceSortField::SerialNumber))
+        && !matches!(filter.order, Some(DeviceSortDirection::Desc));
+    let sort_serial_desc = matches!(filter.sort, Some(DeviceSortField::SerialNumber))
+        && matches!(filter.order, Some(DeviceSortDirection::Desc));
+    let sort_labels_asc = matches!(filter.sort, Some(DeviceSortField::Labels))
+        && !matches!(filter.order, Some(DeviceSortDirection::Desc));
+    let sort_labels_desc = matches!(filter.sort, Some(DeviceSortField::Labels))
+        && matches!(filter.order, Some(DeviceSortDirection::Desc));
+    let search_terms = parse_search_terms(filter.search.as_deref().unwrap_or(""));
+
     #[allow(deprecated)]
     let devices = sqlx::query!(
         r#"SELECT
@@ -225,10 +247,11 @@ pub async fn get_devices(
               WHERE edl.device_id = d.id
               AND el.name || '=' || edl.value = ANY($7)
           ))
-          AND ($10::text IS NULL OR $10 = '' OR (
-              POSITION(LOWER($10) IN LOWER(d.serial_number)) > 0 OR
-              POSITION(LOWER($10) IN LOWER(COALESCE(d.system_info->>'hostname', ''))) > 0 OR
-              POSITION(LOWER($10) IN LOWER(COALESCE(d.system_info->'device_tree'->>'model', ''))) > 0
+          AND (CARDINALITY($10::text[]) = 0 OR EXISTS (
+              SELECT 1 FROM unnest($10::text[]) AS term
+              WHERE POSITION(LOWER(term) IN LOWER(d.serial_number)) > 0
+                 OR POSITION(LOWER(term) IN LOWER(COALESCE(d.system_info->>'hostname', ''))) > 0
+                 OR POSITION(LOWER(term) IN LOWER(COALESCE(d.system_info->'device_tree'->>'model', ''))) > 0
           ))
           AND ($11::int IS NULL OR d.release_id = $11)
           AND ($13::int IS NULL OR rd.id = $13)
@@ -242,7 +265,27 @@ pub async fn get_devices(
                      AND dss.active_state != 'active'
                )))
         GROUP BY d.id, ip.id, m.id, r.id, rd.id, tr.id, trd.id, dn.device_id
-        ORDER BY d.last_ping DESC NULLS LAST, d.serial_number
+        ORDER BY
+            CASE WHEN $15 THEN d.serial_number END ASC NULLS LAST,
+            CASE WHEN $16 THEN d.serial_number END DESC NULLS LAST,
+            -- Correlated subquery, not the outer dl/l join: an active label
+            -- filter (see $4 above) restricts that join to matching rows
+            -- only, which would make every filtered device tie on the same
+            -- filtered label instead of sorting by its actual first label.
+            CASE WHEN $17 THEN (
+                SELECT MIN(l2.name || '=' || dl2.value)
+                FROM device_label dl2
+                JOIN label l2 ON l2.id = dl2.label_id
+                WHERE dl2.device_id = d.id
+            ) END ASC NULLS LAST,
+            CASE WHEN $18 THEN (
+                SELECT MIN(l2.name || '=' || dl2.value)
+                FROM device_label dl2
+                JOIN label l2 ON l2.id = dl2.label_id
+                WHERE dl2.device_id = d.id
+            ) END DESC NULLS LAST,
+            d.last_ping DESC NULLS LAST,
+            d.serial_number
         LIMIT $8
         OFFSET $9
         "#,
@@ -255,11 +298,15 @@ pub async fn get_devices(
         filter.exclude_labels.as_slice(),
         filter.limit.unwrap_or(100).clamp(1, 1000),
         filter.offset.unwrap_or(0).max(0),
-        filter.search,
+        search_terms.as_slice(),
         filter.release_id,
         filter.outdated_minutes,
         filter.distribution_id,
-        filter.service_not_running
+        filter.service_not_running,
+        sort_serial_asc,
+        sort_serial_desc,
+        sort_labels_asc,
+        sort_labels_desc,
     )
     .fetch_all(&state.pg_pool)
     .await
@@ -2437,79 +2484,6 @@ pub async fn revoke_device(
 }
 
 #[utoipa::path(
-    get,
-    path = "/devices/{device_id}/debug-ap-password",
-    params(
-        ("device_id" = String, Path),
-    ),
-    responses(
-        (status = StatusCode::OK, description = "Derived debug-AP WiFi credentials", body = DebugApCredentials),
-        (status = StatusCode::NOT_FOUND, description = "Device not found or has no token"),
-        (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to derive credentials"),
-    ),
-    security(
-        ("auth_token" = [])
-    ),
-    tag = DEVICES_TAG
-)]
-/// Derive the WPA2 password for a device's debug-access AP (`<serial>-tunnel`).
-///
-/// The device's `plex` daemon brings up this AP when it can't reach the backend
-/// and derives the same password on-device from its secret token. The backend
-/// reproduces it here (it already knows the token) so a technician standing next
-/// to an offline device can join and read its diagnostic report. The token is
-/// never returned — only the derived AP credentials.
-pub async fn get_debug_ap_password(
-    Path(device_id): Path<String>,
-    Extension(state): Extension<State>,
-    Extension(current_user): Extension<CurrentUser>,
-) -> axum::response::Result<Json<DebugApCredentials>, StatusCode> {
-    if !authorization::check(current_user, "devices", "read") {
-        return Err(StatusCode::FORBIDDEN);
-    }
-
-    // Same id-or-serial resolution as `get_device_info`: a short all-digit input
-    // is treated as an `id`, anything else (incl. 13-digit serials) as a serial.
-    let row = sqlx::query!(
-        r#"
-        SELECT d.serial_number, d.token
-        FROM device d
-        WHERE
-            CASE
-                WHEN $1 ~ '^[0-9]+$' AND length($1) <= 10 THEN
-                    d.id = $1::int4
-                ELSE
-                    d.serial_number = $1
-            END
-        "#,
-        device_id
-    )
-    .fetch_one(&state.pg_pool)
-    .await
-    .map_err(|err| match err {
-        sqlx::Error::RowNotFound => StatusCode::NOT_FOUND,
-        _ => {
-            error!(
-                device = device_id,
-                "Failed to fetch device for debug-AP password: {err}"
-            );
-            StatusCode::INTERNAL_SERVER_ERROR
-        }
-    })?;
-
-    // No token → no derivable password. Mirror plex's fail-safe: an
-    // unprovisioned device can't have a debug AP. 404 rather than leak that the
-    // row exists but is tokenless.
-    let token = row.token.ok_or(StatusCode::NOT_FOUND)?;
-
-    Ok(Json(DebugApCredentials {
-        ssid: debug_ap::ssid_for(&row.serial_number),
-        password: debug_ap::derive_debug_ap_password(&row.serial_number, &token),
-        serial_number: row.serial_number,
-    }))
-}
-
-#[utoipa::path(
     delete,
     path = "/devices/{device_id}/token",
     params(
@@ -2937,7 +2911,8 @@ pub async fn get_configured_networks_for_device(
 
     let rows = sqlx::query!(
         r#"
-        SELECT dcn.network_id, dcn.profile_name, n.ssid, n.name, n.password, dcn.is_active, dcn.updated_at
+        SELECT dcn.network_id, dcn.profile_name, n.ssid, n.name, n.password, n.security_type,
+               n.is_network_hidden, n.credentials, n.identity, dcn.is_active, dcn.updated_at
         FROM device_configured_network dcn
         JOIN network n ON n.id = dcn.network_id
         WHERE dcn.device_id = $1
@@ -2960,6 +2935,10 @@ pub async fn get_configured_networks_for_device(
             ssid: r.ssid,
             name: r.name,
             password: r.password,
+            security_type: r.security_type,
+            is_network_hidden: r.is_network_hidden,
+            credentials: r.credentials,
+            identity: r.identity,
             is_active: r.is_active,
             updated_at: r.updated_at,
         })
@@ -3107,7 +3086,11 @@ pub async fn get_device_intent(
             dni.updated_at,
             n.ssid,
             n.name,
-            n.network_type::TEXT as "network_type!"
+            n.network_type::TEXT as "network_type!",
+            n.security_type,
+            n.is_network_hidden,
+            n.credentials,
+            n.identity
         FROM device_network_intent dni
         JOIN network n ON n.id = dni.network_id
         WHERE dni.device_id = $1
@@ -3198,15 +3181,23 @@ pub async fn create_device_intent(
         return Err(StatusCode::CONFLICT);
     }
 
+    // Computed server-side, not taken from the request: a client-computed
+    // value let concurrent adds race to the same priority, which smithd turns
+    // into a non-deterministic autoconnect order. The device row lock above
+    // makes this MAX+1 race-free.
     let intent_id = sqlx::query_scalar!(
         r#"
         INSERT INTO device_network_intent (device_id, network_id, priority, managed_by)
-        VALUES ($1, $2, $3, $4)
+        VALUES (
+            $1,
+            $2,
+            COALESCE((SELECT MAX(priority) FROM device_network_intent WHERE device_id = $1), 0) + 1,
+            $3
+        )
         RETURNING id
         "#,
         resolved_id,
         payload.network_id,
-        payload.priority,
         payload.managed_by,
     )
     .fetch_one(&mut *tx)
@@ -3247,7 +3238,11 @@ pub async fn create_device_intent(
             dni.updated_at,
             n.ssid,
             n.name,
-            n.network_type::TEXT as "network_type!"
+            n.network_type::TEXT as "network_type!",
+            n.security_type,
+            n.is_network_hidden,
+            n.credentials,
+            n.identity
         FROM device_network_intent dni
         JOIN network n ON n.id = dni.network_id
         WHERE dni.id = $1
@@ -3354,7 +3349,11 @@ pub async fn update_device_intent(
             dni.updated_at,
             n.ssid,
             n.name,
-            n.network_type::TEXT as "network_type!"
+            n.network_type::TEXT as "network_type!",
+            n.security_type,
+            n.is_network_hidden,
+            n.credentials,
+            n.identity
         FROM device_network_intent dni
         JOIN network n ON n.id = dni.network_id
         WHERE dni.id = $1
@@ -3445,15 +3444,16 @@ pub async fn delete_device_intent(
 }
 
 /// Map a stored `security_type` (and its psk, if any) to the wire credential
-/// object smithd's applier consumes. Capability-bounded: it only ever emits a
-/// `key_mgmt` smithd can currently apply (`none`/`wpa-psk`), degrading `sae` to
-/// `wpa-psk` and `owe` to `none`. Returns `None` when smithd cannot apply the
-/// type yet (`wpa-eap`, unknown) or a psk-requiring type has no psk, so the
-/// caller can skip the network rather than emit an unusable credential.
+/// object smithd's applier consumes. Capability-bounded: only ever emits a
+/// `key_mgmt` smithd can apply (`none`/`wpa-psk`). Returns `None` when smithd
+/// can't apply the type yet (`sae`, `owe`, `wpa-eap`, unknown) or a
+/// psk-requiring type has no psk. `sae`/`owe` used to degrade to
+/// `wpa-psk`/`none`, but that silently applies weaker security than the
+/// network is actually configured for — refused instead.
 fn wire_credentials(security_type: &str, psk: Option<&str>) -> Option<serde_json::Value> {
     match security_type {
-        "open" | "owe" => Some(serde_json::json!({ "key_mgmt": "none" })),
-        "wpa-psk" | "sae" => {
+        "open" => Some(serde_json::json!({ "key_mgmt": "none" })),
+        "wpa-psk" => {
             let psk = psk?;
             Some(serde_json::json!({ "key_mgmt": "wpa-psk", "psk": psk }))
         }
@@ -3510,18 +3510,23 @@ pub async fn apply_device_intent(
         return Err(StatusCode::BAD_REQUEST);
     }
 
+    // ApplyNetworks is a NetworkManager wifi-profile command (key_mgmt/psk); an
+    // intent pointing at an Ethernet/Dongle row has no such profile to build, so
+    // it's excluded here rather than reaching the credentials match below. This
+    // also makes security_type provably non-null: network_security_type_wifi_check
+    // guarantees it for every wifi row, hence the "!" override.
     let networks = sqlx::query!(
         r#"
         SELECT
             dni.priority,
             n.ssid,
             n.name,
-            n.password,
-            n.security_type,
+            n.security_type as "security_type!",
+            n.is_network_hidden,
             n.credentials ->> 'psk' AS credentials_psk
         FROM device_network_intent dni
         JOIN network n ON n.id = dni.network_id
-        WHERE dni.device_id = $1
+        WHERE dni.device_id = $1 AND n.network_type = 'wifi'
         ORDER BY dni.priority ASC
         "#,
         resolved_id
@@ -3554,31 +3559,24 @@ pub async fn apply_device_intent(
     //     "version": <intent_version: i32>,
     //     "networks": [
     //       { "profile_name": "<catalog name>", "ssid": "<ssid>", "priority": <i32>,
+    //         "hidden": <bool>, "security_type": "wpa-psk",
     //         "credentials": { "key_mgmt": "wpa-psk", "psk": "<password>" } }
     //       { "profile_name": "<catalog name>", "ssid": "<ssid>", "priority": <i32>,
+    //         "hidden": <bool>, "security_type": "open",
     //         "credentials": { "key_mgmt": "none" } }  // open network
     //     ]
     //   }
     // }
+    // hidden/security_type sit alongside credentials, not inside it: they're
+    // for smithd's existing-profile matching, not the applied shape itself.
     let applyable_networks: Vec<serde_json::Value> = networks
         .iter()
         .filter_map(|n| {
-            let credentials = match n.security_type.as_deref() {
-                Some(security_type) => {
-                    wire_credentials(security_type, n.credentials_psk.as_deref())
-                }
-                // Legacy rows with no backfilled security_type: preserve the
-                // original password-null inference exactly.
-                None => Some(if let Some(psk) = n.password.as_deref() {
-                    serde_json::json!({ "key_mgmt": "wpa-psk", "psk": psk })
-                } else {
-                    serde_json::json!({ "key_mgmt": "none" })
-                }),
-            };
+            let credentials = wire_credentials(&n.security_type, n.credentials_psk.as_deref());
             let Some(credentials) = credentials else {
                 warn!(
                     device_id = resolved_id,
-                    security_type = n.security_type.as_deref().unwrap_or("<null>"),
+                    security_type = n.security_type.as_str(),
                     "skipping network in ApplyNetworks: security type not applyable by smithd"
                 );
                 return None;
@@ -3587,6 +3585,8 @@ pub async fn apply_device_intent(
                 "profile_name": n.name,
                 "ssid": n.ssid.as_deref().unwrap_or(""),
                 "priority": n.priority,
+                "hidden": n.is_network_hidden,
+                "security_type": n.security_type.as_str(),
                 "credentials": credentials
             }))
         })
@@ -3638,7 +3638,7 @@ pub async fn apply_device_intent(
 
 #[cfg(test)]
 mod tests {
-    use super::wire_credentials;
+    use super::{parse_search_terms, wire_credentials};
     use serde_json::json;
 
     // Mirrors the legacy inline heuristic in apply_device_intent exactly.
@@ -3653,31 +3653,17 @@ mod tests {
     }
 
     #[test]
-    fn open_and_owe_map_to_none() {
+    fn open_maps_to_none() {
         assert_eq!(
             wire_credentials("open", None),
-            Some(json!({ "key_mgmt": "none" }))
-        );
-        assert_eq!(
-            wire_credentials("owe", None),
-            Some(json!({ "key_mgmt": "none" }))
-        );
-        // psk is ignored for open-family types
-        assert_eq!(
-            wire_credentials("owe", Some("ignored")),
             Some(json!({ "key_mgmt": "none" }))
         );
     }
 
     #[test]
-    fn wpa_psk_and_sae_map_to_wpa_psk_with_psk() {
+    fn wpa_psk_maps_to_wpa_psk_with_psk() {
         assert_eq!(
             wire_credentials("wpa-psk", Some("secret")),
-            Some(json!({ "key_mgmt": "wpa-psk", "psk": "secret" }))
-        );
-        // sae degrades to wpa-psk (works on WPA2/WPA3-mixed APs smithd can apply)
-        assert_eq!(
-            wire_credentials("sae", Some("secret")),
             Some(json!({ "key_mgmt": "wpa-psk", "psk": "secret" }))
         );
     }
@@ -3685,11 +3671,13 @@ mod tests {
     #[test]
     fn psk_required_but_missing_is_skipped() {
         assert_eq!(wire_credentials("wpa-psk", None), None);
-        assert_eq!(wire_credentials("sae", None), None);
     }
 
     #[test]
     fn unapplyable_types_are_skipped() {
+        // WPA3 and Enhanced Open have no correct nmcli-applicable degradation
+        assert_eq!(wire_credentials("sae", Some("secret")), None);
+        assert_eq!(wire_credentials("owe", None), None);
         // enterprise not applyable by smithd yet
         assert_eq!(wire_credentials("wpa-eap", Some("secret")), None);
         // unknown / unmodelled types
@@ -3717,14 +3705,54 @@ mod tests {
             Some(legacy_credentials(password))
         );
 
-        // NULL security_type row (new insert from an unupdated writer):
-        // the dual-read builder falls back to the legacy heuristic verbatim,
-        // so the output is the legacy output by definition. Verify both shapes.
-        assert_eq!(legacy_credentials(None), json!({ "key_mgmt": "none" }));
+        // security_type is never NULL here: network_security_type_wifi_check
+        // guarantees it for every wifi row, and the intent query's
+        // `WHERE n.network_type = 'wifi'` guarantees every row this function
+        // sees is one.
+    }
+
+    #[test]
+    fn single_term_is_unchanged() {
+        assert_eq!(parse_search_terms("abc123"), vec!["abc123"]);
+    }
+
+    #[test]
+    fn multiple_terms_are_split_on_comma() {
+        assert_eq!(parse_search_terms("abc,def,ghi"), vec!["abc", "def", "ghi"]);
+    }
+
+    #[test]
+    fn terms_are_trimmed() {
+        assert_eq!(parse_search_terms(" abc , def "), vec!["abc", "def"]);
+    }
+
+    #[test]
+    fn multi_word_term_is_kept_intact() {
+        // Comma is the only delimiter, so a value with internal spaces
+        // (e.g. a device-tree model) still matches as one term.
         assert_eq!(
-            legacy_credentials(Some("pw")),
-            json!({ "key_mgmt": "wpa-psk", "psk": "pw" })
+            parse_search_terms("NVIDIA Jetson Orin NX"),
+            vec!["NVIDIA Jetson Orin NX"]
         );
+    }
+
+    #[test]
+    fn empty_terms_from_repeated_or_trailing_commas_are_dropped() {
+        assert_eq!(parse_search_terms("abc,,def,"), vec!["abc", "def"]);
+        assert_eq!(parse_search_terms(",,,"), Vec::<String>::new());
+    }
+
+    #[test]
+    fn empty_string_yields_no_terms() {
+        assert_eq!(parse_search_terms(""), Vec::<String>::new());
+    }
+
+    #[test]
+    fn more_than_fifty_terms_are_truncated() {
+        let search = (0..60).map(|n| n.to_string()).collect::<Vec<_>>().join(",");
+        assert_eq!(parse_search_terms(&search).len(), 50);
+        assert_eq!(parse_search_terms(&search)[0], "0");
+        assert_eq!(parse_search_terms(&search)[49], "49");
     }
 }
 

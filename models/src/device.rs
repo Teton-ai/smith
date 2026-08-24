@@ -47,6 +47,24 @@ pub struct Device {
     pub labels: Json<HashMap<String, String>>,
 }
 
+/// Column to sort the device list by. If None, devices are ordered by
+/// last_ping (most recently seen first).
+#[derive(Deserialize, Serialize, Debug, Clone, Copy, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum DeviceSortField {
+    SerialNumber,
+    Labels,
+}
+
+/// Sort direction for `DeviceFilter::sort`. Defaults to ascending when
+/// `sort` is set but `order` is not.
+#[derive(Deserialize, Serialize, Debug, Clone, Copy, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum DeviceSortDirection {
+    Asc,
+    Desc,
+}
+
 /// Query filter for device listing.
 #[derive(Deserialize, Serialize, Debug, Default, IntoParams)]
 #[into_params(parameter_in = Query)]
@@ -72,7 +90,10 @@ pub struct DeviceFilter {
     pub limit: Option<i64>,
     /// Number of devices to skip. Used for pagination.
     pub offset: Option<i64>,
-    /// Search term to filter devices by serial number, hostname, or model.
+    /// Search terms to filter devices by serial number, hostname, or model.
+    /// A device matching any term is included. Multiple terms are
+    /// comma-separated (e.g. "abc,def"); at most 50 terms are matched, the
+    /// rest are ignored.
     pub search: Option<String>,
     /// Filter by release ID. Only devices with this release_id are included.
     pub release_id: Option<i32>,
@@ -80,6 +101,12 @@ pub struct DeviceFilter {
     pub distribution_id: Option<i32>,
     /// Filter by service health. If true, only devices with at least one monitored service not in 'active' state.
     pub service_not_running: Option<bool>,
+    /// Column to sort by. If None, devices are ordered by last_ping (default).
+    #[param(inline)]
+    pub sort: Option<DeviceSortField>,
+    /// Sort direction. Only applies when `sort` is set; defaults to ascending.
+    #[param(inline)]
+    pub order: Option<DeviceSortDirection>,
 }
 
 #[derive(Debug, Serialize, Deserialize, utoipa::ToSchema, Clone)]

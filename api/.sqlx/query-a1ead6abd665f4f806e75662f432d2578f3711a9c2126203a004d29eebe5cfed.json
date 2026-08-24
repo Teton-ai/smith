@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT\n            dni.id,\n            dni.device_id,\n            dni.network_id,\n            dni.priority,\n            dni.managed_by,\n            dni.created_at,\n            dni.updated_at,\n            n.ssid,\n            n.name,\n            n.network_type::TEXT as \"network_type!\"\n        FROM device_network_intent dni\n        JOIN network n ON n.id = dni.network_id\n        WHERE dni.id = $1\n        ",
+  "query": "\n        SELECT\n            dni.id,\n            dni.device_id,\n            dni.network_id,\n            dni.priority,\n            dni.managed_by,\n            dni.created_at,\n            dni.updated_at,\n            n.ssid,\n            n.name,\n            n.network_type::TEXT as \"network_type!\",\n            n.security_type,\n            n.is_network_hidden,\n            n.credentials,\n            n.identity\n        FROM device_network_intent dni\n        JOIN network n ON n.id = dni.network_id\n        WHERE dni.id = $1\n        ",
   "describe": {
     "columns": [
       {
@@ -52,6 +52,26 @@
         "ordinal": 9,
         "name": "network_type!",
         "type_info": "Text"
+      },
+      {
+        "ordinal": 10,
+        "name": "security_type",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 11,
+        "name": "is_network_hidden",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 12,
+        "name": "credentials",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 13,
+        "name": "identity",
+        "type_info": "Jsonb"
       }
     ],
     "parameters": {
@@ -69,8 +89,12 @@
       false,
       true,
       false,
-      null
+      null,
+      true,
+      false,
+      false,
+      true
     ]
   },
-  "hash": "de603391b4e956f02b02c29df67ea8a525033ec39f5cc46be43bf548ba2be831"
+  "hash": "a1ead6abd665f4f806e75662f432d2578f3711a9c2126203a004d29eebe5cfed"
 }

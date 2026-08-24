@@ -175,6 +175,20 @@ pub async fn save_responses(
                     let mapped_security_type: Option<&str> =
                         profile.key_mgmt.as_deref().and_then(map_key_mgmt);
 
+                    // Only for the writes below; mapped_security_type keeps its
+                    // relaxed-wildcard role in network_find_by_content. An
+                    // unrecognized key_mgmt (map_key_mgmt's `other => None`, a
+                    // permanent case, not backlog) can no longer write NULL once
+                    // network_security_type_wifi_check exists, so it falls back
+                    // here instead of failing the check-in. Same heuristic as
+                    // resolve_security_type / the Stage 1 backfill.
+                    let stored_security_type: &str =
+                        mapped_security_type.unwrap_or(if profile.password.is_some() {
+                            "wpa-psk"
+                        } else {
+                            "open"
+                        });
+
                     let mut creds_patch = serde_json::Map::new();
                     if let Some(v) = &profile.pmf {
                         creds_patch.insert("pmf".into(), json!(v));
@@ -236,7 +250,7 @@ pub async fn save_responses(
                                     id,
                                     creds_patch,
                                     identity_val as Option<serde_json::Value>,
-                                    mapped_security_type as Option<&str>,
+                                    stored_security_type,
                                 )
                                 .execute(&mut *tx)
                                 .await?;
@@ -260,7 +274,7 @@ pub async fn save_responses(
                                 ssid,
                                 profile.password,
                                 hidden,
-                                mapped_security_type as Option<&str>,
+                                stored_security_type,
                                 identity_credentials,
                                 creds_patch,
                                 identity_val as Option<serde_json::Value>,

@@ -14,6 +14,7 @@ import { isAxiosError } from "axios";
 import {
 	ArrowLeft,
 	ChevronDown,
+	ChevronRight,
 	ChevronUp,
 	Eye,
 	EyeOff,
@@ -25,10 +26,11 @@ import {
 	WifiOff,
 	X,
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import {
 	type ConfiguredNetwork,
 	type Device,
+	type DeviceNetworkIntent,
 	getGetDeviceInfoQueryKey,
 	getGetDeviceIntentQueryKey,
 	getGetNetworksQueryKey,
@@ -48,22 +50,202 @@ import {
 	useClientMutator,
 	useClientMutatorWithStatus,
 } from "@/app/api-client-mutator";
+import { Tooltip } from "@/app/components/tooltip";
+import {
+	groupScanResults,
+	type ScanGroup,
+	SignalBar,
+} from "@/app/utils/wifiScan";
 
 const MASK = "••••••••••••";
 
 const filterFieldClass =
 	"px-2 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm text-gray-900";
 
-const SCAN_COLUMNS = [
-	{ label: "Network", className: "py-2 pr-2 text-left" },
-	{ label: "Band", className: "px-2 py-2 text-left" },
-	{ label: "Signal", className: "px-2 py-2 text-right" },
-	{ label: "Rate", className: "px-2 py-2 text-right" },
-	{ label: "Security", className: "pl-2 py-2 text-left" },
-];
-
 const getProfileTimestamp = (p: ConfiguredNetwork) => p.updated_at;
 const getScanTimestamp = (r: WifiScanResult) => r.scanned_at;
+
+type SecurityClass = "open" | "wep" | "psk" | "sae" | "owe" | "enterprise";
+
+/** A scan security string can name more than one mode at once (nmcli reports
+ *  transitional APs as e.g. "WPA1 WPA2"), so a group can match more than one
+ *  class. WEP gets its own class: it's not WPA-PSK, and NM key-mgmt can't
+ *  distinguish it from "open" on the catalog side (see catalogSecurityClass),
+ *  so a WEP AP must never badge-match a WPA-PSK-configured network. */
+function scanSecurityClasses(security: string | null): Set<SecurityClass> {
+	if (!security) return new Set<SecurityClass>(["open"]);
+	const s = security.toUpperCase();
+	const classes = new Set<SecurityClass>();
+	if (s.includes("OWE")) classes.add("owe");
+	if (s.includes("802.1X") || s.includes("EAP")) classes.add("enterprise");
+	if (s.includes("SAE") || s.includes("WPA3")) classes.add("sae");
+	if (s.includes("WPA1") || s.includes("WPA2")) classes.add("psk");
+	if (s.includes("WEP")) classes.add("wep");
+	if (classes.size === 0) classes.add("open");
+	return classes;
+}
+
+/** Mirrors api's `map_key_mgmt` (api/src/home.rs). */
+function catalogSecurityClass(securityType?: string): SecurityClass | null {
+	switch (securityType) {
+		case "open":
+			return "open";
+		case "wpa-psk":
+			return "psk";
+		case "sae":
+			return "sae";
+		case "owe":
+			return "owe";
+		case "wpa-eap":
+			return "enterprise";
+		default:
+			return null;
+	}
+}
+
+/** SSID must match; security only narrows further when we actually know the
+ *  catalog network's security_type (older rows predate that column and fall
+ *  back to SSID-only matching). */
+function recordMatchesGroup(
+	record: { ssid?: string; security_type?: string },
+	group: ScanGroup,
+	groupClasses: Set<SecurityClass>,
+): boolean {
+	if (group.ssid == null || record.ssid !== group.ssid) return false;
+	if (record.security_type == null) return true;
+	const cls = catalogSecurityClass(record.security_type);
+	return cls != null && groupClasses.has(cls);
+}
+
+type RelationshipBadge = "active" | "configured" | "intent" | null;
+
+function groupBadge(
+	group: ScanGroup,
+	profiles: ConfiguredNetwork[],
+	intent: DeviceNetworkIntent[],
+): RelationshipBadge {
+	if (group.ssid == null) return null;
+	const classes = scanSecurityClasses(group.security);
+	const matchingProfiles = profiles.filter((p) =>
+		recordMatchesGroup(p, group, classes),
+	);
+	if (matchingProfiles.some((p) => p.is_active)) return "active";
+	if (matchingProfiles.length > 0) return "configured";
+	if (intent.some((i) => recordMatchesGroup(i, group, classes)))
+		return "intent";
+	return null;
+}
+
+function RelationshipBadgePill({ badge }: { badge: RelationshipBadge }) {
+	if (badge === "active")
+		return (
+			<Badge variant="green" pill>
+				Active
+			</Badge>
+		);
+	if (badge === "configured")
+		return (
+			<Badge variant="blue" pill>
+				Configured
+			</Badge>
+		);
+	if (badge === "intent")
+		return (
+			<Badge variant="orange" pill>
+				In intent
+			</Badge>
+		);
+	return null;
+}
+
+const SECURITY_LABELS: Record<SecurityClass, string> = {
+	open: "Open",
+	wep: "WEP",
+	psk: "WPA-PSK",
+	sae: "SAE",
+	owe: "OWE",
+	enterprise: "WPA-Enterprise",
+};
+
+/** Plain gray: green/blue/orange are already `RelationshipBadgePill`'s colors
+ *  on this panel, so reusing them here would read as that same signal. */
+function SecurityBadge({ securityType }: { securityType?: string }) {
+	const cls = catalogSecurityClass(securityType);
+	return (
+		<Badge variant="gray" pill>
+			{cls ? SECURITY_LABELS[cls] : "Unknown"}
+		</Badge>
+	);
+}
+
+function HiddenBadge() {
+	return (
+		<Badge variant="gray" pill>
+			Hidden
+		</Badge>
+	);
+}
+
+/** `identity` is freeform jsonb; fall back to the raw JSON rather than assume
+ *  the `{"username": ...}` shape smithd/home.rs writes today always holds. */
+function formatIdentity(identity: unknown): string | null {
+	if (identity == null) return null;
+	if (typeof identity === "object") {
+		const username = (identity as Record<string, unknown>).username;
+		if (typeof username === "string") return username;
+	}
+	return JSON.stringify(identity);
+}
+
+/** Field:value list for a network's `credentials` envelope. Only `psk` is a
+ *  secret worth masking; the rest is metadata, always shown plain. */
+function CredentialsReveal({
+	credentials,
+	revealed,
+	onToggle,
+}: {
+	credentials: unknown;
+	revealed: boolean;
+	onToggle: () => void;
+}) {
+	const record =
+		credentials && typeof credentials === "object"
+			? (credentials as Record<string, unknown>)
+			: {};
+	const entries = Object.entries(record);
+	if (entries.length === 0) return null;
+	const hasSecret = "psk" in record;
+
+	return (
+		<div className="flex items-center gap-2 flex-wrap">
+			{entries.map(([key, value]) => {
+				const display =
+					typeof value === "string" ? value : JSON.stringify(value);
+				const masked = key === "psk" && !revealed;
+				return (
+					<span key={key} className="font-mono text-xs text-gray-700">
+						{key}: {masked ? MASK : display}
+					</span>
+				);
+			})}
+			{hasSecret && (
+				<button
+					type="button"
+					onClick={onToggle}
+					className="text-gray-400 hover:text-gray-600"
+					aria-label={revealed ? "Hide credentials" : "Reveal credentials"}
+					aria-pressed={revealed}
+				>
+					{revealed ? (
+						<EyeOff className="w-3.5 h-3.5" />
+					) : (
+						<Eye className="w-3.5 h-3.5" />
+					)}
+				</button>
+			)}
+		</div>
+	);
+}
 
 interface NetworkCondition {
 	profile_name: string;
@@ -195,11 +377,34 @@ interface WifiPanelProps {
 
 const WifiPanel = ({ serial, device }: WifiPanelProps) => {
 	const [revealedIds, setRevealedIds] = useState<Set<string>>(new Set());
+	// Separate from revealedIds: intent rows are keyed by numeric id, not
+	// profile_name, so a shared Set would risk an accidental key clash.
+	const [revealedIntentIds, setRevealedIntentIds] = useState<Set<number>>(
+		new Set(),
+	);
+	// Per network_id, not the shared mutation's isPending/variables (which only
+	// remembers its latest call): lets each row's pending state stay independent.
+	const [pendingAddNetworkIds, setPendingAddNetworkIds] = useState<Set<number>>(
+		new Set(),
+	);
 	const [syncing, setSyncing] = useState(false);
 	const [scanSyncing, setScanSyncing] = useState(false);
 	const [scanQuery, setScanQuery] = useState("");
 	const [bandFilter, setBandFilter] = useState("all");
 	const [securityFilter, setSecurityFilter] = useState("all");
+	const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
+
+	function toggleGroup(key: string) {
+		setExpandedGroups((prev) => {
+			const next = new Set(prev);
+			if (next.has(key)) {
+				next.delete(key);
+			} else {
+				next.add(key);
+			}
+			return next;
+		});
+	}
 
 	const {
 		data: profilesRaw,
@@ -266,22 +471,65 @@ const WifiPanel = ({ serial, device }: WifiPanelProps) => {
 		[scanResults],
 	);
 
-	const filteredResults = useMemo(() => {
+	const scanGroups = useMemo(
+		() => groupScanResults(scanResults),
+		[scanResults],
+	);
+
+	// A group matches if any of its APs matches (FR-A8): filtering an SSID down
+	// to a subset of its BSSIDs would misrepresent the group's own aggregates
+	// (best signal, AP count, bands). But once a group is shown, expanding it
+	// shouldn't dump every AP back in: `visibleAps` narrows the drill-down to
+	// the APs that actually satisfy each active filter. The text query is the
+	// one exception: it's also matched against the SSID name, and when that's
+	// what matched, narrowing by BSSID text would hide every AP.
+	const filteredGroups = useMemo(() => {
 		const query = scanQuery.trim().toLowerCase();
-		return scanResults.filter((r) => {
-			if (
-				query &&
-				!r.ssid?.toLowerCase().includes(query) &&
-				!r.bssid.toLowerCase().includes(query)
-			) {
-				return false;
-			}
-			if (bandFilter !== "all" && r.band !== bandFilter) return false;
-			if (securityFilter !== "all" && (r.security ?? "Open") !== securityFilter)
-				return false;
-			return true;
-		});
-	}, [scanResults, scanQuery, bandFilter, securityFilter]);
+		return scanGroups
+			.filter((group) => {
+				if (query) {
+					const matches =
+						group.ssid?.toLowerCase().includes(query) ||
+						group.aps.some((ap) => ap.bssid.toLowerCase().includes(query));
+					if (!matches) return false;
+				}
+				if (
+					bandFilter !== "all" &&
+					!group.aps.some((ap) => ap.band === bandFilter)
+				) {
+					return false;
+				}
+				if (
+					securityFilter !== "all" &&
+					!group.aps.some((ap) => (ap.security ?? "Open") === securityFilter)
+				) {
+					return false;
+				}
+				return true;
+			})
+			.map((group) => {
+				const ssidMatchedQuery =
+					query !== "" && (group.ssid?.toLowerCase().includes(query) ?? false);
+				const visibleAps = group.aps.filter((ap) => {
+					if (
+						query &&
+						!ssidMatchedQuery &&
+						!ap.bssid.toLowerCase().includes(query)
+					) {
+						return false;
+					}
+					if (bandFilter !== "all" && ap.band !== bandFilter) return false;
+					if (
+						securityFilter !== "all" &&
+						(ap.security ?? "Open") !== securityFilter
+					) {
+						return false;
+					}
+					return true;
+				});
+				return { ...group, visibleAps };
+			});
+	}, [scanGroups, scanQuery, bandFilter, securityFilter]);
 
 	const toggleReveal = (profileName: string) => {
 		setRevealedIds((prev) => {
@@ -290,6 +538,18 @@ const WifiPanel = ({ serial, device }: WifiPanelProps) => {
 				next.delete(profileName);
 			} else {
 				next.add(profileName);
+			}
+			return next;
+		});
+	};
+
+	const toggleIntentReveal = (intentId: number) => {
+		setRevealedIntentIds((prev) => {
+			const next = new Set(prev);
+			if (next.has(intentId)) {
+				next.delete(intentId);
+			} else {
+				next.add(intentId);
 			}
 			return next;
 		});
@@ -319,6 +579,20 @@ const WifiPanel = ({ serial, device }: WifiPanelProps) => {
 			),
 		[intentListRaw],
 	);
+	// Set for O(1) "already in intent" lookups per Configured-profile row.
+	const intentNetworkIds = useMemo(
+		() => new Set(sortedIntent.map((i) => i.network_id)),
+		[sortedIntent],
+	);
+
+	const badgeByGroupKey = useMemo(() => {
+		const map = new Map<string, RelationshipBadge>();
+		for (const group of scanGroups) {
+			const badge = groupBadge(group, profiles, sortedIntent);
+			if (badge) map.set(group.key, badge);
+		}
+		return map;
+	}, [scanGroups, profiles, sortedIntent]);
 
 	const [applying, setApplying] = useState(false);
 	const { data: polledDevice } = useGetDeviceInfo(serial, {
@@ -441,6 +715,40 @@ const WifiPanel = ({ serial, device }: WifiPanelProps) => {
 		},
 	});
 
+	function addToIntent(networkId: number) {
+		setPendingAddNetworkIds((prev) => new Set(prev).add(networkId));
+		createIntent(
+			{
+				deviceId,
+				data: {
+					network_id: networkId,
+					managed_by: "operator",
+				},
+			},
+			{
+				// The shared mutation's onError sets modal-only error state, which
+				// this (non-modal) call site can't show; use a toast instead.
+				onError: (err) => {
+					const status = isAxiosError(err) ? err.response?.status : undefined;
+					setToast({
+						type: "error",
+						message:
+							status === 409
+								? "A network with this name is already in the intent."
+								: "Failed to add network to intent.",
+					});
+				},
+				onSettled: () => {
+					setPendingAddNetworkIds((prev) => {
+						const next = new Set(prev);
+						next.delete(networkId);
+						return next;
+					});
+				},
+			},
+		);
+	}
+
 	const networkCreator = useClientMutatorWithStatus<{
 		id: number;
 		name: string;
@@ -466,16 +774,11 @@ const WifiPanel = ({ serial, device }: WifiPanelProps) => {
 					password: newNetPassword || null,
 				},
 			});
-			const maxPriority =
-				sortedIntent.length > 0
-					? Math.max(...sortedIntent.map((e) => e.priority))
-					: 0;
 			try {
 				await createIntentAsync({
 					deviceId,
 					data: {
 						network_id: created.id,
-						priority: maxPriority + 1,
 						managed_by: "operator",
 					},
 				});
@@ -630,73 +933,95 @@ const WifiPanel = ({ serial, device }: WifiPanelProps) => {
 					</p>
 				) : (
 					<div className="divide-y divide-gray-100 mb-3">
-						{sortedIntent.map((entry, idx) => (
-							<div key={entry.id} className="py-2.5 flex items-center gap-2">
-								<div className="flex flex-col">
-									<button
-										type="button"
-										disabled={idx === 0}
-										onClick={() => swapPriority(idx, idx - 1)}
-										className="text-gray-400 hover:text-gray-600 disabled:opacity-30 disabled:cursor-not-allowed"
-										aria-label="Move up"
-									>
-										<ChevronUp className="w-3.5 h-3.5" />
-									</button>
-									<button
-										type="button"
-										disabled={idx === sortedIntent.length - 1}
-										onClick={() => swapPriority(idx, idx + 1)}
-										className="text-gray-400 hover:text-gray-600 disabled:opacity-30 disabled:cursor-not-allowed"
-										aria-label="Move down"
-									>
-										<ChevronDown className="w-3.5 h-3.5" />
-									</button>
-								</div>
-								<span className="text-xs text-gray-400 w-4 text-center select-none">
-									{idx + 1}
-								</span>
-								<div className="flex-1 min-w-0">
-									<span className="text-sm font-medium text-gray-900">
-										{entry.name}
+						{sortedIntent.map((entry, idx) => {
+							const identityText = formatIdentity(entry.identity);
+							return (
+								<div
+									key={entry.id}
+									className="py-2.5 grid grid-cols-[auto_auto_1fr_auto] items-center gap-2"
+								>
+									<div className="flex flex-col">
+										<button
+											type="button"
+											disabled={idx === 0}
+											onClick={() => swapPriority(idx, idx - 1)}
+											className="text-gray-400 hover:text-gray-600 disabled:opacity-30 disabled:cursor-not-allowed"
+											aria-label="Move up"
+										>
+											<ChevronUp className="w-3.5 h-3.5" />
+										</button>
+										<button
+											type="button"
+											disabled={idx === sortedIntent.length - 1}
+											onClick={() => swapPriority(idx, idx + 1)}
+											className="text-gray-400 hover:text-gray-600 disabled:opacity-30 disabled:cursor-not-allowed"
+											aria-label="Move down"
+										>
+											<ChevronDown className="w-3.5 h-3.5" />
+										</button>
+									</div>
+									<span className="text-xs text-gray-400 w-4 text-center select-none">
+										{idx + 1}
 									</span>
-									{entry.ssid && (
-										<span className="text-xs text-gray-500 font-mono ml-2">
-											{entry.ssid}
+									<div className="flex-1 min-w-0">
+										<div className="flex items-center gap-1.5 flex-wrap">
+											<span className="text-sm font-medium text-gray-900">
+												{entry.name}
+											</span>
+											<SecurityBadge securityType={entry.security_type} />
+											{entry.is_network_hidden && <HiddenBadge />}
+										</div>
+										{entry.ssid && (
+											<span className="text-xs text-gray-500 font-mono">
+												{entry.ssid}
+											</span>
+										)}
+									</div>
+									{confirmDeleteId === entry.id ? (
+										<span className="inline-flex items-center gap-1.5 text-xs">
+											<span className="text-red-600 font-medium">Remove?</span>
+											<button
+												type="button"
+												onClick={() =>
+													deleteIntent({ deviceId, intentId: entry.id })
+												}
+												className="text-red-600 hover:text-red-800 font-medium"
+											>
+												Confirm
+											</button>
+											<button
+												type="button"
+												onClick={() => setConfirmDeleteId(null)}
+												className="text-gray-500 hover:text-gray-700"
+											>
+												Cancel
+											</button>
 										</span>
+									) : (
+										<button
+											type="button"
+											onClick={() => setConfirmDeleteId(entry.id)}
+											className="text-gray-400 hover:text-red-500 transition-colors"
+											aria-label={`Remove ${entry.name}`}
+										>
+											<Trash2 className="w-3.5 h-3.5" />
+										</button>
 									)}
+									<div className="col-start-3 flex flex-col gap-1">
+										<CredentialsReveal
+											credentials={entry.credentials}
+											revealed={revealedIntentIds.has(entry.id)}
+											onToggle={() => toggleIntentReveal(entry.id)}
+										/>
+										{identityText && (
+											<span className="text-xs text-gray-500">
+												Identity: {identityText}
+											</span>
+										)}
+									</div>
 								</div>
-								{confirmDeleteId === entry.id ? (
-									<span className="inline-flex items-center gap-1.5 text-xs">
-										<span className="text-red-600 font-medium">Remove?</span>
-										<button
-											type="button"
-											onClick={() =>
-												deleteIntent({ deviceId, intentId: entry.id })
-											}
-											className="text-red-600 hover:text-red-800 font-medium"
-										>
-											Confirm
-										</button>
-										<button
-											type="button"
-											onClick={() => setConfirmDeleteId(null)}
-											className="text-gray-500 hover:text-gray-700"
-										>
-											Cancel
-										</button>
-									</span>
-								) : (
-									<button
-										type="button"
-										onClick={() => setConfirmDeleteId(entry.id)}
-										className="text-gray-400 hover:text-red-500 transition-colors"
-										aria-label={`Remove ${entry.name}`}
-									>
-										<Trash2 className="w-3.5 h-3.5" />
-									</button>
-								)}
-							</div>
-						))}
+							);
+						})}
 					</div>
 				)}
 
@@ -1026,24 +1351,15 @@ const WifiPanel = ({ serial, device }: WifiPanelProps) => {
 																		variant="soft"
 																		tone="blue"
 																		size="sm"
-																		onClick={() => {
-																			const maxPriority =
-																				sortedIntent.length > 0
-																					? Math.max(
-																							...sortedIntent.map(
-																								(e) => e.priority,
-																							),
-																						)
-																					: 0;
+																		onClick={() =>
 																			createIntent({
 																				deviceId,
 																				data: {
 																					network_id: n.id,
-																					priority: maxPriority + 1,
 																					managed_by: "operator",
 																				},
-																			});
-																		}}
+																			})
+																		}
 																	>
 																		Add
 																	</Button>
@@ -1136,6 +1452,11 @@ const WifiPanel = ({ serial, device }: WifiPanelProps) => {
 							<div className="divide-y divide-gray-100">
 								{profiles.map((profile: ConfiguredNetwork) => {
 									const revealed = revealedIds.has(profile.profile_name);
+									const identityText = formatIdentity(profile.identity);
+									const inIntent = intentNetworkIds.has(profile.network_id);
+									const addPending = pendingAddNetworkIds.has(
+										profile.network_id,
+									);
 									return (
 										<div
 											key={profile.profile_name}
@@ -1143,9 +1464,15 @@ const WifiPanel = ({ serial, device }: WifiPanelProps) => {
 										>
 											<div className="flex items-center justify-between gap-2">
 												<div className="flex flex-col min-w-0">
-													<span className="text-sm font-medium text-gray-900 truncate">
-														{profile.profile_name}
-													</span>
+													<div className="flex items-center gap-1.5 flex-wrap">
+														<span className="text-sm font-medium text-gray-900 truncate">
+															{profile.profile_name}
+														</span>
+														<SecurityBadge
+															securityType={profile.security_type}
+														/>
+														{profile.is_network_hidden && <HiddenBadge />}
+													</div>
 													{profile.ssid && (
 														<span className="text-xs text-gray-500 font-mono truncate">
 															{profile.ssid}
@@ -1158,27 +1485,33 @@ const WifiPanel = ({ serial, device }: WifiPanelProps) => {
 															Active
 														</Badge>
 													)}
+													{inIntent ? (
+														<Badge variant="blue" pill>
+															In intent
+														</Badge>
+													) : (
+														<Button
+															variant="soft"
+															tone="orange"
+															size="sm"
+															disabled={addPending}
+															loading={addPending}
+															onClick={() => addToIntent(profile.network_id)}
+														>
+															Add to intent
+														</Button>
+													)}
 												</div>
 											</div>
-											{profile.password && (
-												<div className="flex items-center gap-2">
-													<span className="font-mono text-sm text-gray-700">
-														{revealed ? profile.password : MASK}
-													</span>
-													<button
-														type="button"
-														onClick={() => toggleReveal(profile.profile_name)}
-														className="text-gray-400 hover:text-gray-600"
-														aria-label={`${revealed ? "Hide" : "Reveal"} password for ${profile.profile_name}`}
-														aria-pressed={revealed}
-													>
-														{revealed ? (
-															<EyeOff className="w-3.5 h-3.5" />
-														) : (
-															<Eye className="w-3.5 h-3.5" />
-														)}
-													</button>
-												</div>
+											<CredentialsReveal
+												credentials={profile.credentials}
+												revealed={revealed}
+												onToggle={() => toggleReveal(profile.profile_name)}
+											/>
+											{identityText && (
+												<span className="text-xs text-gray-500">
+													Identity: {identityText}
+												</span>
 											)}
 										</div>
 									);
@@ -1260,7 +1593,7 @@ const WifiPanel = ({ serial, device }: WifiPanelProps) => {
 									))}
 								</select>
 							</div>
-							{filteredResults.length === 0 ? (
+							{filteredGroups.length === 0 ? (
 								<p className="text-sm text-gray-500">
 									No networks match the filters.
 								</p>
@@ -1269,7 +1602,22 @@ const WifiPanel = ({ serial, device }: WifiPanelProps) => {
 									<table className="min-w-full divide-y divide-gray-200">
 										<thead>
 											<tr>
-												{SCAN_COLUMNS.map((col) => (
+												{[
+													{
+														label: "Network",
+														className: "py-2 pr-2 text-left",
+													},
+													{
+														label: "Signal",
+														className: "px-2 py-2 text-center",
+													},
+													{ label: "APs", className: "px-2 py-2 text-right" },
+													{ label: "Bands", className: "px-2 py-2 text-left" },
+													{
+														label: "Security",
+														className: "pl-2 py-2 text-left",
+													},
+												].map((col) => (
 													<th
 														key={col.label}
 														scope="col"
@@ -1281,40 +1629,98 @@ const WifiPanel = ({ serial, device }: WifiPanelProps) => {
 											</tr>
 										</thead>
 										<tbody className="divide-y divide-gray-100">
-											{filteredResults.map((result: WifiScanResult) => (
-												<tr key={`${result.bssid}-${result.channel}`}>
-													<td className="py-2 pr-2 max-w-0 w-full">
-														<div className="flex flex-col min-w-0">
-															{result.ssid ? (
-																<span className="text-sm font-medium text-gray-900 truncate">
-																	{result.ssid}
+											{filteredGroups.map((group) => {
+												const expanded = expandedGroups.has(group.key);
+												const hidden = group.ssid == null;
+												const badge = badgeByGroupKey.get(group.key) ?? null;
+												return (
+													<Fragment key={group.key}>
+														<tr>
+															<td className="py-2 pr-2 max-w-0 w-full">
+																<button
+																	type="button"
+																	onClick={() => toggleGroup(group.key)}
+																	aria-expanded={expanded}
+																	aria-label={`${expanded ? "Collapse" : "Expand"} ${
+																		hidden ? "hidden networks" : group.ssid
+																	}`}
+																	className="flex items-center gap-1.5 min-w-0 w-full text-left cursor-pointer"
+																>
+																	{expanded ? (
+																		<ChevronDown className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
+																	) : (
+																		<ChevronRight className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
+																	)}
+																	<span className="flex flex-col min-w-0">
+																		{hidden ? (
+																			<span className="text-sm italic text-gray-500 truncate">
+																				{group.aps.length} hidden AP
+																				{group.aps.length === 1 ? "" : "s"} seen
+																			</span>
+																		) : (
+																			<span className="flex items-center gap-1.5 min-w-0">
+																				<span className="text-sm font-medium text-gray-900 truncate">
+																					{group.ssid}
+																				</span>
+																				<RelationshipBadgePill badge={badge} />
+																			</span>
+																		)}
+																	</span>
+																</button>
+															</td>
+															<td className="px-2 py-2 text-center whitespace-nowrap">
+																<SignalBar value={group.bestSignal} />
+															</td>
+															<td className="px-2 py-2 text-xs text-gray-500 text-right whitespace-nowrap tabular-nums">
+																×{group.aps.length}
+															</td>
+															<td className="px-2 py-2 whitespace-nowrap">
+																<span className="inline-flex gap-1">
+																	{group.bands.map((band) => (
+																		<Badge key={band} variant="gray">
+																			{band}
+																		</Badge>
+																	))}
 																</span>
-															) : (
-																<span className="text-sm italic text-gray-400 truncate">
-																	&lt;hidden&gt;
-																</span>
-															)}
-															<span className="text-xs text-gray-500 font-mono truncate">
-																{result.bssid}
-															</span>
-														</div>
-													</td>
-													<td className="px-2 py-2 text-xs text-gray-500 whitespace-nowrap">
-														{result.band ?? "—"}
-													</td>
-													<td className="px-2 py-2 text-xs text-gray-500 text-right whitespace-nowrap">
-														{result.signal != null ? `${result.signal}%` : "—"}
-													</td>
-													<td className="px-2 py-2 text-xs text-gray-500 text-right whitespace-nowrap">
-														{result.rate != null ? `${result.rate} Mbps` : "—"}
-													</td>
-													<td className="pl-2 py-2 whitespace-nowrap">
-														<Badge variant="gray" pill>
-															{result.security ?? "Open"}
-														</Badge>
-													</td>
-												</tr>
-											))}
+															</td>
+															<td className="pl-2 py-2 whitespace-nowrap">
+																{!hidden && (
+																	<Badge variant="gray" pill>
+																		{group.security ?? "Open"}
+																	</Badge>
+																)}
+															</td>
+														</tr>
+														{expanded &&
+															group.visibleAps.map((ap: WifiScanResult) => (
+																<tr
+																	key={`${ap.bssid}-${ap.channel}`}
+																	className="bg-gray-50"
+																>
+																	<td className="py-1.5 pr-2 pl-8 text-xs font-mono text-gray-500 whitespace-nowrap">
+																		{ap.bssid}
+																	</td>
+																	<td className="px-2 py-1.5 text-center whitespace-nowrap">
+																		<SignalBar value={ap.signal ?? null} />
+																	</td>
+																	<td />
+																	<td className="px-2 py-1.5 text-xs text-gray-500 whitespace-nowrap">
+																		<Tooltip
+																			content={`Channel ${ap.channel ?? "—"}`}
+																		>
+																			<span className="border-b border-dotted border-gray-500 cursor-default">
+																				{ap.band ?? "—"}
+																			</span>
+																		</Tooltip>
+																	</td>
+																	<td className="pl-2 py-1.5 text-right text-xs text-gray-500 tabular-nums whitespace-nowrap">
+																		{ap.rate != null ? `${ap.rate} Mbps` : "—"}
+																	</td>
+																</tr>
+															))}
+													</Fragment>
+												);
+											})}
 										</tbody>
 									</table>
 								</div>
