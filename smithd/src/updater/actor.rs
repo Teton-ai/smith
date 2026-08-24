@@ -7,7 +7,9 @@ use crate::utils::network::NetworkClient;
 use anyhow::Context;
 use anyhow::Result;
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::fmt::Write;
+use std::path::Component;
 use std::path::Path;
 use std::path::PathBuf;
 use tokio::process::Command;
@@ -17,6 +19,9 @@ use tokio::time::{self, Duration};
 use tracing::{error, info, warn};
 
 const MAX_INSTALL_RETRIES: u32 = 3;
+const PACKAGE_CACHE_RESERVE_BYTES: u64 = 3 * 1024 * 1024 * 1024;
+const RETAINED_RELEASES: usize = 4;
+const RELEASE_HISTORY_FILE: &str = "release-history";
 
 #[derive(Clone, Debug)]
 enum InstallFailureKind {
@@ -82,6 +87,48 @@ fn classify_install_failure(stderr: &str) -> InstallFailureKind {
     }
 
     InstallFailureKind::Unknown
+}
+
+fn manifest_blob_paths(manifest: &str, blobs_dir: &Path) -> Result<HashSet<PathBuf>> {
+    manifest
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .map(|line| {
+            let file = line
+                .splitn(3, ' ')
+                .nth(2)
+                .ok_or_else(|| anyhow::anyhow!("malformed package manifest line: {line}"))?;
+            let relative_path = Path::new(file);
+            if relative_path.as_os_str().is_empty()
+                || relative_path
+                    .components()
+                    .any(|component| !matches!(component, Component::Normal(_)))
+            {
+                return Err(anyhow::anyhow!(
+                    "unsafe blob path in package manifest: {file}"
+                ));
+            }
+            Ok(blobs_dir.join(relative_path))
+        })
+        .collect()
+}
+
+async fn remove_file_and_count(path: &Path, bytes_freed: &mut u64) -> bool {
+    let size = match tokio::fs::metadata(path).await {
+        Ok(metadata) => metadata.len(),
+        Err(err) => {
+            warn!("Failed to stat old package {}: {}", path.display(), err);
+            0
+        }
+    };
+
+    if let Err(err) = tokio::fs::remove_file(path).await {
+        error!("Failed to remove old package {}: {}", path.display(), err);
+        false
+    } else {
+        *bytes_freed += size;
+        true
+    }
 }
 
 #[derive(Debug)]
@@ -475,6 +522,17 @@ impl Actor {
             }
         }
 
+        let previous_release_id = match self.magic.get_release_id().await {
+            Ok(release_id) => Some(release_id),
+            Err(err) => {
+                warn!(
+                    error = ?err,
+                    "Current release id is unavailable; package cleanup will be skipped to preserve rollback packages"
+                );
+                None
+            }
+        };
+
         let target_release_id = self
             .magic
             .get_target_release_id()
@@ -606,7 +664,18 @@ impl Actor {
 
         self.magic.set_release_id(target_release_id).await;
 
-        self.clean_up_old_packages().await
+        if let Some(previous_release_id) = previous_release_id
+            && previous_release_id != target_release_id
+        {
+            Self::clean_up_old_packages(&self.packages_dir, target_release_id, previous_release_id)
+                .await?;
+        } else {
+            info!(
+                "Skipping package cleanup because there is no distinct previous release to retain for rollback"
+            );
+        }
+
+        Ok(())
     }
 
     async fn batch_install(
@@ -705,27 +774,227 @@ impl Actor {
         }
     }
 
-    async fn clean_up_old_packages(&self) -> Result<()> {
-        // for now we are gonna delete packages in /packages
-        // TODO: lets improve on the caching mechanism later
-        let mut entries = tokio::fs::read_dir(&self.packages_dir).await?;
+    async fn clean_up_old_packages(
+        packages_dir: &Path,
+        current_release_id: i32,
+        rollback_release_id: i32,
+    ) -> Result<()> {
+        Self::clean_up_old_packages_with_reserve(
+            packages_dir,
+            current_release_id,
+            rollback_release_id,
+            PACKAGE_CACHE_RESERVE_BYTES,
+        )
+        .await
+    }
+
+    async fn clean_up_old_packages_with_reserve(
+        packages_dir: &Path,
+        current_release_id: i32,
+        rollback_release_id: i32,
+        reserve_bytes: u64,
+    ) -> Result<()> {
+        info!(
+            current_release_id,
+            rollback_release_id,
+            reserve_bytes,
+            packages_dir = %packages_dir.display(),
+            "Evaluating package cache cleanup after successful release activation"
+        );
+
+        let versions_dir = packages_dir.join("versions");
+        let blobs_dir = packages_dir.join("blobs");
+        let history_path = packages_dir.join(RELEASE_HISTORY_FILE);
+        let history = match tokio::fs::read_to_string(&history_path).await {
+            Ok(history) => {
+                let history = history
+                    .lines()
+                    .filter(|line| !line.trim().is_empty())
+                    .map(|line| {
+                        line.parse::<i32>().with_context(|| {
+                            format!("invalid release id in {}", history_path.display())
+                        })
+                    })
+                    .collect::<Result<Vec<_>>>()?;
+                info!(?history, "Loaded package release activation history");
+                history
+            }
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+                info!(
+                    history_path = %history_path.display(),
+                    "No package release history exists yet; creating it from the current activation"
+                );
+                Vec::new()
+            }
+            Err(err) => {
+                return Err(err).with_context(|| format!("reading {}", history_path.display()));
+            }
+        };
+
+        let mut seen_releases = HashSet::new();
+        let release_history = [current_release_id, rollback_release_id]
+            .into_iter()
+            .chain(history)
+            .filter(|release_id| seen_releases.insert(*release_id))
+            .collect::<Vec<_>>();
+        let history_contents = release_history
+            .iter()
+            .map(i32::to_string)
+            .collect::<Vec<_>>()
+            .join("\n")
+            + "\n";
+        let history_part = packages_dir.join(format!("{RELEASE_HISTORY_FILE}.part"));
+        tokio::fs::write(&history_part, history_contents).await?;
+        tokio::fs::rename(&history_part, &history_path).await?;
+        info!(
+            ?release_history,
+            history_path = %history_path.display(),
+            "Recorded release activation history in newest-first order"
+        );
+
+        let available_bytes = fs2::available_space(packages_dir)?;
+        if available_bytes >= reserve_bytes {
+            info!(
+                available_bytes,
+                reserve_bytes,
+                "Package cache cleanup deferred: available disk space meets the configured reserve; all cached releases will be kept"
+            );
+            return Ok(());
+        }
+
+        warn!(
+            available_bytes,
+            reserve_bytes,
+            deficit_bytes = reserve_bytes.saturating_sub(available_bytes),
+            "Available disk space is below the package cache reserve; starting cleanup"
+        );
+
+        let retained_releases = release_history
+            .iter()
+            .take(RETAINED_RELEASES)
+            .copied()
+            .collect::<Vec<_>>();
+        let mut retained_blobs = HashSet::new();
+
+        // Read every protected manifest before deleting anything. If one is unavailable
+        // or malformed, retaining the whole cache is safer than losing fast rollback.
+        for release_id in &retained_releases {
+            let manifest_path = versions_dir.join(release_id.to_string());
+            let manifest = tokio::fs::read_to_string(&manifest_path)
+                .await
+                .with_context(|| {
+                    format!("reading retained manifest {}", manifest_path.display())
+                })?;
+            retained_blobs.extend(manifest_blob_paths(&manifest, &blobs_dir)?);
+        }
+        info!(
+            ?retained_releases,
+            retained_blob_count = retained_blobs.len(),
+            "Protected the current release and newest rollback releases; their manifests and blobs will not be removed"
+        );
+
         let mut bytes_freed: u64 = 0;
-        while let Some(entry) = entries.next_entry().await? {
+        let mut manifests_removed = 0_u64;
+        let mut versions = tokio::fs::read_dir(&versions_dir).await?;
+        while let Some(entry) = versions.next_entry().await? {
             let path = entry.path();
-            if path.is_file() && path.extension().and_then(|e| e.to_str()) == Some("deb") {
-                let size = entry.metadata().await.map(|m| m.len()).unwrap_or(0);
-                if let Err(e) = tokio::fs::remove_file(&path).await {
-                    error!("Failed to remove old package {}: {}", path.display(), e);
-                } else {
-                    bytes_freed += size;
+            if !path.is_file() {
+                continue;
+            }
+
+            let retained = entry
+                .file_name()
+                .to_str()
+                .and_then(|name| name.parse::<i32>().ok())
+                .is_some_and(|release_id| retained_releases.contains(&release_id));
+            if retained {
+                continue;
+            }
+
+            info!(
+                manifest = %path.display(),
+                "Removing release manifest because it is outside the protected rollback history"
+            );
+            if remove_file_and_count(&path, &mut bytes_freed).await {
+                manifests_removed += 1;
+            }
+        }
+
+        let mut blobs_removed = 0_u64;
+        if blobs_dir.exists() {
+            let mut directories = vec![blobs_dir.clone()];
+            let mut visited_directories = Vec::new();
+            while let Some(directory) = directories.pop() {
+                visited_directories.push(directory.clone());
+                let mut entries = tokio::fs::read_dir(&directory).await?;
+                while let Some(entry) = entries.next_entry().await? {
+                    let path = entry.path();
+                    let file_type = entry.file_type().await?;
+                    if file_type.is_dir() {
+                        directories.push(path);
+                    } else if file_type.is_file()
+                        && !retained_blobs.contains(&path)
+                        && remove_file_and_count(&path, &mut bytes_freed).await
+                    {
+                        blobs_removed += 1;
+                    }
+                }
+            }
+
+            // Remove now-empty nested directories, but keep the blobs root.
+            for directory in visited_directories.into_iter().rev() {
+                if directory != blobs_dir
+                    && let Err(err) = tokio::fs::remove_dir(&directory).await
+                    && err.kind() != std::io::ErrorKind::DirectoryNotEmpty
+                {
+                    warn!(
+                        "Failed to remove package cache directory {}: {}",
+                        directory.display(),
+                        err
+                    );
                 }
             }
         }
 
+        // Remove packages left behind by the legacy, pre-blob cache layout.
+        let mut legacy_packages_removed = 0_u64;
+        let mut entries = tokio::fs::read_dir(packages_dir).await?;
+        while let Some(entry) = entries.next_entry().await? {
+            let path = entry.path();
+            if path.is_file()
+                && path.extension().and_then(|e| e.to_str()) == Some("deb")
+                && remove_file_and_count(&path, &mut bytes_freed).await
+            {
+                legacy_packages_removed += 1;
+            }
+        }
+
+        let available_bytes_after_cleanup = fs2::available_space(packages_dir)?;
         info!(
-            "Cleaned up old packages, freed {} MB",
-            bytes_freed / 1024 / 1024
+            current_release_id,
+            rollback_release_id,
+            ?retained_releases,
+            retained_release_count = retained_releases.len(),
+            manifests_removed,
+            blobs_removed,
+            legacy_packages_removed,
+            bytes_freed,
+            available_bytes_after_cleanup,
+            reserve_bytes,
+            "Package cache cleanup finished"
         );
+        if available_bytes_after_cleanup < reserve_bytes {
+            warn!(
+                available_bytes_after_cleanup,
+                reserve_bytes,
+                "Package cache cleanup could not restore the disk reserve without deleting protected rollback releases"
+            );
+        } else {
+            info!(
+                available_bytes_after_cleanup,
+                reserve_bytes, "Package cache cleanup restored the configured disk reserve"
+            );
+        }
         Ok(())
     }
 
@@ -818,5 +1087,118 @@ impl Actor {
             }
         }
         info!("Updater shutting down");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn cleanup_retains_current_and_actual_previous_release() -> Result<()> {
+        let temp = tempfile::tempdir()?;
+        let packages = temp.path().join("packages");
+        let versions = packages.join("versions");
+        let blobs = packages.join("blobs");
+        tokio::fs::create_dir_all(&versions).await?;
+        tokio::fs::create_dir_all(blobs.join("nested")).await?;
+
+        tokio::fs::write(
+            versions.join("12"),
+            "app 12 app-12.deb\nshared 2 shared.deb\n",
+        )
+        .await?;
+        tokio::fs::write(
+            versions.join("8"),
+            "app 8 nested/app-8.deb\nshared 2 shared.deb\n",
+        )
+        .await?;
+        tokio::fs::write(versions.join("10"), "app 10 app-10.deb\n").await?;
+        tokio::fs::write(versions.join("9"), "app 9 app-9.deb\n").await?;
+        tokio::fs::write(versions.join("11"), "app 11 app-11.deb\n").await?;
+        tokio::fs::write(packages.join(RELEASE_HISTORY_FILE), "10\n9\n7\n").await?;
+
+        tokio::fs::write(blobs.join("app-12.deb"), b"current").await?;
+        tokio::fs::write(blobs.join("nested/app-8.deb"), b"rollback").await?;
+        tokio::fs::write(blobs.join("app-10.deb"), b"older rollback").await?;
+        tokio::fs::write(blobs.join("app-9.deb"), b"oldest rollback").await?;
+        tokio::fs::write(blobs.join("shared.deb"), b"shared").await?;
+        tokio::fs::write(blobs.join("app-11.deb"), b"stale").await?;
+        tokio::fs::write(blobs.join("abandoned.deb.part"), b"partial").await?;
+        tokio::fs::write(packages.join("legacy.deb"), b"legacy").await?;
+
+        Actor::clean_up_old_packages_with_reserve(&packages, 12, 8, u64::MAX).await?;
+
+        assert!(versions.join("12").exists());
+        assert!(versions.join("8").exists());
+        assert!(versions.join("10").exists());
+        assert!(versions.join("9").exists());
+        assert!(!versions.join("11").exists());
+        assert!(blobs.join("app-12.deb").exists());
+        assert!(blobs.join("nested/app-8.deb").exists());
+        assert!(blobs.join("app-10.deb").exists());
+        assert!(blobs.join("app-9.deb").exists());
+        assert!(blobs.join("shared.deb").exists());
+        assert!(!blobs.join("app-11.deb").exists());
+        assert!(!blobs.join("abandoned.deb.part").exists());
+        assert!(!packages.join("legacy.deb").exists());
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn cleanup_does_not_delete_anything_when_rollback_manifest_is_missing() -> Result<()> {
+        let temp = tempfile::tempdir()?;
+        let packages = temp.path().join("packages");
+        let versions = packages.join("versions");
+        let blobs = packages.join("blobs");
+        tokio::fs::create_dir_all(&versions).await?;
+        tokio::fs::create_dir_all(&blobs).await?;
+
+        tokio::fs::write(versions.join("12"), "app 12 app-12.deb\n").await?;
+        tokio::fs::write(versions.join("11"), "app 11 app-11.deb\n").await?;
+        tokio::fs::write(blobs.join("app-12.deb"), b"current").await?;
+        tokio::fs::write(blobs.join("app-11.deb"), b"stale").await?;
+
+        let result = Actor::clean_up_old_packages_with_reserve(&packages, 12, 8, u64::MAX).await;
+
+        assert!(result.is_err());
+        assert!(versions.join("11").exists());
+        assert!(blobs.join("app-11.deb").exists());
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn cleanup_is_deferred_while_disk_reserve_is_healthy() -> Result<()> {
+        let temp = tempfile::tempdir()?;
+        let packages = temp.path().join("packages");
+        let versions = packages.join("versions");
+        let blobs = packages.join("blobs");
+        tokio::fs::create_dir_all(&versions).await?;
+        tokio::fs::create_dir_all(&blobs).await?;
+
+        tokio::fs::write(versions.join("12"), "app 12 app-12.deb\n").await?;
+        tokio::fs::write(versions.join("8"), "app 8 app-8.deb\n").await?;
+        tokio::fs::write(versions.join("7"), "app 7 app-7.deb\n").await?;
+        tokio::fs::write(blobs.join("app-7.deb"), b"still cached").await?;
+
+        Actor::clean_up_old_packages_with_reserve(&packages, 12, 8, 0).await?;
+
+        assert!(versions.join("7").exists());
+        assert!(blobs.join("app-7.deb").exists());
+        assert_eq!(
+            tokio::fs::read_to_string(packages.join(RELEASE_HISTORY_FILE)).await?,
+            "12\n8\n"
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn manifest_rejects_paths_outside_the_blob_cache() {
+        let result = manifest_blob_paths("app 1 ../../etc/passwd\n", Path::new("/packages/blobs"));
+
+        assert!(result.is_err());
     }
 }
