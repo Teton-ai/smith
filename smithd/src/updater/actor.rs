@@ -772,8 +772,20 @@ impl Actor {
         if let Some(previous_release_id) = previous_release_id
             && previous_release_id != target_release_id
         {
-            Self::clean_up_old_packages(&self.packages_dir, target_release_id, previous_release_id)
-                .await?;
+            if let Err(err) = Self::clean_up_old_packages(
+                &self.packages_dir,
+                target_release_id,
+                previous_release_id,
+            )
+            .await
+            {
+                warn!(
+                    error = ?err,
+                    target_release_id,
+                    previous_release_id,
+                    "Package cache cleanup failed after successful release activation"
+                );
+            }
         } else {
             info!(
                 "Skipping package cleanup because there is no distinct previous release to retain for rollback"
@@ -912,15 +924,22 @@ impl Actor {
         let history_path = packages_dir.join(RELEASE_HISTORY_FILE);
         let history = match tokio::fs::read_to_string(&history_path).await {
             Ok(history) => {
-                let history = history
+                let parsed_history = history
                     .lines()
                     .filter(|line| !line.trim().is_empty())
-                    .map(|line| {
-                        line.parse::<i32>().with_context(|| {
-                            format!("invalid release id in {}", history_path.display())
-                        })
-                    })
-                    .collect::<Result<Vec<_>>>()?;
+                    .map(str::parse::<i32>)
+                    .collect::<Result<Vec<_>, _>>();
+                let history = match parsed_history {
+                    Ok(history) => history,
+                    Err(err) => {
+                        warn!(
+                            error = ?err,
+                            history_path = %history_path.display(),
+                            "Discarding invalid release history and rebuilding it from the current activation"
+                        );
+                        Vec::new()
+                    }
+                };
                 info!(?history, "Loaded package release activation history");
                 history
             }
@@ -1229,6 +1248,11 @@ mod tests {
         );
     }
 
+    #[test]
+    fn no_action_when_current_release_matches_target() {
+        assert_eq!(check_action(Some(12), Some(12), None), None);
+    }
+
     #[tokio::test]
     async fn cleanup_retains_current_and_actual_previous_release() -> Result<()> {
         let temp = tempfile::tempdir()?;
@@ -1321,11 +1345,29 @@ mod tests {
         tokio::fs::write(versions.join("8"), "app 8 app-8.deb\n").await?;
         tokio::fs::write(versions.join("7"), "app 7 app-7.deb\n").await?;
         tokio::fs::write(blobs.join("app-7.deb"), b"still cached").await?;
+        tokio::fs::write(packages.join(RELEASE_HISTORY_FILE), "7\n6\n5\n").await?;
 
         Actor::clean_up_old_packages_with_reserve(&packages, 12, 8, 0).await?;
 
         assert!(versions.join("7").exists());
         assert!(blobs.join("app-7.deb").exists());
+        assert_eq!(
+            tokio::fs::read_to_string(packages.join(RELEASE_HISTORY_FILE)).await?,
+            "12\n8\n7\n6\n"
+        );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn cleanup_repairs_invalid_release_history() -> Result<()> {
+        let temp = tempfile::tempdir()?;
+        let packages = temp.path().join("packages");
+        tokio::fs::create_dir_all(packages.join("versions")).await?;
+        tokio::fs::write(packages.join(RELEASE_HISTORY_FILE), "11\ninvalid\n").await?;
+
+        Actor::clean_up_old_packages_with_reserve(&packages, 12, 8, 0).await?;
+
         assert_eq!(
             tokio::fs::read_to_string(packages.join(RELEASE_HISTORY_FILE)).await?,
             "12\n8\n"
@@ -1335,9 +1377,11 @@ mod tests {
     }
 
     #[test]
-    fn manifest_rejects_paths_outside_the_blob_cache() {
-        let result = manifest_blob_paths("app 1 ../../etc/passwd\n", Path::new("/packages/blobs"));
+    fn manifest_rejects_invalid_blob_entries() {
+        let blobs = Path::new("/packages/blobs");
 
-        assert!(result.is_err());
+        assert!(manifest_blob_paths("app 1 ../../etc/passwd\n", blobs).is_err());
+        assert!(manifest_blob_paths("app 1 /etc/passwd\n", blobs).is_err());
+        assert!(manifest_blob_paths("app 1\n", blobs).is_err());
     }
 }

@@ -35,7 +35,7 @@ impl Handler {
         true
     }
 
-    pub async fn check_for_updates(&self) -> bool {
+    pub async fn prepare_release(&self) -> bool {
         if let Err(err) = self.sender.send(ActorMessage::Prepare).await {
             warn!("Unable to schedule release preparation: {}", err);
             return false;
@@ -43,10 +43,12 @@ impl Handler {
         true
     }
 
-    pub async fn upgrade_device(&self) {
+    pub async fn install_prepared_release(&self) -> bool {
         if let Err(err) = self.sender.send(ActorMessage::InstallPrepared).await {
             warn!("Unable to schedule prepared release installation: {}", err);
+            return false;
         }
+        true
     }
 
     pub async fn status(&self) -> String {
