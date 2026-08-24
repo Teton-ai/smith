@@ -88,6 +88,14 @@ fn classify_install_failure(stderr: &str) -> InstallFailureKind {
     InstallFailureKind::Unknown
 }
 
+fn is_smith_package(package_name: &str) -> bool {
+    package_name == "smith" || package_name == "smith_amd64"
+}
+
+fn is_smith_updater_package(package_name: &str) -> bool {
+    package_name == "smith-updater"
+}
+
 fn manifest_blob_paths(manifest: &str, blobs_dir: &Path) -> Result<HashSet<PathBuf>> {
     ConfigPackage::parse_manifest(manifest)?
         .into_iter()
@@ -438,7 +446,7 @@ impl Actor {
         self.prepared_release_id = None;
     }
 
-    async fn ensure_no_pending_smith_update(&self, requested_release_id: i32) -> Result<()> {
+    async fn ensure_no_pending_smith_update(&mut self, requested_release_id: i32) -> Result<()> {
         let pending_release = self.packages_dir.join(PENDING_SMITH_RELEASE_FILE);
         let pending_release_id = match tokio::fs::read_to_string(&pending_release).await {
             Ok(release_id) => release_id
@@ -451,6 +459,14 @@ impl Actor {
                     .with_context(|| format!("Failed to read {}", pending_release.display()));
             }
         };
+
+        self.ensure_smith_updater_for_release(pending_release_id)
+            .await
+            .with_context(|| {
+                format!(
+                    "Cannot resume Smith self-update to release {pending_release_id} because its updater prerequisite is unavailable"
+                )
+            })?;
 
         warn!(
             pending_release_id,
@@ -474,6 +490,83 @@ impl Actor {
         Err(anyhow::anyhow!(
             "Smith self-update to release {pending_release_id} is still pending"
         ))
+    }
+
+    async fn ensure_smith_updater_for_release(&mut self, release_id: i32) -> Result<()> {
+        let release_cache = self
+            .packages_dir
+            .join("versions")
+            .join(release_id.to_string());
+        let manifest = tokio::fs::read_to_string(&release_cache)
+            .await
+            .with_context(|| {
+                format!(
+                    "Failed to read release manifest required to update smith-updater: {}",
+                    release_cache.display()
+                )
+            })?;
+        let packages = ConfigPackage::parse_manifest(&manifest)?;
+        let updater_package = packages
+            .iter()
+            .find(|package| is_smith_updater_package(&package.name))
+            .with_context(|| {
+                format!(
+                    "Release {release_id} does not contain the smith-updater package required for a safe Smith self-update"
+                )
+            })?;
+
+        if let Ok((status, version)) = updater_package.get_system_state().await
+            && status == "ii"
+            && version == updater_package.version
+        {
+            info!(
+                release_id,
+                version = %updater_package.version,
+                "Smith updater prerequisite is already installed"
+            );
+            return Ok(());
+        }
+
+        if self.should_skip_install(&updater_package.name) {
+            return Err(anyhow::anyhow!(
+                "smith-updater reached its installation retry limit"
+            ));
+        }
+
+        let package_file = updater_package.safe_file_path(&self.packages_dir.join("blobs"))?;
+        if !self.blob_is_valid(&package_file).await? {
+            return Err(anyhow::anyhow!(
+                "smith-updater package is missing or empty: {}",
+                package_file.display()
+            ));
+        }
+
+        info!(
+            release_id,
+            version = %updater_package.version,
+            package_file = %package_file.display(),
+            "Installing Smith updater prerequisite before starting the Smith self-update"
+        );
+        self.install_package_batch(&[(updater_package.name.clone(), package_file)])
+            .await?;
+
+        let (status, version) = updater_package
+            .get_system_state()
+            .await
+            .with_context(|| "Failed to verify installed smith-updater prerequisite")?;
+        if status != "ii" || version != updater_package.version {
+            return Err(anyhow::anyhow!(
+                "smith-updater prerequisite verification failed: status {status}, installed {version}, expected {}",
+                updater_package.version
+            ));
+        }
+
+        info!(
+            release_id,
+            version = %updater_package.version,
+            "Smith updater prerequisite installed and verified"
+        );
+        Ok(())
     }
 
     #[tracing::instrument(skip(self))]
@@ -824,10 +917,17 @@ impl Actor {
             }
         }
 
+        // The helper must understand the pinned-release protocol before it is started.
+        self.ensure_smith_updater_for_release(target_release_id)
+            .await?;
+
         // now install packages
         let mut update_smith = false;
         let mut to_install: Vec<(String, PathBuf)> = Vec::new();
         for package in packages {
+            if is_smith_updater_package(&package.name) {
+                continue;
+            }
             if self.should_skip_install(&package.name) {
                 continue;
             }
@@ -845,7 +945,7 @@ impl Actor {
             };
 
             if !package_installed {
-                if package.name == "smith" || package.name == "smith_amd64" {
+                if is_smith_package(&package.name) {
                     update_smith = true;
                     continue;
                 }
@@ -856,27 +956,7 @@ impl Actor {
 
         // One apt transaction: everything is unpacked before any postinst runs.
         if !to_install.is_empty() {
-            match self.batch_install(&to_install).await {
-                Ok(()) => {
-                    for (package_name, _) in &to_install {
-                        self.install_failures.remove(package_name);
-                    }
-                }
-                Err(BatchInstallError::TimedOut { seconds }) => {
-                    // apt may still be running and holding the dpkg lock.
-                    error!(
-                        "Batch install timed out after {} seconds; the apt transaction may still be running",
-                        seconds
-                    );
-                    return Err(anyhow::anyhow!(
-                        "batch install timed out after {seconds} seconds"
-                    ));
-                }
-                Err(BatchInstallError::Failed { detail }) => {
-                    error!("Batch install failed:\n{detail}");
-                    self.handle_batch_failure(&to_install, &detail).await;
-                }
-            }
+            self.install_package_batch(&to_install).await?;
         }
 
         if update_smith {
@@ -957,6 +1037,31 @@ impl Actor {
         }
 
         Ok(())
+    }
+
+    async fn install_package_batch(&mut self, to_install: &[(String, PathBuf)]) -> Result<()> {
+        match self.batch_install(to_install).await {
+            Ok(()) => {
+                for (package_name, _) in to_install {
+                    self.install_failures.remove(package_name);
+                }
+                Ok(())
+            }
+            Err(BatchInstallError::TimedOut { seconds }) => {
+                error!(
+                    "Batch install timed out after {} seconds; the apt transaction may still be running",
+                    seconds
+                );
+                Err(anyhow::anyhow!(
+                    "batch install timed out after {seconds} seconds"
+                ))
+            }
+            Err(BatchInstallError::Failed { detail }) => {
+                error!("Batch install failed:\n{detail}");
+                self.handle_batch_failure(to_install, &detail).await;
+                Err(anyhow::anyhow!("batch install failed: {detail}"))
+            }
+        }
     }
 
     async fn batch_install(
