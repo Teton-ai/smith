@@ -118,8 +118,19 @@ async fn queue_commands_bundle(
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
 
+    // Use the DB clock, not the API's: `available_at` is compared against
+    // Postgres's `now()` in `get_commands`, so clock skew would otherwise
+    // skew the wave spacing.
+    let db_now = sqlx::query_scalar!(r#"SELECT now() AS "now!: DateTime<Utc>""#)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(|err| {
+            error!("Failed to read database clock {err}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+
     let policy = merged_stagger_policy(commands);
-    let availabilities = assign_wave_availabilities(devices, policy.as_ref(), Utc::now());
+    let availabilities = assign_wave_availabilities(devices, policy.as_ref(), db_now);
 
     let mut queued = Vec::with_capacity(devices.len() * commands.len());
     for DeviceAvailability {
