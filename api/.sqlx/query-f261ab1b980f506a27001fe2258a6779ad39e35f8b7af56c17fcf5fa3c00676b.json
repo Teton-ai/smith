@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE command_queue AS cq\n            SET available_at = statement_timestamp() + make_interval(secs => u.offset_secs)\n            FROM UNNEST($1::int[], $2::int[]) AS u(id, offset_secs)\n            WHERE cq.id = u.id\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int4Array",
+        "Int4Array"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "f261ab1b980f506a27001fe2258a6779ad39e35f8b7af56c17fcf5fa3c00676b"
+}

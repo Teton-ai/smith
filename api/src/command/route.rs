@@ -8,7 +8,7 @@ use crate::user::CurrentUser;
 use axum::Json;
 use axum::extract::{Host, Path, Query};
 use axum::{Extension, http::StatusCode, response::Result};
-use chrono::{DateTime, Utc};
+use chrono::Utc;
 use models::command::{BundleReceipt, BundleWithCommands, CommandRecipe, QueuedCommand};
 use models::device::DeviceCommandResponse;
 use rand::seq::SliceRandom;
@@ -51,25 +51,20 @@ fn merged_stagger_policy(commands: &[SafeCommandRequest]) -> Option<StaggerPolic
         })
 }
 
-/// `None` means no policy applies; leaves `available_at` unbound so the
-/// INSERT falls back to `COALESCE($5, now())`.
-struct DeviceAvailability {
+/// `offset` is relative, not absolute: see the two-phase insert comment below.
+struct DeviceWaveOffset {
     device_id: i32,
-    available_at: Option<DateTime<Utc>>,
+    offset: Option<Duration>,
 }
 
 /// Shuffled once so wave membership doesn't correlate with caller order.
-fn assign_wave_availabilities(
-    devices: &[i32],
-    policy: Option<&StaggerPolicy>,
-    now: DateTime<Utc>,
-) -> Vec<DeviceAvailability> {
+fn assign_wave_offsets(devices: &[i32], policy: Option<&StaggerPolicy>) -> Vec<DeviceWaveOffset> {
     let Some(policy) = policy else {
         return devices
             .iter()
-            .map(|&device_id| DeviceAvailability {
+            .map(|&device_id| DeviceWaveOffset {
                 device_id,
-                available_at: None,
+                offset: None,
             })
             .collect();
     };
@@ -83,12 +78,9 @@ fn assign_wave_availabilities(
     ordered_devices
         .into_iter()
         .enumerate()
-        .map(|(wave_index, device_id)| {
-            let offset = policy.wave_duration * (wave_index as u32 / wave_size);
-            DeviceAvailability {
-                device_id,
-                available_at: Some(now + offset),
-            }
+        .map(|(wave_index, device_id)| DeviceWaveOffset {
+            device_id,
+            offset: Some(policy.wave_duration * (wave_index as u32 / wave_size)),
         })
         .collect()
 }
@@ -118,26 +110,22 @@ async fn queue_commands_bundle(
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
 
-    // Use the DB clock, not the API's: `available_at` is compared against
-    // Postgres's `now()` in `get_commands`, so clock skew would otherwise
-    // skew the wave spacing.
-    let db_now = sqlx::query_scalar!(r#"SELECT now() AS "now!: DateTime<Utc>""#)
-        .fetch_one(&mut *tx)
-        .await
-        .map_err(|err| {
-            error!("Failed to read database clock {err}");
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?;
-
     let policy = merged_stagger_policy(commands);
-    let availabilities = assign_wave_availabilities(devices, policy.as_ref(), db_now);
+    let wave_offsets = assign_wave_offsets(devices, policy.as_ref());
+
+    // Two-phase: a slow insert could let real time pass an early wave's
+    // schedule before anything commits and becomes visible, collapsing
+    // waves. So paced rows insert with a far-future placeholder, then get
+    // corrected in one UPDATE just before commit using `statement_timestamp()`
+    // (unlike `now()`, not frozen at transaction start, and unlike
+    // `clock_timestamp()`, shared by every row in this one UPDATE instead of
+    // drifting per row).
+    let far_future_placeholder = Utc::now() + Duration::from_secs(24 * 60 * 60);
 
     let mut queued = Vec::with_capacity(devices.len() * commands.len());
-    for DeviceAvailability {
-        device_id,
-        available_at,
-    } in &availabilities
-    {
+    let mut pending_corrections: Vec<(i32, i32)> = Vec::new();
+    for DeviceWaveOffset { device_id, offset } in &wave_offsets {
+        let placeholder = offset.map(|_| far_future_placeholder);
         for command in commands {
             let cmd = serde_json::to_value(command.command.clone()).map_err(|err| {
                 error!("Failed to serialize command into JSON {err}");
@@ -158,7 +146,7 @@ async fn queue_commands_bundle(
                 cmd,
                 command.continue_on_error,
                 bundle_id.uuid,
-                *available_at
+                placeholder
             )
             .fetch_one(&mut *tx)
             .await
@@ -167,11 +155,36 @@ async fn queue_commands_bundle(
                 StatusCode::INTERNAL_SERVER_ERROR
             })?;
 
+            if let Some(offset) = offset {
+                pending_corrections.push((row.id, offset.as_secs() as i32));
+            }
+
             queued.push(QueuedCommand {
                 device: *device_id,
                 cmd_id: row.id,
             });
         }
+    }
+
+    if !pending_corrections.is_empty() {
+        let ids: Vec<i32> = pending_corrections.iter().map(|(id, _)| *id).collect();
+        let offset_secs: Vec<i32> = pending_corrections.iter().map(|(_, s)| *s).collect();
+        sqlx::query!(
+            r#"
+            UPDATE command_queue AS cq
+            SET available_at = statement_timestamp() + make_interval(secs => u.offset_secs)
+            FROM UNNEST($1::int[], $2::int[]) AS u(id, offset_secs)
+            WHERE cq.id = u.id
+            "#,
+            &ids,
+            &offset_secs,
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(|err| {
+            error!("Failed to finalize staggered availability {err}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
     }
 
     tx.commit().await.map_err(|err| {
@@ -925,10 +938,10 @@ mod stagger_tests {
     #[test]
     fn no_policy_leaves_every_device_at_the_column_default() {
         let devices = [1, 2, 3, 4, 5];
-        let availabilities = assign_wave_availabilities(&devices, None, Utc::now());
+        let offsets = assign_wave_offsets(&devices, None);
 
-        assert_eq!(availabilities.len(), devices.len());
-        assert!(availabilities.iter().all(|a| a.available_at.is_none()));
+        assert_eq!(offsets.len(), devices.len());
+        assert!(offsets.iter().all(|a| a.offset.is_none()));
     }
 
     #[test]
@@ -938,23 +951,132 @@ mod stagger_tests {
             wave_size: 2,
             wave_duration: Duration::from_secs(10),
         };
-        let now = Utc::now();
-        let availabilities = assign_wave_availabilities(&devices, Some(&policy), now);
+        let offsets = assign_wave_offsets(&devices, Some(&policy));
 
         // Shuffling must not drop or duplicate any device.
-        let mut assigned_devices: Vec<i32> = availabilities.iter().map(|a| a.device_id).collect();
+        let mut assigned_devices: Vec<i32> = offsets.iter().map(|a| a.device_id).collect();
         assigned_devices.sort();
         assert_eq!(assigned_devices, devices);
 
         // 5 devices at wave_size 2 -> ceil(5/2) = 3 distinct waves, sizes 2, 2, 1.
-        let mut counts: HashMap<DateTime<Utc>, usize> = HashMap::new();
-        for a in &availabilities {
-            *counts
-                .entry(a.available_at.expect("policy is Some"))
-                .or_default() += 1;
+        let mut counts: HashMap<Duration, usize> = HashMap::new();
+        for a in &offsets {
+            *counts.entry(a.offset.expect("policy is Some")).or_default() += 1;
         }
         assert_eq!(counts.len(), 3);
         let mut sizes: Vec<usize> = counts.values().copied().collect();
+        sizes.sort_unstable();
+        assert_eq!(sizes, vec![1, 2, 2]);
+    }
+
+    // Needs a live DB at runtime (not just compile time like other `api`
+    // tests), which CI doesn't provide, hence `#[ignore]` (`e2e` convention).
+    // Lives here, not in `e2e`, since this needs no HTTP/auth.
+    #[test]
+    #[ignore = "connects to a real, migrated Postgres via DATABASE_URL; not run in \
+                CI (test.yml has no live DB). Run against the dev stack, e.g. \
+                `docker exec smith-api cargo test -p api -- --ignored`."]
+    fn staggered_bundle_available_at_is_correct_after_commit() {
+        tokio::runtime::Runtime::new()
+            .expect("building a tokio runtime for this test")
+            .block_on(staggered_bundle_available_at_is_correct_after_commit_inner());
+    }
+
+    async fn staggered_bundle_available_at_is_correct_after_commit_inner() {
+        use chrono::DateTime;
+
+        let database_url =
+            std::env::var("DATABASE_URL").expect("DATABASE_URL must point at a migrated Postgres");
+        let pool = sqlx::PgPool::connect(&database_url)
+            .await
+            .expect("connecting to the test database");
+
+        let user_id: i32 = sqlx::query_scalar("SELECT id FROM auth.users LIMIT 1")
+            .fetch_one(&pool)
+            .await
+            .expect("at least one user must exist in auth.users to attribute the bundle to");
+
+        // Throwaway devices, cleaned up at the end (not real fleet devices).
+        let unique = Utc::now()
+            .timestamp_nanos_opt()
+            .expect("current time fits in i64 nanos");
+        let mut device_ids = Vec::new();
+        for i in 0..5 {
+            let id: i32 =
+                sqlx::query_scalar("INSERT INTO device (serial_number) VALUES ($1) RETURNING id")
+                    .bind(format!("wave-correction-test-{unique}-{i}"))
+                    .fetch_one(&pool)
+                    .await
+                    .expect("inserting a throwaway device");
+            device_ids.push(id);
+        }
+
+        let commands = vec![SafeCommandRequest {
+            id: -1,
+            command: SafeCommandTx::WifiScan,
+            continue_on_error: false,
+        }];
+
+        let result = queue_commands_bundle(&pool, &device_ids, &commands, user_id).await;
+
+        // Read back before cleanup so a failure below doesn't hide what happened.
+        let rows: Vec<(i32, DateTime<Utc>)> = match &result {
+            Ok(receipt) => {
+                sqlx::query_as("SELECT id, available_at FROM command_queue WHERE bundle = $1")
+                    .bind(receipt.uuid)
+                    .fetch_all(&pool)
+                    .await
+                    .expect("reading back the inserted rows")
+            }
+            Err(_) => Vec::new(),
+        };
+
+        if let Ok(receipt) = &result {
+            sqlx::query("DELETE FROM command_queue WHERE bundle = $1")
+                .bind(receipt.uuid)
+                .execute(&pool)
+                .await
+                .expect("cleaning up command_queue rows");
+            sqlx::query("DELETE FROM command_bundles WHERE uuid = $1")
+                .bind(receipt.uuid)
+                .execute(&pool)
+                .await
+                .expect("cleaning up the command_bundles row");
+        }
+        sqlx::query("DELETE FROM device WHERE id = ANY($1)")
+            .bind(&device_ids)
+            .execute(&pool)
+            .await
+            .expect("cleaning up throwaway devices");
+
+        result.expect("queue_commands_bundle should succeed");
+        assert_eq!(
+            rows.len(),
+            device_ids.len(),
+            "every device should have exactly one queued command"
+        );
+
+        // Expect 3 waves, sizes 2/2/1. Bucket relative to the earliest row,
+        // not a fresh `now()` (cleanup's round trips would skew it), and
+        // round rather than truncate to absorb jitter between corrected rows.
+        let earliest = rows
+            .iter()
+            .map(|(_, at)| *at)
+            .min()
+            .expect("at least one row");
+        let mut waves: HashMap<i64, usize> = HashMap::new();
+        for (_, available_at) in &rows {
+            let delta_ms = (*available_at - earliest).num_milliseconds();
+            assert!(
+                (0..=25_000).contains(&delta_ms),
+                "available_at should land within one bundle's worth of the \
+                 earliest row, not a leftover placeholder: {delta_ms}ms"
+            );
+            let wave = ((delta_ms as f64) / 10_000.0).round() as i64;
+            *waves.entry(wave).or_default() += 1;
+        }
+        assert_eq!(waves.len(), 3, "expected 3 distinct waves, got {waves:?}");
+        let mut sizes: Vec<usize> = waves.values().copied().collect();
         sizes.sort_unstable();
         assert_eq!(sizes, vec![1, 2, 2]);
     }
