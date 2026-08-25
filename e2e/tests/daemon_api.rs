@@ -704,3 +704,558 @@ async fn typed_match_prefers_exact_row_over_mismatched_type() -> Result<()> {
 
     Ok(())
 }
+
+// --- Reference ledger -----------------------------------------------------
+//
+// The ledger endpoints (`POST/DELETE /networks/{id}/references`,
+// `POST /networks/references/reconcile`) sit behind the Auth0 `check()`
+// middleware, which this harness has no way to mint a token for (see this
+// file's own top comment: every scenario here drives Postgres directly
+// instead, exactly as the dashboard's Auth0-gated routes already do). So,
+// like `concurrent_identical_network_posts_converge_to_one_row` above, these
+// tests replicate the handlers' SQL directly rather than going over HTTP.
+// The pure reconcile-diff algorithm itself (add/remove set computation) is
+// covered separately by unit tests in `api/src/network/ledger.rs`; what's
+// worth an e2e test is the DB-only behavior a unit test can't reach: locking,
+// the `ON DELETE RESTRICT` interaction, and transaction atomicity.
+
+/// `network_has_internal_reference` only exists once the reference ledger's
+/// application code has landed; its absence means a released-api
+/// version-skew run, not a bug.
+async fn has_reference_ledger(ctx: &Ctx) -> Result<bool> {
+    sqlx::query_scalar(
+        "SELECT EXISTS (SELECT 1 FROM pg_proc WHERE proname = 'network_has_internal_reference')",
+    )
+    .fetch_one(&ctx.db)
+    .await
+    .context("checking for network_has_internal_reference")
+}
+
+/// Minimal wifi network row for ledger tests: `security_type` must be set
+/// (a wifi-scoped CHECK requires it), everything else can be a placeholder.
+async fn insert_test_network(ctx: &Ctx, ssid: &str) -> Result<i32> {
+    sqlx::query_scalar(
+        "INSERT INTO network (network_type, is_network_hidden, ssid, name, security_type)
+         VALUES ('wifi', false, $1, $1, 'open')
+         RETURNING id",
+    )
+    .bind(ssid)
+    .fetch_one(&ctx.db)
+    .await
+    .context("inserting test network")
+}
+
+async fn insert_reference(
+    ctx: &Ctx,
+    holder: &str,
+    external_key: &str,
+    network_id: i32,
+) -> Result<()> {
+    sqlx::query(
+        "INSERT INTO network_reference (holder, external_key, network_id)
+         VALUES ($1, $2, $3)
+         ON CONFLICT (holder, external_key, network_id) DO NOTHING",
+    )
+    .bind(holder)
+    .bind(external_key)
+    .bind(network_id)
+    .execute(&ctx.db)
+    .await
+    .context("inserting test network_reference")?;
+    Ok(())
+}
+
+async fn network_reference_count(ctx: &Ctx, network_id: i32) -> Result<i64> {
+    sqlx::query_scalar("SELECT count(*) FROM network_reference WHERE network_id = $1")
+        .bind(network_id)
+        .fetch_one(&ctx.db)
+        .await
+        .context("counting network_reference rows")
+}
+
+async fn network_exists(ctx: &Ctx, network_id: i32) -> Result<bool> {
+    sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM network WHERE id = $1)")
+        .bind(network_id)
+        .fetch_one(&ctx.db)
+        .await
+        .context("checking network existence")
+}
+
+/// Mirrors `acquire_reference`'s insert: `ON CONFLICT DO NOTHING` on the full
+/// `(holder, external_key, network_id)` triple.
+#[tokio::test]
+#[ignore = "requires running compose stack; use make test.e2e"]
+async fn acquire_reference_is_idempotent() -> Result<()> {
+    let ctx = Ctx::connect().await?;
+    wait_for_api(&ctx).await?;
+    if !has_reference_ledger(&ctx).await? {
+        println!("skipping acquire_reference_is_idempotent: ledger not present (version-skew job)");
+        return Ok(());
+    }
+
+    let ssid = format!("e2e-ledger-acquire-{}", uuid::Uuid::new_v4());
+    let outcome: Result<i64> = async {
+        let network_id = insert_test_network(&ctx, &ssid).await?;
+        insert_reference(&ctx, "app_api", &ssid, network_id).await?;
+        insert_reference(&ctx, "app_api", &ssid, network_id).await?; // idempotent repeat
+        network_reference_count(&ctx, network_id).await
+    }
+    .await;
+
+    // network_reference's ON DELETE RESTRICT means the network row can't go
+    // first: this test leaves a real, committed reference behind (unlike
+    // e.g. release_last_reference_collects_unreferenced_network, which clears
+    // its own reference as part of what it's testing).
+    sqlx::query("DELETE FROM network_reference WHERE external_key = $1")
+        .bind(&ssid)
+        .execute(&ctx.db)
+        .await
+        .context("cleaning up acquire-idempotency reference")?;
+    sqlx::query("DELETE FROM network WHERE ssid = $1")
+        .bind(&ssid)
+        .execute(&ctx.db)
+        .await
+        .context("cleaning up acquire-idempotency network")?;
+
+    let count = outcome?;
+    ensure!(
+        count == 1,
+        "expected exactly one reference row, got {count}"
+    );
+    Ok(())
+}
+
+/// Mirrors `release_reference`: delete the ledger row, then `collect_network`'s
+/// check (hand-copied - keep in sync). With zero ledger rows and zero
+/// internal FK references, the network row itself must be deleted as a
+/// side effect.
+#[tokio::test]
+#[ignore = "requires running compose stack; use make test.e2e"]
+async fn release_last_reference_collects_unreferenced_network() -> Result<()> {
+    let ctx = Ctx::connect().await?;
+    wait_for_api(&ctx).await?;
+    if !has_reference_ledger(&ctx).await? {
+        println!(
+            "skipping release_last_reference_collects_unreferenced_network: \
+             ledger not present (version-skew job)"
+        );
+        return Ok(());
+    }
+
+    let ssid = format!("e2e-ledger-collect-{}", uuid::Uuid::new_v4());
+    let outcome: Result<bool> = async {
+        let network_id = insert_test_network(&ctx, &ssid).await?;
+        insert_reference(&ctx, "app_api", &ssid, network_id).await?;
+
+        let mut tx = ctx.db.begin().await?;
+        sqlx::query("SELECT pg_advisory_xact_lock($1)")
+            .bind(i64::from(network_id))
+            .execute(&mut *tx)
+            .await?;
+        let rows_affected = sqlx::query(
+            "DELETE FROM network_reference WHERE holder = $1 AND external_key = $2 AND network_id = $3",
+        )
+        .bind("app_api")
+        .bind(&ssid)
+        .bind(network_id)
+        .execute(&mut *tx)
+        .await?
+        .rows_affected();
+        if rows_affected > 0 {
+            let has_ledger_ref: bool = sqlx::query_scalar(
+                "SELECT EXISTS(SELECT 1 FROM network_reference WHERE network_id = $1)",
+            )
+            .bind(network_id)
+            .fetch_one(&mut *tx)
+            .await?;
+            let has_internal_ref: bool =
+                sqlx::query_scalar("SELECT network_has_internal_reference($1)")
+                    .bind(network_id)
+                    .fetch_one(&mut *tx)
+                    .await?;
+            if !has_ledger_ref && !has_internal_ref {
+                sqlx::query("DELETE FROM network WHERE id = $1")
+                    .bind(network_id)
+                    .execute(&mut *tx)
+                    .await?;
+            }
+        }
+        tx.commit().await?;
+
+        network_exists(&ctx, network_id).await
+    }
+    .await;
+
+    // In the expected (success) path the reference is already gone by the
+    // time the transaction above commits, but if the test body errors before
+    // that commit, the reference `insert_reference` created up front is still
+    // real and committed - same reasoning as acquire_reference_is_idempotent.
+    sqlx::query("DELETE FROM network_reference WHERE external_key = $1")
+        .bind(&ssid)
+        .execute(&ctx.db)
+        .await
+        .context("cleaning up collect-on-release reference")?;
+    sqlx::query("DELETE FROM network WHERE ssid = $1")
+        .bind(&ssid)
+        .execute(&ctx.db)
+        .await
+        .context("cleaning up collect-on-release network")?;
+
+    ensure!(
+        !outcome?,
+        "network with zero ledger and zero internal references should have been collected"
+    );
+    Ok(())
+}
+
+/// A release whose `(holder, external_key, network_id)` matches no row must
+/// not attempt collection - otherwise any holder could garbage-collect a
+/// network it has no relationship to, just by guessing a network_id/
+/// external_key it never registered.
+#[tokio::test]
+#[ignore = "requires running compose stack; use make test.e2e"]
+async fn release_of_an_unheld_reference_does_not_collect() -> Result<()> {
+    let ctx = Ctx::connect().await?;
+    wait_for_api(&ctx).await?;
+    if !has_reference_ledger(&ctx).await? {
+        println!(
+            "skipping release_of_an_unheld_reference_does_not_collect: \
+             ledger not present (version-skew job)"
+        );
+        return Ok(());
+    }
+
+    let ssid = format!("e2e-ledger-unheld-release-{}", uuid::Uuid::new_v4());
+    let outcome: Result<bool> = async {
+        // No insert_reference call: this network has zero references from
+        // creation - the exact state an unauthorized release must not exploit.
+        let network_id = insert_test_network(&ctx, &ssid).await?;
+
+        let mut tx = ctx.db.begin().await?;
+        sqlx::query("SELECT pg_advisory_xact_lock($1)")
+            .bind(i64::from(network_id))
+            .execute(&mut *tx)
+            .await?;
+        let rows_affected = sqlx::query(
+            "DELETE FROM network_reference WHERE holder = $1 AND external_key = $2 AND network_id = $3",
+        )
+        .bind("app_api")
+        .bind("never-registered-key")
+        .bind(network_id)
+        .execute(&mut *tx)
+        .await?
+        .rows_affected();
+        if rows_affected > 0 {
+            let has_ledger_ref: bool = sqlx::query_scalar(
+                "SELECT EXISTS(SELECT 1 FROM network_reference WHERE network_id = $1)",
+            )
+            .bind(network_id)
+            .fetch_one(&mut *tx)
+            .await?;
+            let has_internal_ref: bool =
+                sqlx::query_scalar("SELECT network_has_internal_reference($1)")
+                    .bind(network_id)
+                    .fetch_one(&mut *tx)
+                    .await?;
+            if !has_ledger_ref && !has_internal_ref {
+                sqlx::query("DELETE FROM network WHERE id = $1")
+                    .bind(network_id)
+                    .execute(&mut *tx)
+                    .await?;
+            }
+        }
+        tx.commit().await?;
+
+        network_exists(&ctx, network_id).await
+    }
+    .await;
+
+    sqlx::query("DELETE FROM network WHERE ssid = $1")
+        .bind(&ssid)
+        .execute(&ctx.db)
+        .await
+        .context("cleaning up unheld-release network")?;
+
+    ensure!(
+        outcome?,
+        "a release matching no hold must not collect an unrelated network"
+    );
+    Ok(())
+}
+
+/// Same mechanism as above, but a `device_configured_network` row still points
+/// at the network: `collect_network` must leave it alone even though its
+/// ledger reference count just hit zero.
+#[tokio::test]
+#[ignore = "requires running compose stack; use make test.e2e"]
+async fn release_does_not_collect_while_internal_reference_remains() -> Result<()> {
+    let (ctx, device_id) = setup().await?;
+    if !has_reference_ledger(&ctx).await? {
+        println!(
+            "skipping release_does_not_collect_while_internal_reference_remains: \
+             ledger not present (version-skew job)"
+        );
+        return Ok(());
+    }
+
+    let ssid = format!("e2e-ledger-internal-{}", uuid::Uuid::new_v4());
+    let outcome: Result<bool> = async {
+        let network_id = insert_test_network(&ctx, &ssid).await?;
+        insert_reference(&ctx, "app_api", &ssid, network_id).await?;
+        sqlx::query(
+            "INSERT INTO device_configured_network (device_id, network_id, profile_name)
+             VALUES ($1, $2, $3)",
+        )
+        .bind(device_id)
+        .bind(network_id)
+        .bind(&ssid)
+        .execute(&ctx.db)
+        .await?;
+
+        let mut tx = ctx.db.begin().await?;
+        sqlx::query("SELECT pg_advisory_xact_lock($1)")
+            .bind(i64::from(network_id))
+            .execute(&mut *tx)
+            .await?;
+        sqlx::query(
+            "DELETE FROM network_reference WHERE holder = $1 AND external_key = $2 AND network_id = $3",
+        )
+        .bind("app_api")
+        .bind(&ssid)
+        .bind(network_id)
+        .execute(&mut *tx)
+        .await?;
+        let has_internal_ref: bool =
+            sqlx::query_scalar("SELECT network_has_internal_reference($1)")
+                .bind(network_id)
+                .fetch_one(&mut *tx)
+                .await?;
+        if !has_internal_ref {
+            sqlx::query("DELETE FROM network WHERE id = $1")
+                .bind(network_id)
+                .execute(&mut *tx)
+                .await?;
+        }
+        tx.commit().await?;
+
+        network_exists(&ctx, network_id).await
+    }
+    .await;
+
+    sqlx::query("DELETE FROM device_configured_network WHERE network_id IN (SELECT id FROM network WHERE ssid = $1)")
+        .bind(&ssid)
+        .execute(&ctx.db)
+        .await
+        .context("cleaning up configured-network row")?;
+    // Same reasoning as the sibling collect-on-release test above: a
+    // committed reference can outlive an errored test body.
+    sqlx::query("DELETE FROM network_reference WHERE external_key = $1")
+        .bind(&ssid)
+        .execute(&ctx.db)
+        .await
+        .context("cleaning up internal-reference reference")?;
+    sqlx::query("DELETE FROM network WHERE ssid = $1")
+        .bind(&ssid)
+        .execute(&ctx.db)
+        .await
+        .context("cleaning up internal-reference network")?;
+
+    ensure!(
+        outcome?,
+        "network with a surviving device_configured_network row must not be collected"
+    );
+    Ok(())
+}
+
+/// Mirrors the transaction-level guarantee `reconcile_references` relies on:
+/// an insert referencing a nonexistent `network_id` must roll back every
+/// insert the same transaction already staged, not just skip the bad one.
+/// `reconcile_references` itself now pre-validates `to_add` network_ids and
+/// returns `400` before this FK path is ever reached in practice; this test
+/// exercises the underlying DB guarantee directly as a backstop.
+#[tokio::test]
+#[ignore = "requires running compose stack; use make test.e2e"]
+async fn reconcile_rolls_back_entirely_on_invalid_element() -> Result<()> {
+    let ctx = Ctx::connect().await?;
+    wait_for_api(&ctx).await?;
+    if !has_reference_ledger(&ctx).await? {
+        println!(
+            "skipping reconcile_rolls_back_entirely_on_invalid_element: \
+             ledger not present (version-skew job)"
+        );
+        return Ok(());
+    }
+
+    let ssid = format!("e2e-ledger-reconcile-atomic-{}", uuid::Uuid::new_v4());
+    let holder = format!("e2e-holder-{}", uuid::Uuid::new_v4());
+    let outcome: Result<i64> = async {
+        let network_id = insert_test_network(&ctx, &ssid).await?;
+        // Same nonexistent id every run would collide across parallel test
+        // runs sharing the same DB; derive one from a value that cannot exist
+        // (negative ids are never issued by the IDENTITY sequence).
+        let bogus_network_id = -1;
+
+        let mut tx = ctx.db.begin().await?;
+        let good_insert = sqlx::query(
+            "INSERT INTO network_reference (holder, external_key, network_id) VALUES ($1, $2, $3)",
+        )
+        .bind(&holder)
+        .bind(&ssid)
+        .bind(network_id)
+        .execute(&mut *tx)
+        .await;
+        ensure!(
+            good_insert.is_ok(),
+            "the valid insert should not fail on its own"
+        );
+
+        let bad_insert = sqlx::query(
+            "INSERT INTO network_reference (holder, external_key, network_id) VALUES ($1, $2, $3)",
+        )
+        .bind(&holder)
+        .bind(&ssid)
+        .bind(bogus_network_id)
+        .execute(&mut *tx)
+        .await;
+        ensure!(
+            bad_insert.is_err(),
+            "inserting a reference for a nonexistent network_id should violate the FK"
+        );
+        // Explicit for clarity; a dropped, uncommitted transaction rolls back
+        // the same way.
+        tx.rollback().await?;
+
+        network_reference_count(&ctx, network_id).await
+    }
+    .await;
+
+    sqlx::query("DELETE FROM network WHERE ssid = $1")
+        .bind(&ssid)
+        .execute(&ctx.db)
+        .await
+        .context("cleaning up reconcile-atomicity network")?;
+
+    let count = outcome?;
+    ensure!(
+        count == 0,
+        "the valid insert must not survive the rollback triggered by the invalid one, got {count} rows"
+    );
+    Ok(())
+}
+
+/// `network_reference`'s `ON DELETE RESTRICT` FK means the existing public
+/// `DELETE /networks/{id}` can no longer silently orphan a held network now
+/// that the ledger exists: it must fail instead.
+#[tokio::test]
+#[ignore = "requires running compose stack; use make test.e2e"]
+async fn hard_delete_fails_on_a_held_network() -> Result<()> {
+    let ctx = Ctx::connect().await?;
+    wait_for_api(&ctx).await?;
+    if !has_reference_ledger(&ctx).await? {
+        println!(
+            "skipping hard_delete_fails_on_a_held_network: ledger not present (version-skew job)"
+        );
+        return Ok(());
+    }
+
+    let ssid = format!("e2e-ledger-restrict-{}", uuid::Uuid::new_v4());
+    let outcome: Result<bool> = async {
+        let network_id = insert_test_network(&ctx, &ssid).await?;
+        insert_reference(&ctx, "app_api", &ssid, network_id).await?;
+
+        let delete_result = sqlx::query("DELETE FROM network WHERE id = $1")
+            .bind(network_id)
+            .execute(&ctx.db)
+            .await;
+        Ok(delete_result.is_err())
+    }
+    .await;
+
+    sqlx::query("DELETE FROM network_reference WHERE external_key = $1")
+        .bind(&ssid)
+        .execute(&ctx.db)
+        .await
+        .context("cleaning up restrict-test reference")?;
+    sqlx::query("DELETE FROM network WHERE ssid = $1")
+        .bind(&ssid)
+        .execute(&ctx.db)
+        .await
+        .context("cleaning up restrict-test network")?;
+
+    ensure!(
+        outcome?,
+        "DELETE FROM network on a held network should fail under ON DELETE RESTRICT"
+    );
+    Ok(())
+}
+
+/// `reconcile_references` locks every network_id it touches in ascending
+/// order specifically to avoid deadlocking against another overlapping
+/// reconcile/acquire/release call - a claim that only means something under
+/// real concurrency. N tasks lock the *same two* network ids in ascending
+/// order, racing on which gets there first; drop the ordering and this
+/// reliably deadlocks, keep it and every task completes.
+///
+/// Simulates the invariant rather than calling `reconcile_references`'s own
+/// `.sort_unstable()` (same reason as every other test in this section): a
+/// regression that drops that call from `ledger.rs` would slip past this.
+#[tokio::test]
+#[ignore = "requires running compose stack; use make test.e2e"]
+async fn ascending_lock_order_avoids_deadlock_under_concurrency() -> Result<()> {
+    let ctx = Ctx::connect().await?;
+    wait_for_api(&ctx).await?;
+    if !has_reference_ledger(&ctx).await? {
+        println!(
+            "skipping ascending_lock_order_avoids_deadlock_under_concurrency: \
+             ledger not present (version-skew job)"
+        );
+        return Ok(());
+    }
+
+    let ssid_a = format!("e2e-ledger-lock-a-{}", uuid::Uuid::new_v4());
+    let ssid_b = format!("e2e-ledger-lock-b-{}", uuid::Uuid::new_v4());
+    let outcome: Result<()> = async {
+        let mut id_a = insert_test_network(&ctx, &ssid_a).await?;
+        let mut id_b = insert_test_network(&ctx, &ssid_b).await?;
+        if id_a > id_b {
+            std::mem::swap(&mut id_a, &mut id_b);
+        }
+
+        const WRITERS: usize = 8;
+        let mut writers = Vec::with_capacity(WRITERS);
+        for _ in 0..WRITERS {
+            let pool = ctx.db.clone();
+            writers.push(tokio::spawn(async move {
+                let mut tx = pool.begin().await?;
+                // Ascending order, every task, every time - the invariant
+                // `reconcile_references` relies on.
+                sqlx::query("SELECT pg_advisory_xact_lock($1)")
+                    .bind(i64::from(id_a))
+                    .execute(&mut *tx)
+                    .await?;
+                sqlx::query("SELECT pg_advisory_xact_lock($1)")
+                    .bind(i64::from(id_b))
+                    .execute(&mut *tx)
+                    .await?;
+                tx.commit().await?;
+                anyhow::Ok(())
+            }));
+        }
+
+        for writer in writers {
+            writer.await.context("lock-order writer task panicked")??;
+        }
+        Ok(())
+    }
+    .await;
+
+    sqlx::query("DELETE FROM network WHERE ssid IN ($1, $2)")
+        .bind(&ssid_a)
+        .bind(&ssid_b)
+        .execute(&ctx.db)
+        .await
+        .context("cleaning up lock-order networks")?;
+
+    outcome.context("concurrent ascending-order lockers should all complete without deadlock")?;
+    Ok(())
+}

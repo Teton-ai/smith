@@ -1,4 +1,5 @@
 mod audience;
+use crate::holder::Holder;
 use crate::middlewares::authorization::{AccountsConfig, AuthorizationConfig};
 use crate::{State, user::CurrentUser};
 use audience::Audience;
@@ -71,6 +72,12 @@ pub async fn check(
     // M2M tokens have sub claim ending with "@clients" - they can't call /userinfo
     let is_m2m_token = claims.sub.ends_with("@clients");
 
+    // Resolved once, up front, from config rather than the request: a caller
+    // whose sub isn't a known holder (any user token, or an unrecognized M2M
+    // client) gets None, not an error - the ledger endpoints are the only
+    // callers that care, and they turn None into their own 403.
+    let holder = Holder(state.config.known_holders.get(&claims.sub).cloned());
+
     let needs_userinfo = !is_m2m_token
         && existing_user
             .map(|(_, has_email)| !has_email)
@@ -137,6 +144,7 @@ pub async fn check(
         .map_err(|_| StatusCode::UNAUTHORIZED)?;
 
     request.extensions_mut().insert(current_user);
+    request.extensions_mut().insert(holder);
 
     let response = next.run(request).await;
     Ok(response)

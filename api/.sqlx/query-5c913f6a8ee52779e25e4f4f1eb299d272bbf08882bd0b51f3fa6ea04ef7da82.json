@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM network_reference WHERE holder = $1 AND external_key = $2 AND network_id = $3",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "5c913f6a8ee52779e25e4f4f1eb299d272bbf08882bd0b51f3fa6ea04ef7da82"
+}
