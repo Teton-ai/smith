@@ -15,7 +15,15 @@ import {
 	Terminal,
 } from "lucide-react";
 import { useRef, useState } from "react";
-import { Link } from "react-router";
+import { Link, useNavigate } from "react-router";
+import {
+	BULK_COMMAND_OPTIONS,
+	buildCommand,
+	CommandFields,
+	commandIsValid,
+	getCommandErrorMessage,
+	useCommandForm,
+} from "@/app/(private)/commands/shared";
 import {
 	type CommandRecipe,
 	type Device,
@@ -152,8 +160,15 @@ const DeviceHeader: React.FC<DeviceHeaderProps> = ({ device, serial }) => {
 	const [selectedRecipeId, setSelectedRecipeId] = useState<number | null>(null);
 	const [recipeTriggered, setRecipeTriggered] = useState(false);
 	const [recipeError, setRecipeError] = useState<string | null>(null);
-	const [runCommand, setRunCommand] = useState("");
+	const {
+		command: runCommandState,
+		setCommand: setRunCommandState,
+		error: runCommandError,
+		setError: setRunCommandError,
+		reset: resetRunCommand,
+	} = useCommandForm("Ping");
 	const { config } = useConfig();
+	const navigate = useNavigate();
 
 	const { data: recipesData, isLoading: isLoadingRecipes } = useGetRecipes();
 	const recipes: CommandRecipe[] = Array.isArray(recipesData)
@@ -189,15 +204,24 @@ const DeviceHeader: React.FC<DeviceHeaderProps> = ({ device, serial }) => {
 		);
 	};
 
+	// The variant actually dispatched, captured at submit time: `onError` fires
+	// after the form may have been edited (or reset by closing the modal), so
+	// reading `runCommandState.variant` there could name the wrong command.
+	const submittedVariantRef = useRef(runCommandState.variant);
+
 	const { mutate: issueCommands, isPending: isIssuingCommands } =
 		useIssueCommandsToDevices({
 			mutation: {
 				onSuccess: () => {
 					setShowRunModal(false);
-					setRunCommand("");
+					resetRunCommand();
+					navigate(`/devices/${serial}/commands`);
 				},
 				onError: (error) => {
 					console.error("Failed to issue command:", error);
+					setRunCommandError(
+						getCommandErrorMessage(error, submittedVariantRef.current),
+					);
 				},
 			},
 		});
@@ -215,15 +239,18 @@ const DeviceHeader: React.FC<DeviceHeaderProps> = ({ device, serial }) => {
 		});
 
 	const handleRunCommand = () => {
-		if (!runCommand.trim() || !device?.id) return;
+		if (!commandIsValid(runCommandState) || !device?.id || isIssuingCommands)
+			return;
+		setRunCommandError(null);
+		submittedVariantRef.current = runCommandState.variant;
 		issueCommands({
 			data: {
 				devices: [device.id],
 				commands: [
 					{
 						id: -1,
-						command: { FreeForm: { cmd: runCommand } },
-						continue_on_error: false,
+						command: buildCommand(runCommandState),
+						continue_on_error: runCommandState.continue_on_error,
 					},
 				],
 			},
@@ -471,7 +498,10 @@ const DeviceHeader: React.FC<DeviceHeaderProps> = ({ device, serial }) => {
 				open={showRunModal}
 				onClose={() => {
 					setShowRunModal(false);
-					setRunCommand("");
+					// Escape/backdrop/X bypass the Cancel button's isIssuingCommands
+					// guard: don't reset while a dispatch is in flight, or the
+					// eventual onError lands its banner on an already-reset form.
+					if (!isIssuingCommands) resetRunCommand();
 				}}
 				title="Run Command"
 				footer={
@@ -482,7 +512,7 @@ const DeviceHeader: React.FC<DeviceHeaderProps> = ({ device, serial }) => {
 							disabled={isIssuingCommands}
 							onClick={() => {
 								setShowRunModal(false);
-								setRunCommand("");
+								resetRunCommand();
 							}}
 						>
 							Cancel
@@ -491,7 +521,7 @@ const DeviceHeader: React.FC<DeviceHeaderProps> = ({ device, serial }) => {
 							variant="solid"
 							tone="purple"
 							loading={isIssuingCommands}
-							disabled={!runCommand.trim()}
+							disabled={!commandIsValid(runCommandState)}
 							onClick={handleRunCommand}
 						>
 							{isIssuingCommands ? "Sending..." : "Run Command"}
@@ -514,25 +544,23 @@ const DeviceHeader: React.FC<DeviceHeaderProps> = ({ device, serial }) => {
 					</div>
 				</div>
 
+				{runCommandError && (
+					<div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg p-3 mb-4">
+						{runCommandError}
+					</div>
+				)}
+
 				<div>
 					<label className="block text-sm font-medium text-gray-700 mb-2">
 						Command
 					</label>
-					<input
-						type="text"
-						value={runCommand}
-						onChange={(e) => setRunCommand(e.target.value)}
-						onKeyDown={(e) => {
-							if (e.key === "Enter" && runCommand.trim()) {
-								handleRunCommand();
-							}
-						}}
-						placeholder="e.g., ls -la /var/log"
-						className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-purple-500 focus:border-purple-500 text-gray-900 placeholder-gray-400"
+					<CommandFields
+						command={runCommandState}
+						options={BULK_COMMAND_OPTIONS}
+						onChange={setRunCommandState}
+						onSubmit={handleRunCommand}
+						showContinueOnError={false}
 					/>
-					<p className="mt-1 text-xs text-gray-500">
-						Enter a shell command to execute on this device
-					</p>
 				</div>
 			</Modal>
 
