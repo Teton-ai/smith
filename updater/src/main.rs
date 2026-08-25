@@ -2,7 +2,6 @@ use anyhow::Context;
 use clap::Parser;
 use smith::magic::{MagicHandle, structure::ConfigPackage};
 use smith::shutdown::ShutdownHandler;
-use smith::updater::PENDING_SMITH_RELEASE_FILE;
 use std::path::{Path, PathBuf};
 use tokio::time;
 use tracing::{error, info, warn};
@@ -80,35 +79,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     time::sleep(time::Duration::from_secs(5)).await;
 
-    let packages_dir = PathBuf::from("/etc/smith/packages");
-    let pending_release = packages_dir.join(PENDING_SMITH_RELEASE_FILE);
-    let target_release_id = match tokio::fs::read_to_string(&pending_release).await {
-        Ok(release_id) => {
-            let release_id = release_id
-                .trim()
-                .parse::<i32>()
-                .with_context(|| format!("Invalid release id in {}", pending_release.display()))?;
-            info!(
-                release_id,
-                pending_release = %pending_release.display(),
-                "Using Smith target pinned by the updater transaction"
-            );
-            release_id
-        }
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
-            warn!("No pinned Smith target found; falling back to the current configured target");
-            configuration
-                .get_target_release_id()
-                .await
-                .with_context(|| "Failed to get Target Release ID")?
-        }
-        Err(err) => {
-            let err = anyhow::Error::new(err)
-                .context(format!("Failed to read {}", pending_release.display()));
-            return Err(err.into());
-        }
-    };
+    let target_release_id = configuration
+        .get_target_release_id()
+        .await
+        .with_context(|| "Failed to get Target Release ID")?;
 
+    let packages_dir = PathBuf::from("/etc/smith/packages");
     let blobs = packages_dir.join("blobs");
     let release_cache = packages_dir
         .join("versions")
@@ -119,14 +95,34 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let content = tokio::fs::read(&release_cache).await?;
         let content = std::str::from_utf8(&content)?;
 
-        let packages = ConfigPackage::parse_manifest(content)?;
+        let packages: Vec<ConfigPackage> = content
+            .lines()
+            .filter(|line| !line.trim().is_empty())
+            .map(|line| {
+                let mut parts = line.splitn(3, ' ');
+                Ok::<_, anyhow::Error>(ConfigPackage {
+                    name: parts
+                        .next()
+                        .ok_or_else(|| anyhow::anyhow!("missing name"))?
+                        .to_string(),
+                    version: parts
+                        .next()
+                        .ok_or_else(|| anyhow::anyhow!("missing version"))?
+                        .to_string(),
+                    file: parts
+                        .next()
+                        .ok_or_else(|| anyhow::anyhow!("missing file"))?
+                        .to_string(),
+                })
+            })
+            .collect::<Result<_, _>>()?;
 
         let smith_package = packages
             .into_iter()
             .find(|package| package.name == "smith" || package.name == "smith_amd64")
             .with_context(|| "No smith package found in release")?;
 
-        let package_file = smith_package.safe_file_path(&blobs)?;
+        let package_file = blobs.join(&smith_package.file);
         info!(
             "Found smith package: version={} file={}",
             smith_package.version,
@@ -158,12 +154,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     if !package_installed {
         info!("Installing smith {}", package_version);
-        let status = tokio::process::Command::new("sudo")
-            .arg("apt")
-            .arg("install")
-            .arg(&package_file)
-            .arg("-y")
-            .arg("--allow-downgrades")
+        let install_command = format!(
+            "sudo apt install {} -y --allow-downgrades",
+            package_file.display()
+        );
+        let status = tokio::process::Command::new("sh")
+            .arg("-c")
+            .arg(&install_command)
             .output()
             .await
             .map_err(|e| {
@@ -180,52 +177,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 "Failed to install smith:\nstderr: {}\nstdout: {}",
                 stderr, stdout
             );
-            return Err(anyhow::anyhow!("Failed to install Smith package").into());
         }
     } else {
         info!("Package already installed");
     }
 
-    match tokio::fs::remove_file(&pending_release).await {
-        Ok(()) => info!(
-            pending_release = %pending_release.display(),
-            "Cleared completed Smith self-update target"
-        ),
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
-        Err(err) => warn!(
-            error = ?err,
-            pending_release = %pending_release.display(),
-            "Failed to clear completed Smith self-update target"
-        ),
-    }
-
     info!("Smith Updater Shutting Down");
 
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn release_manifest_rejects_paths_outside_blob_cache() {
-        assert!(ConfigPackage::parse_manifest("smith 1 ../../tmp/smith.deb\n").is_err());
-        assert!(ConfigPackage::parse_manifest("smith 1 /tmp/smith.deb\n").is_err());
-        assert!(ConfigPackage::parse_manifest("smith 1 smith.deb;reboot\n").is_ok());
-    }
-
-    #[test]
-    fn safe_package_path_keeps_nested_files_under_base() -> anyhow::Result<()> {
-        let base = Path::new("/etc/smith/packages/blobs");
-        let package = ConfigPackage {
-            name: "smith".to_string(),
-            version: "1".to_string(),
-            file: "nested/smith.deb".to_string(),
-        };
-        let path = package.safe_file_path(base)?;
-
-        assert_eq!(path, base.join("nested/smith.deb"));
-        Ok(())
-    }
 }

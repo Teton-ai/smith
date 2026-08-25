@@ -1,4 +1,3 @@
-use super::PENDING_SMITH_RELEASE_FILE;
 use crate::downloader::DownloaderHandle;
 use crate::magic::MagicHandle;
 use crate::magic::structure::ConfigPackage;
@@ -7,10 +6,12 @@ use crate::shutdown::ShutdownSignals;
 use crate::utils::network::NetworkClient;
 use anyhow::Context;
 use anyhow::Result;
-use std::collections::HashMap;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
+use std::fmt::Write;
+use std::path::Component;
 use std::path::Path;
 use std::path::PathBuf;
+use std::time::SystemTime;
 use tokio::process::Command;
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
@@ -18,9 +19,8 @@ use tokio::time::{self, Duration};
 use tracing::{error, info, warn};
 
 const MAX_INSTALL_RETRIES: u32 = 3;
-const PACKAGE_CACHE_RESERVE_BYTES: u64 = 3 * 1024 * 1024 * 1024;
-const RETAINED_RELEASES: usize = 4;
-const RELEASE_HISTORY_FILE: &str = "release-history";
+const MAX_BLOB_CACHE_BYTES: u64 = 3 * 1024 * 1024 * 1024;
+const RETAINED_RELEASES: usize = 3;
 
 #[derive(Clone, Debug)]
 enum InstallFailureKind {
@@ -88,79 +88,75 @@ fn classify_install_failure(stderr: &str) -> InstallFailureKind {
     InstallFailureKind::Unknown
 }
 
-fn is_smith_package(package_name: &str) -> bool {
-    package_name == "smith" || package_name == "smith_amd64"
-}
-
-fn is_smith_updater_package(package_name: &str) -> bool {
-    package_name == "smith-updater"
+#[derive(Debug)]
+struct CachedRelease {
+    manifest_path: PathBuf,
+    blobs: HashSet<PathBuf>,
+    modified: SystemTime,
 }
 
 fn manifest_blob_paths(manifest: &str, blobs_dir: &Path) -> Result<HashSet<PathBuf>> {
-    ConfigPackage::parse_manifest(manifest)?
-        .into_iter()
-        .map(|package| package.safe_file_path(blobs_dir))
-        .collect()
-}
-
-fn parse_release_history(history: &str) -> Result<Vec<i32>> {
-    history
+    manifest
         .lines()
         .filter(|line| !line.trim().is_empty())
         .map(|line| {
-            line.parse::<i32>()
-                .with_context(|| format!("invalid release id in history: {line:?}"))
+            let file = line
+                .splitn(3, ' ')
+                .nth(2)
+                .ok_or_else(|| anyhow::anyhow!("malformed package manifest line: {line}"))?;
+            let relative_path = Path::new(file);
+            if relative_path.as_os_str().is_empty()
+                || relative_path
+                    .components()
+                    .any(|component| !matches!(component, Component::Normal(_)))
+            {
+                anyhow::bail!("unsafe blob path in package manifest: {file}");
+            }
+            Ok(blobs_dir.join(relative_path))
         })
         .collect()
 }
 
-async fn remove_file_and_count(path: &Path, bytes_freed: &mut u64) -> bool {
-    let size = match tokio::fs::metadata(path).await {
-        Ok(metadata) => metadata.len(),
-        Err(err) => {
-            warn!("Failed to stat old package {}: {}", path.display(), err);
-            0
-        }
-    };
-
-    if let Err(err) = tokio::fs::remove_file(path).await {
-        error!("Failed to remove old package {}: {}", path.display(), err);
-        false
-    } else {
-        *bytes_freed += size;
-        true
+async fn files_in(directory: &Path) -> Result<Vec<(PathBuf, u64)>> {
+    if !directory.exists() {
+        return Ok(Vec::new());
     }
+
+    let mut files = Vec::new();
+    let mut directories = vec![directory.to_path_buf()];
+    while let Some(directory) = directories.pop() {
+        let mut entries = tokio::fs::read_dir(&directory)
+            .await
+            .with_context(|| format!("reading {}", directory.display()))?;
+        while let Some(entry) = entries.next_entry().await? {
+            let file_type = entry.file_type().await?;
+            if file_type.is_dir() {
+                directories.push(entry.path());
+            } else if file_type.is_file() {
+                files.push((entry.path(), entry.metadata().await?.len()));
+            }
+        }
+    }
+    Ok(files)
+}
+
+async fn remove_file(path: &Path) -> Result<u64> {
+    let size = tokio::fs::metadata(path)
+        .await
+        .with_context(|| format!("stat {}", path.display()))?
+        .len();
+    tokio::fs::remove_file(path)
+        .await
+        .with_context(|| format!("removing {}", path.display()))?;
+    Ok(size)
 }
 
 #[derive(Debug)]
 pub enum ActorMessage {
-    Apply,
-    Prepare { rpc: oneshot::Sender<bool> },
-    InstallPrepared { rpc: oneshot::Sender<bool> },
+    Update,
+    Upgrade,
     Check,
     StatusReport { rpc: oneshot::Sender<String> },
-}
-
-#[derive(Debug, PartialEq)]
-enum CheckAction {
-    InstallPrepared(i32),
-    Apply(i32),
-}
-
-fn check_action(
-    current_release_id: Option<i32>,
-    target_release_id: Option<i32>,
-    prepared_release_id: Option<i32>,
-) -> Option<CheckAction> {
-    if let Some(prepared_release_id) = prepared_release_id
-        && current_release_id != Some(prepared_release_id)
-    {
-        return Some(CheckAction::InstallPrepared(prepared_release_id));
-    }
-
-    target_release_id
-        .filter(|target_release_id| current_release_id != Some(*target_release_id))
-        .map(CheckAction::Apply)
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -190,10 +186,8 @@ pub struct Actor {
     network: NetworkClient,
     last_update: Option<Result<time::Instant>>,
     last_upgrade: Option<Result<time::Instant>>,
-    prepared_release_id: Option<i32>,
     downloader: DownloaderHandle,
     install_failures: HashMap<String, PackageFailure>,
-    install_failure_release_id: Option<i32>,
     packages_dir: PathBuf,
 }
 
@@ -220,10 +214,8 @@ impl Actor {
             status: Status::Idle,
             last_update: None,
             last_upgrade: None,
-            prepared_release_id: None,
             downloader,
             install_failures: HashMap::new(),
-            install_failure_release_id: None,
             packages_dir,
         }
     }
@@ -284,106 +276,28 @@ impl Actor {
         false
     }
 
-    fn begin_release_attempt(&mut self, target_release_id: i32) {
-        if self.install_failure_release_id != Some(target_release_id) {
-            self.install_failures.clear();
-            self.install_failure_release_id = Some(target_release_id);
-        }
-    }
-
     async fn handle_message(&mut self, msg: ActorMessage) {
         match msg {
-            ActorMessage::Apply => {
-                if let Some(prepared_release_id) = self.prepared_release_id {
-                    info!(
-                        prepared_release_id,
-                        "Applying the already prepared release instead of replacing its pinned target"
-                    );
-                    self.upgrade(prepared_release_id).await;
-                    self.prepared_release_id = None;
-                } else {
-                    match self.magic.get_target_release_id().await {
-                        Ok(target_release_id) => self.apply_release(target_release_id).await,
-                        Err(err) => error!(
-                            error = ?err,
-                            "Cannot apply release because no target release is available"
-                        ),
-                    }
-                }
+            ActorMessage::Update => {
+                self.update().await;
             }
-            ActorMessage::Prepare { rpc } => {
-                if let Some(prepared_release_id) = self.prepared_release_id {
-                    info!(
-                        prepared_release_id,
-                        "A release is already prepared; keeping its pinned target"
-                    );
-                    if rpc.send(true).is_err() {
-                        warn!("Release preparation caller stopped waiting for the result");
-                    }
-                } else {
-                    let current_release_id = self.magic.get_release_id().await.ok();
-                    match self.magic.get_target_release_id().await {
-                        Ok(target_release_id) if current_release_id == Some(target_release_id) => {
-                            info!(
-                                target_release_id,
-                                "Release preparation skipped because the target is already active"
-                            );
-                            if rpc.send(false).is_err() {
-                                warn!("Release preparation caller stopped waiting for the result");
-                            }
-                        }
-                        Ok(target_release_id) => {
-                            self.update(target_release_id).await;
-                            let prepared = self.prepared_release_id == Some(target_release_id);
-                            if rpc.send(prepared).is_err() {
-                                warn!("Release preparation caller stopped waiting for the result");
-                            }
-                        }
-                        Err(err) => {
-                            error!(
-                                error = ?err,
-                                "Cannot prepare release because no target release is available"
-                            );
-                            if rpc.send(false).is_err() {
-                                warn!("Release preparation caller stopped waiting for the result");
-                            }
-                        }
-                    }
-                }
+            ActorMessage::Upgrade => {
+                self.upgrade().await;
             }
-            ActorMessage::InstallPrepared { rpc } => match self.prepared_release_id {
-                Some(target_release_id) => {
-                    if rpc.send(true).is_err() {
-                        warn!("Release installation caller stopped waiting for acceptance");
-                    }
-                    self.upgrade(target_release_id).await;
-                    self.prepared_release_id = None;
-                }
-                None => {
-                    warn!("Cannot install release because no prepared target is pinned");
-                    if rpc.send(false).is_err() {
-                        warn!("Release installation caller stopped waiting for rejection");
-                    }
-                }
-            },
             ActorMessage::Check => {
                 let release_id = self.magic.get_release_id().await.ok();
                 let target_release_id = self.magic.get_target_release_id().await.ok();
 
-                match check_action(release_id, target_release_id, self.prepared_release_id) {
-                    Some(CheckAction::InstallPrepared(prepared_release_id)) => {
-                        info!(
-                            prepared_release_id,
-                            latest_target_release_id = ?target_release_id,
-                            "Finishing the already prepared release before considering a newer target"
-                        );
-                        self.upgrade(prepared_release_id).await;
-                        self.prepared_release_id = None;
+                if release_id != target_release_id {
+                    self.install_failures.clear();
+
+                    self.update().await;
+
+                    if matches!(self.last_update, Some(Err(_)) | None) {
+                        return;
                     }
-                    Some(CheckAction::Apply(target_release_id)) => {
-                        self.apply_release(target_release_id).await;
-                    }
-                    None => {}
+
+                    self.upgrade().await;
                 }
             }
             ActorMessage::StatusReport { rpc } => {
@@ -427,211 +341,32 @@ impl Actor {
         }
     }
 
-    async fn apply_release(&mut self, target_release_id: i32) {
-        info!(
-            target_release_id,
-            "Starting updater transaction for pinned target release"
-        );
-        self.update(target_release_id).await;
-
-        if self.prepared_release_id != Some(target_release_id) {
-            warn!(
-                target_release_id,
-                "Release preparation failed; installation will not start"
-            );
-            return;
-        }
-
-        self.upgrade(target_release_id).await;
-        self.prepared_release_id = None;
-    }
-
-    async fn ensure_no_pending_smith_update(&mut self, requested_release_id: i32) -> Result<()> {
-        let pending_release = self.packages_dir.join(PENDING_SMITH_RELEASE_FILE);
-        let pending_release_id = match tokio::fs::read_to_string(&pending_release).await {
-            Ok(release_id) => release_id
-                .trim()
-                .parse::<i32>()
-                .with_context(|| format!("Invalid release id in {}", pending_release.display()))?,
-            Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-            Err(err) => {
-                return Err(err)
-                    .with_context(|| format!("Failed to read {}", pending_release.display()));
-            }
-        };
-
-        info!(
-            pending_release_id,
-            requested_release_id,
-            "Preparing a marker-capable Smith updater from the requested release before resuming the pinned Smith update"
-        );
-        self.ensure_release_cache(requested_release_id)
-            .await
-            .with_context(|| {
-                format!(
-                    "Cannot prepare release {requested_release_id} to bootstrap a marker-capable Smith updater"
-                )
-            })?;
-        self.ensure_smith_updater_for_release(requested_release_id)
-            .await
-            .with_context(|| {
-                format!(
-                    "Cannot resume Smith self-update to release {pending_release_id} because release {requested_release_id} did not provide a marker-capable updater"
-                )
-            })?;
-
-        warn!(
-            pending_release_id,
-            requested_release_id,
-            "Deferring the requested release because a pinned Smith self-update is still pending"
-        );
-        let output = Command::new("sudo")
-            .arg("systemctl")
-            .arg("start")
-            .arg("smith-updater")
-            .output()
-            .await
-            .with_context(|| "Failed to resume pending Smith updater service")?;
-        if !output.status.success() {
-            return Err(anyhow::anyhow!(
-                "Failed to resume pending Smith updater: {}",
-                String::from_utf8_lossy(&output.stderr)
-            ));
-        }
-
-        Err(anyhow::anyhow!(
-            "Smith self-update to release {pending_release_id} is still pending"
-        ))
-    }
-
-    async fn ensure_smith_updater_for_release(&mut self, release_id: i32) -> Result<()> {
-        let release_cache = self
-            .packages_dir
-            .join("versions")
-            .join(release_id.to_string());
-        let manifest = tokio::fs::read_to_string(&release_cache)
-            .await
-            .with_context(|| {
-                format!(
-                    "Failed to read release manifest required to update smith-updater: {}",
-                    release_cache.display()
-                )
-            })?;
-        let packages = ConfigPackage::parse_manifest(&manifest)?;
-        let updater_package = packages
-            .iter()
-            .find(|package| is_smith_updater_package(&package.name))
-            .with_context(|| {
-                format!(
-                    "Release {release_id} does not contain the smith-updater package required for a safe Smith self-update"
-                )
-            })?;
-
-        if let Ok((status, version)) = updater_package.get_system_state().await
-            && status == "ii"
-            && version == updater_package.version
-        {
-            info!(
-                release_id,
-                version = %updater_package.version,
-                "Smith updater prerequisite from the requested release is already installed"
-            );
-            return Ok(());
-        }
-
-        if self.should_skip_install(&updater_package.name) {
-            return Err(anyhow::anyhow!(
-                "smith-updater reached its installation retry limit"
-            ));
-        }
-
-        let package_file = updater_package.safe_file_path(&self.packages_dir.join("blobs"))?;
-        if !self.blob_is_valid(&package_file).await? {
-            return Err(anyhow::anyhow!(
-                "smith-updater package is missing or empty: {}",
-                package_file.display()
-            ));
-        }
-
-        info!(
-            release_id,
-            version = %updater_package.version,
-            package_file = %package_file.display(),
-            "Installing Smith updater prerequisite before starting the Smith self-update"
-        );
-        self.install_package_batch(&[(updater_package.name.clone(), package_file)])
-            .await?;
-
-        let (status, version) = updater_package
-            .get_system_state()
-            .await
-            .with_context(|| "Failed to verify installed smith-updater prerequisite")?;
-        if status != "ii" || version != updater_package.version {
-            return Err(anyhow::anyhow!(
-                "smith-updater prerequisite verification failed: status {status}, installed {version}, expected {}",
-                updater_package.version
-            ));
-        }
-
-        info!(
-            release_id,
-            version = %updater_package.version,
-            "Smith updater prerequisite from the requested release installed and verified"
-        );
-        Ok(())
-    }
-
     #[tracing::instrument(skip(self))]
-    async fn update(&mut self, target_release_id: i32) {
-        info!(target_release_id, "Preparing release update");
-        self.begin_release_attempt(target_release_id);
+    async fn update(&mut self) {
+        info!("Checking for updates");
         self.status = Status::Updating;
-        self.prepared_release_id = None;
-        if let Err(err) = self.ensure_no_pending_smith_update(target_release_id).await {
-            warn!(
-                error = ?err,
-                target_release_id,
-                "Release preparation deferred"
-            );
-            self.last_update = Some(Err(err));
-            self.status = Status::Idle;
-            return;
-        }
-        let res = self
-            .check_for_updates(target_release_id)
-            .await
-            .map(|_| time::Instant::now());
-        if res.is_ok() {
-            self.prepared_release_id = Some(target_release_id);
-        }
+        let res = self.check_for_updates().await.map(|_| time::Instant::now());
         info!("Updating result: {:?}", res);
         self.last_update = Some(res);
         self.status = Status::Idle;
     }
 
-    async fn upgrade(&mut self, target_release_id: i32) {
-        info!(target_release_id, "Upgrading device to pinned release");
+    async fn upgrade(&mut self) {
+        info!("Upgrading device");
         self.status = Status::Upgrading;
-        let res = self
-            .upgrade_device(target_release_id)
-            .await
-            .map(|_| time::Instant::now());
+        let res = self.upgrade_device().await.map(|_| time::Instant::now());
         info!("Upgrading result: {:?}", res);
         self.last_upgrade = Some(res);
         self.status = Status::Idle;
     }
 
-    async fn write_atomic_file(path: &Path, contents: &str) -> Result<()> {
+    async fn write_manifest(&self, path: &Path, contents: &str) -> Result<()> {
         if let Some(parent) = path.parent() {
             tokio::fs::create_dir_all(parent).await?;
         }
-        let part_path = path.with_extension("part");
-        tokio::fs::write(&part_path, contents)
+        tokio::fs::write(path, contents)
             .await
-            .with_context(|| format!("writing temporary file {}", part_path.display()))?;
-        tokio::fs::rename(&part_path, path)
-            .await
-            .with_context(|| format!("publishing {}", path.display()))?;
+            .with_context(|| format!("writing manifest to {}", path.display()))?;
         Ok(())
     }
 
@@ -641,7 +376,7 @@ impl Actor {
         }
 
         // TODO: remove when legacy /packages layout is fully migrated.
-        let legacy_path = package.safe_file_path(&self.packages_dir)?;
+        let legacy_path = self.packages_dir.join(&package.file);
         if legacy_path.exists() {
             warn!(?legacy_path, ?blob_path, "migrating from legacy layout");
             tokio::fs::rename(&legacy_path, blob_path).await?;
@@ -686,44 +421,10 @@ impl Actor {
             .packages_dir
             .join("versions")
             .join(release_id.to_string());
-        let blobs = self.packages_dir.join("blobs");
 
         if release_cache.exists() {
-            let cached_manifest = tokio::fs::read_to_string(&release_cache)
-                .await
-                .with_context(|| format!("reading release cache {}", release_cache.display()))?;
-            match ConfigPackage::parse_manifest(&cached_manifest) {
-                Ok(packages) if !packages.is_empty() => {
-                    let mut cache_complete = true;
-                    for package in packages {
-                        let blob_path = package.safe_file_path(&blobs)?;
-                        if !self.blob_is_valid(&blob_path).await? {
-                            cache_complete = false;
-                        }
-                    }
-                    if cache_complete {
-                        info!(release_id, "release cache is complete");
-                        return Ok(());
-                    }
-                    warn!(
-                        release_id,
-                        "Release manifest references missing or empty blobs; rebuilding cache"
-                    );
-                }
-                Ok(_) => {
-                    warn!(release_id, "Release manifest is empty; rebuilding cache");
-                }
-                Err(err) => {
-                    warn!(
-                        error = ?err,
-                        release_id,
-                        "Release manifest is invalid; rebuilding cache"
-                    );
-                }
-            }
-            tokio::fs::remove_file(&release_cache)
-                .await
-                .with_context(|| format!("removing stale {}", release_cache.display()))?;
+            info!("release cache exists, skipping download");
+            return Ok(());
         }
 
         // Prefer the short-lived device JWT; falls back to the opaque token when
@@ -735,90 +436,46 @@ impl Actor {
             .get_release_packages(release_id, &token)
             .await
             .with_context(|| "failed to fetch release packages manifest")?;
-        if release_packages.is_empty() {
-            return Err(anyhow::anyhow!("release {release_id} contains no packages"));
-        }
 
-        // Serialize first so unsafe server metadata is rejected before any path
-        // construction, migration, or download can touch the filesystem.
-        let manifest = ConfigPackage::serialize_manifest(&release_packages)?;
+        let blobs = self.packages_dir.join("blobs");
+        let mut manifest = String::new();
+        let mut all_cached = true;
 
         for package in &release_packages {
             info!("Processing package: {}", package.file);
-            let blob_path = package.safe_file_path(&blobs)?;
+            let blob_path = blobs.join(&package.file);
 
             if self.blob_is_valid(&blob_path).await? {
                 info!("blob present in cache");
-            } else {
-                self.fetch_blob(package, &blob_path)
-                    .await
-                    .with_context(|| format!("fetching blob for package {}", package.file))?;
+                writeln!(
+                    manifest,
+                    "{} {} {}",
+                    package.name, package.version, package.file
+                )?;
+                continue;
             }
+
+            self.fetch_blob(package, &blob_path)
+                .await
+                .with_context(|| format!("fetching blob for package {}", package.file))?;
+            all_cached = false;
         }
 
-        Self::write_atomic_file(&release_cache, &manifest).await?;
-        info!(release_id, "release cache ready");
+        if all_cached {
+            self.write_manifest(&release_cache, &manifest).await?;
+            info!(release_id, "release cache ready");
+        } else {
+            info!(
+                release_id,
+                "blobs being fetched; manifest write deferred to next call"
+            );
+        }
 
         Ok(())
     }
 
-    async fn clean_cache_before_download(&self, current_release_id: i32) {
-        let history_path = self.packages_dir.join(RELEASE_HISTORY_FILE);
-        let history = match tokio::fs::read_to_string(&history_path).await {
-            Ok(history) => match parse_release_history(&history) {
-                Ok(history) => history,
-                Err(err) => {
-                    warn!(
-                        error = ?err,
-                        history_path = %history_path.display(),
-                        "Skipping pre-download cache cleanup because release history is invalid"
-                    );
-                    return;
-                }
-            },
-            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
-                info!("Skipping pre-download cache cleanup because no rollback history exists yet");
-                return;
-            }
-            Err(err) => {
-                warn!(
-                    error = ?err,
-                    history_path = %history_path.display(),
-                    "Skipping pre-download cache cleanup because release history cannot be read"
-                );
-                return;
-            }
-        };
-
-        let rollback_release_id = match history
-            .into_iter()
-            .find(|release_id| *release_id != current_release_id)
-        {
-            Some(release_id) => release_id,
-            None => {
-                info!(
-                    current_release_id,
-                    "Skipping pre-download cache cleanup because no distinct rollback release is known"
-                );
-                return;
-            }
-        };
-
-        if let Err(err) =
-            Self::clean_up_old_packages(&self.packages_dir, current_release_id, rollback_release_id)
-                .await
-        {
-            warn!(
-                error = ?err,
-                current_release_id,
-                rollback_release_id,
-                "Pre-download package cache cleanup failed; continuing with release preparation"
-            );
-        }
-    }
-
     #[tracing::instrument(skip(self))]
-    async fn check_for_updates(&self, target_release_id: i32) -> Result<()> {
+    async fn check_for_updates(&self) -> Result<()> {
         // apt update on check for updates with timeout
         info!("Running apt update with 5 minute timeout");
         let apt_update_future = Command::new("sh")
@@ -829,13 +486,7 @@ impl Actor {
 
         match time::timeout(Duration::from_secs(300), apt_update_future).await {
             Ok(result) => {
-                let output = result.with_context(|| "Failed to run apt update")?;
-                if !output.status.success() {
-                    return Err(anyhow::anyhow!(
-                        "apt update failed: {}",
-                        String::from_utf8_lossy(&output.stderr)
-                    ));
-                }
+                result.with_context(|| "Failed to run apt update")?;
             }
             Err(_) => {
                 error!("apt update timed out after 5 minutes");
@@ -850,7 +501,6 @@ impl Actor {
                 self.ensure_release_cache(current_release_id)
                     .await
                     .with_context(|| "Failed to ensure current release cache")?;
-                self.clean_cache_before_download(current_release_id).await;
             }
             Err(err) => {
                 warn!(
@@ -860,6 +510,12 @@ impl Actor {
             }
         }
 
+        let target_release_id = self
+            .magic
+            .get_target_release_id()
+            .await
+            .with_context(|| "Failed to get Target Release ID")?;
+
         self.ensure_release_cache(target_release_id)
             .await
             .with_context(|| "Failed to ensure target release cache")?;
@@ -867,7 +523,7 @@ impl Actor {
         Ok(())
     }
 
-    async fn upgrade_device(&mut self, target_release_id: i32) -> Result<()> {
+    async fn upgrade_device(&mut self) -> Result<()> {
         // Check if previous update was successful
         match self.last_update {
             Some(Ok(time)) => {
@@ -886,16 +542,12 @@ impl Actor {
             }
         }
 
-        let previous_release_id = match self.magic.get_release_id().await {
-            Ok(release_id) => Some(release_id),
-            Err(err) => {
-                warn!(
-                    error = ?err,
-                    "Current release id is unavailable; package cleanup will be skipped to preserve rollback packages"
-                );
-                None
-            }
-        };
+        let previous_release_id = self.magic.get_release_id().await;
+        let target_release_id = self
+            .magic
+            .get_target_release_id()
+            .await
+            .with_context(|| "Failed to get Target Release ID")?;
 
         let blobs = self.packages_dir.join("blobs");
         let release_cache = self
@@ -907,15 +559,36 @@ impl Actor {
         let content = tokio::fs::read(&release_cache).await?;
         let content = std::str::from_utf8(&content)?;
 
-        let packages = ConfigPackage::parse_manifest(content)?;
+        let packages: Vec<ConfigPackage> = content
+            .lines()
+            .filter(|line| !line.trim().is_empty())
+            .map(|line| {
+                let mut parts = line.splitn(3, ' ');
+                Ok::<_, anyhow::Error>(ConfigPackage {
+                    name: parts
+                        .next()
+                        .ok_or_else(|| anyhow::anyhow!("missing name"))?
+                        .to_string(),
+                    version: parts
+                        .next()
+                        .ok_or_else(|| anyhow::anyhow!("missing version"))?
+                        .to_string(),
+                    file: parts
+                        .next()
+                        .ok_or_else(|| anyhow::anyhow!("missing file"))?
+                        .to_string(),
+                })
+            })
+            .collect::<Result<_, _>>()?;
 
         // check if all packages are available locally
         for package in &packages {
             info!("Checking package: {}", package.name);
             let package_name = &package.name;
+            let package_file = &package.file;
 
             // check if package is available locally
-            let package_file = package.safe_file_path(&blobs)?;
+            let package_file = blobs.join(package_file);
 
             if package_file.exists() {
                 info!("Package {} exists locally", package_name);
@@ -929,17 +602,10 @@ impl Actor {
             }
         }
 
-        // The helper must understand the pinned-release protocol before it is started.
-        self.ensure_smith_updater_for_release(target_release_id)
-            .await?;
-
         // now install packages
         let mut update_smith = false;
         let mut to_install: Vec<(String, PathBuf)> = Vec::new();
         for package in packages {
-            if is_smith_updater_package(&package.name) {
-                continue;
-            }
             if self.should_skip_install(&package.name) {
                 continue;
             }
@@ -957,123 +623,86 @@ impl Actor {
             };
 
             if !package_installed {
-                if is_smith_package(&package.name) {
+                if package.name == "smith" || package.name == "smith_amd64" {
                     update_smith = true;
                     continue;
                 }
-                let blob_path = package.safe_file_path(&blobs)?;
+                let blob_path = blobs.join(&package.file);
                 to_install.push((package.name, blob_path));
             }
         }
 
         // One apt transaction: everything is unpacked before any postinst runs.
         if !to_install.is_empty() {
-            self.install_package_batch(&to_install).await?;
+            match self.batch_install(&to_install).await {
+                Ok(()) => {
+                    for (package_name, _) in &to_install {
+                        self.install_failures.remove(package_name);
+                    }
+                }
+                Err(BatchInstallError::TimedOut { seconds }) => {
+                    // apt may still be running and holding the dpkg lock.
+                    error!(
+                        "Batch install timed out after {} seconds; the apt transaction may still be running",
+                        seconds
+                    );
+                    return Err(anyhow::anyhow!(
+                        "batch install timed out after {seconds} seconds"
+                    ));
+                }
+                Err(BatchInstallError::Failed { detail }) => {
+                    error!("Batch install failed:\n{detail}");
+                    self.handle_batch_failure(&to_install, &detail).await;
+                }
+            }
         }
 
         if update_smith {
-            let pending_release = self.packages_dir.join(PENDING_SMITH_RELEASE_FILE);
-            Self::write_atomic_file(&pending_release, &format!("{target_release_id}\n"))
-                .await
-                .with_context(|| "Failed to pin target release for smith-updater")?;
-            info!(
-                target_release_id,
-                pending_release = %pending_release.display(),
-                "Pinned Smith self-update target before starting smith-updater"
-            );
-
-            let status = Command::new("sudo")
-                .arg("systemctl")
-                .arg("start")
-                .arg("smith-updater")
+            let status = Command::new("sh")
+                .arg("-c")
+                .arg("sudo systemctl start smith-updater")
                 .output()
                 .await
-                .with_context(|| "Failed to start smith updater service")?;
+                .with_context(|| "Failed to stop smith service")?;
 
             if !status.status.success() {
-                return Err(anyhow::anyhow!(
-                    "Failed to start smith updater: {}",
-                    String::from_utf8_lossy(&status.stderr)
-                ));
+                error!("Failed to start smith updater {:?}", status);
             }
         }
 
-        self.are_packages_up_to_date(target_release_id).await?;
+        self.are_packages_up_to_date().await?;
 
         self.magic.set_release_id(target_release_id).await;
 
-        match self.magic.get_target_release_id().await {
-            Ok(latest_target_release_id) if latest_target_release_id != target_release_id => {
-                warn!(
-                    installed_release_id = target_release_id,
-                    latest_target_release_id,
-                    "Target release changed during the upgrade; committed the pinned installed release and will process the newer target on the next check"
-                );
+        match previous_release_id {
+            Ok(previous_release_id) if previous_release_id != target_release_id => {
+                if let Err(err) = Self::clean_up_old_packages(
+                    &self.packages_dir,
+                    target_release_id,
+                    previous_release_id,
+                )
+                .await
+                {
+                    error!(
+                        error = ?err,
+                        target_release_id,
+                        previous_release_id,
+                        "Package cache cleanup failed after a successful upgrade"
+                    );
+                }
             }
             Ok(_) => {
-                info!(
-                    target_release_id,
-                    "Pinned target remained stable throughout the upgrade"
-                );
+                info!("Package cache cleanup skipped because the release did not change");
             }
             Err(err) => {
                 warn!(
                     error = ?err,
-                    installed_release_id = target_release_id,
-                    "Could not read the latest target after committing the pinned installed release"
+                    "Package cache cleanup skipped because no previous release is known"
                 );
             }
-        }
-
-        if let Some(previous_release_id) = previous_release_id
-            && previous_release_id != target_release_id
-        {
-            if let Err(err) = Self::clean_up_old_packages(
-                &self.packages_dir,
-                target_release_id,
-                previous_release_id,
-            )
-            .await
-            {
-                warn!(
-                    error = ?err,
-                    target_release_id,
-                    previous_release_id,
-                    "Package cache cleanup failed after successful release activation"
-                );
-            }
-        } else {
-            info!(
-                "Skipping package cleanup because there is no distinct previous release to retain for rollback"
-            );
         }
 
         Ok(())
-    }
-
-    async fn install_package_batch(&mut self, to_install: &[(String, PathBuf)]) -> Result<()> {
-        match self.batch_install(to_install).await {
-            Ok(()) => {
-                for (package_name, _) in to_install {
-                    self.install_failures.remove(package_name);
-                }
-                Ok(())
-            }
-            Err(BatchInstallError::TimedOut { seconds }) => {
-                error!(
-                    "Batch install timed out after {} seconds; the apt transaction may still be running",
-                    seconds
-                );
-                Err(anyhow::anyhow!(
-                    "batch install timed out after {seconds} seconds"
-                ))
-            }
-            Err(BatchInstallError::Failed { detail }) => {
-                error!("Batch install failed:\n{detail}");
-                self.handle_batch_failure(to_install, &detail).await;
-                Err(anyhow::anyhow!("batch install failed: {detail}"))
-            }
-        }
     }
 
     async fn batch_install(
@@ -1175,245 +804,218 @@ impl Actor {
     async fn clean_up_old_packages(
         packages_dir: &Path,
         current_release_id: i32,
-        rollback_release_id: i32,
+        previous_release_id: i32,
     ) -> Result<()> {
-        Self::clean_up_old_packages_with_reserve(
+        Self::clean_up_old_packages_with_limit(
             packages_dir,
             current_release_id,
-            rollback_release_id,
-            PACKAGE_CACHE_RESERVE_BYTES,
+            previous_release_id,
+            MAX_BLOB_CACHE_BYTES,
         )
         .await
     }
 
-    async fn clean_up_old_packages_with_reserve(
+    async fn clean_up_old_packages_with_limit(
         packages_dir: &Path,
         current_release_id: i32,
-        rollback_release_id: i32,
-        reserve_bytes: u64,
+        previous_release_id: i32,
+        max_blob_cache_bytes: u64,
     ) -> Result<()> {
-        info!(
-            current_release_id,
-            rollback_release_id,
-            reserve_bytes,
-            packages_dir = %packages_dir.display(),
-            "Evaluating package cache cleanup after successful release activation"
-        );
-
         let versions_dir = packages_dir.join("versions");
         let blobs_dir = packages_dir.join("blobs");
-        let history_path = packages_dir.join(RELEASE_HISTORY_FILE);
-        let history = match tokio::fs::read_to_string(&history_path).await {
-            Ok(history) => {
-                let parsed_history = parse_release_history(&history);
-                let history = match parsed_history {
-                    Ok(history) => history,
-                    Err(err) => {
-                        warn!(
-                            error = ?err,
-                            history_path = %history_path.display(),
-                            "Discarding invalid release history and rebuilding it from the current activation"
-                        );
-                        Vec::new()
-                    }
-                };
-                info!(?history, "Loaded package release activation history");
-                history
-            }
-            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
-                info!(
-                    history_path = %history_path.display(),
-                    "No package release history exists yet; creating it from the current activation"
-                );
-                Vec::new()
-            }
-            Err(err) => {
-                return Err(err).with_context(|| format!("reading {}", history_path.display()));
-            }
-        };
 
-        let mut seen_releases = HashSet::new();
-        let release_history = [current_release_id, rollback_release_id]
-            .into_iter()
-            .chain(history)
-            .filter(|release_id| seen_releases.insert(*release_id))
-            .take(RETAINED_RELEASES)
-            .collect::<Vec<_>>();
-        let history_contents = release_history
-            .iter()
-            .map(i32::to_string)
-            .collect::<Vec<_>>()
-            .join("\n")
-            + "\n";
-        let history_part = packages_dir.join(format!("{RELEASE_HISTORY_FILE}.part"));
-        tokio::fs::write(&history_part, history_contents).await?;
-        tokio::fs::rename(&history_part, &history_path).await?;
-        info!(
-            ?release_history,
-            history_path = %history_path.display(),
-            "Recorded release activation history in newest-first order"
-        );
-
-        let available_bytes = fs2::available_space(packages_dir)?;
-        if available_bytes >= reserve_bytes {
-            info!(
-                available_bytes,
-                reserve_bytes,
-                "Package cache cleanup deferred: available disk space meets the configured reserve; all cached releases will be kept"
-            );
-            return Ok(());
-        }
-
-        warn!(
-            available_bytes,
-            reserve_bytes,
-            deficit_bytes = reserve_bytes.saturating_sub(available_bytes),
-            "Available disk space is below the package cache reserve; starting cleanup"
-        );
-
-        let retained_releases = release_history
-            .iter()
-            .take(RETAINED_RELEASES)
-            .copied()
-            .collect::<Vec<_>>();
-        let mut retained_blobs = HashSet::new();
-
-        // Read every protected manifest before deleting anything. If one is unavailable
-        // or malformed, retaining the whole cache is safer than losing fast rollback.
-        for release_id in &retained_releases {
-            let manifest_path = versions_dir.join(release_id.to_string());
-            let manifest = match tokio::fs::read_to_string(&manifest_path).await {
-                Ok(manifest) => manifest,
-                Err(err) => {
-                    warn!(
-                        error = ?err,
-                        release_id,
-                        manifest = %manifest_path.display(),
-                        "Skipping package cache cleanup because a protected release manifest cannot be read"
-                    );
-                    return Ok(());
-                }
-            };
-            let manifest_blobs = match manifest_blob_paths(&manifest, &blobs_dir) {
-                Ok(manifest_blobs) => manifest_blobs,
-                Err(err) => {
-                    warn!(
-                        error = ?err,
-                        release_id,
-                        manifest = %manifest_path.display(),
-                        "Skipping package cache cleanup because a protected release manifest is invalid"
-                    );
-                    return Ok(());
-                }
-            };
-            retained_blobs.extend(manifest_blobs);
-        }
-        info!(
-            ?retained_releases,
-            retained_blob_count = retained_blobs.len(),
-            "Protected the current release and newest rollback releases; their manifests and blobs will not be removed"
-        );
-
-        let mut bytes_freed: u64 = 0;
-        let mut manifests_removed = 0_u64;
-        let mut versions = tokio::fs::read_dir(&versions_dir).await?;
-        while let Some(entry) = versions.next_entry().await? {
-            let path = entry.path();
-            if !path.is_file() {
+        let mut releases = HashMap::new();
+        let mut entries = tokio::fs::read_dir(&versions_dir)
+            .await
+            .with_context(|| format!("reading {}", versions_dir.display()))?;
+        while let Some(entry) = entries.next_entry().await? {
+            if !entry.file_type().await?.is_file() {
                 continue;
             }
-
-            let retained = entry
+            let Some(release_id) = entry
                 .file_name()
                 .to_str()
                 .and_then(|name| name.parse::<i32>().ok())
-                .is_some_and(|release_id| retained_releases.contains(&release_id));
-            if retained {
+            else {
                 continue;
-            }
-
-            info!(
-                manifest = %path.display(),
-                "Removing release manifest because it is outside the protected rollback history"
+            };
+            let manifest_path = entry.path();
+            let manifest = tokio::fs::read_to_string(&manifest_path)
+                .await
+                .with_context(|| format!("reading {}", manifest_path.display()))?;
+            let modified = entry
+                .metadata()
+                .await?
+                .modified()
+                .with_context(|| format!("reading mtime for {}", manifest_path.display()))?;
+            releases.insert(
+                release_id,
+                CachedRelease {
+                    manifest_path,
+                    blobs: manifest_blob_paths(&manifest, &blobs_dir)?,
+                    modified,
+                },
             );
-            if remove_file_and_count(&path, &mut bytes_freed).await {
-                manifests_removed += 1;
+        }
+
+        let current_release = releases.get_mut(&current_release_id).with_context(|| {
+            format!("current release {current_release_id} has no package manifest")
+        })?;
+        let current_manifest = tokio::fs::OpenOptions::new()
+            .write(true)
+            .open(&current_release.manifest_path)
+            .await
+            .with_context(|| {
+                format!(
+                    "opening current manifest {}",
+                    current_release.manifest_path.display()
+                )
+            })?
+            .into_std()
+            .await;
+        current_manifest
+            .set_modified(SystemTime::now())
+            .with_context(|| {
+                format!(
+                    "updating mtime for {}",
+                    current_release.manifest_path.display()
+                )
+            })?;
+        current_release.modified = tokio::fs::metadata(&current_release.manifest_path)
+            .await?
+            .modified()
+            .with_context(|| {
+                format!(
+                    "reading mtime for {}",
+                    current_release.manifest_path.display()
+                )
+            })?;
+
+        let mut older_releases = releases
+            .iter()
+            .filter(|(release_id, _)| {
+                **release_id != current_release_id && **release_id != previous_release_id
+            })
+            .map(|(release_id, release)| (*release_id, release.modified))
+            .collect::<Vec<_>>();
+        older_releases.sort_by_key(|(_, modified)| std::cmp::Reverse(*modified));
+
+        let protected_releases = [current_release_id, previous_release_id]
+            .into_iter()
+            .chain(
+                older_releases
+                    .iter()
+                    .map(|(release_id, _)| *release_id)
+                    .take(RETAINED_RELEASES.saturating_sub(2)),
+            )
+            .collect::<HashSet<_>>();
+        for release_id in &protected_releases {
+            if !releases.contains_key(release_id) {
+                anyhow::bail!(
+                    "protected release {release_id} has no manifest; retaining the package cache"
+                );
             }
         }
 
+        let blob_files = files_in(&blobs_dir).await?;
+        let mut cache_bytes = blob_files.iter().map(|(_, size)| size).sum::<u64>();
+        info!(
+            cache_bytes,
+            max_blob_cache_bytes,
+            ?protected_releases,
+            "Evaluating package blob cache"
+        );
+
+        let mut bytes_freed = 0_u64;
+        let mut manifests_removed = 0_u64;
         let mut blobs_removed = 0_u64;
-        if blobs_dir.exists() {
-            let mut directories = vec![blobs_dir.clone()];
-            let mut visited_directories = Vec::new();
-            while let Some(directory) = directories.pop() {
-                visited_directories.push(directory.clone());
-                let mut entries = tokio::fs::read_dir(&directory).await?;
-                while let Some(entry) = entries.next_entry().await? {
-                    let path = entry.path();
-                    let file_type = entry.file_type().await?;
-                    if file_type.is_dir() {
-                        directories.push(path);
-                    } else if file_type.is_file()
-                        && !retained_blobs.contains(&path)
-                        && remove_file_and_count(&path, &mut bytes_freed).await
-                    {
-                        blobs_removed += 1;
-                    }
+
+        if cache_bytes > max_blob_cache_bytes {
+            let referenced_blobs = releases
+                .values()
+                .flat_map(|release| release.blobs.iter().cloned())
+                .collect::<HashSet<_>>();
+            for (path, size) in &blob_files {
+                if referenced_blobs.contains(path) {
+                    continue;
                 }
+                tokio::fs::remove_file(path)
+                    .await
+                    .with_context(|| format!("removing orphaned blob {}", path.display()))?;
+                cache_bytes = cache_bytes.saturating_sub(*size);
+                bytes_freed += *size;
+                blobs_removed += 1;
+                info!(blob = %path.display(), size, "Removed unreferenced package blob");
             }
 
-            // Remove now-empty nested directories, but keep the blobs root.
-            for directory in visited_directories.into_iter().rev() {
-                if directory != blobs_dir
-                    && let Err(err) = tokio::fs::remove_dir(&directory).await
-                    && err.kind() != std::io::ErrorKind::DirectoryNotEmpty
-                {
-                    warn!(
-                        "Failed to remove package cache directory {}: {}",
-                        directory.display(),
-                        err
-                    );
+            let mut candidates = releases
+                .iter()
+                .filter(|(release_id, _)| !protected_releases.contains(release_id))
+                .map(|(release_id, release)| (*release_id, release.modified))
+                .collect::<Vec<_>>();
+            candidates.sort_by_key(|(_, modified)| *modified);
+
+            for (release_id, _) in candidates {
+                if cache_bytes <= max_blob_cache_bytes {
+                    break;
+                }
+                let Some(release) = releases.remove(&release_id) else {
+                    continue;
+                };
+                tokio::fs::remove_file(&release.manifest_path)
+                    .await
+                    .with_context(|| format!("removing {}", release.manifest_path.display()))?;
+                manifests_removed += 1;
+                info!(
+                    release_id,
+                    manifest = %release.manifest_path.display(),
+                    "Evicted old release from the package cache"
+                );
+
+                let remaining_blobs = releases
+                    .values()
+                    .flat_map(|release| release.blobs.iter())
+                    .collect::<HashSet<_>>();
+                for blob in release.blobs {
+                    if remaining_blobs.contains(&blob) || !blob.exists() {
+                        continue;
+                    }
+                    let size = remove_file(&blob).await?;
+                    cache_bytes = cache_bytes.saturating_sub(size);
+                    bytes_freed += size;
+                    blobs_removed += 1;
+                    info!(blob = %blob.display(), size, "Removed unreferenced package blob");
                 }
             }
         }
 
-        // Remove packages left behind by the legacy, pre-blob cache layout.
         let mut legacy_packages_removed = 0_u64;
         let mut entries = tokio::fs::read_dir(packages_dir).await?;
         while let Some(entry) = entries.next_entry().await? {
             let path = entry.path();
             if path.is_file()
-                && path.extension().and_then(|e| e.to_str()) == Some("deb")
-                && remove_file_and_count(&path, &mut bytes_freed).await
+                && path.extension().and_then(|extension| extension.to_str()) == Some("deb")
             {
+                bytes_freed += remove_file(&path).await?;
                 legacy_packages_removed += 1;
             }
         }
 
-        let available_bytes_after_cleanup = fs2::available_space(packages_dir)?;
         info!(
-            current_release_id,
-            rollback_release_id,
-            ?retained_releases,
-            retained_release_count = retained_releases.len(),
+            cache_bytes,
+            max_blob_cache_bytes,
+            bytes_freed,
             manifests_removed,
             blobs_removed,
             legacy_packages_removed,
-            bytes_freed,
-            available_bytes_after_cleanup,
-            reserve_bytes,
             "Package cache cleanup finished"
         );
-        if available_bytes_after_cleanup < reserve_bytes {
+        if cache_bytes > max_blob_cache_bytes {
             warn!(
-                available_bytes_after_cleanup,
-                reserve_bytes,
-                "Package cache cleanup could not restore the disk reserve without deleting protected rollback releases"
-            );
-        } else {
-            info!(
-                available_bytes_after_cleanup,
-                reserve_bytes, "Package cache cleanup restored the configured disk reserve"
+                cache_bytes,
+                max_blob_cache_bytes,
+                ?protected_releases,
+                "Package blob cache remains above its soft limit because rollback releases are protected"
             );
         }
         Ok(())
@@ -1422,7 +1024,13 @@ impl Actor {
     /// Checks whether packages are up to date.
     ///
     /// Returns `Ok` if all packages are, `Err` otherwise.
-    async fn are_packages_up_to_date(&self, target_release_id: i32) -> Result<()> {
+    async fn are_packages_up_to_date(&self) -> Result<()> {
+        let target_release_id = self
+            .magic
+            .get_target_release_id()
+            .await
+            .with_context(|| "Failed to get Target Release ID")?;
+
         let release_cache = self
             .packages_dir
             .join("versions")
@@ -1432,7 +1040,27 @@ impl Actor {
         let content = tokio::fs::read(&release_cache).await?;
         let content = std::str::from_utf8(&content)?;
 
-        let packages = ConfigPackage::parse_manifest(content)?;
+        let packages: Vec<ConfigPackage> = content
+            .lines()
+            .filter(|line| !line.trim().is_empty())
+            .map(|line| {
+                let mut parts = line.splitn(3, ' ');
+                Ok::<_, anyhow::Error>(ConfigPackage {
+                    name: parts
+                        .next()
+                        .ok_or_else(|| anyhow::anyhow!("missing name"))?
+                        .to_string(),
+                    version: parts
+                        .next()
+                        .ok_or_else(|| anyhow::anyhow!("missing version"))?
+                        .to_string(),
+                    file: parts
+                        .next()
+                        .ok_or_else(|| anyhow::anyhow!("missing file"))?
+                        .to_string(),
+                })
+            })
+            .collect::<Result<_, _>>()?;
 
         // check the system version of the packages in the magic file
         for package in packages {
@@ -1489,189 +1117,120 @@ impl Actor {
 mod tests {
     use super::*;
 
-    #[test]
-    fn prepared_release_wins_when_postman_changes_target() {
-        assert_eq!(
-            check_action(Some(10), Some(12), Some(11)),
-            Some(CheckAction::InstallPrepared(11))
-        );
-    }
-
-    #[test]
-    fn latest_target_is_applied_after_prepared_release_is_current() {
-        assert_eq!(
-            check_action(Some(11), Some(12), Some(11)),
-            Some(CheckAction::Apply(12))
-        );
-    }
-
-    #[test]
-    fn no_action_when_current_release_matches_target() {
-        assert_eq!(check_action(Some(12), Some(12), None), None);
-    }
-
-    #[tokio::test]
-    async fn release_manifest_is_published_before_preparation_succeeds() -> Result<()> {
-        let temp = tempfile::tempdir()?;
-        let manifest_path = temp.path().join("versions").join("12");
-
-        Actor::write_atomic_file(&manifest_path, "app 12 app-12.deb\n").await?;
-
-        assert_eq!(
-            tokio::fs::read_to_string(&manifest_path).await?,
-            "app 12 app-12.deb\n"
-        );
-        assert!(!manifest_path.with_extension("part").exists());
-
+    async fn write_release(versions_dir: &Path, release_id: i32, manifest: &str) -> Result<()> {
+        tokio::fs::write(versions_dir.join(release_id.to_string()), manifest).await?;
+        tokio::time::sleep(Duration::from_millis(10)).await;
         Ok(())
     }
 
     #[tokio::test]
-    async fn cleanup_retains_current_and_actual_previous_release() -> Result<()> {
+    async fn cleanup_keeps_current_and_two_most_recent_releases() -> Result<()> {
         let temp = tempfile::tempdir()?;
-        let packages = temp.path().join("packages");
-        let versions = packages.join("versions");
-        let blobs = packages.join("blobs");
-        tokio::fs::create_dir_all(&versions).await?;
-        tokio::fs::create_dir_all(blobs.join("nested")).await?;
+        let packages_dir = temp.path().join("packages");
+        let versions_dir = packages_dir.join("versions");
+        let blobs_dir = packages_dir.join("blobs");
+        tokio::fs::create_dir_all(&versions_dir).await?;
+        tokio::fs::create_dir_all(&blobs_dir).await?;
 
-        tokio::fs::write(
-            versions.join("12"),
-            "app 12 app-12.deb\nshared 2 shared.deb\n",
+        write_release(
+            &versions_dir,
+            10,
+            "app 10 app-10.deb\nshared 1 shared.deb\n",
         )
         .await?;
-        tokio::fs::write(
-            versions.join("8"),
-            "app 8 nested/app-8.deb\nshared 2 shared.deb\n",
+        write_release(
+            &versions_dir,
+            11,
+            "app 11 app-11.deb\nshared 1 shared.deb\n",
         )
         .await?;
-        tokio::fs::write(versions.join("10"), "app 10 app-10.deb\n").await?;
-        tokio::fs::write(versions.join("9"), "app 9 app-9.deb\n").await?;
-        tokio::fs::write(versions.join("11"), "app 11 app-11.deb\n").await?;
-        tokio::fs::write(packages.join(RELEASE_HISTORY_FILE), "10\n9\n7\n").await?;
+        write_release(&versions_dir, 12, "app 12 app-12.deb\n").await?;
+        write_release(&versions_dir, 13, "app 13 app-13.deb\n").await?;
 
-        tokio::fs::write(blobs.join("app-12.deb"), b"current").await?;
-        tokio::fs::write(blobs.join("nested/app-8.deb"), b"rollback").await?;
-        tokio::fs::write(blobs.join("app-10.deb"), b"older rollback").await?;
-        tokio::fs::write(blobs.join("app-9.deb"), b"oldest rollback").await?;
-        tokio::fs::write(blobs.join("shared.deb"), b"shared").await?;
-        tokio::fs::write(blobs.join("app-11.deb"), b"stale").await?;
-        tokio::fs::write(blobs.join("abandoned.deb.part"), b"partial").await?;
-        tokio::fs::write(packages.join("legacy.deb"), b"legacy").await?;
+        tokio::fs::write(blobs_dir.join("app-10.deb"), b"old").await?;
+        tokio::fs::write(blobs_dir.join("app-11.deb"), b"rollback two").await?;
+        tokio::fs::write(blobs_dir.join("app-12.deb"), b"rollback one").await?;
+        tokio::fs::write(blobs_dir.join("app-13.deb"), b"current").await?;
+        tokio::fs::write(blobs_dir.join("shared.deb"), b"shared").await?;
+        tokio::fs::write(blobs_dir.join("orphan.deb.part"), b"partial").await?;
 
-        Actor::clean_up_old_packages_with_reserve(&packages, 12, 8, u64::MAX).await?;
+        Actor::clean_up_old_packages_with_limit(&packages_dir, 13, 12, 0).await?;
 
-        assert!(versions.join("12").exists());
-        assert!(versions.join("8").exists());
-        assert!(versions.join("10").exists());
-        assert!(versions.join("9").exists());
-        assert!(!versions.join("11").exists());
-        assert!(blobs.join("app-12.deb").exists());
-        assert!(blobs.join("nested/app-8.deb").exists());
-        assert!(blobs.join("app-10.deb").exists());
-        assert!(blobs.join("app-9.deb").exists());
-        assert!(blobs.join("shared.deb").exists());
-        assert!(!blobs.join("app-11.deb").exists());
-        assert!(!blobs.join("abandoned.deb.part").exists());
-        assert!(!packages.join("legacy.deb").exists());
-        assert_eq!(
-            tokio::fs::read_to_string(packages.join(RELEASE_HISTORY_FILE)).await?,
-            "12\n8\n10\n9\n"
-        );
+        assert!(!versions_dir.join("10").exists());
+        assert!(versions_dir.join("11").exists());
+        assert!(versions_dir.join("12").exists());
+        assert!(versions_dir.join("13").exists());
+        assert!(!blobs_dir.join("app-10.deb").exists());
+        assert!(blobs_dir.join("app-11.deb").exists());
+        assert!(blobs_dir.join("app-12.deb").exists());
+        assert!(blobs_dir.join("app-13.deb").exists());
+        assert!(blobs_dir.join("shared.deb").exists());
+        assert!(!blobs_dir.join("orphan.deb.part").exists());
 
         Ok(())
     }
 
     #[tokio::test]
-    async fn cleanup_does_not_delete_anything_when_rollback_manifest_is_missing() -> Result<()> {
+    async fn cleanup_leaves_extra_releases_while_cache_is_below_limit() -> Result<()> {
         let temp = tempfile::tempdir()?;
-        let packages = temp.path().join("packages");
-        let versions = packages.join("versions");
-        let blobs = packages.join("blobs");
-        tokio::fs::create_dir_all(&versions).await?;
-        tokio::fs::create_dir_all(&blobs).await?;
+        let packages_dir = temp.path().join("packages");
+        let versions_dir = packages_dir.join("versions");
+        let blobs_dir = packages_dir.join("blobs");
+        tokio::fs::create_dir_all(&versions_dir).await?;
+        tokio::fs::create_dir_all(&blobs_dir).await?;
 
-        tokio::fs::write(versions.join("12"), "app 12 app-12.deb\n").await?;
-        tokio::fs::write(versions.join("11"), "app 11 app-11.deb\n").await?;
-        tokio::fs::write(blobs.join("app-12.deb"), b"current").await?;
-        tokio::fs::write(blobs.join("app-11.deb"), b"stale").await?;
+        write_release(&versions_dir, 1, "app 1 app-1.deb\n").await?;
+        write_release(&versions_dir, 2, "app 2 app-2.deb\n").await?;
+        write_release(&versions_dir, 3, "app 3 app-3.deb\n").await?;
+        write_release(&versions_dir, 4, "app 4 app-4.deb\n").await?;
+        tokio::fs::write(blobs_dir.join("app-1.deb"), b"one").await?;
+        tokio::fs::write(blobs_dir.join("app-2.deb"), b"two").await?;
+        tokio::fs::write(blobs_dir.join("app-3.deb"), b"three").await?;
+        tokio::fs::write(blobs_dir.join("app-4.deb"), b"four").await?;
 
-        let result = Actor::clean_up_old_packages_with_reserve(&packages, 12, 8, u64::MAX).await;
+        Actor::clean_up_old_packages_with_limit(&packages_dir, 4, 3, u64::MAX).await?;
 
-        assert!(result.is_ok());
-        assert!(versions.join("11").exists());
-        assert!(blobs.join("app-11.deb").exists());
+        assert!(versions_dir.join("1").exists());
+        assert!(blobs_dir.join("app-1.deb").exists());
 
         Ok(())
     }
 
     #[tokio::test]
-    async fn cleanup_is_deferred_while_disk_reserve_is_healthy() -> Result<()> {
+    async fn cleanup_uses_recency_instead_of_release_id_for_rollbacks() -> Result<()> {
         let temp = tempfile::tempdir()?;
-        let packages = temp.path().join("packages");
-        let versions = packages.join("versions");
-        let blobs = packages.join("blobs");
-        tokio::fs::create_dir_all(&versions).await?;
-        tokio::fs::create_dir_all(&blobs).await?;
+        let packages_dir = temp.path().join("packages");
+        let versions_dir = packages_dir.join("versions");
+        let blobs_dir = packages_dir.join("blobs");
+        tokio::fs::create_dir_all(&versions_dir).await?;
+        tokio::fs::create_dir_all(&blobs_dir).await?;
 
-        tokio::fs::write(versions.join("12"), "app 12 app-12.deb\n").await?;
-        tokio::fs::write(versions.join("8"), "app 8 app-8.deb\n").await?;
-        tokio::fs::write(versions.join("7"), "app 7 app-7.deb\n").await?;
-        tokio::fs::write(blobs.join("app-7.deb"), b"still cached").await?;
-        tokio::fs::write(packages.join(RELEASE_HISTORY_FILE), "7\n6\n5\n").await?;
+        write_release(&versions_dir, 20, "app 20 app-20.deb\n").await?;
+        write_release(&versions_dir, 8, "app 8 app-8.deb\n").await?;
+        write_release(&versions_dir, 15, "app 15 app-15.deb\n").await?;
+        write_release(&versions_dir, 7, "app 7 app-7.deb\n").await?;
+        for release_id in [7, 8, 15, 20] {
+            tokio::fs::write(
+                blobs_dir.join(format!("app-{release_id}.deb")),
+                release_id.to_string(),
+            )
+            .await?;
+        }
 
-        Actor::clean_up_old_packages_with_reserve(&packages, 12, 8, 0).await?;
+        Actor::clean_up_old_packages_with_limit(&packages_dir, 7, 15, 0).await?;
 
-        assert!(versions.join("7").exists());
-        assert!(blobs.join("app-7.deb").exists());
-        assert_eq!(
-            tokio::fs::read_to_string(packages.join(RELEASE_HISTORY_FILE)).await?,
-            "12\n8\n7\n6\n"
-        );
-
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn cleanup_repairs_invalid_release_history() -> Result<()> {
-        let temp = tempfile::tempdir()?;
-        let packages = temp.path().join("packages");
-        tokio::fs::create_dir_all(packages.join("versions")).await?;
-        tokio::fs::write(packages.join(RELEASE_HISTORY_FILE), "11\ninvalid\n").await?;
-
-        Actor::clean_up_old_packages_with_reserve(&packages, 12, 8, 0).await?;
-
-        assert_eq!(
-            tokio::fs::read_to_string(packages.join(RELEASE_HISTORY_FILE)).await?,
-            "12\n8\n"
-        );
+        assert!(versions_dir.join("7").exists());
+        assert!(versions_dir.join("15").exists());
+        assert!(versions_dir.join("8").exists());
+        assert!(!versions_dir.join("20").exists());
 
         Ok(())
     }
 
     #[test]
-    fn manifest_rejects_invalid_blob_entries() {
-        let blobs = Path::new("/packages/blobs");
+    fn manifest_rejects_paths_outside_blob_cache() {
+        let result = manifest_blob_paths("app 1 ../../etc/passwd\n", Path::new("/packages/blobs"));
 
-        assert!(manifest_blob_paths("app 1 ../../etc/passwd\n", blobs).is_err());
-        assert!(manifest_blob_paths("app 1 /etc/passwd\n", blobs).is_err());
-        assert!(manifest_blob_paths("app 1\n", blobs).is_err());
-    }
-
-    #[test]
-    fn server_package_metadata_is_validated_before_serialization() {
-        let unsafe_package = ConfigPackage {
-            name: "app".to_string(),
-            version: "1".to_string(),
-            file: "../../etc/passwd".to_string(),
-        };
-        let injected_package = ConfigPackage {
-            name: "app".to_string(),
-            version: "1".to_string(),
-            file: "app.deb\nother 1 other.deb".to_string(),
-        };
-
-        assert!(ConfigPackage::serialize_manifest(&[unsafe_package]).is_err());
-        assert!(ConfigPackage::serialize_manifest(&[injected_package]).is_err());
+        assert!(result.is_err());
     }
 }

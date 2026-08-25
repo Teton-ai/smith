@@ -82,18 +82,14 @@ async fn updater_status(State(state): State<ControlState>) -> String {
 
 async fn updater_check(State(state): State<ControlState>) -> Json<CheckResponse> {
     Json(CheckResponse {
-        updates_available: state.updater.prepare_release().await,
+        updates_available: state.updater.check_for_updates().await,
     })
 }
 
 async fn updater_upgrade(State(state): State<ControlState>) -> Json<MessageResponse> {
-    let accepted = state.updater.install_prepared_release().await;
+    state.updater.upgrade_device().await;
     Json(MessageResponse {
-        message: if accepted {
-            "Packages upgrade accepted".to_owned()
-        } else {
-            "No prepared packages upgrade is available".to_owned()
-        },
+        message: "Packages upgrade scheduled".to_owned(),
     })
 }
 

@@ -1,7 +1,6 @@
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
-use std::fmt::Write;
-use std::path::{Component, Path, PathBuf};
+use std::path::PathBuf;
 use tokio::fs::File;
 use tokio::io::AsyncWriteExt; // for write_all()
 use tracing::info;
@@ -38,76 +37,6 @@ pub struct ConfigPackage {
 }
 
 impl ConfigPackage {
-    fn validate_manifest_field(field: &str, value: &str) -> Result<()> {
-        if value.is_empty() || value.chars().any(char::is_whitespace) {
-            return Err(anyhow::anyhow!(
-                "invalid {field} in package manifest: {value:?}"
-            ));
-        }
-        Ok(())
-    }
-
-    pub fn safe_file_path(&self, base: &Path) -> Result<PathBuf> {
-        Self::validate_manifest_field("package file", &self.file)?;
-        let relative_path = Path::new(&self.file);
-        if relative_path
-            .components()
-            .any(|component| !matches!(component, Component::Normal(_)))
-        {
-            return Err(anyhow::anyhow!("unsafe package file path: {}", self.file));
-        }
-        Ok(base.join(relative_path))
-    }
-
-    pub fn parse_manifest(manifest: &str) -> Result<Vec<Self>> {
-        manifest
-            .lines()
-            .filter(|line| !line.trim().is_empty())
-            .map(|line| {
-                let mut fields = line.split_whitespace();
-                let name = fields
-                    .next()
-                    .ok_or_else(|| anyhow::anyhow!("missing package name in manifest"))?;
-                let version = fields
-                    .next()
-                    .ok_or_else(|| anyhow::anyhow!("missing package version in manifest"))?;
-                let file = fields
-                    .next()
-                    .ok_or_else(|| anyhow::anyhow!("missing package file in manifest"))?;
-                if fields.next().is_some() {
-                    return Err(anyhow::anyhow!(
-                        "too many fields in package manifest line: {line}"
-                    ));
-                }
-
-                Self::validate_manifest_field("package name", name)?;
-                Self::validate_manifest_field("package version", version)?;
-                let package = Self {
-                    name: name.to_string(),
-                    version: version.to_string(),
-                    file: file.to_string(),
-                };
-                package.safe_file_path(Path::new(""))?;
-                Ok(package)
-            })
-            .collect()
-    }
-
-    pub fn serialize_manifest(packages: &[Self]) -> Result<String> {
-        let mut manifest = String::new();
-        for package in packages {
-            Self::validate_manifest_field("package name", &package.name)?;
-            Self::validate_manifest_field("package version", &package.version)?;
-            package.safe_file_path(Path::new(""))?;
-            writeln!(
-                manifest,
-                "{} {} {}",
-                package.name, package.version, package.file
-            )?;
-        }
-        Ok(manifest)
-    }
-
     /// Returns the dpkg status flags and installed version, e.g. `("ii", "1.2.3")`.
     pub async fn get_system_state(&self) -> Result<(String, String)> {
         let name = &self.name;

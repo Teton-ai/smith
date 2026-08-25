@@ -27,46 +27,15 @@ impl Handler {
         Self { sender }
     }
 
-    pub async fn apply_release(&self) -> bool {
-        if let Err(err) = self.sender.send(ActorMessage::Apply).await {
-            warn!("Unable to schedule release apply: {}", err);
-            return false;
-        }
+    pub async fn check_for_updates(&self) -> bool {
+        // unwrap because if this fails then we are in a bad state
+        self.sender.send(ActorMessage::Update).await.unwrap();
         true
     }
 
-    pub async fn prepare_release(&self) -> bool {
-        let (rpc, receiver) = oneshot::channel();
-        if let Err(err) = self.sender.send(ActorMessage::Prepare { rpc }).await {
-            warn!("Unable to schedule release preparation: {}", err);
-            return false;
-        }
-        match receiver.await {
-            Ok(prepared) => prepared,
-            Err(err) => {
-                warn!("Unable to receive release preparation result: {}", err);
-                false
-            }
-        }
-    }
-
-    pub async fn install_prepared_release(&self) -> bool {
-        let (rpc, receiver) = oneshot::channel();
-        if let Err(err) = self
-            .sender
-            .send(ActorMessage::InstallPrepared { rpc })
-            .await
-        {
-            warn!("Unable to schedule prepared release installation: {}", err);
-            return false;
-        }
-        match receiver.await {
-            Ok(accepted) => accepted,
-            Err(err) => {
-                warn!("Unable to receive release installation acceptance: {}", err);
-                false
-            }
-        }
+    pub async fn upgrade_device(&self) {
+        // unwrap because if this fails then we are in a bad state
+        self.sender.send(ActorMessage::Upgrade).await.unwrap();
     }
 
     pub async fn status(&self) -> String {
