@@ -103,6 +103,7 @@ pub async fn get_networks(
     ),
     responses(
         (status = 200, description = "Return found network"),
+        (status = 404, description = "Network does not exist"),
         (status = 500, description = "Failed to retrieve network", body = String),
     ),
     security(
@@ -132,12 +133,17 @@ pub async fn get_network_by_id(
     )
     .fetch_one(&state.pg_pool)
     .await
-    .map_err(|err| {
-        error!(
-            "error: failed to get network for id {}: {:?}",
-            network_id, err
-        );
-        StatusCode::INTERNAL_SERVER_ERROR
+    .map_err(|err| match err {
+        // A missing row is a normal, expected outcome here (e.g. a network
+        // the ledger has since collected), not a failure worth logging as one.
+        sqlx::Error::RowNotFound => StatusCode::NOT_FOUND,
+        err => {
+            error!(
+                "error: failed to get network for id {}: {:?}",
+                network_id, err
+            );
+            StatusCode::INTERNAL_SERVER_ERROR
+        }
     })?;
 
     Ok(Json(network))
