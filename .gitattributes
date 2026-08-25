@@ -1,0 +1,4 @@
+# Smith is a Rust project; the dashboard and its UI package are a large but
+# secondary part of it. Exclude them so GitHub's language bar reflects that.
+dashboard/**  linguist-detectable=false
+packages/**   linguist-detectable=false
