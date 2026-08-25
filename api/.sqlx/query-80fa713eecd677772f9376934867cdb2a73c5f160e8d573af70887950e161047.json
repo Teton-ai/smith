@@ -1,0 +1,26 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO command_queue (device_id, cmd, continue_on_error, canceled, bundle, available_at)\n                VALUES (\n                    $1,\n                    $2::jsonb,\n                    $3,\n                    false,\n                    $4,\n                    COALESCE($5, now())\n                )\n                RETURNING id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Jsonb",
+        "Bool",
+        "Uuid",
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "80fa713eecd677772f9376934867cdb2a73c5f160e8d573af70887950e161047"
+}

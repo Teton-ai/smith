@@ -8,16 +8,82 @@ use crate::user::CurrentUser;
 use axum::Json;
 use axum::extract::{Host, Path, Query};
 use axum::{Extension, http::StatusCode, response::Result};
+use chrono::Utc;
 use models::command::{BundleReceipt, BundleWithCommands, CommandRecipe, QueuedCommand};
 use models::device::DeviceCommandResponse;
+use rand::seq::SliceRandom;
 use sentry::types::Uuid;
 use serde::Deserialize;
 use smith::utils::schema::{SafeCommandRequest, SafeCommandTx};
 use sqlx::PgPool;
 use std::collections::HashMap;
+use std::time::Duration;
 use tracing::error;
 
 use crate::command::redact_cmd_data;
+
+/// `wave_size` devices become eligible together, then the next `wave_size`
+/// after `wave_duration`, spreading out contention for a shared resource.
+struct StaggerPolicy {
+    wave_size: u32,
+    wave_duration: Duration,
+}
+
+/// `None` for anything that doesn't contend for a shared physical resource.
+fn stagger_policy(cmd: &SafeCommandTx) -> Option<StaggerPolicy> {
+    match cmd {
+        SafeCommandTx::WifiScan => Some(StaggerPolicy {
+            wave_size: 2,
+            wave_duration: Duration::from_secs(10),
+        }),
+        _ => None,
+    }
+}
+
+/// Strictest policy across `commands`: smallest wave, longest duration.
+fn merged_stagger_policy(commands: &[SafeCommandRequest]) -> Option<StaggerPolicy> {
+    commands
+        .iter()
+        .filter_map(|c| stagger_policy(&c.command))
+        .reduce(|a, b| StaggerPolicy {
+            wave_size: a.wave_size.min(b.wave_size),
+            wave_duration: a.wave_duration.max(b.wave_duration),
+        })
+}
+
+/// `offset` is relative, not absolute: see the two-phase insert comment below.
+struct DeviceWaveOffset {
+    device_id: i32,
+    offset: Option<Duration>,
+}
+
+/// Shuffled once so wave membership doesn't correlate with caller order.
+fn assign_wave_offsets(devices: &[i32], policy: Option<&StaggerPolicy>) -> Vec<DeviceWaveOffset> {
+    let Some(policy) = policy else {
+        return devices
+            .iter()
+            .map(|&device_id| DeviceWaveOffset {
+                device_id,
+                offset: None,
+            })
+            .collect();
+    };
+
+    // Avoid a div-by-zero if a future policy sets wave_size to 0.
+    let wave_size = policy.wave_size.max(1);
+
+    let mut ordered_devices: Vec<i32> = devices.to_vec();
+    ordered_devices.shuffle(&mut rand::rng());
+
+    ordered_devices
+        .into_iter()
+        .enumerate()
+        .map(|(wave_index, device_id)| DeviceWaveOffset {
+            device_id,
+            offset: Some(policy.wave_duration * (wave_index as u32 / wave_size)),
+        })
+        .collect()
+}
 
 /// Queue `commands` against every device in `devices` as a single bundle.
 /// Shared by raw bundle issuing and recipe triggering so both produce identical
@@ -44,27 +110,43 @@ async fn queue_commands_bundle(
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
 
+    let policy = merged_stagger_policy(commands);
+    let wave_offsets = assign_wave_offsets(devices, policy.as_ref());
+
+    // Two-phase: a slow insert could let real time pass an early wave's
+    // schedule before anything commits and becomes visible, collapsing
+    // waves. So paced rows insert with a far-future placeholder, then get
+    // corrected in one UPDATE just before commit using `statement_timestamp()`
+    // (unlike `now()`, not frozen at transaction start, and unlike
+    // `clock_timestamp()`, shared by every row in this one UPDATE instead of
+    // drifting per row).
+    let far_future_placeholder = Utc::now() + Duration::from_secs(24 * 60 * 60);
+
     let mut queued = Vec::with_capacity(devices.len() * commands.len());
-    for device_id in devices {
+    let mut pending_corrections: Vec<(i32, i32)> = Vec::new();
+    for DeviceWaveOffset { device_id, offset } in &wave_offsets {
+        let placeholder = offset.map(|_| far_future_placeholder);
         for command in commands {
             let cmd = serde_json::to_value(command.command.clone()).map_err(|err| {
                 error!("Failed to serialize command into JSON {err}");
                 StatusCode::INTERNAL_SERVER_ERROR
             })?;
             let row = sqlx::query!(
-                r#"INSERT INTO command_queue (device_id, cmd, continue_on_error, canceled, bundle)
+                r#"INSERT INTO command_queue (device_id, cmd, continue_on_error, canceled, bundle, available_at)
                 VALUES (
                     $1,
                     $2::jsonb,
                     $3,
                     false,
-                    $4
+                    $4,
+                    COALESCE($5, now())
                 )
                 RETURNING id"#,
                 device_id,
                 cmd,
                 command.continue_on_error,
-                bundle_id.uuid
+                bundle_id.uuid,
+                placeholder
             )
             .fetch_one(&mut *tx)
             .await
@@ -73,11 +155,36 @@ async fn queue_commands_bundle(
                 StatusCode::INTERNAL_SERVER_ERROR
             })?;
 
+            if let Some(offset) = offset {
+                pending_corrections.push((row.id, offset.as_secs() as i32));
+            }
+
             queued.push(QueuedCommand {
                 device: *device_id,
                 cmd_id: row.id,
             });
         }
+    }
+
+    if !pending_corrections.is_empty() {
+        let ids: Vec<i32> = pending_corrections.iter().map(|(id, _)| *id).collect();
+        let offset_secs: Vec<i32> = pending_corrections.iter().map(|(_, s)| *s).collect();
+        sqlx::query!(
+            r#"
+            UPDATE command_queue AS cq
+            SET available_at = statement_timestamp() + make_interval(secs => u.offset_secs)
+            FROM UNNEST($1::int[], $2::int[]) AS u(id, offset_secs)
+            WHERE cq.id = u.id
+            "#,
+            &ids,
+            &offset_secs,
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(|err| {
+            error!("Failed to finalize staggered availability {err}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
     }
 
     tx.commit().await.map_err(|err| {
@@ -785,4 +892,192 @@ pub async fn trigger_recipe(
     .await?;
 
     Ok((StatusCode::CREATED, Json(receipt)))
+}
+
+#[cfg(test)]
+mod stagger_tests {
+    use super::*;
+
+    fn request(command: SafeCommandTx) -> SafeCommandRequest {
+        SafeCommandRequest {
+            id: -1,
+            command,
+            continue_on_error: false,
+        }
+    }
+
+    #[test]
+    fn wifi_scan_has_a_pacing_policy() {
+        let policy = stagger_policy(&SafeCommandTx::WifiScan).expect("WifiScan should be paced");
+        assert_eq!(policy.wave_size, 2);
+        assert_eq!(policy.wave_duration, Duration::from_secs(10));
+    }
+
+    #[test]
+    fn unpaced_commands_have_no_policy() {
+        assert!(stagger_policy(&SafeCommandTx::Ping).is_none());
+    }
+
+    #[test]
+    fn merge_picks_up_the_only_policied_command_in_a_mixed_bundle() {
+        let commands = [
+            request(SafeCommandTx::Ping),
+            request(SafeCommandTx::WifiScan),
+        ];
+        let policy = merged_stagger_policy(&commands).expect("bundle contains a policied command");
+        assert_eq!(policy.wave_size, 2);
+        assert_eq!(policy.wave_duration, Duration::from_secs(10));
+    }
+
+    #[test]
+    fn merge_returns_none_when_nothing_in_the_bundle_is_policied() {
+        let commands = [request(SafeCommandTx::Ping)];
+        assert!(merged_stagger_policy(&commands).is_none());
+    }
+
+    #[test]
+    fn no_policy_leaves_every_device_at_the_column_default() {
+        let devices = [1, 2, 3, 4, 5];
+        let offsets = assign_wave_offsets(&devices, None);
+
+        assert_eq!(offsets.len(), devices.len());
+        assert!(offsets.iter().all(|a| a.offset.is_none()));
+    }
+
+    #[test]
+    fn waves_group_devices_into_ceil_n_over_k_distinct_slots() {
+        let devices: Vec<i32> = (0..5).collect();
+        let policy = StaggerPolicy {
+            wave_size: 2,
+            wave_duration: Duration::from_secs(10),
+        };
+        let offsets = assign_wave_offsets(&devices, Some(&policy));
+
+        // Shuffling must not drop or duplicate any device.
+        let mut assigned_devices: Vec<i32> = offsets.iter().map(|a| a.device_id).collect();
+        assigned_devices.sort();
+        assert_eq!(assigned_devices, devices);
+
+        // 5 devices at wave_size 2 -> ceil(5/2) = 3 distinct waves, sizes 2, 2, 1.
+        let mut counts: HashMap<Duration, usize> = HashMap::new();
+        for a in &offsets {
+            *counts.entry(a.offset.expect("policy is Some")).or_default() += 1;
+        }
+        assert_eq!(counts.len(), 3);
+        let mut sizes: Vec<usize> = counts.values().copied().collect();
+        sizes.sort_unstable();
+        assert_eq!(sizes, vec![1, 2, 2]);
+    }
+
+    // Needs a live DB at runtime (not just compile time like other `api`
+    // tests), which CI doesn't provide, hence `#[ignore]` (`e2e` convention).
+    // Lives here, not in `e2e`, since this needs no HTTP/auth.
+    #[test]
+    #[ignore = "connects to a real, migrated Postgres via DATABASE_URL; not run in \
+                CI (test.yml has no live DB). Run against the dev stack, e.g. \
+                `docker exec smith-api cargo test -p api -- --ignored`."]
+    fn staggered_bundle_available_at_is_correct_after_commit() {
+        tokio::runtime::Runtime::new()
+            .expect("building a tokio runtime for this test")
+            .block_on(staggered_bundle_available_at_is_correct_after_commit_inner());
+    }
+
+    async fn staggered_bundle_available_at_is_correct_after_commit_inner() {
+        use chrono::DateTime;
+
+        let database_url =
+            std::env::var("DATABASE_URL").expect("DATABASE_URL must point at a migrated Postgres");
+        let pool = sqlx::PgPool::connect(&database_url)
+            .await
+            .expect("connecting to the test database");
+
+        let user_id: i32 = sqlx::query_scalar("SELECT id FROM auth.users LIMIT 1")
+            .fetch_one(&pool)
+            .await
+            .expect("at least one user must exist in auth.users to attribute the bundle to");
+
+        // Throwaway devices, cleaned up at the end (not real fleet devices).
+        let unique = Utc::now()
+            .timestamp_nanos_opt()
+            .expect("current time fits in i64 nanos");
+        let mut device_ids = Vec::new();
+        for i in 0..5 {
+            let id: i32 =
+                sqlx::query_scalar("INSERT INTO device (serial_number) VALUES ($1) RETURNING id")
+                    .bind(format!("wave-correction-test-{unique}-{i}"))
+                    .fetch_one(&pool)
+                    .await
+                    .expect("inserting a throwaway device");
+            device_ids.push(id);
+        }
+
+        let commands = vec![SafeCommandRequest {
+            id: -1,
+            command: SafeCommandTx::WifiScan,
+            continue_on_error: false,
+        }];
+
+        let result = queue_commands_bundle(&pool, &device_ids, &commands, user_id).await;
+
+        // Read back before cleanup so a failure below doesn't hide what happened.
+        let rows: Vec<(i32, DateTime<Utc>)> = match &result {
+            Ok(receipt) => {
+                sqlx::query_as("SELECT id, available_at FROM command_queue WHERE bundle = $1")
+                    .bind(receipt.uuid)
+                    .fetch_all(&pool)
+                    .await
+                    .expect("reading back the inserted rows")
+            }
+            Err(_) => Vec::new(),
+        };
+
+        if let Ok(receipt) = &result {
+            sqlx::query("DELETE FROM command_queue WHERE bundle = $1")
+                .bind(receipt.uuid)
+                .execute(&pool)
+                .await
+                .expect("cleaning up command_queue rows");
+            sqlx::query("DELETE FROM command_bundles WHERE uuid = $1")
+                .bind(receipt.uuid)
+                .execute(&pool)
+                .await
+                .expect("cleaning up the command_bundles row");
+        }
+        sqlx::query("DELETE FROM device WHERE id = ANY($1)")
+            .bind(&device_ids)
+            .execute(&pool)
+            .await
+            .expect("cleaning up throwaway devices");
+
+        result.expect("queue_commands_bundle should succeed");
+        assert_eq!(
+            rows.len(),
+            device_ids.len(),
+            "every device should have exactly one queued command"
+        );
+
+        // Expect 3 waves, sizes 2/2/1. Bucket relative to the earliest row,
+        // not a fresh `now()` (cleanup's round trips would skew it), and
+        // round rather than truncate to absorb jitter between corrected rows.
+        let earliest = rows
+            .iter()
+            .map(|(_, at)| *at)
+            .min()
+            .expect("at least one row");
+        let mut waves: HashMap<i64, usize> = HashMap::new();
+        for (_, available_at) in &rows {
+            let delta_ms = (*available_at - earliest).num_milliseconds();
+            assert!(
+                (0..=25_000).contains(&delta_ms),
+                "available_at should land within one bundle's worth of the \
+                 earliest row, not a leftover placeholder: {delta_ms}ms"
+            );
+            let wave = ((delta_ms as f64) / 10_000.0).round() as i64;
+            *waves.entry(wave).or_default() += 1;
+        }
+        assert_eq!(waves.len(), 3, "expected 3 distinct waves, got {waves:?}");
+        let mut sizes: Vec<usize> = waves.values().copied().collect();
+        sizes.sort_unstable();
+        assert_eq!(sizes, vec![1, 2, 2]);
+    }
 }

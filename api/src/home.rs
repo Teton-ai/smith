@@ -581,7 +581,7 @@ pub async fn get_commands(
                 cmd,
                 continue_on_error
             FROM command_queue
-            WHERE device_id = $1 AND fetched = false AND canceled = false"#,
+            WHERE device_id = $1 AND fetched = false AND canceled = false AND available_at <= now()"#,
         device_id
     )
     .fetch_all(&mut *tx)
