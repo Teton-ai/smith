@@ -104,6 +104,10 @@ pub struct Config {
     /// `holder` is never client-supplied: this map is the sole source of truth
     /// for who a caller is allowed to hold references as.
     pub known_holders: HashMap<String, String>,
+    /// How often the network garbage collection sweep (`network::gc`) runs. A plain tunable,
+    /// not an on/off switch - the sweep only ships once seeding is already
+    /// confirmed.
+    pub network_gc_interval_seconds: u64,
 }
 
 /// Builds the M2M-sub -> holder map from one env var per known holder. Missing
@@ -161,6 +165,13 @@ impl Config {
                 .and_then(|s| s.parse().ok())
                 .unwrap_or(3600),
             known_holders: known_holders_from_env(),
+            network_gc_interval_seconds: env::var("NETWORK_GC_INTERVAL_SECONDS")
+                .ok()
+                .and_then(|s| s.parse().ok())
+                // App API's reconcile job (the only current holder) pushes at
+                // most every 2 days, so sweeping more often than that just
+                // finds nothing new.
+                .unwrap_or(2 * 24 * 60 * 60),
         })
     }
 }
