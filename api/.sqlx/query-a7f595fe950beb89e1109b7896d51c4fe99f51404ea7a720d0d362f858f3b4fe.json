@@ -1,0 +1,20 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT n.id\n        FROM network n\n        WHERE NOT EXISTS (SELECT 1 FROM network_reference r WHERE r.network_id = n.id)\n          AND NOT network_has_internal_reference(n.id)\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "a7f595fe950beb89e1109b7896d51c4fe99f51404ea7a720d0d362f858f3b4fe"
+}
