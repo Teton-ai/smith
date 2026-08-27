@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT EXISTS (\n                SELECT 1\n                FROM device d\n                WHERE\n                    CASE\n                        WHEN $1 ~ '^[0-9]+$' AND length($1) <= 10 THEN\n                            d.id = $1::int4\n                        ELSE\n                            d.serial_number = $1\n                    END\n            ) as \"exists!: bool\"\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "exists!: bool",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "f23a8e577b149385bec8f1655bb4e9cee1a2fa4875f75cabca11eed8442534ef"
+}

@@ -2066,7 +2066,7 @@ pub async fn delete_device(
     })?;
 
     sqlx::query!(
-        "UPDATE device 
+        "UPDATE device
         SET archived = true
         WHERE id = $1",
         device_id
@@ -2125,8 +2125,36 @@ pub async fn update_device(
             error!("Failed to start transaction {err}");
             StatusCode::INTERNAL_SERVER_ERROR
         })?;
-        let keys = labels.keys().map(|key| key.to_string()).collect::<Vec<_>>();
-        let values = labels.into_values().collect::<Vec<_>>();
+        // Explicitly verify the device exists (inside the transaction) so that a
+        // missing device returns 404 even for an empty labels map, while an empty
+        // map can still clear every label on an existing device.
+        let device_exists = sqlx::query!(
+            r#"
+            SELECT EXISTS (
+                SELECT 1
+                FROM device d
+                WHERE
+                    CASE
+                        WHEN $1 ~ '^[0-9]+$' AND length($1) <= 10 THEN
+                            d.id = $1::int4
+                        ELSE
+                            d.serial_number = $1
+                    END
+            ) as "exists!: bool"
+            "#,
+            device_id
+        )
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(|err| {
+            error!("Failed to check if device exists {err}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+        if !device_exists.exists {
+            tx.rollback().await.ok();
+            return Err(StatusCode::NOT_FOUND);
+        }
+        let (keys, values): (Vec<_>, Vec<_>) = labels.into_iter().unzip();
         // Ensure the labels exists
         sqlx::query!(
             r#"
@@ -2147,7 +2175,7 @@ pub async fn update_device(
             r#"
             DELETE FROM device_label
             USING device d
-            WHERE 
+            WHERE
                 d.id = device_label.device_id AND
                 CASE
                     WHEN $1 ~ '^[0-9]+$' AND length($1) <= 10 THEN
@@ -2164,7 +2192,7 @@ pub async fn update_device(
             error!("Failed to remove previous device_labels on device {err}");
             StatusCode::INTERNAL_SERVER_ERROR
         })?;
-        let result = sqlx::query!(
+        sqlx::query!(
             r#"
             WITH label_input AS (
                 SELECT *
@@ -2173,7 +2201,7 @@ pub async fn update_device(
             the_device AS (
                 SELECT d.id
                 FROM device d
-                WHERE 
+                WHERE
                     CASE
                         WHEN $1 ~ '^[0-9]+$' AND length($1) <= 10 THEN
                             id = $1::int4
@@ -2206,10 +2234,6 @@ pub async fn update_device(
             error!("Failed to commit transaction {err}");
             StatusCode::INTERNAL_SERVER_ERROR
         })?;
-
-        if result.rows_affected() == 0 {
-            return Err(StatusCode::NOT_FOUND);
-        }
     }
 
     Ok(StatusCode::OK)
@@ -2389,7 +2413,7 @@ pub async fn revoke_device(
     })?;
 
     sqlx::query!(
-        r#"UPDATE device 
+        r#"UPDATE device
         SET approved = false,
             release_id = NULL,
             target_release_id = NULL
