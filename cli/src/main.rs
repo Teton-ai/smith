@@ -367,9 +367,25 @@ async fn resolve_target_devices(
     resolve_devices_from_selector(api, &selector).await
 }
 
+/// Combine a FreeForm response's stdout/stderr into a single labeled string;
+/// `None` if the payload isn't a FreeForm response at all. Labeling both
+/// streams (rather than just concatenating them) avoids implying a
+/// chronological order that piped stdout/stderr capture can't actually give us.
+fn format_freeform_output(payload: &serde_json::Value) -> Option<String> {
+    let freeform = payload.get("FreeForm")?;
+    let stdout = freeform["stdout"].as_str().unwrap_or("").trim();
+    let stderr = freeform["stderr"].as_str().unwrap_or("").trim();
+    Some(match (stdout.is_empty(), stderr.is_empty()) {
+        (true, true) => String::new(),
+        (false, true) => stdout.to_string(),
+        (true, false) => format!("stderr:\n{stderr}"),
+        (false, false) => format!("stdout:\n{stdout}\n\nstderr:\n{stderr}"),
+    })
+}
+
 fn render_command_output(payload: &serde_json::Value) -> String {
-    if let Some(stdout) = payload["FreeForm"]["stdout"].as_str() {
-        stdout.to_string()
+    if let Some(output) = format_freeform_output(payload) {
+        output
     } else if let Some(variant) = payload.as_str() {
         format!("({variant})")
     } else {
@@ -2408,10 +2424,8 @@ where
         }
 
         if let Some(response) = response.response {
-            result = response["FreeForm"]["stdout"]
-                .as_str()
-                .with_context(|| "Failed to get output from response")?
-                .to_string();
+            result = format_freeform_output(&response)
+                .with_context(|| "Failed to get output from response")?;
             break;
         }
 
