@@ -35,7 +35,9 @@ export interface UptimeBucket {
 	end: Date;
 	/** Downtime inside this bucket, in ms. */
 	downMs: number;
-	/** Fraction of the bucket spent up, 0..1. */
+	/** Unobserved time inside this bucket (before `coverageFrom`), in ms. */
+	unknownMs: number;
+	/** Fraction of the *observed* part of the bucket spent up, 0..1. */
 	ratio: number;
 }
 
@@ -52,6 +54,7 @@ export function UptimeBars({
 	from,
 	to,
 	spans,
+	coverageFrom,
 	buckets = 48,
 	height = "1.75rem",
 	renderTooltip,
@@ -60,6 +63,9 @@ export function UptimeBars({
 	to: Date;
 	/** Down intervals in absolute time; clipped to the window. */
 	spans: TimelineSpan[];
+	/** Start of observed time. Anything before this, within the window, is drawn
+	 * as unknown rather than up — omit when the whole window is observed. */
+	coverageFrom?: Date;
 	buckets?: number;
 	height?: string;
 	/** Hover card contents for a bucket. No tooltip is shown when omitted. */
@@ -72,21 +78,26 @@ export function UptimeBars({
 
 	if (!(total > 0)) return null;
 
+	const coverageMs = coverageFrom?.getTime();
 	const width = total / buckets;
 	const items = Array.from({ length: buckets }, (_, i): UptimeBucket => {
 		const a = startMs + i * width;
 		const b = a + width;
+		const unknownMs =
+			coverageMs !== undefined ? Math.max(0, Math.min(b, coverageMs) - a) : 0;
 		let downMs = 0;
 		for (const s of spans) {
 			const lo = Math.max(s.start.getTime(), a);
 			const hi = Math.min(s.end.getTime(), b);
 			if (hi > lo) downMs += hi - lo;
 		}
+		const observedWidth = Math.max(1, width - unknownMs);
 		return {
 			start: new Date(a),
 			end: new Date(b),
 			downMs,
-			ratio: 1 - downMs / width,
+			unknownMs,
+			ratio: 1 - downMs / observedWidth,
 		};
 	});
 
@@ -123,11 +134,19 @@ export function UptimeBars({
 							hovered === i ? "opacity-60" : ""
 						}`}
 					>
+						{bucket.unknownMs > 0 && (
+							<div
+								className="absolute inset-y-0 left-0 bg-gray-300"
+								style={{ width: `${(bucket.unknownMs / width) * 100}%` }}
+							/>
+						)}
 						{bucket.downMs > 0 && (
 							<div
 								className="absolute inset-x-0 bottom-0 bg-red-500"
-								// Floor so a blip too small to round to a pixel is still seen.
-								style={{ height: `max(3px, ${(1 - bucket.ratio) * 100}%)` }}
+								// Floored so a blip too small to round to a pixel is still seen.
+								style={{
+									height: `max(3px, ${(bucket.downMs / width) * 100}%)`,
+								}}
 							/>
 						)}
 					</div>

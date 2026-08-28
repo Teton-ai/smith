@@ -175,6 +175,11 @@ pub struct DeviceUptime {
     pub services: Vec<String>,
     /// Outages overlapping the window, clipped to it by the caller when drawing.
     pub outages: Vec<ServiceOutage>,
+    /// When reachability history begins for this device: the later of its
+    /// registration and the moment the API started recording outages. Null when
+    /// the device has never checked in, in which case nothing in the window is
+    /// known. Time before this is unobserved, not uptime.
+    pub observed_from: Option<DateTime<Utc>>,
 }
 
 #[derive(Debug, Serialize, utoipa::ToSchema)]
@@ -588,7 +593,7 @@ const DOWNTIME_MASS_STALE_MIN_FLEET: i64 = 10;
 /// outage for it would be fabrication. This migration's own `installed_on` is
 /// exactly that moment, which beats a config knob that can be set wrong and a
 /// startup timestamp that would drift on every restart.
-const DOWNTIME_EPOCH_MIGRATION_VERSION: i64 = 20260727000000;
+pub(crate) const DOWNTIME_EPOCH_MIGRATION_VERSION: i64 = 20260727000000;
 
 /// Device reachability is stored as an outage of smithd itself, which is a real
 /// systemd unit (`smithd/debian/smithd.service`), so one table and one set of
