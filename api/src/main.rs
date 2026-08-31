@@ -308,6 +308,7 @@ async fn start_main_server(
         .routes(routes!(
             distribution::route::get_distribution_latest_release
         ))
+        .routes(routes!(distribution::route::get_distribution_lts_release))
         .routes(routes!(ip_address::route::get_ip_addresses,))
         .routes(routes!(
             ip_address::route::get_ip_address_info,
@@ -392,6 +393,7 @@ async fn start_main_server(
         ))
         .routes(routes!(device::route::delete_token))
         .routes(routes!(device::route::update_devices_target_release))
+        .routes(routes!(device::route::update_devices_follow_latest))
         .routes(routes!(device::route::get_variables))
         .routes(routes!(
             command::route::get_bundle_commands,

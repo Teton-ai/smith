@@ -1,4 +1,4 @@
-import { AlertBanner, Card, PageContainer } from "@teton/smith-ui";
+import { AlertBanner, Badge, Card, PageContainer } from "@teton/smith-ui";
 import { CheckCircle2, Tag, XCircle } from "lucide-react";
 import { Link, useParams } from "react-router";
 import {
@@ -73,6 +73,11 @@ const ReleaseLink = ({
 		<>
 			<Tag className="w-3.5 h-3.5 shrink-0" />
 			<span>{label}</span>
+			{release?.lts && (
+				<Badge variant="purple" pill>
+					LTS
+				</Badge>
+			)}
 		</>
 	);
 

@@ -10,6 +10,8 @@ pub struct Release {
     pub draft: bool,
     pub yanked: bool,
     pub release_candidate: bool,
+    pub lts: bool,
+    pub lts_marked_at: Option<chrono::DateTime<chrono::Utc>>,
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub user_id: Option<i32>,
     pub user_email: Option<String>,
@@ -19,4 +21,5 @@ pub struct Release {
 pub struct UpdateRelease {
     pub draft: Option<bool>,
     pub yanked: Option<bool>,
+    pub lts: Option<bool>,
 }

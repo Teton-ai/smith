@@ -27,6 +27,13 @@ pub enum ReleasesCommands {
     Draft,
     /// Publish a release that is in draft
     Publish { release_number: String },
+    /// Mark a release as LTS, a version we commit to keeping devices on
+    Lts {
+        release_number: String,
+        /// Remove the LTS designation instead of applying it
+        #[arg(long)]
+        clear: bool,
+    },
     /// Deploy a release
     Deploy {
         release_number: String,
@@ -56,10 +63,37 @@ impl ReleasesCommands {
                     UpdateRelease {
                         draft: Some(false),
                         yanked: None,
+                        lts: None,
                     },
                 )
                 .await?;
                 println!("Release published successfully!");
+            }
+            ReleasesCommands::Lts {
+                release_number,
+                clear,
+            } => {
+                let secrets = auth::get_secrets(&config)
+                    .await
+                    .with_context(|| "Error getting token")?
+                    .with_context(|| "No Token found, please Login")?;
+                let api = SmithAPI::new(secrets, &config);
+                api.update_release(
+                    release_number
+                        .parse()
+                        .context("Failed to parse release number as i32")?,
+                    UpdateRelease {
+                        draft: None,
+                        yanked: None,
+                        lts: Some(!clear),
+                    },
+                )
+                .await?;
+                if clear {
+                    println!("LTS designation removed.");
+                } else {
+                    println!("Release marked as LTS.");
+                }
             }
             ReleasesCommands::Deploy {
                 release_number,
@@ -191,6 +225,13 @@ async fn handle_releases_get(
             }
             if Some(release.id) == latest_release_id {
                 meta = "Deployed".to_string();
+            }
+            if release.lts {
+                meta = if meta.is_empty() {
+                    "LTS".to_string()
+                } else {
+                    format!("{meta}, LTS")
+                };
             }
             table.add_row(vec![
                 release.id.to_string(),

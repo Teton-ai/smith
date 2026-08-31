@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE device SET follow_latest = $1\n             WHERE NOT archived\n             AND id IN (\n                SELECT dl.device_id\n                FROM device_label dl\n                JOIN label l ON l.id = dl.label_id\n                WHERE l.name || '=' || dl.value = ANY($2)\n                GROUP BY dl.device_id\n                HAVING COUNT(DISTINCT l.name || '=' || dl.value)\n                    = (SELECT COUNT(DISTINCT term) FROM UNNEST($2::text[]) AS term)\n             )",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Bool",
+        "TextArray"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "1d895723f1a1f6ebdee3dc2acbebc5d87f300f56f3c588491452951d75fe01f0"
+}

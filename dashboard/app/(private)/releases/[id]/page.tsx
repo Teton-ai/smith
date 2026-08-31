@@ -28,6 +28,7 @@ import {
 	Plus,
 	Rocket,
 	Search,
+	ShieldCheck,
 	Tag,
 	Trash2,
 	X,
@@ -252,6 +253,9 @@ const ReleaseDetailPage = () => {
 	});
 	const handlePublishRelease = async () => {
 		updateReleaseHook.mutate({ releaseId, data: { draft: false } });
+	};
+	const handleToggleLts = async () => {
+		updateReleaseHook.mutate({ releaseId, data: { lts: !release?.lts } });
 	};
 
 	const addPackageToReleaseHook = useAddPackageToRelease({
@@ -541,6 +545,11 @@ const ReleaseDetailPage = () => {
 										RC
 									</Badge>
 								)}
+								{release.lts && (
+									<Badge variant="purple" pill>
+										LTS
+									</Badge>
+								)}
 								{release.yanked && (
 									<Badge variant="red" pill>
 										Yanked
@@ -600,6 +609,17 @@ const ReleaseDetailPage = () => {
 						) : (
 							!release?.yanked && (
 								<>
+									{!release?.release_candidate && (
+										<Button
+											variant="soft"
+											tone="purple"
+											loading={updateReleaseHook.isPending}
+											icon={<ShieldCheck className="w-4 h-4" />}
+											onClick={handleToggleLts}
+										>
+											{release?.lts ? "Remove LTS" : "Mark as LTS"}
+										</Button>
+									)}
 									<Button
 										variant="solid"
 										tone="red"

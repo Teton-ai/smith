@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE release\n             SET lts = $1,\n                 lts_marked_at = CASE WHEN $1 THEN COALESCE(lts_marked_at, NOW()) ELSE NULL END\n             WHERE id = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Bool",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "d1897f875fd35206139d3768b206bb80a051719d77cc32c82a4d37cca5781f28"
+}

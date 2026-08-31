@@ -2,8 +2,9 @@ use crate::State;
 use crate::device::{
     ApplyIntentResponse, ApproveDeviceBody, ConfiguredNetwork, CreateIntentRequest, DeviceHealth,
     DeviceLedgerItem, DeviceLedgerItemPaginated, DeviceNetworkIntent, DeviceRelease, DeviceUptime,
-    LabelWithValues, NewVariable, Note, PatchIntentRequest, RawDevice, SMITHD_SERVICE_NAME,
-    ServiceOutage, UpdateDeviceRelease, UpdateDevicesRelease, Variable, WifiScanResult,
+    FollowLatestRequest, FollowLatestUpdated, LabelWithValues, NewVariable, Note,
+    PatchIntentRequest, RawDevice, SMITHD_SERVICE_NAME, ServiceOutage, UpdateDeviceRelease,
+    UpdateDevicesRelease, Variable, WifiScanResult,
 };
 use crate::event::PublicEvent;
 use crate::handlers::AuthedDevice;
@@ -162,6 +163,7 @@ pub async fn get_devices(
             d.release_id,
             d.target_release_id,
             d.target_release_id_set_at,
+            d.follow_latest,
             d.system_info,
             d.modem_id,
             d.ip_address_id,
@@ -194,6 +196,8 @@ pub async fn get_devices(
             r.draft as "release_draft?",
             r.yanked as "release_yanked?",
             r.release_candidate as "release_release_candidate?",
+            r.lts as "release_lts?",
+            r.lts_marked_at as "release_lts_marked_at?",
             r.created_at as "release_created_at?",
             r.user_id as "release_user_id?",
             tr.id as "target_release_id_nested?",
@@ -204,6 +208,8 @@ pub async fn get_devices(
             tr.draft as "target_release_draft?",
             tr.yanked as "target_release_yanked?",
             tr.release_candidate as "target_release_release_candidate?",
+            tr.lts as "target_release_lts?",
+            tr.lts_marked_at as "target_release_lts_marked_at?",
             tr.created_at as "target_release_created_at?",
             tr.user_id as "target_release_user_id?",
             dn.network_score as "network_score?",
@@ -263,6 +269,7 @@ pub async fn get_devices(
                      AND rs.watchdog_sec IS NOT NULL
                      AND dss.active_state != 'active'
                )))
+          AND ($19::boolean IS NULL OR d.follow_latest = $19)
         GROUP BY d.id, ip.id, m.id, r.id, rd.id, tr.id, trd.id, dn.device_id
         ORDER BY
             CASE WHEN $15 THEN d.serial_number END ASC NULLS LAST,
@@ -306,6 +313,7 @@ pub async fn get_devices(
         sort_serial_desc,
         sort_labels_asc,
         sort_labels_desc,
+        filter.follow_latest,
     )
     .fetch_all(&state.pg_pool)
     .await
@@ -372,6 +380,8 @@ pub async fn get_devices(
                     draft: row.release_draft.unwrap(),
                     yanked: row.release_yanked.unwrap(),
                     release_candidate: row.release_release_candidate.unwrap(),
+                    lts: row.release_lts.unwrap_or(false),
+                    lts_marked_at: row.release_lts_marked_at,
                     created_at: row.release_created_at.unwrap(),
                     user_id: row.release_user_id,
                     user_email: None,
@@ -392,6 +402,8 @@ pub async fn get_devices(
                     draft: row.target_release_draft.unwrap(),
                     yanked: row.target_release_yanked.unwrap(),
                     release_candidate: row.target_release_release_candidate.unwrap(),
+                    lts: row.target_release_lts.unwrap_or(false),
+                    lts_marked_at: row.target_release_lts_marked_at,
                     created_at: row.target_release_created_at.unwrap(),
                     user_id: row.target_release_user_id,
                     user_email: None,
@@ -424,6 +436,7 @@ pub async fn get_devices(
                 release_id: row.release_id,
                 target_release_id: row.target_release_id,
                 target_release_id_set_at: row.target_release_id_set_at,
+                follow_latest: row.follow_latest,
                 system_info: row.system_info,
                 modem_id: row.modem_id,
                 ip_address_id: row.ip_address_id,
@@ -1619,6 +1632,85 @@ pub async fn update_device_target_release(
 
 #[utoipa::path(
     put,
+    path = "/devices/follow-latest",
+    request_body = FollowLatestRequest,
+    responses(
+        (status = 200, description = "Devices updated", body = FollowLatestUpdated),
+        (status = 400, description = "Specify exactly one of `devices` or `labels`"),
+        (status = 403, description = "Missing devices:write permission"),
+        (status = 500, description = "Failed to update devices"),
+    ),
+    security(
+        ("auth_token" = [])
+    ),
+    tag = DEVICES_TAG
+)]
+pub async fn update_devices_follow_latest(
+    Extension(state): Extension<State>,
+    Extension(current_user): Extension<CurrentUser>,
+    Json(body): Json<FollowLatestRequest>,
+) -> axum::response::Result<Json<FollowLatestUpdated>, StatusCode> {
+    if !authorization::check(current_user, "devices", "write") {
+        return Err(StatusCode::FORBIDDEN);
+    }
+
+    let ids = body.devices.filter(|d| !d.is_empty());
+    let labels = body.labels.filter(|l| !l.is_empty());
+
+    // Exactly one selector: with neither this would silently flip the whole
+    // fleet, and with both it is ambiguous which one the caller meant.
+    let devices_updated = match (ids, labels) {
+        (Some(ids), None) => sqlx::query!(
+            "UPDATE device SET follow_latest = $1 WHERE id = ANY($2)",
+            body.follow_latest,
+            &ids
+        )
+        .execute(&state.pg_pool)
+        .await
+        .map_err(|err| {
+            error!("Failed to update follow_latest for devices: {err}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?
+        .rows_affected(),
+        (None, Some(labels)) => sqlx::query!(
+            // Every listed label must be present, unlike the OR matching used
+            // for canary selection: this flips whether a device receives fleet
+            // rollouts at all, so a selector must narrow, never widen.
+            // Archived devices are excluded, matching the device listing.
+            "UPDATE device SET follow_latest = $1
+             WHERE NOT archived
+             AND id IN (
+                SELECT dl.device_id
+                FROM device_label dl
+                JOIN label l ON l.id = dl.label_id
+                WHERE l.name || '=' || dl.value = ANY($2)
+                GROUP BY dl.device_id
+                HAVING COUNT(DISTINCT l.name || '=' || dl.value)
+                    = (SELECT COUNT(DISTINCT term) FROM UNNEST($2::text[]) AS term)
+             )",
+            body.follow_latest,
+            &labels
+        )
+        .execute(&state.pg_pool)
+        .await
+        .map_err(|err| {
+            error!("Failed to update follow_latest for devices: {err}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?
+        .rows_affected(),
+        _ => {
+            error!("follow-latest requires exactly one of `devices` or `labels`");
+            return Err(StatusCode::BAD_REQUEST);
+        }
+    };
+
+    Ok(Json(FollowLatestUpdated {
+        devices_updated: devices_updated as i64,
+    }))
+}
+
+#[utoipa::path(
+    put,
     path = "/devices/release",
     request_body = UpdateDevicesRelease,
     responses(
@@ -1837,6 +1929,7 @@ pub async fn get_device_info(
         d.release_id,
         d.target_release_id,
         d.target_release_id_set_at,
+        d.follow_latest,
         d.system_info,
         d.modem_id,
         d.ip_address_id,
@@ -1869,6 +1962,8 @@ pub async fn get_device_info(
         r.draft as "release_draft?",
         r.yanked as "release_yanked?",
         r.release_candidate as "release_release_candidate?",
+        r.lts as "release_lts?",
+        r.lts_marked_at as "release_lts_marked_at?",
         r.created_at as "release_created_at?",
         r.user_id as "release_user_id?",
         tr.id as "target_release_id_nested?",
@@ -1879,6 +1974,8 @@ pub async fn get_device_info(
         tr.draft as "target_release_draft?",
         tr.yanked as "target_release_yanked?",
         tr.release_candidate as "target_release_release_candidate?",
+        tr.lts as "target_release_lts?",
+        tr.lts_marked_at as "target_release_lts_marked_at?",
         tr.created_at as "target_release_created_at?",
         tr.user_id as "target_release_user_id?",
         dn.network_score as "network_score?",
@@ -1974,6 +2071,8 @@ pub async fn get_device_info(
             draft: device_row.release_draft.unwrap(),
             yanked: device_row.release_yanked.unwrap(),
             release_candidate: device_row.release_release_candidate.unwrap(),
+            lts: device_row.release_lts.unwrap_or(false),
+            lts_marked_at: device_row.release_lts_marked_at,
             created_at: device_row.release_created_at.unwrap(),
             user_id: device_row.release_user_id,
             user_email: None,
@@ -1992,6 +2091,8 @@ pub async fn get_device_info(
             draft: device_row.target_release_draft.unwrap(),
             yanked: device_row.target_release_yanked.unwrap(),
             release_candidate: device_row.target_release_release_candidate.unwrap(),
+            lts: device_row.target_release_lts.unwrap_or(false),
+            lts_marked_at: device_row.target_release_lts_marked_at,
             created_at: device_row.target_release_created_at.unwrap(),
             user_id: device_row.target_release_user_id,
             user_email: None,
@@ -2024,6 +2125,7 @@ pub async fn get_device_info(
         release_id: device_row.release_id,
         target_release_id: device_row.target_release_id,
         target_release_id_set_at: device_row.target_release_id_set_at,
+        follow_latest: device_row.follow_latest,
         system_info: device_row.system_info,
         modem_id: device_row.modem_id,
         ip_address_id: device_row.ip_address_id,

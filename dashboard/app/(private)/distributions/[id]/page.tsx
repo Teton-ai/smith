@@ -127,6 +127,11 @@ const ReleaseRow = React.memo(function ReleaseRow({
 								RC
 							</Badge>
 						)}
+						{release.lts && (
+							<Badge variant="purple" pill>
+								LTS
+							</Badge>
+						)}
 						{release.yanked && (
 							<Badge variant="red" pill>
 								Yanked
