@@ -165,7 +165,7 @@ fn maybe_show_update_notice() {
     };
     let current = self_update::cargo_crate_version!();
     if latest != current {
-        println!(
+        eprintln!(
             "A new version {} is available! Run 'sm update' to update.",
             latest
         );
