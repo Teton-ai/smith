@@ -402,6 +402,7 @@ async fn start_main_server(
             device::route::revoke_device
         ))
         .routes(routes!(device::route::delete_token))
+        .routes(routes!(device::route::unregister_device))
         .routes(routes!(device::route::update_devices_target_release))
         .routes(routes!(device::route::update_devices_follow_latest))
         .routes(routes!(device::route::get_variables))

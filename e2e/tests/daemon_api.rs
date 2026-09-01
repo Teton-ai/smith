@@ -10,6 +10,7 @@ use smith_e2e::{
     wait_for_response, wait_until,
 };
 use sqlx::Row;
+use std::time::Duration;
 
 /// Stage 3 content-addressed writes (`network_content_lock_key` /
 /// `network_find_by_content`) do not exist in a released API image, so this
@@ -25,6 +26,10 @@ async fn has_stage3_content_addressing(ctx: &Ctx) -> Result<bool> {
     .await
     .context("checking for network_content_lock_key")
 }
+
+/// Re-registration after approval costs one idle tick to notice, one to
+/// register; the same headroom `ROUND_TRIP_TIMEOUT` allows for a slow runner.
+const RE_REGISTER_TIMEOUT: Duration = Duration::from_secs(120);
 
 async fn setup() -> Result<(Ctx, i32)> {
     let ctx = Ctx::connect().await?;
@@ -103,6 +108,124 @@ async fn ping_pong_round_trip() -> Result<()> {
         response == serde_json::json!("Pong"),
         "expected \"Pong\", got {response}"
     );
+    Ok(())
+}
+
+/// Unregistering has to do two things at once: strand the device (so it stops
+/// being managed) *and* leave it able to pair again from scratch. Clearing only
+/// the approval keeps the stale token, which deadlocks registration on 409 the
+/// moment the device is approved again; clearing only the token lets it mint a
+/// new one with nobody approving. This
+/// drives the exact state the `DELETE /devices/{id}/registration` handler
+/// writes and checks the daemon ends up where the operator expects.
+///
+/// The state change is applied over the DB rather than by calling the endpoint:
+/// the e2e stack only ever exercises device JWTs, never staff/Auth0 login (see
+/// `scripts/ensure-e2e-auth0-issuer.sh`), so there is no way to authenticate as
+/// a user here. The handler's own 403/404 paths are covered by hand.
+#[tokio::test]
+#[ignore = "requires running compose stack; use make test.e2e"]
+async fn unregistered_device_waits_for_reapproval_then_recovers() -> Result<()> {
+    let (ctx, device_id) = setup().await?;
+
+    // A command with a response, so the "history survives" claim is tested
+    // against rows this test knows exist rather than whatever was lying around.
+    let command_id = enqueue(&ctx, device_id, r#""Ping""#).await?;
+    wait_for_response(&ctx, command_id).await?;
+
+    let ledger_before: i64 = sqlx::query_scalar("SELECT count(*) FROM ledger WHERE device_id = $1")
+        .bind(device_id)
+        .fetch_one(&ctx.db)
+        .await
+        .context("counting ledger rows before unregister")?;
+
+    // Exactly what the handler writes, minus its ledger entry.
+    sqlx::query(
+        "UPDATE device
+            SET approved = false,
+                token = NULL,
+                release_id = NULL,
+                target_release_id = NULL,
+                target_release_id_set_at = NULL
+          WHERE id = $1",
+    )
+    .bind(device_id)
+    .execute(&ctx.db)
+    .await
+    .context("unregistering device")?;
+
+    // The daemon still holds the old token on disk. It should get a 401, fail
+    // to refresh, drop the token itself and start re-registering — and keep
+    // being turned away, because nobody has approved it. Watch across several
+    // 20s idle ticks so this covers real re-registration attempts, not just the
+    // first moment after the update.
+    for _ in 0..12 {
+        tokio::time::sleep(Duration::from_secs(5)).await;
+        let row = sqlx::query("SELECT approved, token FROM device WHERE id = $1")
+            .bind(device_id)
+            .fetch_one(&ctx.db)
+            .await
+            .context("polling device while unapproved")?;
+        ensure!(
+            !row.get::<bool, _>("approved"),
+            "device re-approved itself while unregistered"
+        );
+        ensure!(
+            row.get::<Option<String>, _>("token").is_none(),
+            "device minted a token without being approved"
+        );
+    }
+
+    // Approve it the way an operator would, and it should come back on its own.
+    sqlx::query("UPDATE device SET approved = true WHERE id = $1")
+        .bind(device_id)
+        .execute(&ctx.db)
+        .await
+        .context("re-approving device")?;
+
+    wait_until(
+        "device to mint a fresh token after re-approval",
+        RE_REGISTER_TIMEOUT,
+        || async {
+            let token: Option<String> =
+                sqlx::query_scalar("SELECT token FROM device WHERE id = $1")
+                    .bind(device_id)
+                    .fetch_one(&ctx.db)
+                    .await
+                    .context("polling for a fresh token")?;
+            Ok(token)
+        },
+    )
+    .await?;
+
+    // A full round trip proves it is genuinely managed again, not merely holding
+    // a row with a token in it.
+    let ping_id = enqueue(&ctx, device_id, r#""Ping""#).await?;
+    let (response, status) = wait_for_response(&ctx, ping_id).await?;
+    ensure!(status == 0, "expected status 0, got {status}: {response}");
+
+    // Nothing was deleted along the way.
+    let ledger_after: i64 = sqlx::query_scalar("SELECT count(*) FROM ledger WHERE device_id = $1")
+        .bind(device_id)
+        .fetch_one(&ctx.db)
+        .await
+        .context("counting ledger rows after recovery")?;
+    ensure!(
+        ledger_after >= ledger_before,
+        "ledger lost rows: {ledger_before} before, {ledger_after} after"
+    );
+
+    let kept_response: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM command_response WHERE command_id = $1")
+            .bind(command_id)
+            .fetch_one(&ctx.db)
+            .await
+            .context("checking the pre-unregister command response survived")?;
+    ensure!(
+        kept_response > 0,
+        "command response from before the unregister was lost"
+    );
+
     Ok(())
 }
 
