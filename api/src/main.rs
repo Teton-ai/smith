@@ -51,6 +51,7 @@ mod metric;
 mod middlewares;
 mod modem;
 pub mod network;
+mod os;
 mod package;
 mod relay;
 mod release;
@@ -231,6 +232,7 @@ async fn start_main_server(
     // Staged device files are removed within the hour; S3 lifecycle rules only
     // go down to a day, so the real cleanup has to run here.
     files::spawn_sweeper(state.pg_pool.clone(), &config.assets_bucket_name);
+    os::spawn_sweeper(state.pg_pool.clone(), &config.packages_bucket_name);
 
     let recorder_handle = metric::setup_metrics_recorder();
 
@@ -333,6 +335,14 @@ async fn start_main_server(
         ))
         .routes(routes!(release::route::delete_release_service))
         .routes(routes!(release::route::promote_release))
+        .routes(routes!(
+            os::route::get_os,
+            os::route::create_os_upload,
+            os::route::delete_os
+        ))
+        .routes(routes!(os::route::report_os_part))
+        .routes(routes!(os::route::complete_os_upload))
+        .routes(routes!(os::route::download_os))
         .routes(routes!(
             device::route::get_network_for_device,
             device::route::update_device_network

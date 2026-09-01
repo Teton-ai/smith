@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM os_part WHERE os_id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "dd2ad35b1cdafb678cc8daa8370b6f387ffcbf69e471255e3ddd87c31be5fd85"
+}

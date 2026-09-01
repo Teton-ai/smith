@@ -1,4 +1,4 @@
-use crate::{api::SmithAPI, auth, print::TablePrint};
+use crate::{api::SmithAPI, auth, commands::os::OsCommands, print::TablePrint};
 use anyhow::Context as _;
 use chrono_humanize::HumanTime;
 use clap::{Args, Subcommand};
@@ -33,6 +33,11 @@ pub enum ReleasesCommands {
         /// Remove the LTS designation instead of applying it
         #[arg(long)]
         clear: bool,
+    },
+    /// Manage the base OS image attached to a release
+    Os {
+        #[clap(subcommand)]
+        command: OsCommands,
     },
     /// Deploy a release
     Deploy {
@@ -95,6 +100,7 @@ impl ReleasesCommands {
                     println!("Release marked as LTS.");
                 }
             }
+            ReleasesCommands::Os { command } => command.handle(config).await?,
             ReleasesCommands::Deploy {
                 release_number,
                 canary_device_labels,
