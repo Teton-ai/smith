@@ -43,6 +43,7 @@ import {
 	useApproveDevice,
 	useDeleteDevice,
 	useGetDistributionRollouts,
+	useGetRecipes,
 	useGetReleases,
 	useIssueCommandsToDevices,
 	useUpdateDevicesTargetRelease,
@@ -275,6 +276,21 @@ const DevicesPage = () => {
 		setError: setBulkCommandError,
 		reset: resetBulkCommand,
 	} = useCommandForm("Ping");
+	const [bulkCommandMode, setBulkCommandMode] = useState<"custom" | "recipe">(
+		"custom",
+	);
+	const [selectedRecipeId, setSelectedRecipeId] = useState<number | null>(null);
+	const resetBulkCommandForm = () => {
+		resetBulkCommand();
+		setBulkCommandMode("custom");
+		setSelectedRecipeId(null);
+	};
+	const {
+		data: recipes = [],
+		isLoading: isLoadingRecipes,
+		isError: isRecipesError,
+	} = useGetRecipes();
+	const selectedRecipe = recipes.find((r) => r.id === selectedRecipeId) ?? null;
 
 	// Approval state
 	const [approveModalDevice, setApproveModalDevice] = useState<Device | null>(
@@ -580,7 +596,7 @@ const DevicesPage = () => {
 				onSuccess: () => {
 					setShowBulkCommandModal(false);
 					setSelectedDeviceIds(new Set());
-					resetBulkCommand();
+					resetBulkCommandForm();
 					navigate("/commands");
 				},
 				onError: (error) => {
@@ -592,10 +608,30 @@ const DevicesPage = () => {
 			},
 		});
 
+	// Recipe mode has no single command variant, so errors use the generic
+	// getCommandErrorMessage branch rather than a per-variant one (e.g. FreeForm's).
+	const isBulkCommandValid =
+		bulkCommandMode === "recipe"
+			? selectedRecipe != null && !isLoadingRecipes && !isRecipesError
+			: commandIsValid(bulkCommand);
+
 	const handleBulkCommand = () => {
-		if (!commandIsValid(bulkCommand) || isIssuingCommands) return;
+		if (!isBulkCommandValid || isIssuingCommands) return;
 
 		setBulkCommandError(null);
+
+		if (bulkCommandMode === "recipe") {
+			if (!selectedRecipe) return;
+			submittedBulkVariantRef.current = "Recipe";
+			issueCommands({
+				data: {
+					devices: Array.from(selectedDeviceIds),
+					commands: selectedRecipe.commands,
+				},
+			});
+			return;
+		}
+
 		submittedBulkVariantRef.current = bulkCommand.variant;
 		issueCommands({
 			data: {
@@ -1892,7 +1928,7 @@ const DevicesPage = () => {
 					// Escape/backdrop/X bypass the Cancel button's isIssuingCommands
 					// guard: don't reset while a dispatch is in flight, or the
 					// eventual onError lands its banner on an already-reset form.
-					if (!isIssuingCommands) resetBulkCommand();
+					if (!isIssuingCommands) resetBulkCommandForm();
 				}}
 				title="Run Command on Selected Devices"
 				footer={
@@ -1903,7 +1939,7 @@ const DevicesPage = () => {
 							disabled={isIssuingCommands}
 							onClick={() => {
 								setShowBulkCommandModal(false);
-								resetBulkCommand();
+								resetBulkCommandForm();
 							}}
 						>
 							Cancel
@@ -1912,7 +1948,7 @@ const DevicesPage = () => {
 							variant="solid"
 							tone="purple"
 							loading={isIssuingCommands}
-							disabled={!commandIsValid(bulkCommand)}
+							disabled={!isBulkCommandValid}
 							onClick={handleBulkCommand}
 						>
 							{isIssuingCommands ? "Sending..." : "Run Command"}
@@ -1943,21 +1979,75 @@ const DevicesPage = () => {
 					</div>
 				)}
 
-				{/* Command */}
-				<div>
-					<label className="block text-sm font-medium text-gray-700 mb-2">
-						Command
-					</label>
-					<CommandFields
-						command={bulkCommand}
-						options={BULK_COMMAND_OPTIONS}
-						onChange={setBulkCommand}
-						onSubmit={handleBulkCommand}
-					/>
-					<p className="mt-1 text-xs text-gray-500">
-						Runs on all selected devices
-					</p>
+				{/* Mode toggle */}
+				<div className="flex items-center gap-1 mb-4 bg-gray-100 rounded-lg p-1 w-fit">
+					{(["custom", "recipe"] as const).map((mode) => (
+						<button
+							key={mode}
+							type="button"
+							onClick={() => setBulkCommandMode(mode)}
+							className={`px-3 py-1.5 text-sm font-medium rounded-md cursor-pointer transition-colors ${
+								bulkCommandMode === mode
+									? "bg-white text-gray-900 shadow-sm"
+									: "text-gray-500 hover:text-gray-700"
+							}`}
+						>
+							{mode === "custom" ? "Custom command" : "Recipe"}
+						</button>
+					))}
 				</div>
+
+				{bulkCommandMode === "custom" ? (
+					<div>
+						<label className="block text-sm font-medium text-gray-700 mb-2">
+							Command
+						</label>
+						<CommandFields
+							command={bulkCommand}
+							options={BULK_COMMAND_OPTIONS}
+							onChange={setBulkCommand}
+							onSubmit={handleBulkCommand}
+						/>
+						<p className="mt-1 text-xs text-gray-500">
+							Runs on all selected devices
+						</p>
+					</div>
+				) : (
+					<div>
+						<label
+							htmlFor="bulk-command-recipe"
+							className="block text-sm font-medium text-gray-700 mb-2"
+						>
+							Recipe
+						</label>
+						{isLoadingRecipes ? (
+							<p className="text-sm text-gray-500">Loading recipes…</p>
+						) : isRecipesError ? (
+							<p className="text-sm text-red-600">Failed to load recipes</p>
+						) : recipes.length === 0 ? (
+							<p className="text-sm text-gray-500">No recipes saved yet</p>
+						) : (
+							<Select
+								id="bulk-command-recipe"
+								value={selectedRecipeId != null ? String(selectedRecipeId) : ""}
+								onChange={(value) =>
+									setSelectedRecipeId(value ? Number(value) : null)
+								}
+								className="w-full"
+							>
+								<option value="">Select a recipe…</option>
+								{recipes.map((recipe) => (
+									<option key={recipe.id} value={recipe.id}>
+										{recipe.name}
+									</option>
+								))}
+							</Select>
+						)}
+						<p className="mt-1 text-xs text-gray-500">
+							Runs the recipe's commands on all selected devices
+						</p>
+					</div>
+				)}
 			</Modal>
 
 			{/* Approve & Assign Distribution Modal */}
