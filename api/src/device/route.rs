@@ -605,18 +605,26 @@ pub async fn get_uptime_for_device(
     // it just gets served at the longest span we're willing to scan.
     let from = from.max(to - Duration::days(UPTIME_MAX_WINDOW_DAYS));
 
-    let device = sqlx::query_scalar!(
+    let device = sqlx::query!(
         r#"
-        SELECT id FROM device
+        SELECT d.id,
+               CASE WHEN d.last_ping IS NULL OR d.last_ping < m.installed_on THEN NULL
+                    ELSE GREATEST(d.created_on, m.installed_on)
+               END AS observed_from
+        FROM device d
+        CROSS JOIN (
+            SELECT installed_on FROM _sqlx_migrations WHERE version = $2
+        ) m
         WHERE
             CASE
                 WHEN $1 ~ '^[0-9]+$' AND length($1) <= 10 THEN
-                    id = $1::int4
+                    d.id = $1::int4
                 ELSE
-                    serial_number = $1
+                    d.serial_number = $1
             END
         "#,
-        device_id
+        device_id,
+        crate::device::DOWNTIME_EPOCH_MIGRATION_VERSION,
     )
     .fetch_optional(&state.pg_pool)
     .await
@@ -643,7 +651,7 @@ pub async fn get_uptime_for_device(
         ) t
         ORDER BY 1
         "#,
-        device,
+        device.id,
         SMITHD_SERVICE_NAME,
     )
     .fetch_all(&state.pg_pool)
@@ -665,7 +673,7 @@ pub async fn get_uptime_for_device(
           AND COALESCE(ended_at, NOW()) > $2
         ORDER BY service_name, started_at
         "#,
-        device,
+        device.id,
         from,
         to,
     )
@@ -681,6 +689,7 @@ pub async fn get_uptime_for_device(
         to,
         services,
         outages,
+        observed_from: device.observed_from,
     }))
 }
 

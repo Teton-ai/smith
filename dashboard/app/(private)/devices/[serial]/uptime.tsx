@@ -23,6 +23,10 @@ interface DeviceUptime {
 	to: string;
 	services: string[];
 	outages: ServiceOutage[];
+	/** Start of reachability history: the later of registration and the moment
+	 * the API started recording outages. Null when the device has never checked
+	 * in — nothing in the window is known. */
+	observed_from: string | null;
 }
 
 /**
@@ -81,11 +85,21 @@ export const formatDuration = (ms: number) => {
  * Turns the raw outage rows into drawable spans plus the headline numbers.
  * Everything is clipped to `[from, to]` first, so an outage that predates the
  * window can't drag the percentage below what the bars actually show.
+ *
+ * Time before `observed_from` isn't "up" — it's time we weren't watching, so
+ * it's excluded from both the downtime total and the ratio's denominator.
+ * `ratio` is null when nothing in the window was observed at all (a device
+ * that has never checked in), which callers must treat as "no data", not 100%.
  */
 const summarize = (data: DeviceUptime, service: string) => {
 	const from = new Date(data.from);
 	const to = new Date(data.to);
-	const windowMs = to.getTime() - from.getTime();
+	const coverageFrom = data.observed_from
+		? new Date(Math.max(new Date(data.observed_from).getTime(), from.getTime()))
+		: null;
+	const observedMs = coverageFrom
+		? Math.max(0, to.getTime() - coverageFrom.getTime())
+		: 0;
 
 	let downMs = 0;
 	let since: Date | null = null;
@@ -97,11 +111,13 @@ const summarize = (data: DeviceUptime, service: string) => {
 			// `ended_at` null rather than pinning it to a server clock.
 			const start = new Date(o.started_at);
 			const end = o.ended_at ? new Date(o.ended_at) : to;
-			downMs += Math.max(
-				0,
-				Math.min(end.getTime(), to.getTime()) -
-					Math.max(start.getTime(), from.getTime()),
-			);
+			if (coverageFrom) {
+				downMs += Math.max(
+					0,
+					Math.min(end.getTime(), to.getTime()) -
+						Math.max(start.getTime(), coverageFrom.getTime()),
+				);
+			}
 			if (!o.ended_at) since = start;
 			return { start, end, tone: "down" };
 		});
@@ -109,9 +125,11 @@ const summarize = (data: DeviceUptime, service: string) => {
 	return {
 		from,
 		to,
+		coverageFrom,
 		spans,
 		downMs,
-		ratio: windowMs > 0 ? 1 - downMs / windowMs : 1,
+		observedMs,
+		ratio: observedMs > 0 ? 1 - downMs / observedMs : null,
 		count: spans.length,
 		since: since as Date | null,
 	};
@@ -134,7 +152,9 @@ export const useReachabilityProblem = (serial: string) => {
 	const problem = useMemo(() => {
 		if (!data) return null;
 		const summary = summarize(data, SMITHD_SERVICE_NAME);
-		return summary.ratio < DEGRADED_RATIO ? summary : null;
+		return summary.ratio !== null && summary.ratio < DEGRADED_RATIO
+			? summary
+			: null;
 	}, [data]);
 
 	// Callers need the pending state: "all clear" is a claim, and it shouldn't be
@@ -203,18 +223,31 @@ const clock = (d: Date, hours: number) =>
 		: d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 
 /** Two-line hover card: which slice of time, and what happened in it. */
-const bucketTooltip = (hours: number) => (bucket: UptimeBucket) => (
-	<>
-		<div className="font-medium tabular-nums">
-			{clock(bucket.start, hours)} – {clock(bucket.end, hours)}
-		</div>
-		<div className={bucket.downMs > 0 ? "text-red-300" : "text-emerald-300"}>
-			{bucket.downMs > 0
-				? `Unreachable ${formatDuration(bucket.downMs)} of this slice`
-				: "Reachable throughout"}
-		</div>
-	</>
-);
+const bucketTooltip = (hours: number) => (bucket: UptimeBucket) => {
+	const fullyUnobserved =
+		bucket.unknownMs >= bucket.end.getTime() - bucket.start.getTime();
+
+	return (
+		<>
+			<div className="font-medium tabular-nums">
+				{clock(bucket.start, hours)} – {clock(bucket.end, hours)}
+			</div>
+			{fullyUnobserved ? (
+				<div className="text-gray-400">
+					Not monitored — before this device was registered
+				</div>
+			) : (
+				<div
+					className={bucket.downMs > 0 ? "text-red-300" : "text-emerald-300"}
+				>
+					{bucket.downMs > 0
+						? `Unreachable ${formatDuration(bucket.downMs)} of this slice`
+						: "Reachable throughout"}
+				</div>
+			)}
+		</>
+	);
+};
 
 /** The worst single stretch of silence, clipped to the window. */
 const longestGap = (summary: ReachabilitySummary) =>
@@ -248,7 +281,9 @@ export const ReachabilityAlert = ({
 		>
 			<div className="flex flex-wrap items-center gap-x-1.5 gap-y-1">
 				<span className="tabular-nums">
-					{(summary.ratio * 100).toFixed(1)}% reachable
+					{/* ratio is never null when ReachabilityAlert is reached via
+					    useReachabilityProblem */}
+					{((summary.ratio ?? 1) * 100).toFixed(1)}% reachable
 				</span>
 				{worst && (
 					<span className="text-gray-500">
@@ -263,6 +298,7 @@ export const ReachabilityAlert = ({
 					from={summary.from}
 					to={summary.to}
 					spans={summary.spans}
+					coverageFrom={summary.coverageFrom ?? summary.to}
 					height="1.5rem"
 					renderTooltip={bucketTooltip(ALERT_HOURS)}
 				/>
@@ -324,12 +360,15 @@ export const ReachabilityCell = ({
 						from={summary.from}
 						to={summary.to}
 						spans={summary.spans}
+						coverageFrom={summary.coverageFrom ?? summary.to}
 						buckets={listBuckets}
 						height="1rem"
 						renderTooltip={bucketTooltip(hours)}
 					/>
 					<div className="mt-1 text-[10px] tabular-nums text-gray-400">
-						{(summary.ratio * 100).toFixed(1)}%
+						{summary.ratio !== null
+							? `${(summary.ratio * 100).toFixed(1)}%`
+							: "—"}
 					</div>
 				</>
 			) : isError ? (
@@ -361,8 +400,10 @@ export const DeviceReachability = ({ serial }: { serial: string }) => {
 	// Only used to colour the panel: an open outage means the device is silent
 	// right now, which the whole card should signal at a glance.
 	const down = Boolean(summary?.since);
-	const stats =
-		summary && summary.count > 0
+	const noHistory = summary?.ratio === null;
+	const stats = noHistory
+		? "no reachability history yet"
+		: summary && summary.count > 0
 			? `${summary.count} interruption${summary.count === 1 ? "" : "s"} · ${formatDuration(summary.downMs)} total`
 			: "no interruptions";
 
@@ -384,11 +425,17 @@ export const DeviceReachability = ({ serial }: { serial: string }) => {
 				<div className="flex items-end gap-4">
 					<div className="shrink-0">
 						<div className="font-mono text-2xl font-semibold leading-none tabular-nums text-gray-900">
-							{(summary.ratio * 100).toFixed(2)}
-							<span className="text-base text-gray-400">%</span>
+							{summary.ratio === null ? (
+								"—"
+							) : (
+								<>
+									{(summary.ratio * 100).toFixed(2)}
+									<span className="text-base text-gray-400">%</span>
+								</>
+							)}
 						</div>
 						<div className="mt-1.5 text-[11px] uppercase tracking-wide text-gray-400">
-							reachable · last {range}
+							{noHistory ? "not monitored yet" : `reachable · last ${range}`}
 						</div>
 					</div>
 
@@ -397,6 +444,7 @@ export const DeviceReachability = ({ serial }: { serial: string }) => {
 							from={summary.from}
 							to={summary.to}
 							spans={summary.spans}
+							coverageFrom={summary.coverageFrom ?? summary.to}
 							renderTooltip={bucketTooltip(hours)}
 						/>
 						<div className="mt-1.5 flex items-center justify-between gap-3 text-[11px] tabular-nums text-gray-400">
