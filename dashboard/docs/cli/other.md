@@ -3,6 +3,27 @@ title: Other commands
 description: Additional utility commands for managing the Smith CLI and your devices.
 ---
 
+## unregister
+
+Reset a device's enrollment so it must register and be approved again.
+
+### Usage
+
+```sh
+sm unregister [DEVICE_SELECTOR] [OPTIONS]
+```
+
+### Options
+
+- `-y`, `--yes`: Skip the confirmation prompt
+
+### Examples
+
+```sh
+sm unregister ABC123
+sm unregister ABC123 DEF456 -y
+```
+
 ## test-network
 
 Test network speed for devices (downloads a 20MB test file).

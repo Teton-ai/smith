@@ -8072,6 +8072,91 @@ export const useUpdateNoteForDevice = <
 	);
 };
 
+/**
+ * @summary Resets a device's enrollment so it must be approved again before it can register.
+ */
+export const useUnregisterDeviceHook = () => {
+	const unregisterDevice = useClientMutator<void>();
+
+	return useCallback(
+		(deviceId: string, signal?: AbortSignal) => {
+			return unregisterDevice({
+				url: `/devices/${deviceId}/registration`,
+				method: "DELETE",
+				signal,
+			});
+		},
+		[unregisterDevice],
+	);
+};
+
+export const useUnregisterDeviceMutationOptions = <
+	TError = void,
+	TContext = unknown,
+>(options?: {
+	mutation?: UseMutationOptions<
+		Awaited<ReturnType<ReturnType<typeof useUnregisterDeviceHook>>>,
+		TError,
+		{ deviceId: string },
+		TContext
+	>;
+}): UseMutationOptions<
+	Awaited<ReturnType<ReturnType<typeof useUnregisterDeviceHook>>>,
+	TError,
+	{ deviceId: string },
+	TContext
+> => {
+	const mutationKey = ["unregisterDevice"];
+	const { mutation: mutationOptions } = options
+		? options.mutation &&
+			"mutationKey" in options.mutation &&
+			options.mutation.mutationKey
+			? options
+			: { ...options, mutation: { ...options.mutation, mutationKey } }
+		: { mutation: { mutationKey } };
+
+	const unregisterDevice = useUnregisterDeviceHook();
+
+	const mutationFn: MutationFunction<
+		Awaited<ReturnType<ReturnType<typeof useUnregisterDeviceHook>>>,
+		{ deviceId: string }
+	> = (props) => {
+		const { deviceId } = props ?? {};
+
+		return unregisterDevice(deviceId);
+	};
+
+	return { mutationFn, ...mutationOptions };
+};
+
+export type UnregisterDeviceMutationResult = NonNullable<
+	Awaited<ReturnType<ReturnType<typeof useUnregisterDeviceHook>>>
+>;
+
+export type UnregisterDeviceMutationError = void;
+
+/**
+ * @summary Resets a device's enrollment so it must be approved again before it can register.
+ */
+export const useUnregisterDevice = <TError = void, TContext = unknown>(
+	options?: {
+		mutation?: UseMutationOptions<
+			Awaited<ReturnType<ReturnType<typeof useUnregisterDeviceHook>>>,
+			TError,
+			{ deviceId: string },
+			TContext
+		>;
+	},
+	queryClient?: QueryClient,
+): UseMutationResult<
+	Awaited<ReturnType<ReturnType<typeof useUnregisterDeviceHook>>>,
+	TError,
+	{ deviceId: string },
+	TContext
+> => {
+	return useMutation(useUnregisterDeviceMutationOptions(options), queryClient);
+};
+
 export const useGetDeviceReleaseHook = () => {
 	const getDeviceRelease = useClientMutator<DeviceRelease>();
 
