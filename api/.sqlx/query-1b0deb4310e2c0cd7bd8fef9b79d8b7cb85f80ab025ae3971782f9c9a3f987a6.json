@@ -1,0 +1,34 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE os SET status = 'failed'\n        WHERE id IN (\n            SELECT id FROM os\n            WHERE status IN ('pending', 'failed')\n              AND upload_id IS NOT NULL\n              AND created_at < now() - make_interval(secs => $1::double precision)\n            FOR UPDATE SKIP LOCKED\n        )\n        RETURNING id, object_key, upload_id AS \"upload_id!\"\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "object_key",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "upload_id!",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Float8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "1b0deb4310e2c0cd7bd8fef9b79d8b7cb85f80ab025ae3971782f9c9a3f987a6"
+}

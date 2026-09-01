@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO os_part (os_id, part_number, etag, size_bytes)\n         VALUES ($1, $2, $3, $4)\n         ON CONFLICT (os_id, part_number)\n         DO UPDATE SET etag = EXCLUDED.etag,\n                       size_bytes = EXCLUDED.size_bytes,\n                       uploaded_at = now()",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Int4",
+        "Text",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "ca704c2290efc804796878a2c5dd7ecbea1298d6cb46133b0d88109db013bec7"
+}

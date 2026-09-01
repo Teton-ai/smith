@@ -5,6 +5,7 @@ use models::{
     deployment::{Deployment, DeploymentRequest},
     device::{CommandsPaginated, Device, DeviceCommandResponse, DeviceFilter},
     distribution::{Distribution, NewDistributionRelease},
+    os::{NewOsUpload, Os, OsPartReport, OsUploadPlan},
     release::{Release, UpdateRelease},
 };
 use reqwest::{Client, Response};
@@ -707,6 +708,98 @@ impl SmithAPI {
             .send()
             .await?
             .error_for_status()?;
+
+        Ok(())
+    }
+
+    /// Opens (or re-opens) a base OS push and returns the parts still to send.
+    /// Re-running it with the same image resumes rather than restarting, so the
+    /// CLI can call this unconditionally.
+    pub async fn create_os_upload(
+        &self,
+        release_id: i32,
+        request: NewOsUpload,
+    ) -> Result<OsUploadPlan> {
+        let client = Client::new();
+
+        let resp = client
+            .post(format!("{}/releases/{}/os", self.domain, release_id))
+            .header("Authorization", format!("Bearer {}", &self.bearer_token))
+            .json(&request)
+            .send()
+            .await?
+            .handle_error()
+            .await?;
+
+        Ok(resp.json().await?)
+    }
+
+    /// Records a part's ETag. S3 only reports it on the response to the part
+    /// upload and it cannot be recovered afterwards, so this runs per part.
+    pub async fn report_os_part(
+        &self,
+        release_id: i32,
+        part_number: i32,
+        report: OsPartReport,
+    ) -> Result<()> {
+        let client = Client::new();
+
+        client
+            .put(format!(
+                "{}/releases/{}/os/parts/{}",
+                self.domain, release_id, part_number
+            ))
+            .header("Authorization", format!("Bearer {}", &self.bearer_token))
+            .json(&report)
+            .send()
+            .await?
+            .handle_error()
+            .await?;
+
+        Ok(())
+    }
+
+    pub async fn complete_os_upload(&self, release_id: i32) -> Result<Os> {
+        let client = Client::new();
+
+        let resp = client
+            .post(format!(
+                "{}/releases/{}/os/complete",
+                self.domain, release_id
+            ))
+            .header("Authorization", format!("Bearer {}", &self.bearer_token))
+            .send()
+            .await?
+            .handle_error()
+            .await?;
+
+        Ok(resp.json().await?)
+    }
+
+    pub async fn get_os(&self, release_id: i32) -> Result<Os> {
+        let client = Client::new();
+
+        let resp = client
+            .get(format!("{}/releases/{}/os", self.domain, release_id))
+            .header("Authorization", format!("Bearer {}", &self.bearer_token))
+            .send()
+            .await?
+            .handle_error()
+            .await?;
+
+        Ok(resp.json().await?)
+    }
+
+    pub async fn delete_os(&self, release_id: i32) -> Result<()> {
+        let client = Client::new();
+
+        client
+            .delete(format!("{}/releases/{}/os", self.domain, release_id))
+            .header("Authorization", format!("Bearer {}", &self.bearer_token))
+            .send()
+            .await?
+            .handle_error()
+            .await?;
 
         Ok(())
     }

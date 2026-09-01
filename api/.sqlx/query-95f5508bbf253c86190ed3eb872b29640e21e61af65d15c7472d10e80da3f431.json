@@ -1,0 +1,34 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT part_number, etag, size_bytes FROM os_part WHERE os_id = $1 ORDER BY part_number",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "part_number",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "etag",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "size_bytes",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "95f5508bbf253c86190ed3eb872b29640e21e61af65d15c7472d10e80da3f431"
+}

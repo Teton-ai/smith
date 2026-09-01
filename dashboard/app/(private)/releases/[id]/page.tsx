@@ -22,7 +22,9 @@ import {
 	Clock,
 	Cog,
 	Cpu,
+	Download,
 	Eye,
+	HardDrive,
 	Loader2,
 	Package as PackageIcon,
 	Plus,
@@ -39,14 +41,18 @@ import { useNavigate, useParams } from "react-router";
 import {
 	type DeploymentRequest,
 	type Device,
+	getGetOsQueryKey,
 	type Package,
 	useAddPackageToRelease,
 	useApiGetReleaseDeployment,
 	useApiReleaseDeployment,
+	useDeleteOs,
 	useDeletePackageForRelease,
+	useDownloadOsHook,
 	useGetDevices,
 	useGetDistributionById,
 	useGetDistributionReleasePackages,
+	useGetOs,
 	useGetPackages,
 	useGetRelease,
 	useGetReleaseServices,
@@ -55,6 +61,7 @@ import {
 import LabelAutocomplete from "@/app/components/LabelAutocomplete";
 import { Modal } from "@/app/components/modal";
 import { RelativeTime } from "@/app/components/RelativeTime";
+import { humanBytes } from "@/app/utils/format";
 
 const getArchVariant = (architecture: string): BadgeVariant => {
 	switch (architecture.toLowerCase()) {
@@ -287,6 +294,53 @@ const ReleaseDetailPage = () => {
 	const handleDeletePackage = async (packageId: number) => {
 		if (!confirm("Are you sure you want to delete this package?")) return;
 		deletePackageForReleaseHook.mutate({ releaseId, packageId });
+	};
+
+	const osQueryKey = getGetOsQueryKey(releaseId);
+	// A release without an image 404s, which is the ordinary case rather than a
+	// failure, so it is not retried and an error is read as "no image".
+	const { data: os, isLoading: osLoading } = useGetOs(releaseId, {
+		query: { enabled: !!releaseId, retry: false },
+	});
+	const downloadOs = useDownloadOsHook();
+	const [downloadingOs, setDownloadingOs] = useState(false);
+	const deleteOsHook = useDeleteOs({
+		mutation: {
+			onSuccess: () => {
+				queryClient.invalidateQueries({ queryKey: osQueryKey });
+			},
+		},
+	});
+
+	const handleDownloadOs = async () => {
+		setDownloadingOs(true);
+		try {
+			const ready = await downloadOs(releaseId);
+			// The link points straight at the CDN, so the browser's own download
+			// manager owns a multi-gigabyte transfer — nothing buffers in the tab.
+			const anchor = document.createElement("a");
+			anchor.href = ready.url;
+			anchor.download = ready.file_name;
+			document.body.appendChild(anchor);
+			anchor.click();
+			anchor.remove();
+			setToast({
+				message: `Downloading ${ready.file_name} (${humanBytes(ready.size_bytes)})`,
+				type: "success",
+			});
+		} catch (error: any) {
+			setToast({
+				message: `Failed to get download link: ${error?.message || "Unknown error"}`,
+				type: "error",
+			});
+		} finally {
+			setDownloadingOs(false);
+		}
+	};
+
+	const handleDeleteOs = () => {
+		if (!confirm("Are you sure you want to delete this OS image?")) return;
+		deleteOsHook.mutate({ releaseId });
 	};
 
 	const openAddModal = () => {
@@ -1424,6 +1478,95 @@ const ReleaseDetailPage = () => {
 					</div>
 				</div>
 			</Modal>
+
+			{/* Base OS — only rendered when the release carries an image, so a
+			    packages-only release reads exactly as it did before. */}
+			{!osLoading && os && (
+				<SectionCard
+					icon={HardDrive}
+					title="Base OS"
+					theme={SECTION_THEMES.green}
+					actions={
+						<div className="flex items-center space-x-1">
+							<Button
+								variant="solid"
+								tone="green"
+								size="sm"
+								icon={
+									downloadingOs ? (
+										<Loader2 className="w-4 h-4 animate-spin" />
+									) : (
+										<Download className="w-4 h-4" />
+									)
+								}
+								onClick={handleDownloadOs}
+								disabled={os.status !== "ready" || downloadingOs}
+								title={
+									os.status === "ready"
+										? "Download the image"
+										: "The image upload has not completed"
+								}
+							>
+								Download
+							</Button>
+							{release?.draft && (
+								<Button
+									variant="ghost"
+									tone="red"
+									icon={<Trash2 className="w-4 h-4" />}
+									onClick={handleDeleteOs}
+									title="Remove OS image"
+								/>
+							)}
+						</div>
+					}
+				>
+					<ListRow>
+						<div className="flex items-center space-x-3 min-w-0">
+							<div className="p-2 bg-green-100 text-green-600 rounded flex-shrink-0">
+								<HardDrive className="w-4 h-4" />
+							</div>
+							<div className="min-w-0">
+								<div className="flex items-center space-x-2">
+									<span className="font-medium text-gray-900 truncate">
+										{os.file_name}
+									</span>
+									{os.status === "ready" ? (
+										<Badge variant="green" pill>
+											Ready
+										</Badge>
+									) : os.status === "pending" ? (
+										<Badge variant="yellow" pill>
+											Uploading
+										</Badge>
+									) : (
+										<Badge variant="red" pill>
+											Failed
+										</Badge>
+									)}
+								</div>
+								<div className="flex items-center space-x-2 text-xs text-gray-500 mt-1">
+									<span>{humanBytes(os.size_bytes)}</span>
+									{os.uploaded_at && (
+										<>
+											<span>·</span>
+											<RelativeTime date={os.uploaded_at} />
+										</>
+									)}
+								</div>
+								{/* The sha256 is what the device verifies before it writes the
+								    image to disk, so it is shown in full rather than elided. */}
+								<p
+									className="text-xs text-gray-400 font-mono mt-1 break-all"
+									title="sha256"
+								>
+									{os.checksum}
+								</p>
+							</div>
+						</div>
+					</ListRow>
+				</SectionCard>
+			)}
 
 			{/* Packages and Services Grid */}
 			<div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">

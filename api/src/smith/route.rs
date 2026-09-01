@@ -210,6 +210,7 @@ pub async fn download_file(
             &state.config.cloudfront.package_domain_name,
             &state.config.cloudfront.package_key_pair_id,
             &state.config.cloudfront.package_private_key,
+            storage::PACKAGE_SIGNED_URL_TTL_SECONDS,
         )
         .await
         .map_err(|err| {

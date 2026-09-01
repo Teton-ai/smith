@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT part_number FROM os_part WHERE os_id = $1 ORDER BY part_number",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "part_number",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "160e84627854e625dda4bdeb283a8d5bfebbeb39a10991965fbad9409730754d"
+}

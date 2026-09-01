@@ -1,0 +1,88 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE os SET status = 'ready', uploaded_at = now(), upload_id = NULL\n         WHERE id = $1\n         RETURNING id, release_id, file_name, object_key, checksum, size_bytes, status,\n                   upload_id, part_size, uploaded_at, user_id, created_at",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "release_id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 2,
+        "name": "file_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "object_key",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "checksum",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "size_bytes",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 6,
+        "name": "status",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "upload_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "part_size",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 9,
+        "name": "uploaded_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 10,
+        "name": "user_id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 11,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      true,
+      true,
+      false
+    ]
+  },
+  "hash": "942e986afb8014c75d4e47de28a656c55a921f7ac3642ce2ed67f3cf74ec135b"
+}
