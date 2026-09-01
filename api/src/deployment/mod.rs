@@ -164,6 +164,7 @@ pub async fn new_deployment(
                 LEFT JOIN device_network dn ON d.id = dn.device_id
                 WHERE d.last_ping > NOW() - INTERVAL '3 minutes'
                 AND d.release_id = d.target_release_id
+                AND d.follow_latest
                 AND r.distribution_id = $1
                 ORDER BY
                     -- Deprioritize devices with unhealthy watchdog services
@@ -365,28 +366,22 @@ pub async fn confirm_full_rollout(
         .fetch_one(&mut *tx)
         .await?;
 
-    let device_count = sqlx::query_scalar!(
-        "SELECT COUNT(*)
-             FROM device
-             WHERE device.release_id IN (
-                SELECT id FROM release WHERE distribution_id = $1
-             )",
-        release.distribution_id
-    )
-    .fetch_one(&mut *tx)
-    .await?;
-
-    sqlx::query!(
+    // Devices that do not follow latest stay where they are: a fleet-wide
+    // rollout must never move a pinned device. The count reported below comes
+    // from this statement so it can't drift from what was actually retargeted.
+    let device_count = sqlx::query!(
         "UPDATE device
              SET target_release_id = $1, target_release_id_set_at = NOW()
              WHERE device.release_id IN (
                 SELECT id FROM release WHERE distribution_id = $2
-             )",
+             )
+             AND device.follow_latest",
         release_id,
         release.distribution_id
     )
     .execute(&mut *tx)
-    .await?;
+    .await?
+    .rows_affected();
 
     sqlx::query!(
         "UPDATE distribution SET latest_release_id = $1 WHERE id = $2",
@@ -422,7 +417,7 @@ pub async fn confirm_full_rollout(
                                 ":white_check_mark: *Full Rollout Confirmed*\n\n*Distribution:* {}\n*Version:* {}\n*Devices updated:* {}\n*Confirmed by:* {}",
                                 info.distribution_name,
                                 info.version,
-                                device_count.unwrap_or(0),
+                                device_count,
                                 confirmed_by
                             )
                         }

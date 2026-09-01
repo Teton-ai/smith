@@ -1,6 +1,6 @@
 use crate::State;
 use crate::package::extract_services_from_deb;
-use crate::release::get_latest_distribution_release;
+use crate::release::{get_current_lts_release, get_latest_distribution_release};
 use crate::storage::Storage;
 use crate::user::CurrentUser;
 use axum::extract::{Path, Query};
@@ -235,6 +235,37 @@ pub async fn get_distribution_latest_release(
         .await
         .map_err(|err| {
             error!("Failed to get latest release {err}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?
+        .ok_or(StatusCode::NOT_FOUND)?;
+
+    Ok(Json(release))
+}
+
+#[utoipa::path(
+    get,
+    path = "/distributions/{distribution_id}/releases/lts",
+    params(
+        ("distribution_id" = i32, Path),
+    ),
+    responses(
+        (status = StatusCode::OK, description = "Get the release currently designated LTS for the distribution", body = Release),
+        (status = StatusCode::NOT_FOUND, description = "No LTS release for the distribution"),
+        (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to get LTS release"),
+    ),
+    security(
+        ("auth_token" = [])
+    ),
+    tag = DISTRIBUTIONS_TAG
+)]
+pub async fn get_distribution_lts_release(
+    Path(distribution_id): Path<i32>,
+    Extension(state): Extension<State>,
+) -> axum::response::Result<Json<Release>, StatusCode> {
+    let release = get_current_lts_release(distribution_id, &state.pg_pool)
+        .await
+        .map_err(|err| {
+            error!("Failed to get LTS release {err}");
             StatusCode::INTERNAL_SERVER_ERROR
         })?
         .ok_or(StatusCode::NOT_FOUND)?;

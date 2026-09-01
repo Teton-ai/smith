@@ -45,16 +45,26 @@
       },
       {
         "ordinal": 8,
+        "name": "lts",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 9,
+        "name": "lts_marked_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 10,
         "name": "distribution_name",
         "type_info": "Text"
       },
       {
-        "ordinal": 9,
+        "ordinal": 11,
         "name": "distribution_architecture",
         "type_info": "Text"
       },
       {
-        "ordinal": 10,
+        "ordinal": 12,
         "name": "user_email",
         "type_info": "Varchar"
       }
@@ -71,6 +81,8 @@
       false,
       true,
       false,
+      false,
+      true,
       false,
       false,
       true

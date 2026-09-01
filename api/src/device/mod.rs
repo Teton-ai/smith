@@ -89,6 +89,21 @@ pub struct UpdateDevicesRelease {
     pub devices: Vec<i32>,
 }
 
+#[derive(Debug, Deserialize, Serialize, utoipa::ToSchema)]
+pub struct FollowLatestRequest {
+    pub follow_latest: bool,
+    /// Explicit device ids. Mutually exclusive with `labels`.
+    pub devices: Option<Vec<i32>>,
+    /// Label selectors as `key=value`. A device must carry *every* label listed
+    /// to match. Mutually exclusive with `devices`.
+    pub labels: Option<Vec<String>>,
+}
+
+#[derive(Debug, Serialize, utoipa::ToSchema)]
+pub struct FollowLatestUpdated {
+    pub devices_updated: i64,
+}
+
 #[derive(Debug, Serialize, utoipa::ToSchema)]
 pub struct Variable {
     pub id: i32,

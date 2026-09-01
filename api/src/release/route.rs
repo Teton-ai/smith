@@ -94,6 +94,8 @@ pub async fn get_release(
     request_body = UpdateRelease,
     responses(
         (status = StatusCode::NO_CONTENT, description = "Release updated successfully"),
+        (status = StatusCode::NOT_FOUND, description = "Release not found"),
+        (status = StatusCode::CONFLICT, description = "Cannot mark a draft, yanked or release candidate as LTS"),
         (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to update release"),
     ),
     security(
@@ -127,6 +129,52 @@ pub async fn update_release(
         sqlx::query!(
             "UPDATE release SET yanked = $1 WHERE id = $2",
             yanked,
+            release_id
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(|err| {
+            error!("Failed to update release: {err}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+    }
+    if let Some(lts) = update_release.lts {
+        // Read back inside the transaction so the check sees any draft/yanked
+        // change made by this same request, not the state it started in.
+        let current = sqlx::query!(
+            "SELECT draft, yanked, release_candidate FROM release WHERE id = $1",
+            release_id
+        )
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(|err| {
+            error!("Failed to read release state: {err}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+
+        let Some(current) = current else {
+            error!("Release {release_id} not found");
+            return Err(StatusCode::NOT_FOUND);
+        };
+
+        // A draft was never published, an RC is by definition not fleet-wide
+        // material, and a yanked release is one we withdrew: none of the three
+        // is something we can commit to keeping devices on.
+        if lts && (current.draft || current.yanked || current.release_candidate) {
+            error!(
+                "Release {release_id} cannot be marked LTS while draft, yanked or a release candidate"
+            );
+            return Err(StatusCode::CONFLICT);
+        }
+
+        // COALESCE keeps the original decision timestamp when a release that is
+        // already LTS is marked again.
+        sqlx::query!(
+            "UPDATE release
+             SET lts = $1,
+                 lts_marked_at = CASE WHEN $1 THEN COALESCE(lts_marked_at, NOW()) ELSE NULL END
+             WHERE id = $2",
+            lts,
             release_id
         )
         .execute(&mut *tx)

@@ -30,6 +30,7 @@ pub struct Device {
     pub release_id: Option<i32>,
     pub target_release_id: Option<i32>,
     pub target_release_id_set_at: Option<DateTime<Utc>>,
+    pub follow_latest: bool,
     #[schema(value_type = Option<SystemInfo>)]
     pub system_info: Option<Value>,
     pub modem_id: Option<i32>,
@@ -101,6 +102,8 @@ pub struct DeviceFilter {
     pub distribution_id: Option<i32>,
     /// Filter by service health. If true, only devices with at least one monitored service not in 'active' state.
     pub service_not_running: Option<bool>,
+    /// Filter by whether the device follows fleet-wide rollouts. If None, both are included.
+    pub follow_latest: Option<bool>,
     /// Column to sort by. If None, devices are ordered by last_ping (default).
     #[param(inline)]
     pub sort: Option<DeviceSortField>,
