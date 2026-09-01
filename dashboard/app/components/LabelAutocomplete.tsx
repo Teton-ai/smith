@@ -21,10 +21,24 @@ export default function LabelAutocomplete({
 		mode: "key",
 		search: "",
 	});
+	const [highlightedIndex, setHighlightedIndex] = useState<number | null>(null);
 	const inputRef = useRef<HTMLInputElement>(null);
 	const dropdownRef = useRef<HTMLDivElement>(null);
+	const rowRefs = useRef<(HTMLButtonElement | null)[]>([]);
 
 	const { data: labels } = useGetLabels();
+
+	// A stale highlight can outlive the list it was computed against, so reset
+	// it whenever the filter text, key/value mode, or `labels` data changes.
+	// biome-ignore lint/correctness/useExhaustiveDependencies: reset highlight whenever the list-defining inputs change
+	useEffect(() => {
+		setHighlightedIndex(null);
+	}, [state.mode, state.search, labels]);
+
+	useEffect(() => {
+		if (highlightedIndex == null) return;
+		rowRefs.current[highlightedIndex]?.scrollIntoView({ block: "nearest" });
+	}, [highlightedIndex]);
 
 	useEffect(() => {
 		const handleClickOutside = (event: MouseEvent) => {
@@ -110,8 +124,38 @@ export default function LabelAutocomplete({
 		}
 	};
 
+	const filteredKeys = getFilteredKeys();
+	const filteredValues =
+		state.mode === "value" ? getFilteredValues(state.key) : [];
+
 	const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+		const list: LabelWithValues[] | string[] =
+			state.mode === "key" ? filteredKeys : filteredValues;
+
+		if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+			if (!isOpen || list.length === 0) return;
+			e.preventDefault();
+			setHighlightedIndex((prev) => {
+				const next = prev == null ? 0 : prev + (e.key === "ArrowDown" ? 1 : -1);
+				return Math.max(0, Math.min(next, list.length - 1));
+			});
+			return;
+		}
+
 		if (e.key === "Enter") {
+			if (
+				isOpen &&
+				highlightedIndex != null &&
+				highlightedIndex < list.length
+			) {
+				if (state.mode === "key") {
+					handleKeySelect((list[highlightedIndex] as LabelWithValues).key);
+				} else {
+					handleValueSelect(list[highlightedIndex] as string);
+				}
+				return;
+			}
+
 			const value = e.currentTarget.value;
 			if (value.includes("=")) {
 				const [key, val] = value.split("=");
@@ -144,10 +188,6 @@ export default function LabelAutocomplete({
 		return state.search;
 	};
 
-	const filteredKeys = getFilteredKeys();
-	const filteredValues =
-		state.mode === "value" ? getFilteredValues(state.key) : [];
-
 	return (
 		<div className="relative">
 			<input
@@ -172,11 +212,19 @@ export default function LabelAutocomplete({
 								<div className="px-3 py-1.5 text-xs text-gray-500 bg-gray-50 border-b border-gray-100">
 									Select a label key
 								</div>
-								{filteredKeys.map((label) => (
+								{filteredKeys.map((label, i) => (
 									<button
 										key={label.key}
+										ref={(el) => {
+											rowRefs.current[i] = el;
+										}}
 										type="button"
-										className="w-full px-3 py-2 text-left text-sm text-gray-700 hover:bg-blue-50 hover:text-blue-700 cursor-pointer"
+										className={`w-full px-3 py-2 text-left text-sm cursor-pointer ${
+											i === highlightedIndex
+												? "bg-blue-50 text-blue-700"
+												: "text-gray-700"
+										}`}
+										onMouseEnter={() => setHighlightedIndex(i)}
 										onClick={() => handleKeySelect(label.key)}
 									>
 										<span className="font-medium">{label.key}</span>
@@ -212,20 +260,26 @@ export default function LabelAutocomplete({
 								</button>
 							</div>
 							{filteredValues.length > 0 ? (
-								filteredValues.map((value) => {
+								filteredValues.map((value, i) => {
 									const isAlreadySelected = existingFilters.includes(
 										`${state.key}=${value}`,
 									);
 									return (
 										<button
 											key={value}
+											ref={(el) => {
+												rowRefs.current[i] = el;
+											}}
 											type="button"
 											disabled={isAlreadySelected}
 											className={`w-full px-3 py-2 text-left text-sm cursor-pointer ${
 												isAlreadySelected
 													? "text-gray-400 bg-gray-50"
-													: "text-gray-700 hover:bg-blue-50 hover:text-blue-700"
+													: i === highlightedIndex
+														? "bg-blue-50 text-blue-700"
+														: "text-gray-700"
 											}`}
+											onMouseEnter={() => setHighlightedIndex(i)}
 											onClick={() => handleValueSelect(value)}
 										>
 											{value}
