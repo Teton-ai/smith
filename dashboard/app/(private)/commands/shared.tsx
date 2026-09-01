@@ -676,6 +676,52 @@ export const getStatusColor = (status: string) => {
 // UI primitives
 // ---------------------------------------------------------------------------
 
+// Copy-to-clipboard icon button, shared by CodeBlock and CopyableText so
+// there's one "copied" flash implementation instead of several.
+const CopyButton = ({ text }: { text: string }) => {
+	const [copied, setCopied] = useState(false);
+
+	const handleCopy = () => {
+		navigator.clipboard.writeText(text);
+		setCopied(true);
+		setTimeout(() => setCopied(false), 2000);
+	};
+
+	return (
+		<button
+			onClick={handleCopy}
+			className="text-gray-400 hover:text-gray-600 cursor-pointer p-1 rounded shrink-0 self-center"
+			title={copied ? "Copied!" : "Copy"}
+		>
+			{copied ? (
+				<Check className="w-3 h-3 text-green-500" />
+			) : (
+				<Copy className="w-3 h-3" />
+			)}
+		</button>
+	);
+};
+
+// Inline monospace value (e.g. an id) with a copy button. Truncates via CSS
+// so the full value stays in the DOM/title, not sliced in JS.
+export const CopyableText = ({
+	text,
+	className,
+}: {
+	text: string;
+	className?: string;
+}) => (
+	<div className={`flex items-center gap-1 min-w-0 ${className ?? ""}`}>
+		<span
+			className="text-xs font-mono leading-none text-gray-500 truncate min-w-0"
+			title={text}
+		>
+			{text}
+		</span>
+		<CopyButton text={text} />
+	</div>
+);
+
 export const CodeBlock = ({
 	label,
 	content,
@@ -687,50 +733,30 @@ export const CodeBlock = ({
 	labelClassName?: string;
 	/** Optional muted text shown left-aligned next to the label. */
 	meta?: ReactNode;
-}) => {
-	const [copied, setCopied] = useState(false);
-
-	const handleCopy = () => {
-		navigator.clipboard.writeText(content);
-		setCopied(true);
-		setTimeout(() => setCopied(false), 2000);
-	};
-
-	return (
-		<div>
-			<div className="flex items-center justify-between mb-1">
-				<span
-					className={`text-xs font-medium uppercase tracking-wide ${labelClassName ?? "text-gray-400"}`}
-				>
-					{label}
-					{meta && (
-						<span className="ml-2 font-normal normal-case text-gray-400">
-							{meta}
-						</span>
-					)}
-				</span>
-				<button
-					onClick={handleCopy}
-					className="text-gray-400 hover:text-gray-600 cursor-pointer p-1 rounded"
-					title={copied ? "Copied!" : "Copy"}
-				>
-					{copied ? (
-						<Check className="w-3 h-3 text-green-500" />
-					) : (
-						<Copy className="w-3 h-3" />
-					)}
-				</button>
-			</div>
-			<pre className="text-xs font-mono bg-gray-900 text-gray-100 p-3 rounded overflow-x-auto whitespace-pre-wrap break-words min-h-[2.5rem]">
-				{content.trim() === "" ? (
-					<span className="text-gray-500 italic">(no output)</span>
-				) : (
-					content
+}) => (
+	<div>
+		<div className="flex items-center justify-between mb-1">
+			<span
+				className={`text-xs font-medium uppercase tracking-wide ${labelClassName ?? "text-gray-400"}`}
+			>
+				{label}
+				{meta && (
+					<span className="ml-2 font-normal normal-case text-gray-400">
+						{meta}
+					</span>
 				)}
-			</pre>
+			</span>
+			<CopyButton text={content} />
 		</div>
-	);
-};
+		<pre className="text-xs font-mono bg-gray-900 text-gray-100 p-3 rounded overflow-x-auto whitespace-pre-wrap break-words min-h-[2.5rem]">
+			{content.trim() === "" ? (
+				<span className="text-gray-500 italic">(no output)</span>
+			) : (
+				content
+			)}
+		</pre>
+	</div>
+);
 
 export const KVTable = ({
 	rows,
