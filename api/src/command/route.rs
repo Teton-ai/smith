@@ -30,14 +30,26 @@ struct StaggerPolicy {
 }
 
 const WIFI_SCAN_WAVE_DURATION: Duration = Duration::from_secs(10);
+const TEST_NETWORK_WAVE_FRACTION: f64 = 0.10;
+const TEST_NETWORK_WAVE_DURATION: Duration = Duration::from_secs(60);
+
+fn bundle_relative_wave_size(device_count: usize, fraction: f64) -> u32 {
+    ((device_count as f64 * fraction).round() as u32).max(1)
+}
 
 /// `None` for anything that doesn't contend for a shared physical resource.
 /// `device_count` sizes policies whose `wave_size` scales with the bundle.
-fn stagger_policy(cmd: &SafeCommandTx, _device_count: usize) -> Option<StaggerPolicy> {
+fn stagger_policy(cmd: &SafeCommandTx, device_count: usize) -> Option<StaggerPolicy> {
     match cmd {
         SafeCommandTx::WifiScan => Some(StaggerPolicy {
             wave_size: 2,
             wave_duration: WIFI_SCAN_WAVE_DURATION,
+        }),
+        // Download+upload each cap at 30s (NETWORK_TEST_TIMEOUT in smithd),
+        // so 60s bounds a run. Paces the api server's bandwidth, not an AP.
+        SafeCommandTx::TestNetwork => Some(StaggerPolicy {
+            wave_size: bundle_relative_wave_size(device_count, TEST_NETWORK_WAVE_FRACTION),
+            wave_duration: TEST_NETWORK_WAVE_DURATION,
         }),
         _ => None,
     }
@@ -940,6 +952,41 @@ mod stagger_tests {
     fn merge_returns_none_when_nothing_in_the_bundle_is_policied() {
         let commands = [request(SafeCommandTx::Ping)];
         assert!(merged_stagger_policy(&commands, 5).is_none());
+    }
+
+    #[test]
+    fn test_network_wave_size_is_bundle_relative() {
+        let normal =
+            stagger_policy(&SafeCommandTx::TestNetwork, 20).expect("TestNetwork should be paced");
+        assert_eq!(normal.wave_size, 2); // round(20 * 0.10) = 2
+        assert_eq!(normal.wave_duration, Duration::from_secs(60));
+
+        // round(0.3) floors to 1.
+        let floored =
+            stagger_policy(&SafeCommandTx::TestNetwork, 3).expect("TestNetwork should be paced");
+        assert_eq!(floored.wave_size, 1);
+    }
+
+    #[test]
+    fn merge_of_test_network_and_wifi_scan_picks_the_strictest_of_each() {
+        // At 50 devices the two policies' numbers differ, so this exercises
+        // min(wave_size)/max(wave_duration) instead of one winning wholesale.
+        let commands = [
+            request(SafeCommandTx::TestNetwork),
+            request(SafeCommandTx::WifiScan),
+        ];
+        let test_network_policy =
+            stagger_policy(&SafeCommandTx::TestNetwork, 50).expect("TestNetwork should be paced");
+        let wifi_scan_policy =
+            stagger_policy(&SafeCommandTx::WifiScan, 50).expect("WifiScan should be paced");
+        assert_eq!(test_network_policy.wave_size, 5);
+        assert!(test_network_policy.wave_size > wifi_scan_policy.wave_size);
+        assert!(test_network_policy.wave_duration > wifi_scan_policy.wave_duration);
+
+        let merged =
+            merged_stagger_policy(&commands, 50).expect("bundle contains policied commands");
+        assert_eq!(merged.wave_size, wifi_scan_policy.wave_size);
+        assert_eq!(merged.wave_duration, test_network_policy.wave_duration);
     }
 
     #[test]
