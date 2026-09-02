@@ -32,6 +32,10 @@ struct StaggerPolicy {
 const WIFI_SCAN_WAVE_DURATION: Duration = Duration::from_secs(10);
 const TEST_NETWORK_WAVE_FRACTION: f64 = 0.10;
 const TEST_NETWORK_WAVE_DURATION: Duration = Duration::from_secs(60);
+const EXTENDED_NETWORK_TEST_WAVE_FRACTION: f64 = 0.10;
+const EXTENDED_NETWORK_TEST_MIN_MINUTES: u32 = 1;
+const EXTENDED_NETWORK_TEST_MAX_MINUTES: u32 = 60;
+const SECONDS_PER_MINUTE: u64 = 60;
 
 fn bundle_relative_wave_size(device_count: usize, fraction: f64) -> u32 {
     ((device_count as f64 * fraction).round() as u32).max(1)
@@ -50,6 +54,17 @@ fn stagger_policy(cmd: &SafeCommandTx, device_count: usize) -> Option<StaggerPol
         SafeCommandTx::TestNetwork => Some(StaggerPolicy {
             wave_size: bundle_relative_wave_size(device_count, TEST_NETWORK_WAVE_FRACTION),
             wave_duration: TEST_NETWORK_WAVE_DURATION,
+        }),
+        // Loops the test for the whole requested duration (sustained load,
+        // not a spike), so wave_duration scales with it. Clamped to 1-60min.
+        SafeCommandTx::ExtendedNetworkTest { duration_minutes } => Some(StaggerPolicy {
+            wave_size: bundle_relative_wave_size(device_count, EXTENDED_NETWORK_TEST_WAVE_FRACTION),
+            wave_duration: Duration::from_secs(
+                u64::from((*duration_minutes).clamp(
+                    EXTENDED_NETWORK_TEST_MIN_MINUTES,
+                    EXTENDED_NETWORK_TEST_MAX_MINUTES,
+                )) * SECONDS_PER_MINUTE,
+            ),
         }),
         _ => None,
     }
@@ -987,6 +1002,43 @@ mod stagger_tests {
             merged_stagger_policy(&commands, 50).expect("bundle contains policied commands");
         assert_eq!(merged.wave_size, wifi_scan_policy.wave_size);
         assert_eq!(merged.wave_duration, test_network_policy.wave_duration);
+    }
+
+    #[test]
+    fn extended_network_test_wave_duration_scales_and_clamps() {
+        // (requested duration_minutes, expected wave_duration)
+        let cases = [
+            (3, Duration::from_secs(180)),   // scales normally
+            (0, Duration::from_secs(60)),    // clamps up to 1 minute
+            (90, Duration::from_secs(3600)), // clamps down to 60 minutes
+        ];
+        for (duration_minutes, expected_wave_duration) in cases {
+            let policy =
+                stagger_policy(&SafeCommandTx::ExtendedNetworkTest { duration_minutes }, 20)
+                    .expect("ExtendedNetworkTest should be paced");
+            assert_eq!(policy.wave_duration, expected_wave_duration);
+        }
+    }
+
+    #[test]
+    fn extended_network_test_wave_size_is_bundle_relative() {
+        let small = stagger_policy(
+            &SafeCommandTx::ExtendedNetworkTest {
+                duration_minutes: 5,
+            },
+            3,
+        )
+        .expect("ExtendedNetworkTest should be paced");
+        assert_eq!(small.wave_size, 1); // round(3 * 0.10) = 0, floored to 1
+
+        let large = stagger_policy(
+            &SafeCommandTx::ExtendedNetworkTest {
+                duration_minutes: 5,
+            },
+            50,
+        )
+        .expect("ExtendedNetworkTest should be paced");
+        assert_eq!(large.wave_size, 5); // round(50 * 0.10) = 5
     }
 
     #[test]
