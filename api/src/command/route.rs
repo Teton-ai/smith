@@ -1123,6 +1123,37 @@ mod stagger_tests {
         assert_eq!(sizes, vec![1, 2, 2]);
     }
 
+    #[test]
+    fn bundle_relative_policies_never_drop_a_device() {
+        // 47 leaves a partial trailing wave; every device must still be assigned.
+        let devices: Vec<i32> = (0..47).collect();
+        let commands_by_policy = [
+            SafeCommandTx::TestNetwork,
+            SafeCommandTx::ExtendedNetworkTest {
+                duration_minutes: 5,
+            },
+            SafeCommandTx::Restart,
+        ];
+
+        for cmd in commands_by_policy {
+            let policy = stagger_policy(&cmd, devices.len())
+                .unwrap_or_else(|| panic!("{cmd:?} should be paced"));
+            let offsets = assign_wave_offsets(&devices, Some(&policy));
+
+            assert_eq!(
+                offsets.len(),
+                devices.len(),
+                "{cmd:?}: every device should be assigned to a wave"
+            );
+            let mut assigned_devices: Vec<i32> = offsets.iter().map(|a| a.device_id).collect();
+            assigned_devices.sort();
+            assert_eq!(
+                assigned_devices, devices,
+                "{cmd:?}: no device should be dropped or duplicated"
+            );
+        }
+    }
+
     // Needs a live DB at runtime (not just compile time like other `api`
     // tests), which CI doesn't provide, hence `#[ignore]` (`e2e` convention).
     // Lives here, not in `e2e`, since this needs no HTTP/auth.
