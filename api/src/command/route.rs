@@ -36,6 +36,8 @@ const EXTENDED_NETWORK_TEST_WAVE_FRACTION: f64 = 0.10;
 const EXTENDED_NETWORK_TEST_MIN_MINUTES: u32 = 1;
 const EXTENDED_NETWORK_TEST_MAX_MINUTES: u32 = 60;
 const SECONDS_PER_MINUTE: u64 = 60;
+const DEFAULT_WAVE_FRACTION: f64 = 0.10;
+const DEFAULT_WAVE_DURATION: Duration = Duration::from_secs(20);
 
 fn bundle_relative_wave_size(device_count: usize, fraction: f64) -> u32 {
     ((device_count as f64 * fraction).round() as u32).max(1)
@@ -66,7 +68,20 @@ fn stagger_policy(cmd: &SafeCommandTx, device_count: usize) -> Option<StaggerPol
                 )) * SECONDS_PER_MINUTE,
             ),
         }),
-        _ => None,
+        // Interactive/session commands: no contention to pace, and waiting
+        // would only add latency.
+        SafeCommandTx::OpenTunnel { .. }
+        | SafeCommandTx::CloseTunnel
+        | SafeCommandTx::OpenFileSession { .. }
+        | SafeCommandTx::CloseFileSession { .. }
+        | SafeCommandTx::StreamLogs { .. }
+        | SafeCommandTx::StopLogStream { .. } => None,
+        // Everything else: paced by default instead of hitting every device
+        // at once.
+        _ => Some(StaggerPolicy {
+            wave_size: bundle_relative_wave_size(device_count, DEFAULT_WAVE_FRACTION),
+            wave_duration: DEFAULT_WAVE_DURATION,
+        }),
     }
 }
 
@@ -947,14 +962,47 @@ mod stagger_tests {
     }
 
     #[test]
-    fn unpaced_commands_have_no_policy() {
-        assert!(stagger_policy(&SafeCommandTx::Ping, 5).is_none());
+    fn unlisted_commands_get_the_default_policy() {
+        let policy = stagger_policy(&SafeCommandTx::Ping, 20).expect("Ping should get the default");
+        assert_eq!(policy.wave_size, 2); // round(20 * 0.10) = 2
+        assert_eq!(policy.wave_duration, Duration::from_secs(20));
+    }
+
+    #[test]
+    fn interactive_and_session_commands_stay_unpaced() {
+        let exempted = [
+            SafeCommandTx::OpenTunnel {
+                port: None,
+                user: None,
+                pub_key: None,
+            },
+            SafeCommandTx::CloseTunnel,
+            SafeCommandTx::OpenFileSession {
+                session_id: "s".to_string(),
+            },
+            SafeCommandTx::CloseFileSession {
+                session_id: "s".to_string(),
+            },
+            SafeCommandTx::StreamLogs {
+                session_id: "s".to_string(),
+                service_name: "svc".to_string(),
+            },
+            SafeCommandTx::StopLogStream {
+                session_id: "s".to_string(),
+            },
+        ];
+        for cmd in exempted {
+            assert!(
+                stagger_policy(&cmd, 20).is_none(),
+                "{cmd:?} should stay unpaced"
+            );
+        }
     }
 
     #[test]
     fn merge_picks_up_the_only_policied_command_in_a_mixed_bundle() {
         let commands = [
-            request(SafeCommandTx::Ping),
+            request(SafeCommandTx::CloseTunnel),
             request(SafeCommandTx::WifiScan),
         ];
         let policy =
@@ -965,7 +1013,7 @@ mod stagger_tests {
 
     #[test]
     fn merge_returns_none_when_nothing_in_the_bundle_is_policied() {
-        let commands = [request(SafeCommandTx::Ping)];
+        let commands = [request(SafeCommandTx::CloseTunnel)];
         assert!(merged_stagger_policy(&commands, 5).is_none());
     }
 
