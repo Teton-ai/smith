@@ -1,4 +1,4 @@
-import { Badge, Card, InfoRow, Panel, SECTION_THEMES } from "@teton/smith-ui";
+import { Badge, InfoRow, Panel, SECTION_THEMES } from "@teton/smith-ui";
 import { Router, Signal, Smartphone, Wifi, WifiOff } from "lucide-react";
 import { useParams } from "react-router";
 import {
@@ -144,6 +144,7 @@ const ConnectionCard = ({
 	iface: NetworkItem;
 	deviceType: string;
 	connected: boolean;
+	virtual?: boolean;
 }) => {
 	const primaryIP = iface.ips[0];
 	const Icon =
@@ -210,6 +211,26 @@ const ConnectionCard = ({
 	);
 };
 
+/**
+ * NM device types that aren't a link to anywhere: docker/libvirt bridges,
+ * loopback, VPN taps. They're reported like any other interface and show as
+ * "connected", so without this they sit at the top of the list looking as
+ * relevant as eth0. Unknown types stay in the main list — better to show an
+ * interface we can't classify than to bury a real one.
+ */
+const VIRTUAL_TYPES = new Set([
+	"bridge",
+	"loopback",
+	"tun",
+	"tap",
+	"veth",
+	"dummy",
+	"wireguard",
+	"ovs-interface",
+	"ovs-bridge",
+	"ovs-port",
+]);
+
 const NetworkConnections = ({ device }: { device: Device }) => {
 	const interfaces = device.system_info?.network?.interfaces;
 
@@ -225,11 +246,13 @@ const NetworkConnections = ({ device }: { device: Device }) => {
 		const status = device.system_info?.connection_statuses?.find(
 			(conn) => conn.device_name === name,
 		);
+		const deviceType = status?.device_type || "unknown";
 		return {
 			name,
 			iface,
-			deviceType: status?.device_type || "unknown",
+			deviceType,
 			connected: status?.connection_state === "connected",
+			virtual: VIRTUAL_TYPES.has(deviceType),
 		};
 	});
 
@@ -242,22 +265,25 @@ const NetworkConnections = ({ device }: { device: Device }) => {
 		);
 	}
 
-	const active = entries.filter((e) => e.connected);
-	const inactive = entries.filter((e) => !e.connected);
+	// Fall back to every connected interface rather than showing nothing on a
+	// device whose only live interfaces are virtual.
+	let primary = entries.filter((e) => e.connected && !e.virtual);
+	if (primary.length === 0) primary = entries.filter((e) => e.connected);
+	const rest = entries.filter((e) => !primary.includes(e));
 
 	return (
 		<div className="space-y-3">
-			{active.map((entry) => (
+			{primary.map((entry) => (
 				<ConnectionCard key={entry.name} {...entry} />
 			))}
 
-			{inactive.length > 0 && (
+			{rest.length > 0 && (
 				<details className="mt-3">
 					<summary className="text-sm text-blue-600 cursor-pointer hover:text-blue-800">
-						Show inactive connections ({inactive.length})
+						Show other interfaces ({rest.length})
 					</summary>
 					<div className="mt-2 space-y-2">
-						{inactive.map((entry) => (
+						{rest.map((entry) => (
 							<ConnectionCard key={entry.name} {...entry} />
 						))}
 					</div>
@@ -274,43 +300,45 @@ const NetworkPage = () => {
 	const serial = params.serial as string;
 	const { data: device } = useGetDeviceInfo(serial);
 
+	// One layout in both states: Reachability and the WiFi panel only need the
+	// serial, so a missing device downgrades the Connections panel rather than
+	// replacing the page. Connections is a narrow, fixed-size list; the other
+	// two stack in the wider column so the room under Reachability is used
+	// instead of pushing WiFi below the fold.
 	return (
 		<DeviceDetailLayout serial={serial} device={device} activeTab="network">
-			{!device ? (
-				<>
-					{/* Whether we heard from the device, not what its interfaces report */}
-					<DeviceReachability key={serial} serial={serial} />
-					<Card className="p-5">
-						<div className="py-6 text-gray-500">
-							Loading network information...
-						</div>
-					</Card>
-				</>
-			) : (
-				<div className="space-y-4">
-					{/* Connections is a narrow, fixed-size list; Reachability fills
-					    whatever width is left beside it. */}
-					<div className="grid grid-cols-1 lg:grid-cols-3 gap-4 items-start">
-						<Panel
-							title="Network Connections"
-							icon={Wifi}
-							theme={SECTION_THEMES.green}
-						>
+			<div className="grid grid-cols-1 lg:grid-cols-3 gap-4 items-start">
+				<Panel
+					title="Network Connections"
+					icon={Wifi}
+					theme={SECTION_THEMES.green}
+				>
+					{device ? (
+						<>
 							<LinkSummary device={device} />
 							<hr className="my-3 border-gray-100" />
 							<NetworkConnections device={device} />
-						</Panel>
-
-						<div className="lg:col-span-2">
-							<DeviceReachability key={serial} serial={serial} />
+						</>
+					) : (
+						<div className="space-y-2">
+							{[1, 2, 3].map((i) => (
+								<div
+									key={i}
+									className="h-4 animate-pulse rounded bg-gray-100"
+								/>
+							))}
 						</div>
-					</div>
+					)}
+				</Panel>
 
-					{/* Full width: intent/profile/scan need the room. Keyed by serial
-					    so filter/reveal state resets when navigating between devices. */}
-					<WifiPanel key={serial} serial={serial} device={device} />
+				<div className="lg:col-span-2 space-y-4">
+					{/* Whether we heard from the device, not what its interfaces report */}
+					<DeviceReachability key={serial} serial={serial} />
+					{/* Keyed by serial so filter/reveal state resets when navigating
+					    between devices. */}
+					{device && <WifiPanel key={serial} serial={serial} device={device} />}
 				</div>
-			)}
+			</div>
 		</DeviceDetailLayout>
 	);
 };
