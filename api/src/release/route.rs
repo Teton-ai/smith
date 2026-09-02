@@ -3,10 +3,10 @@ use crate::package::{Package, extract_services_from_deb};
 use crate::release::{Release, get_release_by_id};
 use crate::storage::Storage;
 use crate::user::CurrentUser;
-use axum::extract::Path;
+use axum::extract::{Path, Query};
 use axum::http::StatusCode;
 use axum::{Extension, Json};
-use models::release::UpdateRelease;
+use models::release::{ReleaseFilter, UpdateRelease};
 use serde::{Deserialize, Serialize};
 use sqlx::types::chrono;
 use tracing::{error, warn};
@@ -16,6 +16,7 @@ const RELEASES_TAG: &str = "releases";
 #[utoipa::path(
     get,
     path = "/releases",
+    params(ReleaseFilter),
     responses(
         (status = StatusCode::OK, description = "List of releases retrieved successfully", body = Vec<Release>),
         (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to retrieve releases"),
@@ -27,6 +28,7 @@ const RELEASES_TAG: &str = "releases";
 )]
 pub async fn get_releases(
     Extension(state): Extension<State>,
+    Query(filter): Query<ReleaseFilter>,
 ) -> axum::response::Result<Json<Vec<Release>>, StatusCode> {
     let releases = sqlx::query_as!(
         Release,
@@ -38,8 +40,10 @@ pub async fn get_releases(
         FROM release
         JOIN distribution ON release.distribution_id = distribution.id
         LEFT JOIN auth.users ON release.user_id = auth.users.id
+        WHERE ($1::boolean IS NULL OR release.lts = $1)
         ORDER BY release.id
         ",
+        filter.lts,
     )
     .fetch_all(&state.pg_pool)
     .await
