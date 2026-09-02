@@ -19,6 +19,7 @@ import { useClientMutator } from "@/app/api-client-mutator";
 import { RelativeTime } from "@/app/components/RelativeTime";
 import {
 	CodeBlock,
+	CopyableText,
 	getCommandStatus,
 	getTxLabel,
 	renderRxDetail,
@@ -278,6 +279,12 @@ const BundleDetail = ({ bundle }: { bundle: BundleWithCommands }) => {
 								>
 									Triggered by: {bundle.user_email ?? "System"}
 								</p>
+							</div>
+							<div className="flex items-center gap-1.5 mt-1">
+								<span className="text-xs leading-none text-gray-400 shrink-0">
+									Bundle ID:
+								</span>
+								<CopyableText text={bundle.uuid} />
 							</div>
 						</div>
 						<div className="flex-1 overflow-y-auto overflow-x-hidden">
