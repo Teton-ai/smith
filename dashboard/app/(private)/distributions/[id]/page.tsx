@@ -20,6 +20,7 @@ import {
 	Monitor,
 	Package,
 	Plus,
+	ShieldCheck,
 	Tag,
 	User,
 	X,
@@ -186,18 +187,27 @@ const DistributionDetailPage = () => {
 	const [creatingDraft, setCreatingDraft] = useState(false);
 	const [compareMode, setCompareMode] = useState(false);
 	const [compareSelection, setCompareSelection] = useState<number[]>([]);
+	const [ltsOnly, setLtsOnly] = useState(false);
 
 	const { data: distribution, isLoading: loading } =
 		useGetDistributionById(distributionId);
 
+	// The unfiltered list backs everything that must not follow the LTS filter
+	// (the draft base, the version suggestions). With the filter off both hooks
+	// share a query key, so this is a single request.
+	const { data: allReleases = [] } = useGetDistributionReleases(distributionId);
+
 	const { data: releases = [], isLoading: releasesLoading } =
-		useGetDistributionReleases(distributionId);
+		useGetDistributionReleases(
+			distributionId,
+			ltsOnly ? { lts: true } : undefined,
+		);
 
 	const { data: deployedRelease } =
 		useGetDistributionLatestRelease(distributionId);
 
 	// Use the most recent stable release as the base for new drafts
-	const baseRelease = releases.find(isStableRelease) || releases[0];
+	const baseRelease = allReleases.find(isStableRelease) || allReleases[0];
 	const getDistributionReleasePackages = useGetDistributionReleasePackages(
 		baseRelease?.id as number,
 		{ query: { enabled: baseRelease?.id != null } },
@@ -597,6 +607,21 @@ const DistributionDetailPage = () => {
 				theme={SECTION_THEMES.blue}
 				actions={
 					<div className="flex items-center gap-2">
+						<Button
+							variant="soft"
+							tone={ltsOnly ? "purple" : "gray"}
+							size="sm"
+							icon={<ShieldCheck className="w-4 h-4" />}
+							onClick={() => {
+								setLtsOnly(!ltsOnly);
+								// Filtering can shrink the list below the two rows compare
+								// mode needs, which would hide its own exit button.
+								setCompareMode(false);
+								setCompareSelection([]);
+							}}
+						>
+							LTS only
+						</Button>
 						{releases.length >= 2 && (
 							<Button
 								variant="soft"
@@ -617,7 +642,7 @@ const DistributionDetailPage = () => {
 								{compareMode ? "Exit Compare" : "Compare"}
 							</Button>
 						)}
-						{releases.length > 0 && (
+						{allReleases.length > 0 && (
 							<Button
 								variant="solid"
 								tone="green"
@@ -639,7 +664,9 @@ const DistributionDetailPage = () => {
 					<div className="p-6 text-center">
 						<Tag className="w-8 h-8 text-gray-400 mx-auto mb-2" />
 						<p className="text-sm text-gray-500">
-							No releases found for this distribution
+							{ltsOnly
+								? "No LTS releases for this distribution"
+								: "No releases found for this distribution"}
 						</p>
 					</div>
 				) : (

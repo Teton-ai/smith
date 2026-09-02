@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use utoipa::IntoParams;
 
 #[derive(Debug, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct Release {
@@ -21,5 +22,13 @@ pub struct Release {
 pub struct UpdateRelease {
     pub draft: Option<bool>,
     pub yanked: Option<bool>,
+    pub lts: Option<bool>,
+}
+
+/// Query filter for release listings.
+#[derive(Debug, Serialize, Deserialize, Default, IntoParams)]
+#[into_params(parameter_in = Query)]
+pub struct ReleaseFilter {
+    /// Filter by LTS status. If None, both LTS and non-LTS releases are included.
     pub lts: Option<bool>,
 }

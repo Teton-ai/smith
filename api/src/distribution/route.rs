@@ -7,7 +7,7 @@ use axum::extract::{Path, Query};
 use axum::http::StatusCode;
 use axum::{Extension, Json};
 use models::distribution::{Distribution, NewDistributionRelease};
-use models::release::Release;
+use models::release::{Release, ReleaseFilter};
 use serde::Deserialize;
 use smith::utils::schema::Package;
 use tracing::{error, warn};
@@ -173,6 +173,7 @@ pub async fn get_distribution_by_id(
     path = "/distributions/{distribution_id}/releases",
     params(
         ("distribution_id" = i32, Path),
+        ReleaseFilter,
     ),
     responses(
         (status = StatusCode::OK, description = "List of releases from given distribution retrieved successfully", body = Vec<Release>),
@@ -186,6 +187,7 @@ pub async fn get_distribution_by_id(
 pub async fn get_distribution_releases(
     Path(distribution_id): Path<i32>,
     Extension(state): Extension<State>,
+    Query(filter): Query<ReleaseFilter>,
 ) -> axum::response::Result<Json<Vec<Release>>, StatusCode> {
     let releases = sqlx::query_as!(
         Release,
@@ -198,8 +200,10 @@ pub async fn get_distribution_releases(
         JOIN distribution ON release.distribution_id = distribution.id
         LEFT JOIN auth.users ON release.user_id = auth.users.id
         WHERE distribution_id = $1
+          AND ($2::boolean IS NULL OR release.lts = $2)
         ORDER BY release.created_at DESC"#,
-        distribution_id
+        distribution_id,
+        filter.lts,
     )
     .fetch_all(&state.pg_pool)
     .await
