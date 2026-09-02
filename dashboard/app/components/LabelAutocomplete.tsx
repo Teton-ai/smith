@@ -151,7 +151,12 @@ export default function LabelAutocomplete({
 				if (state.mode === "key") {
 					handleKeySelect((list[highlightedIndex] as LabelWithValues).key);
 				} else {
-					handleValueSelect(list[highlightedIndex] as string);
+					const value = list[highlightedIndex] as string;
+					// Mirror the disabled button: an already-selected value can't be
+					// activated by mouse, so Enter shouldn't activate it either.
+					if (!existingFilters.includes(`${state.key}=${value}`)) {
+						handleValueSelect(value);
+					}
 				}
 				return;
 			}
