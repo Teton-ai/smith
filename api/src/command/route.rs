@@ -29,22 +29,28 @@ struct StaggerPolicy {
     wave_duration: Duration,
 }
 
+const WIFI_SCAN_WAVE_DURATION: Duration = Duration::from_secs(10);
+
 /// `None` for anything that doesn't contend for a shared physical resource.
-fn stagger_policy(cmd: &SafeCommandTx) -> Option<StaggerPolicy> {
+/// `device_count` sizes policies whose `wave_size` scales with the bundle.
+fn stagger_policy(cmd: &SafeCommandTx, _device_count: usize) -> Option<StaggerPolicy> {
     match cmd {
         SafeCommandTx::WifiScan => Some(StaggerPolicy {
             wave_size: 2,
-            wave_duration: Duration::from_secs(10),
+            wave_duration: WIFI_SCAN_WAVE_DURATION,
         }),
         _ => None,
     }
 }
 
 /// Strictest policy across `commands`: smallest wave, longest duration.
-fn merged_stagger_policy(commands: &[SafeCommandRequest]) -> Option<StaggerPolicy> {
+fn merged_stagger_policy(
+    commands: &[SafeCommandRequest],
+    device_count: usize,
+) -> Option<StaggerPolicy> {
     commands
         .iter()
-        .filter_map(|c| stagger_policy(&c.command))
+        .filter_map(|c| stagger_policy(&c.command, device_count))
         .reduce(|a, b| StaggerPolicy {
             wave_size: a.wave_size.min(b.wave_size),
             wave_duration: a.wave_duration.max(b.wave_duration),
@@ -110,7 +116,7 @@ async fn queue_commands_bundle(
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
 
-    let policy = merged_stagger_policy(commands);
+    let policy = merged_stagger_policy(commands, devices.len());
     let wave_offsets = assign_wave_offsets(devices, policy.as_ref());
 
     // Two-phase: a slow insert could let real time pass an early wave's
@@ -908,14 +914,14 @@ mod stagger_tests {
 
     #[test]
     fn wifi_scan_has_a_pacing_policy() {
-        let policy = stagger_policy(&SafeCommandTx::WifiScan).expect("WifiScan should be paced");
+        let policy = stagger_policy(&SafeCommandTx::WifiScan, 5).expect("WifiScan should be paced");
         assert_eq!(policy.wave_size, 2);
         assert_eq!(policy.wave_duration, Duration::from_secs(10));
     }
 
     #[test]
     fn unpaced_commands_have_no_policy() {
-        assert!(stagger_policy(&SafeCommandTx::Ping).is_none());
+        assert!(stagger_policy(&SafeCommandTx::Ping, 5).is_none());
     }
 
     #[test]
@@ -924,7 +930,8 @@ mod stagger_tests {
             request(SafeCommandTx::Ping),
             request(SafeCommandTx::WifiScan),
         ];
-        let policy = merged_stagger_policy(&commands).expect("bundle contains a policied command");
+        let policy =
+            merged_stagger_policy(&commands, 5).expect("bundle contains a policied command");
         assert_eq!(policy.wave_size, 2);
         assert_eq!(policy.wave_duration, Duration::from_secs(10));
     }
@@ -932,7 +939,7 @@ mod stagger_tests {
     #[test]
     fn merge_returns_none_when_nothing_in_the_bundle_is_policied() {
         let commands = [request(SafeCommandTx::Ping)];
-        assert!(merged_stagger_policy(&commands).is_none());
+        assert!(merged_stagger_policy(&commands, 5).is_none());
     }
 
     #[test]
