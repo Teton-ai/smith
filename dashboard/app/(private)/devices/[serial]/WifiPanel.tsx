@@ -23,10 +23,16 @@ import {
 	RefreshCw,
 	Trash2,
 	Wifi,
-	WifiOff,
 	X,
 } from "lucide-react";
-import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import {
+	Fragment,
+	useCallback,
+	useEffect,
+	useMemo,
+	useRef,
+	useState,
+} from "react";
 import {
 	type ConfiguredNetwork,
 	type Device,
@@ -212,7 +218,12 @@ function CredentialsReveal({
 		credentials && typeof credentials === "object"
 			? (credentials as Record<string, unknown>)
 			: {};
-	const entries = Object.entries(record);
+	// `pmf: 0` is NetworkManager's "no preference" default and comes back on
+	// nearly every profile, so it puts a number under every network that tells
+	// the operator nothing. A non-zero value was actually chosen, so it stays.
+	const entries = Object.entries(record).filter(
+		([key, value]) => !(key === "pmf" && (value === 0 || value === "0")),
+	);
 	if (entries.length === 0) return null;
 	const hasSecret = "psk" in record;
 
@@ -370,6 +381,474 @@ function SyncChip({
 	);
 }
 
+/** The only add-to-intent failure worth naming: it's already in the intent. */
+const intentErrorMessage = (err: unknown) => {
+	const status = isAxiosError(err)
+		? err.response?.status
+		: (err as { status?: number }).status;
+	return status === 409
+		? "A network with this name is already in the intent."
+		: "Failed to add network to intent.";
+};
+
+/**
+ * Add-to-intent picker: the catalog list, plus a form for a network that isn't
+ * in the catalog yet. Only mounted while open, so the search, the reveals and a
+ * half-typed form reset by unmounting instead of by a reset for every field.
+ */
+function AddNetworkModal({
+	deviceId,
+	serial,
+	intentNames,
+	onClose,
+	onToast,
+}: {
+	deviceId: string;
+	serial: string;
+	intentNames: string[];
+	onClose: () => void;
+	onToast: (toast: ToastState | null) => void;
+}) {
+	const queryClient = useQueryClient();
+	const [view, setView] = useState<"list" | "create">("list");
+	const [search, setSearch] = useState("");
+	const [revealedNetworkIds, setRevealedNetworkIds] = useState<Set<number>>(
+		new Set(),
+	);
+	const [error, setError] = useState<string | null>(null);
+	const [newNetName, setNewNetName] = useState("");
+	const [newNetSsid, setNewNetSsid] = useState("");
+	const [newNetPassword, setNewNetPassword] = useState("");
+	const [newNetHidden, setNewNetHidden] = useState(false);
+	const [newNetDescription, setNewNetDescription] = useState("");
+	const [showNewNetPassword, setShowNewNetPassword] = useState(false);
+
+	// Escape backs out of the create form first, and only then closes the modal.
+	useEffect(() => {
+		function onKeyDown(e: KeyboardEvent) {
+			if (e.key !== "Escape") return;
+			setError(null);
+			if (view === "create") setView("list");
+			else onClose();
+		}
+		document.addEventListener("keydown", onKeyDown);
+		return () => document.removeEventListener("keydown", onKeyDown);
+	}, [view, onClose]);
+
+	const invalidateIntent = () => {
+		queryClient.invalidateQueries({
+			queryKey: getGetDeviceIntentQueryKey(deviceId),
+		});
+		queryClient.invalidateQueries({
+			queryKey: getGetDeviceInfoQueryKey(serial),
+		});
+	};
+
+	// useGetNetworks returns void in the generated client (missing utoipa response annotation); cast is safe at runtime
+	const { data: catalogRaw } = useGetNetworks();
+	const wifiCatalog = (
+		Array.isArray(catalogRaw) ? (catalogRaw as CatalogNetwork[]) : []
+	).filter((n) => n.network_type === "wifi" && n.ssid != null);
+
+	const { mutateAsync: createIntentAsync } = useCreateDeviceIntent();
+	const { mutate: addExisting } = useCreateDeviceIntent({
+		mutation: {
+			onSuccess: () => {
+				invalidateIntent();
+				onClose();
+			},
+			onError: (err) => setError(intentErrorMessage(err)),
+		},
+	});
+
+	const networkCreator = useClientMutatorWithStatus<{
+		id: number;
+		name: string;
+	}>();
+	const { mutateAsync: deleteNetworkByIdAsync } = useDeleteNetworkById();
+	const { mutate: createNetwork, isPending: isCreatingNetwork } = useMutation({
+		mutationFn: async (): Promise<{ matchedName: string | null }> => {
+			const requestedName = newNetName.trim();
+			if (intentNames.includes(newNetName.trim())) {
+				throw Object.assign(new Error("intent-conflict"), { status: 409 });
+			}
+			const { data: created, status } = await networkCreator({
+				url: "/networks",
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				data: {
+					network_type: "wifi",
+					is_network_hidden: newNetHidden,
+					ssid: newNetSsid.trim() || null,
+					name: newNetName.trim(),
+					description: newNetDescription.trim() || null,
+					password: newNetPassword || null,
+				},
+			});
+			try {
+				await createIntentAsync({
+					deviceId,
+					data: {
+						network_id: created.id,
+						managed_by: "operator",
+					},
+				});
+			} catch (err) {
+				// Only compensate when the POST actually created this row (201). A 200
+				// means content-addressing matched an existing row that other devices
+				// may already reference; deleting it would corrupt their intents.
+				if (status === 201) {
+					await deleteNetworkByIdAsync({ networkId: created.id }).catch(
+						() => {},
+					);
+				}
+				throw err;
+			}
+			// A 200 means the POST matched an existing catalog row by content, so
+			// the name the operator typed was discarded in favour of that row's.
+			// Silently showing a different name in the intent list looks like a bug.
+			return {
+				matchedName:
+					status === 200 && created.name !== requestedName
+						? created.name
+						: null,
+			};
+		},
+		onSuccess: ({ matchedName }) => {
+			queryClient.invalidateQueries({ queryKey: getGetNetworksQueryKey() });
+			invalidateIntent();
+			if (matchedName) {
+				onToast({
+					type: "success",
+					message: `Matched the existing network "${matchedName}", which has the same SSID and password.`,
+				});
+			} else {
+				onToast(null);
+			}
+			onClose();
+		},
+		onError: (err) => setError(intentErrorMessage(err)),
+	});
+
+	return (
+		<div className="fixed inset-0 z-50 flex items-center justify-center">
+			<div className="absolute inset-0 bg-black/40" onClick={onClose} />
+			<div className="relative bg-white rounded-xl shadow-xl w-full max-w-4xl mx-4 max-h-[80vh] flex flex-col">
+				<div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+					{view === "create" ? (
+						<div className="flex items-center gap-2">
+							<button
+								type="button"
+								onClick={() => setView("list")}
+								className="text-gray-400 hover:text-gray-600 cursor-pointer"
+								aria-label="Back to list"
+							>
+								<ArrowLeft className="w-4 h-4" />
+							</button>
+							<h2 className="text-sm font-semibold text-gray-900">
+								New WiFi network
+							</h2>
+						</div>
+					) : (
+						<div className="flex items-center gap-3">
+							<h2 className="text-sm font-semibold text-gray-900">
+								Add network to intent
+							</h2>
+							<Button
+								variant="soft"
+								tone="blue"
+								size="sm"
+								icon={<Plus className="w-3.5 h-3.5" />}
+								onClick={() => {
+									setView("create");
+									setError(null);
+								}}
+							>
+								New network
+							</Button>
+						</div>
+					)}
+					<button
+						type="button"
+						onClick={onClose}
+						className="text-gray-400 hover:text-gray-600 cursor-pointer"
+						aria-label="Close"
+					>
+						<X className="w-4 h-4" />
+					</button>
+				</div>
+				{view === "list" && (
+					<div className="px-6 py-3 border-b border-gray-100">
+						<SearchInput
+							value={search}
+							onChange={setSearch}
+							placeholder="Search by name or SSID..."
+						/>
+					</div>
+				)}
+				{view === "create" ? (
+					<>
+						<div className="overflow-y-auto flex-1 p-6 space-y-4">
+							<div>
+								<label
+									htmlFor="new-net-name"
+									className="block text-xs font-medium text-gray-700 mb-1"
+								>
+									Name *
+								</label>
+								<input
+									id="new-net-name"
+									type="text"
+									value={newNetName}
+									onChange={(e) => setNewNetName(e.target.value)}
+									className={`${filterFieldClass} w-full`}
+									placeholder="e.g. Office WiFi"
+								/>
+							</div>
+							<div>
+								<label
+									htmlFor="new-net-ssid"
+									className="block text-xs font-medium text-gray-700 mb-1"
+								>
+									SSID *
+								</label>
+								<input
+									id="new-net-ssid"
+									type="text"
+									value={newNetSsid}
+									onChange={(e) => setNewNetSsid(e.target.value)}
+									className={`${filterFieldClass} w-full`}
+									placeholder="Network SSID"
+								/>
+							</div>
+							<div>
+								<label
+									htmlFor="new-net-password"
+									className="block text-xs font-medium text-gray-700 mb-1"
+								>
+									Password
+								</label>
+								<div className="relative">
+									<input
+										id="new-net-password"
+										type={showNewNetPassword ? "text" : "password"}
+										value={newNetPassword}
+										onChange={(e) => setNewNetPassword(e.target.value)}
+										className={`${filterFieldClass} w-full pr-10`}
+										placeholder="Leave empty for open networks"
+									/>
+									<button
+										type="button"
+										onClick={() => setShowNewNetPassword((p) => !p)}
+										className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+										aria-label={
+											showNewNetPassword ? "Hide password" : "Show password"
+										}
+									>
+										{showNewNetPassword ? (
+											<EyeOff className="w-4 h-4" />
+										) : (
+											<Eye className="w-4 h-4" />
+										)}
+									</button>
+								</div>
+							</div>
+							<div>
+								<label
+									htmlFor="new-net-description"
+									className="block text-xs font-medium text-gray-700 mb-1"
+								>
+									Description
+								</label>
+								<input
+									id="new-net-description"
+									type="text"
+									value={newNetDescription}
+									onChange={(e) => setNewNetDescription(e.target.value)}
+									className={`${filterFieldClass} w-full`}
+									placeholder="Optional"
+								/>
+							</div>
+							<div className="flex items-center gap-2">
+								<input
+									id="new-net-hidden"
+									type="checkbox"
+									checked={newNetHidden}
+									onChange={(e) => setNewNetHidden(e.target.checked)}
+									className="rounded border-gray-300 text-blue-600"
+								/>
+								<label
+									htmlFor="new-net-hidden"
+									className="text-sm text-gray-700"
+								>
+									Hidden network (SSID not broadcast)
+								</label>
+							</div>
+						</div>
+						{error && <p className="px-6 py-2 text-sm text-red-600">{error}</p>}
+						<div className="flex items-center justify-end gap-2 px-6 py-4 border-t border-gray-100">
+							<Button
+								variant="ghost"
+								tone="gray"
+								size="sm"
+								onClick={() => {
+									setView("list");
+									setError(null);
+								}}
+							>
+								Cancel
+							</Button>
+							<Button
+								variant="solid"
+								tone="blue"
+								size="sm"
+								disabled={
+									!newNetName.trim() || !newNetSsid.trim() || isCreatingNetwork
+								}
+								loading={isCreatingNetwork}
+								onClick={() => createNetwork()}
+							>
+								Create and add to intent
+							</Button>
+						</div>
+					</>
+				) : (
+					<div className="overflow-y-auto flex-1">
+						{error && <p className="px-6 pt-4 text-sm text-red-600">{error}</p>}
+						{(() => {
+							const q = search.trim().toLowerCase();
+							const filtered = q
+								? wifiCatalog.filter(
+										(n) =>
+											n.name.toLowerCase().includes(q) ||
+											(n.ssid?.toLowerCase().includes(q) ?? false),
+									)
+								: wifiCatalog;
+							return filtered.length === 0 ? (
+								<p className="text-sm text-gray-500 p-6">
+									{q
+										? "No networks match your search."
+										: "No WiFi networks in catalog."}
+								</p>
+							) : (
+								<table className="min-w-full divide-y divide-gray-200">
+									<thead className="sticky top-0 bg-white">
+										<tr>
+											{["Name", "SSID", "Password", "Type", "Hidden", ""].map(
+												(col) => (
+													<th
+														key={col}
+														scope="col"
+														className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
+													>
+														{col}
+													</th>
+												),
+											)}
+										</tr>
+									</thead>
+									<tbody className="divide-y divide-gray-100">
+										{filtered.map((n) => {
+											const revealed = revealedNetworkIds.has(n.id);
+											return (
+												<tr
+													key={n.id}
+													className="hover:bg-gray-50 transition-colors"
+												>
+													<td className="px-4 py-3 text-sm font-medium text-gray-900">
+														{n.name}
+														{n.description && (
+															<p className="text-xs text-gray-400 font-normal">
+																{n.description}
+															</p>
+														)}
+													</td>
+													<td className="px-4 py-3 text-sm font-mono text-gray-600">
+														{n.ssid ?? (
+															<span className="text-gray-400 italic">—</span>
+														)}
+													</td>
+													<td className="px-4 py-3 min-w-[16rem]">
+														{n.password ? (
+															<div className="flex items-center gap-1.5">
+																<span className="text-sm font-mono text-gray-700">
+																	{revealed ? n.password : MASK}
+																</span>
+																<button
+																	type="button"
+																	onClick={() =>
+																		setRevealedNetworkIds((prev) => {
+																			const next = new Set(prev);
+																			next.has(n.id)
+																				? next.delete(n.id)
+																				: next.add(n.id);
+																			return next;
+																		})
+																	}
+																	className="text-gray-400 hover:text-gray-600"
+																	aria-label={
+																		revealed
+																			? "Hide password"
+																			: "Reveal password"
+																	}
+																>
+																	{revealed ? (
+																		<EyeOff className="w-3.5 h-3.5" />
+																	) : (
+																		<Eye className="w-3.5 h-3.5" />
+																	)}
+																</button>
+															</div>
+														) : (
+															<span className="text-xs text-gray-400">
+																None
+															</span>
+														)}
+													</td>
+													<td className="px-4 py-3">
+														<Badge variant="gray">{n.network_type}</Badge>
+													</td>
+													<td className="px-4 py-3 text-center">
+														{n.is_network_hidden ? (
+															<span className="text-green-600 text-xs font-medium">
+																Yes
+															</span>
+														) : (
+															<span className="text-gray-400 text-xs">No</span>
+														)}
+													</td>
+													<td className="px-4 py-3 text-right">
+														<Button
+															variant="soft"
+															tone="blue"
+															size="sm"
+															onClick={() =>
+																addExisting({
+																	deviceId,
+																	data: {
+																		network_id: n.id,
+																		managed_by: "operator",
+																	},
+																})
+															}
+														>
+															Add
+														</Button>
+													</td>
+												</tr>
+											);
+										})}
+									</tbody>
+								</table>
+							);
+						})()}
+					</div>
+				)}
+			</div>
+		</div>
+	);
+}
+
 interface WifiPanelProps {
 	serial: string;
 	device: Device;
@@ -387,6 +866,7 @@ const WifiPanel = ({ serial, device }: WifiPanelProps) => {
 	const [pendingAddNetworkIds, setPendingAddNetworkIds] = useState<Set<number>>(
 		new Set(),
 	);
+	const [toast, setToast] = useState<ToastState | null>(null);
 	const [syncing, setSyncing] = useState(false);
 	const [scanSyncing, setScanSyncing] = useState(false);
 	const [scanQuery, setScanQuery] = useState("");
@@ -418,8 +898,6 @@ const WifiPanel = ({ serial, device }: WifiPanelProps) => {
 	// null/undefined, so a stray "" or object would make .map/.filter/spread
 	// below throw and surface react-router's error page for a frame.
 	const profiles = Array.isArray(profilesRaw) ? profilesRaw : [];
-
-	const currentNetwork = profiles.find((p) => p.is_active);
 
 	const {
 		data: scanResultsRaw,
@@ -633,65 +1111,9 @@ const WifiPanel = ({ serial, device }: WifiPanelProps) => {
 	);
 
 	const [showAddPicker, setShowAddPicker] = useState(false);
-	const [modalView, setModalView] = useState<"list" | "create">("list");
-	const [networkSearch, setNetworkSearch] = useState("");
-	const [revealedNetworkIds, setRevealedNetworkIds] = useState<Set<number>>(
-		new Set(),
-	);
+	// Stable so the modal's Escape listener isn't torn down on every render.
+	const closeAddPicker = useCallback(() => setShowAddPicker(false), []);
 	const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
-
-	// Create-network form state
-	const [newNetName, setNewNetName] = useState("");
-	const [newNetSsid, setNewNetSsid] = useState("");
-	const [newNetPassword, setNewNetPassword] = useState("");
-	const [newNetHidden, setNewNetHidden] = useState(false);
-	const [newNetDescription, setNewNetDescription] = useState("");
-	const [showNewNetPassword, setShowNewNetPassword] = useState(false);
-	const [addIntentError, setAddIntentError] = useState<string | null>(null);
-	const [listAddError, setListAddError] = useState<string | null>(null);
-
-	function closeModal() {
-		setShowAddPicker(false);
-		setModalView("list");
-		setNetworkSearch("");
-		setRevealedNetworkIds(new Set());
-		setNewNetName("");
-		setNewNetSsid("");
-		setNewNetPassword("");
-		setNewNetHidden(false);
-		setNewNetDescription("");
-		setShowNewNetPassword(false);
-		setAddIntentError(null);
-		setListAddError(null);
-	}
-
-	useEffect(() => {
-		if (!showAddPicker) return;
-		function onKeyDown(e: KeyboardEvent) {
-			if (e.key !== "Escape") return;
-			if (modalView === "create") {
-				setModalView("list");
-				setAddIntentError(null);
-			} else {
-				setShowAddPicker(false);
-				setModalView("list");
-				setNetworkSearch("");
-				setRevealedNetworkIds(new Set());
-				setNewNetName("");
-				setNewNetSsid("");
-				setNewNetPassword("");
-				setNewNetHidden(false);
-				setNewNetDescription("");
-				setShowNewNetPassword(false);
-				setAddIntentError(null);
-				setListAddError(null);
-			}
-		}
-		document.addEventListener("keydown", onKeyDown);
-		return () => document.removeEventListener("keydown", onKeyDown);
-	}, [showAddPicker, modalView]);
-
-	const { mutateAsync: createIntentAsync } = useCreateDeviceIntent();
 
 	const { mutate: createIntent } = useCreateDeviceIntent({
 		mutation: {
@@ -702,136 +1124,26 @@ const WifiPanel = ({ serial, device }: WifiPanelProps) => {
 				queryClient.invalidateQueries({
 					queryKey: getGetDeviceInfoQueryKey(serial),
 				});
-				closeModal();
 			},
-			onError: (err) => {
-				const status = isAxiosError(err) ? err.response?.status : undefined;
-				setListAddError(
-					status === 409
-						? "A network with this name is already in the intent."
-						: "Failed to add network to intent.",
-				);
-			},
+			onError: (err) =>
+				setToast({ type: "error", message: intentErrorMessage(err) }),
 		},
 	});
 
 	function addToIntent(networkId: number) {
 		setPendingAddNetworkIds((prev) => new Set(prev).add(networkId));
 		createIntent(
+			{ deviceId, data: { network_id: networkId, managed_by: "operator" } },
 			{
-				deviceId,
-				data: {
-					network_id: networkId,
-					managed_by: "operator",
-				},
-			},
-			{
-				// The shared mutation's onError sets modal-only error state, which
-				// this (non-modal) call site can't show; use a toast instead.
-				onError: (err) => {
-					const status = isAxiosError(err) ? err.response?.status : undefined;
-					setToast({
-						type: "error",
-						message:
-							status === 409
-								? "A network with this name is already in the intent."
-								: "Failed to add network to intent.",
-					});
-				},
-				onSettled: () => {
+				onSettled: () =>
 					setPendingAddNetworkIds((prev) => {
 						const next = new Set(prev);
 						next.delete(networkId);
 						return next;
-					});
-				},
+					}),
 			},
 		);
 	}
-
-	const networkCreator = useClientMutatorWithStatus<{
-		id: number;
-		name: string;
-	}>();
-	const [toast, setToast] = useState<ToastState | null>(null);
-	const { mutateAsync: deleteNetworkByIdAsync } = useDeleteNetworkById();
-	const { mutate: createNetwork, isPending: isCreatingNetwork } = useMutation({
-		mutationFn: async (): Promise<{ matchedName: string | null }> => {
-			const requestedName = newNetName.trim();
-			if (sortedIntent.some((e) => e.name === newNetName.trim())) {
-				throw Object.assign(new Error("intent-conflict"), { status: 409 });
-			}
-			const { data: created, status } = await networkCreator({
-				url: "/networks",
-				method: "POST",
-				headers: { "Content-Type": "application/json" },
-				data: {
-					network_type: "wifi",
-					is_network_hidden: newNetHidden,
-					ssid: newNetSsid.trim() || null,
-					name: newNetName.trim(),
-					description: newNetDescription.trim() || null,
-					password: newNetPassword || null,
-				},
-			});
-			try {
-				await createIntentAsync({
-					deviceId,
-					data: {
-						network_id: created.id,
-						managed_by: "operator",
-					},
-				});
-			} catch (err) {
-				// Only compensate when the POST actually created this row (201). A 200
-				// means content-addressing matched an existing row that other devices
-				// may already reference; deleting it would corrupt their intents.
-				if (status === 201) {
-					await deleteNetworkByIdAsync({ networkId: created.id }).catch(
-						() => {},
-					);
-				}
-				throw err;
-			}
-			// A 200 means the POST matched an existing catalog row by content, so
-			// the name the operator typed was discarded in favour of that row's.
-			// Silently showing a different name in the intent list looks like a bug.
-			return {
-				matchedName:
-					status === 200 && created.name !== requestedName
-						? created.name
-						: null,
-			};
-		},
-		onSuccess: ({ matchedName }) => {
-			queryClient.invalidateQueries({ queryKey: getGetNetworksQueryKey() });
-			queryClient.invalidateQueries({
-				queryKey: getGetDeviceIntentQueryKey(deviceId),
-			});
-			queryClient.invalidateQueries({
-				queryKey: getGetDeviceInfoQueryKey(serial),
-			});
-			if (matchedName) {
-				setToast({
-					type: "success",
-					message: `Matched the existing network "${matchedName}", which has the same SSID and password.`,
-				});
-			} else {
-				setToast(null);
-			}
-			closeModal();
-		},
-		onError: (err) => {
-			const status = isAxiosError(err)
-				? err.response?.status
-				: (err as { status?: number }).status;
-			setAddIntentError(
-				status === 409
-					? "A network with this name is already in the intent."
-					: "Failed to add network to intent.",
-			);
-		},
-	});
 
 	const { mutate: deleteIntent } = useDeleteDeviceIntent({
 		mutation: {
@@ -866,12 +1178,6 @@ const WifiPanel = ({ serial, device }: WifiPanelProps) => {
 				onSuccess: () => setApplying(true),
 			},
 		});
-
-	// useGetNetworks returns void in the generated client (missing utoipa response annotation); cast is safe at runtime
-	const { data: catalogRaw } = useGetNetworks();
-	const wifiCatalog = (
-		Array.isArray(catalogRaw) ? (catalogRaw as CatalogNetwork[]) : []
-	).filter((n) => n.network_type === "wifi" && n.ssid != null);
 
 	async function swapPriority(indexA: number, indexB: number) {
 		const a = sortedIntent[indexA];
@@ -971,7 +1277,8 @@ const WifiPanel = ({ serial, device }: WifiPanelProps) => {
 											<SecurityBadge securityType={entry.security_type} />
 											{entry.is_network_hidden && <HiddenBadge />}
 										</div>
-										{entry.ssid && (
+										{/* Only when it adds something: the name defaults to the SSID */}
+										{entry.ssid && entry.ssid !== entry.name && (
 											<span className="text-xs text-gray-500 font-mono">
 												{entry.ssid}
 											</span>
@@ -1036,345 +1343,13 @@ const WifiPanel = ({ serial, device }: WifiPanelProps) => {
 				</Button>
 
 				{showAddPicker && (
-					<div className="fixed inset-0 z-50 flex items-center justify-center">
-						<div
-							className="absolute inset-0 bg-black/40"
-							onClick={closeModal}
-						/>
-						<div className="relative bg-white rounded-xl shadow-xl w-full max-w-4xl mx-4 max-h-[80vh] flex flex-col">
-							<div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
-								{modalView === "create" ? (
-									<div className="flex items-center gap-2">
-										<button
-											type="button"
-											onClick={() => setModalView("list")}
-											className="text-gray-400 hover:text-gray-600 cursor-pointer"
-											aria-label="Back to list"
-										>
-											<ArrowLeft className="w-4 h-4" />
-										</button>
-										<h2 className="text-sm font-semibold text-gray-900">
-											New WiFi network
-										</h2>
-									</div>
-								) : (
-									<div className="flex items-center gap-3">
-										<h2 className="text-sm font-semibold text-gray-900">
-											Add network to intent
-										</h2>
-										<Button
-											variant="soft"
-											tone="blue"
-											size="sm"
-											icon={<Plus className="w-3.5 h-3.5" />}
-											onClick={() => {
-												setModalView("create");
-												setListAddError(null);
-											}}
-										>
-											New network
-										</Button>
-									</div>
-								)}
-								<button
-									type="button"
-									onClick={closeModal}
-									className="text-gray-400 hover:text-gray-600 cursor-pointer"
-									aria-label="Close"
-								>
-									<X className="w-4 h-4" />
-								</button>
-							</div>
-							{modalView === "list" && (
-								<div className="px-6 py-3 border-b border-gray-100">
-									<SearchInput
-										value={networkSearch}
-										onChange={setNetworkSearch}
-										placeholder="Search by name or SSID..."
-									/>
-								</div>
-							)}
-							{modalView === "create" ? (
-								<>
-									<div className="overflow-y-auto flex-1 p-6 space-y-4">
-										<div>
-											<label
-												htmlFor="new-net-name"
-												className="block text-xs font-medium text-gray-700 mb-1"
-											>
-												Name *
-											</label>
-											<input
-												id="new-net-name"
-												type="text"
-												value={newNetName}
-												onChange={(e) => setNewNetName(e.target.value)}
-												className={`${filterFieldClass} w-full`}
-												placeholder="e.g. Office WiFi"
-											/>
-										</div>
-										<div>
-											<label
-												htmlFor="new-net-ssid"
-												className="block text-xs font-medium text-gray-700 mb-1"
-											>
-												SSID *
-											</label>
-											<input
-												id="new-net-ssid"
-												type="text"
-												value={newNetSsid}
-												onChange={(e) => setNewNetSsid(e.target.value)}
-												className={`${filterFieldClass} w-full`}
-												placeholder="Network SSID"
-											/>
-										</div>
-										<div>
-											<label
-												htmlFor="new-net-password"
-												className="block text-xs font-medium text-gray-700 mb-1"
-											>
-												Password
-											</label>
-											<div className="relative">
-												<input
-													id="new-net-password"
-													type={showNewNetPassword ? "text" : "password"}
-													value={newNetPassword}
-													onChange={(e) => setNewNetPassword(e.target.value)}
-													className={`${filterFieldClass} w-full pr-10`}
-													placeholder="Leave empty for open networks"
-												/>
-												<button
-													type="button"
-													onClick={() => setShowNewNetPassword((p) => !p)}
-													className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
-													aria-label={
-														showNewNetPassword
-															? "Hide password"
-															: "Show password"
-													}
-												>
-													{showNewNetPassword ? (
-														<EyeOff className="w-4 h-4" />
-													) : (
-														<Eye className="w-4 h-4" />
-													)}
-												</button>
-											</div>
-										</div>
-										<div>
-											<label
-												htmlFor="new-net-description"
-												className="block text-xs font-medium text-gray-700 mb-1"
-											>
-												Description
-											</label>
-											<input
-												id="new-net-description"
-												type="text"
-												value={newNetDescription}
-												onChange={(e) => setNewNetDescription(e.target.value)}
-												className={`${filterFieldClass} w-full`}
-												placeholder="Optional"
-											/>
-										</div>
-										<div className="flex items-center gap-2">
-											<input
-												id="new-net-hidden"
-												type="checkbox"
-												checked={newNetHidden}
-												onChange={(e) => setNewNetHidden(e.target.checked)}
-												className="rounded border-gray-300 text-blue-600"
-											/>
-											<label
-												htmlFor="new-net-hidden"
-												className="text-sm text-gray-700"
-											>
-												Hidden network (SSID not broadcast)
-											</label>
-										</div>
-									</div>
-									{addIntentError && (
-										<p className="px-6 py-2 text-sm text-red-600">
-											{addIntentError}
-										</p>
-									)}
-									<div className="flex items-center justify-end gap-2 px-6 py-4 border-t border-gray-100">
-										<Button
-											variant="ghost"
-											tone="gray"
-											size="sm"
-											onClick={() => {
-												setModalView("list");
-												setAddIntentError(null);
-											}}
-										>
-											Cancel
-										</Button>
-										<Button
-											variant="solid"
-											tone="blue"
-											size="sm"
-											disabled={
-												!newNetName.trim() ||
-												!newNetSsid.trim() ||
-												isCreatingNetwork
-											}
-											loading={isCreatingNetwork}
-											onClick={() => createNetwork()}
-										>
-											Create and add to intent
-										</Button>
-									</div>
-								</>
-							) : (
-								<div className="overflow-y-auto flex-1">
-									{listAddError && (
-										<p className="px-6 pt-4 text-sm text-red-600">
-											{listAddError}
-										</p>
-									)}
-									{(() => {
-										const q = networkSearch.trim().toLowerCase();
-										const filtered = q
-											? wifiCatalog.filter(
-													(n) =>
-														n.name.toLowerCase().includes(q) ||
-														(n.ssid?.toLowerCase().includes(q) ?? false),
-												)
-											: wifiCatalog;
-										return filtered.length === 0 ? (
-											<p className="text-sm text-gray-500 p-6">
-												{q
-													? "No networks match your search."
-													: "No WiFi networks in catalog."}
-											</p>
-										) : (
-											<table className="min-w-full divide-y divide-gray-200">
-												<thead className="sticky top-0 bg-white">
-													<tr>
-														{[
-															"Name",
-															"SSID",
-															"Password",
-															"Type",
-															"Hidden",
-															"",
-														].map((col) => (
-															<th
-																key={col}
-																scope="col"
-																className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
-															>
-																{col}
-															</th>
-														))}
-													</tr>
-												</thead>
-												<tbody className="divide-y divide-gray-100">
-													{filtered.map((n) => {
-														const revealed = revealedNetworkIds.has(n.id);
-														return (
-															<tr
-																key={n.id}
-																className="hover:bg-gray-50 transition-colors"
-															>
-																<td className="px-4 py-3 text-sm font-medium text-gray-900">
-																	{n.name}
-																	{n.description && (
-																		<p className="text-xs text-gray-400 font-normal">
-																			{n.description}
-																		</p>
-																	)}
-																</td>
-																<td className="px-4 py-3 text-sm font-mono text-gray-600">
-																	{n.ssid ?? (
-																		<span className="text-gray-400 italic">
-																			—
-																		</span>
-																	)}
-																</td>
-																<td className="px-4 py-3 min-w-[16rem]">
-																	{n.password ? (
-																		<div className="flex items-center gap-1.5">
-																			<span className="text-sm font-mono text-gray-700">
-																				{revealed ? n.password : MASK}
-																			</span>
-																			<button
-																				type="button"
-																				onClick={() =>
-																					setRevealedNetworkIds((prev) => {
-																						const next = new Set(prev);
-																						next.has(n.id)
-																							? next.delete(n.id)
-																							: next.add(n.id);
-																						return next;
-																					})
-																				}
-																				className="text-gray-400 hover:text-gray-600"
-																				aria-label={
-																					revealed
-																						? "Hide password"
-																						: "Reveal password"
-																				}
-																			>
-																				{revealed ? (
-																					<EyeOff className="w-3.5 h-3.5" />
-																				) : (
-																					<Eye className="w-3.5 h-3.5" />
-																				)}
-																			</button>
-																		</div>
-																	) : (
-																		<span className="text-xs text-gray-400">
-																			None
-																		</span>
-																	)}
-																</td>
-																<td className="px-4 py-3">
-																	<Badge variant="gray">{n.network_type}</Badge>
-																</td>
-																<td className="px-4 py-3 text-center">
-																	{n.is_network_hidden ? (
-																		<span className="text-green-600 text-xs font-medium">
-																			Yes
-																		</span>
-																	) : (
-																		<span className="text-gray-400 text-xs">
-																			No
-																		</span>
-																	)}
-																</td>
-																<td className="px-4 py-3 text-right">
-																	<Button
-																		variant="soft"
-																		tone="blue"
-																		size="sm"
-																		onClick={() =>
-																			createIntent({
-																				deviceId,
-																				data: {
-																					network_id: n.id,
-																					managed_by: "operator",
-																				},
-																			})
-																		}
-																	>
-																		Add
-																	</Button>
-																</td>
-															</tr>
-														);
-													})}
-												</tbody>
-											</table>
-										);
-									})()}
-								</div>
-							)}
-						</div>
-					</div>
+					<AddNetworkModal
+						deviceId={deviceId}
+						serial={serial}
+						intentNames={sortedIntent.map((e) => e.name)}
+						onClose={closeAddPicker}
+						onToast={setToast}
+					/>
 				)}
 			</div>
 
@@ -1405,31 +1380,6 @@ const WifiPanel = ({ serial, device }: WifiPanelProps) => {
 						>
 							{syncing ? "Syncing..." : "Refresh"}
 						</Button>
-					</div>
-
-					{/* Current network */}
-					<div className="mb-4 pb-4 border-b border-gray-100">
-						<p className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-2">
-							Current network
-						</p>
-						{isBusy && !currentNetwork ? (
-							<div className="h-4 w-32 bg-gray-100 rounded animate-pulse" />
-						) : currentNetwork ? (
-							<div className="flex items-center gap-2">
-								<Wifi className="w-4 h-4 text-green-500 flex-shrink-0" />
-								<span className="text-sm font-medium text-gray-900">
-									{currentNetwork.ssid}
-								</span>
-								<Badge variant="green" pill>
-									Connected
-								</Badge>
-							</div>
-						) : (
-							<div className="flex items-center gap-2 text-gray-500">
-								<WifiOff className="w-4 h-4 flex-shrink-0" />
-								<span className="text-sm">Disconnected</span>
-							</div>
-						)}
 					</div>
 
 					{/* Configured profiles */}
@@ -1473,11 +1423,12 @@ const WifiPanel = ({ serial, device }: WifiPanelProps) => {
 														/>
 														{profile.is_network_hidden && <HiddenBadge />}
 													</div>
-													{profile.ssid && (
-														<span className="text-xs text-gray-500 font-mono truncate">
-															{profile.ssid}
-														</span>
-													)}
+													{profile.ssid &&
+														profile.ssid !== profile.profile_name && (
+															<span className="text-xs text-gray-500 font-mono truncate">
+																{profile.ssid}
+															</span>
+														)}
 												</div>
 												<div className="flex items-center gap-2 flex-shrink-0">
 													{profile.is_active && (
