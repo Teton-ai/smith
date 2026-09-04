@@ -234,6 +234,10 @@ async fn start_main_server(
     files::spawn_sweeper(state.pg_pool.clone(), &config.assets_bucket_name);
     os::spawn_sweeper(state.pg_pool.clone(), &config.packages_bucket_name);
 
+    // Every pre-existing network has zero ledger references until App API
+    // seeds it, so this only runs once seeding is confirmed (network::gc).
+    network::gc::spawn_sweeper(state.pg_pool.clone(), config.network_gc_interval_seconds);
+
     let recorder_handle = metric::setup_metrics_recorder();
 
     let mut api_doc = ApiDoc::openapi();

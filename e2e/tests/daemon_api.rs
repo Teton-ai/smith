@@ -1259,3 +1259,161 @@ async fn ascending_lock_order_avoids_deadlock_under_concurrency() -> Result<()> 
     outcome.context("concurrent ascending-order lockers should all complete without deadlock")?;
     Ok(())
 }
+
+// --- Garbage collection sweep ------------------------------------------------
+//
+// `network::gc::sweep_once` is private to the `api` binary crate (no `lib.rs`
+// to import from), so - same as the ledger tests above - this replicates its
+// query and per-candidate `collect_network` check directly against Postgres
+// rather than driving it through HTTP or a shared function.
+
+/// Mirrors `network::gc::sweep_once`'s candidate query and per-row
+/// `collect_network` check (hand-copied - keep in sync). Returns the ids
+/// actually collected.
+async fn run_gc_sweep_once(ctx: &Ctx) -> Result<Vec<i32>> {
+    let candidates: Vec<i32> = sqlx::query_scalar(
+        "SELECT n.id FROM network n
+         WHERE NOT EXISTS (SELECT 1 FROM network_reference r WHERE r.network_id = n.id)
+           AND NOT network_has_internal_reference(n.id)",
+    )
+    .fetch_all(&ctx.db)
+    .await
+    .context("selecting gc sweep candidates")?;
+
+    let mut collected = Vec::new();
+    for network_id in candidates {
+        let mut tx = ctx.db.begin().await?;
+        sqlx::query("SELECT pg_advisory_xact_lock($1)")
+            .bind(i64::from(network_id))
+            .execute(&mut *tx)
+            .await?;
+        let has_ledger_ref: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM network_reference WHERE network_id = $1)",
+        )
+        .bind(network_id)
+        .fetch_one(&mut *tx)
+        .await?;
+        let has_internal_ref: bool =
+            sqlx::query_scalar("SELECT network_has_internal_reference($1)")
+                .bind(network_id)
+                .fetch_one(&mut *tx)
+                .await?;
+        if !has_ledger_ref && !has_internal_ref {
+            sqlx::query("DELETE FROM network WHERE id = $1")
+                .bind(network_id)
+                .execute(&mut *tx)
+                .await?;
+            collected.push(network_id);
+        }
+        tx.commit().await?;
+    }
+    Ok(collected)
+}
+
+/// A network with zero `network_reference` rows and zero internal FK
+/// references is collected by the sweep; a referenced sibling seeded
+/// alongside it survives untouched.
+#[tokio::test]
+#[ignore = "requires running compose stack; use make test.e2e"]
+async fn gc_sweep_collects_only_unreferenced_networks() -> Result<()> {
+    let ctx = Ctx::connect().await?;
+    wait_for_api(&ctx).await?;
+    if !has_reference_ledger(&ctx).await? {
+        println!(
+            "skipping gc_sweep_collects_only_unreferenced_networks: \
+             ledger not present (version-skew job)"
+        );
+        return Ok(());
+    }
+
+    let unreferenced_ssid = format!("e2e-gc-sweep-unreferenced-{}", uuid::Uuid::new_v4());
+    let referenced_ssid = format!("e2e-gc-sweep-referenced-{}", uuid::Uuid::new_v4());
+    let outcome: Result<(bool, bool)> = async {
+        let unreferenced_id = insert_test_network(&ctx, &unreferenced_ssid).await?;
+        let referenced_id = insert_test_network(&ctx, &referenced_ssid).await?;
+        insert_reference(&ctx, "app_api", &referenced_ssid, referenced_id).await?;
+
+        run_gc_sweep_once(&ctx).await?;
+
+        Ok((
+            network_exists(&ctx, unreferenced_id).await?,
+            network_exists(&ctx, referenced_id).await?,
+        ))
+    }
+    .await;
+
+    sqlx::query("DELETE FROM network_reference WHERE external_key = $1")
+        .bind(&referenced_ssid)
+        .execute(&ctx.db)
+        .await
+        .context("cleaning up gc sweep reference")?;
+    sqlx::query("DELETE FROM network WHERE ssid IN ($1, $2)")
+        .bind(&unreferenced_ssid)
+        .bind(&referenced_ssid)
+        .execute(&ctx.db)
+        .await
+        .context("cleaning up gc sweep networks")?;
+
+    let (unreferenced_exists, referenced_exists) = outcome?;
+    ensure!(
+        !unreferenced_exists,
+        "an unreferenced network should have been collected by the sweep"
+    );
+    ensure!(
+        referenced_exists,
+        "a network with a surviving network_reference row must not be collected by the sweep"
+    );
+    Ok(())
+}
+
+/// Same mechanism as above, but the surviving reference is an internal FK
+/// (`device_configured_network`), not a ledger row - the sweep's candidate
+/// query itself must exclude it, not just `collect_network`'s later check.
+#[tokio::test]
+#[ignore = "requires running compose stack; use make test.e2e"]
+async fn gc_sweep_does_not_collect_while_internal_reference_remains() -> Result<()> {
+    let (ctx, device_id) = setup().await?;
+    if !has_reference_ledger(&ctx).await? {
+        println!(
+            "skipping gc_sweep_does_not_collect_while_internal_reference_remains: \
+             ledger not present (version-skew job)"
+        );
+        return Ok(());
+    }
+
+    let ssid = format!("e2e-gc-sweep-internal-{}", uuid::Uuid::new_v4());
+    let outcome: Result<bool> = async {
+        let network_id = insert_test_network(&ctx, &ssid).await?;
+        sqlx::query(
+            "INSERT INTO device_configured_network (device_id, network_id, profile_name)
+             VALUES ($1, $2, $3)",
+        )
+        .bind(device_id)
+        .bind(network_id)
+        .bind(&ssid)
+        .execute(&ctx.db)
+        .await?;
+
+        run_gc_sweep_once(&ctx).await?;
+
+        network_exists(&ctx, network_id).await
+    }
+    .await;
+
+    sqlx::query("DELETE FROM device_configured_network WHERE network_id IN (SELECT id FROM network WHERE ssid = $1)")
+        .bind(&ssid)
+        .execute(&ctx.db)
+        .await
+        .context("cleaning up gc sweep configured-network row")?;
+    sqlx::query("DELETE FROM network WHERE ssid = $1")
+        .bind(&ssid)
+        .execute(&ctx.db)
+        .await
+        .context("cleaning up gc sweep internal-reference network")?;
+
+    ensure!(
+        outcome?,
+        "a network with a surviving device_configured_network row must not be collected by the sweep"
+    );
+    Ok(())
+}
