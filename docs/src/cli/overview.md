@@ -191,4 +191,5 @@ sm label -s rpi region=warehouse-1
 - [logs](./cli-logs.md) - Get logs from devices
 - [run](./cli-run.md) - Run custom commands on devices
 - [label](./cli-label.md) - Set labels on devices
-- [Other Commands](./cli-other.md) - Additional utility commands
+- [Other Commands](./cli-other.md) - Additional utility commands, including
+  `approve`, `revoke` and `unregister`

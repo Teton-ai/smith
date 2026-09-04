@@ -2,6 +2,91 @@
 
 Additional utility commands for managing your Smith CLI and devices.
 
+## approve
+
+Approve devices so they can register and join the fleet. A device that has
+registered but has not been approved shows up as pending and receives no token.
+
+### Usage
+
+```sh
+sm approve [DEVICE_SELECTOR] [OPTIONS]
+```
+
+### Options
+
+- `-y`, `--yes`: Skip the confirmation prompt
+
+### Examples
+
+```sh
+# Approve one device
+sm approve ABC123
+
+# Approve every pending device carrying a label, without prompting
+sm approve -l site=oslo -y
+```
+
+## revoke
+
+Withdraw a device's approval. It stops receiving commands and updates, but the
+server keeps its token, so approving it again later can leave it unable to
+register. Use `unregister` when you want the device to pair again from scratch.
+
+### Usage
+
+```sh
+sm revoke [DEVICE_SELECTOR] [OPTIONS]
+```
+
+### Options
+
+- `-y`, `--yes`: Skip the confirmation prompt
+
+### Examples
+
+```sh
+# Revoke one device
+sm revoke ABC123
+```
+
+## unregister
+
+Reset a device's enrollment, sending it back through approval as if it had never
+been seen. Clears the approval, the token and the release target together, which
+is the only combination that lets the device pair again from scratch.
+
+### Usage
+
+```sh
+sm unregister [DEVICE_SELECTOR] [OPTIONS]
+```
+
+### Options
+
+- `-y`, `--yes`: Skip the confirmation prompt
+
+### Examples
+
+```sh
+# Unregister a re-imaged device
+sm unregister ABC123
+
+# Unregister several at once without prompting
+sm unregister ABC123 DEF456 -y
+```
+
+### Notes
+
+- The device drops offline within a ping or two, clears its local token by
+  itself, and reappears under pending approval. Approve it again — with a
+  release — to bring it back.
+- Nothing is deleted. Command history, responses, the ledger, labels, variables
+  and notes all stay on the device page.
+- The reset is recorded in the device's ledger together with who ran it.
+- This resets the device's record in Smith only. It does not touch credentials
+  that other Teton services issue to the same machine.
+
 ## test-network
 
 Test network speed for devices (downloads 20MB test file).
