@@ -9,15 +9,21 @@
 //! the on/off state.
 
 use crate::network::ledger::{collect_network, lock_network};
+use rand::RngExt;
 use sqlx::PgPool;
 use std::time::Duration;
 use tokio::time::{MissedTickBehavior, sleep};
 use tracing::{error, info};
 
-/// Same reasoning as `files::spawn_sweeper`: every replica boots at once
-/// during a rolling deploy, so stagger the first tick rather than have the
-/// whole fleet sweep in lockstep.
+/// Delay before the first tick, so the sweep doesn't compete with everything
+/// else starting up right after boot.
 const STARTUP_GRACE: Duration = Duration::from_secs(60);
+
+/// Added on top of `STARTUP_GRACE`, randomized per instance: `smith-api` runs
+/// several replicas, and a fixed delay alone still has all of them land on
+/// the same candidate set at once. The interval is 2 days by default, so a
+/// few extra minutes of spread costs nothing.
+const STARTUP_JITTER_MAX: Duration = Duration::from_secs(300);
 
 /// Finds every network with zero `network_reference` rows and zero internal
 /// FK references, taking each candidate's per-id advisory lock and running it
@@ -56,7 +62,8 @@ async fn sweep_once(pool: &PgPool) -> Result<i64, sqlx::Error> {
 /// request handler, on `config.network_gc_interval_seconds`.
 pub fn spawn_sweeper(pool: PgPool, interval_seconds: u64) {
     tokio::spawn(async move {
-        sleep(STARTUP_GRACE).await;
+        let jitter = rand::rng().random_range(Duration::ZERO..=STARTUP_JITTER_MAX);
+        sleep(STARTUP_GRACE + jitter).await;
 
         let mut ticker = tokio::time::interval(Duration::from_secs(interval_seconds));
         ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);

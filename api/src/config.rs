@@ -168,6 +168,9 @@ impl Config {
             network_gc_interval_seconds: env::var("NETWORK_GC_INTERVAL_SECONDS")
                 .ok()
                 .and_then(|s| s.parse().ok())
+                // Zero treated as unset, not honored: tokio::time::interval
+                // panics on a zero duration.
+                .filter(|&secs: &u64| secs > 0)
                 // App API's reconcile job (the only current holder) pushes at
                 // most every 2 days, so sweeping more often than that just
                 // finds nothing new.
