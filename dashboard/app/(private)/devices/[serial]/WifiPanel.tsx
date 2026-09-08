@@ -7,6 +7,8 @@ import {
 	Panel,
 	SECTION_THEMES,
 	SearchInput,
+	SelectMenu,
+	type SelectMenuOption,
 	Toast,
 	type ToastState,
 } from "@teton/smith-ui";
@@ -67,6 +69,12 @@ const MASK = "••••••••••••";
 
 const filterFieldClass =
 	"px-2 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm text-gray-900";
+
+const BAND_FILTER_OPTIONS: SelectMenuOption[] = [
+	{ value: "all", label: "All bands" },
+	{ value: "2.4 GHz", label: "2.4 GHz" },
+	{ value: "5 GHz", label: "5 GHz" },
+];
 
 const getProfileTimestamp = (p: ConfiguredNetwork) => p.updated_at;
 const getScanTimestamp = (r: WifiScanResult) => r.scanned_at;
@@ -944,8 +952,13 @@ const WifiPanel = ({ serial, device }: WifiPanelProps) => {
 		onSuccess: startScanSync,
 	});
 
-	const securityOptions = useMemo(
-		() => [...new Set(scanResults.map((r) => r.security ?? "Open"))].sort(),
+	const securityFilterOptions = useMemo<SelectMenuOption[]>(
+		() => [
+			{ value: "all", label: "All security" },
+			...[...new Set(scanResults.map((r) => r.security ?? "Open"))]
+				.sort()
+				.map((s) => ({ value: s, label: s })),
+		],
 		[scanResults],
 	);
 
@@ -1353,9 +1366,7 @@ const WifiPanel = ({ serial, device }: WifiPanelProps) => {
 				)}
 			</div>
 
-			{/* Splits at xl, not lg: the panel itself only takes two thirds of the
-			    Network tab, so the scan table needs the extra width. */}
-			<div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+			<div>
 				<div>
 					{/* Last checked */}
 					<div className="flex items-center justify-between gap-2 mb-3">
@@ -1472,8 +1483,11 @@ const WifiPanel = ({ serial, device }: WifiPanelProps) => {
 					</div>
 				</div>
 
-				{/* Scan results */}
-				<div className="border-t border-gray-100 pt-4 xl:border-t-0 xl:pt-0 xl:border-l xl:border-gray-100 xl:pl-6">
+				{/* Scan results. Stacked under the profiles rather than beside them:
+				    the panel is only two thirds of the Network tab, and half of that
+				    truncates SSIDs and pushes the band/security columns of the table
+				    below into a horizontal scroll. */}
+				<div className="mt-6 border-t border-gray-100 pt-6">
 					<div className="flex items-center justify-between gap-2 mb-3">
 						{isScanError ? (
 							<p className="text-sm text-red-500">
@@ -1513,36 +1527,30 @@ const WifiPanel = ({ serial, device }: WifiPanelProps) => {
 						</div>
 					) : !scanResults || scanResults.length === 0 ? null : (
 						<>
-							<div className="flex items-center gap-2 mb-3">
+							<div className="flex flex-wrap items-center gap-2 mb-3">
 								<SearchInput
 									value={scanQuery}
 									onChange={setScanQuery}
 									placeholder="Filter by SSID or BSSID..."
-									className="flex-1 min-w-0"
+									className="flex-1 min-w-[14rem]"
 								/>
-								<select
+								<SelectMenu
 									value={bandFilter}
-									onChange={(e) => setBandFilter(e.target.value)}
-									aria-label="Filter by band"
-									className={filterFieldClass}
-								>
-									<option value="all">All bands</option>
-									<option value="2.4 GHz">2.4 GHz</option>
-									<option value="5 GHz">5 GHz</option>
-								</select>
-								<select
+									onChange={setBandFilter}
+									options={BAND_FILTER_OPTIONS}
+									ariaLabel="Filter by band"
+									className="w-36"
+									menuClassName="w-44"
+								/>
+								<SelectMenu
 									value={securityFilter}
-									onChange={(e) => setSecurityFilter(e.target.value)}
-									aria-label="Filter by security"
-									className={filterFieldClass}
-								>
-									<option value="all">All security</option>
-									{securityOptions.map((s) => (
-										<option key={s} value={s}>
-											{s}
-										</option>
-									))}
-								</select>
+									onChange={setSecurityFilter}
+									options={securityFilterOptions}
+									ariaLabel="Filter by security"
+									className="w-40"
+									menuClassName="w-56"
+									align="right"
+								/>
 							</div>
 							{filteredGroups.length === 0 ? (
 								<p className="text-sm text-gray-500">
