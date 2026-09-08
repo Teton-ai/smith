@@ -149,36 +149,6 @@ pub async fn get_network_by_id(
     Ok(Json(network))
 }
 
-#[utoipa::path(
-    delete,
-    path = "/networks/{network_id}",
-    params(
-        ("network_id" = i32, Path),
-    ),
-    responses(
-        (status = StatusCode::NO_CONTENT, description = "Successfully deleted the network"),
-        (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to delete network", body = String),
-    ),
-    security(
-        ("auth_token" = [])
-    ),
-    tag = NETWORKS_TAG
-)]
-pub async fn delete_network_by_id(
-    Path(network_id): Path<i32>,
-    Extension(state): Extension<State>,
-) -> Result<StatusCode, StatusCode> {
-    sqlx::query!(r#"DELETE FROM network WHERE id = $1"#, network_id)
-        .execute(&state.pg_pool)
-        .await
-        .map_err(|err| {
-            error!("Failed to delete network {err}");
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?;
-
-    Ok(StatusCode::NO_CONTENT)
-}
-
 /// The one construction of the content-addressing `credentials` envelope.
 ///
 /// Both the lock key and the identity match project `->>'psk'`, so a row must be

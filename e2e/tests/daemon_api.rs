@@ -1143,9 +1143,8 @@ async fn reconcile_rolls_back_entirely_on_invalid_element() -> Result<()> {
     Ok(())
 }
 
-/// `network_reference`'s `ON DELETE RESTRICT` FK means the existing public
-/// `DELETE /networks/{id}` can no longer silently orphan a held network now
-/// that the ledger exists: it must fail instead.
+/// `network_reference`'s `ON DELETE RESTRICT` FK means a raw `DELETE FROM
+/// network` can't silently orphan a held network: it must fail instead.
 #[tokio::test]
 #[ignore = "requires running compose stack; use make test.e2e"]
 async fn hard_delete_fails_on_a_held_network() -> Result<()> {

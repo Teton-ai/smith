@@ -259,10 +259,7 @@ async fn start_main_server(
             network::route::get_networks,
             network::route::create_network
         ))
-        .routes(routes!(
-            network::route::get_network_by_id,
-            network::route::delete_network_by_id
-        ))
+        .routes(routes!(network::route::get_network_by_id))
         .routes(routes!(
             network::ledger::acquire_reference,
             network::ledger::release_reference
