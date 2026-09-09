@@ -23,7 +23,7 @@ use tracing::{error, info, warn};
 
 /// How long after a problem is reported before the device is rebooted. Other
 /// services poll the control socket within this window to react in time.
-const RESTART_DELAY: Duration = Duration::from_secs(10 * 60);
+const RESTART_DELAY: Duration = Duration::from_secs(30 * 60);
 
 /// Restarts are only armed once the daemon has been up this long, so a device
 /// that boots without connectivity does not reboot-loop.
@@ -379,9 +379,17 @@ mod tests {
         assert!(status.held);
         assert_eq!(status.hold_seconds_remaining, MAX_HOLD_TTL.as_secs());
 
-        // Reach the original deadline with the hold still live.
-        tokio::time::advance(RESTART_DELAY - Duration::from_secs(120)).await;
-        settle().await;
+        // Reach the original deadline with the hold still live. A lease is
+        // capped well below the countdown, so carrying a deferral that far is
+        // only possible by renewing, the way a real holder does.
+        let renew_every = MAX_HOLD_TTL / 2;
+        let mut advanced = Duration::from_secs(120);
+        while advanced < RESTART_DELAY {
+            tokio::time::advance(renew_every).await;
+            advanced += renew_every;
+            settle().await;
+            police.hold(Some(3600)).await;
+        }
         let status = police.status().await;
         assert!(
             !REBOOT_FIRED.load(Ordering::SeqCst),
