@@ -109,7 +109,15 @@ impl Actor {
                     } else {
                         Some(secret.as_str())
                     };
-                    let client = Client::new("localhost", local, &server, 0, secret_opt).await;
+                    let mut client = Client::new("localhost", local, &server, 0, secret_opt).await;
+                    for attempt in 1..3 {
+                        if client.is_ok() {
+                            break;
+                        }
+                        tracing::warn!(attempt, "Retrying tunnel connection");
+                        time::sleep(Duration::from_secs(1)).await;
+                        client = Client::new("localhost", local, &server, 0, secret_opt).await;
+                    }
 
                     match client {
                         Ok(client) => {
