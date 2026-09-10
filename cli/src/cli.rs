@@ -333,4 +333,13 @@ pub enum Commands {
         #[arg(short = 'y', long)]
         yes: bool,
     },
+
+    /// Reset device enrollment, sending it back through approval
+    Unregister {
+        #[command(flatten)]
+        selector: DeviceSelector,
+        /// Skip confirmation prompt
+        #[arg(short = 'y', long)]
+        yes: bool,
+    },
 }

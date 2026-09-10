@@ -1,15 +1,35 @@
+import { useQueryClient } from "@tanstack/react-query";
 import {
+	Button,
 	Card,
 	CountryFlag,
 	InfoRow,
 	LabelChip,
 	Panel,
 	SECTION_THEMES,
+	Toast,
+	type ToastState,
 } from "@teton/smith-ui";
-import { GitBranch, Globe, MapPin, Tag, Tags } from "lucide-react";
-import { lazy, Suspense } from "react";
+import {
+	CheckCircle2,
+	GitBranch,
+	Globe,
+	MapPin,
+	MinusCircle,
+	RotateCcw,
+	ShieldAlert,
+	Tag,
+	Tags,
+} from "lucide-react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { Link, useParams } from "react-router";
-import { useGetDeviceInfo } from "@/app/api-client";
+import {
+	type Device,
+	getGetDeviceInfoQueryKey,
+	useGetDeviceInfo,
+	useUnregisterDevice,
+} from "@/app/api-client";
+import { Modal } from "@/app/components/modal";
 import { DeviceDetailLayout } from "../DeviceDetailLayout";
 
 const LocationMap = lazy(() => import("../LocationMap"));
@@ -22,6 +42,147 @@ const MapFallback = () => (
 
 const linkClass =
 	"font-mono text-sm text-blue-600 hover:text-blue-800 hover:underline cursor-pointer transition-colors";
+
+/** Yes / no pill for a single enrollment fact. */
+const EnrollmentPill = ({ value }: { value: boolean }) => (
+	<span
+		className={`inline-flex items-center gap-1.5 text-sm font-medium ${
+			value ? "text-green-600" : "text-gray-400"
+		}`}
+	>
+		{value ? (
+			<CheckCircle2 className="w-4 h-4" />
+		) : (
+			<MinusCircle className="w-4 h-4" />
+		)}
+		{value ? "Yes" : "No"}
+	</span>
+);
+
+/** Enrollment state plus the one destructive action on this tab. Unregistering
+ *  is the only way to get a device that is stuck — approved with a stale token,
+ *  or re-imaged — back through approval, so the current approval/token state is
+ *  shown next to the button rather than left for the operator to guess. */
+const EnrollmentCard = ({
+	serial,
+	device,
+}: {
+	serial: string;
+	device: Device;
+}) => {
+	const queryClient = useQueryClient();
+	const [confirming, setConfirming] = useState(false);
+	const [toast, setToast] = useState<ToastState | null>(null);
+
+	useEffect(() => {
+		if (toast) {
+			const timer = setTimeout(() => setToast(null), 3000);
+			return () => clearTimeout(timer);
+		}
+	}, [toast]);
+
+	const { mutate: unregister, isPending } = useUnregisterDevice({
+		mutation: {
+			onSuccess: () => {
+				queryClient.invalidateQueries({
+					queryKey: getGetDeviceInfoQueryKey(serial),
+				});
+				setConfirming(false);
+				setToast({
+					message: `${device.serial_number} unregistered — pending approval`,
+					type: "success",
+				});
+			},
+			onError: () => {
+				setToast({ message: "Failed to unregister device", type: "error" });
+			},
+		},
+	});
+
+	return (
+		<>
+			<Card className="p-5 border-red-200">
+				<div className="flex items-center gap-2 mb-4">
+					<ShieldAlert className="w-3.5 h-3.5 text-red-400" />
+					<span className="text-xs font-semibold uppercase tracking-wide text-red-500">
+						Enrollment
+					</span>
+				</div>
+
+				<div className="divide-y divide-gray-100">
+					<InfoRow label="Approved">
+						<EnrollmentPill value={device.approved} />
+					</InfoRow>
+					<InfoRow label="Holds a token">
+						<EnrollmentPill value={device.has_token ?? false} />
+					</InfoRow>
+				</div>
+
+				<div className="mt-4 pt-4 border-t border-gray-100 flex items-start justify-between gap-4">
+					<p className="text-sm text-gray-500">
+						Unregistering clears the approval, the token and the release target
+						together, so this device comes back as if it had never been seen and
+						has to be approved again. Nothing is deleted — commands, responses,
+						labels, variables and notes stay.
+					</p>
+					<Button
+						variant="solid"
+						tone="red"
+						size="sm"
+						onClick={() => setConfirming(true)}
+						icon={<RotateCcw className="w-4 h-4" />}
+					>
+						Unregister
+					</Button>
+				</div>
+			</Card>
+
+			<Modal
+				open={confirming}
+				onClose={() => setConfirming(false)}
+				title="Unregister Device"
+				footer={
+					<>
+						<Button
+							variant="soft"
+							tone="gray"
+							disabled={isPending}
+							onClick={() => setConfirming(false)}
+						>
+							Cancel
+						</Button>
+						<Button
+							variant="solid"
+							tone="red"
+							loading={isPending}
+							onClick={() => unregister({ deviceId: serial })}
+						>
+							{isPending ? "Unregistering..." : "Unregister Device"}
+						</Button>
+					</>
+				}
+			>
+				<div className="bg-red-50 border border-red-200 rounded-lg p-4">
+					<div className="flex gap-3">
+						<ShieldAlert className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
+						<div>
+							<p className="text-red-800 font-medium">
+								Unregister {device.serial_number}
+							</p>
+							<p className="text-red-700 text-sm mt-1">
+								It goes offline within a minute or two, then reappears under
+								Pending approval. Approve it again, with a release, to bring it
+								back. Its history, labels, variables and notes are kept.
+							</p>
+						</div>
+					</div>
+				</div>
+			</Modal>
+
+			<Toast toast={toast} onClose={() => setToast(null)} />
+		</>
+	);
+};
 
 /** System tab: the device's labels, hardware, OS and release details, next to
  *  where it is. The system card carries no header — the tab already names it —
@@ -251,6 +412,10 @@ const SystemPage = () => {
 							</div>
 						)}
 					</Panel>
+
+					<div className="lg:col-span-2">
+						<EnrollmentCard serial={serial} device={device} />
+					</div>
 				</div>
 			)}
 		</DeviceDetailLayout>

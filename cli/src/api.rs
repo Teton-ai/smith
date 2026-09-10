@@ -803,4 +803,26 @@ impl SmithAPI {
 
         Ok(())
     }
+
+    /// Clears the device's approval and token together, so it has to be
+    /// approved again before it can re-register. `handle_error` rather than
+    /// `error_for_status` because the two interesting failures here - 403 for a
+    /// caller without `devices:write`, 404 for a serial that doesn't exist -
+    /// are worth showing with their body instead of a bare status line.
+    pub async fn unregister_device(&self, device_id: u64) -> Result<()> {
+        let client = Client::new();
+
+        client
+            .delete(format!(
+                "{}/devices/{}/registration",
+                self.domain, device_id
+            ))
+            .header("Authorization", format!("Bearer {}", &self.bearer_token))
+            .send()
+            .await?
+            .handle_error()
+            .await?;
+
+        Ok(())
+    }
 }

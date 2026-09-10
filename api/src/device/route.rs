@@ -31,7 +31,7 @@ use smith::utils::schema::SafeCommandRequest;
 use sqlx::types::Json as SqlxJson;
 use sqlx::types::chrono::{DateTime, Utc};
 use std::collections::HashMap;
-use tracing::{error, warn};
+use tracing::{error, info, warn};
 use utoipa::IntoParams;
 
 const DEVICE_TAG: &str = "device";
@@ -2586,6 +2586,115 @@ pub async fn delete_token(
     })?;
 
     Ok(Json(()))
+}
+
+// Neither half of this does the job alone. `revoke_device` keeps the row's
+// token, which strands the device on the *next* approval: `register_device`
+// only reaches its token check once `approved` is true again, and then answers
+// 409 forever (verified against a live API). `delete_token` leaves
+// `approved = true`, so the device just mints a fresh token with nobody in the
+// loop. Doing both in one transaction is the only combination that sends a
+// device back through approval the way a never-seen-before one goes.
+//
+// Only the columns registration and approval own are cleared. Commands,
+// responses, ledger, variables, labels and network intent all survive: the
+// physical unit hasn't moved, so its bookkeeping still applies to it. Because
+// the row survives, the reset can record itself in that device's own ledger.
+/// Resets a device's enrollment so it must be approved again before it can register.
+#[utoipa::path(
+    delete,
+    path = "/devices/{device_id}/registration",
+    params(
+        ("device_id" = String, Path, description = "Device id or serial number"),
+    ),
+    responses(
+        (status = StatusCode::NO_CONTENT, description = "Registration reset; the device must be approved again"),
+        (status = StatusCode::FORBIDDEN, description = "Caller is not allowed to write devices"),
+        (status = StatusCode::NOT_FOUND, description = "Device not found"),
+        (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to reset device registration"),
+    ),
+    security(
+        ("auth_token" = [])
+    ),
+    tag = DEVICES_TAG
+)]
+pub async fn unregister_device(
+    Path(device_id): Path<String>,
+    Extension(state): Extension<State>,
+    Extension(current_user): Extension<CurrentUser>,
+) -> axum::response::Result<StatusCode, StatusCode> {
+    let user_id = current_user.user_id;
+
+    if !authorization::check(current_user, "devices", "write") {
+        return Err(StatusCode::FORBIDDEN);
+    }
+
+    let resolved_id = resolve_device_id(&device_id, &state.pg_pool).await?;
+
+    let mut tx = state.pg_pool.begin().await.map_err(|err| {
+        error!("Failed to start transaction {err}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    let device = sqlx::query!(
+        r#"UPDATE device
+        SET approved = false,
+            token = NULL,
+            release_id = NULL,
+            target_release_id = NULL,
+            target_release_id_set_at = NULL
+        WHERE id = $1
+        RETURNING serial_number"#,
+        resolved_id
+    )
+    .fetch_one(&mut *tx)
+    .await
+    .map_err(|err| {
+        // Only reachable if the device was deleted between resolving it and
+        // this update; report it as the 404 it is rather than a server fault.
+        if matches!(err, sqlx::Error::RowNotFound) {
+            return StatusCode::NOT_FOUND;
+        }
+        error!("Failed to reset registration for device {resolved_id} {err}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    // The ledger entry is the whole audit trail for this action, so name the
+    // operator in it. Attribution is best-effort: a missing or unreadable email
+    // must not fail the reset itself.
+    let actor = sqlx::query_scalar!("SELECT email FROM auth.users WHERE id = $1", user_id)
+        .fetch_optional(&mut *tx)
+        .await
+        .inspect_err(|err| error!("Failed to look up email for user {user_id} {err}"))
+        .ok()
+        .flatten()
+        .flatten()
+        .unwrap_or_else(|| "an unknown user".to_string());
+
+    sqlx::query!(
+        r#"INSERT INTO ledger (device_id, "class", "text") VALUES ($1, $2, $3)"#,
+        resolved_id,
+        "unregistered",
+        format!("Registration reset by {actor}. Device must be approved again.")
+    )
+    .execute(&mut *tx)
+    .await
+    .map_err(|err| {
+        error!("Failed to insert ledger entry for device {err}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    tx.commit().await.map_err(|err| {
+        error!("Failed to commit transaction {err}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    info!(
+        "Registration reset for device {} ({resolved_id}) by {actor}",
+        device.serial_number
+    );
+
+    Ok(StatusCode::NO_CONTENT)
 }
 
 #[utoipa::path(
