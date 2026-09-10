@@ -1,5 +1,5 @@
 #[tokio::test]
-async fn secret_from_magic_toml() {
+async fn tunnel_retries_until_server_is_ready_and_uses_secret() {
     use crate::magic::MagicHandle;
     use crate::shutdown::ShutdownHandler;
     use bore_cli::server::Server;
@@ -44,8 +44,12 @@ secret = "{random_secret}"
         .expect("Failed to convert path to string")
         .into();
 
-    tokio::spawn(Server::new(1024..=65535, Some(&random_secret)).listen());
-    tokio::time::sleep(Duration::from_millis(50)).await;
+    let server = tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(1500)).await;
+        Server::new(1024..=65535, Some(&random_secret))
+            .listen()
+            .await
+    });
 
     let listener = TcpListener::bind("localhost:0")
         .await
@@ -63,4 +67,5 @@ secret = "{random_secret}"
     let resp = tunnel.start_tunnel(Some(local_port), None, None).await;
 
     assert_ne!(resp, 0);
+    server.abort();
 }
