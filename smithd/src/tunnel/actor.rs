@@ -74,6 +74,7 @@ impl Actor {
                 remote_login,
                 remote,
             } => {
+                self.timeout_old_tunnels().await;
                 let created_at = Instant::now();
 
                 // check if there is already a ForwardConnection for this port
@@ -172,13 +173,13 @@ impl Actor {
         let timeout_duration = Duration::from_secs(60 * 30);
 
         for (port, conn) in &self.ports {
-            if now.duration_since(conn.created_at) > timeout_duration {
+            if conn.task.is_finished() || now.duration_since(conn.created_at) > timeout_duration {
                 to_remove.push(*port);
             }
         }
 
         for port in to_remove {
-            info!("Closing port {} due to timeout", port);
+            info!("Closing inactive tunnel on port {}", port);
             if let Some(conn) = self.ports.remove(&port) {
                 conn.remove().await;
             }
@@ -209,5 +210,37 @@ impl Actor {
         }
 
         info!("Tunnel task shutting down");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::shutdown::ShutdownHandler;
+
+    #[tokio::test]
+    async fn closed_tunnel_is_removed_before_reuse() -> anyhow::Result<()> {
+        let shutdown = ShutdownHandler::new();
+        let magic = MagicHandle::new(shutdown.signals());
+        let (_sender, receiver) = mpsc::channel(1);
+        let mut actor = Actor::new(shutdown.signals(), receiver, magic);
+        let task = tokio::spawn(async {});
+        while !task.is_finished() {
+            tokio::task::yield_now().await;
+        }
+        actor.ports.insert(
+            22,
+            ForwardConnection {
+                created_at: Instant::now(),
+                tag: "test".into(),
+                remote_login: None,
+                remote: 12345,
+                task,
+            },
+        );
+        actor.timeout_old_tunnels().await;
+        assert!(actor.ports.is_empty());
+        shutdown.signals().token.cancel();
+        Ok(())
     }
 }
