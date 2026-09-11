@@ -6,10 +6,36 @@ use std::time::Duration;
 use tokio::time::{MissedTickBehavior, sleep};
 use tracing::{error, info};
 
+/// Fallback for anything whose extension we do not recognise. Deliberately
+/// generic: a browser maps a concrete type back to its own preferred extension
+/// and renames the download to match, so claiming less is what keeps the name
+/// intact.
+const DEFAULT_CONTENT_TYPE: &str = "application/octet-stream";
+
 /// Stamped on the object when the multipart upload is opened. Deliberately not
 /// signed into the part URLs: a signed `Content-Type` must be echoed back
 /// byte-identically by the client or S3 rejects the part.
-pub const CONTENT_TYPE: &str = "application/gzip";
+///
+/// This has to describe the bytes we were actually handed. S3 stores whatever
+/// is declared here and CloudFront echoes it back on download, so declaring
+/// gzip for an `.iso` leaves the browser holding a header that contradicts the
+/// URL -- it trusts the header and saves the image as `.gz`.
+pub fn content_type_for(file_name: &str) -> &'static str {
+    let lower = file_name.to_ascii_lowercase();
+    if lower.ends_with(".gz") || lower.ends_with(".tgz") {
+        "application/gzip"
+    } else {
+        DEFAULT_CONTENT_TYPE
+    }
+}
+
+/// Stamped alongside the content type so the name the image was pushed under is
+/// the name it comes back as. Without it the browser has to guess from the URL,
+/// and the dashboard cannot help: its `download` attribute is ignored because
+/// the link points at the CDN rather than at our own origin.
+pub fn content_disposition_for(file_name: &str) -> String {
+    format!("attachment; filename=\"{file_name}\"")
+}
 
 /// 100 MiB puts a 20 GiB image at ~205 parts -- few enough round trips to stay
 /// cheap, small enough that a failed part is a cheap retry over a bad link.
@@ -149,5 +175,36 @@ mod tests {
     #[test]
     fn object_key_is_scoped_to_the_release() {
         assert_eq!(object_key(43, "base.tar.gz"), "os/43/base.tar.gz");
+    }
+
+    /// A content type that contradicts the extension is what makes a browser
+    /// rename the download, so every name maps to a type that agrees with it or
+    /// to one generic enough to claim nothing.
+    #[test]
+    fn content_type_follows_the_extension() {
+        assert_eq!(content_type_for("base.tar.gz"), "application/gzip");
+        assert_eq!(content_type_for("base.gz"), "application/gzip");
+        assert_eq!(content_type_for("base.tgz"), "application/gzip");
+        assert_eq!(content_type_for("BASE.TAR.GZ"), "application/gzip");
+
+        // The regression: an image that is not gzip must not claim to be, or
+        // the browser saves it as `.gz`.
+        assert_eq!(
+            content_type_for("overview-installer_6574729_amd64.iso"),
+            "application/octet-stream"
+        );
+        assert_eq!(content_type_for("base.img"), "application/octet-stream");
+        assert_eq!(content_type_for("base"), "application/octet-stream");
+
+        // `.gz` has to be the real suffix, not merely present in the name.
+        assert_eq!(content_type_for("base.gz.iso"), "application/octet-stream");
+    }
+
+    #[test]
+    fn content_disposition_carries_the_file_name() {
+        assert_eq!(
+            content_disposition_for("overview-installer_6574729_amd64.iso"),
+            "attachment; filename=\"overview-installer_6574729_amd64.iso\""
+        );
     }
 }

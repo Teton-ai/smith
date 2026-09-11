@@ -169,17 +169,36 @@ impl Storage {
         Ok(Bucket::new(bucket_name, region, credentials)?)
     }
 
-    /// Opens a multipart upload and returns its id. Content type is fixed here
-    /// rather than signed into the part URLs: a signed `Content-Type` has to be
-    /// echoed back byte-identically by the client or S3 rejects the part with
-    /// `SignatureDoesNotMatch`, which is a miserable way to lose an upload that
-    /// is already 18 GB in.
+    /// Opens a multipart upload and returns its id. Content type and
+    /// disposition are fixed here rather than signed into the part URLs: a
+    /// signed header has to be echoed back byte-identically by the client or S3
+    /// rejects the part with `SignatureDoesNotMatch`, which is a miserable way
+    /// to lose an upload that is already 18 GB in. The extra header rides on a
+    /// handle used for this one call, so it never reaches `presign_upload_parts`.
+    ///
+    /// Both stick to the finished object for its lifetime -- S3 has no way to
+    /// edit them in place, only to copy the object over itself -- so they are
+    /// the one chance to describe the image correctly.
     pub async fn initiate_multipart(
         bucket_name: &str,
         object_key: &str,
         content_type: &str,
+        content_disposition: &str,
     ) -> anyhow::Result<String> {
-        let bucket = Self::bucket(bucket_name)?;
+        // `add_header` unwraps whatever it cannot parse, so the value is checked
+        // here instead of trusted: a header value is visible ASCII plus space.
+        // `validate_file_name` already rejects anything else, and this keeps a
+        // future caller from turning a bad name into a panic in the api.
+        if !content_disposition
+            .bytes()
+            .all(|b| (0x20..=0x7e).contains(&b))
+        {
+            anyhow::bail!("Content-Disposition is not encodable as a header value");
+        }
+
+        let mut bucket = Self::bucket(bucket_name)?;
+        bucket.add_header("content-disposition", content_disposition);
+
         let response = bucket
             .initiate_multipart_upload(object_key, content_type)
             .await?;
