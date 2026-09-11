@@ -37,7 +37,9 @@ fn print_markdown_help() {
 
     println!("## Authentication\n");
     println!("### `sm auth login [--no-open]`");
-    println!("Login to Smith API. Opens browser by default unless `--no-open` is specified.\n");
+    println!(
+        "Login to Smith API. Displays a manual login URL and tries to open a browser unless `--no-open` is specified.\n"
+    );
     println!("### `sm auth logout`");
     println!("Logs out the current session.\n");
     println!("### `sm auth show`");

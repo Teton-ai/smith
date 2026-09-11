@@ -57,12 +57,18 @@ pub async fn login(config: &Config, open: bool) -> anyhow::Result<()> {
     let device_auth_response: DeviceAuthResponse = resp.await?.json::<DeviceAuthResponse>().await?;
 
     println!(
-        "Go to {} and enter the code: {}",
-        device_auth_response.verification_uri, device_auth_response.user_code
+        "Open this URL in a browser to log in:\n{}\n\nOr go to {} and enter the code: {}",
+        device_auth_response.verification_uri_complete,
+        device_auth_response.verification_uri,
+        device_auth_response.user_code
     );
 
     if open {
-        open::that(device_auth_response.verification_uri_complete)?;
+        if let Err(error) = open::that(&device_auth_response.verification_uri_complete) {
+            eprintln!(
+                "Could not open a browser automatically ({error}). Open the URL above manually."
+            );
+        }
     }
 
     let token_endpoint = format!("https://{}/oauth/token", domain);
