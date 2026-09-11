@@ -107,7 +107,8 @@ Before using the CLI, you need to authenticate:
 sm auth login
 ```
 
-This will open your browser for authentication. Use `--no-open` to prevent automatic browser launch.
+This will try to open your browser for authentication and always displays a URL you can open
+manually. Use `--no-open` to prevent the automatic browser-launch attempt.
 
 To logout:
 

@@ -36,7 +36,9 @@ Before using the CLI, you need to authenticate:
 sm auth login
 ```
 
-This will open your browser for authentication. Use `--no-open` to get a URL to paste manually.
+This will try to open your browser for authentication and always displays a URL you can open
+manually. This works well in WSL, SSH sessions, and other environments without a browser.
+Use `--no-open` to skip the automatic browser-launch attempt.
 
 To view your current authentication status:
 
