@@ -1,0 +1,11 @@
+{
+	"version": "0.0.1",
+	"configurations": [
+		{
+			"name": "dashboard",
+			"runtimeExecutable": "npm",
+			"runtimeArgs": ["run", "dev", "-w", "dashboard", "--", "--port", "5174", "--strictPort"],
+			"port": 5174
+		}
+	]
+}

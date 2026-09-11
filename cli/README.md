@@ -7,7 +7,7 @@ Command-line interface for managing your Smith fleet.
 ### Quick Install
 
 ```bash
-curl -fsSL https://docs.smith.teton.ai/install.sh | sh
+curl -fsSL https://smith.teton.ai/install.sh | sh
 ```
 
 ### Manual Install

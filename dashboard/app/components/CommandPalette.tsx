@@ -139,10 +139,9 @@ const PAGES: Page[] = [
 	},
 	{
 		label: "Docs",
-		path: "https://docs.smith.teton.ai",
+		path: "/docs",
 		icon: <FileText className="w-4 h-4" />,
-		keywords: ["docs", "documentation", "help"],
-		external: true,
+		keywords: ["docs", "documentation", "help", "api", "reference"],
 	},
 ];
 

@@ -1,8 +1,11 @@
-# Deployments
+---
+title: Deployments
+description: Roll out new releases canary-first, verify they're healthy, then confirm across the distribution.
+---
 
 Deployments are how you roll out new releases to your fleet. Smith uses a canary-first approach: you select a small set of devices, verify they're healthy, then confirm a full rollout to all remaining devices in the distribution.
 
-## Core Concepts
+## Core concepts
 
 - **Package list** — a named, versioned set of packages that defines what software runs on your devices.
 - **Release** — a published snapshot of a package list, immutable once created. Every deployment targets a specific release.
@@ -12,9 +15,7 @@ Deployments are how you roll out new releases to your fleet. Smith uses a canary
 - **LTS** — a release designated as one to keep devices on long-term. The flag is a record of that decision, so every version ever designated keeps its mark and the history stays readable.
 - **Follow latest** — a per-device flag deciding whether fleet-wide rollouts move that device. Devices that do not follow latest stay where they are until an operator targets them explicitly.
 
----
-
-## How a Deployment Works
+## How a deployment works
 
 1. **Create a release** from a package list.
 2. **Create a deployment** targeting that release. Smith assigns a set of canary devices.
@@ -22,9 +23,7 @@ Deployments are how you roll out new releases to your fleet. Smith uses a canary
 4. **Verify health** — check that canary devices are running correctly (services healthy, online, no regressions).
 5. **Confirm full rollout** — the remaining devices in the distribution update. Or, if something looks wrong, yank the release before it spreads.
 
----
-
-## Walkthrough: RC to Full Rollout
+## Walkthrough: RC to full rollout
 
 This example walks through a complete release cycle using a release candidate for early validation, then promoting it to a stable release and rolling it out automatically to the whole fleet.
 
@@ -78,9 +77,7 @@ This means the healthiest, best-connected devices in your fleet receive the upda
 
 After verifying the automatic canary devices are healthy, confirm the full rollout from the deployment detail page. All remaining devices in the distribution will update to the new release.
 
----
-
-## Selection Strategies
+## Selection strategies
 
 When creating a deployment, you can choose how canary devices are selected:
 
@@ -88,9 +85,7 @@ When creating a deployment, you can choose how canary devices are selected:
 - **Label-based** — targets devices matching one or more labels, useful for deploying to a specific site or hardware variant first.
 - **Explicit device IDs** — hand-pick specific devices, useful for targeting a known lab bench or QA set.
 
----
-
-## Release Candidates
+## Release candidates
 
 The `release_candidate` flag blocks `confirm_full_rollout` entirely. It is not a soft warning — there is no override. Use it when:
 
@@ -100,9 +95,7 @@ The `release_candidate` flag blocks `confirm_full_rollout` entirely. It is not a
 
 To reach the full fleet, an RC must be explicitly promoted to a stable release first.
 
----
-
-## Device Eligibility
+## Device eligibility
 
 A device is eligible for *automatic* canary selection when it is:
 
@@ -111,71 +104,44 @@ A device is eligible for *automatic* canary selection when it is:
 - **In the same distribution** — belongs to the distribution the release targets.
 - **Following latest** — `follow_latest` is true.
 
-Explicit selection by device id or label ignores `follow_latest`: naming a device
-by hand is taken as deliberate, which is what lets a pinned lab bench still be
-used as a canary.
+Explicit selection by device id or label ignores `follow_latest`: naming a device by hand is taken as deliberate, which is what lets a pinned lab bench still be used as a canary.
 
----
+## LTS releases
 
-## LTS Releases
+Marking a release LTS records that it is a version you commit to keeping devices on — the build a device is flashed with in the factory, so you can tell later what shipped on which version.
 
-Marking a release LTS records that it is a version you commit to keeping devices
-on — the build a device is flashed with in the factory, so you can tell later
-what shipped on which version.
-
-```
+```text
 POST /releases/{id}   { "lts": true }
 sm releases lts <release_id>            # or --clear to remove the mark
 ```
 
-A release cannot be marked LTS while it is a draft, yanked, or a release
-candidate: a draft was never published, a yank withdrew it, and an RC is by
-definition not fleet-wide material.
+A release cannot be marked LTS while it is a draft, yanked, or a release candidate: a draft was never published, a yank withdrew it, and an RC is by definition not fleet-wide material.
 
-The flag is kept on every release that ever had it, so the list of LTS versions
-is a history rather than a single pointer. To resolve which one is currently in
-force — what a flashing process should install — ask for the distribution's
-current LTS release, which returns the most recently designated one that is
-still published and not withdrawn:
+The flag is kept on every release that ever had it, so the list of LTS versions is a history rather than a single pointer. To resolve which one is currently in force — what a flashing process should install — ask for the distribution's current LTS release, which returns the most recently designated one that is still published and not withdrawn:
 
-```
+```text
 GET /distributions/{distribution_id}/releases/lts
 ```
 
----
+## Pinning devices off rollouts
 
-## Pinning Devices Off Rollouts
+`confirm_full_rollout` retargets every device in the distribution **except** those with `follow_latest = false`. This is a hard skip, not a warning: a fleet-wide rollout cannot move a pinned device.
 
-`confirm_full_rollout` retargets every device in the distribution **except**
-those with `follow_latest = false`. This is a hard skip, not a warning: a
-fleet-wide rollout cannot move a pinned device.
-
-New devices are pinned by default, so a freshly flashed device stays on the
-release it shipped with until someone decides otherwise. Devices that existed
-before the flag was introduced were backfilled as following latest, so the
-existing fleet's behaviour is unchanged.
+New devices are pinned by default, so a freshly flashed device stays on the release it shipped with until someone decides otherwise. Devices that existed before the flag was introduced were backfilled as following latest, so the existing fleet's behaviour is unchanged.
 
 Move devices between the two states in bulk, either by id or by label:
 
-```
+```text
 PUT /devices/follow-latest
 { "follow_latest": true, "devices": [1, 2, 3] }
 { "follow_latest": false, "labels": ["site=oslo", "stage=field"] }
 ```
 
-Exactly one of `devices` or `labels` must be given. A device must carry **every**
-label listed to match — unlike canary label selection, which matches any. The
-narrower rule is deliberate: this endpoint decides whether a device receives
-rollouts at all, so a selector should never match more than intended. Archived
-devices are excluded from label matching. The response reports how many devices
-changed.
+Exactly one of `devices` or `labels` must be given. A device must carry **every** label listed to match — unlike canary label selection, which matches any. The narrower rule is deliberate: this endpoint decides whether a device receives rollouts at all, so a selector should never match more than intended. Archived devices are excluded from label matching. The response reports how many devices changed.
 
-The device listing accepts `follow_latest` as a filter, so you can see what is
-pinned before and after a bulk move.
+The device listing accepts `follow_latest` as a filter, so you can see what is pinned before and after a bulk move.
 
----
-
-## Best Practices
+## Best practices
 
 - Use RCs for any build that needs validation before reaching the full fleet — the hard rollout block removes the risk of accidentally confirming too early.
 - Run network speed tests on your devices so Smith has connectivity data to factor into automatic selection.

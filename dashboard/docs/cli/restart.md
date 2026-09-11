@@ -1,6 +1,7 @@
-# restart
-
-Restart devices or services.
+---
+title: sm restart
+description: Restart devices or the systemd services running on them.
+---
 
 ## restart device
 
@@ -49,7 +50,7 @@ You can skip this confirmation with the `--yes` (`-y`) flag.
 
 ## restart service
 
-Restart a systemd service on devices (runs 'systemctl restart <unit>').
+Restart a systemd service on devices (runs `systemctl restart <unit>`).
 
 ### Usage
 

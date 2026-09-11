@@ -1,10 +1,11 @@
-# Other Commands
-
-Additional utility commands for managing your Smith CLI and devices.
+---
+title: Other commands
+description: Additional utility commands for managing the Smith CLI and your devices.
+---
 
 ## test-network
 
-Test network speed for devices (downloads 20MB test file).
+Test network speed for devices (downloads a 20MB test file).
 
 ### Usage
 

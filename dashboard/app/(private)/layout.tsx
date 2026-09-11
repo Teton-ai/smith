@@ -35,13 +35,8 @@ const navigationItems: NavItem[] = [
 	{ path: "/settings", label: "Settings", icon: Settings },
 ];
 
-const bottomItems = [
-	{
-		path: "https://docs.smith.teton.ai",
-		label: "Docs",
-		icon: FileText,
-		external: true,
-	},
+const bottomItems: NavItem[] = [
+	{ path: "/docs", label: "Docs", icon: FileText },
 ];
 
 function useApiVersion() {

@@ -25,7 +25,7 @@ Smith consists of five main components:
 
 ## Getting Started
 
-Visit our [documentation](https://docs.smith.teton.ai) to get started with Smith.
+Read the [documentation](./dashboard/docs/introduction.md) to get started with Smith. The dashboard also serves it at `/docs`, together with an API reference generated from your API.
 
 ## Local Development
 

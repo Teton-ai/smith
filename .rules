@@ -36,6 +36,7 @@ The JS side is an npm-workspaces monorepo (`workspaces: ["dashboard", "packages/
 - The `app/` directory keeps the `page.tsx` / `layout.tsx` naming and `(private)` route-group folders, but these are plain components imported by `router.tsx` — there is **no file-based routing**. Adding a page means creating the component and registering it in `router.tsx`.
 - Styling is **Tailwind CSS v4**.
 - Use **Biome** (not ESLint/Prettier) for format/lint: `npm run lint` in `dashboard`.
+- Docs are markdown files in `dashboard/docs` (frontmatter `title`/`description`), served at `/docs` by `dashboard/app/docs`; a file's path is its URL. List new pages in the sidebar in `app/docs/content.ts`. The API reference (`/docs/api`) is generated at runtime from the API's `/openapi.json`, so document endpoints in their utoipa annotations, not by hand.
 
 ## UI package (packages/ui, `@teton/smith-ui`)
 - Shared design-system primitives (buttons, cards, badges, stat cards, search input, nav, toasts, theme tokens) live here, **not** in `dashboard`.

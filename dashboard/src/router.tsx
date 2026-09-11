@@ -57,6 +57,10 @@ const InputPage = lazy(() => import("@/app/components/input/page"));
 const OverlayPage = lazy(() => import("@/app/components/overlay/page"));
 const TextPage = lazy(() => import("@/app/components/text/page"));
 
+const DocsLayout = lazy(() => import("@/app/docs/layout"));
+const DocsPage = lazy(() => import("@/app/docs/page"));
+const ApiReferencePage = lazy(() => import("@/app/docs/api/page"));
+
 const Fallback = () => null;
 
 function withSuspense(node: React.ReactNode) {
@@ -135,6 +139,13 @@ export const router = createBrowserRouter([
 			{ path: "/components/input", element: withSuspense(<InputPage />) },
 			{ path: "/components/overlay", element: withSuspense(<OverlayPage />) },
 			{ path: "/components/text", element: withSuspense(<TextPage />) },
+		],
+	},
+	{
+		element: withSuspense(<DocsLayout />),
+		children: [
+			{ path: "/docs/api", element: withSuspense(<ApiReferencePage />) },
+			{ path: "/docs/*", element: withSuspense(<DocsPage />) },
 		],
 	},
 	{

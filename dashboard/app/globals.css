@@ -83,3 +83,51 @@ body {
 	color: var(--foreground);
 	font-family: Arial, Helvetica, sans-serif;
 }
+
+/* Docs pages scroll the window and link to in-page anchors. */
+html:has([data-docs]) {
+	scroll-behavior: smooth;
+}
+
+/* highlight.js token colours for the docs' dark code blocks. */
+.hljs-surface {
+	color: #e5e7eb;
+}
+.hljs-surface .hljs-comment,
+.hljs-surface .hljs-quote {
+	color: #6b7280;
+	font-style: italic;
+}
+.hljs-surface .hljs-keyword,
+.hljs-surface .hljs-selector-tag,
+.hljs-surface .hljs-literal,
+.hljs-surface .hljs-type {
+	color: #c4b5fd;
+}
+.hljs-surface .hljs-string,
+.hljs-surface .hljs-regexp {
+	color: #86efac;
+}
+.hljs-surface .hljs-number,
+.hljs-surface .hljs-symbol,
+.hljs-surface .hljs-bullet {
+	color: #fdba74;
+}
+.hljs-surface .hljs-title,
+.hljs-surface .hljs-section {
+	color: #93c5fd;
+}
+.hljs-surface .hljs-attr,
+.hljs-surface .hljs-attribute,
+.hljs-surface .hljs-property,
+.hljs-surface .hljs-variable,
+.hljs-surface .hljs-template-variable {
+	color: #7dd3fc;
+}
+.hljs-surface .hljs-built_in {
+	color: #f0abfc;
+}
+.hljs-surface .hljs-meta,
+.hljs-surface .hljs-params {
+	color: #9ca3af;
+}

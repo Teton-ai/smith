@@ -1,6 +1,7 @@
-# logs
-
-Get logs from devices (runs 'journalctl -r -n 500').
+---
+title: sm logs
+description: Fetch the latest system journal entries from devices.
+---
 
 ## Usage
 

@@ -1,10 +1,7 @@
-# CLI Overview
-
-## Command line tool (sm)
-
-Smith provides a command line tool for communicating with the Smith API to manage your fleet of devices.
-
-This tool is named `sm`.
+---
+title: CLI overview
+description: sm is the Smith command line tool for managing your fleet through the Smith API.
+---
 
 For configuration, `sm` looks for configuration files in the `$HOME/.config/smith` directory. You can manage multiple profiles and switch between them using the `sm profile` command.
 
@@ -12,13 +9,13 @@ This overview covers `sm` syntax, describes the command operations, and provides
 
 ## Installation
 
-See the [Installation Guide](./installation.md) for installation instructions.
+See [Install the CLI](../installation.md).
 
 ## Syntax
 
 Use the following syntax to run `sm` commands from your terminal window:
 
-```
+```text
 sm [command] [TYPE] [NAME] [flags]
 ```
 
@@ -62,7 +59,7 @@ where `command`, `TYPE`, `NAME`, and `flags` are:
 
 - **flags**: Specifies optional flags. For example, you can use the `--json` flag to output results in JSON format, or `--nowait` to queue commands asynchronously.
 
-## Common Resource Type Aliases
+## Common resource type aliases
 
 | Resource Type | Aliases | Example |
 |--------------|---------|---------|
@@ -70,7 +67,7 @@ where `command`, `TYPE`, `NAME`, and `flags` are:
 | `service` | `services`, `svc` | `sm status svc nginx ABC123` |
 | `commands` | `cmds` | `sm get cmds ABC123` |
 
-## Device Selection
+## Device selection
 
 Most commands support flexible device selection through a common set of flags:
 
@@ -113,16 +110,18 @@ sm auth login
 This will open your browser for authentication. Use `--no-open` to prevent automatic browser launch.
 
 To logout:
+
 ```sh
 sm auth logout
 ```
 
 To view your current token:
+
 ```sh
 sm auth show
 ```
 
-## Common Workflows
+## Common workflows
 
 ### Checking device status
 
@@ -183,12 +182,12 @@ sm label -s rpi region=warehouse-1
 - Most commands support `--json` (`-j`) flag for machine-readable output
 - Use `sm agent-help` to get a comprehensive markdown reference for automation
 
-## Command Reference
+## Command reference
 
-- [get](./cli-get.md) - Retrieve information about resources
-- [status](./cli-status.md) - Get status information for devices or services
-- [restart](./cli-restart.md) - Restart devices or services
-- [logs](./cli-logs.md) - Get logs from devices
-- [run](./cli-run.md) - Run custom commands on devices
-- [label](./cli-label.md) - Set labels on devices
-- [Other Commands](./cli-other.md) - Additional utility commands
+- [get](./get.md) — Retrieve information about resources
+- [status](./status.md) — Get status information for devices or services
+- [restart](./restart.md) — Restart devices or services
+- [logs](./logs.md) — Get logs from devices
+- [run](./run.md) — Run custom commands on devices
+- [label](./label.md) — Set labels on devices
+- [Other commands](./other.md) — Additional utility commands
