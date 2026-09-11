@@ -1,6 +1,7 @@
-# run
-
-Run custom commands on devices.
+---
+title: sm run
+description: Run custom shell commands on devices.
+---
 
 ## Usage
 

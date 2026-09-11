@@ -1,6 +1,7 @@
-# label
-
-Set labels on devices.
+---
+title: sm label
+description: Set key-value labels on devices to organize and filter them.
+---
 
 ## Usage
 

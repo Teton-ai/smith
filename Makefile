@@ -19,9 +19,6 @@ migrate:
 prepare:
 	cd api && DATABASE_URL="postgres://postgres:postgres@localhost:5432/postgres" cargo sqlx prepare
 
-dev.docs:
-	cd docs && mdbook serve --open
-
 lint:
 	docker exec -it smith-api cargo fmt
 	docker exec -it smith-api cargo clippy --release --all-targets --all-features -- -D clippy::all

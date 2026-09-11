@@ -1,10 +1,11 @@
-# status
-
-Get status information for devices or services.
+---
+title: sm status
+description: Get status information for devices or the services running on them.
+---
 
 ## status device
 
-Get smithd status for devices (runs 'smithd status' command).
+Get smithd status for devices (runs `smithd status`).
 
 Shows comprehensive update status including:
 - Update/upgrade status (whether the system is up-to-date)
@@ -45,7 +46,7 @@ sm status d rpi -s
 
 ## status service
 
-Get systemd service status on devices (runs 'systemctl status <unit>').
+Get systemd service status on devices (runs `systemctl status <unit>`).
 
 ### Usage
 
