@@ -63,9 +63,9 @@ pub enum StatusResourceType {
 
 #[derive(Subcommand)]
 pub enum AuthCommands {
-    /// login to Smith API
+    /// Login to Smith API. If a browser cannot be opened, use the displayed URL manually.
     Login {
-        /// does not open the browser by default
+        /// Do not try to open a browser automatically
         #[arg(long, default_value = "false")]
         no_open: bool,
     },
