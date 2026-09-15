@@ -1,9 +1,11 @@
 import { Button } from "@teton/smith-ui";
 import { ArrowLeft, ArrowRight } from "lucide-react";
 import { Link, Navigate, useLocation } from "react-router";
+import { useConfig } from "@/app/hooks/config";
 import {
 	type DocsNavLink,
 	docsNeighbours,
+	fillDocVariables,
 	readDoc,
 	slugForPath,
 } from "./content";
@@ -41,6 +43,7 @@ function PagerLink({
 export default function DocsPage() {
 	const { pathname, hash } = useLocation();
 	const doc = readDoc(slugForPath(pathname));
+	const { config } = useConfig();
 	useScrollOnNavigate(true);
 
 	if (!doc) {
@@ -86,7 +89,10 @@ export default function DocsPage() {
 				)}
 			</header>
 
-			<DocsMarkdown content={doc.content} slug={doc.slug} />
+			<DocsMarkdown
+				content={fillDocVariables(doc.content, config?.API_BASE_URL)}
+				slug={doc.slug}
+			/>
 
 			{(previous || next) && (
 				<nav className="mt-16 grid gap-3 border-t border-gray-200 pt-6 sm:grid-cols-2">

@@ -74,6 +74,110 @@ impl CloudFrontConfig {
     }
 }
 
+/// The remote MCP server at `/mcp`.
+///
+/// It reuses the dashboard's Auth0 API as its OAuth resource, so MCP clients
+/// get the same tokens as the dashboard. MCP clients accept a resource that is
+/// a parent of the server URL, which is why `https://api.example.com` works for
+/// `https://api.example.com/mcp`.
+#[derive(Debug)]
+pub struct McpConfig {
+    /// `AUTH0_AUDIENCE`: the resource identifier clients request tokens for.
+    pub resource_url: String,
+    /// RFC 9728 metadata location: the well-known path inserted before the
+    /// resource URL's path.
+    pub resource_metadata_url: String,
+    /// `Host` values the MCP transport accepts, guarding against DNS rebinding.
+    pub allowed_hosts: Vec<String>,
+}
+
+impl McpConfig {
+    /// None when the audience is not an absolute URL: an MCP resource has to be
+    /// one, but that should not stop the rest of the API from starting.
+    fn from_audience(auth0_audience: &str) -> Option<Self> {
+        match Self::from_url(auth0_audience.to_string()) {
+            Ok(mcp) => {
+                info!(resource_url = %mcp.resource_url, "Configured MCP server");
+                Some(mcp)
+            }
+            Err(err) => {
+                warn!("MCP server disabled: AUTH0_AUDIENCE is not usable as a resource URL: {err}");
+                None
+            }
+        }
+    }
+
+    fn from_url(resource_url: String) -> anyhow::Result<Self> {
+        let url = reqwest::Url::parse(&resource_url).context("must be an absolute URL")?;
+        let host = url.host_str().context("must include a host")?;
+        let mut allowed_hosts = vec![host.to_string()];
+        if let Some(port) = url.port() {
+            allowed_hosts.push(format!("{host}:{port}"));
+        }
+        let resource_metadata_url = format!(
+            "{}/.well-known/oauth-protected-resource{}",
+            url.origin().ascii_serialization(),
+            url.path().trim_end_matches('/')
+        );
+
+        Ok(McpConfig {
+            resource_url,
+            resource_metadata_url,
+            allowed_hosts,
+        })
+    }
+}
+
+#[cfg(test)]
+mod mcp_config_tests {
+    use super::McpConfig;
+
+    #[test]
+    fn origin_audience_serves_metadata_at_the_root() -> anyhow::Result<()> {
+        let mcp = McpConfig::from_url("https://api.example.com".to_string())?;
+        assert_eq!(mcp.resource_url, "https://api.example.com");
+        assert_eq!(
+            mcp.resource_metadata_url,
+            "https://api.example.com/.well-known/oauth-protected-resource"
+        );
+        assert_eq!(mcp.allowed_hosts, vec!["api.example.com"]);
+        Ok(())
+    }
+
+    #[test]
+    fn non_url_audience_disables_mcp() {
+        assert!(McpConfig::from_audience("smith-api").is_none());
+    }
+
+    #[test]
+    fn metadata_url_inserts_well_known_before_the_path() -> anyhow::Result<()> {
+        let mcp = McpConfig::from_url("https://api.example.com/mcp".to_string())?;
+        assert_eq!(mcp.resource_url, "https://api.example.com/mcp");
+        assert_eq!(
+            mcp.resource_metadata_url,
+            "https://api.example.com/.well-known/oauth-protected-resource/mcp"
+        );
+        assert_eq!(mcp.allowed_hosts, vec!["api.example.com"]);
+        Ok(())
+    }
+
+    #[test]
+    fn explicit_ports_are_allowed_hosts_too() -> anyhow::Result<()> {
+        let mcp = McpConfig::from_url("http://localhost:8080/mcp".to_string())?;
+        assert_eq!(
+            mcp.resource_metadata_url,
+            "http://localhost:8080/.well-known/oauth-protected-resource/mcp"
+        );
+        assert_eq!(mcp.allowed_hosts, vec!["localhost", "localhost:8080"]);
+        Ok(())
+    }
+
+    #[test]
+    fn relative_urls_are_rejected() {
+        assert!(McpConfig::from_url("/mcp".to_string()).is_err());
+    }
+}
+
 #[derive(Debug)]
 pub struct Config {
     pub database_url: String,
@@ -108,6 +212,7 @@ pub struct Config {
     /// not an on/off switch - the sweep only ships once seeding is already
     /// confirmed.
     pub network_gc_interval_seconds: u64,
+    pub mcp: Option<McpConfig>,
 }
 
 /// Builds the M2M-sub -> holder map from one env var per known holder. Missing
@@ -134,6 +239,9 @@ impl Config {
     pub fn new() -> anyhow::Result<Config> {
         _ = dotenvy::dotenv();
 
+        let auth0_audience = env::var("AUTH0_AUDIENCE").context("AUTH0_AUDIENCE is required.")?;
+        let mcp = McpConfig::from_audience(&auth0_audience);
+
         Ok(Config {
             database_url: env::var("DATABASE_URL").context("DATABASE_URL is required.")?,
             packages_bucket_name: env::var("PACKAGES_BUCKET_NAME")
@@ -150,7 +258,7 @@ impl Config {
             victoria_metrics_read_client: VictoriaMetricsClient::from_env_read()?,
             ip_api_key: env::var("IP_API_KEY").ok(),
             auth0_issuer: env::var("AUTH0_ISSUER").context("AUTH0_ISSUER is required.")?,
-            auth0_audience: env::var("AUTH0_AUDIENCE").context("AUTH0_AUDIENCE is required.")?,
+            auth0_audience,
             cloudfront: CloudFrontConfig::new()?,
             dashboard_excluded_labels: env::var("DASHBOARD_EXCLUDED_LABELS")
                 .ok()
@@ -175,6 +283,7 @@ impl Config {
                 // most every 2 days, so sweeping more often than that just
                 // finds nothing new.
                 .unwrap_or(2 * 24 * 60 * 60),
+            mcp,
         })
     }
 }
