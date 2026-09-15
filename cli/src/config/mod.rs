@@ -1,6 +1,5 @@
 use anyhow::Context;
 use colored::{Color, ColoredString, Style};
-use rand::rngs::OsRng;
 use russh::keys::*;
 use serde::{Deserialize, Serialize};
 use std::os::unix::fs::PermissionsExt;
@@ -65,7 +64,7 @@ impl Config {
         if !identity_key_path.exists() || !identity_pub_key_path.exists() {
             println!("Warning: No identity.pub key found in ~/.smith/");
             println!("Creating default");
-            let private_key = PrivateKey::random(&mut OsRng, Algorithm::Ed25519)
+            let private_key = PrivateKey::random(&mut rand::rng(), Algorithm::Ed25519)
                 .context("Failed to generate Ed25519 private key")?;
             let private_key_pem = private_key.to_openssh(Default::default())?;
             let public_key = private_key.public_key();
