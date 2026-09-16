@@ -27,6 +27,38 @@ Smith consists of five main components:
 
 Read the [documentation](./dashboard/docs/introduction.md) to get started with Smith. The dashboard also serves it at `/docs`, together with an API reference generated from your API.
 
+### Externally managed devices (NixOS)
+
+Set `externally_managed = true` in the existing `[meta]` section of the device's
+`magic.toml`, then restart `smithd`. The setting defaults to `false`.
+
+```toml
+[meta]
+magic_version = 2
+server = "https://api.smith.teton.ai/smith"
+externally_managed = true
+```
+
+This keeps registration, authentication, secrets delivery to
+`/root/.teton_environment`, NetworkManager provisioning, monitoring, logs,
+read-only file browsing and tunnels. It disables Debian package updates
+(including Smith self-updates), NVIDIA OTA, remote reboot and arbitrary shell
+commands, SSH configuration hardening, and the connectivity reboot watchdog.
+The local control API rejects package updates, OTA and downloads to the device
+with HTTP 403; rejected remote commands return a failure response.
+
+NixOS must provide SSH hardening, packages and service lifecycle management.
+Do not install the separate `smith-updater` service. Keep `magic.toml` writable
+and persistent: Smith stores its registration token there. It loads
+`./magic.toml` before `/etc/smith/magic.toml`. Keep secrets outside the Nix store;
+arrange application startup after initial secrets delivery and restart applications
+when their environment changes.
+
+This is an operational policy, not a security sandbox: secrets, network profiles
+and tunnel SSH keys remain mutable, and tunnel users retain their normal SSH
+permissions. NetworkManager profiles should be owned by Smith rather than also
+managed declaratively by NixOS.
+
 ## Local Development
 
 **Prerequisites:** Docker

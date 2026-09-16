@@ -16,6 +16,8 @@ pub struct MagicFile {
 #[derive(Serialize, Deserialize, Debug)]
 pub struct ConfigMeta {
     pub magic_version: i32,
+    #[serde(default)]
+    pub externally_managed: bool,
     pub server: String,
     pub release_id: Option<i32>,
     pub target_release_id: Option<i32>,
@@ -99,6 +101,7 @@ impl MagicFile {
             let string = toml::to_string_pretty(&Self {
                 meta: ConfigMeta {
                     magic_version: 2,
+                    externally_managed: false,
                     server: "http://api:8080/smith".to_string(),
                     release_id: None,
                     target_release_id: None,

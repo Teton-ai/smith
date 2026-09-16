@@ -216,7 +216,7 @@ impl Police {
         }
     }
 
-    async fn run(&mut self) {
+    async fn run(&mut self, externally_managed: bool) {
         info!("Police runnning");
 
         let mut enable_by_default = interval(ARM_AFTER);
@@ -235,7 +235,7 @@ impl Police {
                 Some(msg) = self.receiver.recv() => {
                     self.handle_message(msg);
                 }
-                _ = enable_by_default.tick() => {
+                _ = enable_by_default.tick(), if !externally_managed => {
                     info!("Enabling police restarts by default");
                     self.should_restart = true;
                 }
@@ -258,10 +258,10 @@ pub struct PoliceHandle {
 }
 
 impl PoliceHandle {
-    pub fn new(shutdown: ShutdownSignals) -> Self {
+    pub fn new(shutdown: ShutdownSignals, externally_managed: bool) -> Self {
         let (sender, receiver) = mpsc::channel(8);
         let mut actor = Police::new(shutdown, receiver);
-        tokio::spawn(async move { actor.run().await });
+        tokio::spawn(async move { actor.run(externally_managed).await });
 
         Self { sender }
     }
@@ -340,7 +340,7 @@ mod tests {
     #[tokio::test(start_paused = true)]
     async fn restarts_are_not_armed_before_the_arm_window() {
         let shutdown = ShutdownHandler::new();
-        let police = PoliceHandle::new(shutdown.signals());
+        let police = PoliceHandle::new(shutdown.signals(), false);
 
         assert!(police.report_problem_starting().await.is_none());
 
@@ -352,7 +352,7 @@ mod tests {
     #[tokio::test(start_paused = true)]
     async fn hold_defers_a_scheduled_reboot_until_released() {
         let shutdown = ShutdownHandler::new();
-        let police = PoliceHandle::new(shutdown.signals());
+        let police = PoliceHandle::new(shutdown.signals(), false);
 
         // A round-trip guarantees the actor has started (and created its arming
         // interval) before the clock is advanced past it.

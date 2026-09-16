@@ -55,6 +55,40 @@ impl CommandQueueExecutor {
     }
 
     async fn execute_command(&mut self, action: SafeCommandRequest) -> SafeCommandResponse {
+        if self.handles.magic.is_externally_managed().await
+            && !matches!(
+                &action.command,
+                SafeCommandTx::Ping
+                    | SafeCommandTx::UpdateVariables { .. }
+                    | SafeCommandTx::OpenTunnel { .. }
+                    | SafeCommandTx::CloseTunnel
+                    | SafeCommandTx::UpdateNetwork { .. }
+                    | SafeCommandTx::TestNetwork
+                    | SafeCommandTx::ExtendedNetworkTest { .. }
+                    | SafeCommandTx::StreamLogs { .. }
+                    | SafeCommandTx::StopLogStream { .. }
+                    | SafeCommandTx::GetLogs { .. }
+                    | SafeCommandTx::RunAudit
+                    | SafeCommandTx::ReportNMProfiles
+                    | SafeCommandTx::WifiScan
+                    | SafeCommandTx::ApplyNetworks { .. }
+                    | SafeCommandTx::OpenFileSession { .. }
+                    | SafeCommandTx::CloseFileSession { .. }
+            )
+        {
+            warn!(
+                command_id = action.id,
+                "Command disabled: system is externally managed"
+            );
+            return SafeCommandResponse {
+                id: action.id,
+                command: SafeCommandRx::FreeForm {
+                    stdout: String::new(),
+                    stderr: "Command disabled: system is externally managed".to_owned(),
+                },
+                status: -1,
+            };
+        }
         match action.command {
             SafeCommandTx::Ping => SafeCommandResponse {
                 id: action.id,

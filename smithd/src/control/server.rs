@@ -19,8 +19,9 @@ use crate::shutdown::ShutdownSignals;
 use crate::tunnel::TunnelHandle;
 use crate::updater::UpdaterHandle;
 use anyhow::Context;
-use axum::extract::State;
+use axum::extract::{Request, State};
 use axum::http::StatusCode;
+use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
@@ -31,6 +32,7 @@ use tracing::{error, info};
 
 #[derive(Clone)]
 struct ControlState {
+    externally_managed: bool,
     updater: UpdaterHandle,
     downloader: DownloaderHandle,
     tunnel: TunnelHandle,
@@ -161,15 +163,36 @@ fn watchdog_router(police: PoliceHandle) -> Router {
         .with_state(police)
 }
 
+async fn require_system_management(
+    State(state): State<ControlState>,
+    request: Request,
+    next: Next,
+) -> Response {
+    if state.externally_managed {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(ErrorResponse {
+                error: "Operation disabled: system is externally managed".to_owned(),
+            }),
+        )
+            .into_response();
+    }
+    next.run(request).await
+}
+
 fn router(state: ControlState, police: PoliceHandle) -> Router {
     watchdog_router(police).merge(
         Router::new()
-            .route("/updater/status", get(updater_status))
             .route("/updater/check", post(updater_check))
             .route("/updater/upgrade", post(updater_upgrade))
-            .route("/tunnel", post(open_tunnel))
             .route("/downloads", post(start_download))
             .route("/ota/start", post(start_ota))
+            .route_layer(middleware::from_fn_with_state(
+                state.clone(),
+                require_system_management,
+            ))
+            .route("/updater/status", get(updater_status))
+            .route("/tunnel", post(open_tunnel))
             .with_state(state),
     )
 }
@@ -226,8 +249,10 @@ impl ControlHandle {
         tunnel: TunnelHandle,
         filemanager: FileManagerHandle,
         police: PoliceHandle,
+        externally_managed: bool,
     ) -> Self {
         let state = ControlState {
+            externally_managed,
             updater,
             downloader,
             tunnel,
@@ -250,6 +275,154 @@ mod tests {
     use super::*;
     use crate::shutdown::ShutdownHandler;
 
+    #[tokio::test]
+    async fn externally_managed_rejects_system_operations() -> anyhow::Result<()> {
+        use crate::commander::{CommanderHandle, Handles};
+        use crate::filebrowser::FileBrowserHandle;
+        use crate::logstream::LogStreamHandle;
+        use crate::magic::{MagicHandle, structure::MagicFile};
+        use crate::session::SessionHandle;
+        use crate::utils::schema::{SafeCommandRequest, SafeCommandRx, SafeCommandTx};
+        use std::time::Duration;
+
+        assert!(!MagicFile::default().meta.externally_managed);
+        let dir = tempfile::tempdir()?;
+        let config_path = dir.path().join("magic.toml");
+        std::fs::write(
+            &config_path,
+            "[meta]\nmagic_version = 2\nserver = 'http://127.0.0.1:9/smith'\nexternally_managed = true\n",
+        )?;
+        let shutdown = ShutdownHandler::new();
+        let magic = MagicHandle::new(shutdown.signals());
+        magic
+            .load(Some(config_path.to_string_lossy().into_owned()))
+            .await;
+        assert!(magic.is_externally_managed().await);
+        magic.set_token("test-token").await;
+        assert_eq!(magic.get_token().await.as_deref(), Some("test-token"));
+        let persisted: MagicFile = toml::from_str(&std::fs::read_to_string(&config_path)?)?;
+        assert!(persisted.meta.externally_managed);
+
+        let session = SessionHandle::new(shutdown.signals(), magic.clone());
+        let downloader = DownloaderHandle::new(shutdown.signals(), magic.clone(), session.clone());
+        let updater = UpdaterHandle::new(
+            shutdown.signals(),
+            magic.clone(),
+            downloader.clone(),
+            session.clone(),
+        );
+        let tunnel = TunnelHandle::new(shutdown.signals(), magic.clone());
+        let filemanager = FileManagerHandle::new(shutdown.signals(), magic.clone());
+        let police = PoliceHandle::new(shutdown.signals(), true);
+        let commander = CommanderHandle::new(
+            shutdown.signals(),
+            Handles {
+                magic: magic.clone(),
+                tunnel: tunnel.clone(),
+                updater: updater.clone(),
+                downloader: downloader.clone(),
+                filemanager: filemanager.clone(),
+                logstream: LogStreamHandle::new(shutdown.signals(), magic.clone(), session.clone()),
+                filebrowser: FileBrowserHandle::new(shutdown.signals(), magic, session),
+            },
+        );
+        for (command, expected_status) in [
+            (SafeCommandTx::Ping, 0),
+            (
+                SafeCommandTx::FreeForm {
+                    cmd: "true".to_owned(),
+                },
+                -1,
+            ),
+        ] {
+            commander
+                .execute_api_batch(vec![SafeCommandRequest {
+                    id: 42,
+                    command,
+                    continue_on_error: false,
+                }])
+                .await;
+            let response = tokio::time::timeout(Duration::from_secs(5), async {
+                loop {
+                    if let Some(response) = commander.get_results().await.pop() {
+                        break response;
+                    }
+                    tokio::task::yield_now().await;
+                }
+            })
+            .await?;
+            assert_eq!(response.status, expected_status);
+            if expected_status != 0 {
+                assert!(
+                    matches!(response.command, SafeCommandRx::FreeForm { stderr, .. } if stderr.contains("externally managed"))
+                );
+            }
+        }
+
+        let socket = dir.path().join("s");
+        let app = router(
+            ControlState {
+                externally_managed: true,
+                updater,
+                downloader,
+                tunnel,
+                filemanager,
+            },
+            police.clone(),
+        );
+        let serve_socket = socket.clone();
+        let signals = shutdown.signals();
+        let server = tokio::spawn(async move { serve(&serve_socket, app, signals).await });
+        let client = reqwest::Client::builder()
+            .unix_socket(socket.as_path())
+            .build()?;
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                if client.get("http://localhost/watchdog").send().await.is_ok() {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await?;
+        for path in [
+            "/updater/check",
+            "/updater/upgrade",
+            "/downloads",
+            "/ota/start",
+        ] {
+            let response = client
+                .post(format!("http://localhost{path}"))
+                .send()
+                .await?;
+            assert_eq!(response.status(), StatusCode::FORBIDDEN);
+            assert!(
+                response
+                    .json::<ErrorResponse>()
+                    .await?
+                    .error
+                    .contains("externally managed")
+            );
+        }
+        let response = client.get("http://localhost/updater/status").send().await?;
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response.text().await?,
+            "Disabled: system is externally managed"
+        );
+
+        tokio::time::pause();
+        tokio::time::advance(Duration::from_secs(3600)).await;
+        for _ in 0..10 {
+            tokio::task::yield_now().await;
+        }
+        assert!(police.report_problem_starting().await.is_none());
+        assert!(!police.status().await.reboot_pending);
+        shutdown.signals().token.cancel();
+        server.await??;
+        Ok(())
+    }
+
     /// Exercises the real transport end to end: axum serving over a Unix socket,
     /// reqwest dialling it via `unix_socket`, and the police reporting status.
     #[tokio::test]
@@ -258,7 +431,7 @@ mod tests {
         let socket = dir.path().join("s");
 
         let shutdown = ShutdownHandler::new();
-        let police = PoliceHandle::new(shutdown.signals());
+        let police = PoliceHandle::new(shutdown.signals(), false);
 
         let app = watchdog_router(police);
         let serve_socket = socket.clone();

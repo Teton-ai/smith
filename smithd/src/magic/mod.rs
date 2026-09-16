@@ -24,6 +24,9 @@ enum MagicMessage {
     GetServer {
         sender: oneshot::Sender<String>,
     },
+    IsExternallyManaged {
+        sender: oneshot::Sender<bool>,
+    },
     GetReleaseId {
         rpc: oneshot::Sender<Option<i32>>,
     },
@@ -73,6 +76,15 @@ impl Magic {
                     _ = sender.send(conf.get_tunnel_details());
                 } else {
                     _ = sender.send(structure::ConfigTunnel::default());
+                }
+            }
+            MagicMessage::IsExternallyManaged { sender } => {
+                let externally_managed = self
+                    .configuration
+                    .as_ref()
+                    .is_none_or(|conf| conf.meta.externally_managed);
+                if sender.send(externally_managed).is_err() {
+                    warn!("Management mode receiver dropped");
                 }
             }
             MagicMessage::GetServer { sender } => {
@@ -232,6 +244,20 @@ impl MagicHandle {
         let msg = MagicMessage::GetTunnelDetails { sender };
         _ = self.sender.send(msg).await;
         receiver.await.unwrap()
+    }
+
+    pub async fn is_externally_managed(&self) -> bool {
+        let (sender, receiver) = oneshot::channel();
+        if self
+            .sender
+            .send(MagicMessage::IsExternallyManaged { sender })
+            .await
+            .is_err()
+        {
+            error!("Cannot read management mode; disabling system management");
+            return true;
+        }
+        receiver.await.unwrap_or(true)
     }
 
     pub async fn get_server(&self) -> String {

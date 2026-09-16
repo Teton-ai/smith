@@ -276,7 +276,21 @@ impl Actor {
         false
     }
 
-    async fn handle_message(&mut self, msg: ActorMessage) {
+    async fn handle_message(&mut self, msg: ActorMessage, externally_managed: bool) {
+        if externally_managed {
+            match msg {
+                ActorMessage::StatusReport { rpc } => {
+                    if rpc
+                        .send("Disabled: system is externally managed".to_owned())
+                        .is_err()
+                    {
+                        warn!("Updater status receiver dropped");
+                    }
+                }
+                _ => warn!("Package updates are disabled: system is externally managed"),
+            }
+            return;
+        }
         match msg {
             ActorMessage::Update => {
                 self.update().await;
@@ -1089,6 +1103,7 @@ impl Actor {
 
     pub async fn run(&mut self) {
         info!("Updater Starting");
+        let externally_managed = self.magic.is_externally_managed().await;
         let hostname = self.magic.get_server().await;
         self.network.set_hostname(hostname);
 
@@ -1098,10 +1113,10 @@ impl Actor {
             tokio::select! {
                 Some(msg) = self.receiver.recv() => {
                     info!("Received Message");
-                    self.handle_message(msg).await;
+                    self.handle_message(msg, externally_managed).await;
                 }
-                _ = update_check_interval.tick() => {
-                    self.handle_message(ActorMessage::Check).await;
+                _ = update_check_interval.tick(), if !externally_managed => {
+                    self.handle_message(ActorMessage::Check, externally_managed).await;
                 }
                 _ = self.shutdown.token.cancelled() => {
                     info!("Updater waiting for tasks to finish");

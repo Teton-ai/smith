@@ -24,19 +24,22 @@ pub async fn run() {
     let configuration = MagicHandle::new(shutdown.signals());
 
     configuration.load(None).await;
+    let externally_managed = configuration.is_externally_managed().await;
+    info!(externally_managed, "Loaded system management mode");
 
     let session = SessionHandle::new(shutdown.signals(), configuration.clone());
 
     // Kill shared-password SSH logins on every boot (self-heals if the config
     // gets reset by an OS update or someone flips it back). A failure here must
     // not stop the daemon from starting.
-    if let Err(err) = crate::utils::files::disable_ssh_password_auth().await {
+    if !externally_managed && let Err(err) = crate::utils::files::disable_ssh_password_auth().await
+    {
         tracing::error!("Failed to disable SSH password auth: {err:#}");
     }
 
     let tunnel = TunnelHandle::new(shutdown.signals(), configuration.clone());
 
-    let police = PoliceHandle::new(shutdown.signals());
+    let police = PoliceHandle::new(shutdown.signals(), externally_managed);
 
     let downloader =
         DownloaderHandle::new(shutdown.signals(), configuration.clone(), session.clone());
@@ -91,6 +94,7 @@ pub async fn run() {
         tunnel.clone(),
         filemanager.clone(),
         police.clone(),
+        externally_managed,
     );
 
     // this will ensure we have a token
