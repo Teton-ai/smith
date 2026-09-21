@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE device\n        SET approved = false,\n            token = NULL,\n            release_id = NULL,\n            target_release_id = NULL,\n            target_release_id_set_at = NULL\n        WHERE id = $1\n        RETURNING serial_number",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "serial_number",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "e05d402c2d82de226ff430e48d65fcec47f99f72baf940504f89788f20afdbb7"
+}
