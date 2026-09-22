@@ -23,7 +23,7 @@ const PART_ATTEMPTS: u32 = 3;
 pub struct OsPush {
     /// Release to attach the image to
     release_number: String,
-    /// Path to the .tar.gz image
+    /// Path to the image
     #[arg(short, long)]
     path: PathBuf,
     /// Bytes per part
