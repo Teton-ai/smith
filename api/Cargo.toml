@@ -10,6 +10,8 @@ license.workspace = true
 smith = { path = "../smithd" }
 models = { path = "../models" }
 anyhow.workspace = true
+rmcp = { version = "3.3", features = ["transport-streamable-http-server"] }
+schemars = "1"
 
 rust-s3 = "0.35.1"
 axum = { workspace = true, features = ["macros", "multipart", "ws"] }

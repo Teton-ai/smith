@@ -5,9 +5,8 @@ use clap::{Args, Subcommand};
 use models::{
     deployment::{DeploymentRequest, DeploymentStatus},
     distribution::NewDistributionRelease,
-    release::UpdateRelease,
+    release::{UpdateRelease, VersionBump, next_version},
 };
-use regex::Regex;
 
 #[derive(Args, Debug)]
 pub struct ReleasesGet {
@@ -289,15 +288,13 @@ async fn draft_release(config: crate::config::Config) -> anyhow::Result<()> {
     spinner.stop("Previous releases fetched");
     let current_version = &latest_release.version;
 
-    let re = Regex::new(r"^(\d+)\.(\d+)\.(\d+)").unwrap();
-    let captures = re.captures(current_version).unwrap();
-    let major: i32 = captures.get(1).unwrap().as_str().parse().unwrap();
-    let minor: i32 = captures.get(2).unwrap().as_str().parse().unwrap();
-    let patch: i32 = captures.get(3).unwrap().as_str().parse().unwrap();
-
-    let new_patch = format!("{major}.{minor}.{}", patch + 1);
-    let new_minor = format!("{major}.{}.0", minor + 1);
-    let new_major = format!("{}.0.0", major + 1);
+    let bump = |kind| {
+        next_version(current_version, kind)
+            .with_context(|| format!("Latest release version {current_version} is not semver"))
+    };
+    let new_patch = bump(VersionBump::Patch)?;
+    let new_minor = bump(VersionBump::Minor)?;
+    let new_major = bump(VersionBump::Major)?;
     let mut version = cliclack::select(format!("Choose version. Current: {current_version}"))
         .item(
             new_patch.to_string(),

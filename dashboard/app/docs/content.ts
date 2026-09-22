@@ -160,6 +160,28 @@ export function readDoc(slug: string): Doc | undefined {
 }
 
 /**
+ * Smith is self-hosted, so snippets that name this deployment (the MCP server
+ * URL) are written as `{{NAME}}` and filled from the dashboard config when the
+ * page renders. Unknown names are left as they are.
+ */
+export function fillDocVariables(
+	content: string,
+	apiBaseUrl: string | undefined,
+): string {
+	const base = (apiBaseUrl ?? "").replace(/\/+$/, "");
+	const mcpUrl = base ? `${base}/mcp` : "https://<your-api-host>/mcp";
+	const variables: Record<string, string> = {
+		MCP_URL: mcpUrl,
+		CURSOR_INSTALL_URL: `cursor://anysphere.cursor-deeplink/mcp/install?name=smith&config=${encodeURIComponent(btoa(JSON.stringify({ url: mcpUrl })))}`,
+		VSCODE_INSTALL_URL: `https://vscode.dev/redirect/mcp/install?name=smith&config=${encodeURIComponent(JSON.stringify({ type: "http", url: mcpUrl }))}`,
+	};
+	return content.replace(
+		/\{\{([A-Z_]+)\}\}/g,
+		(match, name: string) => variables[name] ?? match,
+	);
+}
+
+/**
  * Pages link to each other with relative `.md` paths so the files also read
  * correctly on GitHub; this turns those into routes.
  */
@@ -207,6 +229,7 @@ export const docsNavigation: DocsNavGroup[] = [
 		links: [
 			{ title: "Deployments", href: "/docs/deployments" },
 			{ title: "Integrations", href: "/docs/integrations" },
+			{ title: "MCP server", href: "/docs/mcp" },
 		],
 	},
 ];

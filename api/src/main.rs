@@ -47,6 +47,7 @@ mod home;
 mod ip_address;
 mod logging;
 mod logstream;
+mod mcp;
 mod metric;
 mod middlewares;
 mod modem;
@@ -466,6 +467,7 @@ async fn start_main_server(
         .merge(protected_router)
         .merge(smith_router)
         .merge(ws_router)
+        .merge(mcp::router(state.clone()))
         .route("/metrics", get(move || ready(recorder_handle.render())))
         .route("/health", get(health::check))
         .route("/.well-known/jwks.json", get(auth::route::jwks_well_known))

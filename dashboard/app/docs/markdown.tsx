@@ -1,6 +1,9 @@
 import { Check, Copy } from "lucide-react";
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
-import ReactMarkdown, { type Components } from "react-markdown";
+import ReactMarkdown, {
+	type Components,
+	defaultUrlTransform,
+} from "react-markdown";
 import { Link, useLocation } from "react-router";
 import remarkGfm from "remark-gfm";
 import {
@@ -261,6 +264,11 @@ function markdownComponents(slug: string): Components {
 	};
 }
 
+// Editor "install" links are deep links, which react-markdown strips by default.
+function docsUrlTransform(url: string): string {
+	return /^(cursor|vscode):/i.test(url) ? url : defaultUrlTransform(url);
+}
+
 export function DocsMarkdown({
 	content,
 	slug,
@@ -275,6 +283,7 @@ export function DocsMarkdown({
 			remarkPlugins={[remarkGfm, remarkCodeMeta]}
 			rehypePlugins={[rehypeHeadingIds]}
 			components={components}
+			urlTransform={docsUrlTransform}
 		>
 			{content}
 		</ReactMarkdown>

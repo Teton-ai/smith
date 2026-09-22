@@ -43,12 +43,26 @@ pub async fn check(
     mut request: Request,
     next: Next,
 ) -> Result<Response, StatusCode> {
-    let token = headers
+    let (current_user, holder) = authenticate(&state, bearer_token(&headers)).await?;
+
+    request.extensions_mut().insert(current_user);
+    request.extensions_mut().insert(holder);
+
+    let response = next.run(request).await;
+    Ok(response)
+}
+
+pub fn bearer_token(headers: &HeaderMap) -> &str {
+    headers
         .get("Authorization")
         .and_then(|value| value.to_str().ok())
         .and_then(|value| value.strip_prefix("Bearer "))
-        .unwrap_or_default();
+        .unwrap_or_default()
+}
 
+/// Validates an Auth0 access token and resolves the caller, creating their user
+/// row on first sight.
+pub async fn authenticate(state: &State, token: &str) -> Result<(CurrentUser, Holder), StatusCode> {
     // Use the shared JwksClient from state
     let audience = vec![state.config.auth0_audience.clone()];
 
@@ -85,26 +99,7 @@ pub async fn check(
 
     // Fetch userinfo from Auth0 if user is new or missing email
     let userinfo = if needs_userinfo {
-        let issuer = Url::parse(&state.config.auth0_issuer)
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-        let userinfo_url = issuer
-            .join("userinfo")
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-        let client_http = reqwest::Client::builder()
-            .timeout(Duration::from_secs(5))
-            .build()
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-        let userinfo: Auth0UserInfo = client_http
-            .get(userinfo_url)
-            .bearer_auth(token)
-            .send()
-            .await
-            .and_then(|r| r.error_for_status())
-            .map_err(|_| StatusCode::UNAUTHORIZED)?
-            .json()
-            .await
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-        Some(userinfo)
+        Some(fetch_userinfo(&state.config.auth0_issuer, token).await?)
     } else {
         None
     };
@@ -143,11 +138,28 @@ pub async fn check(
         .await
         .map_err(|_| StatusCode::UNAUTHORIZED)?;
 
-    request.extensions_mut().insert(current_user);
-    request.extensions_mut().insert(holder);
+    Ok((current_user, holder))
+}
 
-    let response = next.run(request).await;
-    Ok(response)
+async fn fetch_userinfo(auth0_issuer: &str, token: &str) -> Result<Auth0UserInfo, StatusCode> {
+    let issuer = Url::parse(auth0_issuer).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let userinfo_url = issuer
+        .join("userinfo")
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let client_http = reqwest::Client::builder()
+        .timeout(Duration::from_secs(5))
+        .build()
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    client_http
+        .get(userinfo_url)
+        .bearer_auth(token)
+        .send()
+        .await
+        .and_then(|r| r.error_for_status())
+        .map_err(|_| StatusCode::UNAUTHORIZED)?
+        .json()
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
 }
 
 /// Applies the user's accounts-file role on login, logging instead of failing on
