@@ -71,6 +71,6 @@ description: One sentence shown under the title.
 ---
 ```
 
-A file's path is its URL: `dashboard/docs/cli/get.md` is `/docs/cli/get`. Add new pages to the sidebar in `dashboard/app/docs/content.ts`, and link between pages with relative `.md` paths so they also work on GitHub.
+A file's path is its URL: `dashboard/docs/cli-usage.md` is `/docs/cli-usage`. Add new pages to the sidebar in `dashboard/app/docs/content.ts`, and link between pages with relative `.md` paths so they also work on GitHub.
 
-The [API reference](/docs/api) is generated from the API's `/openapi.json`, so endpoints are documented in their `utoipa` annotations and doc comments, not here.
+The [API reference](/docs/api) is generated from the API's `/openapi.json`, so endpoints are documented in their `utoipa` annotations and doc comments, not here. Likewise the [CLI reference](/docs/cli) is rendered from `cli/reference.json`, which `cargo test` regenerates from the clap definitions in `cli/src/cli.rs`: document commands there.

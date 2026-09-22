@@ -30,6 +30,7 @@ Smith consists of five components:
 - [Run Smith locally](./development.md)
 - [Roll out a release](./deployments.md)
 - [Browse the API reference](/docs/api)
+- [Browse the CLI reference](/docs/cli)
 
 ## Security
 
