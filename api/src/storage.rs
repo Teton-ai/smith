@@ -1,11 +1,14 @@
 use axum::response::Response;
 use cloudfront_sign::{SignedOptions, get_signed_url};
+use s3::bucket::CHUNK_SIZE;
 use s3::creds::Credentials;
 use s3::serde_types::Part;
+use s3::utils::read_chunk_async;
 use s3::{Bucket, Region};
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
+use tracing::error;
 
 /// Lifetime of a package's CloudFront URL. Packages are small enough that an
 /// hour comfortably covers a download plus retries.
@@ -38,10 +41,8 @@ impl Storage {
         Ok(())
     }
 
-    /// Stream a reader straight into S3 without ever holding the object in
-    /// memory. `put_object_stream` uploads in multipart chunks, so a 512 MiB
-    /// device file costs a chunk of RSS, not 512 MiB — unlike `save_to_s3`,
-    /// which takes a fully-buffered slice.
+    /// Streams a reader into S3 with one 8 MiB part in flight at a time. rust-s3's
+    /// own `put_object_stream` queues every chunk first, so it buffers the whole object.
     pub async fn stream_to_s3<R>(
         bucket_name: &str,
         object_key: &str,
@@ -50,12 +51,75 @@ impl Storage {
     where
         R: tokio::io::AsyncRead + Unpin + ?Sized,
     {
-        let region = Region::from_default_env()?;
-        let credentials = Credentials::default()?;
-        let bucket = Bucket::new(bucket_name, region, credentials)?;
+        const CONTENT_TYPE: &str = "application/octet-stream";
 
-        let status = bucket.put_object_stream(reader, object_key).await?;
-        Ok(status.status_code())
+        let bucket = Self::bucket(bucket_name)?;
+
+        // Anything that fits in one chunk skips multipart entirely.
+        let first_chunk = read_chunk_async(reader).await?;
+        if first_chunk.len() < CHUNK_SIZE {
+            let response = bucket
+                .put_object_with_content_type(object_key, &first_chunk, CONTENT_TYPE)
+                .await?;
+            return Ok(response.status_code());
+        }
+
+        let upload_id = bucket
+            .initiate_multipart_upload(object_key, CONTENT_TYPE)
+            .await?
+            .upload_id;
+
+        let result = async {
+            let mut chunk = first_chunk;
+            let mut part_number: u32 = 1;
+            let mut parts = Vec::new();
+
+            loop {
+                let last = chunk.len() < CHUNK_SIZE;
+                parts.push(
+                    bucket
+                        .put_multipart_chunk(
+                            chunk,
+                            object_key,
+                            part_number,
+                            &upload_id,
+                            CONTENT_TYPE,
+                        )
+                        .await?,
+                );
+                if last {
+                    break;
+                }
+                part_number += 1;
+                chunk = read_chunk_async(reader).await?;
+                // An exact multiple of CHUNK_SIZE has no trailing part to send.
+                if chunk.is_empty() {
+                    break;
+                }
+            }
+
+            let response = bucket
+                .complete_multipart_upload(object_key, &upload_id, parts)
+                .await?;
+            // A failed complete must be an Err so the abort below runs.
+            let status = response.status_code();
+            if !(200..300).contains(&status) {
+                anyhow::bail!(
+                    "CompleteMultipartUpload for {object_key} failed with status {status}"
+                )
+            }
+            Ok::<u16, anyhow::Error>(status)
+        }
+        .await;
+
+        if result.is_err() {
+            // Parts of an abandoned upload are billed until the upload is aborted.
+            if let Err(abort_error) = bucket.abort_upload(object_key, &upload_id).await {
+                error!("Abort after failed upload of {object_key} did not confirm: {abort_error}");
+            }
+        }
+
+        result
     }
 
     /// A time-limited CloudFront URL for an object staged by the file browser.
