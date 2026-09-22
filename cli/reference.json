@@ -1,0 +1,1093 @@
+{
+  "name": "sm",
+  "version": "0.2.199",
+  "about": "Smith CLI - Fleet management tool",
+  "global_options": [],
+  "commands": [
+    {
+      "path": "sm profile",
+      "about": "Commands to handle current profile to use",
+      "usage": "sm profile [PROFILE]",
+      "arguments": [
+        {
+          "name": "<PROFILE>",
+          "required": false,
+          "help": ""
+        }
+      ],
+      "options": [],
+      "examples": [
+        "# Show the current profile",
+        "sm profile",
+        "# Switch to another profile",
+        "sm profile production"
+      ]
+    },
+    {
+      "path": "sm auth login",
+      "about": "Login to Smith API. If a browser cannot be opened, use the displayed URL manually",
+      "usage": "sm auth login [OPTIONS]",
+      "arguments": [],
+      "options": [
+        {
+          "name": "--no-open",
+          "required": false,
+          "help": "Do not try to open a browser automatically"
+        }
+      ],
+      "examples": [
+        "sm auth login",
+        "# On a machine without a browser",
+        "sm auth login --no-open"
+      ]
+    },
+    {
+      "path": "sm auth logout",
+      "about": "logs out the current section",
+      "usage": "sm auth logout",
+      "arguments": [],
+      "options": [],
+      "examples": []
+    },
+    {
+      "path": "sm auth show",
+      "about": "Shows the current token being used",
+      "usage": "sm auth show",
+      "arguments": [],
+      "options": [],
+      "examples": []
+    },
+    {
+      "path": "sm get device",
+      "aliases": [
+        "devices",
+        "d"
+      ],
+      "about": "Get device information",
+      "description": "Without IDs or filters, lists every device in the fleet.",
+      "usage": "sm get device [OPTIONS] [IDS]...",
+      "arguments": [
+        {
+          "name": "<IDS>",
+          "required": false,
+          "help": "Device serial numbers or IDs. If omitted, shows all devices"
+        }
+      ],
+      "options": [
+        {
+          "name": "--label",
+          "short": "-l",
+          "value": "<KEY=VALUE>",
+          "required": false,
+          "help": "Filter by labels (format: key=value). Can be used multiple times"
+        },
+        {
+          "name": "--online",
+          "required": false,
+          "help": "Show only online devices (last seen < 5 minutes)"
+        },
+        {
+          "name": "--offline",
+          "required": false,
+          "help": "Show only offline devices (last seen >= 5 minutes)"
+        },
+        {
+          "name": "--search",
+          "short": "-s",
+          "required": false,
+          "help": "Use partial matching for device IDs (matches serial number, hostname, or model)"
+        },
+        {
+          "name": "--json",
+          "short": "-j",
+          "required": false,
+          "help": ""
+        },
+        {
+          "name": "--output",
+          "short": "-o",
+          "value": "<OUTPUT>",
+          "required": false,
+          "help": "Output format: wide, json, or custom field (e.g., serial_number, id, ip_address)"
+        }
+      ],
+      "examples": [
+        "sm get d",
+        "sm get d ABC123 XYZ789",
+        "sm get d --online",
+        "# Partial match on serial number, hostname or model",
+        "sm get d rpi -s",
+        "sm get d -l env=production -l region=us-west",
+        "# Only the serial numbers, one per line",
+        "sm get d -o serial_number"
+      ]
+    },
+    {
+      "path": "sm get commands",
+      "aliases": [
+        "cmds"
+      ],
+      "about": "Get recent commands for device(s)",
+      "description": "Shows each command's ID, when it was issued, its type (Restart, FreeForm, UpdateVariables, ...) and its status (Pending, Fetched, Completed, Cancelled). FreeForm commands show the command text.",
+      "usage": "sm get commands [OPTIONS] [IDS]...",
+      "arguments": [
+        {
+          "name": "<IDS>",
+          "required": false,
+          "help": "Device serial numbers or IDs. If omitted, shows all devices"
+        }
+      ],
+      "options": [
+        {
+          "name": "--label",
+          "short": "-l",
+          "value": "<KEY=VALUE>",
+          "required": false,
+          "help": "Filter by labels (format: key=value). Can be used multiple times"
+        },
+        {
+          "name": "--online",
+          "required": false,
+          "help": "Show only online devices (last seen < 5 minutes)"
+        },
+        {
+          "name": "--offline",
+          "required": false,
+          "help": "Show only offline devices (last seen >= 5 minutes)"
+        },
+        {
+          "name": "--search",
+          "short": "-s",
+          "required": false,
+          "help": "Use partial matching for device IDs (matches serial number, hostname, or model)"
+        },
+        {
+          "name": "--limit",
+          "value": "<LIMIT>",
+          "required": false,
+          "help": "Number of commands to show per device",
+          "default": "10"
+        },
+        {
+          "name": "--json",
+          "short": "-j",
+          "required": false,
+          "help": ""
+        }
+      ],
+      "examples": [
+        "sm get cmds ABC123",
+        "sm get cmds ABC123 --limit 50",
+        "sm get cmds -l env=production"
+      ]
+    },
+    {
+      "path": "sm get recipe",
+      "aliases": [
+        "recipes"
+      ],
+      "about": "Get saved command recipes",
+      "usage": "sm get recipe [OPTIONS] [NAME]",
+      "arguments": [
+        {
+          "name": "<NAME>",
+          "required": false,
+          "help": "Recipe name or id to show. Omit to list all recipes"
+        }
+      ],
+      "options": [
+        {
+          "name": "--json",
+          "short": "-j",
+          "required": false,
+          "help": ""
+        }
+      ],
+      "examples": []
+    },
+    {
+      "path": "sm restart device",
+      "aliases": [
+        "devices",
+        "d"
+      ],
+      "about": "Restart devices",
+      "description": "Asks for confirmation first, listing up to 10 of the devices that will restart. Pass `--yes` to skip it.",
+      "usage": "sm restart device [OPTIONS] [IDS]...",
+      "arguments": [
+        {
+          "name": "<IDS>",
+          "required": false,
+          "help": "Device serial numbers or IDs. If omitted, shows all devices"
+        }
+      ],
+      "options": [
+        {
+          "name": "--label",
+          "short": "-l",
+          "value": "<KEY=VALUE>",
+          "required": false,
+          "help": "Filter by labels (format: key=value). Can be used multiple times"
+        },
+        {
+          "name": "--online",
+          "required": false,
+          "help": "Show only online devices (last seen < 5 minutes)"
+        },
+        {
+          "name": "--offline",
+          "required": false,
+          "help": "Show only offline devices (last seen >= 5 minutes)"
+        },
+        {
+          "name": "--search",
+          "short": "-s",
+          "required": false,
+          "help": "Use partial matching for device IDs (matches serial number, hostname, or model)"
+        },
+        {
+          "name": "--yes",
+          "short": "-y",
+          "required": false,
+          "help": "Skip confirmation prompt"
+        },
+        {
+          "name": "--nowait",
+          "required": false,
+          "help": "Don't wait for result, just queue the command and return immediately"
+        }
+      ],
+      "examples": [
+        "sm restart d ABC123",
+        "sm restart d -l env=staging -y",
+        "sm restart d --offline --nowait"
+      ]
+    },
+    {
+      "path": "sm restart service",
+      "aliases": [
+        "services",
+        "svc"
+      ],
+      "about": "Restart a systemd service on device(s) (runs 'systemctl restart <unit>')",
+      "usage": "sm restart service [OPTIONS] <UNIT> [IDS]...",
+      "arguments": [
+        {
+          "name": "<UNIT>",
+          "required": true,
+          "help": "Service unit name (e.g., nginx, smithd, docker)"
+        },
+        {
+          "name": "<IDS>",
+          "required": false,
+          "help": "Device serial numbers or IDs. If omitted, shows all devices"
+        }
+      ],
+      "options": [
+        {
+          "name": "--label",
+          "short": "-l",
+          "value": "<KEY=VALUE>",
+          "required": false,
+          "help": "Filter by labels (format: key=value). Can be used multiple times"
+        },
+        {
+          "name": "--online",
+          "required": false,
+          "help": "Show only online devices (last seen < 5 minutes)"
+        },
+        {
+          "name": "--offline",
+          "required": false,
+          "help": "Show only offline devices (last seen >= 5 minutes)"
+        },
+        {
+          "name": "--search",
+          "short": "-s",
+          "required": false,
+          "help": "Use partial matching for device IDs (matches serial number, hostname, or model)"
+        },
+        {
+          "name": "--yes",
+          "short": "-y",
+          "required": false,
+          "help": "Skip confirmation prompt"
+        },
+        {
+          "name": "--nowait",
+          "required": false,
+          "help": "Don't wait for result, just queue the command and return immediately"
+        }
+      ],
+      "examples": [
+        "sm restart svc nginx ABC123",
+        "sm restart svc smithd -l env=production -y"
+      ]
+    },
+    {
+      "path": "sm status device",
+      "aliases": [
+        "devices",
+        "d"
+      ],
+      "about": "Get smithd status for a device (runs 'smithd status' command)",
+      "description": "Shows comprehensive update status including:\n- Update/upgrade status (whether the system is up-to-date)\n- Installed package versions (currently running on the device)\n- Target package versions (versions that should be running)\n- Update status flag (true/false for each package indicating if it's updated)",
+      "usage": "sm status device [OPTIONS] [IDS]...",
+      "arguments": [
+        {
+          "name": "<IDS>",
+          "required": false,
+          "help": "Device serial numbers or IDs. If omitted, shows all devices"
+        }
+      ],
+      "options": [
+        {
+          "name": "--label",
+          "short": "-l",
+          "value": "<KEY=VALUE>",
+          "required": false,
+          "help": "Filter by labels (format: key=value). Can be used multiple times"
+        },
+        {
+          "name": "--online",
+          "required": false,
+          "help": "Show only online devices (last seen < 5 minutes)"
+        },
+        {
+          "name": "--offline",
+          "required": false,
+          "help": "Show only offline devices (last seen >= 5 minutes)"
+        },
+        {
+          "name": "--search",
+          "short": "-s",
+          "required": false,
+          "help": "Use partial matching for device IDs (matches serial number, hostname, or model)"
+        },
+        {
+          "name": "--nowait",
+          "required": false,
+          "help": "Don't wait for result, just queue the command and return immediately (faster, recommended for agents - use 'sm command <id>' to check results later)"
+        }
+      ],
+      "examples": [
+        "sm status d ABC123",
+        "sm status d --online",
+        "# Queue it on every production device and collect results later",
+        "sm status d -l env=production --nowait"
+      ]
+    },
+    {
+      "path": "sm status service",
+      "aliases": [
+        "services",
+        "svc"
+      ],
+      "about": "Get systemd service status on a device (runs 'systemctl status <unit>')",
+      "usage": "sm status service [OPTIONS] <UNIT> [IDS]...",
+      "arguments": [
+        {
+          "name": "<UNIT>",
+          "required": true,
+          "help": "Service unit name (e.g., nginx, smithd, docker)"
+        },
+        {
+          "name": "<IDS>",
+          "required": false,
+          "help": "Device serial numbers or IDs. If omitted, shows all devices"
+        }
+      ],
+      "options": [
+        {
+          "name": "--label",
+          "short": "-l",
+          "value": "<KEY=VALUE>",
+          "required": false,
+          "help": "Filter by labels (format: key=value). Can be used multiple times"
+        },
+        {
+          "name": "--online",
+          "required": false,
+          "help": "Show only online devices (last seen < 5 minutes)"
+        },
+        {
+          "name": "--offline",
+          "required": false,
+          "help": "Show only offline devices (last seen >= 5 minutes)"
+        },
+        {
+          "name": "--search",
+          "short": "-s",
+          "required": false,
+          "help": "Use partial matching for device IDs (matches serial number, hostname, or model)"
+        },
+        {
+          "name": "--nowait",
+          "required": false,
+          "help": "Don't wait for result, just queue the command and return immediately (faster, recommended for agents - use 'sm command <id>' to check results later)"
+        }
+      ],
+      "examples": [
+        "sm status svc nginx ABC123",
+        "sm status svc smithd -l env=production",
+        "sm status svc docker ABC123 XYZ789"
+      ]
+    },
+    {
+      "path": "sm logs",
+      "about": "Get logs for a device (runs 'journalctl -r' on the device)",
+      "description": "Entries come from the systemd journal, newest first.",
+      "usage": "sm logs [OPTIONS] [IDS]...",
+      "arguments": [
+        {
+          "name": "<IDS>",
+          "required": false,
+          "help": "Device serial numbers or IDs. If omitted, shows all devices"
+        }
+      ],
+      "options": [
+        {
+          "name": "--label",
+          "short": "-l",
+          "value": "<KEY=VALUE>",
+          "required": false,
+          "help": "Filter by labels (format: key=value). Can be used multiple times"
+        },
+        {
+          "name": "--online",
+          "required": false,
+          "help": "Show only online devices (last seen < 5 minutes)"
+        },
+        {
+          "name": "--offline",
+          "required": false,
+          "help": "Show only offline devices (last seen >= 5 minutes)"
+        },
+        {
+          "name": "--search",
+          "short": "-s",
+          "required": false,
+          "help": "Use partial matching for device IDs (matches serial number, hostname, or model)"
+        },
+        {
+          "name": "--unit",
+          "value": "<UNIT>",
+          "required": false,
+          "help": "Filter logs by systemd unit (e.g. smithd or smithd.service). Passed to journalctl -u"
+        },
+        {
+          "name": "--since",
+          "value": "<TIMESTAMP>",
+          "required": false,
+          "help": "Show entries not older than this date. Passed to journalctl --since (e.g. \"1h ago\", \"2026-06-17 10:00:00\")"
+        },
+        {
+          "name": "--until",
+          "value": "<TIMESTAMP>",
+          "required": false,
+          "help": "Show entries not newer than this date. Passed to journalctl --until"
+        },
+        {
+          "name": "--grep",
+          "value": "<PATTERN>",
+          "required": false,
+          "help": "Filter log lines by pattern. Passed to journalctl --grep (supports ERE regex)"
+        },
+        {
+          "name": "--nowait",
+          "required": false,
+          "help": "Don't wait for result, just queue the command and return immediately (faster, recommended for agents - use 'sm command <id>' to check results later)"
+        }
+      ],
+      "examples": [
+        "sm logs ABC123",
+        "sm logs ABC123 --unit smithd --since \"1h ago\"",
+        "sm logs ABC123 --grep \"error|panic\"",
+        "sm logs -l env=production --nowait"
+      ]
+    },
+    {
+      "path": "sm test-network quick",
+      "about": "Run a quick network test on device(s) (downloads 20MB test file)",
+      "usage": "sm test-network quick [OPTIONS] [IDS]...",
+      "arguments": [
+        {
+          "name": "<IDS>",
+          "required": false,
+          "help": "Device serial numbers or IDs. If omitted, shows all devices"
+        }
+      ],
+      "options": [
+        {
+          "name": "--label",
+          "short": "-l",
+          "value": "<KEY=VALUE>",
+          "required": false,
+          "help": "Filter by labels (format: key=value). Can be used multiple times"
+        },
+        {
+          "name": "--online",
+          "required": false,
+          "help": "Show only online devices (last seen < 5 minutes)"
+        },
+        {
+          "name": "--offline",
+          "required": false,
+          "help": "Show only offline devices (last seen >= 5 minutes)"
+        },
+        {
+          "name": "--search",
+          "short": "-s",
+          "required": false,
+          "help": "Use partial matching for device IDs (matches serial number, hostname, or model)"
+        }
+      ],
+      "examples": [
+        "sm test-network quick ABC123",
+        "sm test-network quick --online"
+      ]
+    },
+    {
+      "path": "sm test-network extended",
+      "about": "Run an extended network test on devices matching labels",
+      "usage": "sm test-network extended [OPTIONS] --label <KEY=VALUE>",
+      "arguments": [],
+      "options": [
+        {
+          "name": "--label",
+          "short": "-l",
+          "value": "<KEY=VALUE>",
+          "required": true,
+          "help": "Filter by labels (format: key=value). Can be used multiple times"
+        },
+        {
+          "name": "--duration",
+          "short": "-d",
+          "value": "<DURATION>",
+          "required": false,
+          "help": "Duration in minutes (3-8)",
+          "default": "3"
+        },
+        {
+          "name": "--wait",
+          "short": "-w",
+          "required": false,
+          "help": "Poll for results (wait until completion)"
+        },
+        {
+          "name": "--poll-interval",
+          "value": "<POLL_INTERVAL>",
+          "required": false,
+          "help": "Poll interval in seconds (default: 30)",
+          "default": "30"
+        }
+      ],
+      "examples": [
+        "sm test-network extended -l env=staging",
+        "# Run for 5 minutes and wait for the results",
+        "sm test-network extended -l env=staging -d 5 -w"
+      ]
+    },
+    {
+      "path": "sm test-network status",
+      "about": "Check status of an extended network test session",
+      "usage": "sm test-network status <SESSION_ID>",
+      "arguments": [
+        {
+          "name": "<SESSION_ID>",
+          "required": true,
+          "help": "Session ID (UUID) returned from extended test"
+        }
+      ],
+      "options": [],
+      "examples": []
+    },
+    {
+      "path": "sm command",
+      "about": "Check command results by ID (format: device_id:command_id)",
+      "description": "IDs are printed by any command run with `--nowait`, and listed by `sm get cmds`.",
+      "usage": "sm command [IDS]...",
+      "arguments": [
+        {
+          "name": "<IDS>",
+          "required": false,
+          "help": "Command IDs to check in format device_id:command_id"
+        }
+      ],
+      "options": [],
+      "examples": [
+        "sm command 123:456",
+        "sm command 123:456 789:012"
+      ]
+    },
+    {
+      "path": "sm distributions ls",
+      "about": "List the current distributions",
+      "usage": "sm distributions ls [OPTIONS]",
+      "arguments": [],
+      "options": [
+        {
+          "name": "--json",
+          "short": "-j",
+          "required": false,
+          "help": ""
+        }
+      ],
+      "examples": []
+    },
+    {
+      "path": "sm distributions releases",
+      "about": "List the current distribution releases",
+      "usage": "sm distributions releases",
+      "arguments": [],
+      "options": [],
+      "examples": []
+    },
+    {
+      "path": "sm releases get",
+      "about": "Get releases",
+      "usage": "sm releases get [OPTIONS] [RELEASE_NUMBER]",
+      "arguments": [
+        {
+          "name": "<RELEASE_NUMBER>",
+          "required": false,
+          "help": "Get a specific release, leave out to get all releases"
+        }
+      ],
+      "options": [
+        {
+          "name": "--distribution-id",
+          "value": "<DISTRIBUTION_ID>",
+          "required": false,
+          "help": ""
+        },
+        {
+          "name": "--json",
+          "required": false,
+          "help": ""
+        }
+      ],
+      "examples": []
+    },
+    {
+      "path": "sm releases draft",
+      "about": "Draft a new release",
+      "usage": "sm releases draft",
+      "arguments": [],
+      "options": [],
+      "examples": []
+    },
+    {
+      "path": "sm releases publish",
+      "about": "Publish a release that is in draft",
+      "usage": "sm releases publish <RELEASE_NUMBER>",
+      "arguments": [
+        {
+          "name": "<RELEASE_NUMBER>",
+          "required": true,
+          "help": ""
+        }
+      ],
+      "options": [],
+      "examples": []
+    },
+    {
+      "path": "sm releases lts",
+      "about": "Mark a release as LTS, a version we commit to keeping devices on",
+      "usage": "sm releases lts [OPTIONS] <RELEASE_NUMBER>",
+      "arguments": [
+        {
+          "name": "<RELEASE_NUMBER>",
+          "required": true,
+          "help": ""
+        }
+      ],
+      "options": [
+        {
+          "name": "--clear",
+          "required": false,
+          "help": "Remove the LTS designation instead of applying it"
+        }
+      ],
+      "examples": []
+    },
+    {
+      "path": "sm releases os push",
+      "about": "Upload a base OS image and attach it to a draft release",
+      "usage": "sm releases os push [OPTIONS] --path <PATH> <RELEASE_NUMBER>",
+      "arguments": [
+        {
+          "name": "<RELEASE_NUMBER>",
+          "required": true,
+          "help": "Release to attach the image to"
+        }
+      ],
+      "options": [
+        {
+          "name": "--path",
+          "short": "-p",
+          "value": "<PATH>",
+          "required": true,
+          "help": "Path to the .tar.gz image"
+        },
+        {
+          "name": "--part-size",
+          "value": "<PART_SIZE>",
+          "required": false,
+          "help": "Bytes per part",
+          "default": "104857600"
+        },
+        {
+          "name": "--concurrency",
+          "value": "<CONCURRENCY>",
+          "required": false,
+          "help": "Parallel part uploads",
+          "default": "8"
+        },
+        {
+          "name": "--restart",
+          "required": false,
+          "help": "Discard any upload already in progress and start from zero"
+        }
+      ],
+      "examples": []
+    },
+    {
+      "path": "sm releases os get",
+      "about": "Show the image attached to a release",
+      "usage": "sm releases os get [OPTIONS] <RELEASE_NUMBER>",
+      "arguments": [
+        {
+          "name": "<RELEASE_NUMBER>",
+          "required": true,
+          "help": ""
+        }
+      ],
+      "options": [
+        {
+          "name": "--json",
+          "required": false,
+          "help": ""
+        }
+      ],
+      "examples": []
+    },
+    {
+      "path": "sm releases os rm",
+      "about": "Detach and delete the image from a draft release",
+      "usage": "sm releases os rm [OPTIONS] <RELEASE_NUMBER>",
+      "arguments": [
+        {
+          "name": "<RELEASE_NUMBER>",
+          "required": true,
+          "help": ""
+        }
+      ],
+      "options": [
+        {
+          "name": "--yes",
+          "short": "-y",
+          "required": false,
+          "help": "Skip confirmation prompt"
+        }
+      ],
+      "examples": []
+    },
+    {
+      "path": "sm releases deploy",
+      "about": "Deploy a release",
+      "usage": "sm releases deploy [OPTIONS] <RELEASE_NUMBER>",
+      "arguments": [
+        {
+          "name": "<RELEASE_NUMBER>",
+          "required": true,
+          "help": ""
+        }
+      ],
+      "options": [
+        {
+          "name": "--canary-device-labels",
+          "value": "<CANARY_DEVICE_LABELS>",
+          "required": false,
+          "help": "Customize which devices are canary released, by filtering devices by labels. e.g. --labels label1=a --labels label2=b"
+        }
+      ],
+      "examples": []
+    },
+    {
+      "path": "sm tunnel",
+      "about": "Tunneling options into a device",
+      "usage": "sm tunnel [OPTIONS] <SERIAL_NUMBER>",
+      "arguments": [
+        {
+          "name": "<SERIAL_NUMBER>",
+          "required": true,
+          "help": "Device serial number to tunnel into"
+        }
+      ],
+      "options": [
+        {
+          "name": "--override-user",
+          "value": "<OVERRIDE_USER>",
+          "required": false,
+          "help": "Change the default user for the tunnel"
+        }
+      ],
+      "examples": [
+        "sm tunnel ABC123"
+      ]
+    },
+    {
+      "path": "sm completion",
+      "about": "Generate shell completion scripts",
+      "usage": "sm completion <SHELL>",
+      "arguments": [
+        {
+          "name": "<SHELL>",
+          "required": true,
+          "help": ""
+        }
+      ],
+      "options": [],
+      "examples": [
+        "sm completion zsh > ~/.zsh/completion/_sm",
+        "sm completion bash > /usr/local/etc/bash_completion.d/sm",
+        "sm completion fish > ~/.config/fish/completions/sm.fish"
+      ]
+    },
+    {
+      "path": "sm update",
+      "about": "Update the CLI",
+      "usage": "sm update [OPTIONS]",
+      "arguments": [],
+      "options": [
+        {
+          "name": "--check",
+          "required": false,
+          "help": "Check for updates without installing"
+        }
+      ],
+      "examples": [
+        "sm update --check",
+        "sm update"
+      ]
+    },
+    {
+      "path": "sm agent-help",
+      "about": "Print all available commands in markdown format (useful for agents)",
+      "usage": "sm agent-help",
+      "arguments": [],
+      "options": [],
+      "examples": []
+    },
+    {
+      "path": "sm run",
+      "about": "Run commands on devices with filters (async by default, use --wait to poll for results)",
+      "description": "The command goes after `--`, or on stdin. Wrap anything with pipes or other shell syntax in quotes. Without `--wait`, check results later with `sm command <device_id>:<command_id>`.",
+      "usage": "sm run [OPTIONS] [IDS]... [-- <COMMAND>...]",
+      "arguments": [
+        {
+          "name": "<IDS>",
+          "required": false,
+          "help": "Device serial numbers or IDs. If omitted, shows all devices"
+        },
+        {
+          "name": "<COMMAND>",
+          "required": false,
+          "help": "Command to execute on the devices (provide after -- or via stdin)"
+        }
+      ],
+      "options": [
+        {
+          "name": "--label",
+          "short": "-l",
+          "value": "<KEY=VALUE>",
+          "required": false,
+          "help": "Filter by labels (format: key=value). Can be used multiple times"
+        },
+        {
+          "name": "--online",
+          "required": false,
+          "help": "Show only online devices (last seen < 5 minutes)"
+        },
+        {
+          "name": "--offline",
+          "required": false,
+          "help": "Show only offline devices (last seen >= 5 minutes)"
+        },
+        {
+          "name": "--search",
+          "short": "-s",
+          "required": false,
+          "help": "Use partial matching for device IDs (matches serial number, hostname, or model)"
+        },
+        {
+          "name": "--yes",
+          "short": "-y",
+          "required": false,
+          "help": "Skip confirmation prompt"
+        },
+        {
+          "name": "--wait",
+          "short": "-w",
+          "required": false,
+          "help": "Wait for command results (polls until completion)"
+        },
+        {
+          "name": "--recipe",
+          "short": "-r",
+          "value": "<RECIPE>",
+          "required": false,
+          "help": "Run a saved recipe by name or id instead of a free-form command"
+        }
+      ],
+      "examples": [
+        "sm run ABC123 -- uptime",
+        "sm run ABC123 -w -- df -h",
+        "sm run -l env=production -- systemctl status smithd",
+        "sm run ABC123 -w -- \"dmesg | grep -i error | tail -n 20\"",
+        "# A saved recipe instead of a free-form command",
+        "sm run ABC123 -r disk-usage"
+      ]
+    },
+    {
+      "path": "sm label",
+      "about": "Set labels on devices with filters",
+      "description": "Setting a label overwrites any existing value for that key. Filter on labels in other commands with `-l`, e.g. `sm get d -l env=production`.",
+      "usage": "sm label [OPTIONS] <KEY=VALUE>...",
+      "arguments": [
+        {
+          "name": "<KEY=VALUE>",
+          "required": true,
+          "help": "Labels to set on the devices (format: key=value). Can be used multiple times"
+        }
+      ],
+      "options": [
+        {
+          "name": "--label",
+          "short": "-l",
+          "value": "<KEY=VALUE>",
+          "required": false,
+          "help": "Filter by labels (format: key=value). Can be used multiple times"
+        },
+        {
+          "name": "--online",
+          "required": false,
+          "help": "Only online devices (last seen < 5 minutes)"
+        },
+        {
+          "name": "--offline",
+          "required": false,
+          "help": "Only offline devices (last seen >= 5 minutes)"
+        },
+        {
+          "name": "--search",
+          "short": "-s",
+          "required": false,
+          "help": "Use partial matching for `--device` (matches serial number, hostname, or model)"
+        },
+        {
+          "name": "--device",
+          "short": "-d",
+          "value": "<DEVICES>",
+          "required": false,
+          "help": "Specific device serial numbers or IDs to target"
+        }
+      ],
+      "examples": [
+        "sm label -d ABC123 env=production",
+        "sm label -d ABC123 env=production region=us-west",
+        "sm label -l region=us-east env=production",
+        "sm label -d rpi -s location=warehouse-1"
+      ]
+    },
+    {
+      "path": "sm approve",
+      "about": "Approve devices for fleet management",
+      "usage": "sm approve [OPTIONS] [IDS]...",
+      "arguments": [
+        {
+          "name": "<IDS>",
+          "required": false,
+          "help": "Device serial numbers or IDs. If omitted, shows all devices"
+        }
+      ],
+      "options": [
+        {
+          "name": "--label",
+          "short": "-l",
+          "value": "<KEY=VALUE>",
+          "required": false,
+          "help": "Filter by labels (format: key=value). Can be used multiple times"
+        },
+        {
+          "name": "--online",
+          "required": false,
+          "help": "Show only online devices (last seen < 5 minutes)"
+        },
+        {
+          "name": "--offline",
+          "required": false,
+          "help": "Show only offline devices (last seen >= 5 minutes)"
+        },
+        {
+          "name": "--search",
+          "short": "-s",
+          "required": false,
+          "help": "Use partial matching for device IDs (matches serial number, hostname, or model)"
+        },
+        {
+          "name": "--yes",
+          "short": "-y",
+          "required": false,
+          "help": "Skip confirmation prompt"
+        }
+      ],
+      "examples": []
+    },
+    {
+      "path": "sm revoke",
+      "about": "Revoke device approval",
+      "usage": "sm revoke [OPTIONS] [IDS]...",
+      "arguments": [
+        {
+          "name": "<IDS>",
+          "required": false,
+          "help": "Device serial numbers or IDs. If omitted, shows all devices"
+        }
+      ],
+      "options": [
+        {
+          "name": "--label",
+          "short": "-l",
+          "value": "<KEY=VALUE>",
+          "required": false,
+          "help": "Filter by labels (format: key=value). Can be used multiple times"
+        },
+        {
+          "name": "--online",
+          "required": false,
+          "help": "Show only online devices (last seen < 5 minutes)"
+        },
+        {
+          "name": "--offline",
+          "required": false,
+          "help": "Show only offline devices (last seen >= 5 minutes)"
+        },
+        {
+          "name": "--search",
+          "short": "-s",
+          "required": false,
+          "help": "Use partial matching for device IDs (matches serial number, hostname, or model)"
+        },
+        {
+          "name": "--yes",
+          "short": "-y",
+          "required": false,
+          "help": "Skip confirmation prompt"
+        }
+      ],
+      "examples": []
+    }
+  ]
+}

@@ -45,7 +45,6 @@ import {
 	useApplyDeviceIntent,
 	useCreateDeviceIntent,
 	useDeleteDeviceIntent,
-	useDeleteNetworkById,
 	useGetConfiguredNetworksForDevice,
 	useGetDeviceInfo,
 	useGetDeviceIntent,
@@ -473,7 +472,6 @@ function AddNetworkModal({
 		id: number;
 		name: string;
 	}>();
-	const { mutateAsync: deleteNetworkByIdAsync } = useDeleteNetworkById();
 	const { mutate: createNetwork, isPending: isCreatingNetwork } = useMutation({
 		mutationFn: async (): Promise<{ matchedName: string | null }> => {
 			const requestedName = newNetName.trim();
@@ -493,25 +491,16 @@ function AddNetworkModal({
 					password: newNetPassword || null,
 				},
 			});
-			try {
-				await createIntentAsync({
-					deviceId,
-					data: {
-						network_id: created.id,
-						managed_by: "operator",
-					},
-				});
-			} catch (err) {
-				// Only compensate when the POST actually created this row (201). A 200
-				// means content-addressing matched an existing row that other devices
-				// may already reference; deleting it would corrupt their intents.
-				if (status === 201) {
-					await deleteNetworkByIdAsync({ networkId: created.id }).catch(
-						() => {},
-					);
-				}
-				throw err;
-			}
+			// A row this POST just created (201) with no intent referencing it is
+			// picked up by the API's periodic unreferenced-network sweep - there's
+			// no direct delete endpoint to compensate with anymore.
+			await createIntentAsync({
+				deviceId,
+				data: {
+					network_id: created.id,
+					managed_by: "operator",
+				},
+			});
 			// A 200 means the POST matched an existing catalog row by content, so
 			// the name the operator typed was discarded in favour of that row's.
 			// Silently showing a different name in the intent list looks like a bug.

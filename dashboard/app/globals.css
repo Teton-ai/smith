@@ -6,6 +6,10 @@
 :root {
 	--background: #ffffff;
 	--foreground: #171717;
+	/* From @fontsource-variable/geist-mono (src/main.tsx). Undefined, every
+	   `font-mono` silently inherited the sans font. */
+	--font-geist-mono:
+		"Geist Mono Variable", ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
 @theme inline {

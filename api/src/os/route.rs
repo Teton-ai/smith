@@ -1,6 +1,6 @@
 use super::{
-    CONTENT_TYPE, DEFAULT_PART_SIZE, MAX_PART_SIZE, MAX_PARTS, MIN_PART_SIZE,
-    UPLOAD_URL_TTL_SECONDS, object_key, total_parts,
+    DEFAULT_PART_SIZE, MAX_PART_SIZE, MAX_PARTS, MIN_PART_SIZE, UPLOAD_URL_TTL_SECONDS,
+    content_disposition_for, content_type_for, object_key, total_parts,
 };
 use crate::State;
 use crate::release::get_release_by_id;
@@ -50,11 +50,18 @@ async fn load_os(release_id: i32, pool: &sqlx::PgPool) -> Result<Option<Os>, sql
 
 /// Rejects anything that would escape the release's prefix or produce a key the
 /// device download path cannot address.
+///
+/// The name is also stamped into the object's `Content-Disposition`, so it has
+/// to survive as a header value: anything outside printable ASCII cannot be
+/// sent, and a quote would end the filename early and let the rest of the name
+/// be read as header parameters.
 fn validate_file_name(file_name: &str) -> Result<(), StatusCode> {
     if file_name.is_empty()
         || file_name.contains('/')
         || file_name.contains('\\')
         || file_name.starts_with('.')
+        || !file_name.chars().all(|c| c.is_ascii_graphic() || c == ' ')
+        || file_name.contains('"')
     {
         warn!("Rejected OS image file name: {file_name}");
         return Err(StatusCode::BAD_REQUEST);
@@ -191,13 +198,17 @@ pub async fn create_os_upload(
     }
 
     let key = object_key(release_id, &request.file_name);
-    let upload_id =
-        Storage::initiate_multipart(&state.config.packages_bucket_name, &key, CONTENT_TYPE)
-            .await
-            .map_err(|err| {
-                error!("Failed to initiate OS multipart upload: {err}");
-                StatusCode::INTERNAL_SERVER_ERROR
-            })?;
+    let upload_id = Storage::initiate_multipart(
+        &state.config.packages_bucket_name,
+        &key,
+        content_type_for(&request.file_name),
+        &content_disposition_for(&request.file_name),
+    )
+    .await
+    .map_err(|err| {
+        error!("Failed to initiate OS multipart upload: {err}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
 
     let os = match sqlx::query_as!(
         Os,

@@ -20,6 +20,7 @@ const files = import.meta.glob<string>("/docs/**/*.md", {
 
 export const DOCS_INDEX_SLUG = "introduction";
 export const API_REFERENCE_HREF = "/docs/api";
+export const CLI_REFERENCE_HREF = "/docs/cli";
 
 export interface DocHeading {
 	id: string;
@@ -46,8 +47,33 @@ export function slugForPath(pathname: string): string {
 	);
 }
 
-export function isApiReferencePath(pathname: string): boolean {
-	return pathname.replace(/\/+$/, "") === API_REFERENCE_HREF;
+// ── Sections ─────────────────────────────────────────────────────────────────
+
+export interface DocsSection {
+	title: string;
+	href: string;
+	/** The label in the phone's segmented control, where full titles wrap. */
+	short?: string;
+}
+
+// The header tabs. Compared by identity, so this array is the only source of
+// the objects.
+export const docsSections: DocsSection[] = [
+	// "Guides" rather than "Docs": every tab is docs.
+	{ title: "Guides", href: "/docs" },
+	{ title: "API reference", short: "API", href: API_REFERENCE_HREF },
+	{ title: "CLI reference", short: "CLI", href: CLI_REFERENCE_HREF },
+];
+
+export const [GUIDES_SECTION, API_SECTION, CLI_SECTION] = docsSections;
+
+/** A reference owns its URL; everything else is a guide. */
+export function docsSectionFor(pathname: string): DocsSection {
+	const path = pathname.replace(/\/+$/, "");
+	return (
+		docsSections.slice(1).find((section) => path === section.href) ??
+		GUIDES_SECTION
+	);
 }
 
 export function slugify(text: string): string {
@@ -194,40 +220,23 @@ export const docsNavigation: DocsNavGroup[] = [
 		links: [
 			{ title: "Introduction", href: "/docs" },
 			{ title: "Install the CLI", href: "/docs/installation" },
+			{ title: "Using the CLI", href: "/docs/cli-usage" },
 			{ title: "Local development", href: "/docs/development" },
 		],
 	},
 	{
 		title: "Fleet",
-		links: [{ title: "Deployments", href: "/docs/deployments" }],
-	},
-	{
-		title: "CLI",
 		links: [
-			{ title: "Overview", href: "/docs/cli/overview" },
-			{ title: "sm get", href: "/docs/cli/get" },
-			{ title: "sm status", href: "/docs/cli/status" },
-			{ title: "sm restart", href: "/docs/cli/restart" },
-			{ title: "sm logs", href: "/docs/cli/logs" },
-			{ title: "sm run", href: "/docs/cli/run" },
-			{ title: "sm label", href: "/docs/cli/label" },
-			{ title: "Other commands", href: "/docs/cli/other" },
-		],
-	},
-	{
-		title: "API",
-		links: [
-			{ title: "API reference", href: API_REFERENCE_HREF },
-			{ title: "MCP server", href: "/docs/mcp" },
+			{ title: "Deployments", href: "/docs/deployments" },
 			{ title: "Integrations", href: "/docs/integrations" },
+			{ title: "MCP server", href: "/docs/mcp" },
 		],
 	},
 ];
 
-// The generated reference has its own navigation, so the prose pager skips it.
-const readingOrder = docsNavigation
-	.flatMap((group) => group.links)
-	.filter((link) => link.href !== API_REFERENCE_HREF);
+// The API and CLI references aren't listed: they are header tabs
+// (`docsSections`) with sidebars of their own.
+const readingOrder = docsNavigation.flatMap((group) => group.links);
 
 export function docsNeighbours(href: string): {
 	previous?: DocsNavLink;

@@ -5,21 +5,24 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, Outlet, useLocation } from "react-router";
 import { type ApiReference, methodVariant, useApiReference } from "./api/spec";
 import {
-	API_REFERENCE_HREF,
+	CLI_GLOBAL_OPTIONS_ANCHOR,
+	CLI_INSTALL_ANCHOR,
+	cliReference,
+} from "./cli/reference";
+import {
+	API_SECTION,
+	CLI_SECTION,
 	type DocHeading,
+	type DocsSection,
 	docsNavigation,
-	isApiReferencePath,
+	docsSectionFor,
+	docsSections,
 	readDoc,
 	slugForPath,
 } from "./content";
 
 const REPOSITORY_URL = "https://github.com/Teton-ai/smith";
 const REPOSITORY_API_URL = "https://api.github.com/repos/Teton-ai/smith";
-
-const TABS = [
-	{ title: "Docs", href: "/docs" },
-	{ title: "API reference", href: API_REFERENCE_HREF },
-];
 
 const GROUP_TITLE_CLASS =
 	"mb-2 px-3 text-xs font-semibold uppercase tracking-wider text-gray-500";
@@ -210,6 +213,133 @@ function ApiNav({
 	);
 }
 
+const CLI_NAV_IDS = [
+	CLI_INSTALL_ANCHOR,
+	...cliReference.commands.map((command) => command.anchor),
+	...(cliReference.globalOptions.length > 0 ? [CLI_GLOBAL_OPTIONS_ANCHOR] : []),
+];
+
+function CliNav({ onNavigate }: { onNavigate?: () => void }) {
+	const activeId = useActiveHeading(CLI_NAV_IDS);
+	const rowClass = (id: string) =>
+		`block truncate rounded-md px-3 py-1 text-[13px] transition-colors ${
+			id === activeId
+				? "bg-blue-50 text-blue-700"
+				: "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
+		}`;
+
+	return (
+		<nav className="space-y-6">
+			<div>
+				<h2 className={GROUP_TITLE_CLASS}>Get started</h2>
+				<a
+					href={`#${CLI_INSTALL_ANCHOR}`}
+					onClick={onNavigate}
+					className={rowClass(CLI_INSTALL_ANCHOR)}
+				>
+					Install
+				</a>
+			</div>
+			<div>
+				<h2 className={GROUP_TITLE_CLASS}>Commands</h2>
+				<ul className="space-y-0.5">
+					{cliReference.commands.map((command) => (
+						<li key={command.anchor}>
+							<a
+								href={`#${command.anchor}`}
+								onClick={onNavigate}
+								title={command.about}
+								className={`${rowClass(command.anchor)} font-mono`}
+							>
+								{command.title}
+							</a>
+						</li>
+					))}
+				</ul>
+			</div>
+			{cliReference.globalOptions.length > 0 && (
+				<a
+					href={`#${CLI_GLOBAL_OPTIONS_ANCHOR}`}
+					onClick={onNavigate}
+					className={rowClass(CLI_GLOBAL_OPTIONS_ANCHOR)}
+				>
+					Global options
+				</a>
+			)}
+		</nav>
+	);
+}
+
+function DocsTabs({
+	active,
+	onNavigate,
+}: {
+	active: DocsSection;
+	onNavigate: () => void;
+}) {
+	return (
+		<nav
+			aria-label="Docs sections"
+			className="hidden h-full items-stretch gap-6 sm:flex"
+		>
+			{docsSections.map((section) => {
+				const current = section === active;
+				return (
+					<Link
+						key={section.href}
+						to={section.href}
+						onClick={onNavigate}
+						aria-current={current ? "page" : undefined}
+						className={`flex items-center border-b-2 text-sm font-medium transition-colors ${
+							current
+								? "border-blue-500 text-blue-600"
+								: "border-transparent text-gray-500 hover:text-gray-900"
+						}`}
+					>
+						{section.title}
+					</Link>
+				);
+			})}
+		</nav>
+	);
+}
+
+// On a phone the header has no room for the tabs, so they become a segmented
+// control at the top of the navigation sheet.
+function DocsTabsMobile({
+	active,
+	onNavigate,
+}: {
+	active: DocsSection;
+	onNavigate: () => void;
+}) {
+	return (
+		<nav
+			aria-label="Docs sections"
+			className="mb-6 flex gap-1 rounded-lg bg-gray-100 p-1"
+		>
+			{docsSections.map((section) => {
+				const current = section === active;
+				return (
+					<Link
+						key={section.href}
+						to={section.href}
+						onClick={onNavigate}
+						aria-current={current ? "page" : undefined}
+						className={`flex-1 rounded-md px-3 py-1.5 text-center text-sm font-medium transition-colors ${
+							current
+								? "bg-white text-gray-900 shadow-sm"
+								: "text-gray-500 hover:text-gray-900"
+						}`}
+					>
+						{section.short ?? section.title}
+					</Link>
+				);
+			})}
+		</nav>
+	);
+}
+
 function DocsToc({ headings }: { headings: DocHeading[] }) {
 	const activeId = useActiveHeading(headings.map((heading) => heading.id));
 	if (headings.length < 2) return null;
@@ -292,12 +422,18 @@ function GitHubStars() {
  */
 export default function DocsLayout() {
 	const { pathname } = useLocation();
-	const isApi = isApiReferencePath(pathname);
+	const section = docsSectionFor(pathname);
+	const isApi = section === API_SECTION;
+	const isCli = section === CLI_SECTION;
+	const isReference = isApi || isCli;
 	const { data: reference } = useApiReference(isApi);
-	const doc = isApi ? undefined : readDoc(slugForPath(pathname));
+	const doc = isReference ? undefined : readDoc(slugForPath(pathname));
 	const [menuOpen, setMenuOpen] = useState(false);
+	const closeMenu = () => setMenuOpen(false);
 
+	// The CLI sidebar already lists every command, so it has no separate TOC.
 	const headings = useMemo<DocHeading[]>(() => {
+		if (isCli) return [];
 		if (!isApi) return doc?.headings ?? [];
 		return (
 			reference?.tags.map((tag) => ({
@@ -306,9 +442,9 @@ export default function DocsLayout() {
 				level: 2,
 			})) ?? []
 		);
-	}, [isApi, doc, reference]);
+	}, [isApi, isCli, doc, reference]);
 
-	const title = isApi ? "API reference" : doc?.title;
+	const title = isReference ? section.title : doc?.title;
 	useEffect(() => {
 		document.title = title ? `${title} · Smith Docs` : "Smith Docs";
 		return () => {
@@ -317,13 +453,11 @@ export default function DocsLayout() {
 	}, [title]);
 
 	const nav = isApi ? (
-		<ApiNav reference={reference} onNavigate={() => setMenuOpen(false)} />
+		<ApiNav reference={reference} onNavigate={closeMenu} />
+	) : isCli ? (
+		<CliNav onNavigate={closeMenu} />
 	) : (
-		<GuideNav
-			pathname={pathname}
-			headings={headings}
-			onNavigate={() => setMenuOpen(false)}
-		/>
+		<GuideNav pathname={pathname} headings={headings} onNavigate={closeMenu} />
 	);
 
 	return (
@@ -345,7 +479,7 @@ export default function DocsLayout() {
 					</button>
 					<Link
 						to="/docs"
-						onClick={() => setMenuOpen(false)}
+						onClick={closeMenu}
 						className="flex items-center gap-2 lg:w-58"
 					>
 						<img
@@ -358,28 +492,7 @@ export default function DocsLayout() {
 						<span className="font-semibold">Smith</span>
 						<span className="text-gray-400">Docs</span>
 					</Link>
-					<nav
-						aria-label="Docs sections"
-						className="hidden h-full items-stretch gap-6 sm:flex"
-					>
-						{TABS.map((tab) => {
-							const current = (tab.href === API_REFERENCE_HREF) === isApi;
-							return (
-								<Link
-									key={tab.href}
-									to={tab.href}
-									aria-current={current ? "page" : undefined}
-									className={`flex items-center border-b-2 text-sm font-medium transition-colors ${
-										current
-											? "border-blue-500 text-blue-600"
-											: "border-transparent text-gray-500 hover:text-gray-900"
-									}`}
-								>
-									{tab.title}
-								</Link>
-							);
-						})}
-					</nav>
+					<DocsTabs active={section} onNavigate={closeMenu} />
 					<div className="ml-auto flex items-center">
 						<GitHubStars />
 					</div>
@@ -388,29 +501,7 @@ export default function DocsLayout() {
 
 			{menuOpen && (
 				<div className="fixed inset-x-0 top-14 bottom-0 z-30 overflow-y-auto bg-white px-3 py-5 lg:hidden">
-					<nav
-						aria-label="Docs sections"
-						className="mb-6 flex gap-1 rounded-lg bg-gray-100 p-1"
-					>
-						{TABS.map((tab) => {
-							const current = (tab.href === API_REFERENCE_HREF) === isApi;
-							return (
-								<Link
-									key={tab.href}
-									to={tab.href}
-									onClick={() => setMenuOpen(false)}
-									aria-current={current ? "page" : undefined}
-									className={`flex-1 rounded-md px-3 py-1.5 text-center text-sm font-medium transition-colors ${
-										current
-											? "bg-white text-gray-900 shadow-sm"
-											: "text-gray-500 hover:text-gray-900"
-									}`}
-								>
-									{tab.title}
-								</Link>
-							);
-						})}
-					</nav>
+					<DocsTabsMobile active={section} onNavigate={closeMenu} />
 					{nav}
 				</div>
 			)}
@@ -422,10 +513,10 @@ export default function DocsLayout() {
 			<main className="pt-14 lg:pl-64">
 				<div
 					className={`mx-auto flex gap-12 px-4 py-10 sm:px-6 lg:px-10 ${
-						isApi ? "max-w-6xl" : "max-w-5xl"
+						isReference ? "max-w-6xl" : "max-w-5xl"
 					}`}
 				>
-					<div className={`min-w-0 flex-1 ${isApi ? "" : "max-w-3xl"}`}>
+					<div className={`min-w-0 flex-1 ${isReference ? "" : "max-w-3xl"}`}>
 						<Outlet />
 					</div>
 					<div className="hidden xl:block">

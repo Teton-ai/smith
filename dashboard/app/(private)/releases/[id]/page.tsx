@@ -318,6 +318,9 @@ const ReleaseDetailPage = () => {
 			const ready = await downloadOs(releaseId);
 			// The link points straight at the CDN, so the browser's own download
 			// manager owns a multi-gigabyte transfer — nothing buffers in the tab.
+			// `download` is ignored for a cross-origin href, so it only documents
+			// intent: the saved name comes from the Content-Disposition the api
+			// stamps on the object at upload.
 			const anchor = document.createElement("a");
 			anchor.href = ready.url;
 			anchor.download = ready.file_name;

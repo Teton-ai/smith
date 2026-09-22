@@ -13,6 +13,8 @@ RUN npm ci
 # Copy sources and build the dashboard. The dashboard's Vite alias resolves
 # @teton/smith-ui from packages/ui/src, so no separate package build is needed.
 COPY packages/ui packages/ui
+# /docs/cli is rendered from the reference the CLI writes about itself.
+COPY cli/reference.json cli/reference.json
 COPY dashboard dashboard
 RUN npm run build -w @teton/smith-dashboard
 

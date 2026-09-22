@@ -1,15 +1,15 @@
 ---
-title: CLI overview
-description: sm is the Smith command line tool for managing your fleet through the Smith API.
+title: Using the CLI
+description: How sm commands are put together, how to select devices, and common workflows.
 ---
 
 For configuration, `sm` looks for configuration files in the `$HOME/.config/smith` directory. You can manage multiple profiles and switch between them using the `sm profile` command.
 
-This overview covers `sm` syntax, describes the command operations, and provides common examples. For details about each command, see the individual command reference pages.
+This guide covers `sm` syntax and common workflows. Every command and flag is listed in the [CLI reference](/docs/cli).
 
 ## Installation
 
-See [Install the CLI](../installation.md).
+See [Install the CLI](./installation.md).
 
 ## Syntax
 
@@ -153,7 +153,7 @@ sm status svc smithd ABC123
 sm restart svc smithd ABC123
 
 # Test network connectivity
-sm test-network ABC123
+sm test-network quick ABC123
 
 # Run custom diagnostic command
 sm run ABC123 -w -- dmesg | tail -n 50
@@ -163,13 +163,13 @@ sm run ABC123 -w -- dmesg | tail -n 50
 
 ```sh
 # Add environment label
-sm label ABC123 env=production
+sm label -d ABC123 env=production
 
 # Query by label
 sm get d -l env=production
 
 # Update multiple devices
-sm label -s rpi region=warehouse-1
+sm label -d rpi -s region=warehouse-1
 ```
 
 ## Tips
@@ -185,10 +185,4 @@ sm label -s rpi region=warehouse-1
 
 ## Command reference
 
-- [get](./get.md) — Retrieve information about resources
-- [status](./status.md) — Get status information for devices or services
-- [restart](./restart.md) — Restart devices or services
-- [logs](./logs.md) — Get logs from devices
-- [run](./run.md) — Run custom commands on devices
-- [label](./label.md) — Set labels on devices
-- [Other commands](./other.md) — Additional utility commands
+Every command, with its options and examples, is in the [CLI reference](/docs/cli). `sm <command> --help` prints the same text.
