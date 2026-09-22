@@ -19,4 +19,4 @@ The script needs `unzip`. Set `SMITH_CLI_INSTALL` to install somewhere other tha
 sm --version
 ```
 
-Use `sm help` to see help text documenting Smith's flags and usage, then [authenticate](./cli/overview.md#authentication).
+Use `sm help` to see help text documenting Smith's flags and usage, then [authenticate](./cli-usage.md#authentication).

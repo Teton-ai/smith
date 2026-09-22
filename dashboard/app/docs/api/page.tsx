@@ -29,7 +29,7 @@ function statusVariant(status: string): BadgeVariant {
 	return "red";
 }
 
-function Label({ children }: { children: ReactNode }) {
+export function Label({ children }: { children: ReactNode }) {
 	return (
 		<h4 className="mt-6 mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">
 			{children}
@@ -37,7 +37,16 @@ function Label({ children }: { children: ReactNode }) {
 	);
 }
 
-function FieldTable({ fields }: { fields: ApiField[] }) {
+// Shared with the CLI reference, where the middle column is an option's value
+// and positional arguments have none: one heading drops the type column.
+export function FieldTable({
+	fields,
+	columns = ["Name", "Type"],
+}: {
+	fields: ApiField[];
+	columns?: [string, string] | [string];
+}) {
+	const showType = columns.length === 2;
 	if (fields.length === 0) return null;
 
 	return (
@@ -45,7 +54,7 @@ function FieldTable({ fields }: { fields: ApiField[] }) {
 			<table className="min-w-full text-left">
 				<thead className="bg-gray-50">
 					<tr>
-						{["Name", "Type", "Description"].map((heading) => (
+						{[...columns, "Description"].map((heading) => (
 							<th
 								key={heading}
 								className="px-4 py-2 text-xs font-semibold uppercase tracking-wide text-gray-500"
@@ -68,9 +77,11 @@ function FieldTable({ fields }: { fields: ApiField[] }) {
 									</span>
 								)}
 							</td>
-							<td className="max-w-64 break-words px-4 py-2.5 align-top font-mono text-xs text-gray-500">
-								{field.type}
-							</td>
+							{showType && (
+								<td className="max-w-64 break-words px-4 py-2.5 align-top font-mono text-xs text-gray-500">
+									{field.type}
+								</td>
+							)}
 							<td className="px-4 py-2.5 align-top text-sm leading-relaxed text-gray-600">
 								{field.description ? (
 									<InlineMarkdown>{field.description}</InlineMarkdown>
@@ -226,7 +237,13 @@ function Operation({ operation }: { operation: ApiOperation }) {
 	);
 }
 
-function InfoRow({ label, children }: { label: string; children: ReactNode }) {
+export function InfoRow({
+	label,
+	children,
+}: {
+	label: string;
+	children: ReactNode;
+}) {
 	return (
 		<div className="flex flex-col gap-1 px-5 py-3 sm:flex-row sm:gap-4">
 			<dt className="w-32 shrink-0 text-xs font-semibold uppercase tracking-wide text-gray-500 sm:pt-0.5">
@@ -239,10 +256,10 @@ function InfoRow({ label, children }: { label: string; children: ReactNode }) {
 	);
 }
 
-const CODE_CLASS =
+export const CODE_CLASS =
 	"rounded bg-gray-100 px-1.5 py-0.5 font-mono text-[0.85em] text-gray-900";
 
-const LINK_CLASS =
+export const LINK_CLASS =
 	"font-medium text-blue-600 underline decoration-blue-200 underline-offset-2 hover:text-blue-700 hover:decoration-blue-500";
 
 export default function ApiReferencePage() {
