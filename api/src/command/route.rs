@@ -161,6 +161,14 @@ async fn queue_commands_bundle(
     let policy = merged_stagger_policy(commands, devices.len());
     let wave_offsets = assign_wave_offsets(devices, policy.as_ref());
 
+    // An exempt command (e.g. CloseTunnel) must dispatch immediately even
+    // when bundled with a paced one for the same devices, so the offset is
+    // gated per (device, command), not just per device.
+    let command_is_paced: Vec<bool> = commands
+        .iter()
+        .map(|c| stagger_policy(&c.command, devices.len()).is_some())
+        .collect();
+
     // Two-phase: a slow insert could let real time pass an early wave's
     // schedule before anything commits and becomes visible, collapsing
     // waves. So paced rows insert with a far-future placeholder, then get
@@ -173,8 +181,9 @@ async fn queue_commands_bundle(
     let mut queued = Vec::with_capacity(devices.len() * commands.len());
     let mut pending_corrections: Vec<(i32, i32)> = Vec::new();
     for DeviceWaveOffset { device_id, offset } in &wave_offsets {
-        let placeholder = offset.map(|_| far_future_placeholder);
-        for command in commands {
+        for (command, is_paced) in commands.iter().zip(&command_is_paced) {
+            let row_offset = if *is_paced { *offset } else { None };
+            let placeholder = row_offset.map(|_| far_future_placeholder);
             let cmd = serde_json::to_value(command.command.clone()).map_err(|err| {
                 error!("Failed to serialize command into JSON {err}");
                 StatusCode::INTERNAL_SERVER_ERROR
@@ -203,7 +212,7 @@ async fn queue_commands_bundle(
                 StatusCode::INTERNAL_SERVER_ERROR
             })?;
 
-            if let Some(offset) = offset {
+            if let Some(offset) = row_offset {
                 pending_corrections.push((row.id, offset.as_secs() as i32));
             }
 
@@ -1257,6 +1266,135 @@ mod stagger_tests {
                 "available_at should land within one bundle's worth of the \
                  earliest row, not a leftover placeholder: {delta_ms}ms"
             );
+            let wave = ((delta_ms as f64) / 10_000.0).round() as i64;
+            *waves.entry(wave).or_default() += 1;
+        }
+        assert_eq!(waves.len(), 3, "expected 3 distinct waves, got {waves:?}");
+        let mut sizes: Vec<usize> = waves.values().copied().collect();
+        sizes.sort_unstable();
+        assert_eq!(sizes, vec![1, 2, 2]);
+    }
+
+    // Needs a live DB, same reasoning as the test above.
+    #[test]
+    #[ignore = "connects to a real, migrated Postgres via DATABASE_URL; not run in \
+                CI (test.yml has no live DB). Run against the dev stack, e.g. \
+                `docker exec smith-api cargo test -p api -- --ignored`."]
+    fn exempt_command_in_a_mixed_bundle_stays_unstaggered() {
+        tokio::runtime::Runtime::new()
+            .expect("building a tokio runtime for this test")
+            .block_on(exempt_command_in_a_mixed_bundle_stays_unstaggered_inner());
+    }
+
+    async fn exempt_command_in_a_mixed_bundle_stays_unstaggered_inner() {
+        use chrono::DateTime;
+
+        let database_url =
+            std::env::var("DATABASE_URL").expect("DATABASE_URL must point at a migrated Postgres");
+        let pool = sqlx::PgPool::connect(&database_url)
+            .await
+            .expect("connecting to the test database");
+
+        let user_id: i32 = sqlx::query_scalar("SELECT id FROM auth.users LIMIT 1")
+            .fetch_one(&pool)
+            .await
+            .expect("at least one user must exist in auth.users to attribute the bundle to");
+
+        let unique = Utc::now()
+            .timestamp_nanos_opt()
+            .expect("current time fits in i64 nanos");
+        let mut device_ids = Vec::new();
+        for i in 0..5 {
+            let id: i32 =
+                sqlx::query_scalar("INSERT INTO device (serial_number) VALUES ($1) RETURNING id")
+                    .bind(format!("mixed-bundle-test-{unique}-{i}"))
+                    .fetch_one(&pool)
+                    .await
+                    .expect("inserting a throwaway device");
+            device_ids.push(id);
+        }
+
+        // CloseTunnel (exempt) must not inherit WifiScan's (paced) wave offset.
+        let commands = vec![
+            SafeCommandRequest {
+                id: -1,
+                command: SafeCommandTx::CloseTunnel,
+                continue_on_error: false,
+            },
+            SafeCommandRequest {
+                id: -1,
+                command: SafeCommandTx::WifiScan,
+                continue_on_error: false,
+            },
+        ];
+
+        let result = queue_commands_bundle(&pool, &device_ids, &commands, user_id).await;
+
+        let rows: Vec<(i32, String, DateTime<Utc>)> = match &result {
+            Ok(receipt) => sqlx::query_as(
+                "SELECT id, cmd::text, available_at FROM command_queue WHERE bundle = $1",
+            )
+            .bind(receipt.uuid)
+            .fetch_all(&pool)
+            .await
+            .expect("reading back the inserted rows"),
+            Err(_) => Vec::new(),
+        };
+
+        if let Ok(receipt) = &result {
+            sqlx::query("DELETE FROM command_queue WHERE bundle = $1")
+                .bind(receipt.uuid)
+                .execute(&pool)
+                .await
+                .expect("cleaning up command_queue rows");
+            sqlx::query("DELETE FROM command_bundles WHERE uuid = $1")
+                .bind(receipt.uuid)
+                .execute(&pool)
+                .await
+                .expect("cleaning up the command_bundles row");
+        }
+        sqlx::query("DELETE FROM device WHERE id = ANY($1)")
+            .bind(&device_ids)
+            .execute(&pool)
+            .await
+            .expect("cleaning up throwaway devices");
+
+        result.expect("queue_commands_bundle should succeed");
+        assert_eq!(
+            rows.len(),
+            device_ids.len() * commands.len(),
+            "every device should have one row per command"
+        );
+
+        let now = Utc::now();
+        for (_, cmd, available_at) in &rows {
+            if cmd != "\"CloseTunnel\"" {
+                continue;
+            }
+            let delta_ms = (*available_at - now).num_milliseconds().abs();
+            assert!(
+                delta_ms < 5_000,
+                "CloseTunnel should dispatch immediately, not inherit WifiScan's \
+                 wave offset: available_at was {delta_ms}ms from now"
+            );
+        }
+
+        // WifiScan must still be staggered into its usual 3 waves (sizes
+        // 2/2/1), not just "close to now" (which CloseTunnel dispatching
+        // immediately would satisfy trivially even if staggering broke).
+        let wifi_scan_ats: Vec<DateTime<Utc>> = rows
+            .iter()
+            .filter(|(_, cmd, _)| cmd == "\"WifiScan\"")
+            .map(|(_, _, at)| *at)
+            .collect();
+        let earliest = wifi_scan_ats
+            .iter()
+            .copied()
+            .min()
+            .expect("at least one WifiScan row");
+        let mut waves: HashMap<i64, usize> = HashMap::new();
+        for at in &wifi_scan_ats {
+            let delta_ms = (*at - earliest).num_milliseconds();
             let wave = ((delta_ms as f64) / 10_000.0).round() as i64;
             *waves.entry(wave).or_default() += 1;
         }
