@@ -85,7 +85,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_context(|| "Failed to get Target Release ID")?;
 
     let packages_dir = PathBuf::from("/etc/smith/packages");
-    let blobs = packages_dir.join("blobs");
+    let blobs = smith::utils::files::resolve_blobs_dir(&packages_dir);
     let release_cache = packages_dir
         .join("versions")
         .join(target_release_id.to_string());

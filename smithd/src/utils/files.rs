@@ -390,3 +390,67 @@ pub async fn save_last_applied_networks(ssids: &[String]) -> Result<()> {
     let json = serde_json::to_string(ssids).context("serializing last-applied networks")?;
     write_file_atomic(Path::new(LAST_APPLIED_PATH), &json, 0o600).await
 }
+
+const EXTERNAL_BLOB_VOLUME: &str = "/mnt/crypt_UDA";
+const EXTERNAL_BLOB_VOLUME_MIN_BYTES: u64 = 30 * 1024 * 1024 * 1024;
+
+/// Package blobs go on the UDA volume when it is mounted and large enough,
+/// otherwise under `packages_dir` on rootfs.
+pub fn resolve_blobs_dir(packages_dir: &Path) -> PathBuf {
+    match external_blobs_dir(
+        Path::new(EXTERNAL_BLOB_VOLUME),
+        EXTERNAL_BLOB_VOLUME_MIN_BYTES,
+    ) {
+        Ok(dir) => {
+            info!(?dir, "using external volume for package blobs");
+            dir
+        }
+        Err(reason) => {
+            info!(%reason, "using rootfs for package blobs");
+            packages_dir.join("blobs")
+        }
+    }
+}
+
+fn external_blobs_dir(volume: &Path, min_bytes: u64) -> Result<PathBuf> {
+    use std::os::unix::fs::MetadataExt;
+
+    let metadata =
+        std::fs::metadata(volume).with_context(|| format!("stat {}", volume.display()))?;
+    let parent = volume
+        .parent()
+        .ok_or_else(|| anyhow!("{} has no parent", volume.display()))?;
+    if metadata.dev() == std::fs::metadata(parent)?.dev() {
+        anyhow::bail!("{} is not a mount point", volume.display());
+    }
+
+    let total = fs2::total_space(volume)?;
+    if total < min_bytes {
+        anyhow::bail!(
+            "{} is {total} bytes, below the {min_bytes} byte minimum",
+            volume.display()
+        );
+    }
+
+    Ok(volume.join("smith").join("blobs"))
+}
+
+#[cfg(test)]
+mod blob_dir_tests {
+    use super::*;
+
+    #[test]
+    fn plain_directory_is_not_used_as_blob_volume() -> Result<()> {
+        let temp = tempfile::tempdir()?;
+        match external_blobs_dir(temp.path(), 0) {
+            Ok(dir) => anyhow::bail!("unexpectedly accepted {}", dir.display()),
+            Err(err) => assert!(err.to_string().contains("not a mount point")),
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn missing_volume_is_rejected() {
+        assert!(external_blobs_dir(Path::new("/nonexistent/smith-volume"), 0).is_err());
+    }
+}

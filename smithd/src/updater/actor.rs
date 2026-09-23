@@ -189,6 +189,7 @@ pub struct Actor {
     downloader: DownloaderHandle,
     install_failures: HashMap<String, PackageFailure>,
     packages_dir: PathBuf,
+    blobs_dir: PathBuf,
 }
 
 impl Actor {
@@ -204,6 +205,7 @@ impl Actor {
         //if this unwrap fails, there's no point continuing
         let smith_home = std::env::current_dir().unwrap();
         let packages_dir = smith_home.join("packages");
+        let blobs_dir = crate::utils::files::resolve_blobs_dir(&packages_dir);
 
         Self {
             shutdown,
@@ -217,6 +219,7 @@ impl Actor {
             downloader,
             install_failures: HashMap::new(),
             packages_dir,
+            blobs_dir,
         }
     }
 
@@ -379,7 +382,8 @@ impl Actor {
         let legacy_path = self.packages_dir.join(&package.file);
         if legacy_path.exists() {
             warn!(?legacy_path, ?blob_path, "migrating from legacy layout");
-            tokio::fs::rename(&legacy_path, blob_path).await?;
+            tokio::fs::copy(&legacy_path, blob_path).await?;
+            tokio::fs::remove_file(&legacy_path).await?;
             return Ok(());
         }
 
@@ -437,7 +441,7 @@ impl Actor {
             .await
             .with_context(|| "failed to fetch release packages manifest")?;
 
-        let blobs = self.packages_dir.join("blobs");
+        let blobs = &self.blobs_dir;
         let mut manifest = String::new();
         let mut all_cached = true;
 
@@ -549,7 +553,7 @@ impl Actor {
             .await
             .with_context(|| "Failed to get Target Release ID")?;
 
-        let blobs = self.packages_dir.join("blobs");
+        let blobs = &self.blobs_dir;
         let release_cache = self
             .packages_dir
             .join("versions")
@@ -678,6 +682,7 @@ impl Actor {
             Ok(previous_release_id) if previous_release_id != target_release_id => {
                 if let Err(err) = Self::clean_up_old_packages(
                     &self.packages_dir,
+                    &self.blobs_dir,
                     target_release_id,
                     previous_release_id,
                 )
@@ -803,11 +808,13 @@ impl Actor {
 
     async fn clean_up_old_packages(
         packages_dir: &Path,
+        blobs_dir: &Path,
         current_release_id: i32,
         previous_release_id: i32,
     ) -> Result<()> {
         Self::clean_up_old_packages_with_limit(
             packages_dir,
+            blobs_dir,
             current_release_id,
             previous_release_id,
             MAX_BLOB_CACHE_BYTES,
@@ -817,12 +824,12 @@ impl Actor {
 
     async fn clean_up_old_packages_with_limit(
         packages_dir: &Path,
+        blobs_dir: &Path,
         current_release_id: i32,
         previous_release_id: i32,
         max_blob_cache_bytes: u64,
     ) -> Result<()> {
         let versions_dir = packages_dir.join("versions");
-        let blobs_dir = packages_dir.join("blobs");
 
         let mut releases = HashMap::new();
         let mut entries = tokio::fs::read_dir(&versions_dir)
@@ -852,7 +859,7 @@ impl Actor {
                 release_id,
                 CachedRelease {
                     manifest_path,
-                    blobs: manifest_blob_paths(&manifest, &blobs_dir)?,
+                    blobs: manifest_blob_paths(&manifest, blobs_dir)?,
                     modified,
                 },
             );
@@ -917,7 +924,7 @@ impl Actor {
             }
         }
 
-        let blob_files = files_in(&blobs_dir).await?;
+        let blob_files = files_in(blobs_dir).await?;
         let mut cache_bytes = blob_files.iter().map(|(_, size)| size).sum::<u64>();
         info!(
             cache_bytes,
@@ -1154,7 +1161,7 @@ mod tests {
         tokio::fs::write(blobs_dir.join("shared.deb"), b"shared").await?;
         tokio::fs::write(blobs_dir.join("orphan.deb.part"), b"partial").await?;
 
-        Actor::clean_up_old_packages_with_limit(&packages_dir, 13, 12, 0).await?;
+        Actor::clean_up_old_packages_with_limit(&packages_dir, &blobs_dir, 13, 12, 0).await?;
 
         assert!(!versions_dir.join("10").exists());
         assert!(versions_dir.join("11").exists());
@@ -1188,7 +1195,7 @@ mod tests {
         tokio::fs::write(blobs_dir.join("app-3.deb"), b"three").await?;
         tokio::fs::write(blobs_dir.join("app-4.deb"), b"four").await?;
 
-        Actor::clean_up_old_packages_with_limit(&packages_dir, 4, 3, u64::MAX).await?;
+        Actor::clean_up_old_packages_with_limit(&packages_dir, &blobs_dir, 4, 3, u64::MAX).await?;
 
         assert!(versions_dir.join("1").exists());
         assert!(blobs_dir.join("app-1.deb").exists());
@@ -1217,7 +1224,7 @@ mod tests {
             .await?;
         }
 
-        Actor::clean_up_old_packages_with_limit(&packages_dir, 7, 15, 0).await?;
+        Actor::clean_up_old_packages_with_limit(&packages_dir, &blobs_dir, 7, 15, 0).await?;
 
         assert!(versions_dir.join("7").exists());
         assert!(versions_dir.join("15").exists());
