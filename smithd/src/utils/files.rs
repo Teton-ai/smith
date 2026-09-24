@@ -432,7 +432,7 @@ fn external_blobs_dir(volume: &Path, min_bytes: u64) -> Result<PathBuf> {
         );
     }
 
-    Ok(volume.join("smith").join("blobs"))
+    Ok(volume.join("smith").join("packages").join("blobs"))
 }
 
 #[cfg(test)]
