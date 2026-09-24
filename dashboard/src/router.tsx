@@ -41,6 +41,7 @@ const Commands = lazy(() => import("@/app/(private)/commands/page"));
 const Recipes = lazy(() => import("@/app/(private)/recipes/page"));
 const IpAddresses = lazy(() => import("@/app/(private)/ip-addresses/page"));
 const Modems = lazy(() => import("@/app/(private)/modems/page"));
+const NetworkMap = lazy(() => import("@/app/(private)/network-map/page"));
 const NetworkTesting = lazy(
 	() => import("@/app/(private)/network-testing/page"),
 );
@@ -120,6 +121,7 @@ export const router = createBrowserRouter([
 			{ path: "/commands", element: withSuspense(<Commands />) },
 			{ path: "/recipes", element: withSuspense(<Recipes />) },
 			{ path: "/ip-addresses", element: withSuspense(<IpAddresses />) },
+			{ path: "/network-map", element: withSuspense(<NetworkMap />) },
 			{ path: "/modems", element: withSuspense(<Modems />) },
 			{ path: "/network-testing", element: withSuspense(<NetworkTesting />) },
 			{ path: "/settings", element: <Navigate to="/settings/users" replace /> },

@@ -1,10 +1,18 @@
 import { Badge, InfoRow, Panel, SECTION_THEMES } from "@teton/smith-ui";
-import { Router, Signal, Smartphone, Wifi, WifiOff } from "lucide-react";
-import { useParams } from "react-router";
+import {
+	Network,
+	Router,
+	Signal,
+	Smartphone,
+	Wifi,
+	WifiOff,
+} from "lucide-react";
+import { Link, useParams } from "react-router";
 import {
 	type Device,
 	type NetworkItem,
 	useGetDeviceInfo,
+	useGetLans,
 } from "@/app/api-client";
 import NetworkQualityIndicator from "@/app/components/NetworkQualityIndicator";
 import { RelativeTime } from "@/app/components/RelativeTime";
@@ -293,6 +301,87 @@ const NetworkConnections = ({ device }: { device: Device }) => {
 	);
 };
 
+/** Other devices sharing a LAN (same gateway MAC and subnet) with this one. */
+const SameLanPanel = ({ serial }: { serial: string }) => {
+	const { data: lans, isLoading } = useGetLans({
+		query: {
+			select: (data) =>
+				data.lans.filter((lan) =>
+					lan.devices.some((d) => d.serial_number === serial),
+				),
+		},
+	});
+
+	return (
+		<Panel
+			title="Same LAN"
+			icon={Network}
+			theme={SECTION_THEMES.blue}
+			actions={
+				<Link
+					to={`/network-map?device=${encodeURIComponent(serial)}`}
+					className="text-xs font-medium text-blue-700 hover:text-blue-900"
+				>
+					View on map
+				</Link>
+			}
+		>
+			{isLoading ? (
+				<div className="h-4 animate-pulse rounded bg-gray-100" />
+			) : !lans || lans.length === 0 ? (
+				<p className="text-sm text-gray-500">
+					No LAN reported yet. The device needs a smithd version that reports
+					its gateway.
+				</p>
+			) : (
+				<div className="space-y-4">
+					{lans.map((lan) => {
+						const peers = lan.devices.filter((d) => d.serial_number !== serial);
+						return (
+							<div key={lan.key} className="space-y-2">
+								<div className="text-xs text-gray-500">
+									<span className="font-mono text-gray-800">{lan.network}</span>{" "}
+									· gw <span className="font-mono">{lan.gateway_ip}</span>
+								</div>
+								{peers.length === 0 ? (
+									<p className="text-sm text-gray-500">
+										No other devices on this LAN
+									</p>
+								) : (
+									<ul className="space-y-1">
+										{peers.map((peer) => (
+											<li key={peer.id}>
+												<Link
+													to={`/devices/${peer.serial_number}/network`}
+													className="flex items-center justify-between gap-2 rounded px-2 py-1 text-sm hover:bg-gray-50"
+												>
+													<span className="flex min-w-0 items-center gap-2">
+														<span
+															className={`h-2 w-2 flex-shrink-0 rounded-full ${
+																peer.online ? "bg-green-500" : "bg-gray-300"
+															}`}
+														/>
+														<span className="truncate font-mono">
+															{peer.serial_number}
+														</span>
+													</span>
+													<span className="font-mono text-xs text-gray-500">
+														{peer.address}
+													</span>
+												</Link>
+											</li>
+										))}
+									</ul>
+								)}
+							</div>
+						);
+					})}
+				</div>
+			)}
+		</Panel>
+	);
+};
+
 /** Network tab: whether we heard from the device at all, the interfaces it
  *  reports, and its WiFi intent, configured profiles and scan results. */
 const NetworkPage = () => {
@@ -308,28 +397,31 @@ const NetworkPage = () => {
 	return (
 		<DeviceDetailLayout serial={serial} device={device} activeTab="network">
 			<div className="grid grid-cols-1 lg:grid-cols-3 gap-4 items-start">
-				<Panel
-					title="Network Connections"
-					icon={Wifi}
-					theme={SECTION_THEMES.green}
-				>
-					{device ? (
-						<>
-							<LinkSummary device={device} />
-							<hr className="my-3 border-gray-100" />
-							<NetworkConnections device={device} />
-						</>
-					) : (
-						<div className="space-y-2">
-							{[1, 2, 3].map((i) => (
-								<div
-									key={i}
-									className="h-4 animate-pulse rounded bg-gray-100"
-								/>
-							))}
-						</div>
-					)}
-				</Panel>
+				<div className="space-y-4">
+					<Panel
+						title="Network Connections"
+						icon={Wifi}
+						theme={SECTION_THEMES.green}
+					>
+						{device ? (
+							<>
+								<LinkSummary device={device} />
+								<hr className="my-3 border-gray-100" />
+								<NetworkConnections device={device} />
+							</>
+						) : (
+							<div className="space-y-2">
+								{[1, 2, 3].map((i) => (
+									<div
+										key={i}
+										className="h-4 animate-pulse rounded bg-gray-100"
+									/>
+								))}
+							</div>
+						)}
+					</Panel>
+					<SameLanPanel key={serial} serial={serial} />
+				</div>
 
 				<div className="lg:col-span-2 space-y-4">
 					{/* Whether we heard from the device, not what its interfaces report */}
