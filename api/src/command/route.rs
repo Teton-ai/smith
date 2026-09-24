@@ -161,13 +161,12 @@ async fn queue_commands_bundle(
     let policy = merged_stagger_policy(commands, devices.len());
     let wave_offsets = assign_wave_offsets(devices, policy.as_ref());
 
-    // An exempt command (e.g. CloseTunnel) must dispatch immediately even
-    // when bundled with a paced one for the same devices, so the offset is
-    // gated per (device, command), not just per device.
-    let command_is_paced: Vec<bool> = commands
+    // Once a paced command appears, every later command inherits its
+    // offset too, exempt or not: `get_commands` has no cross-poll ordering
+    // guarantee, so a later command can't be allowed to fetch ahead of it.
+    let first_paced_index = commands
         .iter()
-        .map(|c| stagger_policy(&c.command, devices.len()).is_some())
-        .collect();
+        .position(|c| stagger_policy(&c.command, devices.len()).is_some());
 
     // Two-phase: a slow insert could let real time pass an early wave's
     // schedule before anything commits and becomes visible, collapsing
@@ -181,8 +180,11 @@ async fn queue_commands_bundle(
     let mut queued = Vec::with_capacity(devices.len() * commands.len());
     let mut pending_corrections: Vec<(i32, i32)> = Vec::new();
     for DeviceWaveOffset { device_id, offset } in &wave_offsets {
-        for (command, is_paced) in commands.iter().zip(&command_is_paced) {
-            let row_offset = if *is_paced { *offset } else { None };
+        for (i, command) in commands.iter().enumerate() {
+            let row_offset = match first_paced_index {
+                Some(paced_from) if i >= paced_from => *offset,
+                _ => None,
+            };
             let placeholder = row_offset.map(|_| far_future_placeholder);
             let cmd = serde_json::to_value(command.command.clone()).map_err(|err| {
                 error!("Failed to serialize command into JSON {err}");
@@ -1402,5 +1404,155 @@ mod stagger_tests {
         let mut sizes: Vec<usize> = waves.values().copied().collect();
         sizes.sort_unstable();
         assert_eq!(sizes, vec![1, 2, 2]);
+    }
+
+    // Needs a live DB, same reasoning as the test above.
+    #[test]
+    #[ignore = "connects to a real, migrated Postgres via DATABASE_URL; not run in \
+                CI (test.yml has no live DB). Run against the dev stack, e.g. \
+                `docker exec smith-api cargo test -p api -- --ignored`."]
+    fn exempt_command_after_a_paced_one_inherits_its_offset() {
+        tokio::runtime::Runtime::new()
+            .expect("building a tokio runtime for this test")
+            .block_on(exempt_command_after_a_paced_one_inherits_its_offset_inner());
+    }
+
+    async fn exempt_command_after_a_paced_one_inherits_its_offset_inner() {
+        use crate::home::get_commands;
+        use chrono::DateTime;
+
+        let database_url =
+            std::env::var("DATABASE_URL").expect("DATABASE_URL must point at a migrated Postgres");
+        let pool = sqlx::PgPool::connect(&database_url)
+            .await
+            .expect("connecting to the test database");
+
+        let user_id: i32 = sqlx::query_scalar("SELECT id FROM auth.users LIMIT 1")
+            .fetch_one(&pool)
+            .await
+            .expect("at least one user must exist in auth.users to attribute the bundle to");
+
+        let unique = Utc::now()
+            .timestamp_nanos_opt()
+            .expect("current time fits in i64 nanos");
+        let mut device_ids = Vec::new();
+        let mut serial_numbers = HashMap::new();
+        for i in 0..5 {
+            let serial = format!("order-test-{unique}-{i}");
+            let id: i32 =
+                sqlx::query_scalar("INSERT INTO device (serial_number) VALUES ($1) RETURNING id")
+                    .bind(&serial)
+                    .fetch_one(&pool)
+                    .await
+                    .expect("inserting a throwaway device");
+            device_ids.push(id);
+            serial_numbers.insert(id, serial);
+        }
+
+        // Order matters here (WifiScan before CloseTunnel, unlike the test
+        // above): CloseTunnel must not become eligible before WifiScan.
+        let commands = vec![
+            SafeCommandRequest {
+                id: -1,
+                command: SafeCommandTx::WifiScan,
+                continue_on_error: false,
+            },
+            SafeCommandRequest {
+                id: -1,
+                command: SafeCommandTx::CloseTunnel,
+                continue_on_error: false,
+            },
+        ];
+
+        let result = queue_commands_bundle(&pool, &device_ids, &commands, user_id).await;
+
+        let rows: Vec<(i32, i32, String, DateTime<Utc>)> = match &result {
+            Ok(receipt) => sqlx::query_as(
+                "SELECT id, device_id, cmd::text, available_at FROM command_queue WHERE bundle = $1",
+            )
+            .bind(receipt.uuid)
+            .fetch_all(&pool)
+            .await
+            .expect("reading back the inserted rows"),
+            Err(_) => Vec::new(),
+        };
+
+        // Exercises the real fetch path: a deferred device must return
+        // neither command, not just withhold WifiScan.
+        let now = Utc::now();
+        let mut fetch_results = Vec::new();
+        if result.is_ok() {
+            for &device_id in &device_ids {
+                let is_deferred = rows
+                    .iter()
+                    .any(|(_, d, _, at)| *d == device_id && (*at - now).num_milliseconds() > 2_000);
+                let fetched = get_commands(device_id, &serial_numbers[&device_id], &pool)
+                    .await
+                    .expect("get_commands should succeed");
+                fetch_results.push((device_id, is_deferred, fetched.len()));
+            }
+        }
+
+        if let Ok(receipt) = &result {
+            sqlx::query("DELETE FROM command_queue WHERE bundle = $1")
+                .bind(receipt.uuid)
+                .execute(&pool)
+                .await
+                .expect("cleaning up command_queue rows");
+            sqlx::query("DELETE FROM command_bundles WHERE uuid = $1")
+                .bind(receipt.uuid)
+                .execute(&pool)
+                .await
+                .expect("cleaning up the command_bundles row");
+        }
+        sqlx::query("DELETE FROM device WHERE id = ANY($1)")
+            .bind(&device_ids)
+            .execute(&pool)
+            .await
+            .expect("cleaning up throwaway devices");
+
+        result.expect("queue_commands_bundle should succeed");
+        assert_eq!(
+            rows.len(),
+            device_ids.len() * commands.len(),
+            "every device should have one row per command"
+        );
+
+        // CloseTunnel must share WifiScan's exact available_at per device.
+        let mut by_device: HashMap<i32, HashMap<&str, DateTime<Utc>>> = HashMap::new();
+        for (_, device_id, cmd, available_at) in &rows {
+            by_device
+                .entry(*device_id)
+                .or_default()
+                .insert(cmd.as_str(), *available_at);
+        }
+        for (device_id, cmds) in &by_device {
+            assert_eq!(
+                cmds["\"WifiScan\""], cmds["\"CloseTunnel\""],
+                "device {device_id}: CloseTunnel should share WifiScan's available_at, \
+                 not dispatch ahead of it"
+            );
+        }
+
+        assert!(
+            fetch_results.iter().any(|(_, deferred, _)| *deferred),
+            "expected at least one device in a later wave to exercise the deferred path \
+             (re-run if 5 devices all shuffled into wave 0)"
+        );
+        for (device_id, is_deferred, fetched_count) in &fetch_results {
+            if *is_deferred {
+                assert_eq!(
+                    *fetched_count, 0,
+                    "device {device_id}: neither WifiScan nor CloseTunnel should be \
+                     fetchable before the wave arrives"
+                );
+            } else {
+                assert_eq!(
+                    *fetched_count, 2,
+                    "device {device_id}: an immediate-wave device should fetch both \
+                     commands together"
+                );
+            }
+        }
     }
 }
