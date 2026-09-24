@@ -1,6 +1,6 @@
 {
   "name": "sm",
-  "version": "0.2.199",
+  "version": "0.2.201",
   "about": "Smith CLI - Fleet management tool",
   "global_options": [],
   "commands": [
@@ -728,7 +728,7 @@
           "short": "-p",
           "value": "<PATH>",
           "required": true,
-          "help": "Path to the .tar.gz image"
+          "help": "Path to the image"
         },
         {
           "name": "--part-size",

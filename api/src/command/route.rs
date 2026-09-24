@@ -29,22 +29,70 @@ struct StaggerPolicy {
     wave_duration: Duration,
 }
 
+const WIFI_SCAN_WAVE_DURATION: Duration = Duration::from_secs(10);
+const TEST_NETWORK_WAVE_FRACTION: f64 = 0.10;
+const TEST_NETWORK_WAVE_DURATION: Duration = Duration::from_secs(60);
+const EXTENDED_NETWORK_TEST_WAVE_FRACTION: f64 = 0.10;
+const EXTENDED_NETWORK_TEST_MIN_MINUTES: u32 = 1;
+const EXTENDED_NETWORK_TEST_MAX_MINUTES: u32 = 60;
+const SECONDS_PER_MINUTE: u64 = 60;
+const DEFAULT_WAVE_FRACTION: f64 = 0.10;
+const DEFAULT_WAVE_DURATION: Duration = Duration::from_secs(20);
+
+fn bundle_relative_wave_size(device_count: usize, fraction: f64) -> u32 {
+    ((device_count as f64 * fraction).round() as u32).max(1)
+}
+
 /// `None` for anything that doesn't contend for a shared physical resource.
-fn stagger_policy(cmd: &SafeCommandTx) -> Option<StaggerPolicy> {
+/// `device_count` sizes policies whose `wave_size` scales with the bundle.
+fn stagger_policy(cmd: &SafeCommandTx, device_count: usize) -> Option<StaggerPolicy> {
     match cmd {
         SafeCommandTx::WifiScan => Some(StaggerPolicy {
             wave_size: 2,
-            wave_duration: Duration::from_secs(10),
+            wave_duration: WIFI_SCAN_WAVE_DURATION,
         }),
-        _ => None,
+        // Download+upload each cap at 30s (NETWORK_TEST_TIMEOUT in smithd),
+        // so 60s bounds a run. Paces the api server's bandwidth, not an AP.
+        SafeCommandTx::TestNetwork => Some(StaggerPolicy {
+            wave_size: bundle_relative_wave_size(device_count, TEST_NETWORK_WAVE_FRACTION),
+            wave_duration: TEST_NETWORK_WAVE_DURATION,
+        }),
+        // Loops the test for the whole requested duration (sustained load,
+        // not a spike), so wave_duration scales with it. Clamped to 1-60min.
+        SafeCommandTx::ExtendedNetworkTest { duration_minutes } => Some(StaggerPolicy {
+            wave_size: bundle_relative_wave_size(device_count, EXTENDED_NETWORK_TEST_WAVE_FRACTION),
+            wave_duration: Duration::from_secs(
+                u64::from((*duration_minutes).clamp(
+                    EXTENDED_NETWORK_TEST_MIN_MINUTES,
+                    EXTENDED_NETWORK_TEST_MAX_MINUTES,
+                )) * SECONDS_PER_MINUTE,
+            ),
+        }),
+        // Interactive/session commands: no contention to pace, and waiting
+        // would only add latency.
+        SafeCommandTx::OpenTunnel { .. }
+        | SafeCommandTx::CloseTunnel
+        | SafeCommandTx::OpenFileSession { .. }
+        | SafeCommandTx::CloseFileSession { .. }
+        | SafeCommandTx::StreamLogs { .. }
+        | SafeCommandTx::StopLogStream { .. } => None,
+        // Everything else: paced by default instead of hitting every device
+        // at once.
+        _ => Some(StaggerPolicy {
+            wave_size: bundle_relative_wave_size(device_count, DEFAULT_WAVE_FRACTION),
+            wave_duration: DEFAULT_WAVE_DURATION,
+        }),
     }
 }
 
 /// Strictest policy across `commands`: smallest wave, longest duration.
-fn merged_stagger_policy(commands: &[SafeCommandRequest]) -> Option<StaggerPolicy> {
+fn merged_stagger_policy(
+    commands: &[SafeCommandRequest],
+    device_count: usize,
+) -> Option<StaggerPolicy> {
     commands
         .iter()
-        .filter_map(|c| stagger_policy(&c.command))
+        .filter_map(|c| stagger_policy(&c.command, device_count))
         .reduce(|a, b| StaggerPolicy {
             wave_size: a.wave_size.min(b.wave_size),
             wave_duration: a.wave_duration.max(b.wave_duration),
@@ -110,8 +158,15 @@ async fn queue_commands_bundle(
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
 
-    let policy = merged_stagger_policy(commands);
+    let policy = merged_stagger_policy(commands, devices.len());
     let wave_offsets = assign_wave_offsets(devices, policy.as_ref());
+
+    // Once a paced command appears, every later command inherits its
+    // offset too, exempt or not: `get_commands` has no cross-poll ordering
+    // guarantee, so a later command can't be allowed to fetch ahead of it.
+    let first_paced_index = commands
+        .iter()
+        .position(|c| stagger_policy(&c.command, devices.len()).is_some());
 
     // Two-phase: a slow insert could let real time pass an early wave's
     // schedule before anything commits and becomes visible, collapsing
@@ -125,8 +180,12 @@ async fn queue_commands_bundle(
     let mut queued = Vec::with_capacity(devices.len() * commands.len());
     let mut pending_corrections: Vec<(i32, i32)> = Vec::new();
     for DeviceWaveOffset { device_id, offset } in &wave_offsets {
-        let placeholder = offset.map(|_| far_future_placeholder);
-        for command in commands {
+        for (i, command) in commands.iter().enumerate() {
+            let row_offset = match first_paced_index {
+                Some(paced_from) if i >= paced_from => *offset,
+                _ => None,
+            };
+            let placeholder = row_offset.map(|_| far_future_placeholder);
             let cmd = serde_json::to_value(command.command.clone()).map_err(|err| {
                 error!("Failed to serialize command into JSON {err}");
                 StatusCode::INTERNAL_SERVER_ERROR
@@ -155,7 +214,7 @@ async fn queue_commands_bundle(
                 StatusCode::INTERNAL_SERVER_ERROR
             })?;
 
-            if let Some(offset) = offset {
+            if let Some(offset) = row_offset {
                 pending_corrections.push((row.id, offset.as_secs() as i32));
             }
 
@@ -908,31 +967,137 @@ mod stagger_tests {
 
     #[test]
     fn wifi_scan_has_a_pacing_policy() {
-        let policy = stagger_policy(&SafeCommandTx::WifiScan).expect("WifiScan should be paced");
+        let policy = stagger_policy(&SafeCommandTx::WifiScan, 5).expect("WifiScan should be paced");
         assert_eq!(policy.wave_size, 2);
         assert_eq!(policy.wave_duration, Duration::from_secs(10));
     }
 
     #[test]
-    fn unpaced_commands_have_no_policy() {
-        assert!(stagger_policy(&SafeCommandTx::Ping).is_none());
+    fn unlisted_commands_get_the_default_policy() {
+        let policy = stagger_policy(&SafeCommandTx::Ping, 20).expect("Ping should get the default");
+        assert_eq!(policy.wave_size, 2); // round(20 * 0.10) = 2
+        assert_eq!(policy.wave_duration, Duration::from_secs(20));
+    }
+
+    #[test]
+    fn interactive_and_session_commands_stay_unpaced() {
+        let exempted = [
+            SafeCommandTx::OpenTunnel {
+                port: None,
+                user: None,
+                pub_key: None,
+            },
+            SafeCommandTx::CloseTunnel,
+            SafeCommandTx::OpenFileSession {
+                session_id: "s".to_string(),
+            },
+            SafeCommandTx::CloseFileSession {
+                session_id: "s".to_string(),
+            },
+            SafeCommandTx::StreamLogs {
+                session_id: "s".to_string(),
+                service_name: "svc".to_string(),
+            },
+            SafeCommandTx::StopLogStream {
+                session_id: "s".to_string(),
+            },
+        ];
+        for cmd in exempted {
+            assert!(
+                stagger_policy(&cmd, 20).is_none(),
+                "{cmd:?} should stay unpaced"
+            );
+        }
     }
 
     #[test]
     fn merge_picks_up_the_only_policied_command_in_a_mixed_bundle() {
         let commands = [
-            request(SafeCommandTx::Ping),
+            request(SafeCommandTx::CloseTunnel),
             request(SafeCommandTx::WifiScan),
         ];
-        let policy = merged_stagger_policy(&commands).expect("bundle contains a policied command");
+        let policy =
+            merged_stagger_policy(&commands, 5).expect("bundle contains a policied command");
         assert_eq!(policy.wave_size, 2);
         assert_eq!(policy.wave_duration, Duration::from_secs(10));
     }
 
     #[test]
     fn merge_returns_none_when_nothing_in_the_bundle_is_policied() {
-        let commands = [request(SafeCommandTx::Ping)];
-        assert!(merged_stagger_policy(&commands).is_none());
+        let commands = [request(SafeCommandTx::CloseTunnel)];
+        assert!(merged_stagger_policy(&commands, 5).is_none());
+    }
+
+    #[test]
+    fn test_network_wave_size_is_bundle_relative() {
+        let normal =
+            stagger_policy(&SafeCommandTx::TestNetwork, 20).expect("TestNetwork should be paced");
+        assert_eq!(normal.wave_size, 2); // round(20 * 0.10) = 2
+        assert_eq!(normal.wave_duration, Duration::from_secs(60));
+
+        // round(0.3) floors to 1.
+        let floored =
+            stagger_policy(&SafeCommandTx::TestNetwork, 3).expect("TestNetwork should be paced");
+        assert_eq!(floored.wave_size, 1);
+    }
+
+    #[test]
+    fn merge_of_test_network_and_wifi_scan_picks_the_strictest_of_each() {
+        // At 50 devices the two policies' numbers differ, so this exercises
+        // min(wave_size)/max(wave_duration) instead of one winning wholesale.
+        let commands = [
+            request(SafeCommandTx::TestNetwork),
+            request(SafeCommandTx::WifiScan),
+        ];
+        let test_network_policy =
+            stagger_policy(&SafeCommandTx::TestNetwork, 50).expect("TestNetwork should be paced");
+        let wifi_scan_policy =
+            stagger_policy(&SafeCommandTx::WifiScan, 50).expect("WifiScan should be paced");
+        assert_eq!(test_network_policy.wave_size, 5);
+        assert!(test_network_policy.wave_size > wifi_scan_policy.wave_size);
+        assert!(test_network_policy.wave_duration > wifi_scan_policy.wave_duration);
+
+        let merged =
+            merged_stagger_policy(&commands, 50).expect("bundle contains policied commands");
+        assert_eq!(merged.wave_size, wifi_scan_policy.wave_size);
+        assert_eq!(merged.wave_duration, test_network_policy.wave_duration);
+    }
+
+    #[test]
+    fn extended_network_test_wave_duration_scales_and_clamps() {
+        // (requested duration_minutes, expected wave_duration)
+        let cases = [
+            (3, Duration::from_secs(180)),   // scales normally
+            (0, Duration::from_secs(60)),    // clamps up to 1 minute
+            (90, Duration::from_secs(3600)), // clamps down to 60 minutes
+        ];
+        for (duration_minutes, expected_wave_duration) in cases {
+            let policy =
+                stagger_policy(&SafeCommandTx::ExtendedNetworkTest { duration_minutes }, 20)
+                    .expect("ExtendedNetworkTest should be paced");
+            assert_eq!(policy.wave_duration, expected_wave_duration);
+        }
+    }
+
+    #[test]
+    fn extended_network_test_wave_size_is_bundle_relative() {
+        let small = stagger_policy(
+            &SafeCommandTx::ExtendedNetworkTest {
+                duration_minutes: 5,
+            },
+            3,
+        )
+        .expect("ExtendedNetworkTest should be paced");
+        assert_eq!(small.wave_size, 1); // round(3 * 0.10) = 0, floored to 1
+
+        let large = stagger_policy(
+            &SafeCommandTx::ExtendedNetworkTest {
+                duration_minutes: 5,
+            },
+            50,
+        )
+        .expect("ExtendedNetworkTest should be paced");
+        assert_eq!(large.wave_size, 5); // round(50 * 0.10) = 5
     }
 
     #[test]
@@ -967,6 +1132,37 @@ mod stagger_tests {
         let mut sizes: Vec<usize> = counts.values().copied().collect();
         sizes.sort_unstable();
         assert_eq!(sizes, vec![1, 2, 2]);
+    }
+
+    #[test]
+    fn bundle_relative_policies_never_drop_a_device() {
+        // 47 leaves a partial trailing wave; every device must still be assigned.
+        let devices: Vec<i32> = (0..47).collect();
+        let commands_by_policy = [
+            SafeCommandTx::TestNetwork,
+            SafeCommandTx::ExtendedNetworkTest {
+                duration_minutes: 5,
+            },
+            SafeCommandTx::Restart,
+        ];
+
+        for cmd in commands_by_policy {
+            let policy = stagger_policy(&cmd, devices.len())
+                .unwrap_or_else(|| panic!("{cmd:?} should be paced"));
+            let offsets = assign_wave_offsets(&devices, Some(&policy));
+
+            assert_eq!(
+                offsets.len(),
+                devices.len(),
+                "{cmd:?}: every device should be assigned to a wave"
+            );
+            let mut assigned_devices: Vec<i32> = offsets.iter().map(|a| a.device_id).collect();
+            assigned_devices.sort();
+            assert_eq!(
+                assigned_devices, devices,
+                "{cmd:?}: no device should be dropped or duplicated"
+            );
+        }
     }
 
     // Needs a live DB at runtime (not just compile time like other `api`
@@ -1079,5 +1275,284 @@ mod stagger_tests {
         let mut sizes: Vec<usize> = waves.values().copied().collect();
         sizes.sort_unstable();
         assert_eq!(sizes, vec![1, 2, 2]);
+    }
+
+    // Needs a live DB, same reasoning as the test above.
+    #[test]
+    #[ignore = "connects to a real, migrated Postgres via DATABASE_URL; not run in \
+                CI (test.yml has no live DB). Run against the dev stack, e.g. \
+                `docker exec smith-api cargo test -p api -- --ignored`."]
+    fn exempt_command_in_a_mixed_bundle_stays_unstaggered() {
+        tokio::runtime::Runtime::new()
+            .expect("building a tokio runtime for this test")
+            .block_on(exempt_command_in_a_mixed_bundle_stays_unstaggered_inner());
+    }
+
+    async fn exempt_command_in_a_mixed_bundle_stays_unstaggered_inner() {
+        use chrono::DateTime;
+
+        let database_url =
+            std::env::var("DATABASE_URL").expect("DATABASE_URL must point at a migrated Postgres");
+        let pool = sqlx::PgPool::connect(&database_url)
+            .await
+            .expect("connecting to the test database");
+
+        let user_id: i32 = sqlx::query_scalar("SELECT id FROM auth.users LIMIT 1")
+            .fetch_one(&pool)
+            .await
+            .expect("at least one user must exist in auth.users to attribute the bundle to");
+
+        let unique = Utc::now()
+            .timestamp_nanos_opt()
+            .expect("current time fits in i64 nanos");
+        let mut device_ids = Vec::new();
+        for i in 0..5 {
+            let id: i32 =
+                sqlx::query_scalar("INSERT INTO device (serial_number) VALUES ($1) RETURNING id")
+                    .bind(format!("mixed-bundle-test-{unique}-{i}"))
+                    .fetch_one(&pool)
+                    .await
+                    .expect("inserting a throwaway device");
+            device_ids.push(id);
+        }
+
+        // CloseTunnel (exempt) must not inherit WifiScan's (paced) wave offset.
+        let commands = vec![
+            SafeCommandRequest {
+                id: -1,
+                command: SafeCommandTx::CloseTunnel,
+                continue_on_error: false,
+            },
+            SafeCommandRequest {
+                id: -1,
+                command: SafeCommandTx::WifiScan,
+                continue_on_error: false,
+            },
+        ];
+
+        let result = queue_commands_bundle(&pool, &device_ids, &commands, user_id).await;
+
+        let rows: Vec<(i32, String, DateTime<Utc>)> = match &result {
+            Ok(receipt) => sqlx::query_as(
+                "SELECT id, cmd::text, available_at FROM command_queue WHERE bundle = $1",
+            )
+            .bind(receipt.uuid)
+            .fetch_all(&pool)
+            .await
+            .expect("reading back the inserted rows"),
+            Err(_) => Vec::new(),
+        };
+
+        if let Ok(receipt) = &result {
+            sqlx::query("DELETE FROM command_queue WHERE bundle = $1")
+                .bind(receipt.uuid)
+                .execute(&pool)
+                .await
+                .expect("cleaning up command_queue rows");
+            sqlx::query("DELETE FROM command_bundles WHERE uuid = $1")
+                .bind(receipt.uuid)
+                .execute(&pool)
+                .await
+                .expect("cleaning up the command_bundles row");
+        }
+        sqlx::query("DELETE FROM device WHERE id = ANY($1)")
+            .bind(&device_ids)
+            .execute(&pool)
+            .await
+            .expect("cleaning up throwaway devices");
+
+        result.expect("queue_commands_bundle should succeed");
+        assert_eq!(
+            rows.len(),
+            device_ids.len() * commands.len(),
+            "every device should have one row per command"
+        );
+
+        let now = Utc::now();
+        for (_, cmd, available_at) in &rows {
+            if cmd != "\"CloseTunnel\"" {
+                continue;
+            }
+            let delta_ms = (*available_at - now).num_milliseconds().abs();
+            assert!(
+                delta_ms < 5_000,
+                "CloseTunnel should dispatch immediately, not inherit WifiScan's \
+                 wave offset: available_at was {delta_ms}ms from now"
+            );
+        }
+
+        // WifiScan must still be staggered into its usual 3 waves (sizes
+        // 2/2/1), not just "close to now" (which CloseTunnel dispatching
+        // immediately would satisfy trivially even if staggering broke).
+        let wifi_scan_ats: Vec<DateTime<Utc>> = rows
+            .iter()
+            .filter(|(_, cmd, _)| cmd == "\"WifiScan\"")
+            .map(|(_, _, at)| *at)
+            .collect();
+        let earliest = wifi_scan_ats
+            .iter()
+            .copied()
+            .min()
+            .expect("at least one WifiScan row");
+        let mut waves: HashMap<i64, usize> = HashMap::new();
+        for at in &wifi_scan_ats {
+            let delta_ms = (*at - earliest).num_milliseconds();
+            let wave = ((delta_ms as f64) / 10_000.0).round() as i64;
+            *waves.entry(wave).or_default() += 1;
+        }
+        assert_eq!(waves.len(), 3, "expected 3 distinct waves, got {waves:?}");
+        let mut sizes: Vec<usize> = waves.values().copied().collect();
+        sizes.sort_unstable();
+        assert_eq!(sizes, vec![1, 2, 2]);
+    }
+
+    // Needs a live DB, same reasoning as the test above.
+    #[test]
+    #[ignore = "connects to a real, migrated Postgres via DATABASE_URL; not run in \
+                CI (test.yml has no live DB). Run against the dev stack, e.g. \
+                `docker exec smith-api cargo test -p api -- --ignored`."]
+    fn exempt_command_after_a_paced_one_inherits_its_offset() {
+        tokio::runtime::Runtime::new()
+            .expect("building a tokio runtime for this test")
+            .block_on(exempt_command_after_a_paced_one_inherits_its_offset_inner());
+    }
+
+    async fn exempt_command_after_a_paced_one_inherits_its_offset_inner() {
+        use crate::home::get_commands;
+        use chrono::DateTime;
+
+        let database_url =
+            std::env::var("DATABASE_URL").expect("DATABASE_URL must point at a migrated Postgres");
+        let pool = sqlx::PgPool::connect(&database_url)
+            .await
+            .expect("connecting to the test database");
+
+        let user_id: i32 = sqlx::query_scalar("SELECT id FROM auth.users LIMIT 1")
+            .fetch_one(&pool)
+            .await
+            .expect("at least one user must exist in auth.users to attribute the bundle to");
+
+        let unique = Utc::now()
+            .timestamp_nanos_opt()
+            .expect("current time fits in i64 nanos");
+        let mut device_ids = Vec::new();
+        let mut serial_numbers = HashMap::new();
+        for i in 0..5 {
+            let serial = format!("order-test-{unique}-{i}");
+            let id: i32 =
+                sqlx::query_scalar("INSERT INTO device (serial_number) VALUES ($1) RETURNING id")
+                    .bind(&serial)
+                    .fetch_one(&pool)
+                    .await
+                    .expect("inserting a throwaway device");
+            device_ids.push(id);
+            serial_numbers.insert(id, serial);
+        }
+
+        // Order matters here (WifiScan before CloseTunnel, unlike the test
+        // above): CloseTunnel must not become eligible before WifiScan.
+        let commands = vec![
+            SafeCommandRequest {
+                id: -1,
+                command: SafeCommandTx::WifiScan,
+                continue_on_error: false,
+            },
+            SafeCommandRequest {
+                id: -1,
+                command: SafeCommandTx::CloseTunnel,
+                continue_on_error: false,
+            },
+        ];
+
+        let result = queue_commands_bundle(&pool, &device_ids, &commands, user_id).await;
+
+        let rows: Vec<(i32, i32, String, DateTime<Utc>)> = match &result {
+            Ok(receipt) => sqlx::query_as(
+                "SELECT id, device_id, cmd::text, available_at FROM command_queue WHERE bundle = $1",
+            )
+            .bind(receipt.uuid)
+            .fetch_all(&pool)
+            .await
+            .expect("reading back the inserted rows"),
+            Err(_) => Vec::new(),
+        };
+
+        // Exercises the real fetch path: a deferred device must return
+        // neither command, not just withhold WifiScan.
+        let now = Utc::now();
+        let mut fetch_results = Vec::new();
+        if result.is_ok() {
+            for &device_id in &device_ids {
+                let is_deferred = rows
+                    .iter()
+                    .any(|(_, d, _, at)| *d == device_id && (*at - now).num_milliseconds() > 2_000);
+                let fetched = get_commands(device_id, &serial_numbers[&device_id], &pool)
+                    .await
+                    .expect("get_commands should succeed");
+                fetch_results.push((device_id, is_deferred, fetched.len()));
+            }
+        }
+
+        if let Ok(receipt) = &result {
+            sqlx::query("DELETE FROM command_queue WHERE bundle = $1")
+                .bind(receipt.uuid)
+                .execute(&pool)
+                .await
+                .expect("cleaning up command_queue rows");
+            sqlx::query("DELETE FROM command_bundles WHERE uuid = $1")
+                .bind(receipt.uuid)
+                .execute(&pool)
+                .await
+                .expect("cleaning up the command_bundles row");
+        }
+        sqlx::query("DELETE FROM device WHERE id = ANY($1)")
+            .bind(&device_ids)
+            .execute(&pool)
+            .await
+            .expect("cleaning up throwaway devices");
+
+        result.expect("queue_commands_bundle should succeed");
+        assert_eq!(
+            rows.len(),
+            device_ids.len() * commands.len(),
+            "every device should have one row per command"
+        );
+
+        // CloseTunnel must share WifiScan's exact available_at per device.
+        let mut by_device: HashMap<i32, HashMap<&str, DateTime<Utc>>> = HashMap::new();
+        for (_, device_id, cmd, available_at) in &rows {
+            by_device
+                .entry(*device_id)
+                .or_default()
+                .insert(cmd.as_str(), *available_at);
+        }
+        for (device_id, cmds) in &by_device {
+            assert_eq!(
+                cmds["\"WifiScan\""], cmds["\"CloseTunnel\""],
+                "device {device_id}: CloseTunnel should share WifiScan's available_at, \
+                 not dispatch ahead of it"
+            );
+        }
+
+        assert!(
+            fetch_results.iter().any(|(_, deferred, _)| *deferred),
+            "expected at least one device in a later wave to exercise the deferred path \
+             (re-run if 5 devices all shuffled into wave 0)"
+        );
+        for (device_id, is_deferred, fetched_count) in &fetch_results {
+            if *is_deferred {
+                assert_eq!(
+                    *fetched_count, 0,
+                    "device {device_id}: neither WifiScan nor CloseTunnel should be \
+                     fetchable before the wave arrives"
+                );
+            } else {
+                assert_eq!(
+                    *fetched_count, 2,
+                    "device {device_id}: an immediate-wave device should fetch both \
+                     commands together"
+                );
+            }
+        }
     }
 }
