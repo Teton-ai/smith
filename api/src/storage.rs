@@ -108,6 +108,14 @@ impl Storage {
                     "CompleteMultipartUpload for {object_key} failed with status {status}"
                 )
             }
+            // S3 can embed the real error in a 200 body instead of the status.
+            let body = response.as_str()?;
+            if body.contains("<Error>") {
+                anyhow::bail!(
+                    "CompleteMultipartUpload for {object_key} returned an error body: {}",
+                    body.chars().take(200).collect::<String>()
+                )
+            }
             Ok::<u16, anyhow::Error>(status)
         }
         .await;
