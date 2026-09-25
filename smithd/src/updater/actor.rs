@@ -378,15 +378,6 @@ impl Actor {
             tokio::fs::create_dir_all(parent).await?;
         }
 
-        // TODO: remove when legacy /packages layout is fully migrated.
-        let legacy_path = self.packages_dir.join(&package.file);
-        if legacy_path.exists() {
-            warn!(?legacy_path, ?blob_path, "migrating from legacy layout");
-            tokio::fs::copy(&legacy_path, blob_path).await?;
-            tokio::fs::remove_file(&legacy_path).await?;
-            return Ok(());
-        }
-
         let remote = format!("packages/{}", package.file);
         let download_to = blob_path
             .to_str()
