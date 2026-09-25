@@ -308,7 +308,7 @@ checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 
 [[package]]
 name = "api"
-version = "0.2.203"
+version = "0.2.204"
 dependencies = [
  "anyhow",
  "axum 0.7.9",
@@ -1046,9 +1046,9 @@ dependencies = [
 
 [[package]]
 name = "cc"
-version = "1.4.7"
+version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "54413ede23c2daf518f35156dfde027feb2374004d63bd497f983c8db9c0e313"
+checksum = "207aedd8d29a0eb804986bc99eed0d43719fec84a9b7f9c8b70cf83b97cffcc1"
 dependencies = [
  "find-msvc-tools",
  "jobserver",
@@ -1178,7 +1178,7 @@ checksum = "1c133bc6a41be0d194c306b5506d15e6feeea7b1d6604bd3f8310dfb2ca96486"
 
 [[package]]
 name = "cli"
-version = "0.2.203"
+version = "0.2.204"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2226,9 +2226,9 @@ dependencies = [
 
 [[package]]
 name = "find-msvc-tools"
-version = "0.1.13"
+version = "0.1.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ef25905e51abafe4dcea6c15fec58c57b601cdbd0ee53d22ea1d3016c587d39b"
+checksum = "aedcfb3409746eddb02b9e19ebda1c3394f759a152e48ee875a0844d1b955484"
 
 [[package]]
 name = "findshlibs"
@@ -3675,7 +3675,7 @@ dependencies = [
 
 [[package]]
 name = "models"
-version = "0.2.203"
+version = "0.2.204"
 dependencies = [
  "axum 0.7.9",
  "chrono",
@@ -6080,7 +6080,7 @@ checksum = "e8e2fb0f499abb4d162f2bedad68f5ef91a1682b5a03596ddb67efd37768d100"
 
 [[package]]
 name = "smith"
-version = "0.2.203"
+version = "0.2.204"
 dependencies = [
  "anyhow",
  "axum 0.8.9",
@@ -6117,7 +6117,7 @@ dependencies = [
 
 [[package]]
 name = "smith-e2e"
-version = "0.2.203"
+version = "0.2.204"
 dependencies = [
  "anyhow",
  "reqwest",
@@ -6129,7 +6129,7 @@ dependencies = [
 
 [[package]]
 name = "smith-updater"
-version = "0.2.203"
+version = "0.2.204"
 dependencies = [
  "anyhow",
  "clap",
