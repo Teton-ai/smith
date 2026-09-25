@@ -388,6 +388,12 @@ pub async fn save_responses(
                 )
                 .execute(pool)
                 .await?;
+                // LAN membership is secondary; never let it fail the device's check-in.
+                if let Err(err) =
+                    crate::lan::record_interface_addresses(pool, device_id, system_info).await
+                {
+                    error!(device_id, "Failed to record interface addresses: {err:?}");
+                }
             }
             SafeCommandRx::TestNetwork {
                 bytes_downloaded,

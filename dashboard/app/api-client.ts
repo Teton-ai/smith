@@ -280,7 +280,15 @@ export interface DeviceTree {
 	serial_number: string;
 }
 
+export interface Gateway {
+	ip: string;
+	mac_address?: string;
+}
+
 export interface NetworkItem {
+	/** Addresses with their prefix, e.g. `192.168.1.23/24`. Empty on older smithd versions. */
+	addresses?: string[];
+	gateway?: Gateway;
 	ips: string[];
 	mac_address: string;
 }
@@ -549,6 +557,35 @@ export interface IpAddressListResponse {
 export interface LabelWithValues {
 	key: string;
 	values: string[];
+}
+
+/**
+ * Devices whose default gateway has the same MAC and whose address is in the same subnet.
+ */
+export interface Lan {
+	devices: LanDevice[];
+	gateway_ip: string;
+	gateway_mac: string;
+	/** Stable identifier derived from `gateway_mac` and `network`. */
+	key: string;
+	/** Subnet in CIDR notation, e.g. `192.168.1.0/24`. */
+	network: string;
+}
+
+export interface LanDevice {
+	/** Private address of the device on this LAN. */
+	address: string;
+	id: number;
+	interface: string;
+	last_seen?: string;
+	online: boolean;
+	public_ip?: string;
+	public_ip_name?: string;
+	serial_number: string;
+}
+
+export interface LanListResponse {
+	lans: Lan[];
 }
 
 export interface NewDistribution {
@@ -14707,6 +14744,285 @@ export function useGetIpAddresses<
 	queryKey: DataTag<QueryKey, TData, TError>;
 } {
 	const queryOptions = useGetIpAddressesQueryOptions(options);
+
+	const query = useQuery(queryOptions, queryClient) as UseQueryResult<
+		TData,
+		TError
+	> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+	return withQueryKey(query, queryOptions.queryKey);
+}
+
+export const useGetLansHook = () => {
+	const getLans = useClientMutator<LanListResponse>();
+
+	return useCallback(
+		(signal?: AbortSignal) => {
+			return getLans({ url: `/lans`, method: "GET", signal });
+		},
+		[getLans],
+	);
+};
+
+export const getGetLansInfiniteQueryKey = () => {
+	return ["infinite", `/lans`] as const;
+};
+
+export const getGetLansQueryKey = () => {
+	return [`/lans`] as const;
+};
+
+export const useGetLansInfiniteQueryOptions = <
+	TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetLansHook>>>>,
+	TError = void | string,
+>(options?: {
+	query?: Partial<
+		UseInfiniteQueryOptions<
+			Awaited<ReturnType<ReturnType<typeof useGetLansHook>>>,
+			TError,
+			TData
+		>
+	>;
+}) => {
+	const { query: queryOptions } = options ?? {};
+
+	const queryKey = queryOptions?.queryKey ?? getGetLansInfiniteQueryKey();
+
+	const getLans = useGetLansHook();
+
+	const queryFn: QueryFunction<
+		Awaited<ReturnType<ReturnType<typeof useGetLansHook>>>
+	> = ({ signal }) => getLans(signal);
+
+	return { queryKey, queryFn, ...queryOptions } as UseInfiniteQueryOptions<
+		Awaited<ReturnType<ReturnType<typeof useGetLansHook>>>,
+		TError,
+		TData
+	> & { queryKey: DataTag<QueryKey, TData, TError> };
+};
+
+export type GetLansInfiniteQueryResult = NonNullable<
+	Awaited<ReturnType<ReturnType<typeof useGetLansHook>>>
+>;
+export type GetLansInfiniteQueryError = void | string;
+
+export function useGetLansInfinite<
+	TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetLansHook>>>>,
+	TError = void | string,
+>(
+	options: {
+		query: Partial<
+			UseInfiniteQueryOptions<
+				Awaited<ReturnType<ReturnType<typeof useGetLansHook>>>,
+				TError,
+				TData
+			>
+		> &
+			Pick<
+				DefinedInitialDataOptions<
+					Awaited<ReturnType<ReturnType<typeof useGetLansHook>>>,
+					TError,
+					Awaited<ReturnType<ReturnType<typeof useGetLansHook>>>
+				>,
+				"initialData"
+			>;
+	},
+	queryClient?: QueryClient,
+): DefinedUseInfiniteQueryResult<TData, TError> & {
+	queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useGetLansInfinite<
+	TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetLansHook>>>>,
+	TError = void | string,
+>(
+	options?: {
+		query?: Partial<
+			UseInfiniteQueryOptions<
+				Awaited<ReturnType<ReturnType<typeof useGetLansHook>>>,
+				TError,
+				TData
+			>
+		> &
+			Pick<
+				UndefinedInitialDataOptions<
+					Awaited<ReturnType<ReturnType<typeof useGetLansHook>>>,
+					TError,
+					Awaited<ReturnType<ReturnType<typeof useGetLansHook>>>
+				>,
+				"initialData"
+			>;
+	},
+	queryClient?: QueryClient,
+): UseInfiniteQueryResult<TData, TError> & {
+	queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useGetLansInfinite<
+	TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetLansHook>>>>,
+	TError = void | string,
+>(
+	options?: {
+		query?: Partial<
+			UseInfiniteQueryOptions<
+				Awaited<ReturnType<ReturnType<typeof useGetLansHook>>>,
+				TError,
+				TData
+			>
+		>;
+	},
+	queryClient?: QueryClient,
+): UseInfiniteQueryResult<TData, TError> & {
+	queryKey: DataTag<QueryKey, TData, TError>;
+};
+
+export function useGetLansInfinite<
+	TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetLansHook>>>>,
+	TError = void | string,
+>(
+	options?: {
+		query?: Partial<
+			UseInfiniteQueryOptions<
+				Awaited<ReturnType<ReturnType<typeof useGetLansHook>>>,
+				TError,
+				TData
+			>
+		>;
+	},
+	queryClient?: QueryClient,
+): UseInfiniteQueryResult<TData, TError> & {
+	queryKey: DataTag<QueryKey, TData, TError>;
+} {
+	const queryOptions = useGetLansInfiniteQueryOptions(options);
+
+	const query = useInfiniteQuery(
+		queryOptions,
+		queryClient,
+	) as UseInfiniteQueryResult<TData, TError> & {
+		queryKey: DataTag<QueryKey, TData, TError>;
+	};
+
+	return withQueryKey(query, queryOptions.queryKey);
+}
+
+export const useGetLansQueryOptions = <
+	TData = Awaited<ReturnType<ReturnType<typeof useGetLansHook>>>,
+	TError = void | string,
+>(options?: {
+	query?: Partial<
+		UseQueryOptions<
+			Awaited<ReturnType<ReturnType<typeof useGetLansHook>>>,
+			TError,
+			TData
+		>
+	>;
+}) => {
+	const { query: queryOptions } = options ?? {};
+
+	const queryKey = queryOptions?.queryKey ?? getGetLansQueryKey();
+
+	const getLans = useGetLansHook();
+
+	const queryFn: QueryFunction<
+		Awaited<ReturnType<ReturnType<typeof useGetLansHook>>>
+	> = ({ signal }) => getLans(signal);
+
+	return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+		Awaited<ReturnType<ReturnType<typeof useGetLansHook>>>,
+		TError,
+		TData
+	> & { queryKey: DataTag<QueryKey, TData, TError> };
+};
+
+export type GetLansQueryResult = NonNullable<
+	Awaited<ReturnType<ReturnType<typeof useGetLansHook>>>
+>;
+export type GetLansQueryError = void | string;
+
+export function useGetLans<
+	TData = Awaited<ReturnType<ReturnType<typeof useGetLansHook>>>,
+	TError = void | string,
+>(
+	options: {
+		query: Partial<
+			UseQueryOptions<
+				Awaited<ReturnType<ReturnType<typeof useGetLansHook>>>,
+				TError,
+				TData
+			>
+		> &
+			Pick<
+				DefinedInitialDataOptions<
+					Awaited<ReturnType<ReturnType<typeof useGetLansHook>>>,
+					TError,
+					Awaited<ReturnType<ReturnType<typeof useGetLansHook>>>
+				>,
+				"initialData"
+			>;
+	},
+	queryClient?: QueryClient,
+): DefinedUseQueryResult<TData, TError> & {
+	queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useGetLans<
+	TData = Awaited<ReturnType<ReturnType<typeof useGetLansHook>>>,
+	TError = void | string,
+>(
+	options?: {
+		query?: Partial<
+			UseQueryOptions<
+				Awaited<ReturnType<ReturnType<typeof useGetLansHook>>>,
+				TError,
+				TData
+			>
+		> &
+			Pick<
+				UndefinedInitialDataOptions<
+					Awaited<ReturnType<ReturnType<typeof useGetLansHook>>>,
+					TError,
+					Awaited<ReturnType<ReturnType<typeof useGetLansHook>>>
+				>,
+				"initialData"
+			>;
+	},
+	queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+	queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useGetLans<
+	TData = Awaited<ReturnType<ReturnType<typeof useGetLansHook>>>,
+	TError = void | string,
+>(
+	options?: {
+		query?: Partial<
+			UseQueryOptions<
+				Awaited<ReturnType<ReturnType<typeof useGetLansHook>>>,
+				TError,
+				TData
+			>
+		>;
+	},
+	queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+	queryKey: DataTag<QueryKey, TData, TError>;
+};
+
+export function useGetLans<
+	TData = Awaited<ReturnType<ReturnType<typeof useGetLansHook>>>,
+	TError = void | string,
+>(
+	options?: {
+		query?: Partial<
+			UseQueryOptions<
+				Awaited<ReturnType<ReturnType<typeof useGetLansHook>>>,
+				TError,
+				TData
+			>
+		>;
+	},
+	queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+	queryKey: DataTag<QueryKey, TData, TError>;
+} {
+	const queryOptions = useGetLansQueryOptions(options);
 
 	const query = useQuery(queryOptions, queryClient) as UseQueryResult<
 		TData,

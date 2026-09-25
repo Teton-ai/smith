@@ -1,0 +1,80 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT\n            dia.gateway_mac::text AS \"gateway_mac!\",\n            network(dia.address)::text AS \"network!\",\n            host(dia.gateway_ip) AS \"gateway_ip!\",\n            dia.interface,\n            host(dia.address) AS \"address!\",\n            d.id,\n            d.serial_number,\n            d.last_ping,\n            d.last_ping > NOW() - INTERVAL '3 minutes' AS \"online!\",\n            host(ip.ip_address) AS public_ip,\n            ip.name AS public_ip_name\n        FROM device_interface_address dia\n        JOIN device d ON d.id = dia.device_id\n        LEFT JOIN ip_address ip ON ip.id = d.ip_address_id\n        WHERE dia.gateway_mac IS NOT NULL\n          AND NOT d.archived\n        ORDER BY 1, 2, d.serial_number, dia.interface\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "gateway_mac!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "network!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "gateway_ip!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "interface",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "address!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 6,
+        "name": "serial_number",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "last_ping",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 8,
+        "name": "online!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 9,
+        "name": "public_ip",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 10,
+        "name": "public_ip_name",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null,
+      null,
+      null,
+      false,
+      null,
+      false,
+      false,
+      true,
+      null,
+      null,
+      true
+    ]
+  },
+  "hash": "154a2c4a55c60c5bf0c7283158368458ff84e7fc9ac2ac6be721a755b3dae714"
+}
