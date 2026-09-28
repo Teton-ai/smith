@@ -20,6 +20,7 @@ use std::time::Duration;
 use tokio::sync::{mpsc, oneshot};
 use tokio::time::{Instant, interval, sleep_until};
 use tracing::{error, info, warn};
+use utoipa::ToSchema;
 
 /// How long after a problem is reported before the device is rebooted. Other
 /// services poll the control socket within this window to react in time.
@@ -37,7 +38,7 @@ const DEFAULT_HOLD_TTL: Duration = Duration::from_secs(10 * 60);
 const MAX_HOLD_TTL: Duration = Duration::from_secs(10 * 60);
 
 /// Whether a reboot is scheduled, how long is left, and any hold on it.
-#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, ToSchema)]
 pub struct RebootStatus {
     pub reboot_pending: bool,
     /// Identity of the pending reboot. A new scheduling event gets a new id, so

@@ -61,6 +61,7 @@ const DocsLayout = lazy(() => import("@/app/docs/layout"));
 const DocsPage = lazy(() => import("@/app/docs/page"));
 const ApiReferencePage = lazy(() => import("@/app/docs/api/page"));
 const CliReferencePage = lazy(() => import("@/app/docs/cli/page"));
+const SmithdReferencePage = lazy(() => import("@/app/docs/smithd/page"));
 
 const Fallback = () => null;
 
@@ -147,6 +148,10 @@ export const router = createBrowserRouter([
 		children: [
 			{ path: "/docs/api", element: withSuspense(<ApiReferencePage />) },
 			{ path: "/docs/cli", element: withSuspense(<CliReferencePage />) },
+			{
+				path: "/docs/smithd",
+				element: withSuspense(<SmithdReferencePage />),
+			},
 			// The per-command pages that preceded the generated reference.
 			{ path: "/docs/cli/*", element: <Navigate to="/docs/cli" replace /> },
 			{ path: "/docs/*", element: withSuspense(<DocsPage />) },

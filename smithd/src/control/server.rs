@@ -22,12 +22,14 @@ use anyhow::Context;
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, post};
 use axum::{Json, Router};
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use tokio::net::UnixListener;
 use tracing::{error, info};
+use utoipa::OpenApi;
+use utoipa_axum::router::OpenApiRouter;
+use utoipa_axum::routes;
 
 #[derive(Clone)]
 struct ControlState {
@@ -60,10 +62,53 @@ where
     }
 }
 
+const WATCHDOG: &str = "watchdog";
+const UPDATER: &str = "updater";
+const DEVICE: &str = "device";
+
+/// Served over the Unix socket at [`CONTROL_SOCKET`], root only. Paths are
+/// relative to it, e.g. `curl --unix-socket /run/smithd/smithd.sock
+/// http://localhost/watchdog`.
+#[derive(OpenApi)]
+#[openapi(info(title = "smithd control API"))]
+struct ApiDoc;
+
+/// The spec of every route [`router`] serves, rendered by the dashboard at
+/// `/docs/smithd`. Built from the same route lists as the server, and without
+/// state, so producing it starts none of the actors.
+pub fn openapi() -> utoipa::openapi::OpenApi {
+    let mut api = ApiDoc::openapi();
+    api.merge(watchdog_routes().into_openapi());
+    api.merge(control_routes().into_openapi());
+    api
+}
+
+/// Reboot status
+///
+/// Whether the watchdog has scheduled a reboot, how long is left, and any hold
+/// deferring it.
+#[utoipa::path(
+    get,
+    path = "/watchdog",
+    tag = WATCHDOG,
+    responses((status = 200, body = RebootStatus)),
+)]
 async fn watchdog(State(police): State<PoliceHandle>) -> Json<RebootStatus> {
     Json(police.status().await)
 }
 
+/// Hold the reboot
+///
+/// Places or renews a lease that defers a scheduled reboot, e.g. while a
+/// technician is connected. Holds expire unless renewed, so a crashed holder
+/// cannot disarm the watchdog forever. The body is optional.
+#[utoipa::path(
+    post,
+    path = "/watchdog/hold",
+    tag = WATCHDOG,
+    request_body(content = Option<HoldRequest>),
+    responses((status = 200, body = RebootStatus)),
+)]
 async fn watchdog_hold(
     State(police): State<PoliceHandle>,
     body: Option<Json<HoldRequest>>,
@@ -72,20 +117,56 @@ async fn watchdog_hold(
     Json(police.hold(ttl_seconds).await)
 }
 
+/// Release the hold
+///
+/// Drops the current hold so a pending reboot proceeds on its deadline.
+#[utoipa::path(
+    delete,
+    path = "/watchdog/hold",
+    tag = WATCHDOG,
+    responses((status = 200, body = RebootStatus)),
+)]
 async fn watchdog_release(State(police): State<PoliceHandle>) -> Json<RebootStatus> {
     Json(police.release_hold().await)
 }
 
+/// Updater status
+///
+/// A human-readable report from the package updater.
+#[utoipa::path(
+    get,
+    path = "/updater/status",
+    tag = UPDATER,
+    responses((status = 200, body = String, content_type = "text/plain")),
+)]
 async fn updater_status(State(state): State<ControlState>) -> String {
     state.updater.status().await
 }
 
+/// Check for updates
+///
+/// Queues a package update check and returns without waiting for it.
+#[utoipa::path(
+    post,
+    path = "/updater/check",
+    tag = UPDATER,
+    responses((status = 200, body = CheckResponse)),
+)]
 async fn updater_check(State(state): State<ControlState>) -> Json<CheckResponse> {
     Json(CheckResponse {
         updates_available: state.updater.check_for_updates().await,
     })
 }
 
+/// Upgrade packages
+///
+/// Schedules a package upgrade and returns without waiting for it.
+#[utoipa::path(
+    post,
+    path = "/updater/upgrade",
+    tag = UPDATER,
+    responses((status = 200, body = MessageResponse)),
+)]
 async fn updater_upgrade(State(state): State<ControlState>) -> Json<MessageResponse> {
     state.updater.upgrade_device().await;
     Json(MessageResponse {
@@ -93,6 +174,16 @@ async fn updater_upgrade(State(state): State<ControlState>) -> Json<MessageRespo
     })
 }
 
+/// Open a tunnel
+///
+/// Exposes a local port through the tunnel server. The body is optional.
+#[utoipa::path(
+    post,
+    path = "/tunnel",
+    tag = DEVICE,
+    request_body(content = Option<TunnelRequest>),
+    responses((status = 200, body = TunnelResponse)),
+)]
 async fn open_tunnel(
     State(state): State<ControlState>,
     body: Option<Json<TunnelRequest>>,
@@ -103,6 +194,20 @@ async fn open_tunnel(
     Json(TunnelResponse { public_port })
 }
 
+/// Start a download
+///
+/// Queues a rate-limited download from the Smith API and returns without
+/// waiting for it to finish.
+#[utoipa::path(
+    post,
+    path = "/downloads",
+    tag = DEVICE,
+    request_body = DownloadRequest,
+    responses(
+        (status = 200, body = MessageResponse),
+        (status = 500, body = ErrorResponse),
+    ),
+)]
 async fn start_download(
     State(state): State<ControlState>,
     Json(request): Json<DownloadRequest>,
@@ -117,7 +222,19 @@ async fn start_download(
     }))
 }
 
-/// Applies a staged OTA payload and reboots the device on success.
+/// Start an OTA
+///
+/// Applies the OTA payload staged at `/ota/ota_payload_package.tar.gz` and
+/// reboots the device on success.
+#[utoipa::path(
+    post,
+    path = "/ota/start",
+    tag = DEVICE,
+    responses(
+        (status = 200, description = "Output of the OTA script", body = MessageResponse),
+        (status = 500, body = ErrorResponse),
+    ),
+)]
 async fn start_ota(State(state): State<ControlState>) -> Result<Json<MessageResponse>, ApiError> {
     state
         .filemanager
@@ -149,29 +266,33 @@ async fn start_ota(State(state): State<ControlState>) -> Result<Json<MessageResp
     }))
 }
 
-/// The police owns its own state, so the watchdog route is kept separate from
+// Routes are registered through utoipa so a route cannot be served without
+// also appearing in the spec.
+
+/// The police owns its own state, so the watchdog routes are kept separate from
 /// the device-operations routes rather than widening [`ControlState`].
+fn watchdog_routes() -> OpenApiRouter<PoliceHandle> {
+    OpenApiRouter::new()
+        .routes(routes!(watchdog))
+        .routes(routes!(watchdog_hold, watchdog_release))
+}
+
+fn control_routes() -> OpenApiRouter<ControlState> {
+    OpenApiRouter::new()
+        .routes(routes!(updater_status))
+        .routes(routes!(updater_check))
+        .routes(routes!(updater_upgrade))
+        .routes(routes!(open_tunnel))
+        .routes(routes!(start_download))
+        .routes(routes!(start_ota))
+}
+
 fn watchdog_router(police: PoliceHandle) -> Router {
-    Router::new()
-        .route("/watchdog", get(watchdog))
-        .route(
-            "/watchdog/hold",
-            post(watchdog_hold).delete(watchdog_release),
-        )
-        .with_state(police)
+    Router::from(watchdog_routes()).with_state(police)
 }
 
 fn router(state: ControlState, police: PoliceHandle) -> Router {
-    watchdog_router(police).merge(
-        Router::new()
-            .route("/updater/status", get(updater_status))
-            .route("/updater/check", post(updater_check))
-            .route("/updater/upgrade", post(updater_upgrade))
-            .route("/tunnel", post(open_tunnel))
-            .route("/downloads", post(start_download))
-            .route("/ota/start", post(start_ota))
-            .with_state(state),
-    )
+    watchdog_router(police).merge(Router::from(control_routes()).with_state(state))
 }
 
 async fn serve(socket: &Path, app: Router, shutdown: ShutdownSignals) -> anyhow::Result<()> {
@@ -249,6 +370,21 @@ impl ControlHandle {
 mod tests {
     use super::*;
     use crate::shutdown::ShutdownHandler;
+
+    /// Like `cli/reference.json`: compared against the committed file rather
+    /// than just written, so a stale spec fails the run and gets committed.
+    #[test]
+    fn openapi_json_is_current() -> anyhow::Result<()> {
+        let json = format!("{}\n", openapi().to_pretty_json()?);
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("openapi.json");
+
+        let current = std::fs::read_to_string(&path).unwrap_or_default();
+        if current != json {
+            std::fs::write(&path, &json)?;
+            anyhow::bail!("smithd/openapi.json was stale and has been rewritten. Commit it.");
+        }
+        Ok(())
+    }
 
     /// Exercises the real transport end to end: axum serving over a Unix socket,
     /// reqwest dialling it via `unix_socket`, and the police reporting status.

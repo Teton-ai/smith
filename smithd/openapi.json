@@ -1,0 +1,429 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "smithd control API",
+    "description": "Smith Daemon",
+    "contact": {
+      "name": "Luis Silva",
+      "email": "luis@teton.ai"
+    },
+    "license": {
+      "name": "Apache-2.0",
+      "identifier": "Apache-2.0"
+    },
+    "version": "0.2.201"
+  },
+  "paths": {
+    "/downloads": {
+      "post": {
+        "tags": [
+          "device"
+        ],
+        "summary": "Start a download",
+        "description": "Queues a rate-limited download from the Smith API and returns without\nwaiting for it to finish.",
+        "operationId": "start_download",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DownloadRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessageResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/ota/start": {
+      "post": {
+        "tags": [
+          "device"
+        ],
+        "summary": "Start an OTA",
+        "description": "Applies the OTA payload staged at `/ota/ota_payload_package.tar.gz` and\nreboots the device on success.",
+        "operationId": "start_ota",
+        "responses": {
+          "200": {
+            "description": "Output of the OTA script",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessageResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/tunnel": {
+      "post": {
+        "tags": [
+          "device"
+        ],
+        "summary": "Open a tunnel",
+        "description": "Exposes a local port through the tunnel server. The body is optional.",
+        "operationId": "open_tunnel",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "$ref": "#/components/schemas/TunnelRequest"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TunnelResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/updater/check": {
+      "post": {
+        "tags": [
+          "updater"
+        ],
+        "summary": "Check for updates",
+        "description": "Queues a package update check and returns without waiting for it.",
+        "operationId": "updater_check",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CheckResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/updater/status": {
+      "get": {
+        "tags": [
+          "updater"
+        ],
+        "summary": "Updater status",
+        "description": "A human-readable report from the package updater.",
+        "operationId": "updater_status",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/updater/upgrade": {
+      "post": {
+        "tags": [
+          "updater"
+        ],
+        "summary": "Upgrade packages",
+        "description": "Schedules a package upgrade and returns without waiting for it.",
+        "operationId": "updater_upgrade",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessageResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/watchdog": {
+      "get": {
+        "tags": [
+          "watchdog"
+        ],
+        "summary": "Reboot status",
+        "description": "Whether the watchdog has scheduled a reboot, how long is left, and any hold\ndeferring it.",
+        "operationId": "watchdog",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RebootStatus"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/watchdog/hold": {
+      "post": {
+        "tags": [
+          "watchdog"
+        ],
+        "summary": "Hold the reboot",
+        "description": "Places or renews a lease that defers a scheduled reboot, e.g. while a\ntechnician is connected. Holds expire unless renewed, so a crashed holder\ncannot disarm the watchdog forever. The body is optional.",
+        "operationId": "watchdog_hold",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "$ref": "#/components/schemas/HoldRequest"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RebootStatus"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "watchdog"
+        ],
+        "summary": "Release the hold",
+        "description": "Drops the current hold so a pending reboot proceeds on its deadline.",
+        "operationId": "watchdog_release",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RebootStatus"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "CheckResponse": {
+        "type": "object",
+        "required": [
+          "updates_available"
+        ],
+        "properties": {
+          "updates_available": {
+            "type": "boolean"
+          }
+        }
+      },
+      "DownloadRequest": {
+        "type": "object",
+        "required": [
+          "remote_file",
+          "local_file",
+          "rate_mb"
+        ],
+        "properties": {
+          "local_file": {
+            "type": "string",
+            "description": "Where to write it on the device."
+          },
+          "rate_mb": {
+            "type": "number",
+            "format": "double",
+            "description": "Bandwidth cap in megabytes per second."
+          },
+          "remote_file": {
+            "type": "string",
+            "description": "Path passed to the Smith API's `/download` endpoint."
+          }
+        }
+      },
+      "ErrorResponse": {
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "type": "string"
+          }
+        }
+      },
+      "HoldRequest": {
+        "type": "object",
+        "properties": {
+          "ttl_seconds": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Lease length in seconds. Omitted → the daemon's default TTL. Values are\ncapped server-side; renew before expiry to keep a reboot deferred.",
+            "minimum": 0
+          }
+        }
+      },
+      "MessageResponse": {
+        "type": "object",
+        "required": [
+          "message"
+        ],
+        "properties": {
+          "message": {
+            "type": "string"
+          }
+        }
+      },
+      "RebootStatus": {
+        "type": "object",
+        "description": "Whether a reboot is scheduled, how long is left, and any hold on it.",
+        "required": [
+          "reboot_pending",
+          "seconds_remaining",
+          "elapsed_seconds",
+          "delay_seconds",
+          "held",
+          "hold_seconds_remaining"
+        ],
+        "properties": {
+          "delay_seconds": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The configured delay between scheduling and reboot.",
+            "minimum": 0
+          },
+          "elapsed_seconds": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Seconds since this reboot was scheduled. Can exceed `delay_seconds` when\nholds have deferred the deadline.",
+            "minimum": 0
+          },
+          "held": {
+            "type": "boolean"
+          },
+          "hold_seconds_remaining": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "reboot_pending": {
+            "type": "boolean"
+          },
+          "schedule_id": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Identity of the pending reboot. A new scheduling event gets a new id, so\npollers can tell \"still the same reboot\" from \"cancelled and rescheduled\".",
+            "minimum": 0
+          },
+          "seconds_remaining": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
+      "TunnelRequest": {
+        "type": "object",
+        "properties": {
+          "port": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Local port to expose. Omitted → SSH (22).",
+            "minimum": 0
+          }
+        }
+      },
+      "TunnelResponse": {
+        "type": "object",
+        "required": [
+          "public_port"
+        ],
+        "properties": {
+          "public_port": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Port on the tunnel server that now forwards to the device.",
+            "minimum": 0
+          }
+        }
+      }
+    }
+  }
+}
