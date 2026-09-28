@@ -1,6 +1,7 @@
 use crate::State;
 use crate::middlewares::authorization;
 use crate::user::CurrentUser;
+use axum::extract::Path;
 use axum::http::StatusCode;
 use axum::{Extension, Json};
 use models::lan::{Lan, LanDevice, LanListResponse};
@@ -10,11 +11,15 @@ const LAN_TAG: &str = "lan";
 
 #[utoipa::path(
     get,
-    path = "/lans",
-    description = "Local networks inferred from the devices' reported default gateways. Devices \
-                   whose gateway has the same MAC address and whose address is in the same \
-                   subnet are grouped into one LAN. Requires smithd to report interface prefixes \
-                   and gateways; devices on older versions are not listed.",
+    path = "/devices/{serial_number}/lans",
+    description = "Local networks the device is on, with the other devices on each. LANs are \
+                   inferred from the devices' reported default gateways: devices whose gateway \
+                   has the same MAC address and whose address is in the same subnet share a LAN. \
+                   Requires smithd to report interface prefixes and gateways; devices on older \
+                   versions are not listed.",
+    params(
+        ("serial_number" = String, Path),
+    ),
     responses(
         (status = 200, description = "LANs with their devices", body = LanListResponse),
         (status = 403, description = "Forbidden"),
@@ -25,7 +30,8 @@ const LAN_TAG: &str = "lan";
     ),
     tag = LAN_TAG
 )]
-pub async fn get_lans(
+pub async fn get_lans_for_device(
+    Path(serial_number): Path<String>,
     Extension(state): Extension<State>,
     Extension(current_user): Extension<CurrentUser>,
 ) -> Result<Json<LanListResponse>, StatusCode> {
@@ -33,8 +39,17 @@ pub async fn get_lans(
         return Err(StatusCode::FORBIDDEN);
     }
 
+    // Scoped to one device's LANs so the lookup stays on the LAN index instead of
+    // scanning every device's addresses.
     let rows = sqlx::query!(
         r#"
+        WITH own AS (
+            SELECT DISTINCT dia.gateway_mac, network(dia.address) AS network
+            FROM device_interface_address dia
+            JOIN device d ON d.id = dia.device_id
+            WHERE d.serial_number = $1
+              AND dia.gateway_mac IS NOT NULL
+        )
         SELECT
             dia.gateway_mac::text AS "gateway_mac!",
             network(dia.address)::text AS "network!",
@@ -47,13 +62,16 @@ pub async fn get_lans(
             d.last_ping > NOW() - INTERVAL '3 minutes' AS "online!",
             host(ip.ip_address) AS public_ip,
             ip.name AS public_ip_name
-        FROM device_interface_address dia
+        FROM own
+        JOIN device_interface_address dia
+          ON dia.gateway_mac = own.gateway_mac
+         AND network(dia.address) = own.network
         JOIN device d ON d.id = dia.device_id
         LEFT JOIN ip_address ip ON ip.id = d.ip_address_id
-        WHERE dia.gateway_mac IS NOT NULL
-          AND NOT d.archived
+        WHERE NOT d.archived
         ORDER BY 1, 2, d.serial_number, dia.interface
-        "#
+        "#,
+        serial_number
     )
     .fetch_all(&state.pg_pool)
     .await

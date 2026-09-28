@@ -12,7 +12,7 @@ import {
 	type Device,
 	type NetworkItem,
 	useGetDeviceInfo,
-	useGetLans,
+	useGetLansForDevice,
 } from "@/app/api-client";
 import NetworkQualityIndicator from "@/app/components/NetworkQualityIndicator";
 import { RelativeTime } from "@/app/components/RelativeTime";
@@ -303,13 +303,8 @@ const NetworkConnections = ({ device }: { device: Device }) => {
 
 /** Other devices sharing a LAN (same gateway MAC and subnet) with this one. */
 const SameLanPanel = ({ serial }: { serial: string }) => {
-	const { data: lans, isLoading } = useGetLans({
-		query: {
-			select: (data) =>
-				data.lans.filter((lan) =>
-					lan.devices.some((d) => d.serial_number === serial),
-				),
-		},
+	const { data: lans, isLoading } = useGetLansForDevice(serial, {
+		query: { select: (data) => data.lans },
 	});
 
 	return (
@@ -361,11 +356,11 @@ const SameLanPanel = ({ serial }: { serial: string }) => {
 																peer.online ? "bg-green-500" : "bg-gray-300"
 															}`}
 														/>
-														<span className="truncate font-mono">
+														<span className="truncate font-mono text-gray-900">
 															{peer.serial_number}
 														</span>
 													</span>
-													<span className="font-mono text-xs text-gray-500">
+													<span className="font-mono text-xs text-gray-600">
 														{peer.address}
 													</span>
 												</Link>
