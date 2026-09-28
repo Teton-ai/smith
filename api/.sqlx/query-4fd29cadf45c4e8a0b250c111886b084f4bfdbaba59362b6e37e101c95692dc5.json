@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT\n            dia.gateway_mac::text AS \"gateway_mac!\",\n            network(dia.address)::text AS \"network!\",\n            host(dia.gateway_ip) AS \"gateway_ip!\",\n            dia.interface,\n            host(dia.address) AS \"address!\",\n            d.id,\n            d.serial_number,\n            d.last_ping,\n            d.last_ping > NOW() - INTERVAL '3 minutes' AS \"online!\",\n            host(ip.ip_address) AS public_ip,\n            ip.name AS public_ip_name\n        FROM device_interface_address dia\n        JOIN device d ON d.id = dia.device_id\n        LEFT JOIN ip_address ip ON ip.id = d.ip_address_id\n        WHERE dia.gateway_mac IS NOT NULL\n          AND NOT d.archived\n        ORDER BY 1, 2, d.serial_number, dia.interface\n        ",
+  "query": "\n        WITH own AS (\n            SELECT DISTINCT dia.gateway_mac, network(dia.address) AS network\n            FROM device_interface_address dia\n            JOIN device d ON d.id = dia.device_id\n            WHERE d.serial_number = $1\n              AND dia.gateway_mac IS NOT NULL\n        )\n        SELECT\n            dia.gateway_mac::text AS \"gateway_mac!\",\n            network(dia.address)::text AS \"network!\",\n            host(dia.gateway_ip) AS \"gateway_ip!\",\n            dia.interface,\n            host(dia.address) AS \"address!\",\n            d.id,\n            d.serial_number,\n            d.last_ping,\n            d.last_ping > NOW() - INTERVAL '3 minutes' AS \"online!\",\n            host(ip.ip_address) AS public_ip,\n            ip.name AS public_ip_name\n        FROM own\n        JOIN device_interface_address dia\n          ON dia.gateway_mac = own.gateway_mac\n         AND network(dia.address) = own.network\n        JOIN device d ON d.id = dia.device_id\n        LEFT JOIN ip_address ip ON ip.id = d.ip_address_id\n        WHERE NOT d.archived\n        ORDER BY 1, 2, d.serial_number, dia.interface\n        ",
   "describe": {
     "columns": [
       {
@@ -60,7 +60,9 @@
       }
     ],
     "parameters": {
-      "Left": []
+      "Left": [
+        "Text"
+      ]
     },
     "nullable": [
       null,
@@ -76,5 +78,5 @@
       true
     ]
   },
-  "hash": "154a2c4a55c60c5bf0c7283158368458ff84e7fc9ac2ac6be721a755b3dae714"
+  "hash": "4fd29cadf45c4e8a0b250c111886b084f4bfdbaba59362b6e37e101c95692dc5"
 }

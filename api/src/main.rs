@@ -315,7 +315,7 @@ async fn start_main_server(
         ))
         .routes(routes!(distribution::route::get_distribution_lts_release))
         .routes(routes!(ip_address::route::get_ip_addresses,))
-        .routes(routes!(lan::route::get_lans))
+        .routes(routes!(lan::route::get_lans_for_device))
         .routes(routes!(
             ip_address::route::get_ip_address_info,
             ip_address::route::update_ip_address

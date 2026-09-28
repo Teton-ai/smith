@@ -14753,76 +14753,94 @@ export function useGetIpAddresses<
 	return withQueryKey(query, queryOptions.queryKey);
 }
 
-export const useGetLansHook = () => {
-	const getLans = useClientMutator<LanListResponse>();
+export const useGetLansForDeviceHook = () => {
+	const getLansForDevice = useClientMutator<LanListResponse>();
 
 	return useCallback(
-		(signal?: AbortSignal) => {
-			return getLans({ url: `/lans`, method: "GET", signal });
+		(serialNumber: string, signal?: AbortSignal) => {
+			return getLansForDevice({
+				url: `/devices/${serialNumber}/lans`,
+				method: "GET",
+				signal,
+			});
 		},
-		[getLans],
+		[getLansForDevice],
 	);
 };
 
-export const getGetLansInfiniteQueryKey = () => {
-	return ["infinite", `/lans`] as const;
+export const getGetLansForDeviceInfiniteQueryKey = (serialNumber: string) => {
+	return ["infinite", `/devices/${serialNumber}/lans`] as const;
 };
 
-export const getGetLansQueryKey = () => {
-	return [`/lans`] as const;
+export const getGetLansForDeviceQueryKey = (serialNumber: string) => {
+	return [`/devices/${serialNumber}/lans`] as const;
 };
 
-export const useGetLansInfiniteQueryOptions = <
-	TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetLansHook>>>>,
-	TError = void | string,
->(options?: {
-	query?: Partial<
-		UseInfiniteQueryOptions<
-			Awaited<ReturnType<ReturnType<typeof useGetLansHook>>>,
-			TError,
-			TData
-		>
-	>;
-}) => {
+export const useGetLansForDeviceInfiniteQueryOptions = <
+	TData = InfiniteData<
+		Awaited<ReturnType<ReturnType<typeof useGetLansForDeviceHook>>>
+	>,
+	TError = void,
+>(
+	serialNumber: string,
+	options?: {
+		query?: Partial<
+			UseInfiniteQueryOptions<
+				Awaited<ReturnType<ReturnType<typeof useGetLansForDeviceHook>>>,
+				TError,
+				TData
+			>
+		>;
+	},
+) => {
 	const { query: queryOptions } = options ?? {};
 
-	const queryKey = queryOptions?.queryKey ?? getGetLansInfiniteQueryKey();
+	const queryKey =
+		queryOptions?.queryKey ?? getGetLansForDeviceInfiniteQueryKey(serialNumber);
 
-	const getLans = useGetLansHook();
+	const getLansForDevice = useGetLansForDeviceHook();
 
 	const queryFn: QueryFunction<
-		Awaited<ReturnType<ReturnType<typeof useGetLansHook>>>
-	> = ({ signal }) => getLans(signal);
+		Awaited<ReturnType<ReturnType<typeof useGetLansForDeviceHook>>>
+	> = ({ signal }) => getLansForDevice(serialNumber, signal);
 
-	return { queryKey, queryFn, ...queryOptions } as UseInfiniteQueryOptions<
-		Awaited<ReturnType<ReturnType<typeof useGetLansHook>>>,
+	return {
+		queryKey,
+		queryFn,
+		enabled: serialNumber !== null && serialNumber !== undefined,
+		...queryOptions,
+	} as UseInfiniteQueryOptions<
+		Awaited<ReturnType<ReturnType<typeof useGetLansForDeviceHook>>>,
 		TError,
 		TData
 	> & { queryKey: DataTag<QueryKey, TData, TError> };
 };
 
-export type GetLansInfiniteQueryResult = NonNullable<
-	Awaited<ReturnType<ReturnType<typeof useGetLansHook>>>
+export type GetLansForDeviceInfiniteQueryResult = NonNullable<
+	Awaited<ReturnType<ReturnType<typeof useGetLansForDeviceHook>>>
 >;
-export type GetLansInfiniteQueryError = void | string;
+export type GetLansForDeviceInfiniteQueryError = void;
 
-export function useGetLansInfinite<
-	TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetLansHook>>>>,
-	TError = void | string,
+export function useGetLansForDeviceInfinite<
+	TData = InfiniteData<
+		Awaited<ReturnType<ReturnType<typeof useGetLansForDeviceHook>>>
+	>,
+	TError = void,
 >(
+	serialNumber: string,
 	options: {
 		query: Partial<
 			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetLansHook>>>,
+				Awaited<ReturnType<ReturnType<typeof useGetLansForDeviceHook>>>,
 				TError,
 				TData
 			>
 		> &
 			Pick<
 				DefinedInitialDataOptions<
-					Awaited<ReturnType<ReturnType<typeof useGetLansHook>>>,
+					Awaited<ReturnType<ReturnType<typeof useGetLansForDeviceHook>>>,
 					TError,
-					Awaited<ReturnType<ReturnType<typeof useGetLansHook>>>
+					Awaited<ReturnType<ReturnType<typeof useGetLansForDeviceHook>>>
 				>,
 				"initialData"
 			>;
@@ -14831,23 +14849,26 @@ export function useGetLansInfinite<
 ): DefinedUseInfiniteQueryResult<TData, TError> & {
 	queryKey: DataTag<QueryKey, TData, TError>;
 };
-export function useGetLansInfinite<
-	TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetLansHook>>>>,
-	TError = void | string,
+export function useGetLansForDeviceInfinite<
+	TData = InfiniteData<
+		Awaited<ReturnType<ReturnType<typeof useGetLansForDeviceHook>>>
+	>,
+	TError = void,
 >(
+	serialNumber: string,
 	options?: {
 		query?: Partial<
 			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetLansHook>>>,
+				Awaited<ReturnType<ReturnType<typeof useGetLansForDeviceHook>>>,
 				TError,
 				TData
 			>
 		> &
 			Pick<
 				UndefinedInitialDataOptions<
-					Awaited<ReturnType<ReturnType<typeof useGetLansHook>>>,
+					Awaited<ReturnType<ReturnType<typeof useGetLansForDeviceHook>>>,
 					TError,
-					Awaited<ReturnType<ReturnType<typeof useGetLansHook>>>
+					Awaited<ReturnType<ReturnType<typeof useGetLansForDeviceHook>>>
 				>,
 				"initialData"
 			>;
@@ -14856,14 +14877,17 @@ export function useGetLansInfinite<
 ): UseInfiniteQueryResult<TData, TError> & {
 	queryKey: DataTag<QueryKey, TData, TError>;
 };
-export function useGetLansInfinite<
-	TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetLansHook>>>>,
-	TError = void | string,
+export function useGetLansForDeviceInfinite<
+	TData = InfiniteData<
+		Awaited<ReturnType<ReturnType<typeof useGetLansForDeviceHook>>>
+	>,
+	TError = void,
 >(
+	serialNumber: string,
 	options?: {
 		query?: Partial<
 			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetLansHook>>>,
+				Awaited<ReturnType<ReturnType<typeof useGetLansForDeviceHook>>>,
 				TError,
 				TData
 			>
@@ -14874,14 +14898,17 @@ export function useGetLansInfinite<
 	queryKey: DataTag<QueryKey, TData, TError>;
 };
 
-export function useGetLansInfinite<
-	TData = InfiniteData<Awaited<ReturnType<ReturnType<typeof useGetLansHook>>>>,
-	TError = void | string,
+export function useGetLansForDeviceInfinite<
+	TData = InfiniteData<
+		Awaited<ReturnType<ReturnType<typeof useGetLansForDeviceHook>>>
+	>,
+	TError = void,
 >(
+	serialNumber: string,
 	options?: {
 		query?: Partial<
 			UseInfiniteQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetLansHook>>>,
+				Awaited<ReturnType<ReturnType<typeof useGetLansForDeviceHook>>>,
 				TError,
 				TData
 			>
@@ -14891,7 +14918,10 @@ export function useGetLansInfinite<
 ): UseInfiniteQueryResult<TData, TError> & {
 	queryKey: DataTag<QueryKey, TData, TError>;
 } {
-	const queryOptions = useGetLansInfiniteQueryOptions(options);
+	const queryOptions = useGetLansForDeviceInfiniteQueryOptions(
+		serialNumber,
+		options,
+	);
 
 	const query = useInfiniteQuery(
 		queryOptions,
@@ -14903,57 +14933,67 @@ export function useGetLansInfinite<
 	return withQueryKey(query, queryOptions.queryKey);
 }
 
-export const useGetLansQueryOptions = <
-	TData = Awaited<ReturnType<ReturnType<typeof useGetLansHook>>>,
-	TError = void | string,
->(options?: {
-	query?: Partial<
-		UseQueryOptions<
-			Awaited<ReturnType<ReturnType<typeof useGetLansHook>>>,
-			TError,
-			TData
-		>
-	>;
-}) => {
+export const useGetLansForDeviceQueryOptions = <
+	TData = Awaited<ReturnType<ReturnType<typeof useGetLansForDeviceHook>>>,
+	TError = void,
+>(
+	serialNumber: string,
+	options?: {
+		query?: Partial<
+			UseQueryOptions<
+				Awaited<ReturnType<ReturnType<typeof useGetLansForDeviceHook>>>,
+				TError,
+				TData
+			>
+		>;
+	},
+) => {
 	const { query: queryOptions } = options ?? {};
 
-	const queryKey = queryOptions?.queryKey ?? getGetLansQueryKey();
+	const queryKey =
+		queryOptions?.queryKey ?? getGetLansForDeviceQueryKey(serialNumber);
 
-	const getLans = useGetLansHook();
+	const getLansForDevice = useGetLansForDeviceHook();
 
 	const queryFn: QueryFunction<
-		Awaited<ReturnType<ReturnType<typeof useGetLansHook>>>
-	> = ({ signal }) => getLans(signal);
+		Awaited<ReturnType<ReturnType<typeof useGetLansForDeviceHook>>>
+	> = ({ signal }) => getLansForDevice(serialNumber, signal);
 
-	return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
-		Awaited<ReturnType<ReturnType<typeof useGetLansHook>>>,
+	return {
+		queryKey,
+		queryFn,
+		enabled: serialNumber !== null && serialNumber !== undefined,
+		...queryOptions,
+	} as UseQueryOptions<
+		Awaited<ReturnType<ReturnType<typeof useGetLansForDeviceHook>>>,
 		TError,
 		TData
 	> & { queryKey: DataTag<QueryKey, TData, TError> };
 };
 
-export type GetLansQueryResult = NonNullable<
-	Awaited<ReturnType<ReturnType<typeof useGetLansHook>>>
+export type GetLansForDeviceQueryResult = NonNullable<
+	Awaited<ReturnType<ReturnType<typeof useGetLansForDeviceHook>>>
 >;
-export type GetLansQueryError = void | string;
+export type GetLansForDeviceQueryError = void;
 
-export function useGetLans<
-	TData = Awaited<ReturnType<ReturnType<typeof useGetLansHook>>>,
-	TError = void | string,
+export function useGetLansForDevice<
+	TData = Awaited<ReturnType<ReturnType<typeof useGetLansForDeviceHook>>>,
+	TError = void,
 >(
+	serialNumber: string,
 	options: {
 		query: Partial<
 			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetLansHook>>>,
+				Awaited<ReturnType<ReturnType<typeof useGetLansForDeviceHook>>>,
 				TError,
 				TData
 			>
 		> &
 			Pick<
 				DefinedInitialDataOptions<
-					Awaited<ReturnType<ReturnType<typeof useGetLansHook>>>,
+					Awaited<ReturnType<ReturnType<typeof useGetLansForDeviceHook>>>,
 					TError,
-					Awaited<ReturnType<ReturnType<typeof useGetLansHook>>>
+					Awaited<ReturnType<ReturnType<typeof useGetLansForDeviceHook>>>
 				>,
 				"initialData"
 			>;
@@ -14962,23 +15002,24 @@ export function useGetLans<
 ): DefinedUseQueryResult<TData, TError> & {
 	queryKey: DataTag<QueryKey, TData, TError>;
 };
-export function useGetLans<
-	TData = Awaited<ReturnType<ReturnType<typeof useGetLansHook>>>,
-	TError = void | string,
+export function useGetLansForDevice<
+	TData = Awaited<ReturnType<ReturnType<typeof useGetLansForDeviceHook>>>,
+	TError = void,
 >(
+	serialNumber: string,
 	options?: {
 		query?: Partial<
 			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetLansHook>>>,
+				Awaited<ReturnType<ReturnType<typeof useGetLansForDeviceHook>>>,
 				TError,
 				TData
 			>
 		> &
 			Pick<
 				UndefinedInitialDataOptions<
-					Awaited<ReturnType<ReturnType<typeof useGetLansHook>>>,
+					Awaited<ReturnType<ReturnType<typeof useGetLansForDeviceHook>>>,
 					TError,
-					Awaited<ReturnType<ReturnType<typeof useGetLansHook>>>
+					Awaited<ReturnType<ReturnType<typeof useGetLansForDeviceHook>>>
 				>,
 				"initialData"
 			>;
@@ -14987,14 +15028,15 @@ export function useGetLans<
 ): UseQueryResult<TData, TError> & {
 	queryKey: DataTag<QueryKey, TData, TError>;
 };
-export function useGetLans<
-	TData = Awaited<ReturnType<ReturnType<typeof useGetLansHook>>>,
-	TError = void | string,
+export function useGetLansForDevice<
+	TData = Awaited<ReturnType<ReturnType<typeof useGetLansForDeviceHook>>>,
+	TError = void,
 >(
+	serialNumber: string,
 	options?: {
 		query?: Partial<
 			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetLansHook>>>,
+				Awaited<ReturnType<ReturnType<typeof useGetLansForDeviceHook>>>,
 				TError,
 				TData
 			>
@@ -15005,14 +15047,15 @@ export function useGetLans<
 	queryKey: DataTag<QueryKey, TData, TError>;
 };
 
-export function useGetLans<
-	TData = Awaited<ReturnType<ReturnType<typeof useGetLansHook>>>,
-	TError = void | string,
+export function useGetLansForDevice<
+	TData = Awaited<ReturnType<ReturnType<typeof useGetLansForDeviceHook>>>,
+	TError = void,
 >(
+	serialNumber: string,
 	options?: {
 		query?: Partial<
 			UseQueryOptions<
-				Awaited<ReturnType<ReturnType<typeof useGetLansHook>>>,
+				Awaited<ReturnType<ReturnType<typeof useGetLansForDeviceHook>>>,
 				TError,
 				TData
 			>
@@ -15022,7 +15065,7 @@ export function useGetLans<
 ): UseQueryResult<TData, TError> & {
 	queryKey: DataTag<QueryKey, TData, TError>;
 } {
-	const queryOptions = useGetLansQueryOptions(options);
+	const queryOptions = useGetLansForDeviceQueryOptions(serialNumber, options);
 
 	const query = useQuery(queryOptions, queryClient) as UseQueryResult<
 		TData,
