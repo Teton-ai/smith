@@ -10,6 +10,8 @@ pub struct Release {
     pub version: String,
     pub draft: bool,
     pub yanked: bool,
+    pub yanked_reason: Option<String>,
+    pub yanked_at: Option<chrono::DateTime<chrono::Utc>>,
     pub release_candidate: bool,
     pub lts: bool,
     pub lts_marked_at: Option<chrono::DateTime<chrono::Utc>>,
@@ -22,6 +24,9 @@ pub struct Release {
 pub struct UpdateRelease {
     pub draft: Option<bool>,
     pub yanked: Option<bool>,
+    /// Why the release is being yanked. Only stored when `yanked` is true.
+    #[serde(default)]
+    pub yanked_reason: Option<String>,
     pub lts: Option<bool>,
 }
 

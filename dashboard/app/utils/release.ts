@@ -1,8 +1,47 @@
+import { isAxiosError } from "axios";
 import { Cpu, HardDrive, Monitor, Package } from "lucide-react";
 import type { Release } from "../api-client";
 
 export function isStableRelease(release: Release): boolean {
 	return !release.draft && !release.yanked && !release.release_candidate;
+}
+
+/** Releases devices on `from` can be rolled back to, newest first. */
+export function rollbackCandidates(
+	releases: Release[],
+	from: Release,
+): Release[] {
+	return releases
+		.filter((r) => r.id !== from.id && isStableRelease(r))
+		.sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at));
+}
+
+/**
+ * The fleet's latest release when that is still a valid target, otherwise
+ * the newest stable release older than `from`: the last version known to be
+ * good before it, not an untested newer one.
+ */
+export function defaultRollbackTarget(
+	candidates: Release[],
+	from: Release,
+	latest?: Release,
+): Release | undefined {
+	if (latest && candidates.some((r) => r.id === latest.id)) return latest;
+	const fromCreated = Date.parse(from.created_at);
+	return (
+		candidates.find((r) => Date.parse(r.created_at) < fromCreated) ??
+		candidates[0]
+	);
+}
+
+/** The API returns plain-text reasons on 4xx; prefer them over axios' generic message. */
+export function requestErrorMessage(error: unknown): string {
+	if (isAxiosError(error)) {
+		const data = error.response?.data;
+		if (typeof data === "string" && data.trim()) return data;
+		return error.message;
+	}
+	return error instanceof Error ? error.message : "Unknown error";
 }
 
 /**

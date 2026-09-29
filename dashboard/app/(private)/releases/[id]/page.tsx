@@ -29,6 +29,7 @@ import {
 	Package as PackageIcon,
 	Plus,
 	Rocket,
+	RotateCcw,
 	Search,
 	ShieldCheck,
 	Tag,
@@ -43,15 +44,19 @@ import {
 	type Device,
 	getGetOsQueryKey,
 	type Package,
+	type Release,
 	useAddPackageToRelease,
 	useApiGetReleaseDeployment,
 	useApiReleaseDeployment,
+	useApiRollbackRelease,
 	useDeleteOs,
 	useDeletePackageForRelease,
 	useDownloadOsHook,
 	useGetDevices,
 	useGetDistributionById,
+	useGetDistributionLatestRelease,
 	useGetDistributionReleasePackages,
+	useGetDistributionReleases,
 	useGetOs,
 	useGetPackages,
 	useGetRelease,
@@ -62,6 +67,11 @@ import LabelAutocomplete from "@/app/components/LabelAutocomplete";
 import { Modal } from "@/app/components/modal";
 import { RelativeTime } from "@/app/components/RelativeTime";
 import { humanBytes } from "@/app/utils/format";
+import {
+	defaultRollbackTarget,
+	requestErrorMessage,
+	rollbackCandidates,
+} from "@/app/utils/release";
 
 const getArchVariant = (architecture: string): BadgeVariant => {
 	switch (architecture.toLowerCase()) {
@@ -109,6 +119,9 @@ const ReleaseDetailPage = () => {
 	const [showYankModal, setShowYankModal] = useState(false);
 	const [yanking, setYanking] = useState(false);
 	const [yankReason, setYankReason] = useState("");
+	const [rollbackAfterYank, setRollbackAfterYank] = useState(true);
+	const [showRollbackModal, setShowRollbackModal] = useState(false);
+	const [rollbackTargetId, setRollbackTargetId] = useState<number | null>(null);
 	const [toast, setToast] = useState<ToastState | null>(null);
 	const [upgradingPackages, setUpgradingPackages] = useState<Set<number>>(
 		new Set(),
@@ -152,6 +165,33 @@ const ReleaseDetailPage = () => {
 			retry: false,
 		},
 	});
+
+	const rollbackPickerOpen = showYankModal || showRollbackModal;
+	const { data: distributionReleases = [] } = useGetDistributionReleases(
+		release?.distribution_id as number,
+		undefined,
+		{
+			query: { enabled: rollbackPickerOpen && !!release?.distribution_id },
+		},
+	);
+	const { data: latestRelease } = useGetDistributionLatestRelease(
+		release?.distribution_id as number,
+		{
+			query: {
+				enabled: rollbackPickerOpen && !!release?.distribution_id,
+				retry: false,
+			},
+		},
+	);
+	const rollbackOptions = useMemo(
+		() => (release ? rollbackCandidates(distributionReleases, release) : []),
+		[distributionReleases, release],
+	);
+	const rollbackTarget: Release | undefined =
+		rollbackOptions.find((r) => r.id === rollbackTargetId) ??
+		(release
+			? defaultRollbackTarget(rollbackOptions, release, latestRelease)
+			: undefined);
 
 	// Eligible devices: online + up-to-date in distribution (used for devices mode)
 	const { data: eligibleDevices = [], isLoading: eligibleDevicesLoading } =
@@ -503,6 +543,29 @@ const ReleaseDetailPage = () => {
 		}
 	};
 
+	const rollbackReleaseHook = useApiRollbackRelease({
+		mutation: {
+			onSuccess: () => {
+				queryClient.invalidateQueries({ queryKey: releaseQueryKey });
+			},
+		},
+	});
+
+	const rollBackDevices = async (target: Release) => {
+		const result = await rollbackReleaseHook.mutateAsync({
+			releaseId,
+			data: { target_release_id: target.id },
+		});
+		return `${result.devices_retargeted} device(s) rolled back to v${target.version}`;
+	};
+
+	const closeYankModal = () => {
+		setShowYankModal(false);
+		setYankReason("");
+		setRollbackAfterYank(true);
+		setRollbackTargetId(null);
+	};
+
 	const handleYankRelease = async () => {
 		if (!release || yanking) return;
 
@@ -514,30 +577,78 @@ const ReleaseDetailPage = () => {
 			return;
 		}
 
+		const target = rollbackAfterYank ? rollbackTarget : undefined;
 		setYanking(true);
 		try {
 			await updateReleaseHook.mutateAsync({
 				releaseId,
-				data: { yanked: true },
+				data: { yanked: true, yanked_reason: yankReason.trim() },
 			});
-
-			queryClient.invalidateQueries({ queryKey: releaseQueryKey });
-			setShowYankModal(false);
-			setYankReason("");
-			setToast({
-				message: "Release has been yanked",
-				type: "success",
-			});
-		} catch (error: any) {
+		} catch (error) {
 			console.error("Failed to yank release:", error);
 			setToast({
-				message: `Failed to yank release: ${error?.message || "Unknown error"}`,
+				message: `Failed to yank release: ${requestErrorMessage(error)}`,
+				type: "error",
+			});
+			setYanking(false);
+			return;
+		}
+
+		try {
+			if (target) {
+				const summary = await rollBackDevices(target);
+				setToast({ message: `Release yanked, ${summary}`, type: "success" });
+			} else {
+				setToast({ message: "Release has been yanked", type: "success" });
+			}
+		} catch (error) {
+			console.error("Failed to roll back release:", error);
+			setToast({
+				message: `Release yanked, but rollback failed: ${requestErrorMessage(error)}`,
 				type: "error",
 			});
 		} finally {
 			setYanking(false);
+			closeYankModal();
 		}
 	};
+
+	const handleRollback = async () => {
+		if (!rollbackTarget || rollbackReleaseHook.isPending) return;
+		try {
+			const summary = await rollBackDevices(rollbackTarget);
+			setShowRollbackModal(false);
+			setRollbackTargetId(null);
+			setToast({ message: summary, type: "success" });
+		} catch (error) {
+			console.error("Failed to roll back release:", error);
+			setToast({
+				message: `Rollback failed: ${requestErrorMessage(error)}`,
+				type: "error",
+			});
+		}
+	};
+
+	const renderRollbackTargetSelect = () =>
+		rollbackOptions.length === 0 ? (
+			<p className="text-sm text-gray-500">
+				No other stable release in this distribution to roll back to.
+			</p>
+		) : (
+			<select
+				value={rollbackTarget?.id ?? ""}
+				onChange={(e) => setRollbackTargetId(Number(e.target.value))}
+				className="w-full px-3 py-2 bg-white text-gray-900 border border-gray-300 rounded-md focus:ring-red-500 focus:border-red-500"
+			>
+				{rollbackOptions.map((r) => (
+					<option key={r.id} value={r.id}>
+						v{r.version}
+						{r.id === latestRelease?.id ? " (latest)" : ""}
+						{r.lts ? " (LTS)" : ""}
+					</option>
+				))}
+			</select>
+		);
 
 	const getPackageNameForService = (packageId?: number): string | null => {
 		if (packageId == null) return null;
@@ -663,53 +774,80 @@ const ReleaseDetailPage = () => {
 							>
 								{updateReleaseHook.isPending ? "Publishing..." : "Publish"}
 							</Button>
+						) : release.yanked ? (
+							<Button
+								variant="solid"
+								tone="red"
+								icon={<RotateCcw className="w-4 h-4" />}
+								onClick={() => setShowRollbackModal(true)}
+							>
+								Roll back devices
+							</Button>
 						) : (
-							!release?.yanked && (
-								<>
-									{!release?.release_candidate && (
-										<Button
-											variant="soft"
-											tone="purple"
-											loading={updateReleaseHook.isPending}
-											icon={<ShieldCheck className="w-4 h-4" />}
-											onClick={handleToggleLts}
-										>
-											{release?.lts ? "Remove LTS" : "Mark as LTS"}
-										</Button>
-									)}
+							<>
+								{!release?.release_candidate && (
+									<Button
+										variant="soft"
+										tone="purple"
+										loading={updateReleaseHook.isPending}
+										icon={<ShieldCheck className="w-4 h-4" />}
+										onClick={handleToggleLts}
+									>
+										{release?.lts ? "Remove LTS" : "Mark as LTS"}
+									</Button>
+								)}
+								<Button
+									variant="solid"
+									tone="red"
+									icon={<AlertTriangle className="w-4 h-4" />}
+									onClick={() => setShowYankModal(true)}
+								>
+									Yank
+								</Button>
+								{existingDeployment?.status === "InProgress" ? (
 									<Button
 										variant="solid"
-										tone="red"
-										icon={<AlertTriangle className="w-4 h-4" />}
-										onClick={() => setShowYankModal(true)}
+										tone="blue"
+										to={`/releases/${releaseId}/deployment`}
+										icon={<Loader2 className="w-4 h-4 animate-spin" />}
 									>
-										Yank
+										View Deployment
 									</Button>
-									{existingDeployment?.status === "InProgress" ? (
-										<Button
-											variant="solid"
-											tone="blue"
-											to={`/releases/${releaseId}/deployment`}
-											icon={<Loader2 className="w-4 h-4 animate-spin" />}
-										>
-											View Deployment
-										</Button>
-									) : (
-										<Button
-											variant="solid"
-											tone="blue"
-											icon={<Rocket className="w-4 h-4" />}
-											onClick={handleOpenDeployModal}
-										>
-											Deploy
-										</Button>
-									)}
-								</>
-							)
+								) : (
+									<Button
+										variant="solid"
+										tone="blue"
+										icon={<Rocket className="w-4 h-4" />}
+										onClick={handleOpenDeployModal}
+									>
+										Deploy
+									</Button>
+								)}
+							</>
 						)}
 					</div>
 				</div>
 			</Card>
+
+			{release.yanked && (
+				<div className="bg-red-50 border border-red-200 rounded-lg p-4 flex items-start space-x-3">
+					<AlertTriangle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
+					<div className="min-w-0">
+						<h4 className="font-medium text-red-900 text-sm">
+							Yanked
+							{release.yanked_at && (
+								<>
+									{" "}
+									<RelativeTime date={release.yanked_at} />
+								</>
+							)}
+						</h4>
+						<p className="text-sm text-red-800 mt-1 break-words">
+							{release.yanked_reason || "No reason was recorded."}
+						</p>
+					</div>
+				</div>
+			)}
 
 			{/* Deploy Confirmation Modal */}
 			<Modal
@@ -1115,8 +1253,7 @@ const ReleaseDetailPage = () => {
 			<Modal
 				open={showYankModal}
 				onClose={() => {
-					setShowYankModal(false);
-					setYankReason("");
+					if (!yanking) closeYankModal();
 				}}
 				title={`Yank Release v${release.version}`}
 				width="w-[480px]"
@@ -1126,10 +1263,7 @@ const ReleaseDetailPage = () => {
 							variant="soft"
 							tone="gray"
 							disabled={yanking}
-							onClick={() => {
-								setShowYankModal(false);
-								setYankReason("");
-							}}
+							onClick={closeYankModal}
 						>
 							Cancel
 						</Button>
@@ -1141,7 +1275,11 @@ const ReleaseDetailPage = () => {
 							icon={<AlertTriangle className="w-4 h-4" />}
 							onClick={handleYankRelease}
 						>
-							{yanking ? "Yanking..." : "Yank Release"}
+							{yanking
+								? "Yanking..."
+								: rollbackAfterYank && rollbackTarget
+									? "Yank & Roll Back"
+									: "Yank Release"}
 						</Button>
 					</>
 				}
@@ -1174,6 +1312,72 @@ const ReleaseDetailPage = () => {
 							className="w-full px-3 py-2 bg-white text-gray-900 border border-gray-300 rounded-md focus:ring-red-500 focus:border-red-500 placeholder:text-gray-400"
 						/>
 					</div>
+
+					<div className="space-y-2">
+						<label className="flex items-start space-x-2 text-sm text-gray-700">
+							<input
+								type="checkbox"
+								checked={rollbackAfterYank}
+								onChange={(e) => setRollbackAfterYank(e.target.checked)}
+								className="mt-0.5"
+							/>
+							<span>
+								<span className="font-medium">Roll back devices now</span>
+								<span className="block text-gray-500">
+									Every device targeting v{release.version} is moved to the
+									selected release immediately, without a canary phase.
+								</span>
+							</span>
+						</label>
+						{rollbackAfterYank && renderRollbackTargetSelect()}
+					</div>
+				</div>
+			</Modal>
+
+			{/* Roll Back Modal */}
+			<Modal
+				open={showRollbackModal}
+				onClose={() => {
+					if (!rollbackReleaseHook.isPending) {
+						setShowRollbackModal(false);
+						setRollbackTargetId(null);
+					}
+				}}
+				title={`Roll back from v${release.version}`}
+				width="w-[480px]"
+				footer={
+					<>
+						<Button
+							variant="soft"
+							tone="gray"
+							disabled={rollbackReleaseHook.isPending}
+							onClick={() => {
+								setShowRollbackModal(false);
+								setRollbackTargetId(null);
+							}}
+						>
+							Cancel
+						</Button>
+						<Button
+							variant="solid"
+							tone="red"
+							loading={rollbackReleaseHook.isPending}
+							disabled={!rollbackTarget}
+							icon={<RotateCcw className="w-4 h-4" />}
+							onClick={handleRollback}
+						>
+							{rollbackReleaseHook.isPending ? "Rolling back..." : "Roll Back"}
+						</Button>
+					</>
+				}
+			>
+				<div className="space-y-4">
+					<p className="text-sm text-gray-700">
+						Every device still targeting v{release.version} is moved to the
+						selected release immediately, without a canary phase. Pinned devices
+						are included.
+					</p>
+					{renderRollbackTargetSelect()}
 				</div>
 			</Modal>
 

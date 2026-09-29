@@ -55,16 +55,26 @@
       },
       {
         "ordinal": 10,
-        "name": "distribution_name",
+        "name": "yanked_reason",
         "type_info": "Text"
       },
       {
         "ordinal": 11,
+        "name": "yanked_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 12,
+        "name": "distribution_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 13,
         "name": "distribution_architecture",
         "type_info": "Text"
       },
       {
-        "ordinal": 12,
+        "ordinal": 14,
         "name": "user_email",
         "type_info": "Varchar"
       }
@@ -85,6 +95,8 @@
       true,
       false,
       false,
+      true,
+      true,
       true,
       false,
       false,

@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE device\n         SET target_release_id = $2, target_release_id_set_at = NOW()\n         WHERE target_release_id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "b52b559ae310467161c8f8551e1396a06f3d779a3bb6030951631401a2a4c1cc"
+}

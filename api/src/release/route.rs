@@ -130,10 +130,22 @@ pub async fn update_release(
         })?;
     }
     if let Some(yanked) = update_release.yanked {
+        let reason = update_release
+            .yanked_reason
+            .as_deref()
+            .map(str::trim)
+            .filter(|r| !r.is_empty());
+        // Re-yanking keeps the original timestamp, and un-yanking clears both
+        // so a stale reason never sits next to a live release.
         sqlx::query!(
-            "UPDATE release SET yanked = $1 WHERE id = $2",
+            "UPDATE release
+             SET yanked = $1,
+                 yanked_reason = CASE WHEN $1 THEN COALESCE($3, yanked_reason) ELSE NULL END,
+                 yanked_at = CASE WHEN $1 THEN COALESCE(yanked_at, NOW()) ELSE NULL END
+             WHERE id = $2",
             yanked,
-            release_id
+            release_id,
+            reason
         )
         .execute(&mut *tx)
         .await
