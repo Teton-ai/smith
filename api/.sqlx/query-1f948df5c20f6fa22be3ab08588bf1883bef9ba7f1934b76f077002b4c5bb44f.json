@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "UPDATE deployment SET status = 'done'\n             WHERE release_id = $1\n             RETURNING id, release_id, status AS \"status!: DeploymentStatus\", updated_at, created_at",
+  "query": "UPDATE deployment SET status = 'done', updated_at = NOW()\n             WHERE release_id = $1\n             RETURNING id, release_id, status AS \"status!: DeploymentStatus\", updated_at, created_at",
   "describe": {
     "columns": [
       {
@@ -54,5 +54,5 @@
       false
     ]
   },
-  "hash": "988cbd065a7daddf458d9a040fe6ef3611186f96d19750da0ede39578e6e1444"
+  "hash": "1f948df5c20f6fa22be3ab08588bf1883bef9ba7f1934b76f077002b4c5bb44f"
 }

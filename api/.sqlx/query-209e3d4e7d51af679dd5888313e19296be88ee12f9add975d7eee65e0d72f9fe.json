@@ -1,15 +1,14 @@
 {
   "db_name": "PostgreSQL",
-  "query": "UPDATE release SET yanked = $1 WHERE id = $2",
+  "query": "DELETE FROM deployment_devices WHERE deployment_id = $1",
   "describe": {
     "columns": [],
     "parameters": {
       "Left": [
-        "Bool",
         "Int4"
       ]
     },
     "nullable": []
   },
-  "hash": "c34bd3e01ba0a50adc0eb02be96e9dfe1af32f1d0fe7b3e35ba9ead31d9868c2"
+  "hash": "209e3d4e7d51af679dd5888313e19296be88ee12f9add975d7eee65e0d72f9fe"
 }

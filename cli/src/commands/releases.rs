@@ -67,6 +67,7 @@ impl ReleasesCommands {
                     UpdateRelease {
                         draft: Some(false),
                         yanked: None,
+                        yanked_reason: None,
                         lts: None,
                     },
                 )
@@ -89,6 +90,7 @@ impl ReleasesCommands {
                     UpdateRelease {
                         draft: None,
                         yanked: None,
+                        yanked_reason: None,
                         lts: Some(!clear),
                     },
                 )

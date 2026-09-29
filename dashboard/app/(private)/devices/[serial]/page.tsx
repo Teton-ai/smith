@@ -224,6 +224,7 @@ const NeedsAttention = ({
 
 	const { data: releases } = useGetDistributionReleases(
 		device.release?.distribution_id as number,
+		undefined,
 		{ query: { enabled: failing && sameDistribution } },
 	);
 

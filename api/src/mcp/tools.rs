@@ -143,6 +143,13 @@ pub struct SetLtsParams {
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
+pub struct YankParams {
+    pub release_id: i32,
+    /// Why the release is being withdrawn, shown next to it in the dashboard.
+    pub reason: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
 pub struct PromoteParams {
     /// The release candidate to promote.
     pub release_id: i32,
@@ -399,6 +406,7 @@ impl SmithMcp {
             UpdateRelease {
                 draft: Some(false),
                 yanked: None,
+                yanked_reason: None,
                 lts: None,
             },
         )
@@ -418,6 +426,7 @@ impl SmithMcp {
             UpdateRelease {
                 draft: None,
                 yanked: None,
+                yanked_reason: None,
                 lts: Some(params.lts),
             },
         )
@@ -431,12 +440,13 @@ impl SmithMcp {
         idempotent_hint = true,
         open_world_hint = false
     ))]
-    async fn yank_release(&self, Parameters(params): Parameters<ReleaseParams>) -> ToolResult {
+    async fn yank_release(&self, Parameters(params): Parameters<YankParams>) -> ToolResult {
         self.update_release(
             params.release_id,
             UpdateRelease {
                 draft: None,
                 yanked: Some(true),
+                yanked_reason: params.reason,
                 lts: None,
             },
         )

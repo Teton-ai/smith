@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE distribution SET latest_release_id = $2\n         WHERE id = $3 AND latest_release_id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Int4",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "0b8a204d8444c0b59b2337b59ddfd7a697e9498d95117977d46649c65ad187e1"
+}

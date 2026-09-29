@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE deployment SET status = 'canceled', updated_at = NOW()\n         WHERE release_id = $1 AND status = 'in_progress'",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "c2ad1f4fc2434665098f45ad96411ba297a9bc198fe1b86384df62bc9f2beb45"
+}

@@ -53,24 +53,49 @@ pub async fn new_deployment(
     user_email: Option<&str>,
 ) -> Result<Deployment, ApiError> {
     let mut tx = pg_pool.begin().await?;
-    // Get the distribution_id for this release
     let release = sqlx::query!(
-        "SELECT distribution_id FROM release WHERE id = $1",
+        "SELECT distribution_id, draft, yanked FROM release WHERE id = $1",
         release_id
     )
     .fetch_one(&mut *tx)
     .await?;
 
+    if release.draft {
+        return Err(ApiError::bad_request("Cannot deploy a draft release."));
+    }
+    if release.yanked {
+        return Err(ApiError::bad_request("Cannot deploy a yanked release."));
+    }
+
+    // A release keeps a single deployment row, so deploying one that already
+    // finished (e.g. going back to an older version) restarts that row with a
+    // fresh canary instead of tripping the unique constraint.
     let deployment = sqlx::query_as!(
         Deployment,
         r#"
         INSERT INTO deployment (release_id, status)
         VALUES ($1, 'in_progress')
+        ON CONFLICT (release_id) DO UPDATE
+            SET status = 'in_progress', created_at = NOW(), updated_at = NOW()
+            WHERE deployment.status <> 'in_progress'
         RETURNING id, release_id, status AS "status!: DeploymentStatus", updated_at, created_at
         "#,
         release_id
     )
-    .fetch_one(&mut *tx)
+    .fetch_optional(&mut *tx)
+    .await?;
+
+    let Some(deployment) = deployment else {
+        return Err(ApiError::bad_request(
+            "A deployment for this release is already in progress.",
+        ));
+    };
+
+    sqlx::query!(
+        "DELETE FROM deployment_devices WHERE deployment_id = $1",
+        deployment.id
+    )
+    .execute(&mut *tx)
     .await?;
 
     let labels_opt = request
@@ -114,6 +139,7 @@ pub async fn new_deployment(
                 WHERE
                     d.id = ANY($3)
                     AND d.release_id = d.target_release_id
+                    AND d.release_id <> $4
                     AND d.last_ping > NOW() - INTERVAL '3 minutes'
                     AND r.distribution_id = $1
             )
@@ -122,7 +148,8 @@ pub async fn new_deployment(
             "#,
             release.distribution_id,
             deployment.id,
-            canary_device_ids.as_slice()
+            canary_device_ids.as_slice(),
+            release_id
         )
         .execute(&mut *tx)
         .await?
@@ -144,6 +171,7 @@ pub async fn new_deployment(
                     l.name || '=' || dl.value = ANY($3)
                     AND d.last_ping > NOW() - INTERVAL '3 minutes'
                     AND d.release_id = d.target_release_id
+                    AND d.release_id <> $4
                     AND r.distribution_id = $1
             )
             INSERT INTO deployment_devices (deployment_id, device_id)
@@ -151,7 +179,8 @@ pub async fn new_deployment(
             "#,
             release.distribution_id,
             deployment.id,
-            canary_device_labels.as_slice()
+            canary_device_labels.as_slice(),
+            release_id
         )
         .execute(&mut *tx)
         .await?
@@ -164,6 +193,7 @@ pub async fn new_deployment(
                 LEFT JOIN device_network dn ON d.id = dn.device_id
                 WHERE d.last_ping > NOW() - INTERVAL '3 minutes'
                 AND d.release_id = d.target_release_id
+                AND d.release_id <> $3
                 AND d.follow_latest
                 AND r.distribution_id = $1
                 ORDER BY
@@ -184,7 +214,8 @@ pub async fn new_deployment(
             SELECT $2, id FROM selected_devices
             ",
             release.distribution_id,
-            deployment.id
+            deployment.id,
+            release_id
         )
         .execute(&mut *tx)
         .await?
@@ -256,67 +287,75 @@ pub async fn confirm_full_rollout(
     pg_pool: &PgPool,
     config: &Config,
     user_email: Option<&str>,
-) -> anyhow::Result<Deployment> {
+) -> Result<Deployment, ApiError> {
     let mut tx = pg_pool.begin().await?;
 
-    let deployment = sqlx::query!(
-            "SELECT id, release_id, status AS \"status!: DeploymentStatus\" FROM deployment WHERE release_id = $1",
-            release_id
-        )
-        .fetch_one(&mut *tx)
-        .await?;
+    // Row lock so two confirms racing each other cannot both retarget the fleet.
+    let deployment = sqlx::query_as!(
+        Deployment,
+        r#"SELECT id, release_id, status AS "status!: DeploymentStatus", updated_at, created_at
+           FROM deployment WHERE release_id = $1 FOR UPDATE"#,
+        release_id
+    )
+    .fetch_one(&mut *tx)
+    .await?;
 
-    if deployment.status == DeploymentStatus::Done {
-        let deployment_obj = sqlx::query_as!(
-            Deployment,
-            "SELECT id, release_id, status AS \"status!: DeploymentStatus\", updated_at, created_at
-                 FROM deployment WHERE id = $1",
-            deployment.id
-        )
-        .fetch_one(&mut *tx)
-        .await?;
-
-        tx.commit().await?;
-        return Ok(deployment_obj);
+    match deployment.status {
+        DeploymentStatus::Done => return Ok(deployment),
+        DeploymentStatus::InProgress => {}
+        DeploymentStatus::Failed | DeploymentStatus::Canceled => {
+            return Err(ApiError::bad_request(format!(
+                "Cannot confirm full rollout: deployment is {}",
+                deployment.status
+            )));
+        }
     }
 
     let release = sqlx::query!(
-        "SELECT distribution_id, release_candidate FROM release WHERE id = $1",
+        "SELECT distribution_id, release_candidate, yanked FROM release WHERE id = $1",
         release_id
     )
     .fetch_one(&mut *tx)
     .await?;
 
     if release.release_candidate {
-        anyhow::bail!("Cannot perform full rollout for a release candidate");
+        return Err(ApiError::bad_request(
+            "Cannot perform full rollout for a release candidate",
+        ));
+    }
+    if release.yanked {
+        return Err(ApiError::bad_request(
+            "Cannot perform full rollout for a yanked release",
+        ));
     }
 
-    let deployment_devices = sqlx::query!(
-        "SELECT device_id
-             FROM deployment_devices
-             WHERE deployment_id = $1",
+    let device_ids = sqlx::query_scalar!(
+        "SELECT device_id FROM deployment_devices WHERE deployment_id = $1",
         deployment.id
     )
     .fetch_all(&mut *tx)
     .await?;
 
-    let device_ids: Vec<i32> = deployment_devices.iter().map(|dd| dd.device_id).collect();
-
     if device_ids.is_empty() {
-        anyhow::bail!("No canary devices found in deployment");
+        return Err(ApiError::bad_request(
+            "Cannot confirm full rollout: no canary devices found in deployment",
+        ));
     }
 
     let mismatched_devices_count = sqlx::query_scalar!(
         "SELECT COUNT(*)
              FROM device
-             WHERE id = ANY($1) AND release_id != target_release_id",
+             WHERE id = ANY($1) AND release_id IS DISTINCT FROM target_release_id",
         &device_ids
     )
     .fetch_one(&mut *tx)
-    .await?;
+    .await?
+    .unwrap_or(0);
 
-    if mismatched_devices_count.unwrap_or(0) > 0 {
-        anyhow::bail!("Cannot confirm full rollout: canary devices have not completed updating");
+    if mismatched_devices_count > 0 {
+        return Err(ApiError::bad_request(format!(
+            "Cannot confirm full rollout: {mismatched_devices_count} canary device(s) have not completed updating"
+        )));
     }
 
     // Check service health for watchdog services
@@ -325,9 +364,10 @@ pub async fn confirm_full_rollout(
         release_id
     )
     .fetch_one(&mut *tx)
-    .await?;
+    .await?
+    .unwrap_or(0);
 
-    if watchdog_service_count.unwrap_or(0) > 0 {
+    if watchdog_service_count > 0 {
         let unhealthy_device_count = sqlx::query_scalar!(
             "SELECT COUNT(DISTINCT d.id)
              FROM device d
@@ -346,19 +386,19 @@ pub async fn confirm_full_rollout(
             release_id
         )
         .fetch_one(&mut *tx)
-        .await?;
+        .await?
+        .unwrap_or(0);
 
-        if unhealthy_device_count.unwrap_or(0) > 0 {
-            anyhow::bail!(
-                "Cannot confirm full rollout: {} canary device(s) have unhealthy or unreported services",
-                unhealthy_device_count.unwrap_or(0)
-            );
+        if unhealthy_device_count > 0 {
+            return Err(ApiError::bad_request(format!(
+                "Cannot confirm full rollout: {unhealthy_device_count} canary device(s) have unhealthy or unreported services"
+            )));
         }
     }
 
     let updated_deployment = sqlx::query_as!(
             Deployment,
-            "UPDATE deployment SET status = 'done'
+            "UPDATE deployment SET status = 'done', updated_at = NOW()
              WHERE release_id = $1
              RETURNING id, release_id, status AS \"status!: DeploymentStatus\", updated_at, created_at",
             release_id
@@ -429,6 +469,133 @@ pub async fn confirm_full_rollout(
     }
 
     Ok(updated_deployment)
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, ToSchema)]
+pub struct RollbackRequest {
+    /// Stable release in the same distribution to move devices to.
+    pub target_release_id: i32,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, ToSchema)]
+pub struct RollbackResult {
+    pub target_release_id: i32,
+    pub devices_retargeted: i64,
+}
+
+/// Disaster recovery for a yanked release: every device targeting it is moved
+/// to `target_release_id` at once, skipping the canary phase, because leaving
+/// the fleet on a withdrawn release for a canary round is the worse outcome.
+pub async fn rollback_release(
+    release_id: i32,
+    target_release_id: i32,
+    pg_pool: &PgPool,
+    config: &Config,
+    user_email: Option<&str>,
+) -> Result<RollbackResult, ApiError> {
+    if release_id == target_release_id {
+        return Err(ApiError::bad_request(
+            "Cannot roll back a release onto itself.",
+        ));
+    }
+
+    let mut tx = pg_pool.begin().await?;
+
+    let source = sqlx::query!(
+        "SELECT distribution_id, yanked, version FROM release WHERE id = $1 FOR UPDATE",
+        release_id
+    )
+    .fetch_one(&mut *tx)
+    .await?;
+
+    // Without the yank, a later fleet rollout or the canary could send devices
+    // straight back to the release we are rolling away from.
+    if !source.yanked {
+        return Err(ApiError::bad_request(
+            "Only a yanked release can be rolled back.",
+        ));
+    }
+
+    let target = sqlx::query!(
+        "SELECT distribution_id, draft, yanked, release_candidate, version FROM release WHERE id = $1",
+        target_release_id
+    )
+    .fetch_optional(&mut *tx)
+    .await?;
+
+    let Some(target) = target else {
+        return Err(ApiError::bad_request("Target release not found."));
+    };
+    if target.distribution_id != source.distribution_id {
+        return Err(ApiError::bad_request(
+            "Target release belongs to a different distribution.",
+        ));
+    }
+    if target.draft || target.yanked || target.release_candidate {
+        return Err(ApiError::bad_request(
+            "Target release must be published, not yanked and not a release candidate.",
+        ));
+    }
+
+    sqlx::query!(
+        "UPDATE deployment SET status = 'canceled', updated_at = NOW()
+         WHERE release_id = $1 AND status = 'in_progress'",
+        release_id
+    )
+    .execute(&mut *tx)
+    .await?;
+
+    // Pinned devices move too: a yanked release cannot be pinned to anymore,
+    // so a device still targeting it is exactly what this is meant to rescue.
+    let devices_retargeted = sqlx::query!(
+        "UPDATE device
+         SET target_release_id = $2, target_release_id_set_at = NOW()
+         WHERE target_release_id = $1",
+        release_id,
+        target_release_id
+    )
+    .execute(&mut *tx)
+    .await?
+    .rows_affected();
+
+    sqlx::query!(
+        "UPDATE distribution SET latest_release_id = $2
+         WHERE id = $3 AND latest_release_id = $1",
+        release_id,
+        target_release_id,
+        source.distribution_id
+    )
+    .execute(&mut *tx)
+    .await?;
+
+    tx.commit().await?;
+
+    if let Some(deployment_slack_hook_url) = &config.deployment_slack_hook_url {
+        let triggered_by = user_email.unwrap_or("Unknown");
+        let message = json!({
+            "blocks": [
+                {
+                    "type": "section",
+                    "text": {
+                        "type": "mrkdwn",
+                        "text": format!(
+                            ":rewind: *Rollback*\n\n*From:* {} (yanked)\n*To:* {}\n*Devices retargeted:* {}\n*Triggered by:* {}",
+                            source.version,
+                            target.version,
+                            devices_retargeted,
+                            triggered_by
+                        )
+                    }
+                }
+            ]
+        });
+        send_slack_notification(deployment_slack_hook_url, message).await;
+    }
+
+    Ok(RollbackResult {
+        target_release_id,
+        devices_retargeted: i64::try_from(devices_retargeted).unwrap_or(i64::MAX),
+    })
 }
 
 pub async fn get_devices_in_deployment(

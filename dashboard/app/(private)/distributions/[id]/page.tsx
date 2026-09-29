@@ -134,9 +134,11 @@ const ReleaseRow = React.memo(function ReleaseRow({
 							</Badge>
 						)}
 						{release.yanked && (
-							<Badge variant="red" pill>
-								Yanked
-							</Badge>
+							<span title={release.yanked_reason ?? undefined}>
+								<Badge variant="red" pill>
+									Yanked
+								</Badge>
+							</span>
 						)}
 					</div>
 					<div className="flex items-center space-x-3 mt-1 text-xs text-gray-500">

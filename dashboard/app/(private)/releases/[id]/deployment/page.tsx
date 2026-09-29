@@ -25,6 +25,7 @@ import {
 } from "@/app/api-client";
 import { Button } from "@/app/components/button";
 import { RelativeTime } from "@/app/components/RelativeTime";
+import { requestErrorMessage } from "@/app/utils/release";
 import {
 	type DeviceServiceHealth,
 	useDeploymentServiceHealth,
@@ -37,6 +38,7 @@ const DeploymentStatusPage = () => {
 	const queryClient = useQueryClient();
 	const [elapsedTime, setElapsedTime] = useState(0);
 	const [promoteVersion, setPromoteVersion] = useState("");
+	const [confirmError, setConfirmError] = useState<string | null>(null);
 
 	const { data: release, isLoading: releaseLoading } = useGetRelease(releaseId);
 
@@ -54,6 +56,7 @@ const DeploymentStatusPage = () => {
 
 	const { data: distributionReleases = [] } = useGetDistributionReleases(
 		release?.distribution_id as number,
+		undefined,
 		{
 			query: {
 				enabled: !!release?.distribution_id && release.release_candidate,
@@ -124,10 +127,12 @@ const DeploymentStatusPage = () => {
 
 	const confirmFullRolloutHook = useApiConfirmFullRollout({
 		mutation: {
+			onMutate: () => setConfirmError(null),
 			onSuccess: () => {
 				queryClient.invalidateQueries({ queryKey: deploymentQueryKey });
 				queryClient.invalidateQueries({ queryKey: devicesQueryKey });
 			},
+			onError: (error) => setConfirmError(requestErrorMessage(error)),
 		},
 	});
 
@@ -424,6 +429,11 @@ const DeploymentStatusPage = () => {
 																	? "Confirming..."
 																	: "Confirm Full Rollout"}
 															</Button>
+															{confirmError && (
+																<p className="mt-2 text-sm text-red-700">
+																	{confirmError}
+																</p>
+															)}
 														</div>
 													)}
 												</>
