@@ -35,6 +35,17 @@ pub struct Proc {
 pub struct NetworkItem {
     pub ips: Vec<String>,
     pub mac_address: String,
+    /// Addresses with their prefix, e.g. `192.168.1.23/24`. Empty on older smithd versions.
+    #[serde(default)]
+    pub addresses: Vec<String>,
+    #[serde(default)]
+    pub gateway: Option<Gateway>,
+}
+
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct Gateway {
+    pub ip: String,
+    pub mac_address: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]

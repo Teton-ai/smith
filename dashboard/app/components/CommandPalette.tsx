@@ -9,6 +9,7 @@ import {
 	Globe,
 	Home,
 	Layers,
+	Network,
 	Power,
 	Search,
 	Smartphone,
@@ -124,6 +125,12 @@ const PAGES: Page[] = [
 		path: "/ip-addresses",
 		icon: <Globe className="w-4 h-4" />,
 		keywords: ["ip", "addresses", "network"],
+	},
+	{
+		label: "Network Map",
+		path: "/network-map",
+		icon: <Network className="w-4 h-4" />,
+		keywords: ["network", "map", "lan", "graph", "topology"],
 	},
 	{
 		label: "Modems",

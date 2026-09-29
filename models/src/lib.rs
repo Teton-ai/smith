@@ -3,6 +3,7 @@ pub mod deployment;
 pub mod device;
 pub mod distribution;
 pub mod ip_address;
+pub mod lan;
 pub mod modem;
 pub mod os;
 pub mod release;

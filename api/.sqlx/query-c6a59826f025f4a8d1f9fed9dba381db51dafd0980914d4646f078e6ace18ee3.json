@@ -1,0 +1,19 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO device_interface_address\n               (device_id, interface, address, mac_address, gateway_ip, gateway_mac)\n           SELECT $1, UNNEST($2::text[]), UNNEST($3::inet[]), UNNEST($4::text[])::macaddr,\n                  UNNEST($5::inet[]), UNNEST($6::text[])::macaddr\n           ON CONFLICT DO NOTHING",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "TextArray",
+        "InetArray",
+        "TextArray",
+        "InetArray",
+        "TextArray"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "c6a59826f025f4a8d1f9fed9dba381db51dafd0980914d4646f078e6ace18ee3"
+}

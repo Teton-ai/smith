@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use serde_json::json;
 use std::collections::HashMap;
+use std::net::Ipv4Addr;
 use std::sync::OnceLock;
 use tracing::{error, info};
 
@@ -40,6 +41,20 @@ pub struct Proc {
 pub struct NetworkItem {
     pub ips: Vec<String>,
     pub mac_address: String,
+    /// Same addresses as `ips` but with their prefix (e.g. `192.168.1.23/24`); `ips` is kept
+    /// as-is for older api versions.
+    #[serde(default)]
+    pub addresses: Vec<String>,
+    /// IPv4 default gateway reached through this interface. The api groups devices sharing
+    /// a gateway MAC and subnet into the same LAN.
+    #[serde(default)]
+    pub gateway: Option<Gateway>,
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
+pub struct Gateway {
+    pub ip: String,
+    pub mac_address: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
@@ -273,16 +288,95 @@ async fn get_network_info() -> Network {
     let mut interfaces = HashMap::new();
     let network_interfaces = datalink::interfaces();
 
+    // Missing on non-Linux dev machines; the gateway is then simply not reported.
+    let routes = tokio::fs::read_to_string("/proc/net/route")
+        .await
+        .unwrap_or_default();
+    let arp = tokio::fs::read_to_string("/proc/net/arp")
+        .await
+        .unwrap_or_default();
+    let mut gateways = parse_default_gateways(&routes);
+
     for interface in network_interfaces {
         let ips = get_ips_from_interface(&interface);
+        let addresses = interface
+            .ips
+            .iter()
+            .map(|ip_network| ip_network.to_string())
+            .collect();
         let mac_address = interface
             .mac
             .map_or_else(|| "Unknown".to_string(), |mac| mac.to_string());
+        let gateway = gateways.remove(&interface.name).map(|ip| Gateway {
+            ip: ip.to_string(),
+            mac_address: find_arp_mac(&arp, ip, &interface.name),
+        });
 
-        interfaces.insert(interface.name.clone(), NetworkItem { ips, mac_address });
+        interfaces.insert(
+            interface.name.clone(),
+            NetworkItem {
+                ips,
+                mac_address,
+                addresses,
+                gateway,
+            },
+        );
     }
 
     Network { interfaces }
+}
+
+/// Default IPv4 gateway per interface from `/proc/net/route`, keeping the lowest metric
+/// when an interface has several default routes.
+fn parse_default_gateways(routes: &str) -> HashMap<String, Ipv4Addr> {
+    const RTF_UP: u32 = 0x1;
+    const RTF_GATEWAY: u32 = 0x2;
+
+    let mut gateways: HashMap<String, (u32, Ipv4Addr)> = HashMap::new();
+    for line in routes.lines().skip(1) {
+        let fields: Vec<&str> = line.split_whitespace().collect();
+        let [iface, destination, gateway, flags, _, _, metric, mask, ..] = fields.as_slice() else {
+            continue;
+        };
+        let hex = |s: &str| u32::from_str_radix(s, 16).ok();
+        let (Some(destination), Some(gateway), Some(flags), Some(mask), Ok(metric)) = (
+            hex(destination),
+            hex(gateway),
+            hex(flags),
+            hex(mask),
+            metric.parse::<u32>(),
+        ) else {
+            continue;
+        };
+        if destination != 0 || mask != 0 || flags & (RTF_UP | RTF_GATEWAY) != RTF_UP | RTF_GATEWAY {
+            continue;
+        }
+        // The kernel prints the address as a native-endian u32 of its network-order bytes.
+        let ip = Ipv4Addr::from(gateway.to_ne_bytes());
+        match gateways.get(*iface) {
+            Some((best, _)) if *best <= metric => {}
+            _ => {
+                gateways.insert((*iface).to_string(), (metric, ip));
+            }
+        }
+    }
+    gateways
+        .into_iter()
+        .map(|(iface, (_, ip))| (iface, ip))
+        .collect()
+}
+
+/// MAC of `ip` on `iface` from `/proc/net/arp`, skipping incomplete entries.
+fn find_arp_mac(arp: &str, ip: Ipv4Addr, iface: &str) -> Option<String> {
+    let ip = ip.to_string();
+    arp.lines().skip(1).find_map(|line| {
+        let fields: Vec<&str> = line.split_whitespace().collect();
+        let [entry_ip, _, flags, mac, _, device, ..] = fields.as_slice() else {
+            return None;
+        };
+        (*entry_ip == ip && *device == iface && *flags != "0x0" && *mac != "00:00:00:00:00:00")
+            .then(|| mac.to_lowercase())
+    })
 }
 
 fn get_ips_from_interface(interface: &NetworkInterface) -> Vec<String> {
@@ -337,4 +431,59 @@ fn parse_connection_statuses(statuses: &str) -> Vec<ConnectionStatus> {
             }
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const ROUTES: &str = "\
+Iface\tDestination\tGateway \tFlags\tRefCnt\tUse\tMetric\tMask\t\tMTU\tWindow\tIRTT
+wlan0\t00000000\t0101A8C0\t0003\t0\t0\t600\t00000000\t0\t0\t0
+eth0\t00000000\t0100000A\t0003\t0\t0\t100\t00000000\t0\t0\t0
+eth0\t00000000\tNOTHEX\t0003\t0\t0\t50\t00000000\t0\t0\t0
+eth0\t0000000A\t00000000\t0001\t0\t0\t100\t00FFFFFF\t0\t0\t0
+docker0\t000011AC\t00000000\t0001\t0\t0\t0\t0000FFFF\t0\t0\t0
+";
+
+    const ARP: &str = "\
+IP address       HW type     Flags       HW address            Mask     Device
+192.168.1.1      0x1         0x2         AA:BB:CC:DD:EE:01     *        wlan0
+10.0.0.1         0x1         0x0         00:00:00:00:00:00     *        eth0
+192.168.1.1      0x1         0x2         aa:bb:cc:dd:ee:99     *        eth0
+";
+
+    #[test]
+    fn parses_default_gateways() {
+        let gateways = parse_default_gateways(ROUTES);
+        assert_eq!(gateways.get("wlan0"), Some(&Ipv4Addr::new(192, 168, 1, 1)));
+        // Malformed line is skipped, the remaining default route wins.
+        assert_eq!(gateways.get("eth0"), Some(&Ipv4Addr::new(10, 0, 0, 1)));
+        assert!(!gateways.contains_key("docker0"));
+    }
+
+    #[test]
+    fn picks_lowest_metric_gateway() {
+        let routes = "Iface\tDestination\tGateway\tFlags\tRefCnt\tUse\tMetric\tMask
+eth0\t00000000\t0100000A\t0003\t0\t0\t100\t00000000
+eth0\t00000000\t0200000A\t0003\t0\t0\t50\t00000000
+eth0\t00000000\t0300000A\t0003\t0\t0\t200\t00000000
+";
+        let gateways = parse_default_gateways(routes);
+        assert_eq!(gateways.get("eth0"), Some(&Ipv4Addr::new(10, 0, 0, 2)));
+    }
+
+    #[test]
+    fn finds_gateway_mac_on_matching_interface() {
+        let ip = Ipv4Addr::new(192, 168, 1, 1);
+        assert_eq!(
+            find_arp_mac(ARP, ip, "wlan0"),
+            Some("aa:bb:cc:dd:ee:01".to_string())
+        );
+        assert_eq!(
+            find_arp_mac(ARP, ip, "eth0"),
+            Some("aa:bb:cc:dd:ee:99".to_string())
+        );
+        assert_eq!(find_arp_mac(ARP, Ipv4Addr::new(10, 0, 0, 1), "eth0"), None);
+    }
 }
