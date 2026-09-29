@@ -18,8 +18,10 @@ import {
 	docsSectionFor,
 	docsSections,
 	readDoc,
+	SMITHD_SECTION,
 	slugForPath,
 } from "./content";
+import { smithdReference } from "./smithd/reference";
 
 const REPOSITORY_URL = "https://github.com/Teton-ai/smith";
 const REPOSITORY_API_URL = "https://api.github.com/repos/Teton-ai/smith";
@@ -425,8 +427,10 @@ export default function DocsLayout() {
 	const section = docsSectionFor(pathname);
 	const isApi = section === API_SECTION;
 	const isCli = section === CLI_SECTION;
-	const isReference = isApi || isCli;
-	const { data: reference } = useApiReference(isApi);
+	const isSmithd = section === SMITHD_SECTION;
+	const isReference = isApi || isCli || isSmithd;
+	const { data: apiReference } = useApiReference(isApi);
+	const reference = isSmithd ? smithdReference : apiReference;
 	const doc = isReference ? undefined : readDoc(slugForPath(pathname));
 	const [menuOpen, setMenuOpen] = useState(false);
 	const closeMenu = () => setMenuOpen(false);
@@ -434,7 +438,7 @@ export default function DocsLayout() {
 	// The CLI sidebar already lists every command, so it has no separate TOC.
 	const headings = useMemo<DocHeading[]>(() => {
 		if (isCli) return [];
-		if (!isApi) return doc?.headings ?? [];
+		if (!isApi && !isSmithd) return doc?.headings ?? [];
 		return (
 			reference?.tags.map((tag) => ({
 				id: tag.anchor,
@@ -442,7 +446,7 @@ export default function DocsLayout() {
 				level: 2,
 			})) ?? []
 		);
-	}, [isApi, isCli, doc, reference]);
+	}, [isApi, isCli, isSmithd, doc, reference]);
 
 	const title = isReference ? section.title : doc?.title;
 	useEffect(() => {
@@ -452,13 +456,18 @@ export default function DocsLayout() {
 		};
 	}, [title]);
 
-	const nav = isApi ? (
-		<ApiNav reference={reference} onNavigate={closeMenu} />
-	) : isCli ? (
-		<CliNav onNavigate={closeMenu} />
-	) : (
-		<GuideNav pathname={pathname} headings={headings} onNavigate={closeMenu} />
-	);
+	const nav =
+		isApi || isSmithd ? (
+			<ApiNav reference={reference} onNavigate={closeMenu} />
+		) : isCli ? (
+			<CliNav onNavigate={closeMenu} />
+		) : (
+			<GuideNav
+				pathname={pathname}
+				headings={headings}
+				onNavigate={closeMenu}
+			/>
+		);
 
 	return (
 		<div data-docs className="min-h-screen bg-white text-gray-900">

@@ -3,11 +3,12 @@ use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use serde::{Deserialize, Serialize};
 use tracing::{error, info};
+use utoipa::ToSchema;
 
 mod server;
 mod status;
 mod upload;
-pub use server::ControlHandle;
+pub use server::{ControlHandle, openapi};
 use status::status;
 
 /// Unix socket the daemon serves its local control API on. Root-only (0660).
@@ -16,39 +17,44 @@ pub const CONTROL_SOCKET: &str = "/run/smithd/smithd.sock";
 // Request/response bodies are shared by the server and the CLI client below so
 // the two cannot drift apart.
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct MessageResponse {
     pub message: String,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct CheckResponse {
     pub updates_available: bool,
 }
 
-#[derive(Debug, Default, Serialize, Deserialize)]
+#[derive(Debug, Default, Serialize, Deserialize, ToSchema)]
 pub struct TunnelRequest {
+    /// Local port to expose. Omitted → SSH (22).
     pub port: Option<u16>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct TunnelResponse {
+    /// Port on the tunnel server that now forwards to the device.
     pub public_port: u16,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct DownloadRequest {
+    /// Path passed to the Smith API's `/download` endpoint.
     pub remote_file: String,
+    /// Where to write it on the device.
     pub local_file: String,
+    /// Bandwidth cap in megabytes per second.
     pub rate_mb: f64,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct ErrorResponse {
     pub error: String,
 }
 
-#[derive(Debug, Default, Serialize, Deserialize)]
+#[derive(Debug, Default, Serialize, Deserialize, ToSchema)]
 pub struct HoldRequest {
     /// Lease length in seconds. Omitted → the daemon's default TTL. Values are
     /// capped server-side; renew before expiry to keep a reboot deferred.

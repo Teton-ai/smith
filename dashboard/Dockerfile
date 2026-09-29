@@ -15,6 +15,8 @@ RUN npm ci
 COPY packages/ui packages/ui
 # /docs/cli is rendered from the reference the CLI writes about itself.
 COPY cli/reference.json cli/reference.json
+# /docs/smithd from the spec smithd's tests write about its control API.
+COPY smithd/openapi.json smithd/openapi.json
 COPY dashboard dashboard
 RUN npm run build -w @teton/smith-dashboard
 

@@ -12,6 +12,7 @@ import {
 	type ApiBody,
 	type ApiField,
 	type ApiOperation,
+	type ApiReference,
 	type ApiResponse,
 	methodVariant,
 	useApiReference,
@@ -160,7 +161,13 @@ function Response({ response }: { response: ApiResponse }) {
 	);
 }
 
-function Operation({ operation }: { operation: ApiOperation }) {
+function Operation({
+	operation,
+	unauthenticated,
+}: {
+	operation: ApiOperation;
+	unauthenticated: string;
+}) {
 	return (
 		<section
 			id={operation.anchor}
@@ -187,7 +194,7 @@ function Operation({ operation }: { operation: ApiOperation }) {
 								.join(" or ")}
 						</>
 					) : (
-						"Public"
+						unauthenticated
 					)}
 				</span>
 			</div>
@@ -235,6 +242,33 @@ function Operation({ operation }: { operation: ApiOperation }) {
 			)}
 		</section>
 	);
+}
+
+export function ApiTags({
+	reference,
+	unauthenticated = "Public",
+}: {
+	reference: ApiReference;
+	/** Shown for operations without a security scheme. */
+	unauthenticated?: string;
+}) {
+	return reference.tags.map((tag) => (
+		<section key={tag.anchor} className="mb-6">
+			<h2
+				id={tag.anchor}
+				className="scroll-mt-20 pb-2 text-xl font-semibold tracking-tight text-gray-900"
+			>
+				{tag.title}
+			</h2>
+			{tag.operations.map((operation) => (
+				<Operation
+					key={operation.anchor}
+					operation={operation}
+					unauthenticated={unauthenticated}
+				/>
+			))}
+		</section>
+	));
 }
 
 export function InfoRow({
@@ -310,19 +344,7 @@ export default function ApiReferencePage() {
 			</div>
 		);
 	} else {
-		content = reference.tags.map((tag) => (
-			<section key={tag.anchor} className="mb-6">
-				<h2
-					id={tag.anchor}
-					className="scroll-mt-20 pb-2 text-xl font-semibold tracking-tight text-gray-900"
-				>
-					{tag.title}
-				</h2>
-				{tag.operations.map((operation) => (
-					<Operation key={operation.anchor} operation={operation} />
-				))}
-			</section>
-		));
+		content = <ApiTags reference={reference} />;
 	}
 
 	return (

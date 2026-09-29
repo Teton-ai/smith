@@ -21,6 +21,7 @@ const files = import.meta.glob<string>("/docs/**/*.md", {
 export const DOCS_INDEX_SLUG = "introduction";
 export const API_REFERENCE_HREF = "/docs/api";
 export const CLI_REFERENCE_HREF = "/docs/cli";
+export const SMITHD_REFERENCE_HREF = "/docs/smithd";
 
 export interface DocHeading {
 	id: string;
@@ -63,9 +64,11 @@ export const docsSections: DocsSection[] = [
 	{ title: "Guides", href: "/docs" },
 	{ title: "API reference", short: "API", href: API_REFERENCE_HREF },
 	{ title: "CLI reference", short: "CLI", href: CLI_REFERENCE_HREF },
+	{ title: "Daemon reference", short: "Daemon", href: SMITHD_REFERENCE_HREF },
 ];
 
-export const [GUIDES_SECTION, API_SECTION, CLI_SECTION] = docsSections;
+export const [GUIDES_SECTION, API_SECTION, CLI_SECTION, SMITHD_SECTION] =
+	docsSections;
 
 /** A reference owns its URL; everything else is a guide. */
 export function docsSectionFor(pathname: string): DocsSection {

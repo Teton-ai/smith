@@ -51,7 +51,7 @@ interface RawOperation {
 	security?: Record<string, string[]>[];
 }
 
-interface RawSpec {
+export interface RawSpec {
 	info?: { version?: string };
 	paths?: Record<string, Record<string, RawOperation>>;
 	components?: { schemas?: Record<string, RawSchema> };

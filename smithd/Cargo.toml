@@ -59,6 +59,10 @@ url = "2.5"
 # Not the workspace axum (0.7): the local control API is served over a Unix
 # socket, and `axum::serve` only accepts a UnixListener from 0.8 onwards.
 axum = "0.8"
+utoipa = { workspace = true }
+# 0.2 is the line built on axum 0.8. Registering routes through it is what
+# keeps the committed openapi.json from missing one.
+utoipa-axum = "0.2"
 
 [dev-dependencies]
 # test-util enables start_paused so the police tests can drive the clock across
