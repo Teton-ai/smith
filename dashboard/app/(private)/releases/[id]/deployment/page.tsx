@@ -7,6 +7,7 @@ import {
 	Loader2,
 	Monitor,
 	Rocket,
+	ShieldCheck,
 	XCircle,
 } from "lucide-react";
 import moment from "moment";
@@ -16,7 +17,9 @@ import {
 	type Deployment,
 	type DeploymentDeviceWithStatus,
 	type Release,
+	useApiApproveDeployment,
 	useApiConfirmFullRollout,
+	useApiGetDeploymentApprovals,
 	useApiGetDeploymentDevices,
 	useApiGetReleaseDeployment,
 	useGetDistributionReleases,
@@ -53,6 +56,11 @@ const DeploymentStatusPage = () => {
 		});
 
 	const { data: serviceHealth = [] } = useDeploymentServiceHealth(releaseId);
+
+	const { data: approvals, queryKey: approvalsQueryKey } =
+		useApiGetDeploymentApprovals(releaseId, {
+			query: { enabled: !!deployment, refetchInterval: 5000 },
+		});
 
 	const { data: distributionReleases = [] } = useGetDistributionReleases(
 		release?.distribution_id as number,
@@ -133,6 +141,14 @@ const DeploymentStatusPage = () => {
 				queryClient.invalidateQueries({ queryKey: devicesQueryKey });
 			},
 			onError: (error) => setConfirmError(requestErrorMessage(error)),
+		},
+	});
+
+	const approveDeploymentHook = useApiApproveDeployment({
+		mutation: {
+			onSuccess: (data) => {
+				queryClient.setQueryData(approvalsQueryKey, data);
+			},
 		},
 	});
 
@@ -413,9 +429,16 @@ const DeploymentStatusPage = () => {
 															</div>
 														</div>
 													) : (
-														<div className="mt-4">
+														<div className="mt-4 space-y-2">
+															{!approvals?.approval_requirement_met && (
+																<p className="text-sm">
+																	Full rollout needs an approval from another
+																	admin before you can confirm it.
+																</p>
+															)}
 															<Button
 																loading={confirmFullRolloutHook.isPending}
+																disabled={!approvals?.approval_requirement_met}
 																icon={
 																	!confirmFullRolloutHook.isPending ? (
 																		<CheckCircle2 className="w-4 h-4" />
@@ -473,6 +496,59 @@ const DeploymentStatusPage = () => {
 									)}
 								</div>
 							</div>
+
+							{!release.release_candidate && approvals && (
+								<div className="border border-gray-200 bg-white rounded-lg p-4">
+									<div className="flex items-center justify-between mb-3">
+										<div className="flex items-center space-x-2">
+											<ShieldCheck className="w-5 h-5 text-gray-700" />
+											<h3 className="font-semibold text-gray-900">
+												Approvals ({approvals.approvals.length})
+											</h3>
+										</div>
+										{approvals.can_approve && (
+											<Button
+												loading={approveDeploymentHook.isPending}
+												icon={
+													!approveDeploymentHook.isPending ? (
+														<ShieldCheck className="w-4 h-4" />
+													) : undefined
+												}
+												onClick={() => {
+													approveDeploymentHook.mutate({ releaseId });
+												}}
+											>
+												{approveDeploymentHook.isPending
+													? "Approving..."
+													: "Approve"}
+											</Button>
+										)}
+									</div>
+									{approvals.approvals.length > 0 ? (
+										<ul className="space-y-1 text-sm text-gray-700">
+											{approvals.approvals.map((approval) => (
+												<li
+													key={approval.user_id}
+													className="flex items-center space-x-2"
+												>
+													<CheckCircle2 className="w-4 h-4 text-green-600" />
+													<span>
+														{approval.email ?? `User #${approval.user_id}`}
+													</span>
+													<span className="text-gray-500">
+														<RelativeTime date={approval.created_at} />
+													</span>
+												</li>
+											))}
+										</ul>
+									) : (
+										<p className="text-sm text-gray-600">
+											No approvals yet. Full rollout needs an approval from an
+											admin other than the person confirming it.
+										</p>
+									)}
+								</div>
+							)}
 
 							{deployment.status === "InProgress" &&
 								!isCanaryComplete() &&

@@ -1,4 +1,4 @@
-import { Loader2 } from "lucide-react";
+import { LayoutGrid, List, Loader2 } from "lucide-react";
 import type { ReactNode } from "react";
 import { Link } from "react-router";
 
@@ -131,5 +131,42 @@ export function Button({
 		>
 			{inner}
 		</button>
+	);
+}
+
+export type ViewMode = "list" | "grid";
+
+/** Segmented grid/list switch, sized to sit next to `SearchInput`. */
+export function ViewToggle({
+	value,
+	onChange,
+}: {
+	value: ViewMode;
+	onChange: (value: ViewMode) => void;
+}) {
+	const options = [
+		{ mode: "grid" as const, label: "Grid view", Icon: LayoutGrid },
+		{ mode: "list" as const, label: "List view", Icon: List },
+	];
+	return (
+		<div className="inline-flex p-0.5 bg-white border border-gray-200 rounded-lg shadow-sm">
+			{options.map(({ mode, label, Icon }) => (
+				<button
+					key={mode}
+					type="button"
+					title={label}
+					aria-label={label}
+					aria-pressed={value === mode}
+					onClick={() => onChange(mode)}
+					className={`p-1.5 rounded-md transition-colors cursor-pointer ${
+						value === mode
+							? "bg-blue-50 text-blue-700"
+							: "text-gray-400 hover:text-gray-700 hover:bg-gray-50"
+					}`}
+				>
+					<Icon className="w-4 h-4" />
+				</button>
+			))}
+		</div>
 	);
 }

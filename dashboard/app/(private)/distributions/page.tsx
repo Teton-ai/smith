@@ -6,9 +6,12 @@ import {
 	ListRow,
 	PageContainer,
 	SearchInput,
+	type ViewMode,
+	ViewToggle,
 } from "@teton/smith-ui";
 import { Check, ChevronDown, ChevronRight, Layers } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { Link } from "react-router";
 import {
 	type DistributionRolloutStats,
 	useGetDistributionRollouts,
@@ -52,8 +55,28 @@ const FILTER_OPTIONS: {
 	{ value: "all", label: "All", dot: "bg-blue-500", key: "3" },
 ];
 
+const VIEW_MODE_KEY = "distributions:view";
+
+const readViewMode = (): ViewMode => {
+	try {
+		return localStorage.getItem(VIEW_MODE_KEY) === "list" ? "list" : "grid";
+	} catch {
+		return "grid";
+	}
+};
+
 const DistributionsPage = () => {
 	const [filter, setFilter] = useState<DistributionFilter>("active");
+	const [viewMode, setViewMode] = useState<ViewMode>(readViewMode);
+
+	const changeViewMode = (mode: ViewMode) => {
+		setViewMode(mode);
+		try {
+			localStorage.setItem(VIEW_MODE_KEY, mode);
+		} catch {
+			// Storage can be unavailable (private mode); the choice just won't persist.
+		}
+	};
 	const [searchTerm, setSearchTerm] = useState("");
 	const [showFilterDropdown, setShowFilterDropdown] = useState(false);
 	const filterDropdownRef = useRef<HTMLDivElement>(null);
@@ -243,84 +266,156 @@ const DistributionsPage = () => {
 					</div>
 				</div>
 
-				<span className="text-sm text-gray-500">
-					{`${displayedDistributions.length} distribution${displayedDistributions.length !== 1 ? "s" : ""} shown`}
-				</span>
+				<div className="flex items-center gap-3">
+					<span className="text-sm text-gray-500">
+						{`${displayedDistributions.length} distribution${displayedDistributions.length !== 1 ? "s" : ""} shown`}
+					</span>
+					<ViewToggle value={viewMode} onChange={changeViewMode} />
+				</div>
 			</div>
 
-			{/* Distributions List */}
-			<Card className="overflow-hidden">
-				{displayedDistributions.length === 0 ? (
-					<div className="p-6 text-center">
-						<Layers className="w-8 h-8 text-gray-400 mx-auto mb-2" />
-						<p className="text-sm text-gray-500">No distributions found</p>
-					</div>
-				) : (
-					<div className="divide-y divide-gray-100">
-						{displayedDistributions.map((distribution) => {
-							const archVariant = getArchVariant(distribution.architecture);
-							const ArchIcon = architectureIcon(distribution.architecture);
-							const rollout = rollouts.get(distribution.id);
-							const totalDevices = rollout?.total_devices || 0;
-							const progress =
-								totalDevices > 0
-									? Math.round(
-											((rollout?.updated_devices || 0) / totalDevices) * 100,
-										)
-									: null;
-							return (
-								<ListRow
-									key={distribution.id}
-									to={`/distributions/${distribution.id}`}
-								>
-									<div className="flex items-center space-x-3 min-w-0">
+			{viewMode === "grid" && displayedDistributions.length > 0 ? (
+				<div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-4">
+					{displayedDistributions.map((distribution) => {
+						const archVariant = getArchVariant(distribution.architecture);
+						const ArchIcon = architectureIcon(distribution.architecture);
+						const rollout = rollouts.get(distribution.id);
+						const totalDevices = rollout?.total_devices || 0;
+						const updatedDevices = rollout?.updated_devices || 0;
+						const progress =
+							totalDevices > 0
+								? Math.round((updatedDevices / totalDevices) * 100)
+								: null;
+						return (
+							<Link
+								key={distribution.id}
+								to={`/distributions/${distribution.id}`}
+								className="group"
+							>
+								<Card className="h-full p-4 flex flex-col gap-3 transition-all group-hover:border-gray-300 group-hover:shadow-md">
+									<div className="flex items-start gap-3 min-w-0">
 										<div
-											className={`p-1.5 rounded-lg ${BADGE_COLORS[archVariant]}`}
+											className={`p-2 rounded-lg flex-shrink-0 ${BADGE_COLORS[archVariant]}`}
 										>
 											<ArchIcon className="w-5 h-5" />
 										</div>
 										<div className="min-w-0 flex-1">
-											<div className="flex items-center space-x-2">
-												<h4 className="text-sm font-medium text-gray-900 truncate">
-													{distribution.name}
-												</h4>
-												<Badge
-													variant={archVariant}
-													pill
-													className="flex-shrink-0"
-												>
-													{distribution.architecture.toUpperCase()}
-												</Badge>
-											</div>
-											{distribution.description && (
-												<p className="text-xs text-gray-500 truncate mt-0.5">
-													{distribution.description}
-												</p>
-											)}
+											<h4
+												className="text-sm font-medium text-gray-900 truncate"
+												title={distribution.name}
+											>
+												{distribution.name}
+											</h4>
+											<Badge variant={archVariant} pill className="mt-1">
+												{distribution.architecture.toUpperCase()}
+											</Badge>
 										</div>
 									</div>
-									<div className="flex items-center space-x-2 flex-shrink-0">
-										{rollout &&
-											(progress !== null ? (
-												<>
-													<div className="text-xs text-gray-700 font-medium tabular-nums">
-														{rollout.updated_devices || 0}/{totalDevices}
-													</div>
-													<Badge variant={getProgressVariant(progress)}>
-														{progress}%
+									<p className="text-xs text-gray-500 line-clamp-2 flex-1">
+										{distribution.description || "No description"}
+									</p>
+									{rollout && (
+										<div className="pt-3 border-t border-gray-100">
+											<div className="flex items-center justify-between text-xs mb-1.5">
+												<span className="text-gray-500">Updated</span>
+												<span className="flex items-center gap-2">
+													<span className="text-gray-700 font-medium tabular-nums">
+														{updatedDevices}/{totalDevices}
+													</span>
+													{progress !== null && (
+														<Badge variant={getProgressVariant(progress)}>
+															{progress}%
+														</Badge>
+													)}
+												</span>
+											</div>
+											<div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
+												<div
+													className="h-full bg-blue-500 rounded-full"
+													style={{ width: `${progress ?? 0}%` }}
+												/>
+											</div>
+										</div>
+									)}
+								</Card>
+							</Link>
+						);
+					})}
+				</div>
+			) : (
+				<Card className="overflow-hidden">
+					{displayedDistributions.length === 0 ? (
+						<div className="p-6 text-center">
+							<Layers className="w-8 h-8 text-gray-400 mx-auto mb-2" />
+							<p className="text-sm text-gray-500">No distributions found</p>
+						</div>
+					) : (
+						<div className="divide-y divide-gray-100">
+							{displayedDistributions.map((distribution) => {
+								const archVariant = getArchVariant(distribution.architecture);
+								const ArchIcon = architectureIcon(distribution.architecture);
+								const rollout = rollouts.get(distribution.id);
+								const totalDevices = rollout?.total_devices || 0;
+								const progress =
+									totalDevices > 0
+										? Math.round(
+												((rollout?.updated_devices || 0) / totalDevices) * 100,
+											)
+										: null;
+								return (
+									<ListRow
+										key={distribution.id}
+										to={`/distributions/${distribution.id}`}
+									>
+										<div className="flex items-center space-x-3 min-w-0">
+											<div
+												className={`p-1.5 rounded-lg ${BADGE_COLORS[archVariant]}`}
+											>
+												<ArchIcon className="w-5 h-5" />
+											</div>
+											<div className="min-w-0 flex-1">
+												<div className="flex items-center space-x-2">
+													<h4 className="text-sm font-medium text-gray-900 truncate">
+														{distribution.name}
+													</h4>
+													<Badge
+														variant={archVariant}
+														pill
+														className="flex-shrink-0"
+													>
+														{distribution.architecture.toUpperCase()}
 													</Badge>
-												</>
-											) : (
-												<div className="text-xs text-gray-500">0/0</div>
-											))}
-										<ChevronRight className="w-3 h-3 text-gray-400" />
-									</div>
-								</ListRow>
-							);
-						})}
-					</div>
-				)}
-			</Card>
+												</div>
+												{distribution.description && (
+													<p className="text-xs text-gray-500 truncate mt-0.5">
+														{distribution.description}
+													</p>
+												)}
+											</div>
+										</div>
+										<div className="flex items-center space-x-2 flex-shrink-0">
+											{rollout &&
+												(progress !== null ? (
+													<>
+														<div className="text-xs text-gray-700 font-medium tabular-nums">
+															{rollout.updated_devices || 0}/{totalDevices}
+														</div>
+														<Badge variant={getProgressVariant(progress)}>
+															{progress}%
+														</Badge>
+													</>
+												) : (
+													<div className="text-xs text-gray-500">0/0</div>
+												))}
+											<ChevronRight className="w-3 h-3 text-gray-400" />
+										</div>
+									</ListRow>
+								);
+							})}
+						</div>
+					)}
+				</Card>
+			)}
 		</PageContainer>
 	);
 };

@@ -379,6 +379,10 @@ async fn start_main_server(
         .routes(routes!(deployment::route::api_confirm_full_rollout))
         .routes(routes!(deployment::route::api_rollback_release))
         .routes(routes!(
+            deployment::route::api_get_deployment_approvals,
+            deployment::route::api_approve_deployment,
+        ))
+        .routes(routes!(
             deployment::route::api_get_deployment_service_health
         ))
         .nest_service(
