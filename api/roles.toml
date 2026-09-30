@@ -16,6 +16,9 @@
 #   recipes:write      create / update / delete recipes
 # User permissions:
 #   users:read         view the user list and role definitions
+# Deployment permissions:
+#   deployments:approve  sign off a deployment. A full rollout needs an approval
+#                        from someone other than the user confirming it.
 
 [roles.default]
 description = "Standard user: manage devices, run safe commands, trigger vetted recipes"
@@ -38,4 +41,5 @@ permissions = [
     { action = "files", resource = "commands" },
     { action = "write", resource = "recipes" },
     { action = "read", resource = "users" },
+    { action = "approve", resource = "deployments" },
 ]

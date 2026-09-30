@@ -21,7 +21,8 @@ Deployments are how you roll out new releases to your fleet. Smith uses a canary
 2. **Create a deployment** targeting that release. Smith assigns a set of canary devices.
 3. **Canary devices update** to the new release.
 4. **Verify health** — check that canary devices are running correctly (services healthy, online, no regressions).
-5. **Confirm full rollout** — the remaining devices in the distribution update. Or, if something looks wrong, yank the release before it spreads.
+5. **Get approval** — another admin approves the deployment.
+6. **Confirm full rollout** — the remaining devices in the distribution update. Or, if something looks wrong, yank the release before it spreads.
 
 ## Walkthrough: RC to full rollout
 
@@ -76,6 +77,8 @@ This means the healthiest, best-connected devices in your fleet receive the upda
 ### Step 7 — Confirm full rollout
 
 After verifying the automatic canary devices are healthy, confirm the full rollout from the deployment detail page. All remaining devices in the distribution will update to the new release.
+
+A full rollout needs at least one approval from an admin **other than the person confirming it**. Admins approve from the Approvals card on the deployment detail page (or `POST /releases/{release_id}/deployment/approvals`), at any point while the deployment is in progress. Approving your own rollout does not count, so at least two people are always involved. Approvals are checked against each approver's current role, so demoting an admin voids their approvals. The permission is `deployments:approve` in `roles.toml`.
 
 ## Selection strategies
 

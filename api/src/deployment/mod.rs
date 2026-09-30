@@ -13,7 +13,9 @@ use utoipa::ToSchema;
 
 use crate::config::Config;
 use crate::error::ApiError;
+use crate::middlewares::authorization::AuthorizationConfig;
 use crate::slack::send_slack_notification;
+use crate::user::CurrentUser;
 
 pub mod route;
 
@@ -286,6 +288,8 @@ pub async fn confirm_full_rollout(
     release_id: i32,
     pg_pool: &PgPool,
     config: &Config,
+    authorization: &AuthorizationConfig,
+    current_user: &CurrentUser,
     user_email: Option<&str>,
 ) -> Result<Deployment, ApiError> {
     let mut tx = pg_pool.begin().await?;
@@ -326,6 +330,16 @@ pub async fn confirm_full_rollout(
     if release.yanked {
         return Err(ApiError::bad_request(
             "Cannot perform full rollout for a yanked release",
+        ));
+    }
+
+    let approvals = get_valid_approvals(deployment.id, authorization, &mut *tx).await?;
+    if !approvals
+        .iter()
+        .any(|approval| approval.user_id != current_user.user_id)
+    {
+        return Err(ApiError::bad_request(
+            "Cannot confirm full rollout: it needs an approval from an admin other than you",
         ));
     }
 
@@ -596,6 +610,132 @@ pub async fn rollback_release(
         target_release_id,
         devices_retargeted: i64::try_from(devices_retargeted).unwrap_or(i64::MAX),
     })
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, ToSchema)]
+pub struct DeploymentApproval {
+    pub user_id: i32,
+    pub email: Option<String>,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, ToSchema)]
+pub struct DeploymentApprovals {
+    /// Approvals from users whose role currently grants `deployments:approve`.
+    pub approvals: Vec<DeploymentApproval>,
+    /// Whether the caller may add their approval now.
+    pub can_approve: bool,
+    /// Whether an approval from someone other than the caller exists, so the
+    /// caller may confirm the full rollout (canary health is checked separately).
+    pub approval_requirement_met: bool,
+}
+
+/// Approvals whose author's role still grants `deployments:approve`. Roles are
+/// resolved now rather than trusted from approval time, so demoting an admin
+/// voids their outstanding sign-offs.
+async fn get_valid_approvals(
+    deployment_id: i32,
+    authorization: &AuthorizationConfig,
+    executor: impl sqlx::PgExecutor<'_>,
+) -> Result<Vec<DeploymentApproval>, sqlx::Error> {
+    let rows = sqlx::query!(
+        r#"
+        SELECT da.user_id, u.email, da.created_at, ur.role AS "role?"
+        FROM deployment_approval da
+        JOIN auth.users u ON u.id = da.user_id
+        LEFT JOIN auth.users_roles ur ON ur.user_id = da.user_id
+        WHERE da.deployment_id = $1
+        ORDER BY da.created_at ASC
+        "#,
+        deployment_id
+    )
+    .fetch_all(executor)
+    .await?;
+
+    Ok(rows
+        .into_iter()
+        .filter(|row| {
+            row.role.as_deref().is_some_and(|role| {
+                authorization
+                    .permissions_for_role(role)
+                    .iter()
+                    .any(|p| p.resource == "deployments" && p.action == "approve")
+            })
+        })
+        .map(|row| DeploymentApproval {
+            user_id: row.user_id,
+            email: row.email,
+            created_at: row.created_at,
+        })
+        .collect())
+}
+
+pub async fn get_deployment_approvals(
+    release_id: i32,
+    pg_pool: &PgPool,
+    authorization: &AuthorizationConfig,
+    current_user: &CurrentUser,
+) -> Result<DeploymentApprovals, ApiError> {
+    let deployment = sqlx::query!(
+        r#"SELECT id, status AS "status!: DeploymentStatus" FROM deployment WHERE release_id = $1"#,
+        release_id
+    )
+    .fetch_optional(pg_pool)
+    .await?
+    .ok_or(ApiError::NotFound)?;
+
+    let approvals = get_valid_approvals(deployment.id, authorization, pg_pool).await?;
+    let already_approved = approvals
+        .iter()
+        .any(|approval| approval.user_id == current_user.user_id);
+    let approval_requirement_met = approvals
+        .iter()
+        .any(|approval| approval.user_id != current_user.user_id);
+
+    Ok(DeploymentApprovals {
+        approvals,
+        can_approve: deployment.status == DeploymentStatus::InProgress
+            && !already_approved
+            && current_user.has_permission("deployments", "approve"),
+        approval_requirement_met,
+    })
+}
+
+pub async fn approve_deployment(
+    release_id: i32,
+    pg_pool: &PgPool,
+    current_user: &CurrentUser,
+) -> Result<(), ApiError> {
+    if !current_user.has_permission("deployments", "approve") {
+        return Err(ApiError::Forbidden);
+    }
+
+    let deployment = sqlx::query!(
+        r#"SELECT id, status AS "status!: DeploymentStatus" FROM deployment WHERE release_id = $1"#,
+        release_id
+    )
+    .fetch_optional(pg_pool)
+    .await?
+    .ok_or(ApiError::NotFound)?;
+
+    if deployment.status != DeploymentStatus::InProgress {
+        return Err(ApiError::bad_request(format!(
+            "Cannot approve a deployment that is {}",
+            deployment.status
+        )));
+    }
+
+    sqlx::query!(
+        "INSERT INTO deployment_approval (deployment_id, user_id)
+         VALUES ($1, $2)
+         ON CONFLICT DO NOTHING",
+        deployment.id,
+        current_user.user_id
+    )
+    .execute(pg_pool)
+    .await?;
+
+    Ok(())
 }
 
 pub async fn get_devices_in_deployment(

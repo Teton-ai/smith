@@ -196,6 +196,24 @@ export interface Deployment {
 	updated_at: string;
 }
 
+export interface DeploymentApproval {
+	created_at: string;
+	email?: string;
+	user_id: number;
+}
+
+export interface DeploymentApprovals {
+	/**
+	 * Whether an approval from someone other than the caller exists, so the
+	 * caller may confirm the full rollout (canary health is checked separately).
+	 */
+	approval_requirement_met: boolean;
+	/** Approvals from users whose role currently grants `deployments:approve`. */
+	approvals: DeploymentApproval[];
+	/** Whether the caller may add their approval now. */
+	can_approve: boolean;
+}
+
 export type DeploymentDeviceWithStatusLabels = { [key: string]: string };
 
 export interface DeploymentDeviceWithStatus {
@@ -20690,6 +20708,472 @@ export const useApiReleaseDeployment = <TError = void, TContext = unknown>(
 	);
 };
 
+export const useApiGetDeploymentApprovalsHook = () => {
+	const apiGetDeploymentApprovals = useClientMutator<DeploymentApprovals>();
+
+	return useCallback(
+		(releaseId: number, signal?: AbortSignal) => {
+			return apiGetDeploymentApprovals({
+				url: `/releases/${releaseId}/deployment/approvals`,
+				method: "GET",
+				signal,
+			});
+		},
+		[apiGetDeploymentApprovals],
+	);
+};
+
+export const getApiGetDeploymentApprovalsInfiniteQueryKey = (
+	releaseId: number,
+) => {
+	return ["infinite", `/releases/${releaseId}/deployment/approvals`] as const;
+};
+
+export const getApiGetDeploymentApprovalsQueryKey = (releaseId: number) => {
+	return [`/releases/${releaseId}/deployment/approvals`] as const;
+};
+
+export const useApiGetDeploymentApprovalsInfiniteQueryOptions = <
+	TData = InfiniteData<
+		Awaited<ReturnType<ReturnType<typeof useApiGetDeploymentApprovalsHook>>>
+	>,
+	TError = void,
+>(
+	releaseId: number,
+	options?: {
+		query?: Partial<
+			UseInfiniteQueryOptions<
+				Awaited<
+					ReturnType<ReturnType<typeof useApiGetDeploymentApprovalsHook>>
+				>,
+				TError,
+				TData
+			>
+		>;
+	},
+) => {
+	const { query: queryOptions } = options ?? {};
+
+	const queryKey =
+		queryOptions?.queryKey ??
+		getApiGetDeploymentApprovalsInfiniteQueryKey(releaseId);
+
+	const apiGetDeploymentApprovals = useApiGetDeploymentApprovalsHook();
+
+	const queryFn: QueryFunction<
+		Awaited<ReturnType<ReturnType<typeof useApiGetDeploymentApprovalsHook>>>
+	> = ({ signal }) => apiGetDeploymentApprovals(releaseId, signal);
+
+	return {
+		queryKey,
+		queryFn,
+		enabled: releaseId !== null && releaseId !== undefined,
+		...queryOptions,
+	} as UseInfiniteQueryOptions<
+		Awaited<ReturnType<ReturnType<typeof useApiGetDeploymentApprovalsHook>>>,
+		TError,
+		TData
+	> & { queryKey: DataTag<QueryKey, TData, TError> };
+};
+
+export type ApiGetDeploymentApprovalsInfiniteQueryResult = NonNullable<
+	Awaited<ReturnType<ReturnType<typeof useApiGetDeploymentApprovalsHook>>>
+>;
+export type ApiGetDeploymentApprovalsInfiniteQueryError = void;
+
+export function useApiGetDeploymentApprovalsInfinite<
+	TData = InfiniteData<
+		Awaited<ReturnType<ReturnType<typeof useApiGetDeploymentApprovalsHook>>>
+	>,
+	TError = void,
+>(
+	releaseId: number,
+	options: {
+		query: Partial<
+			UseInfiniteQueryOptions<
+				Awaited<
+					ReturnType<ReturnType<typeof useApiGetDeploymentApprovalsHook>>
+				>,
+				TError,
+				TData
+			>
+		> &
+			Pick<
+				DefinedInitialDataOptions<
+					Awaited<
+						ReturnType<ReturnType<typeof useApiGetDeploymentApprovalsHook>>
+					>,
+					TError,
+					Awaited<
+						ReturnType<ReturnType<typeof useApiGetDeploymentApprovalsHook>>
+					>
+				>,
+				"initialData"
+			>;
+	},
+	queryClient?: QueryClient,
+): DefinedUseInfiniteQueryResult<TData, TError> & {
+	queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useApiGetDeploymentApprovalsInfinite<
+	TData = InfiniteData<
+		Awaited<ReturnType<ReturnType<typeof useApiGetDeploymentApprovalsHook>>>
+	>,
+	TError = void,
+>(
+	releaseId: number,
+	options?: {
+		query?: Partial<
+			UseInfiniteQueryOptions<
+				Awaited<
+					ReturnType<ReturnType<typeof useApiGetDeploymentApprovalsHook>>
+				>,
+				TError,
+				TData
+			>
+		> &
+			Pick<
+				UndefinedInitialDataOptions<
+					Awaited<
+						ReturnType<ReturnType<typeof useApiGetDeploymentApprovalsHook>>
+					>,
+					TError,
+					Awaited<
+						ReturnType<ReturnType<typeof useApiGetDeploymentApprovalsHook>>
+					>
+				>,
+				"initialData"
+			>;
+	},
+	queryClient?: QueryClient,
+): UseInfiniteQueryResult<TData, TError> & {
+	queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useApiGetDeploymentApprovalsInfinite<
+	TData = InfiniteData<
+		Awaited<ReturnType<ReturnType<typeof useApiGetDeploymentApprovalsHook>>>
+	>,
+	TError = void,
+>(
+	releaseId: number,
+	options?: {
+		query?: Partial<
+			UseInfiniteQueryOptions<
+				Awaited<
+					ReturnType<ReturnType<typeof useApiGetDeploymentApprovalsHook>>
+				>,
+				TError,
+				TData
+			>
+		>;
+	},
+	queryClient?: QueryClient,
+): UseInfiniteQueryResult<TData, TError> & {
+	queryKey: DataTag<QueryKey, TData, TError>;
+};
+
+export function useApiGetDeploymentApprovalsInfinite<
+	TData = InfiniteData<
+		Awaited<ReturnType<ReturnType<typeof useApiGetDeploymentApprovalsHook>>>
+	>,
+	TError = void,
+>(
+	releaseId: number,
+	options?: {
+		query?: Partial<
+			UseInfiniteQueryOptions<
+				Awaited<
+					ReturnType<ReturnType<typeof useApiGetDeploymentApprovalsHook>>
+				>,
+				TError,
+				TData
+			>
+		>;
+	},
+	queryClient?: QueryClient,
+): UseInfiniteQueryResult<TData, TError> & {
+	queryKey: DataTag<QueryKey, TData, TError>;
+} {
+	const queryOptions = useApiGetDeploymentApprovalsInfiniteQueryOptions(
+		releaseId,
+		options,
+	);
+
+	const query = useInfiniteQuery(
+		queryOptions,
+		queryClient,
+	) as UseInfiniteQueryResult<TData, TError> & {
+		queryKey: DataTag<QueryKey, TData, TError>;
+	};
+
+	return withQueryKey(query, queryOptions.queryKey);
+}
+
+export const useApiGetDeploymentApprovalsQueryOptions = <
+	TData = Awaited<
+		ReturnType<ReturnType<typeof useApiGetDeploymentApprovalsHook>>
+	>,
+	TError = void,
+>(
+	releaseId: number,
+	options?: {
+		query?: Partial<
+			UseQueryOptions<
+				Awaited<
+					ReturnType<ReturnType<typeof useApiGetDeploymentApprovalsHook>>
+				>,
+				TError,
+				TData
+			>
+		>;
+	},
+) => {
+	const { query: queryOptions } = options ?? {};
+
+	const queryKey =
+		queryOptions?.queryKey ?? getApiGetDeploymentApprovalsQueryKey(releaseId);
+
+	const apiGetDeploymentApprovals = useApiGetDeploymentApprovalsHook();
+
+	const queryFn: QueryFunction<
+		Awaited<ReturnType<ReturnType<typeof useApiGetDeploymentApprovalsHook>>>
+	> = ({ signal }) => apiGetDeploymentApprovals(releaseId, signal);
+
+	return {
+		queryKey,
+		queryFn,
+		enabled: releaseId !== null && releaseId !== undefined,
+		...queryOptions,
+	} as UseQueryOptions<
+		Awaited<ReturnType<ReturnType<typeof useApiGetDeploymentApprovalsHook>>>,
+		TError,
+		TData
+	> & { queryKey: DataTag<QueryKey, TData, TError> };
+};
+
+export type ApiGetDeploymentApprovalsQueryResult = NonNullable<
+	Awaited<ReturnType<ReturnType<typeof useApiGetDeploymentApprovalsHook>>>
+>;
+export type ApiGetDeploymentApprovalsQueryError = void;
+
+export function useApiGetDeploymentApprovals<
+	TData = Awaited<
+		ReturnType<ReturnType<typeof useApiGetDeploymentApprovalsHook>>
+	>,
+	TError = void,
+>(
+	releaseId: number,
+	options: {
+		query: Partial<
+			UseQueryOptions<
+				Awaited<
+					ReturnType<ReturnType<typeof useApiGetDeploymentApprovalsHook>>
+				>,
+				TError,
+				TData
+			>
+		> &
+			Pick<
+				DefinedInitialDataOptions<
+					Awaited<
+						ReturnType<ReturnType<typeof useApiGetDeploymentApprovalsHook>>
+					>,
+					TError,
+					Awaited<
+						ReturnType<ReturnType<typeof useApiGetDeploymentApprovalsHook>>
+					>
+				>,
+				"initialData"
+			>;
+	},
+	queryClient?: QueryClient,
+): DefinedUseQueryResult<TData, TError> & {
+	queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useApiGetDeploymentApprovals<
+	TData = Awaited<
+		ReturnType<ReturnType<typeof useApiGetDeploymentApprovalsHook>>
+	>,
+	TError = void,
+>(
+	releaseId: number,
+	options?: {
+		query?: Partial<
+			UseQueryOptions<
+				Awaited<
+					ReturnType<ReturnType<typeof useApiGetDeploymentApprovalsHook>>
+				>,
+				TError,
+				TData
+			>
+		> &
+			Pick<
+				UndefinedInitialDataOptions<
+					Awaited<
+						ReturnType<ReturnType<typeof useApiGetDeploymentApprovalsHook>>
+					>,
+					TError,
+					Awaited<
+						ReturnType<ReturnType<typeof useApiGetDeploymentApprovalsHook>>
+					>
+				>,
+				"initialData"
+			>;
+	},
+	queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+	queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useApiGetDeploymentApprovals<
+	TData = Awaited<
+		ReturnType<ReturnType<typeof useApiGetDeploymentApprovalsHook>>
+	>,
+	TError = void,
+>(
+	releaseId: number,
+	options?: {
+		query?: Partial<
+			UseQueryOptions<
+				Awaited<
+					ReturnType<ReturnType<typeof useApiGetDeploymentApprovalsHook>>
+				>,
+				TError,
+				TData
+			>
+		>;
+	},
+	queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+	queryKey: DataTag<QueryKey, TData, TError>;
+};
+
+export function useApiGetDeploymentApprovals<
+	TData = Awaited<
+		ReturnType<ReturnType<typeof useApiGetDeploymentApprovalsHook>>
+	>,
+	TError = void,
+>(
+	releaseId: number,
+	options?: {
+		query?: Partial<
+			UseQueryOptions<
+				Awaited<
+					ReturnType<ReturnType<typeof useApiGetDeploymentApprovalsHook>>
+				>,
+				TError,
+				TData
+			>
+		>;
+	},
+	queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+	queryKey: DataTag<QueryKey, TData, TError>;
+} {
+	const queryOptions = useApiGetDeploymentApprovalsQueryOptions(
+		releaseId,
+		options,
+	);
+
+	const query = useQuery(queryOptions, queryClient) as UseQueryResult<
+		TData,
+		TError
+	> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+	return withQueryKey(query, queryOptions.queryKey);
+}
+
+/**
+ * Approve an in-progress deployment. Requires the `deployments:approve` permission. Approving twice is a no-op.
+ */
+export const useApiApproveDeploymentHook = () => {
+	const apiApproveDeployment = useClientMutator<DeploymentApprovals>();
+
+	return useCallback(
+		(releaseId: number, signal?: AbortSignal) => {
+			return apiApproveDeployment({
+				url: `/releases/${releaseId}/deployment/approvals`,
+				method: "POST",
+				signal,
+			});
+		},
+		[apiApproveDeployment],
+	);
+};
+
+export const getApiApproveDeploymentMutationKey = () =>
+	["apiApproveDeployment"] as const;
+
+export const useApiApproveDeploymentMutationOptions = <
+	TError = void,
+	TContext = unknown,
+>(options?: {
+	mutation?: UseMutationOptions<
+		Awaited<ReturnType<ReturnType<typeof useApiApproveDeploymentHook>>>,
+		TError,
+		ApiApproveDeploymentMutationVariables,
+		TContext
+	>;
+}): UseMutationOptions<
+	Awaited<ReturnType<ReturnType<typeof useApiApproveDeploymentHook>>>,
+	TError,
+	ApiApproveDeploymentMutationVariables,
+	TContext
+> => {
+	const mutationKey = getApiApproveDeploymentMutationKey();
+	const { mutation: mutationOptions } = options
+		? options.mutation &&
+			"mutationKey" in options.mutation &&
+			options.mutation.mutationKey
+			? options
+			: { ...options, mutation: { ...options.mutation, mutationKey } }
+		: { mutation: { mutationKey } };
+
+	const apiApproveDeployment = useApiApproveDeploymentHook();
+
+	const mutationFn: MutationFunction<
+		Awaited<ReturnType<ReturnType<typeof useApiApproveDeploymentHook>>>,
+		ApiApproveDeploymentMutationVariables
+	> = (props) => {
+		const { releaseId } = props ?? {};
+
+		return apiApproveDeployment(releaseId);
+	};
+
+	return { mutationFn, ...mutationOptions };
+};
+
+export type ApiApproveDeploymentMutationResult = NonNullable<
+	Awaited<ReturnType<ReturnType<typeof useApiApproveDeploymentHook>>>
+>;
+
+export type ApiApproveDeploymentMutationError = void;
+export type ApiApproveDeploymentMutationVariables = { releaseId: number };
+
+export const useApiApproveDeployment = <TError = void, TContext = unknown>(
+	options?: {
+		mutation?: UseMutationOptions<
+			Awaited<ReturnType<ReturnType<typeof useApiApproveDeploymentHook>>>,
+			TError,
+			ApiApproveDeploymentMutationVariables,
+			TContext
+		>;
+	},
+	queryClient?: QueryClient,
+): UseMutationResult<
+	Awaited<ReturnType<ReturnType<typeof useApiApproveDeploymentHook>>>,
+	TError,
+	ApiApproveDeploymentMutationVariables,
+	TContext
+> => {
+	return useMutation(
+		useApiApproveDeploymentMutationOptions(options),
+		queryClient,
+	);
+};
+
+/**
+ * Roll the release out to every device following latest. Requires healthy, updated canary devices and an approval from an admin other than the caller.
+ */
 export const useApiConfirmFullRolloutHook = () => {
 	const apiConfirmFullRollout = useClientMutator<Deployment>();
 

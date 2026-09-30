@@ -1,7 +1,8 @@
 use crate::State;
 use crate::deployment::{
-    Deployment, DeploymentDeviceWithStatus, DeviceServiceHealth, RollbackRequest, RollbackResult,
-    confirm_full_rollout, get_deployment, get_deployment_service_health, get_devices_in_deployment,
+    Deployment, DeploymentApprovals, DeploymentDeviceWithStatus, DeviceServiceHealth,
+    RollbackRequest, RollbackResult, approve_deployment, confirm_full_rollout, get_deployment,
+    get_deployment_approvals, get_deployment_service_health, get_devices_in_deployment,
     new_deployment, rollback_release,
 };
 use crate::error::ApiError;
@@ -109,9 +110,10 @@ pub async fn api_get_deployment_devices(
     params(
         ("release_id" = i32, Path),
     ),
+  description = "Roll the release out to every device following latest. Requires healthy, updated canary devices and an approval from an admin other than the caller.",
   responses(
         (status = StatusCode::OK, body = Deployment),
-        (status = StatusCode::BAD_REQUEST, description = "Canary devices have not finished updating or are unhealthy, or the release is a release candidate, yanked, or its deployment was canceled"),
+        (status = StatusCode::BAD_REQUEST, description = "Canary devices have not finished updating or are unhealthy, or the release is a release candidate, yanked, or its deployment was canceled, or no admin other than the caller has approved it"),
         (status = StatusCode::NOT_FOUND, description = "Deployment not found"),
   ),
   security(
@@ -130,6 +132,8 @@ pub async fn api_confirm_full_rollout(
         release_id,
         &state.pg_pool,
         state.config,
+        &state.authorization,
+        &current_user,
         user_email.as_deref(),
     )
     .await
@@ -195,6 +199,70 @@ async fn current_user_email(state: &State, current_user: &CurrentUser) -> Option
     .ok()
     .flatten()
     .flatten()
+}
+
+#[utoipa::path(
+    get,
+    path = "/releases/{release_id}/deployment/approvals",
+    params(
+        ("release_id" = i32, Path),
+    ),
+    responses(
+        (status = StatusCode::OK, body = DeploymentApprovals),
+        (status = StatusCode::NOT_FOUND, description = "Release has no deployment"),
+    ),
+    security(
+        ("auth_token" = [])
+    ),
+    tag = TAG
+)]
+pub async fn api_get_deployment_approvals(
+    Path(release_id): Path<i32>,
+    Extension(state): Extension<State>,
+    Extension(current_user): Extension<CurrentUser>,
+) -> Result<Json<DeploymentApprovals>, ApiError> {
+    let approvals = get_deployment_approvals(
+        release_id,
+        &state.pg_pool,
+        &state.authorization,
+        &current_user,
+    )
+    .await?;
+    Ok(Json(approvals))
+}
+
+#[utoipa::path(
+    post,
+    path = "/releases/{release_id}/deployment/approvals",
+    params(
+        ("release_id" = i32, Path),
+    ),
+    description = "Approve an in-progress deployment. Requires the `deployments:approve` permission. Approving twice is a no-op.",
+    responses(
+        (status = StatusCode::OK, body = DeploymentApprovals),
+        (status = StatusCode::BAD_REQUEST, description = "Deployment is not in progress"),
+        (status = StatusCode::FORBIDDEN, description = "Caller may not approve deployments"),
+        (status = StatusCode::NOT_FOUND, description = "Release has no deployment"),
+    ),
+    security(
+        ("auth_token" = [])
+    ),
+    tag = TAG
+)]
+pub async fn api_approve_deployment(
+    Path(release_id): Path<i32>,
+    Extension(state): Extension<State>,
+    Extension(current_user): Extension<CurrentUser>,
+) -> Result<Json<DeploymentApprovals>, ApiError> {
+    approve_deployment(release_id, &state.pg_pool, &current_user).await?;
+    let approvals = get_deployment_approvals(
+        release_id,
+        &state.pg_pool,
+        &state.authorization,
+        &current_user,
+    )
+    .await?;
+    Ok(Json(approvals))
 }
 
 #[utoipa::path(

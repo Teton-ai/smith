@@ -1,0 +1,40 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id, status AS \"status!: DeploymentStatus\" FROM deployment WHERE release_id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "status!: DeploymentStatus",
+        "type_info": {
+          "Custom": {
+            "name": "deployment_status",
+            "kind": {
+              "Enum": [
+                "in_progress",
+                "failed",
+                "canceled",
+                "done"
+              ]
+            }
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "9743d7915f22752e92731e75e2d775da29fdbed5dbc1c8c3a8e3102f435dc6db"
+}
