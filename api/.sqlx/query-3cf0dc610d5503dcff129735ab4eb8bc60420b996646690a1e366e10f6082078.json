@@ -1,0 +1,40 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT da.user_id, u.email, da.created_at, ur.role AS \"role?\"\n        FROM deployment_approval da\n        JOIN deployment d ON d.id = da.deployment_id\n        JOIN auth.users u ON u.id = da.user_id\n        LEFT JOIN auth.users_roles ur ON ur.user_id = da.user_id\n        -- Redeploying a release restarts the same row, so approvals from an\n        -- earlier rollout must not satisfy the gate for the new one.\n        WHERE da.deployment_id = $1 AND da.created_at >= d.created_at\n        ORDER BY da.created_at ASC\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "user_id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "email",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 2,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 3,
+        "name": "role?",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "3cf0dc610d5503dcff129735ab4eb8bc60420b996646690a1e366e10f6082078"
+}

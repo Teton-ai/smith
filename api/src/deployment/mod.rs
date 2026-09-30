@@ -642,9 +642,12 @@ async fn get_valid_approvals(
         r#"
         SELECT da.user_id, u.email, da.created_at, ur.role AS "role?"
         FROM deployment_approval da
+        JOIN deployment d ON d.id = da.deployment_id
         JOIN auth.users u ON u.id = da.user_id
         LEFT JOIN auth.users_roles ur ON ur.user_id = da.user_id
-        WHERE da.deployment_id = $1
+        -- Redeploying a release restarts the same row, so approvals from an
+        -- earlier rollout must not satisfy the gate for the new one.
+        WHERE da.deployment_id = $1 AND da.created_at >= d.created_at
         ORDER BY da.created_at ASC
         "#,
         deployment_id
@@ -726,9 +729,13 @@ pub async fn approve_deployment(
     }
 
     sqlx::query!(
+        // A stale approval from an earlier rollout of this row is refreshed,
+        // otherwise the user could never approve the current one.
         "INSERT INTO deployment_approval (deployment_id, user_id)
          VALUES ($1, $2)
-         ON CONFLICT DO NOTHING",
+         ON CONFLICT (deployment_id, user_id) DO UPDATE SET created_at = NOW()
+         WHERE deployment_approval.created_at
+             < (SELECT created_at FROM deployment WHERE id = $1)",
         deployment.id,
         current_user.user_id
     )
