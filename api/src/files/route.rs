@@ -564,8 +564,8 @@ async fn start_transfer(state: &State, session_id: &Uuid, op_id: u64, name: &str
     .await;
 }
 
-/// Device upload endpoint. Streams the request body straight into S3 — the body
-/// is never buffered, so a 512 MiB file costs a chunk of api memory, not 512 MiB.
+/// Device upload endpoint. Streams the request body straight into S3: a 512 MiB
+/// file costs about two 8 MiB chunks of api memory, not 512 MiB.
 #[utoipa::path(
     post,
     path = "/smith/files/upload",
