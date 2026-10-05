@@ -1,6 +1,6 @@
 {
   "name": "sm",
-  "version": "0.2.205",
+  "version": "0.2.206",
   "about": "Smith CLI - Fleet management tool",
   "global_options": [],
   "commands": [
@@ -1088,6 +1088,53 @@
         }
       ],
       "examples": []
+    },
+    {
+      "path": "sm unregister",
+      "about": "Reset device enrollment, sending it back through approval",
+      "usage": "sm unregister [OPTIONS] [IDS]...",
+      "arguments": [
+        {
+          "name": "<IDS>",
+          "required": false,
+          "help": "Device serial numbers or IDs. If omitted, shows all devices"
+        }
+      ],
+      "options": [
+        {
+          "name": "--label",
+          "short": "-l",
+          "value": "<KEY=VALUE>",
+          "required": false,
+          "help": "Filter by labels (format: key=value). Can be used multiple times"
+        },
+        {
+          "name": "--online",
+          "required": false,
+          "help": "Show only online devices (last seen < 5 minutes)"
+        },
+        {
+          "name": "--offline",
+          "required": false,
+          "help": "Show only offline devices (last seen >= 5 minutes)"
+        },
+        {
+          "name": "--search",
+          "short": "-s",
+          "required": false,
+          "help": "Use partial matching for device IDs (matches serial number, hostname, or model)"
+        },
+        {
+          "name": "--yes",
+          "short": "-y",
+          "required": false,
+          "help": "Skip confirmation prompt"
+        }
+      ],
+      "examples": [
+        "sm unregister ABC123",
+        "sm unregister ABC123 DEF456 -y"
+      ]
     }
   ]
 }
