@@ -190,7 +190,7 @@ sm get d --pinned
 sm unpin -l experiment=rfdetr-b
 ```
 
-Both commands list the devices and the target release they will stay on, then ask for confirmation. `--yes` skips the prompt. Unpinning does not update a device at once: it gets the next full rollout of its distribution.
+Both commands list the devices and their target release, then ask for confirmation. `--yes` skips the prompt. Unpinning does not update a device at once: it gets the next full rollout of its distribution.
 
 ## Tips
 

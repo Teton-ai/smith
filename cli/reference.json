@@ -100,7 +100,7 @@
         {
           "name": "--pinned",
           "required": false,
-          "help": "Show only pinned devices (skipped by fleet-wide rollouts)"
+          "help": "Only select pinned devices (skipped by fleet-wide rollouts)"
         },
         {
           "name": "--json",
@@ -169,7 +169,7 @@
         {
           "name": "--pinned",
           "required": false,
-          "help": "Show only pinned devices (skipped by fleet-wide rollouts)"
+          "help": "Only select pinned devices (skipped by fleet-wide rollouts)"
         },
         {
           "name": "--limit",
@@ -258,7 +258,7 @@
         {
           "name": "--pinned",
           "required": false,
-          "help": "Show only pinned devices (skipped by fleet-wide rollouts)"
+          "help": "Only select pinned devices (skipped by fleet-wide rollouts)"
         },
         {
           "name": "--yes",
@@ -325,7 +325,7 @@
         {
           "name": "--pinned",
           "required": false,
-          "help": "Show only pinned devices (skipped by fleet-wide rollouts)"
+          "help": "Only select pinned devices (skipped by fleet-wide rollouts)"
         },
         {
           "name": "--yes",
@@ -387,7 +387,7 @@
         {
           "name": "--pinned",
           "required": false,
-          "help": "Show only pinned devices (skipped by fleet-wide rollouts)"
+          "help": "Only select pinned devices (skipped by fleet-wide rollouts)"
         },
         {
           "name": "--nowait",
@@ -449,7 +449,7 @@
         {
           "name": "--pinned",
           "required": false,
-          "help": "Show only pinned devices (skipped by fleet-wide rollouts)"
+          "help": "Only select pinned devices (skipped by fleet-wide rollouts)"
         },
         {
           "name": "--nowait",
@@ -502,7 +502,7 @@
         {
           "name": "--pinned",
           "required": false,
-          "help": "Show only pinned devices (skipped by fleet-wide rollouts)"
+          "help": "Only select pinned devices (skipped by fleet-wide rollouts)"
         },
         {
           "name": "--unit",
@@ -579,7 +579,7 @@
         {
           "name": "--pinned",
           "required": false,
-          "help": "Show only pinned devices (skipped by fleet-wide rollouts)"
+          "help": "Only select pinned devices (skipped by fleet-wide rollouts)"
         }
       ],
       "examples": [
@@ -964,7 +964,7 @@
         {
           "name": "--pinned",
           "required": false,
-          "help": "Show only pinned devices (skipped by fleet-wide rollouts)"
+          "help": "Only select pinned devices (skipped by fleet-wide rollouts)"
         },
         {
           "name": "--yes",
@@ -1084,7 +1084,7 @@
         {
           "name": "--pinned",
           "required": false,
-          "help": "Show only pinned devices (skipped by fleet-wide rollouts)"
+          "help": "Only select pinned devices (skipped by fleet-wide rollouts)"
         },
         {
           "name": "--yes",
@@ -1133,7 +1133,7 @@
         {
           "name": "--pinned",
           "required": false,
-          "help": "Show only pinned devices (skipped by fleet-wide rollouts)"
+          "help": "Only select pinned devices (skipped by fleet-wide rollouts)"
         },
         {
           "name": "--yes",
@@ -1183,7 +1183,7 @@
         {
           "name": "--pinned",
           "required": false,
-          "help": "Show only pinned devices (skipped by fleet-wide rollouts)"
+          "help": "Only select pinned devices (skipped by fleet-wide rollouts)"
         },
         {
           "name": "--release",
@@ -1245,7 +1245,7 @@
         {
           "name": "--pinned",
           "required": false,
-          "help": "Show only pinned devices (skipped by fleet-wide rollouts)"
+          "help": "Only select pinned devices (skipped by fleet-wide rollouts)"
         },
         {
           "name": "--yes",

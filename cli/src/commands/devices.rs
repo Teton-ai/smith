@@ -1,5 +1,10 @@
+use crate::api::SmithAPI;
+use crate::cli::DeviceSelector;
+use anyhow::Context;
 use chrono::{DateTime, Utc};
 use colored::Colorize;
+use std::collections::HashSet;
+use std::io::{self, Write};
 
 pub fn get_online_colored(serial_number: &str, last_seen: &Option<DateTime<Utc>>) -> String {
     use chrono_humanize::HumanTime;
@@ -25,15 +30,12 @@ pub fn get_online_colored(serial_number: &str, last_seen: &Option<DateTime<Utc>>
 /// Pins or unpins the selected devices. With `release`, the devices are first
 /// retargeted to it, so they move to that release and stay there.
 pub async fn set_pinned(
-    api: &crate::api::SmithAPI,
-    selector: &crate::cli::DeviceSelector,
+    api: &SmithAPI,
+    selector: &DeviceSelector,
     pin: bool,
     release: Option<i32>,
     yes: bool,
 ) -> anyhow::Result<()> {
-    use std::collections::HashSet;
-    use std::io::{self, Write};
-
     let verb = if pin { "pin" } else { "unpin" };
     if !selector.has_filters() {
         anyhow::bail!(
@@ -125,15 +127,22 @@ pub async fn set_pinned(
 
     let ids: Vec<i32> = devices.iter().map(|d| d.id).collect();
     // Pin before retargeting, so a rollout can never land between the two calls.
-    let changed = api.set_devices_follow_latest(&ids, !pin).await?;
+    api.set_devices_follow_latest(&ids, !pin).await?;
     if let Some(r) = &target_release {
-        api.set_devices_target_release(&ids, r.id).await?;
+        api.set_devices_target_release(&ids, r.id)
+            .await
+            .with_context(|| {
+                format!(
+                    "The devices are pinned, but their target release was not set to {}. Run the same command again.",
+                    r.id
+                )
+            })?;
     }
 
     println!(
         "\n{} {} device(s) {}.",
         "Done:".bright_green(),
-        changed,
+        ids.len(),
         if pin { "pinned" } else { "unpinned" }
     );
     Ok(())

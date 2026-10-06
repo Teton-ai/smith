@@ -289,6 +289,7 @@ async fn resolve_devices_from_selector(
             let devices = api
                 .get_devices(DeviceFilter {
                     serial_number: Some(id.clone()),
+                    follow_latest: follow_latest_filter,
                     ..Default::default()
                 })
                 .await
@@ -371,6 +372,9 @@ async fn resolve_target_devices(
         search,
         pinned: false,
     };
+    if !selector.has_filters() {
+        bail!("No device IDs or filters specified. Use `--device` or `-l` to choose devices");
+    }
 
     resolve_devices_from_selector(api, &selector).await
 }
@@ -958,6 +962,11 @@ async fn main() -> anyhow::Result<()> {
 
                     let api = SmithAPI::new(secrets, &config);
 
+                    if !selector.has_filters() {
+                        bail!(
+                            "No device IDs or filters specified. Example: sm get cmds ABC123 or sm get cmds -l env=staging"
+                        );
+                    }
                     let devices = resolve_devices_from_selector(&api, &selector).await?;
 
                     if devices.is_empty() {
@@ -1877,6 +1886,12 @@ async fn main() -> anyhow::Result<()> {
                     .with_context(|| "No Token found, please Login")?;
 
                 let api = SmithAPI::new(secrets, &config);
+
+                if !selector.has_filters() {
+                    bail!(
+                        "No device IDs or filters specified. Name devices or pass a filter, e.g. `sm run ABC123 -- uptime` or `sm run -l env=staging -- uptime`"
+                    );
+                }
 
                 // Build the command list and a human label, from either a saved
                 // recipe or a free-form command (args after -- or stdin).

@@ -138,9 +138,11 @@ impl SmithAPI {
 
         const PAGE: i64 = 1000;
         query.limit = Some(PAGE);
-        // A stable order keeps offset pages from skipping or repeating devices
-        // whose last ping changes between requests.
-        if query.sort.is_none() {
+        // The default order (last ping) shifts between requests, so offset
+        // pages could skip or repeat devices. Page in serial order instead and
+        // restore the default order once every page is in.
+        let default_order = query.sort.is_none();
+        if default_order {
             query.sort = Some(DeviceSortField::SerialNumber);
         }
         let mut devices = Vec::new();
@@ -151,10 +153,14 @@ impl SmithAPI {
             let len = page.len() as i64;
             devices.extend(page);
             if len < PAGE {
-                return Ok(devices);
+                break;
             }
             offset += PAGE;
         }
+        if default_order {
+            devices.sort_by(|a, b| b.last_seen.cmp(&a.last_seen));
+        }
+        Ok(devices)
     }
 
     async fn get_devices_page(&self, query: &DeviceFilter) -> Result<Vec<Device>> {
@@ -761,20 +767,14 @@ impl SmithAPI {
         Ok(())
     }
 
-    /// Returns how many devices changed state.
     pub async fn set_devices_follow_latest(
         &self,
         device_ids: &[i32],
         follow_latest: bool,
-    ) -> Result<i64> {
-        #[derive(Deserialize)]
-        struct Updated {
-            devices_updated: i64,
-        }
-
+    ) -> Result<()> {
         let client = Client::new();
 
-        let updated: Updated = client
+        client
             .put(format!("{}/devices/follow-latest", self.domain))
             .header("Authorization", format!("Bearer {}", &self.bearer_token))
             .json(&serde_json::json!({
@@ -784,11 +784,9 @@ impl SmithAPI {
             .send()
             .await?
             .handle_error()
-            .await?
-            .json()
             .await?;
 
-        Ok(updated.devices_updated)
+        Ok(())
     }
 
     /// Opens (or re-opens) a base OS push and returns the parts still to send.

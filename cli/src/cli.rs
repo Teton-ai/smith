@@ -27,7 +27,7 @@ pub struct DeviceSelector {
     /// Use partial matching for device IDs (matches serial number, hostname, or model)
     #[arg(short, long)]
     pub search: bool,
-    /// Show only pinned devices (skipped by fleet-wide rollouts)
+    /// Only select pinned devices (skipped by fleet-wide rollouts)
     #[arg(long)]
     pub pinned: bool,
 }
