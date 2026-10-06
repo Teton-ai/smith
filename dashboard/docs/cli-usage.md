@@ -172,6 +172,26 @@ sm get d -l env=production
 sm label -d rpi -s region=warehouse-1
 ```
 
+### Pinning devices
+
+A pinned device keeps its target release when a fleet-wide rollout runs. Use it to hold devices on a build, for example for an A/B test.
+
+```sh
+# Put devices on release 812 and keep them there
+sm pin ABC123 DEF456 --release 812
+
+# Pin every device with a label (several -l flags match any of them)
+sm pin -l experiment=rfdetr-b
+
+# List pinned devices
+sm get d --pinned
+
+# Follow fleet-wide rollouts again
+sm unpin -l experiment=rfdetr-b
+```
+
+Both commands list the devices and the target release they will stay on, then ask for confirmation. `--yes` skips the prompt. Unpinning does not update a device at once: it gets the next full rollout of its distribution.
+
 ## Tips
 
 - **Use aliases** to save typing: `sm get d` instead of `sm get device`, `sm status svc` instead of `sm status service`

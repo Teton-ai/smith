@@ -3,7 +3,7 @@ use chrono::{DateTime, Utc};
 use models::{
     command::{BundleReceipt, BundleWithCommands, CommandRecipe},
     deployment::{Deployment, DeploymentRequest},
-    device::{CommandsPaginated, Device, DeviceCommandResponse, DeviceFilter},
+    device::{CommandsPaginated, Device, DeviceCommandResponse, DeviceFilter, DeviceSortField},
     distribution::{Distribution, NewDistributionRelease},
     os::{NewOsUpload, Os, OsPartReport, OsUploadPlan},
     release::{Release, UpdateRelease},
@@ -130,14 +130,41 @@ impl SmithAPI {
         Ok(new_release_id)
     }
 
-    pub async fn get_devices(&self, query: DeviceFilter) -> Result<Vec<Device>> {
+    /// Without `query.limit`, fetches every matching device page by page.
+    pub async fn get_devices(&self, mut query: DeviceFilter) -> Result<Vec<Device>> {
+        if query.limit.is_some() {
+            return self.get_devices_page(&query).await;
+        }
+
+        const PAGE: i64 = 1000;
+        query.limit = Some(PAGE);
+        // A stable order keeps offset pages from skipping or repeating devices
+        // whose last ping changes between requests.
+        if query.sort.is_none() {
+            query.sort = Some(DeviceSortField::SerialNumber);
+        }
+        let mut devices = Vec::new();
+        let mut offset = 0;
+        loop {
+            query.offset = Some(offset);
+            let page = self.get_devices_page(&query).await?;
+            let len = page.len() as i64;
+            devices.extend(page);
+            if len < PAGE {
+                return Ok(devices);
+            }
+            offset += PAGE;
+        }
+    }
+
+    async fn get_devices_page(&self, query: &DeviceFilter) -> Result<Vec<Device>> {
         let client = Client::new();
 
         let resp = client
             .get(format!(
                 "{}/devices?{}",
                 self.domain,
-                serde_html_form::to_string(&query)?
+                serde_html_form::to_string(query)?
             ))
             .header("Authorization", format!("Bearer {}", &self.bearer_token))
             .send()
@@ -710,6 +737,58 @@ impl SmithAPI {
             .error_for_status()?;
 
         Ok(())
+    }
+
+    pub async fn set_devices_target_release(
+        &self,
+        device_ids: &[i32],
+        target_release_id: i32,
+    ) -> Result<()> {
+        let client = Client::new();
+
+        client
+            .put(format!("{}/devices/release", self.domain))
+            .header("Authorization", format!("Bearer {}", &self.bearer_token))
+            .json(&serde_json::json!({
+                "target_release_id": target_release_id,
+                "devices": device_ids,
+            }))
+            .send()
+            .await?
+            .handle_error()
+            .await?;
+
+        Ok(())
+    }
+
+    /// Returns how many devices changed state.
+    pub async fn set_devices_follow_latest(
+        &self,
+        device_ids: &[i32],
+        follow_latest: bool,
+    ) -> Result<i64> {
+        #[derive(Deserialize)]
+        struct Updated {
+            devices_updated: i64,
+        }
+
+        let client = Client::new();
+
+        let updated: Updated = client
+            .put(format!("{}/devices/follow-latest", self.domain))
+            .header("Authorization", format!("Bearer {}", &self.bearer_token))
+            .json(&serde_json::json!({
+                "follow_latest": follow_latest,
+                "devices": device_ids,
+            }))
+            .send()
+            .await?
+            .handle_error()
+            .await?
+            .json()
+            .await?;
+
+        Ok(updated.devices_updated)
     }
 
     /// Opens (or re-opens) a base OS push and returns the parts still to send.

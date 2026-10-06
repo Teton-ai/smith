@@ -27,6 +27,19 @@ pub struct DeviceSelector {
     /// Use partial matching for device IDs (matches serial number, hostname, or model)
     #[arg(short, long)]
     pub search: bool,
+    /// Show only pinned devices (skipped by fleet-wide rollouts)
+    #[arg(long)]
+    pub pinned: bool,
+}
+
+impl DeviceSelector {
+    pub fn has_filters(&self) -> bool {
+        !self.ids.is_empty()
+            || !self.labels.is_empty()
+            || self.online
+            || self.offline
+            || self.pinned
+    }
 }
 
 #[derive(Subcommand)]
@@ -469,6 +482,47 @@ Examples:
 
     /// Revoke device approval
     Revoke {
+        #[command(flatten)]
+        selector: DeviceSelector,
+        /// Skip confirmation prompt
+        #[arg(short = 'y', long)]
+        yes: bool,
+    },
+
+    /// Pin devices so fleet-wide rollouts do not update them
+    ///
+    /// A pinned device is skipped by full rollouts and by automatic canary
+    /// selection. It still moves when a canary targets it by label or ID, when
+    /// its release is rolled back, or when its target release is set directly.
+    /// Use `--release` to put the devices on a release and keep them there.
+    #[command(after_long_help = "\
+Examples:
+  sm pin ABC123
+  sm pin ABC123 DEF456 --release 812
+  sm pin -l experiment=rfdetr-b --release 812 -y
+  sm get d --pinned
+")]
+    Pin {
+        #[command(flatten)]
+        selector: DeviceSelector,
+        /// Set this release as the devices' target before pinning
+        #[arg(short, long, value_name = "RELEASE_ID")]
+        release: Option<i32>,
+        /// Skip confirmation prompt
+        #[arg(short = 'y', long)]
+        yes: bool,
+    },
+
+    /// Unpin devices so they follow fleet-wide rollouts again
+    ///
+    /// Unpinning does not update the device now. It receives the next full
+    /// rollout of its distribution.
+    #[command(after_long_help = "\
+Examples:
+  sm unpin ABC123
+  sm unpin -l experiment=rfdetr-b -y
+")]
+    Unpin {
         #[command(flatten)]
         selector: DeviceSelector,
         /// Skip confirmation prompt
