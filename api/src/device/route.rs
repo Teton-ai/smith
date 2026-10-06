@@ -241,7 +241,14 @@ pub async fn get_devices(
         WHERE ($1::text IS NULL OR d.serial_number = $1)
           AND ($2::boolean IS NULL OR d.approved = $2)
           AND (COALESCE($3, false) = true OR d.archived = false)
-          AND (CARDINALITY($4::text[]) = 0 OR l.name || '=' || dl.value = ANY($4))
+          -- A subquery, not a filter on the joined rows, so every label of a
+          -- matching device still reaches the aggregate.
+          AND (CARDINALITY($4::text[]) = 0 OR EXISTS (
+              SELECT 1 FROM device_label fdl
+              JOIN label fl ON fl.id = fdl.label_id
+              WHERE fdl.device_id = d.id
+              AND fl.name || '=' || fdl.value = ANY($4)
+          ))
           AND ($5::boolean IS NULL OR
                ($5 = true AND d.last_ping >= now() - INTERVAL '3 minutes') OR
                ($5 = false AND d.last_ping < now() - INTERVAL '3 minutes'))
