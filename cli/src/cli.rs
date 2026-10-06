@@ -499,7 +499,7 @@ Examples:
 Examples:
   sm pin ABC123
   sm pin ABC123 DEF456 --release 812
-  sm pin -l experiment=rfdetr-b --release 812 -y
+  sm pin -l experiment=build-b --release 812 -y
   sm get d --pinned
 ")]
     Pin {
@@ -520,7 +520,7 @@ Examples:
     #[command(after_long_help = "\
 Examples:
   sm unpin ABC123
-  sm unpin -l experiment=rfdetr-b -y
+  sm unpin -l experiment=build-b -y
 ")]
     Unpin {
         #[command(flatten)]

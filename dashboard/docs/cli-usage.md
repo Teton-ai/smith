@@ -181,13 +181,13 @@ A pinned device keeps its target release when a fleet-wide rollout runs. Use it 
 sm pin ABC123 DEF456 --release 812
 
 # Pin every device with a label (several -l flags match any of them)
-sm pin -l experiment=rfdetr-b
+sm pin -l experiment=build-b
 
 # List pinned devices
 sm get d --pinned
 
 # Follow fleet-wide rollouts again
-sm unpin -l experiment=rfdetr-b
+sm unpin -l experiment=build-b
 ```
 
 Both commands list the devices and their target release, then ask for confirmation. `--yes` skips the prompt. Unpinning does not update a device at once: it gets the next full rollout of its distribution.
