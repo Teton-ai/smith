@@ -6,6 +6,8 @@ export {
 	type ButtonSize,
 	type ButtonTone,
 	type ButtonVariant,
+	type ViewMode,
+	ViewToggle,
 } from "./button";
 export {
 	AlertBanner,

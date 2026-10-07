@@ -141,6 +141,8 @@ Exactly one of `devices` or `labels` must be given. A device must carry **every*
 
 The device listing accepts `follow_latest` as a filter, so you can see what is pinned before and after a bulk move.
 
+The CLI wraps this by device id: `sm pin` / `sm unpin` take the usual device selection (ids, `-l`, `-s`), and `sm pin --release <id>` sets the target release before pinning. `sm get d --pinned` lists pinned devices.
+
 ## Best practices
 
 - Use RCs for any build that needs validation before reaching the full fleet — the hard rollout block removes the risk of accidentally confirming too early.

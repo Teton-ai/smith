@@ -244,12 +244,14 @@ async fn resolve_devices_from_selector(
     } else {
         None
     };
+    let follow_latest_filter = selector.pinned.then_some(false);
 
     if selector.ids.is_empty() {
         // No IDs specified, apply filters only
         api.get_devices(DeviceFilter {
             labels: selector.labels.clone(),
             online: online_filter,
+            follow_latest: follow_latest_filter,
             ..Default::default()
         })
         .await
@@ -262,6 +264,7 @@ async fn resolve_devices_from_selector(
                 .get_devices(DeviceFilter {
                     labels: selector.labels.clone(),
                     online: online_filter,
+                    follow_latest: follow_latest_filter,
                     search: Some(search_term.clone()),
                     ..Default::default()
                 })
@@ -286,6 +289,7 @@ async fn resolve_devices_from_selector(
             let devices = api
                 .get_devices(DeviceFilter {
                     serial_number: Some(id.clone()),
+                    follow_latest: follow_latest_filter,
                     ..Default::default()
                 })
                 .await
@@ -366,7 +370,11 @@ async fn resolve_target_devices(
         online,
         offline,
         search,
+        pinned: false,
     };
+    if !selector.has_filters() {
+        bail!("No device IDs or filters specified. Use `--device` or `-l` to choose devices");
+    }
 
     resolve_devices_from_selector(api, &selector).await
 }
@@ -735,9 +743,10 @@ async fn main() -> anyhow::Result<()> {
                                             .as_ref()
                                             .map(|r| r.id.to_string())
                                             .unwrap_or_default(),
+                                        "pinned" => (!device.follow_latest).to_string(),
                                         _ => {
                                             eprintln!(
-                                                "Unknown field: '{}'. Available fields: serial_number, id, ip_address, version, release, target_release",
+                                                "Unknown field: '{}'. Available fields: serial_number, id, ip_address, version, release, target_release, pinned",
                                                 field
                                             );
                                             return Err(anyhow::anyhow!("Invalid output field"));
@@ -818,6 +827,13 @@ async fn main() -> anyhow::Result<()> {
                                 String::new()
                             };
                             println!("  {} {}{}", "release:".dimmed(), release.id, target_str);
+                        }
+                        if !device.follow_latest {
+                            println!(
+                                "  {} {}",
+                                "pinned:".dimmed(),
+                                "yes (skipped by fleet-wide rollouts)".yellow()
+                            );
                         }
 
                         // IP Address
@@ -900,6 +916,11 @@ async fn main() -> anyhow::Result<()> {
                             } else {
                                 "-".to_string()
                             };
+                            let release_str = if d.follow_latest {
+                                release_str
+                            } else {
+                                format!("{release_str} (pinned)")
+                            };
 
                             let ip_str = d
                                 .ip_address
@@ -941,6 +962,11 @@ async fn main() -> anyhow::Result<()> {
 
                     let api = SmithAPI::new(secrets, &config);
 
+                    if !selector.has_filters() {
+                        bail!(
+                            "No device IDs or filters specified. Example: sm get cmds ABC123 or sm get cmds -l env=staging"
+                        );
+                    }
                     let devices = resolve_devices_from_selector(&api, &selector).await?;
 
                     if devices.is_empty() {
@@ -1168,10 +1194,7 @@ async fn main() -> anyhow::Result<()> {
                     let api = SmithAPI::new(secrets, &config);
 
                     // Check if no filters are specified - this should NEVER be allowed
-                    let has_filters = !selector.ids.is_empty()
-                        || !selector.labels.is_empty()
-                        || selector.online
-                        || selector.offline;
+                    let has_filters = selector.has_filters();
 
                     if !has_filters {
                         eprintln!(
@@ -1299,10 +1322,7 @@ async fn main() -> anyhow::Result<()> {
                     let api = SmithAPI::new(secrets, &config);
 
                     // Check if no filters are specified
-                    let has_filters = !selector.ids.is_empty()
-                        || !selector.labels.is_empty()
-                        || selector.online
-                        || selector.offline;
+                    let has_filters = selector.has_filters();
 
                     if !has_filters {
                         eprintln!(
@@ -1867,6 +1887,12 @@ async fn main() -> anyhow::Result<()> {
 
                 let api = SmithAPI::new(secrets, &config);
 
+                if !selector.has_filters() {
+                    bail!(
+                        "No device IDs or filters specified. Name devices or pass a filter, e.g. `sm run ABC123 -- uptime` or `sm run -l env=staging -- uptime`"
+                    );
+                }
+
                 // Build the command list and a human label, from either a saved
                 // recipe or a free-form command (args after -- or stdin).
                 let cmd_from_stdin;
@@ -1947,15 +1973,7 @@ async fn main() -> anyhow::Result<()> {
                     (commands, format!("command '{}'", cmd_string))
                 };
 
-                let target_devices = resolve_target_devices(
-                    &api,
-                    selector.ids,
-                    selector.labels,
-                    selector.online,
-                    selector.offline,
-                    selector.search,
-                )
-                .await?;
+                let target_devices = resolve_devices_from_selector(&api, &selector).await?;
 
                 // Deduplicate devices by ID to prevent duplicate command execution
                 let mut seen_ids = HashSet::new();
@@ -2113,10 +2131,7 @@ async fn main() -> anyhow::Result<()> {
                 let api = SmithAPI::new(secrets, &config);
 
                 // Check if no filters are specified
-                let has_filters = !selector.ids.is_empty()
-                    || !selector.labels.is_empty()
-                    || selector.online
-                    || selector.offline;
+                let has_filters = selector.has_filters();
 
                 if !has_filters {
                     eprintln!(
@@ -2224,6 +2239,26 @@ async fn main() -> anyhow::Result<()> {
 
                 println!("\n{}", "Done!".bright_green());
             }
+            Commands::Pin {
+                selector,
+                release,
+                yes,
+            } => {
+                let secrets = auth::get_secrets(&config)
+                    .await
+                    .with_context(|| "Error getting token")?
+                    .with_context(|| "No Token found, please Login")?;
+                let api = SmithAPI::new(secrets, &config);
+                commands::devices::set_pinned(&api, &selector, true, release, yes).await?;
+            }
+            Commands::Unpin { selector, yes } => {
+                let secrets = auth::get_secrets(&config)
+                    .await
+                    .with_context(|| "Error getting token")?
+                    .with_context(|| "No Token found, please Login")?;
+                let api = SmithAPI::new(secrets, &config);
+                commands::devices::set_pinned(&api, &selector, false, None, yes).await?;
+            }
             Commands::Revoke { selector, yes } => {
                 let secrets = auth::get_secrets(&config)
                     .await
@@ -2233,10 +2268,7 @@ async fn main() -> anyhow::Result<()> {
                 let api = SmithAPI::new(secrets, &config);
 
                 // Check if no filters are specified
-                let has_filters = !selector.ids.is_empty()
-                    || !selector.labels.is_empty()
-                    || selector.online
-                    || selector.offline;
+                let has_filters = selector.has_filters();
 
                 if !has_filters {
                     eprintln!(

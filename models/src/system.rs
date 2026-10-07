@@ -79,4 +79,7 @@ pub struct SystemInfo {
     pub device_tree: DeviceTree,
     #[serde(default)]
     pub connection_statuses: Vec<ConnectionStatus>,
+    /// ESP configuration mode, absent when the CLI is unavailable or the probe fails.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub operational_mode: Option<String>,
 }

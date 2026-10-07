@@ -1,6 +1,6 @@
 {
   "name": "sm",
-  "version": "0.2.205",
+  "version": "0.2.208",
   "about": "Smith CLI - Fleet management tool",
   "global_options": [],
   "commands": [
@@ -98,6 +98,11 @@
           "help": "Use partial matching for device IDs (matches serial number, hostname, or model)"
         },
         {
+          "name": "--pinned",
+          "required": false,
+          "help": "Only select pinned devices (skipped by fleet-wide rollouts)"
+        },
+        {
           "name": "--json",
           "short": "-j",
           "required": false,
@@ -160,6 +165,11 @@
           "short": "-s",
           "required": false,
           "help": "Use partial matching for device IDs (matches serial number, hostname, or model)"
+        },
+        {
+          "name": "--pinned",
+          "required": false,
+          "help": "Only select pinned devices (skipped by fleet-wide rollouts)"
         },
         {
           "name": "--limit",
@@ -246,6 +256,11 @@
           "help": "Use partial matching for device IDs (matches serial number, hostname, or model)"
         },
         {
+          "name": "--pinned",
+          "required": false,
+          "help": "Only select pinned devices (skipped by fleet-wide rollouts)"
+        },
+        {
           "name": "--yes",
           "short": "-y",
           "required": false,
@@ -308,6 +323,11 @@
           "help": "Use partial matching for device IDs (matches serial number, hostname, or model)"
         },
         {
+          "name": "--pinned",
+          "required": false,
+          "help": "Only select pinned devices (skipped by fleet-wide rollouts)"
+        },
+        {
           "name": "--yes",
           "short": "-y",
           "required": false,
@@ -363,6 +383,11 @@
           "short": "-s",
           "required": false,
           "help": "Use partial matching for device IDs (matches serial number, hostname, or model)"
+        },
+        {
+          "name": "--pinned",
+          "required": false,
+          "help": "Only select pinned devices (skipped by fleet-wide rollouts)"
         },
         {
           "name": "--nowait",
@@ -422,6 +447,11 @@
           "help": "Use partial matching for device IDs (matches serial number, hostname, or model)"
         },
         {
+          "name": "--pinned",
+          "required": false,
+          "help": "Only select pinned devices (skipped by fleet-wide rollouts)"
+        },
+        {
           "name": "--nowait",
           "required": false,
           "help": "Don't wait for result, just queue the command and return immediately (faster, recommended for agents - use 'sm command <id>' to check results later)"
@@ -468,6 +498,11 @@
           "short": "-s",
           "required": false,
           "help": "Use partial matching for device IDs (matches serial number, hostname, or model)"
+        },
+        {
+          "name": "--pinned",
+          "required": false,
+          "help": "Only select pinned devices (skipped by fleet-wide rollouts)"
         },
         {
           "name": "--unit",
@@ -540,6 +575,11 @@
           "short": "-s",
           "required": false,
           "help": "Use partial matching for device IDs (matches serial number, hostname, or model)"
+        },
+        {
+          "name": "--pinned",
+          "required": false,
+          "help": "Only select pinned devices (skipped by fleet-wide rollouts)"
         }
       ],
       "examples": [
@@ -922,6 +962,11 @@
           "help": "Use partial matching for device IDs (matches serial number, hostname, or model)"
         },
         {
+          "name": "--pinned",
+          "required": false,
+          "help": "Only select pinned devices (skipped by fleet-wide rollouts)"
+        },
+        {
           "name": "--yes",
           "short": "-y",
           "required": false,
@@ -1037,6 +1082,11 @@
           "help": "Use partial matching for device IDs (matches serial number, hostname, or model)"
         },
         {
+          "name": "--pinned",
+          "required": false,
+          "help": "Only select pinned devices (skipped by fleet-wide rollouts)"
+        },
+        {
           "name": "--yes",
           "short": "-y",
           "required": false,
@@ -1081,6 +1131,11 @@
           "help": "Use partial matching for device IDs (matches serial number, hostname, or model)"
         },
         {
+          "name": "--pinned",
+          "required": false,
+          "help": "Only select pinned devices (skipped by fleet-wide rollouts)"
+        },
+        {
           "name": "--yes",
           "short": "-y",
           "required": false,
@@ -1088,6 +1143,121 @@
         }
       ],
       "examples": []
+    },
+    {
+      "path": "sm pin",
+      "about": "Pin devices so fleet-wide rollouts do not update them",
+      "description": "A pinned device is skipped by full rollouts and by automatic canary selection. It still moves when a canary targets it by label or ID, when its release is rolled back, or when its target release is set directly. Use `--release` to put the devices on a release and keep them there.",
+      "usage": "sm pin [OPTIONS] [IDS]...",
+      "arguments": [
+        {
+          "name": "<IDS>",
+          "required": false,
+          "help": "Device serial numbers or IDs. If omitted, shows all devices"
+        }
+      ],
+      "options": [
+        {
+          "name": "--label",
+          "short": "-l",
+          "value": "<KEY=VALUE>",
+          "required": false,
+          "help": "Filter by labels (format: key=value). Can be used multiple times"
+        },
+        {
+          "name": "--online",
+          "required": false,
+          "help": "Show only online devices (last seen < 5 minutes)"
+        },
+        {
+          "name": "--offline",
+          "required": false,
+          "help": "Show only offline devices (last seen >= 5 minutes)"
+        },
+        {
+          "name": "--search",
+          "short": "-s",
+          "required": false,
+          "help": "Use partial matching for device IDs (matches serial number, hostname, or model)"
+        },
+        {
+          "name": "--pinned",
+          "required": false,
+          "help": "Only select pinned devices (skipped by fleet-wide rollouts)"
+        },
+        {
+          "name": "--release",
+          "short": "-r",
+          "value": "<RELEASE_ID>",
+          "required": false,
+          "help": "Set this release as the devices' target before pinning"
+        },
+        {
+          "name": "--yes",
+          "short": "-y",
+          "required": false,
+          "help": "Skip confirmation prompt"
+        }
+      ],
+      "examples": [
+        "sm pin ABC123",
+        "sm pin ABC123 DEF456 --release 812",
+        "sm pin -l experiment=build-b --release 812 -y",
+        "sm get d --pinned"
+      ]
+    },
+    {
+      "path": "sm unpin",
+      "about": "Unpin devices so they follow fleet-wide rollouts again",
+      "description": "Unpinning does not update the device now. It receives the next full rollout of its distribution.",
+      "usage": "sm unpin [OPTIONS] [IDS]...",
+      "arguments": [
+        {
+          "name": "<IDS>",
+          "required": false,
+          "help": "Device serial numbers or IDs. If omitted, shows all devices"
+        }
+      ],
+      "options": [
+        {
+          "name": "--label",
+          "short": "-l",
+          "value": "<KEY=VALUE>",
+          "required": false,
+          "help": "Filter by labels (format: key=value). Can be used multiple times"
+        },
+        {
+          "name": "--online",
+          "required": false,
+          "help": "Show only online devices (last seen < 5 minutes)"
+        },
+        {
+          "name": "--offline",
+          "required": false,
+          "help": "Show only offline devices (last seen >= 5 minutes)"
+        },
+        {
+          "name": "--search",
+          "short": "-s",
+          "required": false,
+          "help": "Use partial matching for device IDs (matches serial number, hostname, or model)"
+        },
+        {
+          "name": "--pinned",
+          "required": false,
+          "help": "Only select pinned devices (skipped by fleet-wide rollouts)"
+        },
+        {
+          "name": "--yes",
+          "short": "-y",
+          "required": false,
+          "help": "Skip confirmation prompt"
+        }
+      ],
+      "examples": [
+        "sm unpin ABC123",
+        "sm unpin -l experiment=build-b -y"
+      ]
     }
   ]
 }
