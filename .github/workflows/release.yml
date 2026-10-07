@@ -43,6 +43,12 @@ jobs:
           
           # Update the version in the Cargo.toml file
           sed -i "s/version = \"$CURRENT_VERSION\"/version = \"$NEW_VERSION\"/" Cargo.toml
+          # Committed generated files embed the version and their tests fail when
+          # it lags. Rewrite whatever value is there so a drifted file self-heals.
+          for f in cli/reference.json smithd/openapi.json; do
+            sed -i "0,/\"version\": \"[^\"]*\"/s//\"version\": \"$NEW_VERSION\"/" "$f"
+            grep -q "\"version\": \"$NEW_VERSION\"" "$f" || { echo "::error::$f was not bumped to $NEW_VERSION"; exit 1; }
+          done
           
           # Store the versions for later steps
           echo "CURRENT_VERSION=$CURRENT_VERSION" >> $GITHUB_ENV
