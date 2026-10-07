@@ -6,7 +6,7 @@ use serde_json::json;
 use std::collections::HashMap;
 use std::net::Ipv4Addr;
 use std::sync::OnceLock;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub struct Smith {
@@ -87,6 +87,8 @@ pub struct SystemInfo {
     pub network: Network,
     pub device_tree: DeviceTree,
     pub connection_statuses: Vec<ConnectionStatus>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub operational_mode: Option<String>,
 }
 
 impl SystemInfo {
@@ -158,6 +160,7 @@ impl SystemInfo {
                     }),
             },
             connection_statuses: get_connection_statuses(),
+            operational_mode: get_operational_mode().await,
         }
     }
     pub fn print(&self) {
@@ -168,6 +171,46 @@ impl SystemInfo {
     }
     pub fn to_value(&self) -> Value {
         serde_json::to_value(self).unwrap_or_else(|_| json!({}))
+    }
+}
+
+const OPERATIONAL_MODE_COMMAND: &str = "command -v esp-host >/dev/null 2>&1 || exit 127; exec esp-host configuration operational-mode get";
+
+async fn get_operational_mode() -> Option<String> {
+    let mut command = tokio::process::Command::new("bash");
+    command.args(["-c", OPERATIONAL_MODE_COMMAND]);
+    read_operational_mode(command, std::time::Duration::from_secs(5)).await
+}
+
+async fn read_operational_mode(
+    mut command: tokio::process::Command,
+    timeout: std::time::Duration,
+) -> Option<String> {
+    let output = match tokio::time::timeout(timeout, command.kill_on_drop(true).output()).await {
+        Ok(Ok(output)) => output,
+        Ok(Err(err)) => {
+            warn!(%err, "Failed to run operational-mode probe");
+            return None;
+        }
+        Err(_) => {
+            warn!("Operational-mode probe timed out");
+            return None;
+        }
+    };
+    // esp-host is optional; absence is expected on devices without the CLI.
+    if output.status.code() == Some(127) {
+        return None;
+    }
+    if !output.status.success() {
+        warn!(status = %output.status, "Operational-mode probe failed");
+        return None;
+    }
+    match std::str::from_utf8(&output.stdout).map(str::trim) {
+        Ok(mode @ ("production" | "debug")) => Some(mode.to_owned()),
+        _ => {
+            warn!("Operational-mode probe returned unexpected output");
+            None
+        }
     }
 }
 
