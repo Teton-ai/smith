@@ -6,8 +6,6 @@ use std::borrow::Cow;
 pub enum ApiError {
     /// 400 Bad Request
     BadRequest(Cow<'static, str>),
-    /// 403 Forbidden
-    Forbidden,
     /// 404 Not Found
     NotFound,
     /// 500 Internal Server Error
@@ -34,7 +32,6 @@ impl IntoResponse for ApiError {
     fn into_response(self) -> axum::response::Response {
         match self {
             ApiError::BadRequest(cow) => (StatusCode::BAD_REQUEST, cow).into_response(),
-            ApiError::Forbidden => StatusCode::FORBIDDEN.into_response(),
             ApiError::NotFound => StatusCode::NOT_FOUND.into_response(),
             ApiError::InternalServerError(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
         }
