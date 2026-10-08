@@ -1091,6 +1091,15 @@ mod downtime_tests {
         anyhow::bail!("ping neither finished nor blocked within 5 s")
     }
 
+    async fn last_ping(pool: &PgPool, device_id: i32) -> anyhow::Result<DateTime<Utc>> {
+        Ok(
+            sqlx::query_scalar("SELECT last_ping FROM device WHERE id = $1")
+                .bind(device_id)
+                .fetch_one(pool)
+                .await?,
+        )
+    }
+
     #[sqlx::test]
     #[ignore = "needs the compose Postgres; run with --test-threads=1"]
     async fn sweeper_then_recovery_ping_leaves_one_closed_outage(
@@ -1148,6 +1157,84 @@ mod downtime_tests {
         let silent_rows = outages(&pool, silent).await?;
         assert_eq!(silent_rows.len(), 1);
         assert!(silent_rows[0].1.is_none(), "real outage was closed");
+        Ok(())
+    }
+
+    #[sqlx::test]
+    #[ignore = "needs the compose Postgres; run with --test-threads=1"]
+    async fn ping_in_flight_is_skipped_by_sweeper(pool: PgPool) -> anyhow::Result<()> {
+        backdate_epoch(&pool).await?;
+        let device_id = insert_device(&pool, "mid-ping", 120.0).await?;
+
+        // A ping holds the device row from its UPDATE until it commits.
+        let mut ping = pool.begin().await?;
+        sqlx::query("SELECT id FROM device WHERE id = $1 FOR UPDATE")
+            .bind(device_id)
+            .execute(&mut *ping)
+            .await?;
+
+        let mut conn = pool.acquire().await?;
+        assert_eq!(open_outages_for_stale_devices(&mut conn).await?, 0);
+        ping.rollback().await?;
+        assert_eq!(open_outages_for_stale_devices(&mut conn).await?, 1);
+        Ok(())
+    }
+
+    #[sqlx::test]
+    #[ignore = "needs the compose Postgres; run with --test-threads=1"]
+    async fn concurrent_sweepers_open_one_outage(pool: PgPool) -> anyhow::Result<()> {
+        backdate_epoch(&pool).await?;
+        let device_id = insert_device(&pool, "two-sweepers", 120.0).await?;
+
+        let mut first = pool.begin().await?;
+        assert_eq!(open_outages_for_stale_devices(&mut first).await?, 1);
+        let mut second = pool.acquire().await?;
+        assert_eq!(open_outages_for_stale_devices(&mut second).await?, 0);
+        first.commit().await?;
+
+        let rows = outages(&pool, device_id).await?;
+        assert_eq!(rows.len(), 1, "expected one outage row, got {rows:?}");
+        assert!(rows[0].1.is_none());
+
+        record_ping_without_ip(device_id, &pool).await?;
+        let rows = outages(&pool, device_id).await?;
+        assert_eq!(rows.len(), 1, "expected one outage row, got {rows:?}");
+        assert!(rows[0].1.is_some(), "outage still open: {rows:?}");
+        Ok(())
+    }
+
+    #[sqlx::test]
+    #[ignore = "needs the compose Postgres; run with --test-threads=1"]
+    async fn silent_device_gets_one_outage_and_ping_closes_it(pool: PgPool) -> anyhow::Result<()> {
+        backdate_epoch(&pool).await?;
+        let device_id = insert_device(&pool, "silent", 120.0).await?;
+        let silent_since = last_ping(&pool, device_id).await?;
+
+        let mut conn = pool.acquire().await?;
+        assert_eq!(open_outages_for_stale_devices(&mut conn).await?, 1);
+        assert_eq!(open_outages_for_stale_devices(&mut conn).await?, 0);
+        assert_eq!(outages(&pool, device_id).await?, vec![(silent_since, None)]);
+
+        record_ping_without_ip(device_id, &pool).await?;
+        let rows = outages(&pool, device_id).await?;
+        assert_eq!(rows.len(), 1, "expected one outage row, got {rows:?}");
+        assert_eq!(rows[0].0, silent_since);
+        assert!(rows[0].1.is_some(), "outage still open: {rows:?}");
+        Ok(())
+    }
+
+    #[sqlx::test]
+    #[ignore = "needs the compose Postgres; run with --test-threads=1"]
+    async fn recovered_before_sweep_records_closed_outage(pool: PgPool) -> anyhow::Result<()> {
+        backdate_epoch(&pool).await?;
+        let device_id = insert_device(&pool, "quick-recovery", 120.0).await?;
+        let silent_since = last_ping(&pool, device_id).await?;
+
+        record_ping_without_ip(device_id, &pool).await?;
+        let rows = outages(&pool, device_id).await?;
+        assert_eq!(rows.len(), 1, "expected one outage row, got {rows:?}");
+        assert_eq!(rows[0].0, silent_since);
+        assert!(rows[0].1.is_some(), "outage still open: {rows:?}");
         Ok(())
     }
 }
