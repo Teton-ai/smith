@@ -90,7 +90,7 @@ The chip next to the **Intent** heading compares the version of the list with th
 | **Unknown** | The device has never reported an applied version. |
 | **Pending** | The list has changed since the device last confirmed. Either you have not applied yet, or the device has not answered. |
 | **Applying...** | You pressed **Apply** and the dashboard is waiting, polling every three seconds for up to 60 seconds. |
-| **Synced** | The device applied the current list with no failures. |
+| **Synced** | The device applied every entry it received with no failures. Entries the API skipped (see [Before anything is sent](#before-anything-is-sent)) are not counted, so the intent can show Synced while some of its networks are not on the device. |
 | **Error** | The device applied the list but at least one entry failed. Click the chip for the reason per profile. |
 
 A chip that falls back to **Pending** after Apply means no confirmation arrived: the device is offline, has not polled yet, or the apply could not run at all (see [Hard failures](#hard-failures)).
@@ -102,8 +102,8 @@ Apply sends the whole list to the device as a single command, and the device rec
 #### Before anything is sent
 
 - The list must not be empty, so the **Apply** button is disabled for an empty list. There is no way to apply "no networks": removing the last entry only changes the database, and the device keeps its profiles.
-- Only **WPA/WPA2 personal** and **open** networks can be applied. Entries of any other type (WPA3 SAE, Enhanced Open, enterprise, WEP) are dropped from the command by the API. They are shown in the intent list but never configured, and they do not raise an error. If nothing applicable is left, the request is rejected.
-- Every entry needs an SSID, and a secured entry needs a password.
+- Only **WPA/WPA2 personal** and **open** networks can be applied. Entries of any other type (WPA3 SAE, Enhanced Open, enterprise, WEP), and WPA/WPA2 personal entries with no password, are dropped from the command by the API. They are shown in the intent list but never configured, and they do not raise an error or affect the sync chip. If nothing applicable is left, the request is rejected.
+- Every entry needs an SSID, or the request is rejected.
 - Priorities are recomputed from the list order at apply time (`(entries - position) * 10`), so gaps left by reordering never matter and the raw database values never reach the device.
 
 #### How the device treats each entry
@@ -153,7 +153,7 @@ An apply that reached the device and partly failed still counts as applied: the 
 | --- | --- |
 | `WrongPSK` | The connectivity guard could not authenticate with the new password. The old profile was restored. |
 | `NotInRange` | The connectivity guard could not find the network. The old profile was restored. |
-| `NmcliError` | A NetworkManager command failed, or the entry was not applicable (unsupported security type, or a secured entry with no password). |
+| `NmcliError` | A NetworkManager command failed, or the device rejected an entry it received as not applicable. Entries the API skips before sending never produce this error. |
 | `ActiveProfileKept` | A removed profile is the active connection and no fallback network was reachable, so it was not deleted. |
 
 #### Hard failures
