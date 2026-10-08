@@ -610,8 +610,11 @@ pub const SMITHD_SERVICE_NAME: &str = "smithd";
 /// last ping so a coarse sweep interval still yields accurate history.
 ///
 /// Safe to run alongside device pings and from several API replicas; see
-/// `open_outages_for_stale_devices`.
-pub async fn open_downtime_for_silent_devices(pool: &PgPool) -> anyhow::Result<u64> {
+/// `open_outages_for_stale_devices`. Each sweep also closes any open outage a
+/// pinging device was left with, see `close_phantom_downtime`.
+pub async fn open_downtime_for_silent_devices(pool: &PgPool) -> anyhow::Result<SweepOutcome> {
+    let healed = close_phantom_downtime(pool).await?;
+
     let counts = sqlx::query!(
         r#"
         SELECT
@@ -644,12 +647,54 @@ pub async fn open_downtime_for_silent_devices(pool: &PgPool) -> anyhow::Result<u
                 "Skipping downtime sweep: {:.0}% of the fleet is stale at once, which means the API or its network was down, not the devices",
                 stale_ratio * 100.0
             );
-            return Ok(0);
+            return Ok(SweepOutcome { healed, opened: 0 });
         }
     }
 
     let mut conn = pool.acquire().await?;
-    open_outages_for_stale_devices(&mut conn).await
+    let opened = open_outages_for_stale_devices(&mut conn).await?;
+    Ok(SweepOutcome { healed, opened })
+}
+
+/// What one sweep did, so the logs can tell routine openings from repairs.
+#[derive(Debug)]
+pub struct SweepOutcome {
+    pub healed: u64,
+    pub opened: u64,
+}
+
+/// The ping path closes its own outage, so any hit here is a race
+/// `open_outages_for_stale_devices` missed or a cause not found yet: logged as an
+/// error, not repaired quietly. `ended_at` is the sweep time, not the real recovery.
+async fn close_phantom_downtime(pool: &PgPool) -> anyhow::Result<u64> {
+    let healed = sqlx::query!(
+        r#"
+        UPDATE device_service_outage o SET ended_at = NOW()
+        FROM device d
+        WHERE o.device_id = d.id
+          AND o.service_name = $1
+          AND o.ended_at IS NULL
+          AND d.archived = false
+          AND d.last_ping >= NOW() - make_interval(secs => $2::double precision)
+          AND d.last_ping > o.started_at
+        RETURNING o.id, o.device_id, o.started_at
+        "#,
+        SMITHD_SERVICE_NAME,
+        DOWNTIME_STALE_AFTER_SECS,
+    )
+    .fetch_all(pool)
+    .await?;
+
+    for outage in &healed {
+        error!(
+            device_id = outage.device_id,
+            outage_id = outage.id,
+            started_at = %outage.started_at,
+            "Closed an open smithd outage on a device that is pinging"
+        );
+    }
+
+    Ok(healed.len() as u64)
 }
 
 /// Locks each stale device row before inserting: a ping that lands after this
@@ -709,8 +754,15 @@ pub fn spawn_downtime_sweeper(pool: PgPool) {
         loop {
             ticker.tick().await;
             match open_downtime_for_silent_devices(&pool).await {
-                Ok(0) => debug!("Downtime sweep found no newly silent devices"),
-                Ok(opened) => info!("Downtime sweep opened {opened} outage(s)"),
+                Ok(SweepOutcome {
+                    healed: 0,
+                    opened: 0,
+                }) => debug!("Downtime sweep found no newly silent devices"),
+                Ok(SweepOutcome { healed, opened }) => {
+                    info!(
+                        "Downtime sweep opened {opened} outage(s), closed {healed} phantom outage(s)"
+                    )
+                }
                 Err(err) => error!("Downtime sweep failed: {err:?}"),
             }
         }
@@ -969,6 +1021,11 @@ pub enum RegistrationError {
     FailedToLogInLedger,
 }
 
+/// Run against the compose Postgres (it has pg_partman and allows CREATE DATABASE):
+/// `DATABASE_URL=postgres://postgres:postgres@localhost:5432/postgres \
+///  cargo test -p api downtime_tests -- --ignored --test-threads=1`.
+/// Serial, because the migrations of several fresh test databases collide on
+/// cluster-wide catalogs when run at once ("tuple concurrently updated").
 #[cfg(test)]
 mod downtime_tests {
     use super::*;
@@ -1035,7 +1092,7 @@ mod downtime_tests {
     }
 
     #[sqlx::test]
-    #[ignore = "needs DATABASE_URL pointing at the compose Postgres (CREATE DATABASE + pg_partman)"]
+    #[ignore = "needs the compose Postgres; run with --test-threads=1"]
     async fn sweeper_then_recovery_ping_leaves_one_closed_outage(
         pool: PgPool,
     ) -> anyhow::Result<()> {
@@ -1056,6 +1113,41 @@ mod downtime_tests {
         let rows = outages(&pool, device_id).await?;
         assert_eq!(rows.len(), 1, "expected one outage row, got {rows:?}");
         assert!(rows[0].1.is_some(), "outage still open: {rows:?}");
+        Ok(())
+    }
+
+    #[sqlx::test]
+    #[ignore = "needs the compose Postgres; run with --test-threads=1"]
+    async fn sweep_closes_open_outage_on_pinging_device(pool: PgPool) -> anyhow::Result<()> {
+        backdate_epoch(&pool).await?;
+        let pinging = insert_device(&pool, "pinging", 10.0).await?;
+        let silent = insert_device(&pool, "silent", 120.0).await?;
+        sqlx::query(
+            "INSERT INTO device_service_outage (device_id, service_name, started_at)
+             VALUES ($1, $2, NOW() - INTERVAL '1 hour')",
+        )
+        .bind(pinging)
+        .bind(SMITHD_SERVICE_NAME)
+        .execute(&pool)
+        .await?;
+        sqlx::query(
+            "INSERT INTO device_service_outage (device_id, service_name, started_at)
+             SELECT id, $2, last_ping FROM device WHERE id = $1",
+        )
+        .bind(silent)
+        .bind(SMITHD_SERVICE_NAME)
+        .execute(&pool)
+        .await?;
+
+        let outcome = open_downtime_for_silent_devices(&pool).await?;
+        assert_eq!((outcome.healed, outcome.opened), (1, 0));
+
+        let pinging_rows = outages(&pool, pinging).await?;
+        assert_eq!(pinging_rows.len(), 1);
+        assert!(pinging_rows[0].1.is_some(), "phantom left open");
+        let silent_rows = outages(&pool, silent).await?;
+        assert_eq!(silent_rows.len(), 1);
+        assert!(silent_rows[0].1.is_none(), "real outage was closed");
         Ok(())
     }
 }
