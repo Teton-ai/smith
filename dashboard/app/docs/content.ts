@@ -231,6 +231,7 @@ export const docsNavigation: DocsNavGroup[] = [
 		title: "Fleet",
 		links: [
 			{ title: "Deployments", href: "/docs/deployments" },
+			{ title: "WiFi management", href: "/docs/wifi" },
 			{ title: "Integrations", href: "/docs/integrations" },
 			{ title: "MCP server", href: "/docs/mcp" },
 		],
