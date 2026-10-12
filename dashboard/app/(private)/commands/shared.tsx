@@ -1300,14 +1300,14 @@ export const CommandMeta = ({
 	trigger?: string | null;
 	bundleId: string;
 }) => (
-	<div className="flex items-center gap-x-4 gap-y-1 flex-wrap mt-1">
+	<div className="flex items-center gap-x-4 mt-1">
 		<p
 			className="text-xs text-gray-500 min-w-0 truncate"
 			title={trigger ?? "System"}
 		>
 			Triggered by: {trigger ?? "System"}
 		</p>
-		<div className="flex items-center gap-1.5 min-w-0">
+		<div className="flex items-center gap-1.5 shrink-0">
 			<span className="text-xs leading-none text-gray-400 shrink-0">
 				Bundle ID:
 			</span>
@@ -1333,7 +1333,8 @@ export const CommandHeader = ({
 	const { label, mono } = getTxLabel(cmd.cmd_data);
 	return (
 		<div className={`px-5 py-3 bg-gray-50/70 ${className}`}>
-			<div className="flex items-center justify-between gap-3">
+			{/* min-h matches the Raw JSON button, which only exists once there is a response. */}
+			<div className="flex items-center justify-between gap-3 min-h-[30px]">
 				<div className="flex items-center gap-2 flex-wrap min-w-0">
 					<span
 						title={label}
