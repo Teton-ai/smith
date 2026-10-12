@@ -2,7 +2,7 @@ use crate::{ip_address::IpAddressInfo, modem::Modem, release::Release, system::S
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sqlx::types::{
-    Json,
+    Json, Uuid,
     chrono::{DateTime, Utc},
 };
 use std::collections::HashMap;
@@ -127,6 +127,8 @@ pub struct DeviceCommandResponse {
     pub response: Option<Value>,
     pub status: Option<i32>,
     pub user_email: Option<String>,
+    #[schema(value_type = String)]
+    pub bundle_id: Uuid,
 }
 
 #[derive(Debug, Serialize, Deserialize, utoipa::ToSchema)]

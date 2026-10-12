@@ -482,6 +482,7 @@ pub async fn get_bundle_commands(
             response: raw_bundle.response,
             status: raw_bundle.status,
             user_email: None,
+            bundle_id: raw_bundle.uuid,
         };
 
         map_responses
@@ -691,6 +692,7 @@ pub async fn get_bundle(
             response: raw.response,
             status: raw.status,
             user_email: None,
+            bundle_id: uuid,
         })
         .collect();
 

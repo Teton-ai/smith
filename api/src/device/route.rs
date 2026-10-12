@@ -1265,7 +1265,8 @@ pub async fn get_all_commands_for_device(
                 cr.created_at as "response_at?",
                 cr.response as "response?",
                 cr.status as "status?",
-                u.email as "user_email?"
+                u.email as "user_email?",
+                cq.bundle as bundle_id
             FROM command_queue cq
             LEFT JOIN command_response cr ON cq.id = cr.command_id
             LEFT JOIN device d ON cq.device_id = d.id
@@ -1297,7 +1298,8 @@ pub async fn get_all_commands_for_device(
                 cr.created_at as "response_at?",
                 cr.response as "response?",
                 cr.status as "status?",
-                u.email as "user_email?"
+                u.email as "user_email?",
+                cq.bundle as bundle_id
             FROM command_queue cq
             LEFT JOIN command_response cr ON cq.id = cr.command_id
             LEFT JOIN device d ON cq.device_id = d.id
@@ -1329,7 +1331,8 @@ pub async fn get_all_commands_for_device(
                 cr.created_at as "response_at?",
                 cr.response as "response?",
                 cr.status as "status?",
-                u.email as "user_email?"
+                u.email as "user_email?",
+                cq.bundle as bundle_id
             FROM command_queue cq
             LEFT JOIN command_response cr ON cq.id = cr.command_id
             LEFT JOIN device d ON cq.device_id = d.id
