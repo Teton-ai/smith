@@ -345,8 +345,60 @@ pub struct PaginationUuid {
     pub ending_before: Option<Uuid>,
     pub limit: Option<i32>,
     /// Who triggered the bundle: absent for no filter, `people` for anything a
-    /// person triggered, `system` for api-generated bundles, or a user id.
+    /// person triggered, `system` for api-generated bundles, `me` for the
+    /// caller, or a user id.
     pub triggered_by: Option<String>,
+}
+
+/// A parsed `triggered_by` value. `Me` stays distinct from `User` so the
+/// pagination links keep saying `me` instead of baking in the caller's id.
+#[derive(Debug, PartialEq, Eq)]
+enum TriggeredBy {
+    All,
+    People,
+    System,
+    Me(i32),
+    User(i32),
+}
+
+impl TriggeredBy {
+    /// A well-formed id for a user that no longer exists is valid input with zero
+    /// results; only unparseable values are rejected.
+    fn parse(raw: Option<&str>, caller_id: i32) -> Result<Self, StatusCode> {
+        match raw {
+            None => Ok(Self::All),
+            Some("people") => Ok(Self::People),
+            Some("system") => Ok(Self::System),
+            Some("me") => Ok(Self::Me(caller_id)),
+            Some(other) => other
+                .parse::<i32>()
+                .map(Self::User)
+                .map_err(|_| StatusCode::BAD_REQUEST),
+        }
+    }
+
+    /// Binds for `TRIGGERER_FILTER`: `$2` user id, `$3` system-only, `$4` people-only.
+    fn sql_binds(&self) -> (Option<i32>, bool, bool) {
+        match self {
+            Self::All => (None, false, false),
+            Self::People => (None, false, true),
+            Self::System => (None, true, false),
+            Self::Me(id) | Self::User(id) => (Some(*id), false, false),
+        }
+    }
+
+    /// The filter must travel with the cursor or `next` silently widens back to
+    /// every triggerer. Rebuilt from the parsed value rather than echoed: `+5`
+    /// parses as 5 but decodes back as " 5", which would 400 our own link.
+    fn query_suffix(&self) -> String {
+        match self {
+            Self::All => String::new(),
+            Self::People => "&triggered_by=people".to_string(),
+            Self::System => "&triggered_by=system".to_string(),
+            Self::Me(_) => "&triggered_by=me".to_string(),
+            Self::User(id) => format!("&triggered_by={id}"),
+        }
+    }
 }
 
 /// Restricts bundles to one triggerer: `$2` user id, `$3` system-only, `$4`
@@ -373,23 +425,16 @@ const TRIGGERER_FILTER: &str = "($2::int IS NULL OR user_id = $2)
 pub async fn get_bundle_commands(
     host: Host,
     Extension(state): Extension<State>,
+    Extension(current_user): Extension<CurrentUser>,
     pagination: Query<PaginationUuid>,
 ) -> Result<Json<BundleWithCommandsPaginated>, StatusCode> {
     if pagination.starting_after.is_some() && pagination.ending_before.is_some() {
         return Err(StatusCode::BAD_REQUEST);
     }
 
-    // A well-formed id for a user that no longer exists is valid input with zero
-    // results; only unparseable values are rejected.
-    let (filter_user_id, filter_system, filter_people) = match pagination.triggered_by.as_deref() {
-        None => (None, false, false),
-        Some("people") => (None, false, true),
-        Some("system") => (None, true, false),
-        Some(other) => match other.parse::<i32>() {
-            Ok(id) => (Some(id), false, false),
-            Err(_) => return Err(StatusCode::BAD_REQUEST),
-        },
-    };
+    let triggered_by =
+        TriggeredBy::parse(pagination.triggered_by.as_deref(), current_user.user_id)?;
+    let (filter_user_id, filter_system, filter_people) = triggered_by.sql_binds();
 
     let mut tx = state.pg_pool.begin().await.map_err(|err| {
         error!("Failed to start transaction {err}");
@@ -586,15 +631,7 @@ pub async fn get_bundle_commands(
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
 
-    // The filter must travel with the cursor or `next` silently widens back to
-    // every triggerer. Rebuilt from the parsed values rather than echoed: `+5`
-    // parses as 5 but decodes back as " 5", which would 400 our own link.
-    let filter_query = match (filter_user_id, filter_system, filter_people) {
-        (Some(user_id), _, _) => format!("&triggered_by={user_id}"),
-        (_, true, _) => "&triggered_by=system".to_string(),
-        (_, _, true) => "&triggered_by=people".to_string(),
-        _ => String::new(),
-    };
+    let filter_query = triggered_by.query_suffix();
 
     let next = last_id.filter(|_| has_more_last_id).map(|last_id| {
         format!(
@@ -1556,5 +1593,47 @@ mod stagger_tests {
                 );
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod triggered_by_tests {
+    use super::*;
+
+    const CALLER: i32 = 53;
+
+    #[test]
+    fn parses_every_token() {
+        let parse = |raw| TriggeredBy::parse(raw, CALLER);
+        assert_eq!(parse(None), Ok(TriggeredBy::All));
+        assert_eq!(parse(Some("people")), Ok(TriggeredBy::People));
+        assert_eq!(parse(Some("system")), Ok(TriggeredBy::System));
+        assert_eq!(parse(Some("me")), Ok(TriggeredBy::Me(CALLER)));
+        assert_eq!(parse(Some("7")), Ok(TriggeredBy::User(7)));
+    }
+
+    #[test]
+    fn rejects_unparseable_values() {
+        for raw in ["abc", "", "ME", "99999999999"] {
+            assert_eq!(
+                TriggeredBy::parse(Some(raw), CALLER),
+                Err(StatusCode::BAD_REQUEST),
+                "{raw:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn me_filters_on_the_caller_id() {
+        let me = TriggeredBy::parse(Some("me"), CALLER).unwrap_or(TriggeredBy::All);
+        assert_eq!(me.sql_binds(), (Some(CALLER), false, false));
+    }
+
+    #[test]
+    fn me_stays_me_in_pagination_links() {
+        let me = TriggeredBy::parse(Some("me"), CALLER).unwrap_or(TriggeredBy::All);
+        assert_eq!(me.query_suffix(), "&triggered_by=me");
+        assert_eq!(TriggeredBy::User(7).query_suffix(), "&triggered_by=7");
+        assert_eq!(TriggeredBy::All.query_suffix(), "");
     }
 }
