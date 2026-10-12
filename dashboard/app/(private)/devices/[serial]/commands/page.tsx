@@ -1,19 +1,15 @@
-import {
-	Badge,
-	type BadgeVariant,
-	Button,
-	Card,
-	ListRow,
-} from "@teton/smith-ui";
+import { Badge, Card } from "@teton/smith-ui";
 import { Loader2, Send } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "react-router";
 import {
-	CodeBlock,
+	CommandBody,
+	CommandHeader,
+	CommandListRow,
+	CommandMeta,
 	getCommandStatus,
 	getTxLabel,
-	renderRxDetail,
-	renderTxDetail,
+	statusVariant,
 } from "@/app/(private)/commands/shared";
 import {
 	type CommandsPaginated,
@@ -22,21 +18,9 @@ import {
 	useGetDeviceInfo,
 } from "@/app/api-client";
 import { useClientMutator } from "@/app/api-client-mutator";
-import { RelativeTime } from "@/app/components/RelativeTime";
 import { DeviceDetailLayout } from "../DeviceDetailLayout";
 
 const PAGE_SIZE = 50;
-
-// Maps a command status to a design-system Badge variant.
-const STATUS_VARIANT: Record<string, BadgeVariant> = {
-	success: "green",
-	failed: "red",
-	executing: "blue",
-	cancelled: "gray",
-	pending: "yellow",
-};
-const statusVariant = (status: string): BadgeVariant =>
-	STATUS_VARIANT[status] ?? "gray";
 
 // ---------------------------------------------------------------------------
 // Right panel: full detail view
@@ -44,8 +28,6 @@ const statusVariant = (status: string): BadgeVariant =>
 
 const ResponseDetail = ({ cmd }: { cmd: DeviceCommandResponse }) => {
 	const [showRaw, setShowRaw] = useState(false);
-	const status = getCommandStatus(cmd);
-	const { label: txLabel } = getTxLabel(cmd.cmd_data);
 
 	// biome-ignore lint/correctness/useExhaustiveDependencies: intentional reset on cmd change
 	useEffect(() => {
@@ -54,106 +36,16 @@ const ResponseDetail = ({ cmd }: { cmd: DeviceCommandResponse }) => {
 
 	return (
 		<div className="h-full flex flex-col overflow-hidden">
-			{/* Header */}
-			<div className="px-4 py-3 border-b border-gray-200 bg-gray-50/70 shrink-0">
-				<div className="flex items-center justify-between gap-3">
-					<div className="flex items-center gap-2 flex-wrap min-w-0">
-						<span className="text-sm font-semibold text-gray-900 truncate">
-							{txLabel}
-						</span>
-						<Badge variant={statusVariant(status)}>{status}</Badge>
-						{cmd.response != null && cmd.status != null && (
-							<Badge
-								variant={cmd.status === 0 ? "green" : "red"}
-								className="font-mono"
-							>
-								exit {cmd.status}
-							</Badge>
-						)}
-					</div>
-					<div className="flex items-center gap-3 min-w-0">
-						<p
-							className="text-xs text-gray-500 min-w-0 truncate"
-							title={cmd.user_email ?? "System"}
-						>
-							Triggered by: {cmd.user_email ?? "System"}
-						</p>
-						{cmd.response != null && (
-							<Button
-								variant="soft"
-								tone="gray"
-								size="sm"
-								className="shrink-0"
-								onClick={() => setShowRaw((v) => !v)}
-							>
-								{showRaw ? "Formatted" : "Raw JSON"}
-							</Button>
-						)}
-					</div>
-				</div>
-			</div>
-
-			{/* Scrollable body */}
-			<div className="flex-1 overflow-y-auto px-4 py-3">
-				{showRaw ? (
-					<>
-						<CodeBlock
-							label="raw TX"
-							meta={
-								<>
-									· Issued <RelativeTime date={cmd.issued_at} />
-								</>
-							}
-							content={JSON.stringify(cmd.cmd_data, null, 2)}
-						/>
-						<div className="mt-4">
-							<CodeBlock
-								label="raw RX"
-								meta={
-									cmd.response_at ? (
-										<>
-											· Responded <RelativeTime date={cmd.response_at} />
-										</>
-									) : (
-										<span className="text-yellow-500">
-											· Waiting for response…
-										</span>
-									)
-								}
-								content={JSON.stringify(cmd.response, null, 2)}
-							/>
-						</div>
-					</>
-				) : (
-					<>
-						<div className="mb-4">
-							<div className="flex items-center gap-2 mb-3">
-								<p className="text-xs font-medium uppercase tracking-wide text-gray-400">
-									Sent
-								</p>
-								<span className="text-xs text-gray-400">
-									· Issued <RelativeTime date={cmd.issued_at} />
-								</span>
-							</div>
-							{renderTxDetail(cmd.cmd_data)}
-						</div>
-						<div className="flex items-center gap-2 mb-3">
-							<p className="text-xs font-medium uppercase tracking-wide text-gray-400">
-								Response
-							</p>
-							{cmd.response_at ? (
-								<span className="text-xs text-gray-400">
-									· Responded <RelativeTime date={cmd.response_at} />
-								</span>
-							) : (
-								<span className="text-xs text-yellow-500">
-									· Waiting for response…
-								</span>
-							)}
-						</div>
-						{renderRxDetail(cmd.response)}
-					</>
-				)}
+			<CommandHeader
+				cmd={cmd}
+				showRaw={showRaw}
+				onToggleRaw={() => setShowRaw((v) => !v)}
+				className="border-b border-gray-200 shrink-0"
+			>
+				<CommandMeta trigger={cmd.user_email} bundleId={cmd.bundle_id} />
+			</CommandHeader>
+			<div className="flex-1 overflow-y-auto px-5 py-3">
+				<CommandBody cmd={cmd} showRaw={showRaw} />
 			</div>
 		</div>
 	);
@@ -258,38 +150,20 @@ const CommandsPage = () => {
 							{commands.map((cmd) => {
 								const status = getCommandStatus(cmd);
 								const { label, mono } = getTxLabel(cmd.cmd_data);
-								const isSelected = cmd.cmd_id === selectedId;
 
 								return (
-									<ListRow
+									<CommandListRow
 										key={cmd.cmd_id}
+										selected={cmd.cmd_id === selectedId}
 										onClick={() => setSelectedId(cmd.cmd_id)}
-										hover={isSelected ? "bg-blue-50" : "hover:bg-gray-50"}
-										className={
-											isSelected
-												? "border-l-2 border-l-blue-500"
-												: "border-l-2 border-l-transparent"
+										title={label}
+										mono={mono}
+										badge={
+											<Badge variant={statusVariant(status)}>{status}</Badge>
 										}
-									>
-										<div className="w-full min-w-0">
-											<div className="flex items-center justify-between gap-2">
-												<span
-													className={`text-sm truncate ${mono ? "font-mono" : "font-medium"} ${isSelected ? "text-blue-900" : "text-gray-900"}`}
-												>
-													{label}
-												</span>
-												<Badge
-													variant={statusVariant(status)}
-													className="shrink-0"
-												>
-													{status}
-												</Badge>
-											</div>
-											<div className="text-xs text-gray-400 mt-0.5">
-												<RelativeTime date={cmd.issued_at} />
-											</div>
-										</div>
-									</ListRow>
+										trigger={cmd.user_email}
+										time={cmd.issued_at}
+									/>
 								);
 							})}
 						</div>
