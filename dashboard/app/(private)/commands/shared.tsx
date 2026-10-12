@@ -1282,11 +1282,12 @@ export const CommandListRow = ({
 			{stats && (
 				<div className="flex items-center gap-1.5 flex-wrap mt-1">{stats}</div>
 			)}
-			<div className="flex items-center justify-between gap-2 mt-0.5 text-xs text-gray-400">
-				<span className="truncate min-w-0" title={trigger ?? "System"}>
+			{/* Wraps so the trigger keeps a full line when the list is narrow. */}
+			<div className="flex flex-wrap items-center gap-x-2 mt-0.5 text-xs text-gray-400">
+				<span className="truncate max-w-full" title={trigger ?? "System"}>
 					{trigger ?? "System"}
 				</span>
-				<RelativeTime date={time} className="shrink-0" />
+				<RelativeTime date={time} className="ml-auto shrink-0" />
 			</div>
 		</div>
 	</ListRow>

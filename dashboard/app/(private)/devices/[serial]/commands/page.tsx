@@ -145,7 +145,7 @@ const CommandsPage = () => {
 						<div
 							ref={scrollRef}
 							onScroll={handleScroll}
-							className="flex-1 overflow-y-auto divide-y divide-gray-100"
+							className="flex-1 overflow-y-auto overflow-x-hidden divide-y divide-gray-100"
 						>
 							{commands.map((cmd) => {
 								const status = getCommandStatus(cmd);
