@@ -4,9 +4,9 @@ use models::release::Release;
 use serde::{Deserialize, Serialize, Serializer};
 use serde_json::{Value, json};
 use smith::utils::schema::{DeviceRegistration, DeviceRegistrationResponse};
-use sqlx::PgPool;
 use sqlx::types::chrono::{DateTime, Utc};
 use sqlx::types::{Json as SqlxJson, chrono, ipnetwork};
+use sqlx::{PgConnection, PgPool};
 use std::collections::HashMap;
 use std::net::IpAddr;
 use std::time::Duration;
@@ -609,9 +609,12 @@ pub const SMITHD_SERVICE_NAME: &str = "smithd";
 /// does not already have one open. `started_at` is backdated to the device's
 /// last ping so a coarse sweep interval still yields accurate history.
 ///
-/// Safe to run concurrently from several API replicas: the partial unique index
-/// on open rows turns a lost race into a no-op instead of a duplicate.
-pub async fn open_downtime_for_silent_devices(pool: &PgPool) -> anyhow::Result<u64> {
+/// Safe to run alongside device pings and from several API replicas; see
+/// `open_outages_for_stale_devices`. Each sweep also closes any open outage a
+/// pinging device was left with, see `close_phantom_downtime`.
+pub async fn open_downtime_for_silent_devices(pool: &PgPool) -> anyhow::Result<SweepOutcome> {
+    let healed = close_phantom_downtime(pool).await?;
+
     let counts = sqlx::query!(
         r#"
         SELECT
@@ -644,35 +647,95 @@ pub async fn open_downtime_for_silent_devices(pool: &PgPool) -> anyhow::Result<u
                 "Skipping downtime sweep: {:.0}% of the fleet is stale at once, which means the API or its network was down, not the devices",
                 stale_ratio * 100.0
             );
-            return Ok(0);
+            return Ok(SweepOutcome { healed, opened: 0 });
         }
     }
 
+    let mut conn = pool.acquire().await?;
+    let opened = open_outages_for_stale_devices(&mut conn).await?;
+    Ok(SweepOutcome { healed, opened })
+}
+
+/// What one sweep did, so the logs can tell routine openings from repairs.
+#[derive(Debug)]
+pub struct SweepOutcome {
+    pub healed: u64,
+    pub opened: u64,
+}
+
+/// The ping path closes its own outage, so any hit here is a race
+/// `open_outages_for_stale_devices` missed or a cause not found yet: logged as an
+/// error, not repaired quietly. `ended_at` is the sweep time, not the real recovery.
+async fn close_phantom_downtime(pool: &PgPool) -> anyhow::Result<u64> {
+    let healed = sqlx::query!(
+        r#"
+        UPDATE device_service_outage o SET ended_at = NOW()
+        FROM device d
+        WHERE o.device_id = d.id
+          AND o.service_name = $1
+          AND o.ended_at IS NULL
+          AND d.archived = false
+          AND d.last_ping >= NOW() - make_interval(secs => $2::double precision)
+          AND d.last_ping > o.started_at
+        RETURNING o.id, o.device_id, o.started_at
+        "#,
+        SMITHD_SERVICE_NAME,
+        DOWNTIME_STALE_AFTER_SECS,
+    )
+    .fetch_all(pool)
+    .await?;
+
+    for outage in &healed {
+        error!(
+            device_id = outage.device_id,
+            outage_id = outage.id,
+            started_at = %outage.started_at,
+            "Closed an open smithd outage on a device that is pinging"
+        );
+    }
+
+    Ok(healed.len() as u64)
+}
+
+/// Locks each stale device row before inserting: a ping that lands after this
+/// statement's snapshot makes Postgres re-check `last_ping` on the locked row, so
+/// the device is skipped. The unique index on open rows cannot catch this, because
+/// the ping closes only the rows it can see and a sweeper with an older snapshot
+/// then opens another. `SKIP LOCKED` leaves a device that is mid-ping to the next
+/// sweep.
+///
+/// Takes a bare connection so a test can keep the transaction open; the sweeper
+/// runs it autocommit on a pooled connection.
+async fn open_outages_for_stale_devices(conn: &mut PgConnection) -> anyhow::Result<u64> {
     let opened = sqlx::query!(
         r#"
+        WITH stale AS (
+            SELECT d.id, d.last_ping
+            FROM device d
+            CROSS JOIN (
+                SELECT installed_on FROM _sqlx_migrations WHERE version = $1
+            ) m
+            WHERE d.archived = false
+              AND d.last_ping IS NOT NULL
+              AND d.last_ping >= m.installed_on
+              AND d.last_ping < NOW() - make_interval(secs => $2::double precision)
+              AND NOT EXISTS (
+                  SELECT 1 FROM device_service_outage o
+                  WHERE o.device_id = d.id
+                    AND o.service_name = $3
+                    AND o.ended_at IS NULL
+              )
+            FOR UPDATE OF d SKIP LOCKED
+        )
         INSERT INTO device_service_outage (device_id, service_name, started_at)
-        SELECT d.id, $3, d.last_ping
-        FROM device d
-        CROSS JOIN (
-            SELECT installed_on FROM _sqlx_migrations WHERE version = $1
-        ) m
-        WHERE d.archived = false
-          AND d.last_ping IS NOT NULL
-          AND d.last_ping >= m.installed_on
-          AND d.last_ping < NOW() - make_interval(secs => $2::double precision)
-          AND NOT EXISTS (
-              SELECT 1 FROM device_service_outage o
-              WHERE o.device_id = d.id
-                AND o.service_name = $3
-                AND o.ended_at IS NULL
-          )
+        SELECT id, $3, last_ping FROM stale
         ON CONFLICT DO NOTHING
         "#,
         DOWNTIME_EPOCH_MIGRATION_VERSION,
         DOWNTIME_STALE_AFTER_SECS,
         SMITHD_SERVICE_NAME,
     )
-    .execute(pool)
+    .execute(conn)
     .await?
     .rows_affected();
 
@@ -691,8 +754,15 @@ pub fn spawn_downtime_sweeper(pool: PgPool) {
         loop {
             ticker.tick().await;
             match open_downtime_for_silent_devices(&pool).await {
-                Ok(0) => debug!("Downtime sweep found no newly silent devices"),
-                Ok(opened) => info!("Downtime sweep opened {opened} outage(s)"),
+                Ok(SweepOutcome {
+                    healed: 0,
+                    opened: 0,
+                }) => debug!("Downtime sweep found no newly silent devices"),
+                Ok(SweepOutcome { healed, opened }) => {
+                    info!(
+                        "Downtime sweep opened {opened} outage(s), closed {healed} phantom outage(s)"
+                    )
+                }
                 Err(err) => error!("Downtime sweep failed: {err:?}"),
             }
         }
@@ -748,9 +818,9 @@ pub async fn save_last_ping_with_ip(
     pool: &PgPool,
     config: &Config,
 ) -> anyhow::Result<()> {
-    let mut tx = pool.begin().await?;
     match ip_address {
         Some(ip) => {
+            let mut tx = pool.begin().await?;
             let ip_network: ipnetwork::IpNetwork = ip.into();
 
             // SELECT first to avoid burning an IDENTITY sequence value on every ping —
@@ -846,9 +916,17 @@ pub async fn save_last_ping_with_ip(
                 }
             }
         }
-        None => {
-            let ping = sqlx::query!(
-                r#"
+        None => record_ping_without_ip(device_id, pool).await?,
+    }
+    Ok(())
+}
+
+/// Split out of `save_last_ping_with_ip` so tests can drive the real ping path
+/// without building a `Config`, which only the IP branch reads.
+async fn record_ping_without_ip(device_id: i32, pool: &PgPool) -> anyhow::Result<()> {
+    let mut tx = pool.begin().await?;
+    let ping = sqlx::query!(
+        r#"
                 WITH prev AS (SELECT last_ping FROM device WHERE id = $1)
                 UPDATE device SET last_ping = NOW()
                 WHERE id = $1
@@ -857,22 +935,20 @@ pub async fn save_last_ping_with_ip(
                     (SELECT last_ping < NOW() - make_interval(secs => $2::double precision)
                      FROM prev) AS was_stale
                 "#,
-                device_id,
-                DOWNTIME_STALE_AFTER_SECS,
-            )
-            .fetch_optional(&mut *tx)
-            .await?;
+        device_id,
+        DOWNTIME_STALE_AFTER_SECS,
+    )
+    .fetch_optional(&mut *tx)
+    .await?;
 
-            if let Some(ping) = ping
-                && ping.was_stale.unwrap_or(false)
-                && let Some(previous) = ping.previous_last_ping
-            {
-                close_open_downtime(device_id, previous, &mut tx).await?;
-            }
-
-            tx.commit().await?;
-        }
+    if let Some(ping) = ping
+        && ping.was_stale.unwrap_or(false)
+        && let Some(previous) = ping.previous_last_ping
+    {
+        close_open_downtime(device_id, previous, &mut tx).await?;
     }
+
+    tx.commit().await?;
     Ok(())
 }
 
@@ -943,4 +1019,222 @@ pub enum RegistrationError {
     NotApprovedDevice,
     #[error("Failed to log in ledger")]
     FailedToLogInLedger,
+}
+
+/// Run against the compose Postgres (it has pg_partman and allows CREATE DATABASE):
+/// `DATABASE_URL=postgres://postgres:postgres@localhost:5432/postgres \
+///  cargo test -p api downtime_tests -- --ignored --test-threads=1`.
+/// Serial, because the migrations of several fresh test databases collide on
+/// cluster-wide catalogs when run at once ("tuple concurrently updated").
+#[cfg(test)]
+mod downtime_tests {
+    use super::*;
+
+    /// A fresh test database installs every migration "now", which would put the
+    /// observation epoch after any ping these tests can fabricate.
+    async fn backdate_epoch(pool: &PgPool) -> anyhow::Result<()> {
+        sqlx::query(
+            "UPDATE _sqlx_migrations SET installed_on = NOW() - INTERVAL '1 day' WHERE version = $1",
+        )
+        .bind(DOWNTIME_EPOCH_MIGRATION_VERSION)
+        .execute(pool)
+        .await?;
+        Ok(())
+    }
+
+    async fn insert_device(pool: &PgPool, serial: &str, ping_age_secs: f64) -> anyhow::Result<i32> {
+        Ok(sqlx::query_scalar(
+            "INSERT INTO device (serial_number, approved, last_ping)
+             VALUES ($1, true, NOW() - make_interval(secs => $2)) RETURNING id",
+        )
+        .bind(serial)
+        .bind(ping_age_secs)
+        .fetch_one(pool)
+        .await?)
+    }
+
+    async fn outages(
+        pool: &PgPool,
+        device_id: i32,
+    ) -> anyhow::Result<Vec<(DateTime<Utc>, Option<DateTime<Utc>>)>> {
+        Ok(sqlx::query_as(
+            "SELECT started_at, ended_at FROM device_service_outage
+             WHERE device_id = $1 AND service_name = $2 ORDER BY id",
+        )
+        .bind(device_id)
+        .bind(SMITHD_SERVICE_NAME)
+        .fetch_all(pool)
+        .await?)
+    }
+
+    /// Waits until the spawned ping has finished or is parked on a row lock, so a
+    /// test never commits the other side before the ping has had its chance to run.
+    async fn settle(
+        pool: &PgPool,
+        ping: &tokio::task::JoinHandle<anyhow::Result<()>>,
+    ) -> anyhow::Result<()> {
+        for _ in 0..500 {
+            if ping.is_finished() {
+                return Ok(());
+            }
+            let blocked: i64 = sqlx::query_scalar(
+                "SELECT COUNT(*) FROM pg_stat_activity
+                 WHERE datname = current_database() AND wait_event_type = 'Lock'",
+            )
+            .fetch_one(pool)
+            .await?;
+            if blocked > 0 {
+                return Ok(());
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        anyhow::bail!("ping neither finished nor blocked within 5 s")
+    }
+
+    async fn last_ping(pool: &PgPool, device_id: i32) -> anyhow::Result<DateTime<Utc>> {
+        Ok(
+            sqlx::query_scalar("SELECT last_ping FROM device WHERE id = $1")
+                .bind(device_id)
+                .fetch_one(pool)
+                .await?,
+        )
+    }
+
+    #[sqlx::test]
+    #[ignore = "needs the compose Postgres; run with --test-threads=1"]
+    async fn sweeper_then_recovery_ping_leaves_one_closed_outage(
+        pool: PgPool,
+    ) -> anyhow::Result<()> {
+        backdate_epoch(&pool).await?;
+        let device_id = insert_device(&pool, "sweeper-vs-ping", 120.0).await?;
+
+        let mut sweeper = pool.begin().await?;
+        assert_eq!(open_outages_for_stale_devices(&mut sweeper).await?, 1);
+
+        let ping = tokio::spawn({
+            let pool = pool.clone();
+            async move { record_ping_without_ip(device_id, &pool).await }
+        });
+        settle(&pool, &ping).await?;
+        sweeper.commit().await?;
+        ping.await??;
+
+        let rows = outages(&pool, device_id).await?;
+        assert_eq!(rows.len(), 1, "expected one outage row, got {rows:?}");
+        assert!(rows[0].1.is_some(), "outage still open: {rows:?}");
+        Ok(())
+    }
+
+    #[sqlx::test]
+    #[ignore = "needs the compose Postgres; run with --test-threads=1"]
+    async fn sweep_closes_open_outage_on_pinging_device(pool: PgPool) -> anyhow::Result<()> {
+        backdate_epoch(&pool).await?;
+        let pinging = insert_device(&pool, "pinging", 10.0).await?;
+        let silent = insert_device(&pool, "silent", 120.0).await?;
+        sqlx::query(
+            "INSERT INTO device_service_outage (device_id, service_name, started_at)
+             VALUES ($1, $2, NOW() - INTERVAL '1 hour')",
+        )
+        .bind(pinging)
+        .bind(SMITHD_SERVICE_NAME)
+        .execute(&pool)
+        .await?;
+        sqlx::query(
+            "INSERT INTO device_service_outage (device_id, service_name, started_at)
+             SELECT id, $2, last_ping FROM device WHERE id = $1",
+        )
+        .bind(silent)
+        .bind(SMITHD_SERVICE_NAME)
+        .execute(&pool)
+        .await?;
+
+        let outcome = open_downtime_for_silent_devices(&pool).await?;
+        assert_eq!((outcome.healed, outcome.opened), (1, 0));
+
+        let pinging_rows = outages(&pool, pinging).await?;
+        assert_eq!(pinging_rows.len(), 1);
+        assert!(pinging_rows[0].1.is_some(), "phantom left open");
+        let silent_rows = outages(&pool, silent).await?;
+        assert_eq!(silent_rows.len(), 1);
+        assert!(silent_rows[0].1.is_none(), "real outage was closed");
+        Ok(())
+    }
+
+    #[sqlx::test]
+    #[ignore = "needs the compose Postgres; run with --test-threads=1"]
+    async fn ping_in_flight_is_skipped_by_sweeper(pool: PgPool) -> anyhow::Result<()> {
+        backdate_epoch(&pool).await?;
+        let device_id = insert_device(&pool, "mid-ping", 120.0).await?;
+
+        // A ping holds the device row from its UPDATE until it commits.
+        let mut ping = pool.begin().await?;
+        sqlx::query("SELECT id FROM device WHERE id = $1 FOR UPDATE")
+            .bind(device_id)
+            .execute(&mut *ping)
+            .await?;
+
+        let mut conn = pool.acquire().await?;
+        assert_eq!(open_outages_for_stale_devices(&mut conn).await?, 0);
+        ping.rollback().await?;
+        assert_eq!(open_outages_for_stale_devices(&mut conn).await?, 1);
+        Ok(())
+    }
+
+    #[sqlx::test]
+    #[ignore = "needs the compose Postgres; run with --test-threads=1"]
+    async fn concurrent_sweepers_open_one_outage(pool: PgPool) -> anyhow::Result<()> {
+        backdate_epoch(&pool).await?;
+        let device_id = insert_device(&pool, "two-sweepers", 120.0).await?;
+
+        let mut first = pool.begin().await?;
+        assert_eq!(open_outages_for_stale_devices(&mut first).await?, 1);
+        let mut second = pool.acquire().await?;
+        assert_eq!(open_outages_for_stale_devices(&mut second).await?, 0);
+        first.commit().await?;
+
+        let rows = outages(&pool, device_id).await?;
+        assert_eq!(rows.len(), 1, "expected one outage row, got {rows:?}");
+        assert!(rows[0].1.is_none());
+
+        record_ping_without_ip(device_id, &pool).await?;
+        let rows = outages(&pool, device_id).await?;
+        assert_eq!(rows.len(), 1, "expected one outage row, got {rows:?}");
+        assert!(rows[0].1.is_some(), "outage still open: {rows:?}");
+        Ok(())
+    }
+
+    #[sqlx::test]
+    #[ignore = "needs the compose Postgres; run with --test-threads=1"]
+    async fn silent_device_gets_one_outage_and_ping_closes_it(pool: PgPool) -> anyhow::Result<()> {
+        backdate_epoch(&pool).await?;
+        let device_id = insert_device(&pool, "silent", 120.0).await?;
+        let silent_since = last_ping(&pool, device_id).await?;
+
+        let mut conn = pool.acquire().await?;
+        assert_eq!(open_outages_for_stale_devices(&mut conn).await?, 1);
+        assert_eq!(open_outages_for_stale_devices(&mut conn).await?, 0);
+        assert_eq!(outages(&pool, device_id).await?, vec![(silent_since, None)]);
+
+        record_ping_without_ip(device_id, &pool).await?;
+        let rows = outages(&pool, device_id).await?;
+        assert_eq!(rows.len(), 1, "expected one outage row, got {rows:?}");
+        assert_eq!(rows[0].0, silent_since);
+        assert!(rows[0].1.is_some(), "outage still open: {rows:?}");
+        Ok(())
+    }
+
+    #[sqlx::test]
+    #[ignore = "needs the compose Postgres; run with --test-threads=1"]
+    async fn recovered_before_sweep_records_closed_outage(pool: PgPool) -> anyhow::Result<()> {
+        backdate_epoch(&pool).await?;
+        let device_id = insert_device(&pool, "quick-recovery", 120.0).await?;
+        let silent_since = last_ping(&pool, device_id).await?;
+
+        record_ping_without_ip(device_id, &pool).await?;
+        let rows = outages(&pool, device_id).await?;
+        assert_eq!(rows.len(), 1, "expected one outage row, got {rows:?}");
+        assert_eq!(rows[0].0, silent_since);
+        assert!(rows[0].1.is_some(), "outage still open: {rows:?}");
+        Ok(())
+    }
 }

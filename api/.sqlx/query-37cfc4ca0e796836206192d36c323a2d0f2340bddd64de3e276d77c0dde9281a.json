@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        WITH stale AS (\n            SELECT d.id, d.last_ping\n            FROM device d\n            CROSS JOIN (\n                SELECT installed_on FROM _sqlx_migrations WHERE version = $1\n            ) m\n            WHERE d.archived = false\n              AND d.last_ping IS NOT NULL\n              AND d.last_ping >= m.installed_on\n              AND d.last_ping < NOW() - make_interval(secs => $2::double precision)\n              AND NOT EXISTS (\n                  SELECT 1 FROM device_service_outage o\n                  WHERE o.device_id = d.id\n                    AND o.service_name = $3\n                    AND o.ended_at IS NULL\n              )\n            FOR UPDATE OF d SKIP LOCKED\n        )\n        INSERT INTO device_service_outage (device_id, service_name, started_at)\n        SELECT id, $3, last_ping FROM stale\n        ON CONFLICT DO NOTHING\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Float8",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "37cfc4ca0e796836206192d36c323a2d0f2340bddd64de3e276d77c0dde9281a"
+}
