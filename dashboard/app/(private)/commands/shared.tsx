@@ -1,6 +1,6 @@
 "use client";
 
-import { Badge } from "@teton/smith-ui";
+import { Badge, type BadgeVariant, Button, ListRow } from "@teton/smith-ui";
 import { isAxiosError } from "axios";
 import { Check, ChevronDown, ChevronRight, Copy, X } from "lucide-react";
 import {
@@ -11,6 +11,7 @@ import {
 	useState,
 } from "react";
 import type { DeviceCommandResponse } from "@/app/api-client";
+import { RelativeTime } from "@/app/components/RelativeTime";
 import { Tooltip } from "@/app/components/tooltip";
 import { deriveBand, groupScanResults, SignalBar } from "@/app/utils/wifiScan";
 
@@ -655,6 +656,17 @@ export const getCommandStatus = (cmd: DeviceCommandResponse) => {
 	return cmd.status === 0 ? "success" : "failed";
 };
 
+export const statusVariant = (status: string): BadgeVariant =>
+	STATUS_VARIANT[status] ?? "gray";
+
+const STATUS_VARIANT: Record<string, BadgeVariant> = {
+	success: "green",
+	failed: "red",
+	executing: "blue",
+	cancelled: "gray",
+	pending: "yellow",
+};
+
 export const getStatusColor = (status: string) => {
 	switch (status) {
 		case "success":
@@ -1221,3 +1233,201 @@ export const renderRxDetail = (response: unknown) => {
 			);
 	}
 };
+
+// ---------------------------------------------------------------------------
+// List row and detail pieces shared by /commands and the device commands page
+// ---------------------------------------------------------------------------
+
+// The trigger is a prop, not read from the command: responses nested in a
+// bundle carry no user_email, the bundle owns it.
+export const CommandListRow = ({
+	selected,
+	onClick,
+	title,
+	mono = false,
+	badge,
+	stats,
+	trigger,
+	time,
+}: {
+	selected: boolean;
+	onClick: () => void;
+	title: string;
+	mono?: boolean;
+	badge?: ReactNode;
+	/** Wrapping pills on their own line, for rows that summarise many commands. */
+	stats?: ReactNode;
+	trigger?: string | null;
+	time: string;
+}) => (
+	<ListRow
+		onClick={onClick}
+		hover={selected ? "bg-blue-50" : "hover:bg-gray-50"}
+		className={
+			selected
+				? "border-l-2 border-l-blue-500"
+				: "border-l-2 border-l-transparent"
+		}
+	>
+		<div className="w-full min-w-0">
+			<div className="flex items-center justify-between gap-2">
+				<span
+					title={title}
+					className={`text-sm truncate min-w-0 ${mono ? "font-mono" : "font-medium"} ${selected ? "text-blue-900" : "text-gray-900"}`}
+				>
+					{title}
+				</span>
+				{badge && <span className="shrink-0">{badge}</span>}
+			</div>
+			{stats && (
+				<div className="flex items-center gap-1.5 flex-wrap mt-1">{stats}</div>
+			)}
+			<div className="flex items-center justify-between gap-2 mt-0.5 text-xs text-gray-400">
+				<span className="truncate min-w-0" title={trigger ?? "System"}>
+					{trigger ?? "System"}
+				</span>
+				<RelativeTime date={time} className="shrink-0" />
+			</div>
+		</div>
+	</ListRow>
+);
+
+export const CommandMeta = ({
+	trigger,
+	bundleId,
+}: {
+	trigger?: string | null;
+	bundleId: string;
+}) => (
+	<div className="flex items-center gap-x-4 gap-y-1 flex-wrap mt-1">
+		<p
+			className="text-xs text-gray-500 min-w-0 truncate"
+			title={trigger ?? "System"}
+		>
+			Triggered by: {trigger ?? "System"}
+		</p>
+		<div className="flex items-center gap-1.5 min-w-0">
+			<span className="text-xs leading-none text-gray-400 shrink-0">
+				Bundle ID:
+			</span>
+			<CopyableText text={bundleId} />
+		</div>
+	</div>
+);
+
+export const CommandHeader = ({
+	cmd,
+	showRaw,
+	onToggleRaw,
+	className = "",
+	children,
+}: {
+	cmd: DeviceCommandResponse;
+	showRaw: boolean;
+	onToggleRaw: () => void;
+	className?: string;
+	children?: ReactNode;
+}) => {
+	const status = getCommandStatus(cmd);
+	const { label, mono } = getTxLabel(cmd.cmd_data);
+	return (
+		<div className={`px-5 py-3 bg-gray-50/70 ${className}`}>
+			<div className="flex items-center justify-between gap-3">
+				<div className="flex items-center gap-2 flex-wrap min-w-0">
+					<span
+						title={label}
+						className={`text-sm font-semibold text-gray-900 truncate ${mono ? "font-mono" : ""}`}
+					>
+						{label}
+					</span>
+					<Badge variant={statusVariant(status)}>{status}</Badge>
+					{cmd.response != null && cmd.status != null && (
+						<Badge
+							variant={cmd.status === 0 ? "green" : "red"}
+							className="font-mono"
+						>
+							exit {cmd.status}
+						</Badge>
+					)}
+				</div>
+				{cmd.response != null && (
+					<Button
+						variant="soft"
+						tone="gray"
+						size="sm"
+						className="shrink-0"
+						onClick={onToggleRaw}
+					>
+						{showRaw ? "Formatted" : "Raw JSON"}
+					</Button>
+				)}
+			</div>
+			{children}
+		</div>
+	);
+};
+
+export const CommandBody = ({
+	cmd,
+	showRaw,
+}: {
+	cmd: DeviceCommandResponse;
+	showRaw: boolean;
+}) =>
+	showRaw ? (
+		<>
+			<CodeBlock
+				label="raw TX"
+				meta={
+					<>
+						· Issued <RelativeTime date={cmd.issued_at} />
+					</>
+				}
+				content={JSON.stringify(cmd.cmd_data, null, 2)}
+			/>
+			<div className="mt-4">
+				<CodeBlock
+					label="raw RX"
+					meta={
+						cmd.response_at ? (
+							<>
+								· Responded <RelativeTime date={cmd.response_at} />
+							</>
+						) : (
+							<span className="text-yellow-500">· Waiting for response…</span>
+						)
+					}
+					content={JSON.stringify(cmd.response, null, 2)}
+				/>
+			</div>
+		</>
+	) : (
+		<>
+			<div className="mb-4">
+				<div className="flex items-center gap-2 mb-3">
+					<p className="text-xs font-medium uppercase tracking-wide text-gray-400">
+						Sent
+					</p>
+					<span className="text-xs text-gray-400">
+						· Issued <RelativeTime date={cmd.issued_at} />
+					</span>
+				</div>
+				{renderTxDetail(cmd.cmd_data)}
+			</div>
+			<div className="flex items-center gap-2 mb-3">
+				<p className="text-xs font-medium uppercase tracking-wide text-gray-400">
+					Response
+				</p>
+				{cmd.response_at ? (
+					<span className="text-xs text-gray-400">
+						· Responded <RelativeTime date={cmd.response_at} />
+					</span>
+				) : (
+					<span className="text-xs text-yellow-500">
+						· Waiting for response…
+					</span>
+				)}
+			</div>
+			{renderRxDetail(cmd.response)}
+		</>
+	);

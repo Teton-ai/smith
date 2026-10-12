@@ -1,11 +1,5 @@
-import {
-	Badge,
-	type BadgeVariant,
-	Button,
-	Card,
-	Select,
-} from "@teton/smith-ui";
-import { AlertCircle, Loader2, Send, Terminal } from "lucide-react";
+import { Badge, Button, Card, Select } from "@teton/smith-ui";
+import { AlertCircle, Loader2, Send } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router";
 import {
@@ -16,25 +10,16 @@ import {
 	useGetUsers,
 } from "@/app/api-client";
 import { useClientMutator } from "@/app/api-client-mutator";
-import { RelativeTime } from "@/app/components/RelativeTime";
 import {
-	CodeBlock,
-	CopyableText,
+	CommandBody,
+	CommandHeader,
+	CommandListRow,
+	CommandMeta,
 	getCommandStatus,
 	getTxLabel,
-	renderRxDetail,
-	renderTxDetail,
 } from "./shared";
 
 const PAGE_SIZE = 50;
-
-const STATUS_VARIANT: Record<string, BadgeVariant> = {
-	success: "green",
-	failed: "red",
-	executing: "blue",
-	cancelled: "gray",
-	pending: "yellow",
-};
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -66,100 +51,16 @@ const getBundleStats = (responses: DeviceCommandResponse[]) => {
 
 const CommandResult = ({ response }: { response: DeviceCommandResponse }) => {
 	const [showRaw, setShowRaw] = useState(false);
-	const status = getCommandStatus(response);
-	const { label, mono } = getTxLabel(response.cmd_data);
 
 	return (
 		<div className="border-b border-gray-100 last:border-b-0">
-			<div className="flex items-center justify-between gap-3 px-5 py-3 bg-gray-50/70">
-				<div className="flex items-center gap-2 flex-wrap min-w-0">
-					<span
-						className={`text-sm font-semibold text-gray-900 truncate ${mono ? "font-mono" : ""}`}
-					>
-						{label}
-					</span>
-					<Badge variant={STATUS_VARIANT[status] ?? "gray"}>{status}</Badge>
-					{response.response != null && response.status != null && (
-						<Badge
-							variant={response.status === 0 ? "green" : "red"}
-							className="font-mono"
-						>
-							exit {response.status}
-						</Badge>
-					)}
-				</div>
-				{response.response != null && (
-					<Button
-						variant="soft"
-						tone="gray"
-						size="sm"
-						className="shrink-0"
-						onClick={() => setShowRaw((v) => !v)}
-					>
-						{showRaw ? "Formatted" : "Raw JSON"}
-					</Button>
-				)}
-			</div>
+			<CommandHeader
+				cmd={response}
+				showRaw={showRaw}
+				onToggleRaw={() => setShowRaw((v) => !v)}
+			/>
 			<div className="px-5 py-3">
-				{showRaw ? (
-					<>
-						<CodeBlock
-							label="raw TX"
-							meta={
-								<>
-									· Issued <RelativeTime date={response.issued_at} />
-								</>
-							}
-							content={JSON.stringify(response.cmd_data, null, 2)}
-						/>
-						<div className="mt-4">
-							<CodeBlock
-								label="raw RX"
-								meta={
-									response.response_at ? (
-										<>
-											· Responded <RelativeTime date={response.response_at} />
-										</>
-									) : (
-										<span className="text-yellow-500">
-											· Waiting for response…
-										</span>
-									)
-								}
-								content={JSON.stringify(response.response, null, 2)}
-							/>
-						</div>
-					</>
-				) : (
-					<>
-						<div className="mb-4">
-							<div className="flex items-center gap-2 mb-3">
-								<p className="text-xs font-medium uppercase tracking-wide text-gray-400">
-									Sent
-								</p>
-								<span className="text-xs text-gray-400">
-									· Issued <RelativeTime date={response.issued_at} />
-								</span>
-							</div>
-							{renderTxDetail(response.cmd_data)}
-						</div>
-						<div className="flex items-center gap-2 mb-3">
-							<p className="text-xs font-medium uppercase tracking-wide text-gray-400">
-								Response
-							</p>
-							{response.response_at ? (
-								<span className="text-xs text-gray-400">
-									· Responded <RelativeTime date={response.response_at} />
-								</span>
-							) : (
-								<span className="text-xs text-yellow-500">
-									· Waiting for response…
-								</span>
-							)}
-						</div>
-						{renderRxDetail(response.response)}
-					</>
-				)}
+				<CommandBody cmd={response} showRaw={showRaw} />
 			</div>
 		</div>
 	);
@@ -266,26 +167,13 @@ const BundleDetail = ({ bundle }: { bundle: BundleWithCommands }) => {
 				{selected != null ? (
 					<>
 						<div className="px-5 py-3 border-b border-gray-200 shrink-0">
-							<div className="flex items-center justify-between gap-3">
-								<Link
-									to={`/devices/${selected.serial}/commands`}
-									className="text-sm font-mono font-medium text-blue-600 hover:underline"
-								>
-									{selected.serial}
-								</Link>
-								<p
-									className="text-xs text-gray-500 min-w-0 truncate"
-									title={bundle.user_email ?? "System"}
-								>
-									Triggered by: {bundle.user_email ?? "System"}
-								</p>
-							</div>
-							<div className="flex items-center gap-1.5 mt-1">
-								<span className="text-xs leading-none text-gray-400 shrink-0">
-									Bundle ID:
-								</span>
-								<CopyableText text={bundle.uuid} />
-							</div>
+							<Link
+								to={`/devices/${selected.serial}/commands`}
+								className="text-sm font-mono font-medium text-blue-600 hover:underline"
+							>
+								{selected.serial}
+							</Link>
+							<CommandMeta trigger={bundle.user_email} bundleId={bundle.uuid} />
 						</div>
 						<div className="flex-1 overflow-y-auto overflow-x-hidden">
 							{selected.commands.map((c) => (
@@ -512,7 +400,7 @@ const CommandsPage = () => {
 				<div
 					ref={scrollRef}
 					onScroll={handleScroll}
-					className="flex-1 overflow-y-auto overflow-x-hidden"
+					className="flex-1 overflow-y-auto overflow-x-hidden divide-y divide-gray-100"
 				>
 					{bundles.map((bundle) => {
 						const stats = getBundleStats(bundle.responses);
@@ -520,31 +408,17 @@ const CommandsPage = () => {
 						const { label: commandLabel } = firstCommand
 							? getTxLabel(firstCommand.cmd_data)
 							: { label: "Unknown Command" };
-						const isSelected = bundle.uuid === selectedUuid;
 
 						return (
-							<button
+							<CommandListRow
 								key={bundle.uuid}
-								type="button"
+								selected={bundle.uuid === selectedUuid}
 								onClick={() => setSelectedUuid(bundle.uuid)}
-								className={`w-full text-left px-4 py-3 border-b border-gray-100 last:border-b-0 transition-colors cursor-pointer ${
-									isSelected
-										? "bg-blue-50 border-l-2 border-l-blue-500"
-										: "hover:bg-gray-50 border-l-2 border-l-transparent"
-								}`}
-							>
-								<div className="flex items-center gap-2 mb-1 min-w-0">
-									<Terminal
-										className={`w-3.5 h-3.5 shrink-0 ${isSelected ? "text-blue-500" : "text-purple-500"}`}
-									/>
-									<span
-										className={`text-sm font-medium truncate min-w-0 ${isSelected ? "text-blue-900" : "text-gray-900"}`}
-									>
-										{commandLabel}
-									</span>
-								</div>
-								<div className="flex items-center justify-between gap-2">
-									<div className="flex items-center gap-1.5 flex-wrap">
+								title={commandLabel}
+								trigger={bundle.user_email}
+								time={bundle.created_on}
+								stats={
+									<>
 										{stats.success > 0 && (
 											<Badge variant="green" pill>
 												{stats.success} ok
@@ -565,18 +439,9 @@ const CommandsPage = () => {
 												{stats.executing} executing
 											</Badge>
 										)}
-									</div>
-									<span className="text-xs text-gray-400 shrink-0 truncate max-w-[50%] text-right">
-										{bundle.user_email ?? "System"}
-									</span>
-								</div>
-								<div className="flex justify-end mt-0.5">
-									<RelativeTime
-										date={bundle.created_on}
-										className="text-xs text-gray-400 shrink-0"
-									/>
-								</div>
-							</button>
+									</>
+								}
+							/>
 						);
 					})}
 				</div>
