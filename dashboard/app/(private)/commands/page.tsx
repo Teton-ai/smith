@@ -192,15 +192,79 @@ const BundleDetail = ({ bundle }: { bundle: BundleWithCommands }) => {
 };
 
 // ---------------------------------------------------------------------------
+// Triggered-by filter
+// ---------------------------------------------------------------------------
+
+// The presets (All, People, System, Me) are remembered across visits;
+// an individual user is only ever in the URL.
+const PRESET_KEY = "commands:triggered-by";
+const NAMED_PRESETS = ["people", "system", "me"];
+
+const readPreset = (): string => {
+	try {
+		const saved = localStorage.getItem(PRESET_KEY);
+		return saved != null && NAMED_PRESETS.includes(saved) ? saved : "";
+	} catch {
+		return "";
+	}
+};
+
+const writePreset = (preset: string) => {
+	try {
+		if (preset) localStorage.setItem(PRESET_KEY, preset);
+		else localStorage.removeItem(PRESET_KEY);
+	} catch {
+		// Storage can be unavailable (private mode); the choice just won't persist.
+	}
+};
+
+// `?by=` always wins over the saved preset and never writes it, so a shared
+// link shows what it says without changing the viewer's preference.
+const useTriggeredByFilter = () => {
+	const [searchParams, setSearchParams] = useSearchParams();
+	const [savedPreset, setSavedPreset] = useState(readPreset);
+	const byParam = searchParams.get("by");
+
+	// Mirror a restored preset into the URL so a copied link is explicit.
+	useEffect(() => {
+		if (byParam == null && savedPreset) {
+			setSearchParams(
+				(prev) => {
+					const next = new URLSearchParams(prev);
+					next.set("by", savedPreset);
+					return next;
+				},
+				{ replace: true },
+			);
+		}
+	}, [byParam, savedPreset, setSearchParams]);
+
+	const setValue = (value: string) => {
+		// Saved before the URL changes: with `by` gone, the old preset would
+		// otherwise be restored over an explicit "All".
+		if (value === "" || NAMED_PRESETS.includes(value)) {
+			writePreset(value);
+			setSavedPreset(value);
+		}
+		const next = new URLSearchParams(searchParams);
+		if (value) next.set("by", value);
+		else next.delete("by");
+		setSearchParams(next);
+	};
+
+	// null = All.
+	return { value: byParam ?? (savedPreset || null), setValue };
+};
+
+// ---------------------------------------------------------------------------
 // Page
 // ---------------------------------------------------------------------------
 
 const CommandsPage = () => {
 	const fetcher = useClientMutator<BundleWithCommandsPaginated>();
-	const [searchParams, setSearchParams] = useSearchParams();
 
-	// null = All. Otherwise "people", "system", or a user id.
-	const triggeredBy = searchParams.get("by");
+	// null = All. Otherwise "people", "system", "me", or a user id.
+	const { value: triggeredBy, setValue: setFilter } = useTriggeredByFilter();
 
 	// Listing users needs `users:read`, which reading commands does not, so this
 	// is allowed to fail: the per-person options just disappear.
@@ -279,13 +343,6 @@ const CommandsPage = () => {
 
 	const selectedBundle = bundles.find((b) => b.uuid === selectedUuid) ?? null;
 
-	const setFilter = (value: string) => {
-		const next = new URLSearchParams(searchParams);
-		if (value) next.set("by", value);
-		else next.delete("by");
-		setSearchParams(next);
-	};
-
 	// Accounts without an email would render as blank rows, so drop them.
 	const userOptions = useMemo(
 		() =>
@@ -304,6 +361,7 @@ const CommandsPage = () => {
 		triggeredBy != null &&
 		triggeredBy !== "people" &&
 		triggeredBy !== "system" &&
+		triggeredBy !== "me" &&
 		!userOptions.some((user) => String(user.id) === triggeredBy)
 			? triggeredBy
 			: null;
@@ -317,6 +375,7 @@ const CommandsPage = () => {
 				<option value="">All</option>
 				<option value="people">People</option>
 				<option value="system">System</option>
+				<option value="me">Me</option>
 				{userOptions.length > 0 && (
 					<optgroup label="Individual users">
 						{userOptions.map((user) => (
