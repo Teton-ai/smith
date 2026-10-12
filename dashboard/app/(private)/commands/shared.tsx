@@ -1335,18 +1335,20 @@ export const CommandHeader = ({
 		<div className={`px-5 py-3 bg-gray-50/70 ${className}`}>
 			{/* min-h matches the Raw JSON button, which only exists once there is a response. */}
 			<div className="flex items-center justify-between gap-3 min-h-[30px]">
-				<div className="flex items-center gap-2 flex-wrap min-w-0">
+				<div className="flex items-center gap-2 min-w-0">
 					<span
 						title={label}
-						className={`text-sm font-semibold text-gray-900 truncate ${mono ? "font-mono" : ""}`}
+						className={`text-sm font-semibold text-gray-900 truncate min-w-0 ${mono ? "font-mono" : ""}`}
 					>
 						{label}
 					</span>
-					<Badge variant={statusVariant(status)}>{status}</Badge>
+					<Badge variant={statusVariant(status)} className="shrink-0">
+						{status}
+					</Badge>
 					{cmd.response != null && cmd.status != null && (
 						<Badge
 							variant={cmd.status === 0 ? "green" : "red"}
-							className="font-mono"
+							className="font-mono shrink-0"
 						>
 							exit {cmd.status}
 						</Badge>
