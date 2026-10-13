@@ -10,7 +10,7 @@ use axum::extract::{ConnectInfo, Multipart, Path, Query};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::Response;
 use axum::{Extension, Json};
-use futures::stream;
+use futures::{StreamExt, stream};
 use serde::{Deserialize, Serialize};
 use smith::utils::schema::{
     DeviceRegistration, DeviceRegistrationResponse, HomePost, HomePostResponse, Package,
@@ -18,7 +18,9 @@ use smith::utils::schema::{
 };
 use std::convert::Infallible;
 use std::net::SocketAddr;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::SystemTime;
+use tokio_util::io::StreamReader;
 use tracing::{debug, error, info};
 use utoipa::{IntoParams, ToSchema};
 
@@ -330,18 +332,34 @@ pub async fn upload_file(
     };
     file_name.push_str(local_file_name);
 
-    let file_data = field.bytes().await.map_err(|_| StatusCode::BAD_REQUEST)?;
-
     if file_name.is_empty() {
         return Err(StatusCode::BAD_REQUEST);
     }
 
-    Storage::save_to_s3(bucket_name, None, &file_name, &file_data)
+    // A broken multipart body is the client's fault; only an S3 failure is ours.
+    let client_error = AtomicBool::new(false);
+    // Streaming the field costs a couple of chunks of memory, not the whole file.
+    let mut reader = StreamReader::new(field.map(|chunk| {
+        chunk.map_err(|err| {
+            client_error.store(true, Ordering::Relaxed);
+            std::io::Error::other(err)
+        })
+    }));
+
+    let status = Storage::stream_to_s3(bucket_name, &file_name, &mut reader)
         .await
         .map_err(|err| {
-            error!("{:?}", err);
+            if client_error.load(Ordering::Relaxed) {
+                return StatusCode::BAD_REQUEST;
+            }
+            error!("Failed to stream {file_name} to S3: {err:?}");
             StatusCode::INTERNAL_SERVER_ERROR
         })?;
+
+    if !(200..300).contains(&status) {
+        error!("S3 rejected {file_name} with status {status}");
+        return Err(StatusCode::INTERNAL_SERVER_ERROR);
+    }
 
     Ok(Json(UploadResult {
         url: format!("s3://{}/{}", bucket_name, &file_name),
