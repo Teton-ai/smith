@@ -6,6 +6,7 @@ use crate::shutdown::ShutdownSignals;
 use crate::utils::network::NetworkClient;
 use anyhow::Context;
 use anyhow::Result;
+use md5::{Digest, Md5};
 use std::collections::{HashMap, HashSet};
 use std::fmt::Write;
 use std::path::Component;
@@ -149,6 +150,105 @@ async fn remove_file(path: &Path) -> Result<u64> {
         .await
         .with_context(|| format!("removing {}", path.display()))?;
     Ok(size)
+}
+
+/// Set by the downloader from the ETag the API reports for the S3 object.
+const ETAG_XATTR: &str = "user.etag";
+
+#[derive(Debug, PartialEq)]
+enum BlobCheck {
+    Verified,
+    Missing,
+    NoEtag,
+    Mismatch,
+}
+
+async fn md5_of_file(path: &Path) -> Result<String> {
+    let path = path.to_path_buf();
+    tokio::task::spawn_blocking(move || {
+        let mut file =
+            std::fs::File::open(&path).with_context(|| format!("opening {}", path.display()))?;
+        let mut hasher = Md5::new();
+        std::io::copy(&mut file, &mut hasher)
+            .with_context(|| format!("hashing {}", path.display()))?;
+        Ok(format!("{:x}", hasher.finalize()))
+    })
+    .await?
+}
+
+/// Package objects are uploaded in one part, so their S3 ETag is the MD5 of
+/// the content. Any other ETag (e.g. a multipart `-N` suffix) means the upload
+/// mode changed and the blob cannot be verified.
+fn md5_from_etag(raw: &[u8]) -> Result<String> {
+    let etag = std::str::from_utf8(raw)
+        .context("blob ETag is not UTF-8")?
+        .trim()
+        .trim_matches('"');
+    if etag.len() != 32 || !etag.bytes().all(|b| b.is_ascii_hexdigit()) {
+        anyhow::bail!("blob ETag {etag} is not an MD5 digest, cannot verify the package");
+    }
+    Ok(etag.to_ascii_lowercase())
+}
+
+async fn check_blob(path: &Path) -> Result<BlobCheck> {
+    if !tokio::fs::try_exists(path)
+        .await
+        .with_context(|| format!("stat {}", path.display()))?
+    {
+        return Ok(BlobCheck::Missing);
+    }
+    let Some(raw) = xattr::get(path, ETAG_XATTR)
+        .with_context(|| format!("reading ETag of {}", path.display()))?
+    else {
+        return Ok(BlobCheck::NoEtag);
+    };
+    let expected = md5_from_etag(&raw).with_context(|| format!("checking {}", path.display()))?;
+    if md5_of_file(path).await? == expected {
+        Ok(BlobCheck::Verified)
+    } else {
+        Ok(BlobCheck::Mismatch)
+    }
+}
+
+/// `ensure_release_cache` skips releases that have a manifest, so the manifest
+/// is removed with a bad blob to make the next update cycle fetch it again.
+async fn verify_blobs_before_install(
+    manifest_path: &Path,
+    blobs: &[(String, PathBuf)],
+) -> Result<()> {
+    let mut unverified = Vec::new();
+    for (package_name, blob_path) in blobs {
+        let check = check_blob(blob_path).await?;
+        match check {
+            BlobCheck::Verified => continue,
+            BlobCheck::Missing => {}
+            BlobCheck::NoEtag | BlobCheck::Mismatch => {
+                if let Err(e) = tokio::fs::remove_file(blob_path).await {
+                    error!(blob = %blob_path.display(), "Failed to remove blob: {e}");
+                }
+            }
+        }
+        error!(
+            package = %package_name,
+            blob = %blob_path.display(),
+            ?check,
+            "Package blob failed ETag verification"
+        );
+        unverified.push(package_name.as_str());
+    }
+
+    if unverified.is_empty() {
+        return Ok(());
+    }
+    if let Err(e) = tokio::fs::remove_file(manifest_path).await
+        && e.kind() != std::io::ErrorKind::NotFound
+    {
+        error!(manifest = %manifest_path.display(), "Failed to remove release manifest: {e}");
+    }
+    anyhow::bail!(
+        "package blobs failed ETag verification, nothing installed: {}",
+        unverified.join(", ")
+    )
 }
 
 #[derive(Debug)]
@@ -392,23 +492,6 @@ impl Actor {
         Ok(())
     }
 
-    /// Returns Ok(true) if the blob exists and looks usable.
-    /// Removes zero-byte files as a side effect so they'll be re-downloaded.
-    async fn blob_is_valid(&self, blob_path: &Path) -> Result<bool> {
-        if !blob_path.exists() {
-            return Ok(false);
-        }
-        let metadata = tokio::fs::metadata(blob_path)
-            .await
-            .with_context(|| format!("stat {}", blob_path.display()))?;
-        if metadata.len() == 0 {
-            warn!(?blob_path, "zero-byte blob, removing for re-download");
-            tokio::fs::remove_file(blob_path).await?;
-            return Ok(false);
-        }
-        Ok(true)
-    }
-
     async fn ensure_release_cache(&self, release_id: i32) -> Result<()> {
         info!("ensuring release cache for release_id: {release_id}");
 
@@ -440,14 +523,27 @@ impl Actor {
             info!("Processing package: {}", package.file);
             let blob_path = blobs.join(&package.file);
 
-            if self.blob_is_valid(&blob_path).await? {
-                info!("blob present in cache");
-                writeln!(
-                    manifest,
-                    "{} {} {}",
-                    package.name, package.version, package.file
-                )?;
-                continue;
+            match check_blob(&blob_path).await? {
+                BlobCheck::Verified => {
+                    info!("blob present in cache");
+                    writeln!(
+                        manifest,
+                        "{} {} {}",
+                        package.name, package.version, package.file
+                    )?;
+                    continue;
+                }
+                BlobCheck::Missing => {}
+                check @ (BlobCheck::NoEtag | BlobCheck::Mismatch) => {
+                    warn!(
+                        ?blob_path,
+                        ?check,
+                        "blob not verified, removing for re-download"
+                    );
+                    tokio::fs::remove_file(&blob_path)
+                        .await
+                        .with_context(|| format!("removing {}", blob_path.display()))?;
+                }
             }
 
             self.fetch_blob(package, &blob_path)
@@ -493,9 +589,15 @@ impl Actor {
         // on new devices
         match self.magic.get_release_id().await {
             Ok(current_release_id) => {
-                self.ensure_release_cache(current_release_id)
-                    .await
-                    .with_context(|| "Failed to ensure current release cache")?;
+                // The current release is already installed, so a blob it cannot
+                // cache must not block the move to the target release.
+                if let Err(err) = self.ensure_release_cache(current_release_id).await {
+                    warn!(
+                        error = ?err,
+                        current_release_id,
+                        "Failed to ensure current release cache"
+                    );
+                }
             }
             Err(err) => {
                 warn!(
@@ -590,6 +692,10 @@ impl Actor {
                 continue;
             } else {
                 info!("Package {} does not exist locally", package_name);
+                // Without the manifest the next update cycle fetches the blob again.
+                tokio::fs::remove_file(&release_cache)
+                    .await
+                    .with_context(|| format!("removing {}", release_cache.display()))?;
                 return Err(anyhow::anyhow!(
                     "Package {} does not exist locally",
                     package_name
@@ -598,7 +704,7 @@ impl Actor {
         }
 
         // now install packages
-        let mut update_smith = false;
+        let mut smith_package: Option<(String, PathBuf)> = None;
         let mut to_install: Vec<(String, PathBuf)> = Vec::new();
         for package in packages {
             if self.should_skip_install(&package.name) {
@@ -618,14 +724,21 @@ impl Actor {
             };
 
             if !package_installed {
+                let blob_path = blobs.join(&package.file);
                 if package.name == "smith" || package.name == "smith_amd64" {
-                    update_smith = true;
+                    smith_package = Some((package.name, blob_path));
                     continue;
                 }
-                let blob_path = blobs.join(&package.file);
                 to_install.push((package.name, blob_path));
             }
         }
+
+        let to_verify = to_install
+            .iter()
+            .chain(&smith_package)
+            .cloned()
+            .collect::<Vec<_>>();
+        verify_blobs_before_install(&release_cache, &to_verify).await?;
 
         // One apt transaction: everything is unpacked before any postinst runs.
         if !to_install.is_empty() {
@@ -652,7 +765,7 @@ impl Actor {
             }
         }
 
-        if update_smith {
+        if smith_package.is_some() {
             let status = Command::new("sh")
                 .arg("-c")
                 .arg("sudo systemctl start smith-updater")
@@ -1221,6 +1334,109 @@ mod tests {
         assert!(versions_dir.join("15").exists());
         assert!(versions_dir.join("8").exists());
         assert!(!versions_dir.join("20").exists());
+
+        Ok(())
+    }
+
+    const HELLO_MD5: &str = "5d41402abc4b2a76b9719d911017c592";
+
+    async fn blob_with_etag(etag: Option<&str>) -> Result<(tempfile::TempDir, PathBuf)> {
+        let temp = tempfile::tempdir()?;
+        let blob = temp.path().join("app.deb");
+        tokio::fs::write(&blob, b"hello").await?;
+        if let Some(etag) = etag {
+            xattr::set(&blob, ETAG_XATTR, etag.as_bytes())?;
+        }
+        Ok((temp, blob))
+    }
+
+    #[tokio::test]
+    async fn md5_of_file_returns_hex_digest() -> Result<()> {
+        let (_temp, blob) = blob_with_etag(None).await?;
+
+        assert_eq!(md5_of_file(&blob).await?, HELLO_MD5);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn check_blob_verifies_quoted_etag() -> Result<()> {
+        let (_temp, blob) =
+            blob_with_etag(Some(&format!("\"{}\"", HELLO_MD5.to_uppercase()))).await?;
+
+        assert_eq!(check_blob(&blob).await?, BlobCheck::Verified);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn check_blob_reports_wrong_digest() -> Result<()> {
+        let (_temp, blob) = blob_with_etag(Some("\"00000000000000000000000000000000\"")).await?;
+
+        assert_eq!(check_blob(&blob).await?, BlobCheck::Mismatch);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn check_blob_reports_missing_etag_and_file() -> Result<()> {
+        let (temp, blob) = blob_with_etag(None).await?;
+
+        assert_eq!(check_blob(&blob).await?, BlobCheck::NoEtag);
+        assert_eq!(
+            check_blob(&temp.path().join("absent.deb")).await?,
+            BlobCheck::Missing
+        );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn check_blob_rejects_multipart_etag() -> Result<()> {
+        let (_temp, blob) = blob_with_etag(Some("\"abc-2\"")).await?;
+
+        let result = check_blob(&blob).await;
+
+        assert_eq!(
+            result.map_err(|e| format!("{e:#}")),
+            Err(format!(
+                "checking {}: blob ETag abc-2 is not an MD5 digest, cannot verify the package",
+                blob.display()
+            ))
+        );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn install_check_keeps_blob_with_matching_etag() -> Result<()> {
+        let (temp, blob) = blob_with_etag(Some(&format!("\"{HELLO_MD5}\""))).await?;
+        let manifest = temp.path().join("7");
+        tokio::fs::write(&manifest, "app 1 app.deb\n").await?;
+
+        verify_blobs_before_install(&manifest, &[("app".to_string(), blob.clone())]).await?;
+
+        assert!(blob.exists());
+        assert!(manifest.exists());
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn install_check_removes_blob_and_manifest_on_wrong_digest() -> Result<()> {
+        let (temp, blob) = blob_with_etag(Some("\"00000000000000000000000000000000\"")).await?;
+        let manifest = temp.path().join("7");
+        tokio::fs::write(&manifest, "app 1 app.deb\n").await?;
+
+        let result =
+            verify_blobs_before_install(&manifest, &[("app".to_string(), blob.clone())]).await;
+
+        assert_eq!(
+            result.map_err(|e| e.to_string()),
+            Err("package blobs failed ETag verification, nothing installed: app".to_string())
+        );
+        assert!(!blob.exists());
+        assert!(!manifest.exists());
 
         Ok(())
     }
