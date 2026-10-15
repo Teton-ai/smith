@@ -122,6 +122,23 @@ impl SmithAPI {
         Ok(packages)
     }
 
+    pub async fn delete_release_package(&self, release_id: i32, package_id: i32) -> Result<()> {
+        let client = Client::new();
+
+        client
+            .delete(format!(
+                "{}/releases/{}/packages/{}",
+                self.domain, release_id, package_id
+            ))
+            .header("Authorization", format!("Bearer {}", &self.bearer_token))
+            .send()
+            .await?
+            .handle_error()
+            .await?;
+
+        Ok(())
+    }
+
     pub async fn get_packages(&self) -> Result<Vec<Package>> {
         let client = Client::new();
 

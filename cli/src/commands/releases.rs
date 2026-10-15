@@ -40,6 +40,11 @@ Examples:
         #[arg(long)]
         json: bool,
     },
+    /// Remove a package from a release that is in draft
+    RemovePackage {
+        release_number: i32,
+        package_id: i32,
+    },
     /// Publish a release that is in draft
     Publish { release_number: String },
     /// Mark a release as LTS, a version we commit to keeping devices on
@@ -126,6 +131,15 @@ impl ReleasesCommands {
                     }
                     table.print();
                 }
+            }
+            ReleasesCommands::RemovePackage {
+                release_number,
+                package_id,
+            } => {
+                let api = api(&config).await?;
+                api.delete_release_package(release_number, package_id)
+                    .await?;
+                println!("Removed package {package_id} from release {release_number}.");
             }
             ReleasesCommands::Deployment { release_number } => {
                 let api = api(&config).await?;

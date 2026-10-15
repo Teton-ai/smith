@@ -774,6 +774,25 @@
       "examples": []
     },
     {
+      "path": "sm releases remove-package",
+      "about": "Remove a package from a release that is in draft",
+      "usage": "sm releases remove-package <RELEASE_NUMBER> <PACKAGE_ID>",
+      "arguments": [
+        {
+          "name": "<RELEASE_NUMBER>",
+          "required": true,
+          "help": ""
+        },
+        {
+          "name": "<PACKAGE_ID>",
+          "required": true,
+          "help": ""
+        }
+      ],
+      "options": [],
+      "examples": []
+    },
+    {
       "path": "sm releases publish",
       "about": "Publish a release that is in draft",
       "usage": "sm releases publish <RELEASE_NUMBER>",
