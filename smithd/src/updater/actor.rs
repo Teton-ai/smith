@@ -686,6 +686,10 @@ impl Actor {
                 continue;
             } else {
                 info!("Package {} does not exist locally", package_name);
+                // Without the manifest the next update cycle fetches the blob again.
+                tokio::fs::remove_file(&release_cache)
+                    .await
+                    .with_context(|| format!("removing {}", release_cache.display()))?;
                 return Err(anyhow::anyhow!(
                     "Package {} does not exist locally",
                     package_name
