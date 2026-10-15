@@ -64,6 +64,24 @@ sm devices ls
 
 Add `--json` flag for JSON output.
 
+### Reset device enrollment
+
+For a re-imaged or reprovisioned device, reset its enrollment with:
+
+```bash
+sm unregister ABC123
+# Skip confirmation, or select multiple devices
+sm unregister ABC123 DEF456 -y
+```
+
+This clears the token, approval, current release, target release, and target release timestamp.
+The device record and its history are preserved. Approve the device again with
+`sm approve ABC123` and assign its target release when it is ready to reconnect.
+
+This does more than `DELETE /devices/{id}/token`, which only clears the token and
+preserves approval and release assignments. Use the token endpoint if you only want
+the device to register again without another approval.
+
 ### Distributions
 
 List available distributions:

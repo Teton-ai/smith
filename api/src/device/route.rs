@@ -2643,9 +2643,26 @@ pub async fn unregister_device(
         return Err(StatusCode::FORBIDDEN);
     }
 
-    let resolved_id = resolve_device_id(&device_id, &state.pg_pool).await?;
+    reset_device_registration(&state.pg_pool, &device_id, user_id).await
+}
 
-    let mut tx = state.pg_pool.begin().await.map_err(|err| {
+async fn reset_device_registration(
+    pool: &sqlx::PgPool,
+    device_id: &str,
+    user_id: i32,
+) -> Result<StatusCode, StatusCode> {
+    let resolved_id = resolve_device_id(device_id, pool).await?;
+
+    let actor = sqlx::query_scalar!("SELECT email FROM auth.users WHERE id = $1", user_id)
+        .fetch_optional(pool)
+        .await
+        .inspect_err(|err| error!("Failed to look up email for user {user_id} {err}"))
+        .ok()
+        .flatten()
+        .flatten()
+        .unwrap_or_else(|| "an unknown user".to_string());
+
+    let mut tx = pool.begin().await.map_err(|err| {
         error!("Failed to start transaction {err}");
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
@@ -2670,15 +2687,6 @@ pub async fn unregister_device(
         error!("Failed to reset registration for device {resolved_id} {err}");
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
-
-    let actor = sqlx::query_scalar!("SELECT email FROM auth.users WHERE id = $1", user_id)
-        .fetch_optional(&mut *tx)
-        .await
-        .inspect_err(|err| error!("Failed to look up email for user {user_id} {err}"))
-        .ok()
-        .flatten()
-        .flatten()
-        .unwrap_or_else(|| "an unknown user".to_string());
 
     sqlx::query!(
         r#"INSERT INTO ledger (device_id, "class", "text") VALUES ($1, $2, $3)"#,
@@ -3923,5 +3931,152 @@ mod tests {
         assert_eq!(parse_search_terms(&search).len(), 50);
         assert_eq!(parse_search_terms(&search)[0], "0");
         assert_eq!(parse_search_terms(&search)[49], "49");
+    }
+}
+
+#[cfg(test)]
+mod registration_tests {
+    use super::reset_device_registration;
+    use axum::http::StatusCode;
+    use sqlx::{PgPool, Row};
+
+    async fn enrolled_device(pool: &PgPool) -> anyhow::Result<i32> {
+        let distribution_id: i32 = sqlx::query_scalar(
+            "INSERT INTO distribution (name, description, architecture)
+             VALUES ('unregister-test', 'test', 'amd64') RETURNING id",
+        )
+        .fetch_one(pool)
+        .await?;
+        let release_id: i32 = sqlx::query_scalar(
+            "INSERT INTO release (distribution_id, version) VALUES ($1, 'test') RETURNING id",
+        )
+        .bind(distribution_id)
+        .fetch_one(pool)
+        .await?;
+        Ok(sqlx::query_scalar(
+            "INSERT INTO device (serial_number, approved, token, release_id,
+                                 target_release_id, target_release_id_set_at, note)
+             VALUES ('unregister-test', true, 'old-token', $1, $1, NOW(), 'keep me')
+             RETURNING id",
+        )
+        .bind(release_id)
+        .fetch_one(pool)
+        .await?)
+    }
+
+    #[sqlx::test]
+    #[ignore = "requires local Postgres with pg_partman; run with --test-threads=1"]
+    async fn reset_clears_enrollment_and_preserves_history(pool: PgPool) -> anyhow::Result<()> {
+        let device_id = enrolled_device(&pool).await?;
+        let user_id: i32 = sqlx::query_scalar(
+            "INSERT INTO auth.users (auth0_user_id, email)
+             VALUES ('unregister-test', 'operator@example.com') RETURNING id",
+        )
+        .fetch_one(&pool)
+        .await?;
+        sqlx::query(
+            "INSERT INTO ledger (device_id, class, text) VALUES ($1, 'note', 'keep history')",
+        )
+        .bind(device_id)
+        .execute(&pool)
+        .await?;
+
+        assert_eq!(
+            reset_device_registration(&pool, "unregister-test", user_id).await,
+            Ok(StatusCode::NO_CONTENT)
+        );
+        let row = sqlx::query(
+            "SELECT approved, token, release_id, target_release_id, target_release_id_set_at, note
+             FROM device WHERE id = $1",
+        )
+        .bind(device_id)
+        .fetch_one(&pool)
+        .await?;
+        assert!(!row.get::<bool, _>("approved"));
+        assert!(row.get::<Option<String>, _>("token").is_none());
+        assert!(row.get::<Option<i32>, _>("release_id").is_none());
+        assert!(row.get::<Option<i32>, _>("target_release_id").is_none());
+        assert!(
+            row.get::<Option<chrono::DateTime<chrono::Utc>>, _>("target_release_id_set_at")
+                .is_none()
+        );
+        assert_eq!(row.get::<String, _>("note"), "keep me");
+        let history: Vec<(String, String)> =
+            sqlx::query_as("SELECT class, text FROM ledger WHERE device_id = $1 ORDER BY id")
+                .bind(device_id)
+                .fetch_all(&pool)
+                .await?;
+        assert_eq!(history.len(), 2);
+        assert_eq!(history[0], ("note".into(), "keep history".into()));
+        assert_eq!(history[1].0, "unregistered");
+        assert!(history[1].1.contains("operator@example.com"));
+
+        // Repeating a reset using the numeric ID is safe, too.
+        assert_eq!(
+            reset_device_registration(&pool, &device_id.to_string(), user_id).await,
+            Ok(StatusCode::NO_CONTENT)
+        );
+        Ok(())
+    }
+
+    #[sqlx::test]
+    #[ignore = "requires local Postgres with pg_partman; run with --test-threads=1"]
+    async fn reset_unknown_device_returns_not_found(pool: PgPool) -> anyhow::Result<()> {
+        assert_eq!(
+            reset_device_registration(&pool, "missing-device", 0).await,
+            Err(StatusCode::NOT_FOUND)
+        );
+        Ok(())
+    }
+
+    #[sqlx::test]
+    #[ignore = "requires local Postgres with pg_partman; run with --test-threads=1"]
+    async fn reset_survives_failed_actor_lookup(pool: PgPool) -> anyhow::Result<()> {
+        let device_id = enrolled_device(&pool).await?;
+        // A failed lookup must not poison the reset's transaction.
+        sqlx::query("ALTER TABLE auth.users RENAME TO unavailable_users")
+            .execute(&pool)
+            .await?;
+        assert_eq!(
+            reset_device_registration(&pool, &device_id.to_string(), 0).await,
+            Ok(StatusCode::NO_CONTENT)
+        );
+        let text: String = sqlx::query_scalar(
+            "SELECT text FROM ledger WHERE device_id = $1 AND class = 'unregistered'",
+        )
+        .bind(device_id)
+        .fetch_one(&pool)
+        .await?;
+        assert!(text.contains("an unknown user"));
+        Ok(())
+    }
+
+    #[sqlx::test]
+    #[ignore = "requires local Postgres with pg_partman; run with --test-threads=1"]
+    async fn reset_rolls_back_when_ledger_write_fails(pool: PgPool) -> anyhow::Result<()> {
+        let device_id = enrolled_device(&pool).await?;
+        sqlx::query("ALTER TABLE ledger RENAME TO unavailable_ledger")
+            .execute(&pool)
+            .await?;
+        assert_eq!(
+            reset_device_registration(&pool, &device_id.to_string(), 0).await,
+            Err(StatusCode::INTERNAL_SERVER_ERROR)
+        );
+        let row = sqlx::query(
+            "SELECT approved, token, release_id, target_release_id, target_release_id_set_at
+             FROM device WHERE id = $1",
+        )
+        .bind(device_id)
+        .fetch_one(&pool)
+        .await?;
+        assert!(row.get::<bool, _>("approved"));
+        assert_eq!(row.get::<String, _>("token"), "old-token");
+        assert!(row.get::<Option<i32>, _>("release_id").is_some());
+        assert!(row.get::<Option<i32>, _>("target_release_id").is_some());
+        assert!(
+            row.get::<Option<chrono::DateTime<chrono::Utc>>, _>("target_release_id_set_at")
+                .is_some()
+        );
+        Ok(())
     }
 }

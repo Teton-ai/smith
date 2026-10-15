@@ -2405,13 +2405,7 @@ async fn main() -> anyhow::Result<()> {
 
                 let api = SmithAPI::new(secrets, &config);
 
-                // Check if no filters are specified
-                let has_filters = !selector.ids.is_empty()
-                    || !selector.labels.is_empty()
-                    || selector.online
-                    || selector.offline;
-
-                if !has_filters {
+                if !selector.has_filters() {
                     eprintln!(
                         "{}",
                         "Error: No device IDs or filters specified.".red().bold()
@@ -2439,8 +2433,31 @@ async fn main() -> anyhow::Result<()> {
                     return Err(anyhow::anyhow!("Aborted: No device selector specified"));
                 }
 
-                // Get target devices
-                let target_devices = resolve_devices_from_selector(&api, &selector).await?;
+                // Exact lookups accept both numeric IDs and serial numbers.
+                let target_devices = if !selector.search && !selector.ids.is_empty() {
+                    let mut devices = Vec::new();
+                    for id in &selector.ids {
+                        let device = api
+                            .get_device(id.clone())
+                            .await
+                            .with_context(|| format!("Failed to fetch device '{id}'"))?;
+                        if (selector.pinned && device.follow_latest)
+                            || (selector.online && !device.online)
+                            || (selector.offline && device.online)
+                            || !selector.labels.iter().all(|label| {
+                                label.split_once('=').is_some_and(|(key, value)| {
+                                    device.labels.get(key).is_some_and(|v| v == value)
+                                })
+                            })
+                        {
+                            continue;
+                        }
+                        devices.push(device);
+                    }
+                    devices
+                } else {
+                    resolve_devices_from_selector(&api, &selector).await?
+                };
 
                 // Deduplicate devices
                 let mut seen_ids = HashSet::new();
@@ -2456,7 +2473,13 @@ async fn main() -> anyhow::Result<()> {
 
                 let enrolled_devices: Vec<_> = target_devices
                     .into_iter()
-                    .filter(|device| device.approved || device.has_token.unwrap_or(false))
+                    .filter(|device| {
+                        device.approved
+                            || device.has_token.unwrap_or(false)
+                            || device.release_id.is_some()
+                            || device.target_release_id.is_some()
+                            || device.target_release_id_set_at.is_some()
+                    })
                     .collect();
 
                 if enrolled_devices.is_empty() {
@@ -2490,7 +2513,7 @@ async fn main() -> anyhow::Result<()> {
 
                 println!(
                     "\n{}",
-                    "Warning: Devices must be approved again after unregistering."
+                    "Warning: Tokens and release assignments will be cleared. Devices must be approved again."
                         .yellow()
                         .bold()
                 );
@@ -2510,6 +2533,7 @@ async fn main() -> anyhow::Result<()> {
 
                 println!("\n{} devices...", "Unregistering".bold());
 
+                let mut failed = 0;
                 for device in &enrolled_devices {
                     let device_id = device.id;
                     let serial_number = &device.serial_number;
@@ -2523,11 +2547,13 @@ async fn main() -> anyhow::Result<()> {
                             );
                         }
                         Err(e) => {
-                            println!("  {} [{}] - Failed: {}", serial_number.red(), device_id, e);
+                            failed += 1;
+                            eprintln!("  {} [{}] - Failed: {}", serial_number.red(), device_id, e);
                         }
                     }
                 }
 
+                anyhow::ensure!(failed == 0, "Failed to unregister {failed} device(s)");
                 println!("\n{}", "Done!".bright_green());
             }
         },

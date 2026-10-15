@@ -115,7 +115,7 @@ const EnrollmentCard = ({
 
 				<div className="mt-4 pt-4 border-t border-gray-100 flex items-start justify-between gap-4">
 					<p className="text-sm text-gray-500">
-						Reset enrollment so this device must register and be approved again.
+						Clear the token and release assignments, and require approval again.
 					</p>
 					<Button
 						variant="solid"
@@ -162,7 +162,8 @@ const EnrollmentCard = ({
 								Unregister {device.serial_number}
 							</p>
 							<p className="text-red-700 text-sm mt-1">
-								The device will go offline and require approval before it can
+								The token and current and target release assignments will be
+								cleared. The device will require approval before it can
 								reconnect.
 							</p>
 						</div>

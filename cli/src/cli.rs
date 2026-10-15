@@ -531,7 +531,9 @@ Examples:
     },
 
     /// Reset device enrollment, sending it back through approval
-    #[command(after_long_help = "Examples:\n  sm unregister ABC123\n  sm unregister ABC123 DEF456 -y")]
+    #[command(
+        after_long_help = "Examples:\n  sm unregister ABC123\n  sm unregister ABC123 DEF456 -y"
+    )]
     Unregister {
         #[command(flatten)]
         selector: DeviceSelector,
