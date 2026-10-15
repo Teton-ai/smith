@@ -1,9 +1,9 @@
 use crate::{api::SmithAPI, auth, commands::os::OsCommands, print::TablePrint};
-use anyhow::Context as _;
+use anyhow::{Context as _, bail};
 use chrono_humanize::HumanTime;
 use clap::{Args, Subcommand};
 use models::{
-    deployment::{DeploymentRequest, DeploymentStatus},
+    deployment::DeploymentRequest,
     distribution::NewDistributionRelease,
     release::{UpdateRelease, VersionBump, next_version},
 };
@@ -22,8 +22,24 @@ pub struct ReleasesGet {
 pub enum ReleasesCommands {
     /// Get releases
     Get(ReleasesGet),
-    /// Draft a new release
-    Draft,
+    /// Draft a new release from the deployed release of a distribution
+    ///
+    /// The draft copies the packages of the deployed release (or of `--from`)
+    /// and swaps in each `--package`. Choices left out are asked
+    /// interactively.
+    #[command(after_long_help = "\
+Examples:
+  sm releases draft
+  sm releases draft --distro 6 --version 1.4.0 --package 812 --package 815
+  sm releases draft --distro 6 --from 140 --version 1.4.0-rc --rc
+")]
+    Draft(ReleasesDraft),
+    /// List the packages of a release
+    Packages {
+        release_number: i32,
+        #[arg(long)]
+        json: bool,
+    },
     /// Publish a release that is in draft
     Publish { release_number: String },
     /// Mark a release as LTS, a version we commit to keeping devices on
@@ -38,22 +54,91 @@ pub enum ReleasesCommands {
         #[clap(subcommand)]
         command: OsCommands,
     },
-    /// Deploy a release
+    /// Deploy a release to its canary devices
+    ///
+    /// Waits until every canary device runs the release, then shows the
+    /// deployment. Roll it out to the fleet with `sm releases confirm`.
     Deploy {
-        release_number: String,
+        release_number: i32,
         /// Customize which devices are canary released,
         /// by filtering devices by labels.
         /// e.g. --labels label1=a --labels label2=b
         #[arg(long, visible_alias = "labels")]
         canary_device_labels: Option<Vec<String>>,
+        /// Return after the deployment starts, without waiting for the canary devices
+        #[arg(long)]
+        nowait: bool,
     },
+    /// Show the deployment of a release: its status, canary devices and their service health
+    Deployment { release_number: i32 },
+    /// Roll a release out to the whole fleet after its canary
+    ///
+    /// Fails while a canary device does not run the release yet.
+    Confirm { release_number: i32 },
+}
+
+#[derive(Args, Debug)]
+pub struct ReleasesDraft {
+    /// Distribution of the release
+    #[arg(long, visible_alias = "distro")]
+    distribution_id: Option<i32>,
+    /// Release to copy the packages from. Defaults to the deployed release
+    #[arg(long, value_name = "RELEASE_ID")]
+    from: Option<i32>,
+    /// Package to put in the release. It replaces the package with the same
+    /// name, or is added when there is none. Can be used multiple times
+    #[arg(long = "package", value_name = "PACKAGE_ID")]
+    packages: Vec<i32>,
+    /// Version of the release
+    #[arg(long)]
+    version: Option<String>,
+    /// Make the release a release candidate. Asked when `--version` is left out
+    #[arg(long)]
+    rc: bool,
 }
 
 impl ReleasesCommands {
     pub async fn handle(self, config: crate::config::Config) -> anyhow::Result<()> {
         match self {
             ReleasesCommands::Get(get) => handle_releases_get(get, config).await?,
-            ReleasesCommands::Draft => draft_release(config).await?,
+            ReleasesCommands::Draft(draft) => draft_release(draft, config).await?,
+            ReleasesCommands::Packages {
+                release_number,
+                json,
+            } => {
+                let api = api(&config).await?;
+                let packages = api.get_release_packages(release_number).await?;
+                if json {
+                    println!("{}", serde_json::to_string_pretty(&packages)?);
+                } else {
+                    let mut table =
+                        TablePrint::new_with_headers(vec!["Id", "Name", "Version", "Created at"]);
+                    for package in packages {
+                        table.add_row(vec![
+                            package.id.to_string(),
+                            package.name,
+                            package.version,
+                            package
+                                .created_at
+                                .map(|t| HumanTime::from(t).to_string())
+                                .unwrap_or_default(),
+                        ]);
+                    }
+                    table.print();
+                }
+            }
+            ReleasesCommands::Deployment { release_number } => {
+                let api = api(&config).await?;
+                print_deployment(&api, release_number).await?;
+            }
+            ReleasesCommands::Confirm { release_number } => {
+                let api = api(&config).await?;
+                let deployment = api.confirm_deployment(release_number).await?;
+                println!(
+                    "Release {release_number} rolls out to the fleet. Deployment status: {}",
+                    deployment.status
+                );
+            }
             ReleasesCommands::Publish { release_number } => {
                 let secrets = auth::get_secrets(&config)
                     .await
@@ -105,75 +190,117 @@ impl ReleasesCommands {
             ReleasesCommands::Deploy {
                 release_number,
                 canary_device_labels,
-            } => deploy_release(release_number, canary_device_labels, config).await?,
+                nowait,
+            } => deploy_release(release_number, canary_device_labels, nowait, config).await?,
         };
 
         Ok(())
     }
 }
 
-async fn deploy_release(
-    release_number: String,
-    canary_device_labels: Option<Vec<String>>,
-    config: crate::config::Config,
-) -> anyhow::Result<()> {
-    let secrets = auth::get_secrets(&config)
+async fn api(config: &crate::config::Config) -> anyhow::Result<SmithAPI> {
+    let secrets = auth::get_secrets(config)
         .await
         .with_context(|| "Error getting token")?
         .with_context(|| "No Token found, please Login")?;
-    let api = SmithAPI::new(secrets, &config);
+    Ok(SmithAPI::new(secrets, config))
+}
 
-    // Start the deployment
+async fn deploy_release(
+    release_number: i32,
+    canary_device_labels: Option<Vec<String>>,
+    nowait: bool,
+    config: crate::config::Config,
+) -> anyhow::Result<()> {
+    let api = api(&config).await?;
+
     api.deploy_release(
-        release_number.clone(),
+        release_number.to_string(),
         canary_device_labels.map(|l| DeploymentRequest {
             canary_device_labels: Some(l),
             canary_device_ids: None,
         }),
     )
     .await?;
+    println!("Deployment of release {release_number} started.");
 
-    // Set up polling parameters
-    let start_time = std::time::Instant::now();
-    let timeout = std::time::Duration::from_secs(5 * 60); // 5 minutes
-    let check_interval = std::time::Duration::from_secs(5); // Check every 5 seconds
-
-    println!("Checking for deployment completion...");
-
-    // Start polling loop
-    loop {
-        // Check if we've exceeded the timeout
-        if start_time.elapsed() > timeout {
-            println!("Deployment timed out after 5 minutes");
-            return Err(anyhow::anyhow!("Deployment timed out after 5 minutes"));
+    if !nowait {
+        // Devices pick up a new target release on their next update cycle.
+        let timeout = std::time::Duration::from_secs(15 * 60);
+        let start = std::time::Instant::now();
+        let mut last_updated = None;
+        loop {
+            let devices = api.get_deployment_devices(release_number).await?;
+            let updated = devices
+                .iter()
+                .filter(|d| d.release_id == Some(release_number))
+                .count();
+            if last_updated != Some(updated) {
+                println!("{updated}/{} canary devices run the release", devices.len());
+                last_updated = Some(updated);
+            }
+            if updated == devices.len() {
+                break;
+            }
+            if start.elapsed() > timeout {
+                println!(
+                    "Not all canary devices updated within {} minutes.",
+                    timeout.as_secs() / 60
+                );
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_secs(10)).await;
         }
-
-        // Check deployment status
-        let deployment = api
-            .deploy_release_check_done(release_number.clone())
-            .await?;
-
-        // Check if the deployment is done
-        let status = deployment.status;
-        println!("Current status: {}", status);
-
-        if status == DeploymentStatus::Done {
-            println!("Deployment completed successfully!");
-            return Ok(());
-        }
-
-        // If status is "failed" or any other terminal state, we can exit early
-        if status == DeploymentStatus::Failed {
-            return Err(anyhow::anyhow!("Deployment failed"));
-        }
-
-        // Wait before the next check
-        println!(
-            "Waiting for devices to update... (elapsed: {:?})",
-            start_time.elapsed()
-        );
-        tokio::time::sleep(check_interval).await;
+        println!();
+        print_deployment(&api, release_number).await?;
     }
+
+    println!(
+        "\nCheck the canary with `sm releases deployment {release_number}`, then roll out with `sm releases confirm {release_number}`."
+    );
+    Ok(())
+}
+
+async fn print_deployment(api: &SmithAPI, release_number: i32) -> anyhow::Result<()> {
+    let deployment = api.get_deployment(release_number).await?;
+    let devices = api.get_deployment_devices(release_number).await?;
+    let health = api.get_deployment_service_health(release_number).await?;
+
+    println!(
+        "Deployment {} of release {release_number}: {}",
+        deployment.id, deployment.status
+    );
+
+    let mut table = TablePrint::new_with_headers(vec![
+        "Serial number",
+        "Release",
+        "Target release",
+        "Services",
+    ]);
+    for device in devices {
+        let services = health
+            .iter()
+            .filter(|h| h.serial_number == device.serial_number)
+            .map(|h| {
+                format!(
+                    "{} {} ({} restarts)",
+                    h.service_name, h.active_state, h.n_restarts
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
+        table.add_row(vec![
+            device.serial_number,
+            device.release_id.map(|r| r.to_string()).unwrap_or_default(),
+            device
+                .target_release_id
+                .map(|r| r.to_string())
+                .unwrap_or_default(),
+            services,
+        ]);
+    }
+    table.print();
+    Ok(())
 }
 
 async fn handle_releases_get(
@@ -254,50 +381,110 @@ async fn handle_releases_get(
     Ok(())
 }
 
-async fn draft_release(config: crate::config::Config) -> anyhow::Result<()> {
-    let secrets = auth::get_secrets(&config)
-        .await
-        .with_context(|| "Error getting token")?
-        .with_context(|| "No Token found, please Login")?;
-    let api = SmithAPI::new(secrets, &config);
+async fn draft_release(draft: ReleasesDraft, config: crate::config::Config) -> anyhow::Result<()> {
+    let api = api(&config).await?;
 
-    cliclack::intro("Draft New Release")?;
-    let spinner = cliclack::spinner();
+    let distro_id = match draft.distribution_id {
+        Some(id) => id,
+        None => {
+            let distros = api.get_distributions().await?;
+            let mut distro_selecter = cliclack::select("Choose distro");
+            for distro in distros.iter() {
+                distro_selecter = distro_selecter.item(
+                    distro.id,
+                    format!("{} ({})", distro.name, distro.architecture),
+                    distro.description.clone().unwrap_or_default(),
+                );
+            }
+            distro_selecter.interact()?
+        }
+    };
 
-    spinner.start("Getting distributions");
-    let distros = api.get_distributions().await?;
-    spinner.stop("Distributions fetched");
-
-    let mut distro_selecter = cliclack::select("Choose distro");
-    for distro in distros.iter() {
-        distro_selecter = distro_selecter.item(
-            distro.id,
-            format!("{} ({})", distro.name, distro.architecture),
-            distro.description.clone().unwrap_or_default(),
+    let base = match draft.from {
+        Some(id) => api.get_release_info(id.to_string()).await?,
+        None => api
+            .get_latest_distribution_release(distro_id)
+            .await
+            .context("No deployed release in this distribution, choose one with --from")?,
+    };
+    if base.distribution_id != distro_id {
+        bail!(
+            "Release {} belongs to distribution {}, not {distro_id}",
+            base.id,
+            base.distribution_id
         );
     }
-    let distro_id = distro_selecter.interact()?;
 
-    let distro = distros
-        .iter()
-        .find(|distro| distro.id == distro_id)
-        .unwrap();
+    let (version, release_candidate) = match draft.version {
+        Some(version) => (version, draft.rc),
+        None => choose_version(&base.version)?,
+    };
 
-    let spinner = cliclack::spinner();
-    spinner.start("Fetching previous releases");
-    let releases = api.get_distribution_releases(distro_id).await?;
-    let latest_release = releases.first().context("Could not find latest release")?;
-    spinner.stop("Previous releases fetched");
-    let current_version = &latest_release.version;
+    let mut packages = api.get_release_packages(base.id).await?;
+    let mut changes = Vec::new();
+    if !draft.packages.is_empty() {
+        let mut all_packages = api.get_packages().await?;
+        for package_id in draft.packages {
+            let index = all_packages
+                .iter()
+                .position(|p| p.id == package_id)
+                .with_context(|| format!("Package {package_id} not found"))?;
+            let new = all_packages.swap_remove(index);
+            let (name, new_version) = (new.name.clone(), new.version.clone());
+            let old_version = match packages.iter_mut().find(|p| p.name == new.name) {
+                Some(slot) => Some(std::mem::replace(slot, new).version),
+                None => {
+                    packages.push(new);
+                    None
+                }
+            };
+            changes.push((name, old_version, new_version));
+        }
+    }
 
+    let new_release_id = api
+        .create_distribution_release(
+            distro_id,
+            NewDistributionRelease {
+                version: version.clone(),
+                packages: packages.iter().map(|p| p.id).collect(),
+                release_candidate,
+            },
+        )
+        .await?;
+
+    println!(
+        "Draft release {new_release_id} ({version}) created from release {} ({}).",
+        base.id, base.version
+    );
+    if changes.is_empty() {
+        println!("Packages are the same as in release {}.", base.id);
+    } else {
+        let mut table = TablePrint::new_with_headers(vec!["Package", "From", "To"]);
+        for (name, old_version, new_version) in changes {
+            table.add_row(vec![
+                name,
+                old_version.unwrap_or_else(|| "(added)".to_string()),
+                new_version,
+            ]);
+        }
+        table.print();
+    }
+    println!("Publish it with `sm releases publish {new_release_id}`.");
+
+    Ok(())
+}
+
+/// Asks for the semver bump from `current` and whether the release is an RC.
+fn choose_version(current: &str) -> anyhow::Result<(String, bool)> {
     let bump = |kind| {
-        next_version(current_version, kind)
-            .with_context(|| format!("Latest release version {current_version} is not semver"))
+        next_version(current, kind)
+            .with_context(|| format!("Release version {current} is not semver"))
     };
     let new_patch = bump(VersionBump::Patch)?;
     let new_minor = bump(VersionBump::Minor)?;
     let new_major = bump(VersionBump::Major)?;
-    let mut version = cliclack::select(format!("Choose version. Current: {current_version}"))
+    let version = cliclack::select(format!("Choose version. Current: {current}"))
         .item(
             new_patch.to_string(),
             format!("{new_patch} (PATCH)"),
@@ -320,25 +507,8 @@ async fn draft_release(config: crate::config::Config) -> anyhow::Result<()> {
         .item(true, "Yes", "")
         .interact()?;
     if as_rc {
-        version = format!("{version}-rc");
-    };
-
-    let spinner = cliclack::spinner();
-    spinner.start("Creating release");
-    let packages = api.get_release_packages(latest_release.id).await?;
-
-    let new_release_id = api
-        .create_distribution_release(
-            distro.id,
-            NewDistributionRelease {
-                version,
-                packages: packages.into_iter().map(|p| p.id).collect(),
-                release_candidate: as_rc,
-            },
-        )
-        .await?;
-
-    spinner.stop(format!("Release created. New release id {new_release_id}"));
-
-    Ok(())
+        Ok((format!("{version}-rc"), true))
+    } else {
+        Ok((version, false))
+    }
 }

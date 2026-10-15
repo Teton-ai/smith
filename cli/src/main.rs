@@ -1530,18 +1530,25 @@ async fn main() -> anyhow::Result<()> {
 
                 let api = SmithAPI::new(secrets, &config);
 
-                let device = resolve_single_device_from_selector(&api, &selector, "logs").await?;
-                let serial_number = device.serial_number.clone();
-
-                let logs =
-                    execute_device_command(&api, serial_number, "Fetching logs", nowait, |id| {
-                        api.send_logs_command(id, unit, since, until, grep)
-                    })
-                    .await?;
-
-                if !logs.is_empty() {
-                    println!("{}", logs);
+                if !selector.has_filters() {
+                    bail!("No devices specified. Give device IDs or filters such as `-l`");
                 }
+                let devices = resolve_devices_from_selector(&api, &selector).await?;
+                if devices.is_empty() {
+                    bail!("No device found matching the selector");
+                }
+
+                let command = schema::SafeCommandRequest {
+                    id: 0,
+                    command: schema::SafeCommandTx::GetLogs {
+                        unit,
+                        since,
+                        until,
+                        grep,
+                    },
+                    continue_on_error: false,
+                };
+                issue_bundle(&api, &devices, vec![command], !nowait).await?;
             }
             Commands::TestNetwork { command } => {
                 let secrets = auth::get_secrets(&config)
