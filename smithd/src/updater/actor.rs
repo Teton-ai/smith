@@ -589,9 +589,15 @@ impl Actor {
         // on new devices
         match self.magic.get_release_id().await {
             Ok(current_release_id) => {
-                self.ensure_release_cache(current_release_id)
-                    .await
-                    .with_context(|| "Failed to ensure current release cache")?;
+                // The current release is already installed, so a blob it cannot
+                // cache must not block the move to the target release.
+                if let Err(err) = self.ensure_release_cache(current_release_id).await {
+                    warn!(
+                        error = ?err,
+                        current_release_id,
+                        "Failed to ensure current release cache"
+                    );
+                }
             }
             Err(err) => {
                 warn!(
