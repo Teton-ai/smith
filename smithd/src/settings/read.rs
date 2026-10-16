@@ -1,6 +1,13 @@
 use crate::utils::schema::{DeviceSetting, SettingsReport};
 use anyhow::{Context, Result, anyhow, bail};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
+use tokio::time::Instant;
+use tracing::{debug, warn};
+use zbus::Connection;
+use zbus::proxy::CacheProperties;
+use zbus::zvariant::{OwnedObjectPath, OwnedValue};
 
 const SYS_CLASS_NET: &str = "/sys/class/net";
 const VENDOR_MODULE: &str = "rtl8822ce";
@@ -475,6 +482,410 @@ impl NmConfigReader {
     }
 }
 
+pub const NTP_FIELDS: [DeviceSetting; 5] = [
+    DeviceSetting::NtpServers,
+    DeviceSetting::NtpLinkServers,
+    DeviceSetting::NtpFallbackServers,
+    DeviceSetting::NtpServerInUse,
+    DeviceSetting::NtpSynchronized,
+];
+
+#[zbus::proxy(
+    interface = "fi.w1.wpa_supplicant1",
+    default_service = "fi.w1.wpa_supplicant1",
+    default_path = "/fi/w1/wpa_supplicant1"
+)]
+trait WpaSupplicant {
+    #[zbus(property)]
+    fn interfaces(&self) -> zbus::Result<Vec<OwnedObjectPath>>;
+}
+
+#[zbus::proxy(
+    interface = "fi.w1.wpa_supplicant1.Interface",
+    default_service = "fi.w1.wpa_supplicant1"
+)]
+trait WpaInterface {
+    #[zbus(property)]
+    fn current_network(&self) -> zbus::Result<OwnedObjectPath>;
+}
+
+#[zbus::proxy(
+    interface = "fi.w1.wpa_supplicant1.Network",
+    default_service = "fi.w1.wpa_supplicant1"
+)]
+trait WpaNetwork {
+    #[zbus(property)]
+    fn properties(&self) -> zbus::Result<HashMap<String, OwnedValue>>;
+}
+
+#[zbus::proxy(
+    interface = "org.freedesktop.timesync1.Manager",
+    default_service = "org.freedesktop.timesync1",
+    default_path = "/org/freedesktop/timesync1"
+)]
+trait Timesync {
+    #[zbus(property, name = "SystemNTPServers")]
+    fn system_ntp_servers(&self) -> zbus::Result<Vec<String>>;
+    #[zbus(property, name = "LinkNTPServers")]
+    fn link_ntp_servers(&self) -> zbus::Result<Vec<String>>;
+    #[zbus(property, name = "FallbackNTPServers")]
+    fn fallback_ntp_servers(&self) -> zbus::Result<Vec<String>>;
+    #[zbus(property)]
+    fn server_name(&self) -> zbus::Result<String>;
+}
+
+#[zbus::proxy(
+    interface = "org.freedesktop.timedate1",
+    default_service = "org.freedesktop.timedate1",
+    default_path = "/org/freedesktop/timedate1"
+)]
+trait Timedate {
+    #[zbus(property, name = "NTPSynchronized")]
+    fn ntp_synchronized(&self) -> zbus::Result<bool>;
+}
+
+/// wpa_supplicant returns string network properties in config syntax, quoted.
+pub fn unquote(value: &str) -> &str {
+    value
+        .strip_prefix('"')
+        .and_then(|v| v.strip_suffix('"'))
+        .unwrap_or(value)
+}
+
+/// bgscan of the network wpa_supplicant is connected to, on any interface.
+/// `None` when no interface is connected (e.g. a device on Ethernet) or the
+/// network has no bgscan set.
+async fn read_bgscan(conn: &Connection) -> Result<Option<String>> {
+    let supplicant = WpaSupplicantProxy::builder(conn)
+        .cache_properties(CacheProperties::No)
+        .build()
+        .await?;
+    for path in supplicant.interfaces().await? {
+        let interface = WpaInterfaceProxy::builder(conn)
+            .path(path)?
+            .cache_properties(CacheProperties::No)
+            .build()
+            .await?;
+        let network = interface.current_network().await?;
+        if network.as_str() == "/" {
+            continue;
+        }
+        let network = WpaNetworkProxy::builder(conn)
+            .path(network)?
+            .cache_properties(CacheProperties::No)
+            .build()
+            .await?;
+        let properties = network.properties().await?;
+        return Ok(match properties.get("bgscan") {
+            Some(value) => {
+                let value = String::try_from(value.try_clone()?)?;
+                Some(unquote(&value).to_owned()).filter(|v| !v.is_empty())
+            }
+            None => None,
+        });
+    }
+    Ok(None)
+}
+
+/// Server names from chrony `server` / `pool` lines; other directives are
+/// ignored.
+pub fn parse_chrony_sources(text: &str) -> Vec<String> {
+    text.lines()
+        .map(str::trim)
+        .filter(|line| !line.starts_with('#') && !line.starts_with('!'))
+        .filter_map(|line| {
+            let mut words = line.split_whitespace();
+            match words.next() {
+                Some("server" | "pool") => words.next().map(str::to_owned),
+                _ => None,
+            }
+        })
+        .collect()
+}
+
+/// Address from the `Reference ID` line of `chronyc -n tracking`; `None` when
+/// chrony has no reference yet (empty parentheses).
+pub fn parse_chrony_tracking(text: &str) -> Result<Option<String>> {
+    let line = text
+        .lines()
+        .find(|l| l.trim_start().starts_with("Reference ID"))
+        .ok_or_else(|| anyhow!("no Reference ID in chronyc tracking"))?;
+    let inner = line
+        .split_once('(')
+        .and_then(|(_, rest)| rest.split_once(')'))
+        .map(|(inner, _)| inner.trim())
+        .ok_or_else(|| anyhow!("unexpected Reference ID line {line:?}"))?;
+    Ok(Some(inner.to_owned()).filter(|s| !s.is_empty()))
+}
+
+/// Country of the Wi-Fi phy's own regulatory domain when `iw reg get` lists
+/// one (self-managed drivers), else the global one.
+pub fn parse_iw_reg(text: &str, phy: Option<&str>) -> Result<String> {
+    let wanted = phy
+        .and_then(|p| p.strip_prefix("phy"))
+        .map(|n| format!("phy#{n}"));
+    let mut block = String::new();
+    let mut global = None;
+    let mut ours = None;
+    for line in text.lines() {
+        let trimmed = line.trim();
+        if trimmed == "global" || trimmed.starts_with("phy#") {
+            block = trimmed
+                .split_whitespace()
+                .next()
+                .unwrap_or_default()
+                .to_owned();
+        } else if let Some(rest) = trimmed.strip_prefix("country ") {
+            let code = rest.split(':').next().unwrap_or_default();
+            if block == "global" {
+                global = Some(code.to_owned());
+            } else if wanted.as_deref() == Some(block.as_str()) {
+                ours = Some(code.to_owned());
+            }
+        }
+    }
+    let code = ours
+        .or(global)
+        .ok_or_else(|| anyhow!("no country in iw reg get"))?;
+    parse_country_code(&code)
+}
+
+async fn run(program: &str, args: &[&str]) -> Result<String> {
+    let output = tokio::time::timeout(
+        Duration::from_secs(5),
+        tokio::process::Command::new(program).args(args).output(),
+    )
+    .await
+    .with_context(|| format!("{program} timed out"))?
+    .with_context(|| format!("running {program}"))?;
+    if !output.status.success() {
+        bail!("{program} exited with {}", output.status);
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
+fn read_sources_dir(dir: &Path, extension: &str) -> Vec<String> {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    let mut files: Vec<PathBuf> = entries
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.extension().is_some_and(|e| e == extension))
+        .collect();
+    files.sort();
+    files
+        .iter()
+        .filter_map(|f| std::fs::read_to_string(f).ok())
+        .flat_map(|text| parse_chrony_sources(&text))
+        .collect()
+}
+
+const CHRONY_TRACKING_EVERY: Duration = Duration::from_secs(5 * 60);
+
+/// Reads every setting. Holds the caches that keep process spawns rare.
+#[derive(Default)]
+pub struct SettingsReader {
+    driver_paths: DriverPaths,
+    nm: NmConfigReader,
+    conn: Option<Connection>,
+    chrony_tracking: Option<(Instant, Option<String>)>,
+    iw_country: Option<((String, String), String)>,
+}
+
+/// One full read. `vendor_present` feeds the reload hold in the actor.
+pub struct Reading {
+    pub report: SettingsReport,
+    pub vendor_present: bool,
+}
+
+impl SettingsReader {
+    async fn connection(&mut self) -> Result<Connection> {
+        if let Some(conn) = &self.conn {
+            return Ok(conn.clone());
+        }
+        let conn = Connection::system().await?;
+        self.conn = Some(conn.clone());
+        Ok(conn)
+    }
+
+    pub async fn read(&mut self, check_interval_s: i32) -> Reading {
+        let mut report = SettingsReport {
+            check_interval_s: Some(check_interval_s),
+            ..Default::default()
+        };
+        let driver = read_driver(&self.driver_paths, &mut report);
+        let wifi = wifi_interfaces(&self.driver_paths.net).into_iter().next();
+
+        match driver.country_code {
+            Some(Ok(code)) => report.country_code = Some(code),
+            Some(Err(err)) => {
+                warn!("settings: vendor country code: {err:#}");
+                report.read_errors.push(DeviceSetting::CountryCode);
+            }
+            None => match self.iw_country(wifi.as_ref()).await {
+                Ok(code) => report.country_code = Some(code),
+                Err(err) => {
+                    debug!("settings: country code: {err:#}");
+                    report.read_errors.push(DeviceSetting::CountryCode);
+                }
+            },
+        }
+
+        match self.nm.read(wifi.as_ref()).await {
+            Ok(nm) => {
+                report.nm_wifi_powersave = Some(nm.wifi_powersave);
+                report.nm_autoconnect_retries = Some(nm.autoconnect_retries);
+                report.nm_cloned_mac = Some(nm.cloned_mac);
+                report.nm_scan_rand_mac = Some(nm.scan_rand_mac);
+            }
+            Err(err) => {
+                warn!("settings: NetworkManager config: {err:#}");
+                report.read_errors.extend(NM_FIELDS);
+            }
+        }
+
+        match std::fs::read_to_string("/etc/hostname") {
+            Ok(name) if !name.trim().is_empty() => report.hostname = Some(name.trim().to_owned()),
+            Ok(_) => report.read_errors.push(DeviceSetting::Hostname),
+            Err(err) => {
+                warn!("settings: /etc/hostname: {err}");
+                report.read_errors.push(DeviceSetting::Hostname);
+            }
+        }
+
+        match self.connection().await {
+            Ok(conn) => {
+                match read_bgscan(&conn).await {
+                    Ok(bgscan) => report.bgscan = bgscan,
+                    Err(err) => {
+                        warn!("settings: bgscan: {err:#}");
+                        report.read_errors.push(DeviceSetting::Bgscan);
+                    }
+                }
+                self.read_ntp(&conn, &mut report).await;
+            }
+            Err(err) => {
+                warn!("settings: system D-Bus: {err:#}");
+                self.conn = None;
+                report.read_errors.push(DeviceSetting::Bgscan);
+                report.read_errors.extend(NTP_FIELDS);
+            }
+        }
+
+        Reading {
+            report,
+            vendor_present: driver.vendor_present,
+        }
+    }
+
+    /// Spawns `iw` only when the Wi-Fi interface changed (name or ifindex).
+    async fn iw_country(&mut self, wifi: Option<&WifiInterface>) -> Result<String> {
+        let wifi = wifi.ok_or_else(|| anyhow!("no Wi-Fi interface"))?;
+        let iface = self.driver_paths.net.join(&wifi.name);
+        let ifindex = std::fs::read_to_string(iface.join("ifindex")).unwrap_or_default();
+        let key = (wifi.name.clone(), ifindex.trim().to_owned());
+        if let Some((cached_key, code)) = &self.iw_country
+            && *cached_key == key
+        {
+            return Ok(code.clone());
+        }
+        let phy = link_name(&iface.join("phy80211"));
+        let code = parse_iw_reg(&run("iw", &["reg", "get"]).await?, phy.as_deref())?;
+        self.iw_country = Some((key, code.clone()));
+        Ok(code)
+    }
+
+    async fn read_ntp(&mut self, conn: &Connection, report: &mut SettingsReport) {
+        match TimedateProxy::builder(conn)
+            .cache_properties(CacheProperties::No)
+            .build()
+            .await
+        {
+            Ok(timedate) => match timedate.ntp_synchronized().await {
+                Ok(synced) => report.ntp_synchronized = Some(synced),
+                Err(err) => {
+                    warn!("settings: NTPSynchronized: {err}");
+                    report.read_errors.push(DeviceSetting::NtpSynchronized);
+                }
+            },
+            Err(err) => {
+                warn!("settings: timedate1 proxy: {err}");
+                report.read_errors.push(DeviceSetting::NtpSynchronized);
+            }
+        }
+
+        // NameHasOwner never bus-activates timesyncd, which must not start
+        // next to chrony.
+        let timesyncd_running = async {
+            let dbus = zbus::fdo::DBusProxy::new(conn).await?;
+            let name = zbus::names::BusName::try_from("org.freedesktop.timesync1")?;
+            Ok::<bool, anyhow::Error>(dbus.name_has_owner(name).await?)
+        }
+        .await;
+        let lists = [
+            DeviceSetting::NtpServers,
+            DeviceSetting::NtpLinkServers,
+            DeviceSetting::NtpFallbackServers,
+            DeviceSetting::NtpServerInUse,
+        ];
+        match timesyncd_running {
+            Ok(true) => {
+                if let Err(err) = read_timesyncd(conn, report).await {
+                    warn!("settings: timesyncd: {err:#}");
+                    report.read_errors.extend(lists);
+                }
+            }
+            Ok(false) => {
+                if let Err(err) = self.read_chrony(report).await {
+                    warn!("settings: chrony: {err:#}");
+                    report.read_errors.extend(lists);
+                }
+            }
+            Err(err) => {
+                warn!("settings: NameHasOwner: {err:#}");
+                report.read_errors.extend(lists);
+            }
+        }
+    }
+
+    async fn read_chrony(&mut self, report: &mut SettingsReport) -> Result<()> {
+        let in_use = match &self.chrony_tracking {
+            Some((at, in_use)) if at.elapsed() < CHRONY_TRACKING_EVERY => in_use.clone(),
+            _ => {
+                let in_use = parse_chrony_tracking(&run("chronyc", &["-n", "tracking"]).await?)?;
+                self.chrony_tracking = Some((Instant::now(), in_use.clone()));
+                in_use
+            }
+        };
+        let mut servers = parse_chrony_sources(
+            &std::fs::read_to_string("/etc/chrony/chrony.conf")
+                .context("reading /etc/chrony/chrony.conf")?,
+        );
+        servers.extend(read_sources_dir(Path::new("/etc/chrony/conf.d"), "conf"));
+        servers.extend(read_sources_dir(
+            Path::new("/etc/chrony/sources.d"),
+            "sources",
+        ));
+        report.ntp_servers = Some(servers);
+        report.ntp_link_servers = Some(read_sources_dir(Path::new("/run/chrony-dhcp"), "sources"));
+        report.ntp_server_in_use = in_use;
+        Ok(())
+    }
+}
+
+async fn read_timesyncd(conn: &Connection, report: &mut SettingsReport) -> Result<()> {
+    let timesync = TimesyncProxy::builder(conn)
+        .cache_properties(CacheProperties::No)
+        .build()
+        .await?;
+    report.ntp_servers = Some(timesync.system_ntp_servers().await?);
+    report.ntp_link_servers = Some(timesync.link_ntp_servers().await?);
+    report.ntp_fallback_servers = Some(timesync.fallback_ntp_servers().await?);
+    report.ntp_server_in_use = Some(timesync.server_name().await?).filter(|s| !s.is_empty());
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -716,5 +1127,61 @@ mod tests {
         std::fs::write(conf_dir.join("b.conf"), "[connection]\n").unwrap();
         reader.read(None).await.unwrap();
         assert_eq!(runs(), 2);
+    }
+
+    #[test]
+    fn bgscan_is_unquoted() {
+        assert_eq!(unquote("\"simple:30:-70:86400\""), "simple:30:-70:86400");
+        assert_eq!(unquote("simple:30:-65:300"), "simple:30:-65:300");
+    }
+
+    #[test]
+    fn chrony_fixtures() {
+        let conf = include_str!("../utils/fixtures/settings/chrony_conf_platform_c.txt");
+        assert_eq!(
+            parse_chrony_sources(conf),
+            vec![
+                "ntp.ubuntu.com",
+                "0.ubuntu.pool.ntp.org",
+                "1.ubuntu.pool.ntp.org",
+                "2.ubuntu.pool.ntp.org"
+            ]
+        );
+        let cameras =
+            include_str!("../utils/fixtures/settings/chrony_conf_d_cameras_platform_c.txt");
+        assert!(parse_chrony_sources(cameras).is_empty());
+
+        let tracking = include_str!("../utils/fixtures/settings/chronyc_tracking_platform_c.txt");
+        assert_eq!(
+            parse_chrony_tracking(tracking).unwrap().as_deref(),
+            Some("80.248.138.19")
+        );
+        assert_eq!(
+            parse_chrony_tracking("Reference ID    : 00000000 ()\n").unwrap(),
+            None
+        );
+        assert!(parse_chrony_tracking("506 Cannot talk to daemon\n").is_err());
+    }
+
+    #[test]
+    fn iw_reg_prefers_the_phy_domain() {
+        let c = include_str!("../utils/fixtures/settings/iw_reg_get_platform_c.txt");
+        assert_eq!(parse_iw_reg(c, Some("phy0")).unwrap(), "DE");
+
+        let both = "global\ncountry DE: DFS-ETSI\n\tx\n\nphy#1 (self-managed)\ncountry 00: DFS-UNSET\n\ny\n\nphy#0 (self-managed)\ncountry US: DFS-FCC\n";
+        assert_eq!(parse_iw_reg(both, Some("phy0")).unwrap(), "US");
+        assert_eq!(parse_iw_reg(both, Some("phy7")).unwrap(), "DE");
+        assert!(parse_iw_reg("", None).is_err());
+    }
+
+    /// Reads the machine running the tests: `cargo test -- --ignored read_this_host --nocapture`.
+    #[tokio::test]
+    #[ignore]
+    async fn read_this_host() {
+        let reading = SettingsReader::default().read(60).await;
+        println!(
+            "vendor_present={} {:#?}",
+            reading.vendor_present, reading.report
+        );
     }
 }

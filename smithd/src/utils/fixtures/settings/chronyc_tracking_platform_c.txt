@@ -1,0 +1,13 @@
+Reference ID    : 50F88A13 (80.248.138.19)
+Stratum         : 2
+Ref time (UTC)  : Fri Oct 16 09:43:54 2026
+System time     : 0.000142211 seconds slow of NTP time
+Last offset     : -0.000128978 seconds
+RMS offset      : 0.001079504 seconds
+Frequency       : 25.444 ppm slow
+Residual freq   : -0.047 ppm
+Skew            : 1.695 ppm
+Root delay      : 0.003172011 seconds
+Root dispersion : 0.000208494 seconds
+Update interval : 65.3 seconds
+Leap status     : Normal
