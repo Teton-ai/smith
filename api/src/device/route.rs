@@ -266,7 +266,12 @@ pub async fn get_devices(
           AND (CARDINALITY($10::text[]) = 0 OR EXISTS (
               SELECT 1 FROM unnest($10::text[]) AS term
               WHERE POSITION(LOWER(term) IN LOWER(d.serial_number)) > 0
-                 OR POSITION(LOWER(term) IN LOWER(COALESCE(d.system_info->>'hostname', ''))) > 0
+                 -- The settings report holds the hostname; system_info is the
+                 -- fallback for devices on a smithd without settings reporting.
+                 OR POSITION(LOWER(term) IN LOWER(COALESCE(
+                        (SELECT dsr.hostname FROM device_settings_reported dsr WHERE dsr.device_id = d.id),
+                        d.system_info->>'hostname',
+                        ''))) > 0
                  OR POSITION(LOWER(term) IN LOWER(COALESCE(d.system_info->'device_tree'->>'model', ''))) > 0
           ))
           AND ($11::int IS NULL OR d.release_id = $11)
