@@ -15,6 +15,7 @@ import { useConfig } from "@/app/hooks/config";
 interface LogViewerProps {
 	deviceSerial: string;
 	serviceName: string;
+	showRaw?: boolean;
 	onStatusChange?: (
 		status: "connecting" | "connected" | "disconnected",
 	) => void;
@@ -132,7 +133,7 @@ const LogRow = memo(({ line }: { line: LogLine }) => (
 	<div
 		className={`grid grid-cols-[12ch_5ch_minmax(0,1fr)] gap-x-3 px-3 ${LEVEL_STYLES[line.level]}`}
 	>
-		<span className="tabular-nums text-gray-500">
+		<span className="whitespace-nowrap tabular-nums text-gray-500">
 			{!line.continuation && line.time}
 		</span>
 		<span className="font-medium">{line.label}</span>
@@ -146,6 +147,7 @@ const LogRow = memo(({ line }: { line: LogLine }) => (
 const LogViewer = ({
 	deviceSerial,
 	serviceName,
+	showRaw = false,
 	onStatusChange,
 }: LogViewerProps) => {
 	const { getAccessTokenSilently } = useAuth0();
@@ -321,7 +323,7 @@ const LogViewer = ({
 		pendingLines.current = 0;
 		if (pinned) el.scrollTop = el.scrollHeight;
 		else if (added > 0) setUnseen((n) => n + added);
-	}, [logs]);
+	}, [logs, showRaw]);
 
 	useEffect(() => {
 		if (onStatusChange) {
@@ -360,7 +362,18 @@ const LogViewer = ({
 				className={`bg-gray-900 py-3 font-mono text-[12px] leading-[1.45] text-gray-100 overflow-auto h-[32rem] rounded-lg ${error ? "pb-12" : ""}`}
 			>
 				{logs.length > 0 ? (
-					logs.map((line) => <LogRow key={line.id} line={line} />)
+					logs.map((line) =>
+						showRaw ? (
+							<div
+								key={line.id}
+								className="min-h-[1.45em] px-3 whitespace-pre-wrap break-words"
+							>
+								{line.raw}
+							</div>
+						) : (
+							<LogRow key={line.id} line={line} />
+						),
+					)
 				) : (
 					<div className="px-3 text-gray-500">Waiting for logs…</div>
 				)}

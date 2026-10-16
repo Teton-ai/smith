@@ -1,5 +1,5 @@
-import { Card, ListRow } from "@teton/smith-ui";
-import { FileText, Play, Radio, X } from "lucide-react";
+import { Button, Card, ListRow } from "@teton/smith-ui";
+import { Code2, FileText, Play, Radio, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useParams, useSearchParams } from "react-router";
 import { useGetDeviceInfo } from "@/app/api-client";
@@ -19,6 +19,7 @@ const ServicesPage = () => {
 	const [selectedService, setSelectedService] = useState<string | null>(
 		searchParams.get("service"),
 	);
+	const [showRawLogs, setShowRawLogs] = useState(false);
 	const [connectionStatus, setConnectionStatus] = useState<
 		"connecting" | "connected" | "disconnected"
 	>("connecting");
@@ -26,6 +27,7 @@ const ServicesPage = () => {
 	useEffect(() => {
 		const fromUrl = searchParams.get("service");
 		if (fromUrl && fromUrl !== selectedService) {
+			setShowRawLogs(false);
 			setConnectionStatus("connecting");
 			setSelectedService(fromUrl);
 		}
@@ -34,6 +36,8 @@ const ServicesPage = () => {
 	const loading = deviceLoading || servicesLoading;
 
 	const handleSelectService = (serviceName: string) => {
+		if (serviceName === selectedService) return;
+		setShowRawLogs(false);
 		setConnectionStatus("connecting");
 		setSelectedService(serviceName);
 		const next = new URLSearchParams(searchParams);
@@ -141,17 +145,30 @@ const ServicesPage = () => {
 												{selectedService}
 											</span>
 										</div>
-										<button
-											onClick={handleCloseLogs}
-											className="p-1 text-gray-400 hover:text-gray-600 hover:bg-gray-200 rounded transition-colors cursor-pointer"
-										>
-											<X className="w-4 h-4" />
-										</button>
+										<div className="flex items-center gap-3">
+											<Button
+												variant={showRawLogs ? "solid" : "soft"}
+												tone="gray"
+												size="sm"
+												icon={<Code2 className="w-3.5 h-3.5" />}
+												pressed={showRawLogs}
+												onClick={() => setShowRawLogs((raw) => !raw)}
+											>
+												Raw logs
+											</Button>
+											<button
+												onClick={handleCloseLogs}
+												className="p-1 text-gray-400 hover:text-gray-600 hover:bg-gray-200 rounded transition-colors cursor-pointer"
+											>
+												<X className="w-4 h-4" />
+											</button>
+										</div>
 									</div>
 									<LogViewer
 										key={selectedService}
 										deviceSerial={serial}
 										serviceName={selectedService}
+										showRaw={showRawLogs}
 										onStatusChange={setConnectionStatus}
 									/>
 								</>
