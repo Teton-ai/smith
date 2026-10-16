@@ -1,4 +1,5 @@
 import {
+	Button,
 	Card,
 	CountryFlag,
 	InfoRow,
@@ -6,11 +7,25 @@ import {
 	Panel,
 	SECTION_THEMES,
 } from "@teton/smith-ui";
-import { GitBranch, Globe, MapPin, Tag, Tags } from "lucide-react";
+import {
+	Clock,
+	GitBranch,
+	Globe,
+	MapPin,
+	RefreshCw,
+	Tag,
+	Tags,
+} from "lucide-react";
 import { lazy, Suspense } from "react";
 import { Link, useParams } from "react-router";
-import { useGetDeviceInfo } from "@/app/api-client";
+import { type Device, useGetDeviceInfo } from "@/app/api-client";
+import { RelativeTime } from "@/app/components/RelativeTime";
 import { DeviceDetailLayout } from "../DeviceDetailLayout";
+import {
+	SettingValue,
+	useDeviceSettings,
+	useRefreshDeviceSettings,
+} from "../NetworkSettingsPanel";
 
 const LocationMap = lazy(() => import("../LocationMap"));
 
@@ -19,6 +34,102 @@ const MapFallback = () => (
 		Loading map...
 	</div>
 );
+
+const ServerList = ({ servers }: { servers?: string[] }) =>
+	servers && servers.length > 0 ? (
+		<span className="flex flex-col items-end font-mono text-xs">
+			{servers.map((server) => (
+				<span key={server}>{server}</span>
+			))}
+		</span>
+	) : (
+		<span className="text-gray-400">None</span>
+	);
+
+/** Hostname and time sync as the device reports them (settings report). */
+const TimeAndIdentityPanel = ({
+	serial,
+	device,
+}: {
+	serial: string;
+	device: Device;
+}) => {
+	const { data: settings, isLoading, refetch } = useDeviceSettings(serial);
+	const { refresh, isPending } = useRefreshDeviceSettings(device, refetch);
+	const r = settings?.reported;
+
+	return (
+		<Panel
+			title="Time and identity"
+			icon={Clock}
+			theme={SECTION_THEMES.blue}
+			actions={
+				<div className="flex items-center gap-2">
+					{r && (
+						<span className="text-xs text-gray-500">
+							Reported <RelativeTime date={r.reported_at} />
+						</span>
+					)}
+					<Button
+						variant="soft"
+						tone="gray"
+						size="sm"
+						loading={isPending}
+						onClick={refresh}
+						icon={<RefreshCw className="w-3.5 h-3.5" />}
+					>
+						Refresh
+					</Button>
+				</div>
+			}
+		>
+			{isLoading || !settings ? (
+				<div className="h-4 animate-pulse rounded bg-gray-100" />
+			) : !r ? (
+				<p className="text-sm text-gray-500">
+					Not reported. The device needs a smithd version that reports its
+					settings.
+				</p>
+			) : (
+				<div className="space-y-3">
+					<InfoRow label="Hostname">
+						<SettingValue settings={settings} field="hostname">
+							{r.hostname && <span className="font-mono">{r.hostname}</span>}
+						</SettingValue>
+					</InfoRow>
+					<InfoRow label="NTP servers">
+						<SettingValue settings={settings} field="ntp_servers">
+							<ServerList servers={r.ntp_servers} />
+						</SettingValue>
+					</InfoRow>
+					<InfoRow label="From DHCP">
+						<SettingValue settings={settings} field="ntp_link_servers">
+							<ServerList servers={r.ntp_link_servers} />
+						</SettingValue>
+					</InfoRow>
+					<InfoRow label="Fallback servers">
+						<SettingValue settings={settings} field="ntp_fallback_servers">
+							<ServerList servers={r.ntp_fallback_servers} />
+						</SettingValue>
+					</InfoRow>
+					<InfoRow label="Server in use">
+						<SettingValue settings={settings} field="ntp_server_in_use">
+							{r.ntp_server_in_use && (
+								<span className="font-mono text-xs">{r.ntp_server_in_use}</span>
+							)}
+						</SettingValue>
+					</InfoRow>
+					<InfoRow label="Clock synchronized">
+						<SettingValue settings={settings} field="ntp_synchronized">
+							{r.ntp_synchronized !== undefined &&
+								(r.ntp_synchronized ? "Yes" : "No")}
+						</SettingValue>
+					</InfoRow>
+				</div>
+			)}
+		</Panel>
+	);
+};
 
 const linkClass =
 	"font-mono text-sm text-blue-600 hover:text-blue-800 hover:underline cursor-pointer transition-colors";
@@ -41,124 +152,131 @@ const SystemPage = () => {
 				</Card>
 			) : (
 				<div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
-					<Card className="p-5">
-						{/* Labels */}
-						{device.labels && Object.keys(device.labels).length > 0 && (
-							<div className="mb-4 pb-4 border-b border-gray-100">
-								<div className="flex items-center gap-2 mb-2.5">
-									<Tags className="w-3.5 h-3.5 text-gray-400" />
-									<span className="text-xs font-semibold uppercase tracking-wide text-gray-500">
-										Labels
-									</span>
+					<div className="space-y-4">
+						<Card className="p-5">
+							{/* Labels */}
+							{device.labels && Object.keys(device.labels).length > 0 && (
+								<div className="mb-4 pb-4 border-b border-gray-100">
+									<div className="flex items-center gap-2 mb-2.5">
+										<Tags className="w-3.5 h-3.5 text-gray-400" />
+										<span className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+											Labels
+										</span>
+									</div>
+									<div className="flex flex-wrap gap-1.5">
+										{Object.entries(device.labels).map(([key, value]) => (
+											<LabelChip key={key} name={key} value={value} />
+										))}
+									</div>
 								</div>
-								<div className="flex flex-wrap gap-1.5">
-									{Object.entries(device.labels).map(([key, value]) => (
-										<LabelChip key={key} name={key} value={value} />
-									))}
-								</div>
-							</div>
-						)}
-
-						{/* System Info Details */}
-						<div className="space-y-3">
-							{device.system_info?.device_tree?.model && (
-								<InfoRow label="Model">
-									{device.system_info.device_tree.model}
-								</InfoRow>
 							)}
 
-							{device.system_info?.os_release?.pretty_name && (
-								<InfoRow label="Operating System">
-									<span className="font-mono">
-										{device.system_info.os_release.pretty_name}
-									</span>
-								</InfoRow>
-							)}
-
-							{device.system_info?.proc?.version && (
-								<InfoRow label="Kernel">
-									<span className="font-mono">
-										{device.system_info.proc.version}
-									</span>
-								</InfoRow>
-							)}
-
-							{device.release && (
-								<InfoRow label="Distribution" icon={GitBranch}>
-									<Link
-										to={`/distributions/${device.release?.distribution_id}`}
-										className={linkClass}
-									>
-										{device.release.distribution_name}
-									</Link>
-								</InfoRow>
-							)}
-
-							{device.release && (
-								<InfoRow label="Current Release" icon={Tag}>
-									<Link
-										to={`/releases/${device.release?.id}`}
-										className={linkClass}
-									>
-										{device.release.version}
-									</Link>
-								</InfoRow>
-							)}
-
-							{device.target_release &&
-								device.target_release_id !== device.release_id && (
-									<>
-										<InfoRow
-											label="Target Distribution"
-											icon={GitBranch}
-											iconClassName="text-purple-400"
-										>
-											<Link
-												to={`/distributions/${device.target_release.distribution_id}`}
-												className={linkClass}
-											>
-												{device.target_release.distribution_name}
-											</Link>
-										</InfoRow>
-
-										<InfoRow
-											label="Target Release"
-											icon={Tag}
-											iconClassName="text-purple-400"
-										>
-											<Link
-												to={`/releases/${device.target_release?.id}`}
-												className={linkClass}
-											>
-												{device.target_release.version}
-											</Link>
-										</InfoRow>
-									</>
+							{/* System Info Details */}
+							<div className="space-y-3">
+								{device.system_info?.device_tree?.model && (
+									<InfoRow label="Model">
+										{device.system_info.device_tree.model}
+									</InfoRow>
 								)}
 
-							{device.system_info?.smith?.version && (
-								<InfoRow label="Agent">
-									<span className="font-mono">
-										{device.system_info.smith.version}
-									</span>
-								</InfoRow>
-							)}
+								{device.system_info?.os_release?.pretty_name && (
+									<InfoRow label="Operating System">
+										<span className="font-mono">
+											{device.system_info.os_release.pretty_name}
+										</span>
+									</InfoRow>
+								)}
 
-							{device.system_info?.proc?.stat?.btime && (
-								<InfoRow label="Boot Time">
-									{new Date(
-										device.system_info.proc.stat.btime * 1000,
-									).toLocaleString()}
-								</InfoRow>
-							)}
+								{device.system_info?.proc?.version && (
+									<InfoRow label="Kernel">
+										<span className="font-mono">
+											{device.system_info.proc.version}
+										</span>
+									</InfoRow>
+								)}
 
-							{device.created_on && (
-								<InfoRow label="Registration Date">
-									{new Date(device.created_on).toLocaleString()}
-								</InfoRow>
-							)}
-						</div>
-					</Card>
+								{device.release && (
+									<InfoRow label="Distribution" icon={GitBranch}>
+										<Link
+											to={`/distributions/${device.release?.distribution_id}`}
+											className={linkClass}
+										>
+											{device.release.distribution_name}
+										</Link>
+									</InfoRow>
+								)}
+
+								{device.release && (
+									<InfoRow label="Current Release" icon={Tag}>
+										<Link
+											to={`/releases/${device.release?.id}`}
+											className={linkClass}
+										>
+											{device.release.version}
+										</Link>
+									</InfoRow>
+								)}
+
+								{device.target_release &&
+									device.target_release_id !== device.release_id && (
+										<>
+											<InfoRow
+												label="Target Distribution"
+												icon={GitBranch}
+												iconClassName="text-purple-400"
+											>
+												<Link
+													to={`/distributions/${device.target_release.distribution_id}`}
+													className={linkClass}
+												>
+													{device.target_release.distribution_name}
+												</Link>
+											</InfoRow>
+
+											<InfoRow
+												label="Target Release"
+												icon={Tag}
+												iconClassName="text-purple-400"
+											>
+												<Link
+													to={`/releases/${device.target_release?.id}`}
+													className={linkClass}
+												>
+													{device.target_release.version}
+												</Link>
+											</InfoRow>
+										</>
+									)}
+
+								{device.system_info?.smith?.version && (
+									<InfoRow label="Agent">
+										<span className="font-mono">
+											{device.system_info.smith.version}
+										</span>
+									</InfoRow>
+								)}
+
+								{device.system_info?.proc?.stat?.btime && (
+									<InfoRow label="Boot Time">
+										{new Date(
+											device.system_info.proc.stat.btime * 1000,
+										).toLocaleString()}
+									</InfoRow>
+								)}
+
+								{device.created_on && (
+									<InfoRow label="Registration Date">
+										{new Date(device.created_on).toLocaleString()}
+									</InfoRow>
+								)}
+							</div>
+						</Card>
+						<TimeAndIdentityPanel
+							key={serial}
+							serial={serial}
+							device={device}
+						/>
+					</div>
 
 					{/* Location Information */}
 					<Panel
