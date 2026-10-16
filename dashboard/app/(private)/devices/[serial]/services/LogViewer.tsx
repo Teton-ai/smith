@@ -195,10 +195,12 @@ const LogViewer = ({
 	const copyToClipboard = () => {
 		navigator.clipboard
 			.writeText(logs.map((l) => l.raw).join("\n"))
-			.then(() => setCopied(true))
+			.then(() => {
+				setCopied(true);
+				if (copyTimer.current) clearTimeout(copyTimer.current);
+				copyTimer.current = setTimeout(() => setCopied(false), 2000);
+			})
 			.catch(() => setCopied(false));
-		if (copyTimer.current) clearTimeout(copyTimer.current);
-		copyTimer.current = setTimeout(() => setCopied(false), 2000);
 	};
 
 	useEffect(() => {
