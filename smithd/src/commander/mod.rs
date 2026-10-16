@@ -139,6 +139,17 @@ impl CommandQueueExecutor {
             SafeCommandTx::CloseFileSession { session_id } => {
                 files::close_session(action.id, &self.handles.filebrowser, session_id).await
             }
+            SafeCommandTx::ReportSettings => {
+                warn!(
+                    command_id = action.id,
+                    "ReportSettings is not wired to the settings reporter yet"
+                );
+                SafeCommandResponse {
+                    id: action.id,
+                    command: SafeCommandRx::ReportSettings,
+                    status: -1,
+                }
+            }
             // Issued by a newer api than this daemon understands. Report a
             // failure so the operator sees why the command did nothing instead
             // of it silently disappearing.
