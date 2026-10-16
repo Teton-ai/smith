@@ -3,6 +3,7 @@
 import { useAuth0 } from "@auth0/auth0-react";
 import { ArrowDown, Check, Copy, Loader2 } from "lucide-react";
 import {
+	Fragment,
 	memo,
 	useCallback,
 	useEffect,
@@ -31,6 +32,7 @@ type Level = "error" | "warn" | "debug" | "info";
 
 interface LogLine {
 	id: number;
+	date: string;
 	time: string;
 	label: string;
 	source: string;
@@ -73,12 +75,14 @@ const parseLine = (raw: string, id: number, previous?: LogLine): LogLine => {
 	const m = JOURNAL.exec(raw);
 	let message = m ? m[3] : raw;
 	let time = m ? m[2] : "";
+	let date = m ? m[1].slice(0, 10) : (previous?.date ?? "");
 	const journal = m ? raw.slice(0, raw.length - message.length) : "";
 
 	// Loggers like tracing re-stamp every line, so the journal time would show
 	// twice. Prefer the inner one (it has sub-second precision) and drop it.
 	const inner = INNER_TS.exec(message);
 	if (inner) {
+		date = inner[0].slice(0, 10);
 		time = inner[1];
 		message = message.slice(inner[0].length);
 	}
@@ -111,6 +115,7 @@ const parseLine = (raw: string, id: number, previous?: LogLine): LogLine => {
 
 	return {
 		id,
+		date,
 		time,
 		label,
 		source,
@@ -362,7 +367,7 @@ const LogViewer = ({
 				className={`bg-gray-900 py-3 font-mono text-[12px] leading-[1.45] text-gray-100 overflow-auto h-[32rem] rounded-lg ${error ? "pb-12" : ""}`}
 			>
 				{logs.length > 0 ? (
-					logs.map((line) =>
+					logs.map((line, index) =>
 						showRaw ? (
 							<div
 								key={line.id}
@@ -371,7 +376,18 @@ const LogViewer = ({
 								{line.raw}
 							</div>
 						) : (
-							<LogRow key={line.id} line={line} />
+							<Fragment key={line.id}>
+								{line.date && line.date !== logs[index - 1]?.date && (
+									<div className="flex items-center gap-3 px-3 py-2 text-gray-400">
+										<span className="flex-1 border-t border-gray-700" />
+										<time dateTime={line.date} className="shrink-0">
+											{line.date}
+										</time>
+										<span className="flex-1 border-t border-gray-700" />
+									</div>
+								)}
+								<LogRow line={line} />
+							</Fragment>
 						),
 					)
 				) : (
