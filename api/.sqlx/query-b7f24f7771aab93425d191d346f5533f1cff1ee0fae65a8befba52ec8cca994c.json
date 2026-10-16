@@ -1,0 +1,197 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT\n            wireless_mode, power_mgnt, roam_flags,\n            idle_diff, busy_diff, scanr_exp_ms, scan_int, idle_th, busy_th,\n            nm_wifi_powersave, nm_autoconnect_retries, nm_cloned_mac, nm_scan_rand_mac,\n            bgscan, country_code, hostname,\n            ntp_servers, ntp_link_servers, ntp_fallback_servers, ntp_server_in_use, ntp_synchronized,\n            check_interval_s,\n            read_errors as \"read_errors: Vec<schema::DeviceSetting>\",\n            reported_at\n        FROM device_settings_reported\n        WHERE device_id = $1\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "wireless_mode",
+        "type_info": "Int2"
+      },
+      {
+        "ordinal": 1,
+        "name": "power_mgnt",
+        "type_info": "Int2"
+      },
+      {
+        "ordinal": 2,
+        "name": "roam_flags",
+        "type_info": "Int2"
+      },
+      {
+        "ordinal": 3,
+        "name": "idle_diff",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 4,
+        "name": "busy_diff",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 5,
+        "name": "scanr_exp_ms",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 6,
+        "name": "scan_int",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 7,
+        "name": "idle_th",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 8,
+        "name": "busy_th",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 9,
+        "name": "nm_wifi_powersave",
+        "type_info": "Int2"
+      },
+      {
+        "ordinal": 10,
+        "name": "nm_autoconnect_retries",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 11,
+        "name": "nm_cloned_mac",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 12,
+        "name": "nm_scan_rand_mac",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 13,
+        "name": "bgscan",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 14,
+        "name": "country_code",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 15,
+        "name": "hostname",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 16,
+        "name": "ntp_servers",
+        "type_info": "TextArray"
+      },
+      {
+        "ordinal": 17,
+        "name": "ntp_link_servers",
+        "type_info": "TextArray"
+      },
+      {
+        "ordinal": 18,
+        "name": "ntp_fallback_servers",
+        "type_info": "TextArray"
+      },
+      {
+        "ordinal": 19,
+        "name": "ntp_server_in_use",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 20,
+        "name": "ntp_synchronized",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 21,
+        "name": "check_interval_s",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 22,
+        "name": "read_errors: Vec<schema::DeviceSetting>",
+        "type_info": {
+          "Custom": {
+            "name": "device_setting[]",
+            "kind": {
+              "Array": {
+                "Custom": {
+                  "name": "device_setting",
+                  "kind": {
+                    "Enum": [
+                      "wireless_mode",
+                      "power_mgnt",
+                      "roam_flags",
+                      "idle_diff",
+                      "busy_diff",
+                      "scanr_exp_ms",
+                      "scan_int",
+                      "idle_th",
+                      "busy_th",
+                      "nm_wifi_powersave",
+                      "nm_autoconnect_retries",
+                      "nm_cloned_mac",
+                      "nm_scan_rand_mac",
+                      "bgscan",
+                      "country_code",
+                      "hostname",
+                      "ntp_servers",
+                      "ntp_link_servers",
+                      "ntp_fallback_servers",
+                      "ntp_server_in_use",
+                      "ntp_synchronized",
+                      "check_interval_s"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        "ordinal": 23,
+        "name": "reported_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4"
+      ]
+    },
+    "nullable": [
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "b7f24f7771aab93425d191d346f5533f1cff1ee0fae65a8befba52ec8cca994c"
+}

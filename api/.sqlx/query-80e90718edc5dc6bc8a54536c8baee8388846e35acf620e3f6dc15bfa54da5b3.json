@@ -1,0 +1,52 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT setting as \"setting: schema::DeviceSetting\"\n            FROM distribution_unsupported_setting\n            WHERE distribution_id = $1\n            ORDER BY setting\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "setting: schema::DeviceSetting",
+        "type_info": {
+          "Custom": {
+            "name": "device_setting",
+            "kind": {
+              "Enum": [
+                "wireless_mode",
+                "power_mgnt",
+                "roam_flags",
+                "idle_diff",
+                "busy_diff",
+                "scanr_exp_ms",
+                "scan_int",
+                "idle_th",
+                "busy_th",
+                "nm_wifi_powersave",
+                "nm_autoconnect_retries",
+                "nm_cloned_mac",
+                "nm_scan_rand_mac",
+                "bgscan",
+                "country_code",
+                "hostname",
+                "ntp_servers",
+                "ntp_link_servers",
+                "ntp_fallback_servers",
+                "ntp_server_in_use",
+                "ntp_synchronized",
+                "check_interval_s"
+              ]
+            }
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "80e90718edc5dc6bc8a54536c8baee8388846e35acf620e3f6dc15bfa54da5b3"
+}
