@@ -14,7 +14,7 @@ use futures::stream;
 use serde::{Deserialize, Serialize};
 use smith::utils::schema::{
     DeviceRegistration, DeviceRegistrationResponse, HomePost, HomePostResponse, Package,
-    ServiceCheck,
+    ServiceCheck, SettingsReport,
 };
 use std::convert::Infallible;
 use std::net::SocketAddr;
@@ -49,6 +49,51 @@ pub async fn register_device(
             };
 
             (status_code, Json(DeviceRegistrationResponse::default()))
+        }
+    }
+}
+
+/// Parses a settings report body; an unknown field value (e.g. a setting name
+/// this api does not know) is a client error, never stored half.
+fn parse_settings_report(body: &[u8]) -> Result<SettingsReport, serde_json::Error> {
+    serde_json::from_slice(body)
+}
+
+#[utoipa::path(
+  post,
+  path = "/smith/settings",
+  responses(
+        (status = 204, description = "Settings report stored"),
+        (status = 400, description = "Invalid settings report"),
+        (status = 500, description = "Settings report not stored; the device resends it"),
+  ),
+  security(
+        ("device_token" = [])
+  ),
+)]
+pub async fn report_settings(
+    device: AuthedDevice,
+    Extension(state): Extension<State>,
+    body: Bytes,
+) -> StatusCode {
+    let report = match parse_settings_report(&body) {
+        Ok(report) => report,
+        Err(err) => {
+            error!(
+                "Invalid settings report from device {} (serial {}): {err}",
+                device.id, device.serial_number
+            );
+            return StatusCode::BAD_REQUEST;
+        }
+    };
+    match crate::home::save_settings_report(device.id, &report, &state.pg_pool).await {
+        Ok(()) => StatusCode::NO_CONTENT,
+        Err(err) => {
+            error!(
+                "Failed to store settings report for device {}: {err:?}",
+                device.id
+            );
+            StatusCode::INTERNAL_SERVER_ERROR
         }
     }
 }
@@ -430,4 +475,16 @@ pub async fn test_upload(body: axum::body::Bytes) -> Json<UploadTestResult> {
     Json(UploadTestResult {
         bytes_received: body.len(),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_settings_report;
+
+    #[test]
+    fn settings_report_rejects_unknown_setting_names() {
+        assert!(parse_settings_report(br#"{"read_errors": ["bgscan"]}"#).is_ok());
+        assert!(parse_settings_report(br#"{"read_errors": ["made_up"]}"#).is_err());
+        assert!(parse_settings_report(b"not json").is_err());
+    }
 }

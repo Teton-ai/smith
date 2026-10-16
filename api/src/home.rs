@@ -760,9 +760,87 @@ pub async fn add_commands(
     Ok(command_ids)
 }
 
+/// Replaces the device's reported settings with `report`. Fails (rather than
+/// silently dropping it) so the caller can withhold the acknowledgement and
+/// the device resends.
+pub async fn save_settings_report(
+    device_id: i32,
+    report: &schema::SettingsReport,
+    pool: &PgPool,
+) -> Result<()> {
+    sqlx::query!(
+        r#"
+        INSERT INTO device_settings_reported (
+            device_id, wireless_mode, power_mgnt, roam_flags,
+            idle_diff, busy_diff, scanr_exp_ms, scan_int, idle_th, busy_th,
+            nm_wifi_powersave, nm_autoconnect_retries, nm_cloned_mac, nm_scan_rand_mac,
+            bgscan, country_code, hostname,
+            ntp_servers, ntp_link_servers, ntp_fallback_servers, ntp_server_in_use, ntp_synchronized,
+            check_interval_s, read_errors, reported_version, reported_at
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17,
+                $18, $19, $20, $21, $22, $23, $24, NULL, NOW())
+        ON CONFLICT (device_id) DO UPDATE SET
+            wireless_mode = EXCLUDED.wireless_mode,
+            power_mgnt = EXCLUDED.power_mgnt,
+            roam_flags = EXCLUDED.roam_flags,
+            idle_diff = EXCLUDED.idle_diff,
+            busy_diff = EXCLUDED.busy_diff,
+            scanr_exp_ms = EXCLUDED.scanr_exp_ms,
+            scan_int = EXCLUDED.scan_int,
+            idle_th = EXCLUDED.idle_th,
+            busy_th = EXCLUDED.busy_th,
+            nm_wifi_powersave = EXCLUDED.nm_wifi_powersave,
+            nm_autoconnect_retries = EXCLUDED.nm_autoconnect_retries,
+            nm_cloned_mac = EXCLUDED.nm_cloned_mac,
+            nm_scan_rand_mac = EXCLUDED.nm_scan_rand_mac,
+            bgscan = EXCLUDED.bgscan,
+            country_code = EXCLUDED.country_code,
+            hostname = EXCLUDED.hostname,
+            ntp_servers = EXCLUDED.ntp_servers,
+            ntp_link_servers = EXCLUDED.ntp_link_servers,
+            ntp_fallback_servers = EXCLUDED.ntp_fallback_servers,
+            ntp_server_in_use = EXCLUDED.ntp_server_in_use,
+            ntp_synchronized = EXCLUDED.ntp_synchronized,
+            check_interval_s = EXCLUDED.check_interval_s,
+            read_errors = EXCLUDED.read_errors,
+            reported_version = EXCLUDED.reported_version,
+            reported_at = EXCLUDED.reported_at
+        "#,
+        device_id,
+        report.wireless_mode,
+        report.power_mgnt,
+        report.roam_flags,
+        report.idle_diff,
+        report.busy_diff,
+        report.scanr_exp_ms,
+        report.scan_int,
+        report.idle_th,
+        report.busy_th,
+        report.nm_wifi_powersave,
+        report.nm_autoconnect_retries,
+        report.nm_cloned_mac,
+        report.nm_scan_rand_mac,
+        report.bgscan,
+        report.country_code,
+        report.hostname,
+        report.ntp_servers.as_deref(),
+        report.ntp_link_servers.as_deref(),
+        report.ntp_fallback_servers.as_deref(),
+        report.ntp_server_in_use,
+        report.ntp_synchronized,
+        report.check_interval_s,
+        &report.read_errors as &[schema::DeviceSetting],
+    )
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
-    use super::map_key_mgmt;
+    use super::{map_key_mgmt, save_settings_report, schema};
+    use sqlx::PgPool;
 
     #[test]
     fn map_key_mgmt_known_values() {
@@ -779,5 +857,60 @@ mod tests {
         assert_eq!(map_key_mgmt("wep"), None);
         assert_eq!(map_key_mgmt(""), None);
         assert_eq!(map_key_mgmt("wpa3"), None);
+    }
+
+    async fn insert_device(pool: &PgPool, serial: &str) -> anyhow::Result<i32> {
+        Ok(
+            sqlx::query_scalar("INSERT INTO device (serial_number) VALUES ($1) RETURNING id")
+                .bind(serial)
+                .fetch_one(pool)
+                .await?,
+        )
+    }
+
+    #[sqlx::test]
+    #[ignore = "needs the compose Postgres; run with --test-threads=1"]
+    async fn settings_report_is_created_then_replaced(pool: PgPool) -> anyhow::Result<()> {
+        let device_id = insert_device(&pool, "settings-report").await?;
+        let first: schema::SettingsReport = serde_json::from_str(
+            r#"{"wireless_mode": 11, "roam_flags": 3, "idle_diff": 10, "busy_diff": null,
+                "ntp_servers": ["10.0.0.1"], "hostname": "a", "read_errors": ["bgscan"]}"#,
+        )?;
+        save_settings_report(device_id, &first, &pool).await?;
+
+        let row: (Option<i16>, Option<String>, Vec<String>) = sqlx::query_as(
+            "SELECT wireless_mode, hostname, read_errors::text[] FROM device_settings_reported WHERE device_id = $1",
+        )
+        .bind(device_id)
+        .fetch_one(&pool)
+        .await?;
+        assert_eq!(
+            row,
+            (Some(11), Some("a".to_owned()), vec!["bgscan".to_owned()])
+        );
+
+        let second = schema::SettingsReport {
+            hostname: Some("b".to_owned()),
+            ..Default::default()
+        };
+        save_settings_report(device_id, &second, &pool).await?;
+        let row: (Option<i16>, Option<String>, Vec<String>, i64) = sqlx::query_as(
+            "SELECT wireless_mode, hostname, read_errors::text[],
+                    (SELECT count(*) FROM device_settings_reported WHERE device_id = $1)
+             FROM device_settings_reported WHERE device_id = $1",
+        )
+        .bind(device_id)
+        .fetch_one(&pool)
+        .await?;
+        assert_eq!(row, (None, Some("b".to_owned()), vec![], 1));
+        Ok(())
+    }
+
+    #[sqlx::test]
+    #[ignore = "needs the compose Postgres; run with --test-threads=1"]
+    async fn settings_report_for_unknown_device_fails(pool: PgPool) -> anyhow::Result<()> {
+        let result = save_settings_report(-1, &schema::SettingsReport::default(), &pool).await;
+        assert!(result.is_err());
+        Ok(())
     }
 }

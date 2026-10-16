@@ -434,6 +434,7 @@ async fn start_main_server(
     let (smith_router, smith_api) = OpenApiRouter::with_openapi(SmithApiDoc::openapi())
         .routes(routes!(smith::route::register_device))
         .routes(routes!(smith::route::home))
+        .routes(routes!(smith::route::report_settings))
         .routes(routes!(telemetry::route::modem))
         .routes(routes!(telemetry::route::victoria))
         .routes(routes!(smith::route::upload_file))

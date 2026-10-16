@@ -1,0 +1,74 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        INSERT INTO device_settings_reported (\n            device_id, wireless_mode, power_mgnt, roam_flags,\n            idle_diff, busy_diff, scanr_exp_ms, scan_int, idle_th, busy_th,\n            nm_wifi_powersave, nm_autoconnect_retries, nm_cloned_mac, nm_scan_rand_mac,\n            bgscan, country_code, hostname,\n            ntp_servers, ntp_link_servers, ntp_fallback_servers, ntp_server_in_use, ntp_synchronized,\n            check_interval_s, read_errors, reported_version, reported_at\n        )\n        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17,\n                $18, $19, $20, $21, $22, $23, $24, NULL, NOW())\n        ON CONFLICT (device_id) DO UPDATE SET\n            wireless_mode = EXCLUDED.wireless_mode,\n            power_mgnt = EXCLUDED.power_mgnt,\n            roam_flags = EXCLUDED.roam_flags,\n            idle_diff = EXCLUDED.idle_diff,\n            busy_diff = EXCLUDED.busy_diff,\n            scanr_exp_ms = EXCLUDED.scanr_exp_ms,\n            scan_int = EXCLUDED.scan_int,\n            idle_th = EXCLUDED.idle_th,\n            busy_th = EXCLUDED.busy_th,\n            nm_wifi_powersave = EXCLUDED.nm_wifi_powersave,\n            nm_autoconnect_retries = EXCLUDED.nm_autoconnect_retries,\n            nm_cloned_mac = EXCLUDED.nm_cloned_mac,\n            nm_scan_rand_mac = EXCLUDED.nm_scan_rand_mac,\n            bgscan = EXCLUDED.bgscan,\n            country_code = EXCLUDED.country_code,\n            hostname = EXCLUDED.hostname,\n            ntp_servers = EXCLUDED.ntp_servers,\n            ntp_link_servers = EXCLUDED.ntp_link_servers,\n            ntp_fallback_servers = EXCLUDED.ntp_fallback_servers,\n            ntp_server_in_use = EXCLUDED.ntp_server_in_use,\n            ntp_synchronized = EXCLUDED.ntp_synchronized,\n            check_interval_s = EXCLUDED.check_interval_s,\n            read_errors = EXCLUDED.read_errors,\n            reported_version = EXCLUDED.reported_version,\n            reported_at = EXCLUDED.reported_at\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Int2",
+        "Int2",
+        "Int2",
+        "Int4",
+        "Int4",
+        "Int4",
+        "Int4",
+        "Int4",
+        "Int4",
+        "Int2",
+        "Int4",
+        "Text",
+        "Bool",
+        "Text",
+        "Text",
+        "Text",
+        "TextArray",
+        "TextArray",
+        "TextArray",
+        "Text",
+        "Bool",
+        "Int4",
+        {
+          "Custom": {
+            "name": "device_setting[]",
+            "kind": {
+              "Array": {
+                "Custom": {
+                  "name": "device_setting",
+                  "kind": {
+                    "Enum": [
+                      "wireless_mode",
+                      "power_mgnt",
+                      "roam_flags",
+                      "idle_diff",
+                      "busy_diff",
+                      "scanr_exp_ms",
+                      "scan_int",
+                      "idle_th",
+                      "busy_th",
+                      "nm_wifi_powersave",
+                      "nm_autoconnect_retries",
+                      "nm_cloned_mac",
+                      "nm_scan_rand_mac",
+                      "bgscan",
+                      "country_code",
+                      "hostname",
+                      "ntp_servers",
+                      "ntp_link_servers",
+                      "ntp_fallback_servers",
+                      "ntp_server_in_use",
+                      "ntp_synchronized",
+                      "check_interval_s"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "6dee4400858a4de11a2cf77b3b8cbd30e474a96a1c53264311d8392ac9613071"
+}
