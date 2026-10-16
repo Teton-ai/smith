@@ -4,6 +4,7 @@ use crate::filebrowser::FileBrowserHandle;
 use crate::filemanager::FileManagerHandle;
 use crate::logstream::LogStreamHandle;
 use crate::magic::MagicHandle;
+use crate::settings::SettingsHandle;
 use crate::shutdown::ShutdownSignals;
 use crate::tunnel::TunnelHandle;
 use crate::updater::UpdaterHandle;
@@ -30,6 +31,7 @@ pub struct Handles {
     pub filemanager: FileManagerHandle,
     pub logstream: LogStreamHandle,
     pub filebrowser: FileBrowserHandle,
+    pub settings: SettingsHandle,
 }
 
 struct CommandQueueExecutor {
@@ -140,14 +142,20 @@ impl CommandQueueExecutor {
                 files::close_session(action.id, &self.handles.filebrowser, session_id).await
             }
             SafeCommandTx::ReportSettings => {
-                warn!(
-                    command_id = action.id,
-                    "ReportSettings is not wired to the settings reporter yet"
-                );
+                // Stays under the 60 s command cap even when the api is slow.
+                let acknowledged = tokio::time::timeout(
+                    std::time::Duration::from_secs(45),
+                    self.handles.settings.report_now(),
+                )
+                .await
+                .unwrap_or_else(|_| {
+                    warn!(command_id = action.id, "Settings report timed out");
+                    false
+                });
                 SafeCommandResponse {
                     id: action.id,
                     command: SafeCommandRx::ReportSettings,
-                    status: -1,
+                    status: if acknowledged { 0 } else { -1 },
                 }
             }
             // Issued by a newer api than this daemon understands. Report a

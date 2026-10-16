@@ -1,4 +1,5 @@
 use crate::commander::{CommanderHandle, network};
+use crate::settings::SettingsHandle;
 use crate::shutdown::ShutdownSignals;
 use futures::StreamExt;
 use tokio::time::{Duration, Instant, sleep, sleep_until};
@@ -43,15 +44,19 @@ trait NetworkManagerSettings {
 pub struct NMWatcherHandle;
 
 impl NMWatcherHandle {
-    pub fn new(shutdown: ShutdownSignals, commander: CommanderHandle) -> Self {
+    pub fn new(
+        shutdown: ShutdownSignals,
+        commander: CommanderHandle,
+        settings: SettingsHandle,
+    ) -> Self {
         tokio::spawn(async move {
-            run(shutdown, commander).await;
+            run(shutdown, commander, settings).await;
         });
         Self
     }
 }
 
-async fn run(shutdown: ShutdownSignals, commander: CommanderHandle) {
+async fn run(shutdown: ShutdownSignals, commander: CommanderHandle, settings: SettingsHandle) {
     let mut backoff = RETRY_INITIAL;
 
     // Carry pending debounce state across reconnects.
@@ -162,6 +167,7 @@ async fn run(shutdown: ShutdownSignals, commander: CommanderHandle) {
                 },
                 _ = sleep_until(deadline), if pending => {
                     pending = false;
+                    settings.check_now();
                     let result = network::execute_report_nm_profiles(CMD_ID_REPORT_NM_PROFILES).await;
                     commander.insert_result(vec![result]).await;
                 }

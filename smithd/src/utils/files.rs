@@ -1,3 +1,4 @@
+use crate::utils::schema::SettingsReport;
 use anyhow::{Context, Result, anyhow};
 use fs2::FileExt;
 use nix::unistd::{Gid, Uid, User, chown};
@@ -389,6 +390,27 @@ pub async fn save_last_applied_networks(ssids: &[String]) -> Result<()> {
         .context("creating /etc/smith")?;
     let json = serde_json::to_string(ssids).context("serializing last-applied networks")?;
     write_file_atomic(Path::new(LAST_APPLIED_PATH), &json, 0o600).await
+}
+
+const LAST_SETTINGS_REPORT_PATH: &str = "/etc/smith/last-settings-report.json";
+
+/// The last settings report the api acknowledged; `None` before the first one.
+pub async fn load_last_settings_report() -> Result<Option<SettingsReport>> {
+    match tokio::fs::read_to_string(LAST_SETTINGS_REPORT_PATH).await {
+        Ok(contents) => serde_json::from_str(&contents)
+            .map(Some)
+            .with_context(|| format!("parsing {LAST_SETTINGS_REPORT_PATH}")),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(e).with_context(|| format!("reading {LAST_SETTINGS_REPORT_PATH}")),
+    }
+}
+
+pub async fn save_last_settings_report(report: &SettingsReport) -> Result<()> {
+    tokio::fs::create_dir_all("/etc/smith")
+        .await
+        .context("creating /etc/smith")?;
+    let json = serde_json::to_string(report).context("serializing settings report")?;
+    write_file_atomic(Path::new(LAST_SETTINGS_REPORT_PATH), &json, 0o600).await
 }
 
 const EXTERNAL_BLOB_VOLUME: &str = "/mnt/crypt_UDA";

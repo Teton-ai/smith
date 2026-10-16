@@ -10,6 +10,7 @@ use crate::nm_watcher::NMWatcherHandle;
 use crate::police::PoliceHandle;
 use crate::postman::PostmanHandle;
 use crate::session::SessionHandle;
+use crate::settings::SettingsHandle;
 use crate::shutdown::ShutdownHandler;
 use crate::tunnel::TunnelHandle;
 use crate::updater::UpdaterHandle;
@@ -56,6 +57,8 @@ pub async fn run() {
     let filebrowser =
         FileBrowserHandle::new(shutdown.signals(), configuration.clone(), session.clone());
 
+    let settings = SettingsHandle::new(shutdown.signals(), configuration.clone(), session.clone());
+
     let commander = CommanderHandle::new(
         shutdown.signals(),
         Handles {
@@ -66,6 +69,7 @@ pub async fn run() {
             filemanager: filemanager.clone(),
             logstream: logstream.clone(),
             filebrowser: filebrowser.clone(),
+            settings: settings.clone(),
         },
     );
 
@@ -82,7 +86,7 @@ pub async fn run() {
         session.clone(),
     );
 
-    let _nm_watcher = NMWatcherHandle::new(shutdown.signals(), commander.clone());
+    let _nm_watcher = NMWatcherHandle::new(shutdown.signals(), commander.clone(), settings.clone());
 
     let _control = ControlHandle::new(
         shutdown.signals(),
