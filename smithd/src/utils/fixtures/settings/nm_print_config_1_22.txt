@@ -1,0 +1,33 @@
+# NetworkManager configuration: /etc/NetworkManager/NetworkManager.conf (lib: 10-dns-resolved.conf, 20-connectivity-ubuntu.conf, no-mac-addr-change.conf) (etc: 10-globally-managed-devices.conf, 10-ubuntu-fan.conf, default-wifi-powersave-on.conf)
+
+[main]
+# rc-manager=symlink
+# auth-polkit=true
+# dhcp=internal
+dns=systemd-resolved
+plugins=ifupdown,keyfile
+
+[connectivity]
+uri=http://connectivity-check.ubuntu.com/
+
+[ifupdown]
+managed=false
+
+[keyfile]
+unmanaged-devices=interface-name:fan-*
+
+[logging]
+# backend=journal
+# audit=true
+
+[device]
+wifi.scan-rand-mac-address=no
+
+[device-mac-addr-change-wifi]
+match-device=driver:rtl8723bs,driver:rtl8189es,driver:r8188eu,driver:8188eu,driver:eagle_sdio,driver:wl
+wifi.scan-rand-mac-address=no
+
+[connection]
+wifi.powersave=3
+
+# no-auto-default file "/var/lib/NetworkManager/no-auto-default.state"

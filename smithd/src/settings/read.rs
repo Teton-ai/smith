@@ -252,6 +252,229 @@ pub fn read_driver(paths: &DriverPaths, report: &mut SettingsReport) -> DriverRe
     }
 }
 
+/// NetworkManager's global defaults for the settings we report. Built-in
+/// values (NetworkManager.conf(5)) fill keys the config does not set, because
+/// `--print-config` only prints keys that are set.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NmConfig {
+    pub wifi_powersave: i16,
+    pub autoconnect_retries: i32,
+    pub cloned_mac: String,
+    pub scan_rand_mac: bool,
+}
+
+const NM_DEFAULT_POWERSAVE: i16 = 1; // ignore
+const NM_DEFAULT_AUTOCONNECT_RETRIES: i32 = 4;
+const NM_DEFAULT_CLONED_MAC: &str = "preserve";
+const NM_DEFAULT_SCAN_RAND_MAC: bool = true;
+
+pub const NM_FIELDS: [DeviceSetting; 4] = [
+    DeviceSetting::NmWifiPowersave,
+    DeviceSetting::NmAutoconnectRetries,
+    DeviceSetting::NmClonedMac,
+    DeviceSetting::NmScanRandMac,
+];
+
+struct NmSection {
+    name: String,
+    entries: Vec<(String, String)>,
+}
+
+fn parse_nm_sections(text: &str) -> Vec<NmSection> {
+    let mut sections: Vec<NmSection> = Vec::new();
+    for line in text.lines().map(str::trim) {
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        if let Some(name) = line.strip_prefix('[').and_then(|l| l.strip_suffix(']')) {
+            sections.push(NmSection {
+                name: name.to_owned(),
+                entries: Vec::new(),
+            });
+        } else if let (Some(section), Some((key, value))) =
+            (sections.last_mut(), line.split_once('='))
+        {
+            section
+                .entries
+                .push((key.trim().to_owned(), value.trim().to_owned()));
+        }
+    }
+    sections
+}
+
+/// Whether a per-device section's `match-device` selects our Wi-Fi interface.
+/// Only `driver:` and `interface-name:` (exact or trailing `*`) are understood;
+/// anything else, including `except:`, counts as not matching.
+fn nm_match_device(spec: &str, wifi: Option<&WifiInterface>) -> bool {
+    let Some(wifi) = wifi else {
+        return false;
+    };
+    let items: Vec<&str> = spec.split(',').map(str::trim).collect();
+    if items.iter().any(|item| item.starts_with("except:")) {
+        return false;
+    }
+    let glob = |pattern: &str, value: &str| match pattern.strip_suffix('*') {
+        Some(prefix) => value.starts_with(prefix),
+        None => pattern == value,
+    };
+    items.iter().any(|item| {
+        if let Some(driver) = item.strip_prefix("driver:") {
+            glob(driver, &wifi.driver)
+        } else if let Some(name) = item.strip_prefix("interface-name:") {
+            glob(name, &wifi.name)
+        } else {
+            false
+        }
+    })
+}
+
+fn parse_nm_bool(value: &str) -> Result<bool> {
+    match value.to_ascii_lowercase().as_str() {
+        "yes" | "true" | "on" | "1" => Ok(true),
+        "no" | "false" | "off" | "0" => Ok(false),
+        other => bail!("not a boolean: {other:?}"),
+    }
+}
+
+fn parse_nm_powersave(value: &str) -> Result<i16> {
+    match value.to_ascii_lowercase().as_str() {
+        "default" => Ok(0),
+        "ignore" => Ok(1),
+        "disable" => Ok(2),
+        "enable" => Ok(3),
+        other => parse_int(other),
+    }
+}
+
+/// Applies `[device]` / `[connection]` sections, and their `-suffix` variants
+/// when `match-device` selects `wifi`, in file order so later sections win.
+pub fn parse_nm_config(text: &str, wifi: Option<&WifiInterface>) -> Result<NmConfig> {
+    let mut config = NmConfig {
+        wifi_powersave: NM_DEFAULT_POWERSAVE,
+        autoconnect_retries: NM_DEFAULT_AUTOCONNECT_RETRIES,
+        cloned_mac: NM_DEFAULT_CLONED_MAC.to_owned(),
+        scan_rand_mac: NM_DEFAULT_SCAN_RAND_MAC,
+    };
+    for section in parse_nm_sections(text) {
+        let kind = if section.name == "device" || section.name.starts_with("device-") {
+            "device"
+        } else if section.name == "connection" || section.name.starts_with("connection-") {
+            "connection"
+        } else {
+            continue;
+        };
+        if section.name.contains('-') {
+            let spec = section
+                .entries
+                .iter()
+                .find(|(key, _)| key == "match-device")
+                .map(|(_, value)| value.as_str());
+            if !spec.is_some_and(|spec| nm_match_device(spec, wifi)) {
+                continue;
+            }
+        }
+        for (key, value) in &section.entries {
+            match (kind, key.as_str()) {
+                ("device", "wifi.scan-rand-mac-address") => {
+                    config.scan_rand_mac = parse_nm_bool(value)?
+                }
+                ("connection", "wifi.powersave") => {
+                    config.wifi_powersave = parse_nm_powersave(value)?
+                }
+                ("connection", "connection.autoconnect-retries") => {
+                    config.autoconnect_retries = parse_int(value)?
+                }
+                ("connection", "wifi.cloned-mac-address") => config.cloned_mac = value.clone(),
+                _ => {}
+            }
+        }
+    }
+    Ok(config)
+}
+
+const NM_CONFIG_PATHS: [&str; 4] = [
+    "/etc/NetworkManager/NetworkManager.conf",
+    "/etc/NetworkManager/conf.d",
+    "/usr/lib/NetworkManager/conf.d",
+    "/run/NetworkManager/conf.d",
+];
+
+type ConfigStamp = Vec<(PathBuf, Option<std::time::SystemTime>)>;
+
+/// Modification times of every config file and directory NetworkManager reads,
+/// so a change anywhere (file edited, added or removed) changes the stamp.
+fn config_stamp(paths: &[PathBuf]) -> ConfigStamp {
+    let mtime = |path: &Path| std::fs::metadata(path).and_then(|m| m.modified()).ok();
+    let mut stamp = Vec::new();
+    for path in paths {
+        stamp.push((path.clone(), mtime(path)));
+        if let Ok(entries) = std::fs::read_dir(path) {
+            let mut files: Vec<PathBuf> = entries.flatten().map(|e| e.path()).collect();
+            files.sort();
+            stamp.extend(files.into_iter().map(|file| {
+                let modified = mtime(&file);
+                (file, modified)
+            }));
+        }
+    }
+    stamp
+}
+
+/// Runs `NetworkManager --print-config` only when the config files changed,
+/// since it spawns a process.
+pub struct NmConfigReader {
+    program: PathBuf,
+    paths: Vec<PathBuf>,
+    cached: Option<(ConfigStamp, String)>,
+}
+
+impl Default for NmConfigReader {
+    fn default() -> Self {
+        Self::new(
+            PathBuf::from("NetworkManager"),
+            NM_CONFIG_PATHS.iter().map(PathBuf::from).collect(),
+        )
+    }
+}
+
+impl NmConfigReader {
+    pub fn new(program: PathBuf, paths: Vec<PathBuf>) -> Self {
+        Self {
+            program,
+            paths,
+            cached: None,
+        }
+    }
+
+    pub async fn read(&mut self, wifi: Option<&WifiInterface>) -> Result<NmConfig> {
+        let stamp = config_stamp(&self.paths);
+        let output = match &self.cached {
+            Some((cached_stamp, output)) if *cached_stamp == stamp => output.clone(),
+            _ => {
+                let output = tokio::time::timeout(
+                    std::time::Duration::from_secs(5),
+                    tokio::process::Command::new(&self.program)
+                        .arg("--print-config")
+                        .output(),
+                )
+                .await
+                .context("NetworkManager --print-config timed out")?
+                .context("running NetworkManager --print-config")?;
+                if !output.status.success() {
+                    bail!(
+                        "NetworkManager --print-config exited with {}",
+                        output.status
+                    );
+                }
+                let output = String::from_utf8_lossy(&output.stdout).into_owned();
+                self.cached = Some((stamp, output.clone()));
+                output
+            }
+        };
+        parse_nm_config(&output, wifi)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -407,5 +630,91 @@ mod tests {
                 module: "rtw88_8822ce".to_owned(),
             }]
         );
+    }
+
+    const NM_1_22: &str = include_str!("../utils/fixtures/settings/nm_print_config_1_22.txt");
+    const NM_1_36: &str = include_str!("../utils/fixtures/settings/nm_print_config_1_36.txt");
+
+    fn vendor_wifi() -> WifiInterface {
+        WifiInterface {
+            name: "wlP1p1s0".to_owned(),
+            driver: "rtl88x2ce".to_owned(),
+            module: "rtl8822ce".to_owned(),
+        }
+    }
+
+    #[test]
+    fn nm_fixtures_set_keys_and_fall_back_to_built_ins() {
+        for fixture in [NM_1_22, NM_1_36] {
+            let config = parse_nm_config(fixture, Some(&vendor_wifi())).unwrap();
+            assert_eq!(
+                config,
+                NmConfig {
+                    wifi_powersave: 3,
+                    autoconnect_retries: NM_DEFAULT_AUTOCONNECT_RETRIES,
+                    cloned_mac: "preserve".to_owned(),
+                    scan_rand_mac: false,
+                }
+            );
+        }
+        let empty = parse_nm_config("", None).unwrap();
+        assert_eq!(empty.wifi_powersave, NM_DEFAULT_POWERSAVE);
+        assert!(empty.scan_rand_mac);
+    }
+
+    #[test]
+    fn nm_per_device_sections_apply_only_when_matching() {
+        let text = "[device]\nwifi.scan-rand-mac-address=no\n\n\
+            [device]\nwifi.scan-rand-mac-address=no\n\n\
+            [device-other]\nmatch-device=driver:eagle_sdio,driver:wl\nwifi.scan-rand-mac-address=yes\n\n\
+            [connection-ours]\nmatch-device=driver:rtl88x2ce\nwifi.powersave=2\nconnection.autoconnect-retries=0\n\n\
+            [connection-except]\nmatch-device=except:driver:iwlwifi\nwifi.cloned-mac-address=random\n";
+        let config = parse_nm_config(text, Some(&vendor_wifi())).unwrap();
+        assert!(
+            !config.scan_rand_mac,
+            "non-matching [device-*] must be ignored"
+        );
+        assert_eq!(config.wifi_powersave, 2);
+        assert_eq!(config.autoconnect_retries, 0);
+        assert_eq!(config.cloned_mac, "preserve");
+
+        let no_wifi = parse_nm_config(text, None).unwrap();
+        assert_eq!(no_wifi.wifi_powersave, NM_DEFAULT_POWERSAVE);
+    }
+
+    #[tokio::test]
+    async fn nm_print_config_runs_only_when_config_changes() {
+        let tmp = tempfile::tempdir().unwrap();
+        let conf_dir = tmp.path().join("conf.d");
+        std::fs::create_dir_all(&conf_dir).unwrap();
+        std::fs::write(conf_dir.join("a.conf"), "[connection]\n").unwrap();
+        let counter = tmp.path().join("runs");
+        let script = tmp.path().join("nm");
+        std::fs::write(
+            &script,
+            format!(
+                "#!/bin/sh\necho run >> {}\nprintf '[connection]\\nwifi.powersave=2\\n'\n",
+                counter.display()
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&script, std::os::unix::fs::PermissionsExt::from_mode(0o755))
+            .unwrap();
+
+        let mut reader = NmConfigReader::new(script, vec![conf_dir.clone()]);
+        let runs = || {
+            std::fs::read_to_string(&counter)
+                .unwrap_or_default()
+                .lines()
+                .count()
+        };
+
+        assert_eq!(reader.read(None).await.unwrap().wifi_powersave, 2);
+        assert_eq!(reader.read(None).await.unwrap().wifi_powersave, 2);
+        assert_eq!(runs(), 1);
+
+        std::fs::write(conf_dir.join("b.conf"), "[connection]\n").unwrap();
+        reader.read(None).await.unwrap();
+        assert_eq!(runs(), 2);
     }
 }
