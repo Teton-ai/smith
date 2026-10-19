@@ -774,6 +774,29 @@
       "examples": []
     },
     {
+      "path": "sm releases set-package",
+      "about": "Put packages in a release that is in draft",
+      "description": "Each package replaces the package with the same name, or is added when there is none.",
+      "usage": "sm releases set-package <RELEASE_NUMBER> <PACKAGE_IDS>...",
+      "arguments": [
+        {
+          "name": "<RELEASE_NUMBER>",
+          "required": true,
+          "help": ""
+        },
+        {
+          "name": "<PACKAGE_IDS>",
+          "required": true,
+          "help": ""
+        }
+      ],
+      "options": [],
+      "examples": [
+        "sm releases set-package 141 812",
+        "sm releases set-package 141 812 815"
+      ]
+    },
+    {
       "path": "sm releases remove-package",
       "about": "Remove a package from a release that is in draft",
       "usage": "sm releases remove-package <RELEASE_NUMBER> <PACKAGE_ID>",

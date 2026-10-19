@@ -40,6 +40,20 @@ Examples:
         #[arg(long)]
         json: bool,
     },
+    /// Put packages in a release that is in draft
+    ///
+    /// Each package replaces the package with the same name, or is added when
+    /// there is none.
+    #[command(after_long_help = "\
+Examples:
+  sm releases set-package 141 812
+  sm releases set-package 141 812 815
+")]
+    SetPackage {
+        release_number: i32,
+        #[arg(required = true)]
+        package_ids: Vec<i32>,
+    },
     /// Remove a package from a release that is in draft
     RemovePackage {
         release_number: i32,
@@ -131,6 +145,36 @@ impl ReleasesCommands {
                     }
                     table.print();
                 }
+            }
+            ReleasesCommands::SetPackage {
+                release_number,
+                package_ids,
+            } => {
+                let api = api(&config).await?;
+                let release = api.get_release_info(release_number.to_string()).await?;
+                if !release.draft || release.yanked {
+                    bail!("Release {release_number} is not a draft");
+                }
+                let mut packages = api.get_release_packages(release_number).await?;
+                let mut all_packages = api.get_packages().await?;
+                let mut changes = Vec::new();
+                for package_id in package_ids {
+                    let new = take_package(&mut all_packages, package_id)?;
+                    let old_version = match packages.iter_mut().find(|p| p.name == new.name) {
+                        Some(slot) => {
+                            api.replace_release_package(release_number, slot.id, new.id)
+                                .await?;
+                            slot.id = new.id;
+                            Some(std::mem::replace(&mut slot.version, new.version.clone()))
+                        }
+                        None => {
+                            api.add_release_package(release_number, new.id).await?;
+                            None
+                        }
+                    };
+                    changes.push((new.name, old_version, new.version));
+                }
+                print_changes(changes);
             }
             ReleasesCommands::RemovePackage {
                 release_number,
@@ -439,11 +483,7 @@ async fn draft_release(draft: ReleasesDraft, config: crate::config::Config) -> a
     if !draft.packages.is_empty() {
         let mut all_packages = api.get_packages().await?;
         for package_id in draft.packages {
-            let index = all_packages
-                .iter()
-                .position(|p| p.id == package_id)
-                .with_context(|| format!("Package {package_id} not found"))?;
-            let new = all_packages.swap_remove(index);
+            let new = take_package(&mut all_packages, package_id)?;
             let (name, new_version) = (new.name.clone(), new.version.clone());
             let old_version = match packages.iter_mut().find(|p| p.name == new.name) {
                 Some(slot) => Some(std::mem::replace(slot, new).version),
@@ -474,19 +514,35 @@ async fn draft_release(draft: ReleasesDraft, config: crate::config::Config) -> a
     if changes.is_empty() {
         println!("Packages are the same as in release {}.", base.id);
     } else {
-        let mut table = TablePrint::new_with_headers(vec!["Package", "From", "To"]);
-        for (name, old_version, new_version) in changes {
-            table.add_row(vec![
-                name,
-                old_version.unwrap_or_else(|| "(added)".to_string()),
-                new_version,
-            ]);
-        }
-        table.print();
+        print_changes(changes);
     }
     println!("Publish it with `sm releases publish {new_release_id}`.");
 
     Ok(())
+}
+
+fn take_package(
+    packages: &mut Vec<smith::utils::schema::Package>,
+    package_id: i32,
+) -> anyhow::Result<smith::utils::schema::Package> {
+    let index = packages
+        .iter()
+        .position(|p| p.id == package_id)
+        .with_context(|| format!("Package {package_id} not found"))?;
+    Ok(packages.swap_remove(index))
+}
+
+/// Prints (name, old version, new version) rows; no old version means added.
+fn print_changes(changes: Vec<(String, Option<String>, String)>) {
+    let mut table = TablePrint::new_with_headers(vec!["Package", "From", "To"]);
+    for (name, old_version, new_version) in changes {
+        table.add_row(vec![
+            name,
+            old_version.unwrap_or_else(|| "(added)".to_string()),
+            new_version,
+        ]);
+    }
+    table.print();
 }
 
 /// Asks for the semver bump from `current` and whether the release is an RC.

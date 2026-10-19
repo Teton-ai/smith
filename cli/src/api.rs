@@ -122,6 +122,44 @@ impl SmithAPI {
         Ok(packages)
     }
 
+    pub async fn add_release_package(&self, release_id: i32, package_id: i32) -> Result<()> {
+        let client = Client::new();
+
+        client
+            .post(format!("{}/releases/{}/packages", self.domain, release_id))
+            .header("Authorization", format!("Bearer {}", &self.bearer_token))
+            .json(&serde_json::json!({ "id": package_id }))
+            .send()
+            .await?
+            .handle_error()
+            .await?;
+
+        Ok(())
+    }
+
+    pub async fn replace_release_package(
+        &self,
+        release_id: i32,
+        old_package_id: i32,
+        new_package_id: i32,
+    ) -> Result<()> {
+        let client = Client::new();
+
+        client
+            .put(format!(
+                "{}/releases/{}/packages/{}",
+                self.domain, release_id, old_package_id
+            ))
+            .header("Authorization", format!("Bearer {}", &self.bearer_token))
+            .json(&serde_json::json!({ "id": new_package_id }))
+            .send()
+            .await?
+            .handle_error()
+            .await?;
+
+        Ok(())
+    }
+
     pub async fn delete_release_package(&self, release_id: i32, package_id: i32) -> Result<()> {
         let client = Client::new();
 
