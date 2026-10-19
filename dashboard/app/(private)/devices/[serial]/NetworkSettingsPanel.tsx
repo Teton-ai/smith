@@ -15,8 +15,6 @@ const POLL_INTERVAL_MS = 30_000;
 /** A requested report lands after the device's next poll plus its POST. */
 const REFETCH_AFTER_REFRESH_MS = [5_000, 25_000];
 
-/** `roam_flags` bit for driver-initiated roaming (0x07 on, 0x03 disabled). */
-const ACTIVE_ROAMING_FLAG = 0x04;
 /** The vendor driver's `scan_int` counts in 2 s units. */
 const SCAN_INTERVAL_UNIT_S = 2;
 /** Driver signal units are dBm + 100 on both vendor driver versions. */
@@ -112,8 +110,13 @@ const SettingLabel = ({ text, info }: { text: string; info: string }) => (
 	</span>
 );
 
+interface Flag {
+	bit: number;
+	label: string;
+}
+
 // Bits from the driver's `rtw_wireless_mode` (include/ieee80211.h).
-const MODE_BITS = [
+const MODE_BITS: Flag[] = [
 	{ bit: 1, label: "802.11b" },
 	{ bit: 2, label: "802.11g" },
 	{ bit: 4, label: "802.11a" },
@@ -123,31 +126,46 @@ const MODE_BITS = [
 ];
 const OTHER_MODE_BITS: Record<number, string> = { 32: "AUTO" };
 
-const WirelessMode = ({ mode }: { mode: number }) => {
-	const known = MODE_BITS.reduce((acc, m) => acc | m.bit, 0);
+// Bits from the driver's `roam_flags` (include/rtw_mlme.h).
+const ROAM_BITS: Flag[] = [
+	{ bit: 1, label: "On link loss" },
+	{ bit: 2, label: "On resume" },
+	{ bit: 4, label: "Active (weak signal)" },
+];
+
+/** Read-only checkboxes for a driver bit field; set bits outside `flags` are
+ *  listed below, by name when known. */
+const DriverFlags = ({
+	value,
+	flags,
+	otherNames = {},
+}: {
+	value: number;
+	flags: Flag[];
+	otherNames?: Record<number, string>;
+}) => {
+	const known = flags.reduce((acc, f) => acc | f.bit, 0);
 	const other: string[] = [];
-	for (let bit = 1; bit <= mode; bit <<= 1) {
-		if (mode & bit && !(known & bit)) {
-			other.push(
-				OTHER_MODE_BITS[bit] ? `${OTHER_MODE_BITS[bit]} (${bit})` : `${bit}`,
-			);
+	for (let bit = 1; bit <= value; bit <<= 1) {
+		if (value & bit && !(known & bit)) {
+			other.push(otherNames[bit] ? `${otherNames[bit]} (${bit})` : `${bit}`);
 		}
 	}
 	return (
 		<div className="flex flex-col items-end gap-1">
 			<div className="flex flex-wrap justify-end gap-x-3 gap-y-1">
-				{MODE_BITS.map((m) => (
+				{flags.map((f) => (
 					<label
-						key={m.bit}
+						key={f.bit}
 						className="inline-flex items-center gap-1 text-xs text-gray-700"
 					>
 						<input
 							type="checkbox"
-							checked={(mode & m.bit) !== 0}
+							checked={(value & f.bit) !== 0}
 							disabled
 							className="h-3.5 w-3.5"
 						/>
-						{m.label}
+						{f.label}
 					</label>
 				))}
 			</div>
@@ -324,7 +342,11 @@ const NetworkSettingsPanel = ({
 						>
 							<SettingValue settings={settings} field="wireless_mode">
 								{r.wireless_mode !== undefined && (
-									<WirelessMode mode={r.wireless_mode} />
+									<DriverFlags
+										value={r.wireless_mode}
+										flags={MODE_BITS}
+										otherNames={OTHER_MODE_BITS}
+									/>
 								)}
 							</SettingValue>
 						</InfoRow>
@@ -370,24 +392,15 @@ const NetworkSettingsPanel = ({
 						<InfoRow
 							label={
 								<SettingLabel
-									text="Active roaming"
-									info="Driver moves to a better AP on its own when signal is weak"
+									text="Driver roaming"
+									info="When the Wi-Fi driver itself moves to another AP"
 								/>
 							}
 						>
 							<SettingValue settings={settings} field="roam_flags">
-								{r.roam_flags !== undefined &&
-									(r.roam_flags & ACTIVE_ROAMING_FLAG ? (
-										<Described
-											value="Enabled"
-											note="Scans and roams by itself when the signal is weak"
-										/>
-									) : (
-										<Described
-											value="Disable active roaming"
-											note="Only rejoins an AP after losing the link"
-										/>
-									))}
+								{r.roam_flags !== undefined && (
+									<DriverFlags value={r.roam_flags} flags={ROAM_BITS} />
+								)}
 							</SettingValue>
 						</InfoRow>
 						<InfoRow
