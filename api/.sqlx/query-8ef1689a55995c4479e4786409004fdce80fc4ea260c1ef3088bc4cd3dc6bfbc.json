@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT to_jsonb(dsr) - 'device_id' - 'reported_at' AS \"report!\",\n               reported_at\n        FROM device_settings_reported dsr\n        WHERE device_id = $1\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "report!",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 1,
+        "name": "reported_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4"
+      ]
+    },
+    "nullable": [
+      null,
+      false
+    ]
+  },
+  "hash": "8ef1689a55995c4479e4786409004fdce80fc4ea260c1ef3088bc4cd3dc6bfbc"
+}

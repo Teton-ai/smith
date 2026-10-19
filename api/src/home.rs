@@ -8,7 +8,7 @@ use smith::utils::schema::SafeCommandTx::{UpdateNetwork, UpdateVariables};
 use smith::utils::schema::{
     HomePost, NetworkType, SafeCommandRequest, SafeCommandRx, ServiceStatus,
 };
-use sqlx::PgPool;
+use sqlx::{Acquire, PgConnection, PgPool};
 use tracing::debug;
 use tracing::error;
 
@@ -529,6 +529,12 @@ pub async fn save_responses(
                     .await?;
                 }
             }
+            SafeCommandRx::ReportSettings { ref report } if response.status == 0 => {
+                // Display only: a bad report must not drop the rest of the poll.
+                if let Err(err) = save_settings_report(&mut tx, device_id, report).await {
+                    error!(device_id, "Failed to store settings report: {err:?}");
+                }
+            }
             _ => {}
         }
         let mut response_json = match &response.command {
@@ -760,9 +766,45 @@ pub async fn add_commands(
     Ok(command_ids)
 }
 
+/// Replaces the device's reported settings. Errors propagate so the device gets
+/// no 204 and resends. JSON keys map to columns by name (`jsonb_populate_record`);
+/// `settings_report_matches_the_table` keeps the struct and the table in step.
+/// Replaces the device's stored report. Inside an open transaction `begin`
+/// makes this a savepoint, so a failure rolls back only this report.
+pub async fn save_settings_report(
+    conn: &mut PgConnection,
+    device_id: i32,
+    report: &schema::SettingsReport,
+) -> Result<()> {
+    let report = serde_json::to_value(report)?;
+    let mut tx = conn.begin().await?;
+    sqlx::query!(
+        "DELETE FROM device_settings_reported WHERE device_id = $1",
+        device_id
+    )
+    .execute(&mut *tx)
+    .await?;
+    sqlx::query!(
+        r#"
+        INSERT INTO device_settings_reported
+        SELECT * FROM jsonb_populate_record(
+            NULL::device_settings_reported,
+            $2::jsonb || jsonb_build_object('device_id', $1::int4, 'reported_at', NOW())
+        )
+        "#,
+        device_id,
+        report,
+    )
+    .execute(&mut *tx)
+    .await?;
+    tx.commit().await?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
-    use super::map_key_mgmt;
+    use super::{map_key_mgmt, save_settings_report, schema};
+    use sqlx::PgPool;
 
     #[test]
     fn map_key_mgmt_known_values() {
@@ -779,5 +821,84 @@ mod tests {
         assert_eq!(map_key_mgmt("wep"), None);
         assert_eq!(map_key_mgmt(""), None);
         assert_eq!(map_key_mgmt("wpa3"), None);
+    }
+
+    #[sqlx::test]
+    #[ignore = "needs the compose Postgres; run with --test-threads=1"]
+    async fn settings_report_replaces_the_previous_one(pool: PgPool) -> anyhow::Result<()> {
+        let device_id: i32 =
+            sqlx::query_scalar("INSERT INTO device (serial_number) VALUES ('s') RETURNING id")
+                .fetch_one(&pool)
+                .await?;
+        let first = schema::SettingsReport {
+            wireless_mode: Some(11),
+            hostname: Some("a".to_owned()),
+            ..Default::default()
+        };
+        let second = schema::SettingsReport {
+            hostname: Some("b".to_owned()),
+            ..Default::default()
+        };
+        let mut conn = pool.acquire().await?;
+        save_settings_report(&mut conn, device_id, &first).await?;
+        save_settings_report(&mut conn, device_id, &second).await?;
+
+        let rows: Vec<(Option<i16>, Option<String>)> = sqlx::query_as(
+            "SELECT wireless_mode, hostname FROM device_settings_reported WHERE device_id = $1",
+        )
+        .bind(device_id)
+        .fetch_all(&pool)
+        .await?;
+        assert_eq!(rows, vec![(None, Some("b".to_owned()))]);
+        Ok(())
+    }
+
+    #[sqlx::test]
+    #[ignore = "needs the compose Postgres; run with --test-threads=1"]
+    async fn settings_report_matches_the_table(pool: PgPool) -> anyhow::Result<()> {
+        use std::collections::BTreeSet;
+
+        let report = serde_json::to_value(schema::SettingsReport::default())?;
+        let fields: BTreeSet<String> = report
+            .as_object()
+            .map(|o| o.keys().cloned().collect())
+            .unwrap_or_default();
+
+        let columns: BTreeSet<String> = sqlx::query_scalar(
+            "SELECT column_name::text FROM information_schema.columns
+             WHERE table_name = 'device_settings_reported'",
+        )
+        .fetch_all(&pool)
+        .await?
+        .into_iter()
+        .collect();
+        let server_side: BTreeSet<String> = ["device_id", "reported_at"]
+            .into_iter()
+            .map(str::to_owned)
+            .collect();
+        assert_eq!(
+            fields,
+            &columns - &server_side,
+            "SettingsReport fields and device_settings_reported columns differ"
+        );
+
+        let enum_values: BTreeSet<String> =
+            sqlx::query_scalar("SELECT unnest(enum_range(NULL::device_setting))::text")
+                .fetch_all(&pool)
+                .await?
+                .into_iter()
+                .collect();
+        let settings: BTreeSet<String> = fields
+            .into_iter()
+            .filter(|field| field != "read_errors")
+            .collect();
+        assert_eq!(
+            enum_values, settings,
+            "device_setting enum and SettingsReport fields differ"
+        );
+        for value in &enum_values {
+            serde_json::from_value::<schema::DeviceSetting>(serde_json::json!(value))?;
+        }
+        Ok(())
     }
 }
