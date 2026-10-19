@@ -60,30 +60,67 @@ fn parse_nm_sections(text: &str) -> Vec<NmSection> {
     sections
 }
 
-/// Whether a per-device section's `match-device` selects our Wi-Fi interface.
-/// Only `driver:` and `interface-name:` (exact or trailing `*`) are understood;
-/// anything else, including `except:`, counts as not matching.
-fn nm_match_device(spec: &str, wifi: Option<&WifiInterface>) -> bool {
+/// `*` and `?` globbing, as NetworkManager allows in `interface-name:`.
+fn glob_match(pattern: &str, value: &str) -> bool {
+    match pattern.chars().next() {
+        None => value.is_empty(),
+        Some('*') => (0..=value.len())
+            .filter(|i| value.is_char_boundary(*i))
+            .any(|i| glob_match(&pattern[1..], &value[i..])),
+        Some(c) => {
+            value.chars().next().is_some_and(|v| c == '?' || c == v) && {
+                let n = c.len_utf8();
+                let m = value.chars().next().map_or(0, char::len_utf8);
+                glob_match(&pattern[n..], &value[m..])
+            }
+        }
+    }
+}
+
+/// One positive spec from NetworkManager's "Device List Format". Specs we do
+/// not evaluate (`mac:`, `s390-subchannels:`, ...) never match.
+fn spec_matches(spec: &str, wifi: &WifiInterface) -> bool {
+    if spec == "*" {
+        return true;
+    }
+    if let Some(name) = spec.strip_prefix("interface-name:") {
+        return match name.strip_prefix('=') {
+            Some(literal) => literal == wifi.name,
+            None => glob_match(name.strip_prefix('~').unwrap_or(name), &wifi.name),
+        };
+    }
+    if let Some(driver) = spec.strip_prefix("driver:") {
+        // An optional `/version` follows the driver name.
+        return driver.split('/').next() == Some(wifi.driver.as_str());
+    }
+    if let Some(kind) = spec.strip_prefix("type:") {
+        return kind == "wifi";
+    }
+    !spec.contains(':') && spec == wifi.name
+}
+
+/// Whether a per-device section's `match-device` selects our Wi-Fi interface:
+/// any matching `except:` wins, and a list of only `except:` specs behaves as
+/// `*` plus those exceptions (NetworkManager.conf(5), "Device List Format").
+fn nm_match_device(list: &str, wifi: Option<&WifiInterface>) -> bool {
     let Some(wifi) = wifi else {
         return false;
     };
-    let items: Vec<&str> = spec.split(',').map(str::trim).collect();
-    if items.iter().any(|item| item.starts_with("except:")) {
+    let specs: Vec<&str> = list
+        .split([',', ';'])
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .collect();
+    let (negative, positive): (Vec<&str>, Vec<&str>) =
+        specs.iter().partition(|s| s.starts_with("except:"));
+    if negative
+        .iter()
+        .filter_map(|s| s.strip_prefix("except:"))
+        .any(|s| spec_matches(s, wifi))
+    {
         return false;
     }
-    let glob = |pattern: &str, value: &str| match pattern.strip_suffix('*') {
-        Some(prefix) => value.starts_with(prefix),
-        None => pattern == value,
-    };
-    items.iter().any(|item| {
-        if let Some(driver) = item.strip_prefix("driver:") {
-            glob(driver, &wifi.driver)
-        } else if let Some(name) = item.strip_prefix("interface-name:") {
-            glob(name, &wifi.name)
-        } else {
-            false
-        }
-    })
+    positive.is_empty() || positive.iter().any(|s| spec_matches(s, wifi))
 }
 
 fn parse_nm_bool(value: &str) -> Result<bool> {
@@ -104,16 +141,15 @@ fn parse_nm_powersave(value: &str) -> Result<i16> {
     }
 }
 
-/// Applies `[device]` / `[connection]` sections, and their `-suffix` variants
-/// when `match-device` selects `wifi`, in file order so later sections win.
+/// Reads `[device*]` / `[connection*]` the way NetworkManager does: sections
+/// in order, plain `[device]` / `[connection]` last, and the first value found
+/// for a key wins (NetworkManager.conf(5)). `-suffix` sections count only when
+/// their `match-device` selects `wifi`.
 pub fn parse_nm_config(text: &str, wifi: Option<&WifiInterface>) -> Result<NmConfig> {
-    let mut config = NmConfig {
-        wifi_powersave: NM_DEFAULT_POWERSAVE,
-        autoconnect_retries: NM_DEFAULT_AUTOCONNECT_RETRIES,
-        cloned_mac: NM_DEFAULT_CLONED_MAC.to_owned(),
-        scan_rand_mac: NM_DEFAULT_SCAN_RAND_MAC,
-    };
-    for section in parse_nm_sections(text) {
+    let (mut powersave, mut retries, mut cloned_mac, mut scan_rand_mac) = (None, None, None, None);
+    let mut sections = parse_nm_sections(text);
+    sections.sort_by_key(|section| !section.name.contains('-'));
+    for section in sections {
         let kind = if section.name == "device" || section.name.starts_with("device-") {
             "device"
         } else if section.name == "connection" || section.name.starts_with("connection-") {
@@ -133,21 +169,28 @@ pub fn parse_nm_config(text: &str, wifi: Option<&WifiInterface>) -> Result<NmCon
         }
         for (key, value) in &section.entries {
             match (kind, key.as_str()) {
-                ("device", "wifi.scan-rand-mac-address") => {
-                    config.scan_rand_mac = parse_nm_bool(value)?
+                ("device", "wifi.scan-rand-mac-address") if scan_rand_mac.is_none() => {
+                    scan_rand_mac = Some(parse_nm_bool(value)?)
                 }
-                ("connection", "wifi.powersave") => {
-                    config.wifi_powersave = parse_nm_powersave(value)?
+                ("connection", "wifi.powersave") if powersave.is_none() => {
+                    powersave = Some(parse_nm_powersave(value)?)
                 }
-                ("connection", "connection.autoconnect-retries") => {
-                    config.autoconnect_retries = parse_int(value)?
+                ("connection", "connection.autoconnect-retries") if retries.is_none() => {
+                    retries = Some(parse_int(value)?)
                 }
-                ("connection", "wifi.cloned-mac-address") => config.cloned_mac = value.clone(),
+                ("connection", "wifi.cloned-mac-address") if cloned_mac.is_none() => {
+                    cloned_mac = Some(value.clone())
+                }
                 _ => {}
             }
         }
     }
-    Ok(config)
+    Ok(NmConfig {
+        wifi_powersave: powersave.unwrap_or(NM_DEFAULT_POWERSAVE),
+        autoconnect_retries: retries.unwrap_or(NM_DEFAULT_AUTOCONNECT_RETRIES),
+        cloned_mac: cloned_mac.unwrap_or_else(|| NM_DEFAULT_CLONED_MAC.to_owned()),
+        scan_rand_mac: scan_rand_mac.unwrap_or(NM_DEFAULT_SCAN_RAND_MAC),
+    })
 }
 
 pub async fn read_nm_config(wifi: Option<&WifiInterface>) -> Result<NmConfig> {
@@ -186,19 +229,23 @@ mod tests {
     }
 
     #[test]
-    fn nm_per_device_sections_apply_only_when_matching() {
-        let text = "[device]\nwifi.scan-rand-mac-address=no\n\n\
-            [device]\nwifi.scan-rand-mac-address=no\n\n\
-            [device-other]\nmatch-device=driver:eagle_sdio,driver:wl\nwifi.scan-rand-mac-address=yes\n\n\
-            [connection-ours]\nmatch-device=driver:rtl88x2ce\nwifi.powersave=2\nconnection.autoconnect-retries=0\n\n\
-            [connection-except]\nmatch-device=except:driver:iwlwifi\nwifi.cloned-mac-address=random\n";
+    fn nm_sections_follow_network_manager_precedence() {
+        // Plain [connection] is read last even though it comes first; the
+        // first matching section wins; a non-matching except: is a match.
+        let text = "[connection]\nwifi.powersave=3\nwifi.cloned-mac-address=stable\n\n\
+            [device-other]\nmatch-device=driver:eagle_sdio;driver:wl\nwifi.scan-rand-mac-address=yes\n\n\
+            [connection-ours]\nmatch-device=interface-name:wlP*\nwifi.powersave=2\n\n\
+            [connection-also-ours]\nmatch-device=except:driver:iwlwifi\nwifi.powersave=1\nconnection.autoconnect-retries=0\n\n\
+            [connection-not-ours]\nmatch-device=type:wifi,except:driver:rtl88x2ce\nwifi.cloned-mac-address=random\n";
         let config = parse_nm_config(text, Some(&vendor_wifi())).unwrap();
-        assert!(
-            !config.scan_rand_mac,
-            "non-matching [device-*] must be ignored"
+        assert_eq!(
+            config,
+            NmConfig {
+                wifi_powersave: NM_POWERSAVE_DISABLE,
+                autoconnect_retries: 0,
+                cloned_mac: "stable".to_owned(),
+                scan_rand_mac: NM_DEFAULT_SCAN_RAND_MAC,
+            }
         );
-        assert_eq!(config.wifi_powersave, NM_POWERSAVE_DISABLE);
-        assert_eq!(config.autoconnect_retries, 0);
-        assert_eq!(config.cloned_mac, NM_DEFAULT_CLONED_MAC);
     }
 }
