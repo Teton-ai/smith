@@ -261,7 +261,12 @@ const NetworkSettingsPanel = ({
 	serial: string;
 	device: Device | undefined;
 }) => {
-	const { data: settings, isLoading, refetch } = useDeviceSettings(serial);
+	const {
+		data: settings,
+		isLoading,
+		isError,
+		refetch,
+	} = useDeviceSettings(serial);
 	const { refresh, isPending, canRefresh } = useRefreshDeviceSettings(
 		device,
 		refetch,
@@ -294,7 +299,9 @@ const NetworkSettingsPanel = ({
 				</div>
 			}
 		>
-			{isLoading || !settings ? (
+			{isError ? (
+				<p className="text-sm text-amber-600">Couldn't load settings.</p>
+			) : isLoading || !settings ? (
 				<div className="h-4 animate-pulse rounded bg-gray-100" />
 			) : !r ? (
 				<p className="text-sm text-gray-500">
