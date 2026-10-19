@@ -141,12 +141,14 @@ fn parse_nm_powersave(value: &str) -> Result<i16> {
     }
 }
 
-/// Reads `[device*]` / `[connection*]` the way NetworkManager does: sections
-/// in order, plain `[device]` / `[connection]` last, and the first value found
-/// for a key wins (NetworkManager.conf(5)). `-suffix` sections count only when
-/// their `match-device` selects `wifi`.
+/// Reads `[device*]` / `[connection*]` the way NetworkManager does
+/// (NetworkManager.conf(5)): sections in order, plain `[device]` /
+/// `[connection]` last, the first value found for a key wins. A section with
+/// `match-device` counts only when it selects `wifi` (without it, it applies to
+/// every device); a matching `stop-match=yes` ends the search for its kind.
 pub fn parse_nm_config(text: &str, wifi: Option<&WifiInterface>) -> Result<NmConfig> {
     let (mut powersave, mut retries, mut cloned_mac, mut scan_rand_mac) = (None, None, None, None);
+    let (mut device_stopped, mut connection_stopped) = (false, false);
     let mut sections = parse_nm_sections(text);
     sections.sort_by_key(|section| !section.name.contains('-'));
     for section in sections {
@@ -157,16 +159,24 @@ pub fn parse_nm_config(text: &str, wifi: Option<&WifiInterface>) -> Result<NmCon
         } else {
             continue;
         };
-        if section.name.contains('-') {
-            let spec = section
+        let stopped = match kind {
+            "device" => &mut device_stopped,
+            _ => &mut connection_stopped,
+        };
+        let value_of = |wanted: &str| {
+            section
                 .entries
                 .iter()
-                .find(|(key, _)| key == "match-device")
-                .map(|(_, value)| value.as_str());
-            if !spec.is_some_and(|spec| nm_match_device(spec, wifi)) {
-                continue;
-            }
+                .find(|(key, _)| key == wanted)
+                .map(|(_, value)| value.as_str())
+        };
+        if *stopped || value_of("match-device").is_some_and(|spec| !nm_match_device(spec, wifi)) {
+            continue;
         }
+        *stopped = match value_of("stop-match") {
+            Some(value) => parse_nm_bool(value)?,
+            None => false,
+        };
         for (key, value) in &section.entries {
             match (kind, key.as_str()) {
                 ("device", "wifi.scan-rand-mac-address") if scan_rand_mac.is_none() => {
@@ -230,10 +240,15 @@ mod tests {
 
     #[test]
     fn nm_sections_follow_network_manager_precedence() {
-        // Plain [connection] is read last even though it comes first; the
-        // first matching section wins; a non-matching except: is a match.
-        let text = "[connection]\nwifi.powersave=3\nwifi.cloned-mac-address=stable\n\n\
+        // Plain sections are read last even though they come first; the first
+        // matching section wins; a non-matching except: is a match; a section
+        // without match-device applies; stop-match ends only its own kind.
+        let text = "[device]\nmatch-device=interface-name:eth3\nwifi.scan-rand-mac-address=no\n\n\
+            [connection]\nmatch-device=interface-name:eth3\nwifi.cloned-mac-address=random\n\n\
+            [connection]\nwifi.powersave=3\nwifi.cloned-mac-address=stable\n\n\
             [device-other]\nmatch-device=driver:eagle_sdio;driver:wl\nwifi.scan-rand-mac-address=yes\n\n\
+            [device-everyone]\nstop-match=yes\n\n\
+            [device-too-late]\nwifi.scan-rand-mac-address=no\n\n\
             [connection-ours]\nmatch-device=interface-name:wlP*\nwifi.powersave=2\n\n\
             [connection-also-ours]\nmatch-device=except:driver:iwlwifi\nwifi.powersave=1\nconnection.autoconnect-retries=0\n\n\
             [connection-not-ours]\nmatch-device=type:wifi,except:driver:rtl88x2ce\nwifi.cloned-mac-address=random\n";
