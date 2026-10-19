@@ -69,6 +69,7 @@ export function Button({
 	icon,
 	loading = false,
 	disabled = false,
+	pressed,
 	type = "button",
 	title,
 	onClick,
@@ -84,6 +85,7 @@ export function Button({
 	icon?: ReactNode;
 	loading?: boolean;
 	disabled?: boolean;
+	pressed?: boolean;
 	type?: "button" | "submit";
 	title?: string;
 	onClick?: () => void;
@@ -126,6 +128,7 @@ export function Button({
 			type={type}
 			onClick={onClick}
 			disabled={disabled || loading}
+			aria-pressed={pressed}
 			title={title}
 			className={`${cls} disabled:opacity-50 disabled:cursor-not-allowed`}
 		>
