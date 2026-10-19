@@ -1,0 +1,2 @@
+idle_rssi_diff_th  busy_rssi_diff_th  scanr_exp_ms  scan_int(unit:2 sec)  idle_rssi_th  busy_rssi_th
+5                  10                 10000         2                     40            40           

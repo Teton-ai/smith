@@ -10,6 +10,7 @@ use crate::nm_watcher::NMWatcherHandle;
 use crate::police::PoliceHandle;
 use crate::postman::PostmanHandle;
 use crate::session::SessionHandle;
+use crate::settings::SettingsHandle;
 use crate::shutdown::ShutdownHandler;
 use crate::tunnel::TunnelHandle;
 use crate::updater::UpdaterHandle;
@@ -82,7 +83,10 @@ pub async fn run() {
         session.clone(),
     );
 
-    let _nm_watcher = NMWatcherHandle::new(shutdown.signals(), commander.clone());
+    // Queues its reports on the commander, so it must be created after it.
+    let settings = SettingsHandle::new(shutdown.signals(), commander.clone());
+
+    let _nm_watcher = NMWatcherHandle::new(shutdown.signals(), commander.clone(), settings.clone());
 
     let _control = ControlHandle::new(
         shutdown.signals(),

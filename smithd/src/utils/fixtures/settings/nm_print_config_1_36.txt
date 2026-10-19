@@ -1,0 +1,37 @@
+# NetworkManager configuration: /etc/NetworkManager/NetworkManager.conf (lib: 10-dns-resolved.conf, 20-connectivity-ubuntu.conf, no-mac-addr-change.conf) (etc: 10-globally-managed-devices.conf, default-wifi-powersave-on.conf)
+
+[main]
+# rc-manager=
+# auth-polkit=true
+# dhcp=internal
+# iwd-config-path=
+dns=systemd-resolved
+plugins=ifupdown,keyfile
+configure-and-quit=no
+
+[connectivity]
+uri=http://connectivity-check.ubuntu.com./
+
+[ifupdown]
+managed=false
+
+[logging]
+# backend=journal
+# audit=true
+
+[device]
+# wifi.backend=wpa_supplicant
+wifi.scan-rand-mac-address=no
+
+[device]
+# wifi.backend=wpa_supplicant
+wifi.scan-rand-mac-address=no
+
+[device-31-mac-addr-change]
+match-device=driver:eagle_sdio,driver:wl
+wifi.scan-rand-mac-address=no
+
+[connection]
+wifi.powersave=3
+
+# no-auto-default file "/var/lib/NetworkManager/no-auto-default.state"
