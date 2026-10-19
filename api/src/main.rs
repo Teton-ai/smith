@@ -286,6 +286,7 @@ async fn start_main_server(
             device::route::get_labels,
             device::route::delete_label
         ))
+        .routes(routes!(device::route::update_device_labels))
         .routes(routes!(device::route::get_health_for_device))
         .routes(routes!(device::route::get_uptime_for_device))
         .routes(routes!(telemetry::route::get_telemetry_for_device))

@@ -2262,94 +2262,210 @@ pub async fn update_device(
             error!("Failed to start transaction {err}");
             StatusCode::INTERNAL_SERVER_ERROR
         })?;
-        let keys = labels.keys().map(|key| key.to_string()).collect::<Vec<_>>();
-        let values = labels.into_values().collect::<Vec<_>>();
-        // Ensure the labels exists
-        sqlx::query!(
-            r#"
-            INSERT INTO label (name)
-            SELECT * FROM UNNEST($1::text[])
-            ON CONFLICT (name) DO NOTHING
-            "#,
-            keys.as_slice()
-        )
-        .execute(&mut *tx)
-        .await
-        .map_err(|err| {
-            error!("Failed to upsert labels {err}");
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?;
-        // Remove previous labels on device
-        sqlx::query!(
-            r#"
-            DELETE FROM device_label
-            USING device d
-            WHERE 
-                d.id = device_label.device_id AND
-                CASE
-                    WHEN $1 ~ '^[0-9]+$' AND length($1) <= 10 THEN
-                        d.id = $1::int4
-                    ELSE
-                        d.serial_number = $1
-                END
-            "#,
-            device_id
-        )
-        .execute(&mut *tx)
-        .await
-        .map_err(|err| {
-            error!("Failed to remove previous device_labels on device {err}");
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?;
-        let result = sqlx::query!(
-            r#"
-            WITH label_input AS (
-                SELECT *
-                FROM UNNEST($2::text[], $3::text[]) AS t(key, value)
-            ),
-            the_device AS (
-                SELECT d.id
-                FROM device d
-                WHERE 
-                    CASE
-                        WHEN $1 ~ '^[0-9]+$' AND length($1) <= 10 THEN
-                            id = $1::int4
-                        ELSE
-                            serial_number = $1
-                    END
-            )
-            INSERT INTO device_label (device_id, label_id, value)
-            SELECT
-                d.id,
-                l.id label_id,
-                i.value
-            FROM label_input i
-            INNER JOIN the_device d ON d.id IS NOT NULL
-            INNER JOIN label l ON l.name = i.key
-            ON CONFLICT (device_id, label_id)
-                DO UPDATE SET value = EXCLUDED.value
-            "#,
-            device_id,
-            keys.as_slice(),
-            values.as_slice(),
-        )
-        .execute(&mut *tx)
-        .await
-        .map_err(|err| {
-            error!("Failed to create or update device_labels {err}");
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?;
+        replace_device_labels(&mut tx, &device_id, labels).await?;
         tx.commit().await.map_err(|err| {
             error!("Failed to commit transaction {err}");
             StatusCode::INTERNAL_SERVER_ERROR
         })?;
-
-        if result.rows_affected() == 0 {
-            return Err(StatusCode::NOT_FOUND);
-        }
     }
 
     Ok(StatusCode::OK)
+}
+
+/// Incremental changes: null removes a key; a string sets its value.
+#[derive(serde::Deserialize, utoipa::ToSchema)]
+pub struct UpdateDeviceLabelsRequest {
+    /// Only these keys are changed. Null removes a key; an empty string is stored as a value.
+    pub changes: HashMap<String, Option<String>>,
+}
+
+#[utoipa::path(
+    patch,
+    path = "/devices/{device_id}/labels",
+    params(("device_id" = String, Path)),
+    request_body = UpdateDeviceLabelsRequest,
+    responses(
+        (status = StatusCode::OK, description = "Label changes applied; other keys are preserved"),
+        (status = StatusCode::FORBIDDEN, description = "Forbidden"),
+        (status = StatusCode::NOT_FOUND, description = "Device not found"),
+        (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to update labels"),
+    ),
+    security(("auth_token" = [])),
+    tag = DEVICES_TAG
+)]
+pub async fn update_device_labels(
+    Path(device_id): Path<String>,
+    Extension(state): Extension<State>,
+    Extension(current_user): Extension<CurrentUser>,
+    Json(payload): Json<UpdateDeviceLabelsRequest>,
+) -> Result<StatusCode, StatusCode> {
+    if !authorization::check(current_user, "devices", "write") {
+        return Err(StatusCode::FORBIDDEN);
+    }
+    let mut tx = state.pg_pool.begin().await.map_err(|err| {
+        error!("Failed to start label transaction {err}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+    change_device_labels(&mut tx, &device_id, payload.changes).await?;
+    tx.commit().await.map_err(|err| {
+        error!("Failed to commit label changes {err}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+    Ok(StatusCode::OK)
+}
+
+// All label writers take this shared lock before any device/label row locks.
+// Global deletion takes it exclusively, so its cascade cannot race a writer.
+// Shared locks allow updates on different devices to proceed concurrently.
+const LABEL_REGISTRY_LOCK: i64 = 0x534d_4954_484c_424c; // "SMITHLBL"
+
+async fn replace_device_labels(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    device_id: &str,
+    labels: HashMap<String, String>,
+) -> Result<(), StatusCode> {
+    write_device_labels(tx, device_id, labels, None).await
+}
+
+async fn change_device_labels(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    device_id: &str,
+    changes: HashMap<String, Option<String>>,
+) -> Result<(), StatusCode> {
+    let changed_keys = changes.keys().cloned().collect();
+    let labels = changes
+        .into_iter()
+        .filter_map(|(key, value)| value.map(|v| (key, v)))
+        .collect();
+    write_device_labels(tx, device_id, labels, Some(changed_keys)).await
+}
+
+async fn write_device_labels(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    device_id: &str,
+    labels: HashMap<String, String>,
+    changed_keys: Option<Vec<String>>,
+) -> Result<(), StatusCode> {
+    sqlx::query("SELECT pg_advisory_xact_lock_shared($1)")
+        .bind(LABEL_REGISTRY_LOCK)
+        .execute(&mut **tx)
+        .await
+        .map_err(|err| {
+            error!("Failed to lock label registry {err}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+    // Serialize replacements even when the device currently has no labels.
+    let device_id = sqlx::query_scalar!(
+        r#"
+        SELECT id FROM device
+        WHERE CASE
+            WHEN $1 ~ '^[0-9]+$'
+                 AND (length($1) < 10 OR
+                      (length($1) = 10 AND $1 <= '2147483647')) THEN
+                id = $1::int4
+            ELSE
+                serial_number = $1
+        END
+        FOR UPDATE
+        "#,
+        device_id
+    )
+    .fetch_optional(&mut **tx)
+    .await
+    .map_err(|err| {
+        error!("Failed to lock device for label update {err}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?
+    .ok_or(StatusCode::NOT_FOUND)?;
+
+    let (keys, values): (Vec<_>, Vec<_>) = labels.into_iter().unzip();
+    // Insert shared dictionary entries in the same order on every device.
+    sqlx::query!(
+        r#"
+        INSERT INTO label (name)
+        SELECT name FROM UNNEST($1::text[]) AS input(name)
+        ORDER BY name COLLATE "C"
+        ON CONFLICT (name) DO NOTHING
+        "#,
+        &keys
+    )
+    .execute(&mut **tx)
+    .await
+    .map_err(|err| {
+        error!("Failed to upsert labels {err}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    sqlx::query!(
+        r#"
+        DELETE FROM device_label
+        WHERE device_id = $1
+          AND ($2::text[] IS NULL OR label_id IN (
+              SELECT id FROM label WHERE name = ANY($2)
+          ))
+        "#,
+        device_id,
+        changed_keys.as_deref()
+    )
+    .execute(&mut **tx)
+    .await
+    .map_err(|err| {
+        error!("Failed to remove device labels {err}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    sqlx::query!(
+        r#"
+        INSERT INTO device_label (device_id, label_id, value)
+        SELECT $1, l.id, i.value
+        FROM UNNEST($2::text[], $3::text[]) AS i(key, value)
+        JOIN label l ON l.name = i.key
+        "#,
+        device_id,
+        &keys,
+        &values
+    )
+    .execute(&mut **tx)
+    .await
+    .map_err(|err| {
+        error!("Failed to insert device labels {err}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    Ok(())
+}
+
+async fn delete_label_globally(pool: &sqlx::PgPool, key: &str) -> Result<(), StatusCode> {
+    let mut tx = pool.begin().await.map_err(|err| {
+        error!("Failed to start global label deletion {err}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+    sqlx::query("SELECT pg_advisory_xact_lock($1)")
+        .bind(LABEL_REGISTRY_LOCK)
+        .execute(&mut *tx)
+        .await
+        .map_err(|err| {
+            error!("Failed to lock label registry for deletion {err}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+    sqlx::query!(
+        r#"
+        DELETE FROM label
+        WHERE name = $1
+        "#,
+        key
+    )
+    .execute(&mut *tx)
+    .await
+    .map_err(|err| {
+        error!("Failed to delete label '{key}': {err}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+    tx.commit().await.map_err(|err| {
+        error!("Failed to commit global label deletion {err}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+    Ok(())
 }
 
 #[utoipa::path(
@@ -2379,19 +2495,7 @@ pub async fn delete_label(
         return Err(StatusCode::FORBIDDEN);
     }
 
-    sqlx::query!(
-        r#"
-        DELETE FROM label
-        WHERE name = $1
-        "#,
-        key
-    )
-    .execute(&state.pg_pool)
-    .await
-    .map_err(|err| {
-        error!("Failed to delete label '{key}': {err}");
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
+    delete_label_globally(&state.pg_pool, &key).await?;
 
     Ok(StatusCode::NO_CONTENT)
 }
@@ -3831,5 +3935,501 @@ mod tests {
         assert_eq!(parse_search_terms(&search).len(), 50);
         assert_eq!(parse_search_terms(&search)[0], "0");
         assert_eq!(parse_search_terms(&search)[49], "49");
+    }
+}
+
+/// Requires the compose Postgres image (pg_partman). Run with:
+/// `DATABASE_URL=... cargo test -p api label_updates -- --ignored --test-threads=1`.
+#[cfg(test)]
+mod label_updates {
+    use super::{change_device_labels, delete_label_globally, replace_device_labels};
+    use axum::http::StatusCode;
+    use sqlx::PgPool;
+    use std::{collections::HashMap, time::Duration};
+
+    fn labels(pairs: &[(&str, &str)]) -> HashMap<String, String> {
+        pairs
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect()
+    }
+
+    async fn insert_device(pool: &PgPool, serial: &str) -> anyhow::Result<i32> {
+        Ok(
+            sqlx::query_scalar("INSERT INTO device (serial_number) VALUES ($1) RETURNING id")
+                .bind(serial)
+                .fetch_one(pool)
+                .await?,
+        )
+    }
+
+    async fn labels_of(pool: &PgPool, id: i32) -> anyhow::Result<HashMap<String, String>> {
+        let rows = sqlx::query_as::<_, (String, String)>(
+            "SELECT l.name, dl.value FROM device_label dl
+             JOIN label l ON l.id = dl.label_id WHERE dl.device_id = $1",
+        )
+        .bind(id)
+        .fetch_all(pool)
+        .await?;
+        Ok(rows.into_iter().collect())
+    }
+
+    async fn replace(
+        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        device: &str,
+        labels: HashMap<String, String>,
+    ) -> anyhow::Result<()> {
+        replace_device_labels(tx, device, labels)
+            .await
+            .map_err(|status| anyhow::anyhow!("unexpected status: {status}"))
+    }
+
+    #[sqlx::test]
+    #[ignore = "needs Postgres with pg_partman; run with --test-threads=1"]
+    async fn replaces_and_clears_by_id_and_serial(pool: PgPool) -> anyhow::Result<()> {
+        // A numeric serial outside int4 must not fail the ID cast.
+        let id = insert_device(&pool, "2147483648").await?;
+        let initial = labels(&[("env", "prod"), ("region", "eu"), ("maintenance", "")]);
+        let mut tx = pool.begin().await?;
+        replace(&mut tx, &id.to_string(), initial.clone()).await?;
+        tx.commit().await?;
+        assert_eq!(labels_of(&pool, id).await?, initial);
+
+        let updated = labels(&[("env", "test")]);
+        let mut tx = pool.begin().await?;
+        replace(&mut tx, "2147483648", updated.clone()).await?;
+        tx.commit().await?;
+        assert_eq!(labels_of(&pool, id).await?, updated);
+
+        for _ in 0..2 {
+            let mut tx = pool.begin().await?;
+            replace(&mut tx, &id.to_string(), HashMap::new()).await?;
+            tx.commit().await?;
+            assert!(labels_of(&pool, id).await?.is_empty());
+        }
+        Ok(())
+    }
+
+    #[sqlx::test]
+    #[ignore = "needs Postgres with pg_partman; run with --test-threads=1"]
+    async fn missing_device_returns_not_found(pool: PgPool) -> anyhow::Result<()> {
+        for device in ["missing-device", "2147483647"] {
+            for payload in [HashMap::new(), labels(&[("env", "prod")])] {
+                let mut tx = pool.begin().await?;
+                assert_eq!(
+                    replace_device_labels(&mut tx, device, payload.clone()).await,
+                    Err(StatusCode::NOT_FOUND),
+                );
+                let changes = payload
+                    .iter()
+                    .map(|(key, value)| (key.clone(), Some(value.clone())))
+                    .collect();
+                assert_eq!(
+                    change_device_labels(&mut tx, device, changes).await,
+                    Err(StatusCode::NOT_FOUND),
+                );
+                tx.rollback().await?;
+            }
+        }
+        Ok(())
+    }
+
+    #[sqlx::test]
+    #[ignore = "needs Postgres with pg_partman; run with --test-threads=1"]
+    async fn failed_replacement_preserves_previous_labels(pool: PgPool) -> anyhow::Result<()> {
+        let id = insert_device(&pool, "rollback").await?;
+        let initial = labels(&[("env", "prod")]);
+        let mut tx = pool.begin().await?;
+        replace(&mut tx, &id.to_string(), initial.clone()).await?;
+        tx.commit().await?;
+
+        let mut tx = pool.begin().await?;
+        let invalid = HashMap::from([("env".into(), "x".repeat(256))]);
+        assert_eq!(
+            replace_device_labels(&mut tx, &id.to_string(), invalid).await,
+            Err(StatusCode::INTERNAL_SERVER_ERROR)
+        );
+        tx.rollback().await?;
+        assert_eq!(labels_of(&pool, id).await?, initial);
+        Ok(())
+    }
+
+    #[sqlx::test]
+    #[ignore = "needs Postgres with pg_partman; run with --test-threads=1"]
+    async fn concurrent_replacements_and_clears_are_serialized(pool: PgPool) -> anyhow::Result<()> {
+        let id = insert_device(&pool, "concurrent").await?;
+        for (first_labels, second_labels) in [
+            (labels(&[("a", "1")]), labels(&[("b", "2")])),
+            (labels(&[("a", "1")]), HashMap::new()),
+            (HashMap::new(), labels(&[("b", "2")])),
+        ] {
+            let mut tx = pool.begin().await?;
+            replace(&mut tx, &id.to_string(), HashMap::new()).await?;
+            tx.commit().await?;
+
+            let mut first = pool.begin().await?;
+            let first_pid: i32 = sqlx::query_scalar("SELECT pg_backend_pid()")
+                .fetch_one(&mut *first)
+                .await?;
+            replace(&mut first, &id.to_string(), first_labels).await?;
+            let expected = second_labels.clone();
+            let second = tokio::spawn({
+                let pool = pool.clone();
+                async move {
+                    let mut tx = pool.begin().await?;
+                    // Resolve the second request by serial, the first by ID.
+                    replace(&mut tx, "concurrent", second_labels).await?;
+                    tx.commit().await?;
+                    anyhow::Ok(())
+                }
+            });
+
+            // Observe a real lock wait, rather than depending on scheduling sleeps.
+            tokio::time::timeout(Duration::from_secs(5), async {
+                loop {
+                    assert!(
+                        !second.is_finished(),
+                        "second replacement bypassed the device lock"
+                    );
+                    let blocked: bool = sqlx::query_scalar(
+                        "SELECT EXISTS (SELECT 1 FROM pg_stat_activity
+                         WHERE $1 = ANY(pg_blocking_pids(pid)))",
+                    )
+                    .bind(first_pid)
+                    .fetch_one(&pool)
+                    .await?;
+                    if blocked {
+                        break;
+                    }
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+                anyhow::Ok(())
+            })
+            .await??;
+            first.commit().await?;
+            second.await??;
+            assert_eq!(labels_of(&pool, id).await?, expected);
+        }
+        Ok(())
+    }
+
+    async fn wait_for_blocker(pool: &PgPool, blocker: i32) -> anyhow::Result<()> {
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                let blocked: bool = sqlx::query_scalar(
+                    "SELECT EXISTS (SELECT 1 FROM pg_stat_activity
+                     WHERE $1 = ANY(pg_blocking_pids(pid)))",
+                )
+                .bind(blocker)
+                .fetch_one(pool)
+                .await?;
+                if blocked {
+                    return anyhow::Ok(());
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await??;
+        Ok(())
+    }
+
+    #[sqlx::test]
+    #[ignore = "needs Postgres with pg_partman; run with --test-threads=1"]
+    async fn concurrent_incremental_edits_preserve_both_intents(
+        pool: PgPool,
+    ) -> anyhow::Result<()> {
+        let id = insert_device(&pool, "incremental").await?;
+        let mut seed = pool.begin().await?;
+        replace(
+            &mut seed,
+            &id.to_string(),
+            labels(&[("env", "prod"), ("region", "eu"), ("maintenance", "")]),
+        )
+        .await?;
+        seed.commit().await?;
+
+        let mut first = pool.begin().await?;
+        let pid: i32 = sqlx::query_scalar("SELECT pg_backend_pid()")
+            .fetch_one(&mut *first)
+            .await?;
+        change_device_labels(
+            &mut first,
+            &id.to_string(),
+            HashMap::from([("env".into(), None)]),
+        )
+        .await
+        .map_err(|s| anyhow::anyhow!("{s}"))?;
+        let second = tokio::spawn({
+            let pool = pool.clone();
+            async move {
+                let mut tx = pool.begin().await?;
+                change_device_labels(
+                    &mut tx,
+                    "incremental",
+                    HashMap::from([("team".into(), Some("ops".into()))]),
+                )
+                .await
+                .map_err(|s| anyhow::anyhow!("{s}"))?;
+                tx.commit().await?;
+                anyhow::Ok(())
+            }
+        });
+        wait_for_blocker(&pool, pid).await?;
+        first.commit().await?;
+        tokio::time::timeout(Duration::from_secs(5), second).await???;
+        assert_eq!(
+            labels_of(&pool, id).await?,
+            labels(&[("region", "eu"), ("maintenance", ""), ("team", "ops")])
+        );
+
+        // Explicit removals can clear the final labels, including an empty-valued key.
+        let mut tx = pool.begin().await?;
+        change_device_labels(
+            &mut tx,
+            &id.to_string(),
+            HashMap::from([
+                ("region".into(), None),
+                ("maintenance".into(), None),
+                ("team".into(), None),
+                ("missing".into(), None),
+            ]),
+        )
+        .await
+        .map_err(|s| anyhow::anyhow!("{s}"))?;
+        tx.commit().await?;
+        assert!(labels_of(&pool, id).await?.is_empty());
+        Ok(())
+    }
+
+    #[sqlx::test]
+    #[ignore = "needs Postgres with pg_partman; run with --test-threads=1"]
+    async fn different_devices_can_share_new_label_names(pool: PgPool) -> anyhow::Result<()> {
+        let one = insert_device(&pool, "one").await?;
+        let two = insert_device(&pool, "two").await?;
+        // Force the opposite iteration order that previously deadlocked inside
+        // the bulk INSERT. The real writer must normalize both request orders.
+        fn in_order(pairs: &[(&str, &str)]) -> HashMap<String, String> {
+            for _ in 0..1000 {
+                let map = labels(pairs);
+                if map
+                    .keys()
+                    .map(String::as_str)
+                    .eq(pairs.iter().map(|(key, _)| *key))
+                {
+                    return map;
+                }
+            }
+            panic!("could not construct requested HashMap iteration order");
+        }
+        sqlx::raw_sql(
+            "CREATE FUNCTION pause_second_label() RETURNS trigger LANGUAGE plpgsql AS $$
+             BEGIN
+                 IF NEW.name = 'b' AND current_setting('application_name') = 'label-writer-one' THEN
+                     PERFORM pg_advisory_xact_lock(987654322);
+                 END IF;
+                 RETURN NEW;
+             END $$;
+             CREATE TRIGGER pause_second_label BEFORE INSERT ON label
+             FOR EACH ROW EXECUTE FUNCTION pause_second_label();",
+        )
+        .execute(&pool)
+        .await?;
+        let mut gate = pool.begin().await?;
+        sqlx::query("SELECT pg_advisory_xact_lock(987654322)")
+            .execute(&mut *gate)
+            .await?;
+        let gate_pid: i32 = sqlx::query_scalar("SELECT pg_backend_pid()")
+            .fetch_one(&mut *gate)
+            .await?;
+        let mut first_tx = pool.begin().await?;
+        sqlx::query("SET LOCAL application_name = 'label-writer-one'")
+            .execute(&mut *first_tx)
+            .await?;
+        let first_pid: i32 = sqlx::query_scalar("SELECT pg_backend_pid()")
+            .fetch_one(&mut *first_tx)
+            .await?;
+        let first = tokio::spawn(async move {
+            replace(
+                &mut first_tx,
+                &one.to_string(),
+                in_order(&[("a", "first-a"), ("b", "first-b")]),
+            )
+            .await?;
+            first_tx.commit().await?;
+            anyhow::Ok(())
+        });
+        wait_for_blocker(&pool, gate_pid).await?;
+        let second = tokio::spawn({
+            let pool = pool.clone();
+            async move {
+                let mut tx = pool.begin().await?;
+                replace(
+                    &mut tx,
+                    &two.to_string(),
+                    in_order(&[("b", "second-b"), ("a", "second-a")]),
+                )
+                .await?;
+                tx.commit().await?;
+                anyhow::Ok(())
+            }
+        });
+        wait_for_blocker(&pool, first_pid).await?;
+        gate.commit().await?;
+        tokio::time::timeout(Duration::from_secs(5), async {
+            first.await??;
+            second.await??;
+            anyhow::Ok(())
+        })
+        .await??;
+        assert_eq!(
+            labels_of(&pool, one).await?,
+            labels(&[("a", "first-a"), ("b", "first-b")])
+        );
+        assert_eq!(
+            labels_of(&pool, two).await?,
+            labels(&[("a", "second-a"), ("b", "second-b")])
+        );
+
+        // Existing shared label names do not serialize updates on unrelated devices.
+        let mut first = pool.begin().await?;
+        replace(&mut first, &one.to_string(), labels(&[("a", "updated")])).await?;
+        let mut second = pool.begin().await?;
+        tokio::time::timeout(
+            Duration::from_secs(5),
+            replace(&mut second, &two.to_string(), labels(&[("a", "updated")])),
+        )
+        .await??;
+        second.commit().await?;
+        first.commit().await?;
+        Ok(())
+    }
+
+    #[sqlx::test]
+    #[ignore = "needs Postgres with pg_partman; run with --test-threads=1"]
+    async fn global_delete_cannot_deadlock_between_delete_and_insert(
+        pool: PgPool,
+    ) -> anyhow::Result<()> {
+        let id = insert_device(&pool, "global-delete-race").await?;
+        let mut seed = pool.begin().await?;
+        replace(&mut seed, &id.to_string(), labels(&[("env", "prod")])).await?;
+        seed.commit().await?;
+
+        // Pause the real writer after deleting the association, before its insert.
+        sqlx::raw_sql(
+            "CREATE FUNCTION pause_label_writer() RETURNS trigger LANGUAGE plpgsql AS $$
+             BEGIN PERFORM pg_advisory_xact_lock(987654321); RETURN OLD; END $$;
+             CREATE TRIGGER pause_label_writer AFTER DELETE ON device_label
+             FOR EACH ROW EXECUTE FUNCTION pause_label_writer();",
+        )
+        .execute(&pool)
+        .await?;
+        let mut gate = pool.begin().await?;
+        sqlx::query("SELECT pg_advisory_xact_lock(987654321)")
+            .execute(&mut *gate)
+            .await?;
+        let gate_pid: i32 = sqlx::query_scalar("SELECT pg_backend_pid()")
+            .fetch_one(&mut *gate)
+            .await?;
+        let mut writer_tx = pool.begin().await?;
+        let writer_pid: i32 = sqlx::query_scalar("SELECT pg_backend_pid()")
+            .fetch_one(&mut *writer_tx)
+            .await?;
+        let writer = tokio::spawn(async move {
+            replace(&mut writer_tx, &id.to_string(), labels(&[("env", "test")])).await?;
+            writer_tx.commit().await?;
+            anyhow::Ok(())
+        });
+        wait_for_blocker(&pool, gate_pid).await?;
+        let deleter = tokio::spawn({
+            let pool = pool.clone();
+            async move {
+                delete_label_globally(&pool, "env")
+                    .await
+                    .map_err(|s| anyhow::anyhow!("{s}"))
+            }
+        });
+        wait_for_blocker(&pool, writer_pid).await?;
+        gate.commit().await?;
+        tokio::time::timeout(Duration::from_secs(5), async {
+            writer.await??;
+            deleter.await??;
+            anyhow::Ok(())
+        })
+        .await??;
+        assert!(labels_of(&pool, id).await?.is_empty());
+        Ok(())
+    }
+
+    #[sqlx::test]
+    #[ignore = "needs Postgres with pg_partman; run with --test-threads=1"]
+    async fn update_waits_for_global_delete_then_recreates_the_label(
+        pool: PgPool,
+    ) -> anyhow::Result<()> {
+        let one = insert_device(&pool, "after-delete").await?;
+        let two = insert_device(&pool, "also-deleted").await?;
+        let mut seed = pool.begin().await?;
+        replace(&mut seed, &one.to_string(), labels(&[("env", "prod")])).await?;
+        seed.commit().await?;
+        let mut seed = pool.begin().await?;
+        replace(&mut seed, &two.to_string(), labels(&[("env", "prod")])).await?;
+        seed.commit().await?;
+
+        sqlx::raw_sql(
+            "CREATE FUNCTION pause_global_label_delete() RETURNS trigger LANGUAGE plpgsql AS $$
+             BEGIN PERFORM pg_advisory_xact_lock(987654323); RETURN OLD; END $$;
+             CREATE TRIGGER pause_global_label_delete BEFORE DELETE ON label
+             FOR EACH ROW EXECUTE FUNCTION pause_global_label_delete();",
+        )
+        .execute(&pool)
+        .await?;
+        let mut gate = pool.begin().await?;
+        sqlx::query("SELECT pg_advisory_xact_lock(987654323)")
+            .execute(&mut *gate)
+            .await?;
+        let gate_pid: i32 = sqlx::query_scalar("SELECT pg_backend_pid()")
+            .fetch_one(&mut *gate)
+            .await?;
+        let deleter = tokio::spawn({
+            let pool = pool.clone();
+            async move {
+                delete_label_globally(&pool, "env")
+                    .await
+                    .map_err(|s| anyhow::anyhow!("{s}"))
+            }
+        });
+        wait_for_blocker(&pool, gate_pid).await?;
+        // Identify the session holding the exclusive registry lock while paused.
+        let deleter_pid: i32 = sqlx::query_scalar(
+            "SELECT pid FROM pg_stat_activity WHERE $1 = ANY(pg_blocking_pids(pid))",
+        )
+        .bind(gate_pid)
+        .fetch_one(&pool)
+        .await?;
+        let writer = tokio::spawn({
+            let pool = pool.clone();
+            async move {
+                let mut tx = pool.begin().await?;
+                change_device_labels(
+                    &mut tx,
+                    "after-delete",
+                    HashMap::from([("env".into(), Some("test".into()))]),
+                )
+                .await
+                .map_err(|s| anyhow::anyhow!("{s}"))?;
+                tx.commit().await?;
+                anyhow::Ok(())
+            }
+        });
+        wait_for_blocker(&pool, deleter_pid).await?;
+        gate.commit().await?;
+        tokio::time::timeout(Duration::from_secs(5), async {
+            deleter.await??;
+            writer.await??;
+            anyhow::Ok(())
+        })
+        .await??;
+        assert_eq!(labels_of(&pool, one).await?, labels(&[("env", "test")]));
+        assert!(labels_of(&pool, two).await?.is_empty());
+        Ok(())
     }
 }

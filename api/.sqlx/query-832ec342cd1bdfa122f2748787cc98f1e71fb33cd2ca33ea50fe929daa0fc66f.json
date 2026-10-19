@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        DELETE FROM device_label\n        WHERE device_id = $1\n          AND ($2::text[] IS NULL OR label_id IN (\n              SELECT id FROM label WHERE name = ANY($2)\n          ))\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "TextArray"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "832ec342cd1bdfa122f2748787cc98f1e71fb33cd2ca33ea50fe929daa0fc66f"
+}
