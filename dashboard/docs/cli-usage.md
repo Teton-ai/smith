@@ -165,6 +165,9 @@ sm run ABC123 -w -- dmesg | tail -n 50
 # Add environment label
 sm label -d ABC123 env=production
 
+# Remove the environment label without changing other labels
+sm label -d ABC123 env=
+
 # Query by label
 sm get d -l env=production
 

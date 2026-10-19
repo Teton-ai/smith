@@ -231,14 +231,42 @@ fn parse_label_filters(
     Ok(Some(map))
 }
 
-fn apply_label_updates(labels: &mut HashMap<String, String>, updates: &HashMap<String, String>) {
-    for (key, value) in updates {
-        if value.is_empty() {
-            labels.remove(key);
-        } else {
-            labels.insert(key.clone(), value.clone());
+async fn apply_labels_to_devices(
+    api: &SmithAPI,
+    devices: &[Device],
+    new_labels_map: &HashMap<String, String>,
+) -> anyhow::Result<()> {
+    let mut failures = 0;
+    for device in devices {
+        let device_id = device.id;
+        let serial_number = &device.serial_number;
+
+        match api
+            .update_device_labels(device_id as u64, new_labels_map)
+            .await
+        {
+            Ok(()) => {
+                println!(
+                    "  {} [{}] - Labels updated",
+                    serial_number.bright_green(),
+                    device_id
+                );
+            }
+            Err(e) => {
+                failures += 1;
+                println!("  {} [{}] - Failed: {}", serial_number.red(), device_id, e);
+            }
         }
     }
+
+    if failures > 0 {
+        bail!(
+            "Failed to update labels on {failures} of {} device(s)",
+            devices.len()
+        );
+    }
+    println!("\n{}", "Done!".bright_green());
+    Ok(())
 }
 
 /// Resolves devices from a DeviceSelector
@@ -2103,36 +2131,7 @@ async fn main() -> anyhow::Result<()> {
 
                 println!("\n{} labels to devices...", "Applying".bold());
 
-                for device in &target_devices {
-                    let device_id = device.id;
-                    let serial_number = &device.serial_number;
-
-                    let mut device_labels = device
-                        .labels
-                        .iter()
-                        .map(|(k, v)| (k.clone(), v.to_string()))
-                        .collect::<std::collections::HashMap<String, String>>();
-
-                    apply_label_updates(&mut device_labels, &new_labels_map);
-
-                    match api
-                        .update_device_labels(device_id as u64, device_labels)
-                        .await
-                    {
-                        Ok(()) => {
-                            println!(
-                                "  {} [{}] - Labels updated",
-                                serial_number.bright_green(),
-                                device_id
-                            );
-                        }
-                        Err(e) => {
-                            println!("  {} [{}] - Failed: {}", serial_number.red(), device_id, e);
-                        }
-                    }
-                }
-
-                println!("\n{}", "Done!".bright_green());
+                apply_labels_to_devices(&api, &target_devices, &new_labels_map).await?;
             }
             Commands::Approve { selector, yes } => {
                 let secrets = auth::get_secrets(&config)
@@ -2533,41 +2532,5 @@ fn print_extended_test_results(status: &ExtendedTestStatus) {
             }
         }
         println!();
-    }
-}
-
-#[cfg(test)]
-mod label_tests {
-    use super::*;
-
-    #[test]
-    fn sets_and_removes_only_requested_labels() -> anyhow::Result<()> {
-        let mut labels = HashMap::from([
-            ("env".into(), "prod".into()),
-            ("region".into(), "eu".into()),
-            ("maintenance".into(), String::new()),
-        ]);
-        let updates = parse_label_filters(vec!["env=test".into(), "region=".into()])?.unwrap();
-        apply_label_updates(&mut labels, &updates);
-        assert_eq!(
-            labels,
-            HashMap::from([
-                ("env".into(), "test".into()),
-                ("maintenance".into(), String::new()),
-            ])
-        );
-        Ok(())
-    }
-
-    #[test]
-    fn removes_the_last_label() -> anyhow::Result<()> {
-        let mut labels = HashMap::from([("env".into(), "prod".into())]);
-        let cli = Cli::try_parse_from(["sm", "label", "-d", "DEVICE", "env="])?;
-        let Some(Commands::Label { set_labels, .. }) = cli.command else {
-            panic!("expected label command");
-        };
-        apply_label_updates(&mut labels, &parse_label_filters(set_labels)?.unwrap());
-        assert!(labels.is_empty());
-        Ok(())
     }
 }

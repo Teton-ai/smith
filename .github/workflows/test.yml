@@ -82,6 +82,28 @@ jobs:
       - name: Run tests
         run: cargo test --workspace
 
+      - name: Start Postgres for label concurrency tests
+        run: |
+          docker build -f postgres.Dockerfile -t smith-label-test-postgres .
+          docker run --rm -d --name smith-label-test-postgres -p 5432:5432 -e POSTGRES_PASSWORD=postgres smith-label-test-postgres
+          for attempt in $(seq 1 30); do
+            if docker exec smith-label-test-postgres pg_isready -h 127.0.0.1 -U postgres; then
+              exit 0
+            fi
+            sleep 1
+          done
+          docker logs smith-label-test-postgres
+          exit 1
+
+      - name: Run label concurrency tests
+        env:
+          DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres
+        run: cargo test -p api label_updates -- --ignored --test-threads=1
+
+      - name: Stop label test Postgres
+        if: always()
+        run: docker stop smith-label-test-postgres || true
+
       - name: Report Status
         if: always()
         uses: ravsamhq/notify-slack-action@v2
