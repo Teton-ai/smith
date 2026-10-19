@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        INSERT INTO label (name)\n        SELECT * FROM UNNEST($1::text[])\n        ON CONFLICT (name) DO NOTHING\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "TextArray"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "8c818a6ccc4f179d08f802e2154f513054fbd4ca17703616a7a32ed76b58011e"
+}

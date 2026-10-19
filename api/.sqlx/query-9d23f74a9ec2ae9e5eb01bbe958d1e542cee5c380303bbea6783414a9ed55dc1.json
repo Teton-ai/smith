@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        INSERT INTO device_label (device_id, label_id, value)\n        SELECT $1, l.id, i.value\n        FROM UNNEST($2::text[], $3::text[]) AS i(key, value)\n        JOIN label l ON l.name = i.key\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "TextArray",
+        "TextArray"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "9d23f74a9ec2ae9e5eb01bbe958d1e542cee5c380303bbea6783414a9ed55dc1"
+}

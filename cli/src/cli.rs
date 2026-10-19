@@ -467,6 +467,7 @@ Examples:
         #[arg(short, long = "device")]
         devices: Vec<String>,
         /// Labels to set on the devices (format: key=value). Can be used multiple times.
+        /// Use `key=` with an empty value to remove the label.
         #[arg(required = true, value_name = "KEY=VALUE")]
         set_labels: Vec<String>,
     },
