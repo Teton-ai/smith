@@ -207,6 +207,10 @@ sm releases packages 140
 # Draft 1.5.0 with packages 812 and 815 in place of their older versions
 sm releases draft --distro 6 --version 1.5.0 --package 812 --package 815
 
+# Change the draft: swap in or add package 820, remove package 790
+sm releases set-package 141 820
+sm releases remove-package 141 790
+
 # Publish it and send it to the canary devices
 sm releases publish 141
 sm releases deploy 141
