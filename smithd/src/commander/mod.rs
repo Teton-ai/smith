@@ -23,9 +23,6 @@ mod tunnel;
 mod upgrade;
 mod variable;
 
-/// Stays under the 60 s command cap even when the api is slow.
-const REPORT_SETTINGS_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(45);
-
 pub struct Handles {
     pub magic: MagicHandle,
     pub tunnel: TunnelHandle,
@@ -143,25 +140,20 @@ impl CommandQueueExecutor {
             SafeCommandTx::CloseFileSession { session_id } => {
                 files::close_session(action.id, &self.handles.filebrowser, session_id).await
             }
-            SafeCommandTx::ReportSettings => {
-                match tokio::time::timeout(REPORT_SETTINGS_TIMEOUT, settings::read_now()).await {
-                    Ok(report) => SafeCommandResponse {
-                        id: action.id,
-                        command: SafeCommandRx::ReportSettings { report },
-                        status: 0,
+            SafeCommandTx::ReportSettings => match settings::read_now().await {
+                Some(report) => SafeCommandResponse {
+                    id: action.id,
+                    command: SafeCommandRx::ReportSettings { report },
+                    status: 0,
+                },
+                None => SafeCommandResponse {
+                    id: action.id,
+                    command: SafeCommandRx::ReportSettings {
+                        report: Default::default(),
                     },
-                    Err(_) => {
-                        warn!(command_id = action.id, "Settings read timed out");
-                        SafeCommandResponse {
-                            id: action.id,
-                            command: SafeCommandRx::ReportSettings {
-                                report: Default::default(),
-                            },
-                            status: -1,
-                        }
-                    }
-                }
-            }
+                    status: -1,
+                },
+            },
             // Issued by a newer api than this daemon understands. Report a
             // failure so the operator sees why the command did nothing instead
             // of it silently disappearing.

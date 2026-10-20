@@ -1,10 +1,11 @@
+use super::READ_TIMEOUT;
 use super::read::SettingsReader;
 use crate::commander::CommanderHandle;
 use crate::shutdown::ShutdownSignals;
 use crate::utils::schema::{SafeCommandResponse, SafeCommandRx, SettingsReport};
 use tokio::sync::mpsc;
 use tokio::time::{self, Duration, Instant};
-use tracing::info;
+use tracing::{info, warn};
 
 /// Synthetic command id for reports smithd sends without being asked.
 const CMD_ID_REPORT_SETTINGS: i32 = -7;
@@ -100,7 +101,14 @@ impl Actor {
     }
 
     async fn check(&mut self) {
-        let reading = self.reader.read(check_interval_s()).await;
+        let reading = match time::timeout(READ_TIMEOUT, self.reader.read(check_interval_s())).await
+        {
+            Ok(reading) => reading,
+            Err(_) => {
+                warn!("Settings read timed out after {READ_TIMEOUT:?}; skipping this check");
+                return;
+            }
+        };
         let hold = hold_for_reload(self.previous_vendor_present, reading.vendor_present);
         self.previous_vendor_present = Some(reading.vendor_present);
         if hold {

@@ -14,7 +14,13 @@ use crate::utils::schema::SettingsReport;
 use actor::{Actor, ActorMessage};
 use read::SettingsReader;
 use tokio::sync::mpsc;
-use tracing::debug;
+use tokio::time::Duration;
+use tracing::{debug, warn};
+
+/// Helper processes are capped on their own, D-Bus calls are not; a hung
+/// service must not stall the reporter or the commander. Under the 60 s check
+/// interval.
+const READ_TIMEOUT: Duration = Duration::from_secs(30);
 
 #[derive(Clone)]
 pub struct SettingsHandle {
@@ -41,10 +47,14 @@ impl SettingsHandle {
 
 /// One full read for the `ReportSettings` command, which carries the report as
 /// its response. Independent of the reporter actor, which the commander cannot
-/// hold since the actor queues its reports on the commander.
-pub async fn read_now() -> SettingsReport {
-    SettingsReader::default()
-        .read(actor::check_interval_s())
-        .await
-        .report
+/// hold since the actor queues its reports on the commander. `None` on timeout.
+pub async fn read_now() -> Option<SettingsReport> {
+    let mut reader = SettingsReader::default();
+    match tokio::time::timeout(READ_TIMEOUT, reader.read(actor::check_interval_s())).await {
+        Ok(reading) => Some(reading.report),
+        Err(_) => {
+            warn!("Settings read timed out after {READ_TIMEOUT:?}");
+            None
+        }
+    }
 }
