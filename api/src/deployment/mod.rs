@@ -17,6 +17,90 @@ use crate::slack::send_slack_notification;
 
 pub mod route;
 
+/// Most buckets a staggered retarget is split into; smaller sets get one device
+/// per bucket.
+pub const STAGGER_MAX_BUCKETS: usize = 20;
+pub const STAGGER_INTERVAL_MINUTES: i32 = 5;
+
+pub fn bucket_count(device_count: usize) -> usize {
+    device_count.min(STAGGER_MAX_BUCKETS)
+}
+
+/// Consecutive chunks of the ranked devices rather than a modulo, so bucket
+/// sizes differ by at most one device whatever the set size.
+pub fn bucket_for_rank(rank: usize, device_count: usize) -> usize {
+    if device_count == 0 {
+        return 0;
+    }
+    rank * bucket_count(device_count) / device_count
+}
+
+pub struct StaggerOutcome {
+    /// Every device now targeting the release, including those already on it.
+    pub retargeted: u64,
+}
+
+/// Points `device_ids` at `release_id`, letting each device move only once its
+/// bucket opens.
+pub async fn stagger_retarget(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    release_id: i32,
+    device_ids: &[i32],
+) -> sqlx::Result<StaggerOutcome> {
+    // Devices already on the release (canaries) download nothing, so they take
+    // no bucket slot and keep the buckets even for the devices that do.
+    let already_on_release = sqlx::query!(
+        "UPDATE device
+         SET target_release_id = $1,
+             target_release_id_set_at = NOW(),
+             target_release_eligible_at = NULL
+         WHERE id = ANY($2) AND release_id = $1",
+        release_id,
+        device_ids
+    )
+    .execute(&mut **tx)
+    .await?
+    .rows_affected();
+
+    // Ranked by a hash of device and release, not by id: sites are provisioned
+    // in contiguous ids, and who goes first should change with every release.
+    // md5 in Postgres is stable across API restarts and replicas.
+    let ranked_ids = sqlx::query_scalar!(
+        "SELECT id FROM device
+         WHERE id = ANY($1) AND release_id IS DISTINCT FROM $2
+         ORDER BY md5(id::text || ':' || $2::int::text), id",
+        device_ids,
+        release_id
+    )
+    .fetch_all(&mut **tx)
+    .await?;
+
+    let device_count = ranked_ids.len();
+    let offset_minutes: Vec<i32> = (0..device_count)
+        .map(|rank| bucket_for_rank(rank, device_count) as i32 * STAGGER_INTERVAL_MINUTES)
+        .collect();
+
+    // Eligibility uses the database clock, the same one the poll compares it to.
+    let staggered = sqlx::query!(
+        "UPDATE device d
+         SET target_release_id = $1,
+             target_release_id_set_at = NOW(),
+             target_release_eligible_at = NOW() + make_interval(mins => u.offset_minutes)
+         FROM UNNEST($2::int[], $3::int[]) AS u(id, offset_minutes)
+         WHERE d.id = u.id",
+        release_id,
+        &ranked_ids,
+        &offset_minutes
+    )
+    .execute(&mut **tx)
+    .await?
+    .rows_affected();
+
+    Ok(StaggerOutcome {
+        retargeted: already_on_release + staggered,
+    })
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone, ToSchema)]
 pub struct DeploymentDeviceWithStatus {
     pub device_id: i32,
@@ -407,21 +491,24 @@ pub async fn confirm_full_rollout(
         .await?;
 
     // Devices that do not follow latest stay where they are: a fleet-wide
-    // rollout must never move a pinned device. The count reported below comes
-    // from this statement so it can't drift from what was actually retargeted.
-    let device_count = sqlx::query!(
-        "UPDATE device
-             SET target_release_id = $1, target_release_id_set_at = NOW(), target_release_eligible_at = NULL
+    // rollout must never move a pinned device. The rows stay locked until the
+    // retarget so a concurrent pin is either seen here or waits for us, and the
+    // count reported below comes from the retarget itself.
+    let follower_ids = sqlx::query_scalar!(
+        "SELECT id FROM device
              WHERE device.release_id IN (
-                SELECT id FROM release WHERE distribution_id = $2
+                SELECT id FROM release WHERE distribution_id = $1
              )
-             AND device.follow_latest",
-        release_id,
+             AND device.follow_latest
+             FOR UPDATE",
         release.distribution_id
     )
-    .execute(&mut *tx)
-    .await?
-    .rows_affected();
+    .fetch_all(&mut *tx)
+    .await?;
+
+    let device_count = stagger_retarget(&mut tx, release_id, &follower_ids)
+        .await?
+        .retargeted;
 
     sqlx::query!(
         "UPDATE distribution SET latest_release_id = $1 WHERE id = $2",
@@ -693,4 +780,130 @@ pub async fn get_deployment_service_health(
     .await?;
 
     Ok(health)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn bucket_sizes(device_count: usize) -> Vec<usize> {
+        let mut sizes = vec![0; bucket_count(device_count)];
+        for rank in 0..device_count {
+            sizes[bucket_for_rank(rank, device_count)] += 1;
+        }
+        sizes
+    }
+
+    #[test]
+    fn bucket_sizes_differ_by_at_most_one() {
+        for device_count in (1..=200).chain([5000]) {
+            let sizes = bucket_sizes(device_count);
+            let min = sizes.iter().min().copied().unwrap_or(0);
+            let max = sizes.iter().max().copied().unwrap_or(0);
+            assert!(max - min <= 1, "{device_count} devices: sizes {sizes:?}");
+            assert_eq!(sizes.iter().sum::<usize>(), device_count);
+        }
+    }
+
+    #[test]
+    fn bucket_count_is_capped() {
+        assert_eq!(bucket_count(0), 0);
+        assert_eq!(bucket_count(16), 16);
+        assert_eq!(bucket_count(21), STAGGER_MAX_BUCKETS);
+        assert_eq!(bucket_count(5000), STAGGER_MAX_BUCKETS);
+    }
+
+    /// `N` releases of one distribution, so a test can move devices between them.
+    pub(crate) async fn insert_releases<const N: usize>(pool: &PgPool) -> anyhow::Result<[i32; N]> {
+        let distribution_id: i32 = sqlx::query_scalar(
+            "INSERT INTO distribution (name) VALUES ('stagger-test') RETURNING id",
+        )
+        .fetch_one(pool)
+        .await?;
+        let ids: Vec<i32> = sqlx::query_scalar(
+            "INSERT INTO release (distribution_id, version)
+             SELECT $1, n || '.0.0' FROM generate_series(1, $2) AS n RETURNING id",
+        )
+        .bind(distribution_id)
+        .bind(i32::try_from(N)?)
+        .fetch_all(pool)
+        .await?;
+        ids.try_into()
+            .map_err(|ids| anyhow::anyhow!("expected {N} releases, got {ids:?}"))
+    }
+
+    /// Devices on `release_id`, or with no release reported when `None`.
+    pub(crate) async fn insert_devices(
+        pool: &PgPool,
+        count: usize,
+        release_id: Option<i32>,
+    ) -> anyhow::Result<Vec<i32>> {
+        Ok(sqlx::query_scalar(
+            "INSERT INTO device (serial_number, release_id)
+             SELECT gen_random_uuid()::text, $2 FROM generate_series(1, $1)
+             RETURNING id",
+        )
+        .bind(i32::try_from(count)?)
+        .bind(release_id)
+        .fetch_all(pool)
+        .await?)
+    }
+
+    /// Minutes from now until each device's bucket opens; `None` for no bucket.
+    async fn offsets_by_device(
+        pool: &PgPool,
+        device_ids: &[i32],
+    ) -> anyhow::Result<HashMap<i32, Option<i64>>> {
+        let rows: Vec<(i32, Option<f64>)> = sqlx::query_as(
+            "SELECT id, EXTRACT(EPOCH FROM target_release_eligible_at - NOW())::float8
+             FROM device WHERE id = ANY($1)",
+        )
+        .bind(device_ids)
+        .fetch_all(pool)
+        .await?;
+        Ok(rows
+            .into_iter()
+            .map(|(id, secs)| (id, secs.map(|secs| (secs / 60.0).round() as i64)))
+            .collect())
+    }
+
+    #[sqlx::test]
+    #[ignore = "needs the compose Postgres; run with --test-threads=1"]
+    async fn stagger_retarget_spreads_movers_and_skips_canaries(
+        pool: PgPool,
+    ) -> anyhow::Result<()> {
+        let [current, target, next] = insert_releases(&pool).await?;
+        let movers = insert_devices(&pool, 19, Some(current)).await?;
+        let canary = insert_devices(&pool, 1, Some(target)).await?;
+        let all: Vec<i32> = movers.iter().chain(&canary).copied().collect();
+
+        let mut tx = pool.begin().await?;
+        let outcome = stagger_retarget(&mut tx, target, &all).await?;
+        tx.commit().await?;
+
+        assert_eq!(outcome.retargeted, 20);
+        let to_target = offsets_by_device(&pool, &all).await?;
+        assert_eq!(to_target.get(&canary[0]), Some(&None));
+        let mut minutes: Vec<i64> = movers
+            .iter()
+            .filter_map(|id| to_target.get(id).copied().flatten())
+            .collect();
+        minutes.sort_unstable();
+        let expected: Vec<i64> = (0..19).map(|bucket| bucket * 5).collect();
+        assert_eq!(minutes, expected, "one mover per bucket, 5 min apart");
+
+        let mut tx = pool.begin().await?;
+        stagger_retarget(&mut tx, next, &movers).await?;
+        tx.commit().await?;
+        let to_next = offsets_by_device(&pool, &movers).await?;
+        let movers_to_target: HashMap<i32, Option<i64>> = movers
+            .iter()
+            .map(|id| (*id, to_target.get(id).copied().flatten()))
+            .collect();
+        assert_ne!(
+            to_next, movers_to_target,
+            "who goes first should change with the release"
+        );
+        Ok(())
+    }
 }
