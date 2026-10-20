@@ -88,6 +88,16 @@ impl HandleApiError for Response {
     }
 }
 
+/// The deployment routes answer 404 with no body when a release has no deployment.
+fn require_deployment(resp: Response, release_id: i32) -> Result<Response> {
+    if resp.status() == reqwest::StatusCode::NOT_FOUND {
+        anyhow::bail!(
+            "Release {release_id} has no deployment. Start one with `sm releases deploy {release_id}`"
+        );
+    }
+    Ok(resp)
+}
+
 pub struct SmithAPI {
     domain: String,
     bearer_token: String,
@@ -399,9 +409,8 @@ impl SmithAPI {
             ))
             .header("Authorization", format!("Bearer {}", &self.bearer_token))
             .send()
-            .await?
-            .handle_error()
             .await?;
+        let resp = require_deployment(resp, release_id)?.handle_error().await?;
 
         Ok(resp.json().await?)
     }
@@ -453,9 +462,8 @@ impl SmithAPI {
             ))
             .header("Authorization", format!("Bearer {}", &self.bearer_token))
             .send()
-            .await?
-            .handle_error()
             .await?;
+        let resp = require_deployment(resp, release_id)?.handle_error().await?;
 
         Ok(resp.json().await?)
     }
