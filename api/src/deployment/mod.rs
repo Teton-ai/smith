@@ -231,7 +231,7 @@ pub async fn new_deployment(
     sqlx::query!(
         "
         UPDATE device
-        SET target_release_id = $1, target_release_id_set_at = NOW()
+        SET target_release_id = $1, target_release_id_set_at = NOW(), target_release_eligible_at = NULL
         WHERE id IN (
             SELECT device_id FROM deployment_devices WHERE deployment_id = $2
         )
@@ -411,7 +411,7 @@ pub async fn confirm_full_rollout(
     // from this statement so it can't drift from what was actually retargeted.
     let device_count = sqlx::query!(
         "UPDATE device
-             SET target_release_id = $1, target_release_id_set_at = NOW()
+             SET target_release_id = $1, target_release_id_set_at = NOW(), target_release_eligible_at = NULL
              WHERE device.release_id IN (
                 SELECT id FROM release WHERE distribution_id = $2
              )
@@ -549,7 +549,7 @@ pub async fn rollback_release(
     // so a device still targeting it is exactly what this is meant to rescue.
     let devices_retargeted = sqlx::query!(
         "UPDATE device
-         SET target_release_id = $2, target_release_id_set_at = NOW()
+         SET target_release_id = $2, target_release_id_set_at = NOW(), target_release_eligible_at = NULL
          WHERE target_release_id = $1",
         release_id,
         target_release_id

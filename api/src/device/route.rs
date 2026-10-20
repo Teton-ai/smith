@@ -1599,7 +1599,7 @@ pub async fn update_device_target_release(
     }
 
     sqlx::query!(
-        "UPDATE device SET target_release_id = $1, target_release_id_set_at = NOW() WHERE id = $2",
+        "UPDATE device SET target_release_id = $1, target_release_id_set_at = NOW(), target_release_eligible_at = NULL WHERE id = $2",
         target_release_id,
         device_id
     )
@@ -1777,7 +1777,7 @@ pub async fn update_devices_target_release(
     }
 
     sqlx::query!(
-        "UPDATE device SET target_release_id = $1, target_release_id_set_at = NOW() WHERE id = ANY($2)",
+        "UPDATE device SET target_release_id = $1, target_release_id_set_at = NOW(), target_release_eligible_at = NULL WHERE id = ANY($2)",
         target_release_id,
         &devices_release.devices
     )
@@ -2562,7 +2562,7 @@ pub async fn approve_device(
 
     if let Some(release_id) = target_release_id {
         sqlx::query!(
-            "UPDATE device SET target_release_id = $1, target_release_id_set_at = NOW() WHERE id = $2",
+            "UPDATE device SET target_release_id = $1, target_release_id_set_at = NOW(), target_release_eligible_at = NULL WHERE id = $2",
             release_id,
             device_id
         )
@@ -2636,7 +2636,8 @@ pub async fn revoke_device(
         r#"UPDATE device 
         SET approved = false,
             release_id = NULL,
-            target_release_id = NULL
+            target_release_id = NULL,
+            target_release_eligible_at = NULL
         WHERE id = $1"#,
         device_id
     )
