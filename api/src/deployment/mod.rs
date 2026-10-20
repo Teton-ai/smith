@@ -783,7 +783,7 @@ pub async fn get_deployment_service_health(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     fn bucket_sizes(device_count: usize) -> Vec<usize> {
