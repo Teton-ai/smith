@@ -745,6 +745,152 @@ pub async fn rollback_release(
     })
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone, ToSchema)]
+pub struct StaggerPolicy {
+    /// Deploy to Selected staggers selections of more than this many devices.
+    pub bulk_threshold: i32,
+    /// Most buckets a staggered rollout is split into.
+    pub max_buckets: i32,
+    /// Minutes between two buckets opening.
+    pub interval_minutes: i32,
+    /// Whether Deploy to Selected staggers the requested number of devices.
+    pub staggered: bool,
+    /// Minutes until the last bucket opens for that many devices; 0 when not
+    /// staggered.
+    pub window_minutes: i32,
+}
+
+pub fn stagger_policy(device_count: usize) -> StaggerPolicy {
+    let window = bulk_stagger_window(device_count, false);
+    StaggerPolicy {
+        bulk_threshold: BULK_STAGGER_THRESHOLD as i32,
+        max_buckets: STAGGER_MAX_BUCKETS as i32,
+        interval_minutes: STAGGER_INTERVAL_MINUTES,
+        staggered: window.is_some(),
+        window_minutes: window.unwrap_or(0),
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, ToSchema)]
+pub struct FinishNowResult {
+    pub devices_released: i64,
+}
+
+/// Opens every remaining bucket of the release at once.
+pub async fn release_waiting_devices<'e, E>(release_id: i32, executor: E) -> sqlx::Result<u64>
+where
+    E: sqlx::PgExecutor<'e>,
+{
+    Ok(sqlx::query!(
+        "UPDATE device SET target_release_eligible_at = NOW()
+         WHERE target_release_id = $1
+         AND target_release_eligible_at > NOW()
+         AND release_id IS DISTINCT FROM target_release_id
+         AND archived = false",
+        release_id
+    )
+    .execute(executor)
+    .await?
+    .rows_affected())
+}
+
+pub async fn finish_now(
+    release_id: i32,
+    pg_pool: &PgPool,
+    config: &Config,
+    user_email: Option<&str>,
+) -> Result<FinishNowResult, ApiError> {
+    let devices_released = release_waiting_devices(release_id, pg_pool).await?;
+
+    if devices_released > 0
+        && let Some(deployment_slack_hook_url) = &config.deployment_slack_hook_url
+    {
+        let release_info = sqlx::query!(
+            "SELECT r.version, d.name as distribution_name
+             FROM release r
+             JOIN distribution d ON r.distribution_id = d.id
+             WHERE r.id = $1",
+            release_id
+        )
+        .fetch_optional(pg_pool)
+        .await;
+
+        match release_info {
+            Ok(Some(info)) => {
+                let triggered_by = user_email.unwrap_or("Unknown");
+                let message = json!({
+                    "blocks": [
+                        {
+                            "type": "section",
+                            "text": {
+                                "type": "mrkdwn",
+                                "text": format!(
+                                    ":fast_forward: *Staggered Rollout Finished Early*\n\n*Distribution:* {}\n*Version:* {}\n*Devices released at once:* {}\n*Triggered by:* {}",
+                                    info.distribution_name,
+                                    info.version,
+                                    devices_released,
+                                    triggered_by
+                                )
+                            }
+                        }
+                    ]
+                });
+                send_slack_notification(deployment_slack_hook_url, message).await;
+            }
+            Ok(None) => {}
+            Err(err) => tracing::error!("Failed to look up release {release_id} for Slack: {err}"),
+        }
+    }
+
+    Ok(FinishNowResult {
+        devices_released: i64::try_from(devices_released).unwrap_or(i64::MAX),
+    })
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, ToSchema)]
+pub struct RolloutProgress {
+    /// Not on the release yet and waiting for their bucket to open.
+    pub scheduled: i64,
+    /// Allowed to move but not on the release yet.
+    pub eligible: i64,
+    /// Already on the release.
+    pub updated: i64,
+    pub next_bucket_at: Option<chrono::DateTime<chrono::Utc>>,
+    /// When the last bucket opens (or opened).
+    pub expected_end_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+/// Counts every device currently targeting the release, so a device moved to
+/// another release afterwards drops out.
+pub async fn rollout_progress<'e, E>(release_id: i32, executor: E) -> sqlx::Result<RolloutProgress>
+where
+    E: sqlx::PgExecutor<'e>,
+{
+    sqlx::query_as!(
+        RolloutProgress,
+        r#"SELECT
+            COUNT(*) FILTER (
+                WHERE release_id IS DISTINCT FROM target_release_id
+                AND target_release_eligible_at > NOW()
+            ) AS "scheduled!",
+            COUNT(*) FILTER (
+                WHERE release_id IS DISTINCT FROM target_release_id
+                AND (target_release_eligible_at IS NULL OR target_release_eligible_at <= NOW())
+            ) AS "eligible!",
+            COUNT(*) FILTER (WHERE release_id = target_release_id) AS "updated!",
+            MIN(target_release_eligible_at) FILTER (
+                WHERE release_id IS DISTINCT FROM target_release_id
+                AND target_release_eligible_at > NOW()
+            ) AS next_bucket_at,
+            MAX(target_release_eligible_at) AS expected_end_at
+        FROM device
+        WHERE target_release_id = $1 AND archived = false"#,
+        release_id
+    )
+    .fetch_one(executor)
+    .await
+}
+
 pub async fn get_devices_in_deployment(
     release_id: i32,
     pg_pool: &PgPool,
@@ -999,6 +1145,41 @@ pub(crate) mod tests {
 
         assert_eq!(retarget.device_count, BULK_STAGGER_THRESHOLD);
         assert_eq!(retarget.window_minutes, None);
+        Ok(())
+    }
+
+    #[sqlx::test]
+    #[ignore = "needs the compose Postgres; run with --test-threads=1"]
+    async fn progress_and_finish_now_follow_the_buckets(pool: PgPool) -> anyhow::Result<()> {
+        let [current, target] = insert_releases(&pool).await?;
+        let ids = insert_devices(&pool, 20, Some(current)).await?;
+        let mut tx = pool.begin().await?;
+        stagger_retarget(&mut tx, target, &ids).await?;
+        tx.commit().await?;
+        // Updated before its bucket opened: counted as updated, and finish now
+        // must leave it alone.
+        sqlx::query("UPDATE device SET release_id = target_release_id WHERE id = $1")
+            .bind(ids[0])
+            .execute(&pool)
+            .await?;
+
+        let progress = rollout_progress(target, &pool).await?;
+        assert_eq!(progress.updated, 1);
+        assert_eq!(progress.scheduled + progress.eligible, 19);
+        assert!(
+            progress.scheduled >= 18,
+            "only bucket 0 is open: {progress:?}"
+        );
+        assert!(progress.next_bucket_at.is_some());
+        assert!(progress.expected_end_at.is_some());
+
+        let released = release_waiting_devices(target, &pool).await?;
+        assert_eq!(i64::try_from(released)?, progress.scheduled);
+
+        let after = rollout_progress(target, &pool).await?;
+        assert_eq!(after.scheduled, 0);
+        assert_eq!(after.eligible, 19);
+        assert_eq!(after.next_bucket_at, None);
         Ok(())
     }
 }
