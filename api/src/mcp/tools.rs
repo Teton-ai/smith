@@ -36,7 +36,7 @@ use tracing::error;
 const INSTRUCTIONS: &str = "Smith manages a fleet of Linux devices. Devices can be referred to by \
 numeric id or serial number. Releases belong to a distribution; the usual flow is draft_release, \
 publish_release, deploy_release (canary devices first), get_deployment to watch it, then \
-confirm_full_rollout. Device commands are queued and run when the device next checks in: tools \
+confirm_full_rollout, which lets devices update in staggered groups over up to 95 minutes. Device commands are queued and run when the device next checks in: tools \
 that queue commands return a bundle UUID, and get_command_results fetches the output later.";
 
 /// Long polls hold an HTTP request open; stay under typical load balancer idle timeouts.
@@ -551,7 +551,7 @@ impl SmithMcp {
         }))
     }
 
-    /// Roll a release out to the whole fleet once its canary devices are healthy.
+    /// Roll a release out to the whole fleet once its canary devices are healthy. Devices are released in staggered groups over up to 95 minutes, so they don't all update at once.
     #[tool(annotations(
         read_only_hint = false,
         destructive_hint = true,
