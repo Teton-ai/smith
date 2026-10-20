@@ -1,6 +1,7 @@
 "use client";
 
-import { X } from "lucide-react";
+import { Button } from "@teton/smith-ui";
+import { AlertTriangle, X } from "lucide-react";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
@@ -100,5 +101,67 @@ export function Modal({
 			</div>
 		</div>,
 		document.body,
+	);
+}
+
+/**
+ * Confirmation before skipping a staggered rollout. Shared by Finish now and
+ * the Deploy to Selected opt-out so both warn the same way.
+ */
+export function EmergencyConfirmModal({
+	open,
+	title,
+	confirmLabel,
+	loading = false,
+	onCancel,
+	onConfirm,
+}: {
+	open: boolean;
+	title: string;
+	confirmLabel: string;
+	loading?: boolean;
+	onCancel: () => void;
+	onConfirm: () => void;
+}) {
+	return (
+		<Modal
+			open={open}
+			onClose={onCancel}
+			title={title}
+			footer={
+				<>
+					<Button
+						variant="soft"
+						tone="gray"
+						disabled={loading}
+						onClick={onCancel}
+					>
+						Cancel
+					</Button>
+					<Button
+						variant="solid"
+						tone="red"
+						loading={loading}
+						onClick={onConfirm}
+					>
+						{confirmLabel}
+					</Button>
+				</>
+			}
+		>
+			<div className="flex gap-3">
+				<AlertTriangle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
+				<div className="space-y-2 text-sm text-gray-700">
+					<p>
+						Some departments may have trouble updating all their devices at
+						once: when every device on a site downloads the release together,
+						the site's network can saturate and devices can go offline.
+					</p>
+					<p className="font-medium text-gray-900">
+						Only do this in case of emergency.
+					</p>
+				</div>
+			</div>
+		</Modal>
 	);
 }
