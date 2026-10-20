@@ -1137,7 +1137,7 @@
         {
           "name": "<KEY=VALUE>",
           "required": true,
-          "help": "Labels to set on the devices (format: key=value). Can be used multiple times"
+          "help": "Labels to set on the devices (format: key=value). Can be used multiple times. Use `key=` with an empty value to remove the label"
         }
       ],
       "options": [

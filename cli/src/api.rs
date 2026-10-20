@@ -736,14 +736,20 @@ impl SmithAPI {
     pub async fn update_device_labels(
         &self,
         device_id: u64,
-        labels: HashMap<String, String>,
+        labels: &HashMap<String, String>,
     ) -> Result<()> {
         let client = Client::new();
+        let changes: HashMap<_, _> = labels
+            .iter()
+            .map(|(key, value)| (key, (!value.is_empty()).then_some(value)))
+            .collect();
 
+        // A separate endpoint makes older servers fail explicitly with 404,
+        // rather than silently ignoring an unknown field on PATCH /devices/{id}.
         let resp = client
-            .patch(format!("{}/devices/{}", self.domain, device_id))
+            .patch(format!("{}/devices/{}/labels", self.domain, device_id))
             .header("Authorization", format!("Bearer {}", &self.bearer_token))
-            .json(&serde_json::json!({ "labels": labels }))
+            .json(&serde_json::json!({ "changes": changes }))
             .send();
 
         resp.await?.error_for_status()?;
@@ -979,6 +985,109 @@ impl SmithAPI {
             .handle_error()
             .await?;
 
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod label_tests {
+    use super::*;
+    use std::io::{BufRead, BufReader, Read, Write};
+    use std::net::TcpListener;
+    use std::thread;
+    use std::time::{Duration, Instant};
+
+    #[tokio::test]
+    async fn label_changes_preserve_intent_and_report_bulk_failures() -> anyhow::Result<()> {
+        for statuses in [[200, 200], [500, 200], [500, 500], [404, 404]] {
+            let listener = TcpListener::bind("127.0.0.1:0")?;
+            listener.set_nonblocking(true)?;
+            let api = SmithAPI {
+                domain: format!("http://{}", listener.local_addr()?),
+                bearer_token: "test-token".into(),
+            };
+            let server = thread::spawn(move || -> anyhow::Result<Vec<serde_json::Value>> {
+                let mut bodies = Vec::new();
+                for (index, status) in statuses.into_iter().enumerate() {
+                    let deadline = Instant::now() + Duration::from_secs(5);
+                    let (mut stream, _) = loop {
+                        match listener.accept() {
+                            Ok(stream) => break stream,
+                            Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
+                                anyhow::ensure!(Instant::now() < deadline, "CLI skipped a device");
+                                thread::sleep(Duration::from_millis(10));
+                            }
+                            Err(err) => return Err(err.into()),
+                        }
+                    };
+                    stream.set_read_timeout(Some(Duration::from_secs(5)))?;
+                    let mut reader = BufReader::new(stream.try_clone()?);
+                    let mut line = String::new();
+                    reader.read_line(&mut line)?;
+                    assert_eq!(
+                        line.trim(),
+                        format!("PATCH /devices/{}/labels HTTP/1.1", index + 1)
+                    );
+                    let mut length = 0;
+                    loop {
+                        line.clear();
+                        anyhow::ensure!(reader.read_line(&mut line)? > 0, "unexpected HTTP EOF");
+                        if line == "\r\n" {
+                            break;
+                        }
+                        if let Some((key, value)) = line.split_once(':')
+                            && key.eq_ignore_ascii_case("content-length")
+                        {
+                            length = value.trim().parse::<usize>()?;
+                        }
+                    }
+                    let mut body = vec![0; length];
+                    reader.read_exact(&mut body)?;
+                    bodies.push(serde_json::from_slice(&body)?);
+                    write!(
+                        stream,
+                        "HTTP/1.1 {status} Test\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                    )?;
+                }
+                Ok(bodies)
+            });
+            let devices = (1..=2)
+                .map(|id| {
+                    serde_json::from_value(serde_json::json!({
+                        "id": id, "serial_number": format!("device-{id}"),
+                        "online": true, "approved": true, "follow_latest": true,
+                        "created_on": "2026-01-01T00:00:00Z", "intent_version": 0,
+                        "labels": {"env": "prod", "region": "eu"}
+                    }))
+                })
+                .collect::<Result<Vec<Device>, _>>()?;
+            use clap::Parser;
+            let cli = crate::cli::Cli::try_parse_from([
+                "sm", "label", "-d", "device", "env=", "team=ops",
+            ])?;
+            let Some(crate::cli::Commands::Label { set_labels, .. }) = cli.command else {
+                panic!("expected label command");
+            };
+            let changes = crate::parse_label_filters(set_labels)?.unwrap();
+            let result = crate::apply_labels_to_devices(&api, &devices, &changes).await;
+            let bodies = server.join().expect("mock server panicked")?;
+            for body in bodies {
+                // No stale labels are sent; removals are explicit nulls.
+                assert_eq!(
+                    body,
+                    serde_json::json!({"changes": {"env": null, "team": "ops"}})
+                );
+            }
+            let failures = statuses.iter().filter(|status| **status >= 400).count();
+            if failures == 0 {
+                assert!(result.is_ok());
+            } else {
+                assert_eq!(
+                    result.unwrap_err().to_string(),
+                    format!("Failed to update labels on {failures} of 2 device(s)")
+                );
+            }
+        }
         Ok(())
     }
 }

@@ -231,6 +231,44 @@ fn parse_label_filters(
     Ok(Some(map))
 }
 
+async fn apply_labels_to_devices(
+    api: &SmithAPI,
+    devices: &[Device],
+    new_labels_map: &HashMap<String, String>,
+) -> anyhow::Result<()> {
+    let mut failures = 0;
+    for device in devices {
+        let device_id = device.id;
+        let serial_number = &device.serial_number;
+
+        match api
+            .update_device_labels(device_id as u64, new_labels_map)
+            .await
+        {
+            Ok(()) => {
+                println!(
+                    "  {} [{}] - Labels updated",
+                    serial_number.bright_green(),
+                    device_id
+                );
+            }
+            Err(e) => {
+                failures += 1;
+                println!("  {} [{}] - Failed: {}", serial_number.red(), device_id, e);
+            }
+        }
+    }
+
+    if failures > 0 {
+        bail!(
+            "Failed to update labels on {failures} of {} device(s)",
+            devices.len()
+        );
+    }
+    println!("\n{}", "Done!".bright_green());
+    Ok(())
+}
+
 /// Resolves devices from a DeviceSelector
 /// Returns a Vec of all matching devices (may contain duplicates if multiple search terms match the same device)
 async fn resolve_devices_from_selector(
@@ -2078,9 +2116,13 @@ async fn main() -> anyhow::Result<()> {
                 for device in &target_devices {
                     println!("  - {}", device.serial_number);
                 }
-                println!("\nLabels to set:");
+                println!("\nLabel changes:");
                 for (key, value) in &new_labels_map {
-                    println!("  {}={}", key, value);
+                    if value.is_empty() {
+                        println!("  {} (remove)", key);
+                    } else {
+                        println!("  {}={}", key, value);
+                    }
                 }
 
                 print!("\nProceed? [y/N]: ");
@@ -2096,38 +2138,7 @@ async fn main() -> anyhow::Result<()> {
 
                 println!("\n{} labels to devices...", "Applying".bold());
 
-                for device in &target_devices {
-                    let device_id = device.id;
-                    let serial_number = &device.serial_number;
-
-                    let mut device_labels = device
-                        .labels
-                        .iter()
-                        .map(|(k, v)| (k.clone(), v.to_string()))
-                        .collect::<std::collections::HashMap<String, String>>();
-
-                    for (key, value) in &new_labels_map {
-                        device_labels.insert(key.clone(), value.clone());
-                    }
-
-                    match api
-                        .update_device_labels(device_id as u64, device_labels)
-                        .await
-                    {
-                        Ok(()) => {
-                            println!(
-                                "  {} [{}] - Labels updated",
-                                serial_number.bright_green(),
-                                device_id
-                            );
-                        }
-                        Err(e) => {
-                            println!("  {} [{}] - Failed: {}", serial_number.red(), device_id, e);
-                        }
-                    }
-                }
-
-                println!("\n{}", "Done!".bright_green());
+                apply_labels_to_devices(&api, &target_devices, &new_labels_map).await?;
             }
             Commands::Approve { selector, yes } => {
                 let secrets = auth::get_secrets(&config)
