@@ -69,6 +69,7 @@ pub async fn get_device(
             d.release_id,
             d.target_release_id,
             d.target_release_id_set_at,
+            d.target_release_eligible_at,
             d.system_info,
             d.network_id,
             d.current_network_id,
@@ -163,6 +164,7 @@ pub async fn get_devices(
             d.release_id,
             d.target_release_id,
             d.target_release_id_set_at,
+            d.target_release_eligible_at,
             d.follow_latest,
             d.system_info,
             d.modem_id,
@@ -254,10 +256,15 @@ pub async fn get_devices(
                ($5 = true AND d.last_ping >= now() - INTERVAL '3 minutes') OR
                ($5 = false AND d.last_ping < now() - INTERVAL '3 minutes'))
           AND ($6::boolean IS NULL OR
-               ($6 = true AND d.release_id != d.target_release_id) OR
+               -- A device waiting for its staggered bucket is scheduled, not outdated.
+               ($6 = true AND d.release_id != d.target_release_id
+                   AND NOT COALESCE(d.target_release_eligible_at > now(), false)) OR
                ($6 = false AND d.release_id = d.target_release_id))
+          -- Measured from when the device was allowed to move: a device that
+          -- waited for its staggered bucket isn't late for that time.
           AND ($12::bigint IS NULL OR
-               d.target_release_id_set_at <= now() - make_interval(mins => $12::int))
+               COALESCE(d.target_release_eligible_at, d.target_release_id_set_at)
+                   <= now() - make_interval(mins => $12::int))
           AND (CARDINALITY($7::text[]) = 0 OR NOT EXISTS (
               SELECT 1 FROM device_label edl
               JOIN label el ON el.id = edl.label_id
@@ -454,6 +461,7 @@ pub async fn get_devices(
                 release_id: row.release_id,
                 target_release_id: row.target_release_id,
                 target_release_id_set_at: row.target_release_id_set_at,
+                target_release_eligible_at: row.target_release_eligible_at,
                 follow_latest: row.follow_latest,
                 system_info: row.system_info,
                 modem_id: row.modem_id,
@@ -1980,6 +1988,7 @@ pub async fn get_device_info(
         d.release_id,
         d.target_release_id,
         d.target_release_id_set_at,
+        d.target_release_eligible_at,
         d.follow_latest,
         d.system_info,
         d.modem_id,
@@ -2184,6 +2193,7 @@ pub async fn get_device_info(
         release_id: device_row.release_id,
         target_release_id: device_row.target_release_id,
         target_release_id_set_at: device_row.target_release_id_set_at,
+        target_release_eligible_at: device_row.target_release_eligible_at,
         follow_latest: device_row.follow_latest,
         system_info: device_row.system_info,
         modem_id: device_row.modem_id,

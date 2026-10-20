@@ -106,6 +106,7 @@ impl Dashboard {
             r#"
             SELECT COUNT(*) FROM device d
             WHERE d.release_id != d.target_release_id
+            AND NOT COALESCE(d.target_release_eligible_at > now(), false)
             AND d.archived = false
             AND NOT EXISTS (
                 SELECT 1 FROM device_label dl

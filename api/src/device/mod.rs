@@ -34,6 +34,7 @@ pub struct RawDevice {
     pub release_id: Option<i32>,
     pub target_release_id: Option<i32>,
     pub target_release_id_set_at: Option<DateTime<Utc>>,
+    pub target_release_eligible_at: Option<DateTime<Utc>>,
     pub system_info: Option<serde_json::Value>,
     pub network_id: Option<i32>,
     pub current_network_id: Option<i32>,
