@@ -724,6 +724,9 @@ impl Actor {
             .arg("install")
             .arg("-y")
             .arg("--allow-downgrades")
+            // A failed earlier transaction can leave packages unpacked with unmet
+            // dependencies; apt then refuses every install until it is fixed.
+            .arg("--fix-broken")
             .args(to_install.iter().map(|(_, file)| file.as_os_str()))
             .kill_on_drop(true)
             .output();
