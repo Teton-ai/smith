@@ -1739,6 +1739,11 @@ pub async fn update_devices_follow_latest(
     }))
 }
 
+/// Set the target release of the given devices, bypassing the canary.
+///
+/// More than 15 devices are staggered like a full rollout: split into up to 20
+/// buckets opening 5 minutes apart, so a site's devices don't all download at
+/// once. Set `all_at_once` to move every device immediately.
 #[utoipa::path(
     put,
     path = "/devices/release",
@@ -1776,15 +1781,23 @@ pub async fn update_devices_target_release(
         return Err(StatusCode::CONFLICT);
     }
 
-    sqlx::query!(
-        "UPDATE device SET target_release_id = $1, target_release_id_set_at = NOW(), target_release_eligible_at = NULL WHERE id = ANY($2)",
+    let mut tx = state.pg_pool.begin().await.map_err(|err| {
+        error!("Failed to start transaction {err}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+    let retarget = crate::deployment::retarget_selected(
+        &mut tx,
         target_release_id,
-        &devices_release.devices
+        &devices_release.devices,
+        devices_release.all_at_once,
     )
-    .execute(&state.pg_pool)
     .await
     .map_err(|err| {
         error!("Failed to update target release id for devices; {err}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+    tx.commit().await.map_err(|err| {
+        error!("Failed to commit target release update for devices; {err}");
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
 
@@ -1800,8 +1813,15 @@ pub async fn update_devices_target_release(
         .flatten()
         .flatten();
 
-        let device_count = devices_release.devices.len();
+        let device_count = retarget.device_count;
         let triggered_by = user_email.as_deref().unwrap_or("Unknown");
+        let rollout = if let Some(window_minutes) = retarget.window_minutes {
+            format!("staggered over {window_minutes} min")
+        } else if devices_release.all_at_once {
+            "all at once (emergency opt-out)".to_string()
+        } else {
+            "all at once".to_string()
+        };
         let message = json!({
             "blocks": [
                 {
@@ -1809,10 +1829,11 @@ pub async fn update_devices_target_release(
                     "text": {
                         "type": "mrkdwn",
                         "text": format!(
-                            ":warning: *Direct Bulk Deployment - Risk of Drift*\n\n*Devices affected:* {}\n*Target Version:* {} v{}\n*Triggered by:* {}\n\n_This deployment bypasses the canary rollout process._",
+                            ":warning: *Direct Bulk Deployment - Risk of Drift*\n\n*Devices affected:* {}\n*Target Version:* {} v{}\n*Rollout:* {}\n*Triggered by:* {}\n\n_This deployment bypasses the canary rollout process._",
                             device_count,
                             target_release.distribution_name,
                             target_release.version,
+                            rollout,
                             triggered_by
                         )
                     }

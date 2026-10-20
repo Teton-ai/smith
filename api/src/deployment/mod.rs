@@ -22,6 +22,10 @@ pub mod route;
 pub const STAGGER_MAX_BUCKETS: usize = 20;
 pub const STAGGER_INTERVAL_MINUTES: i32 = 5;
 
+/// Deploy to Selected above this many devices is staggered unless the caller
+/// opts out.
+pub const BULK_STAGGER_THRESHOLD: usize = 15;
+
 pub fn bucket_count(device_count: usize) -> usize {
     device_count.min(STAGGER_MAX_BUCKETS)
 }
@@ -35,9 +39,64 @@ pub fn bucket_for_rank(rank: usize, device_count: usize) -> usize {
     rank * bucket_count(device_count) / device_count
 }
 
+/// Minutes between the first and the last bucket opening.
+pub fn stagger_window_minutes(device_count: usize) -> i32 {
+    bucket_count(device_count).saturating_sub(1) as i32 * STAGGER_INTERVAL_MINUTES
+}
+
+/// Deploy to Selected: the stagger window for `device_count` distinct devices,
+/// or `None` when they all move at once.
+pub fn bulk_stagger_window(device_count: usize, all_at_once: bool) -> Option<i32> {
+    (device_count > BULK_STAGGER_THRESHOLD && !all_at_once)
+        .then(|| stagger_window_minutes(device_count))
+}
+
+pub struct SelectedRetarget {
+    /// Distinct devices retargeted.
+    pub device_count: usize,
+    /// `None` when every device moved at once.
+    pub window_minutes: Option<i32>,
+}
+
+/// Deploy to Selected: staggered above the bulk threshold unless the caller
+/// opts out, immediate otherwise.
+pub async fn retarget_selected(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    release_id: i32,
+    device_ids: &[i32],
+    all_at_once: bool,
+) -> sqlx::Result<SelectedRetarget> {
+    // Duplicates would push a small selection over the threshold.
+    let mut unique_ids = device_ids.to_vec();
+    unique_ids.sort_unstable();
+    unique_ids.dedup();
+
+    if bulk_stagger_window(unique_ids.len(), all_at_once).is_some() {
+        let staggered = stagger_retarget(tx, release_id, &unique_ids).await?;
+        return Ok(SelectedRetarget {
+            device_count: unique_ids.len(),
+            window_minutes: Some(staggered.window_minutes),
+        });
+    }
+
+    sqlx::query!(
+        "UPDATE device SET target_release_id = $1, target_release_id_set_at = NOW(), target_release_eligible_at = NULL WHERE id = ANY($2)",
+        release_id,
+        &unique_ids
+    )
+    .execute(&mut **tx)
+    .await?;
+    Ok(SelectedRetarget {
+        device_count: unique_ids.len(),
+        window_minutes: None,
+    })
+}
+
 pub struct StaggerOutcome {
     /// Every device now targeting the release, including those already on it.
     pub retargeted: u64,
+    /// Minutes until the last bucket opens.
+    pub window_minutes: i32,
 }
 
 /// Points `device_ids` at `release_id`, letting each device move only once its
@@ -98,6 +157,7 @@ pub async fn stagger_retarget(
 
     Ok(StaggerOutcome {
         retargeted: already_on_release + staggered,
+        window_minutes: stagger_window_minutes(device_count),
     })
 }
 
@@ -806,6 +866,21 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn window_covers_every_bucket_but_the_first() {
+        assert_eq!(stagger_window_minutes(0), 0);
+        assert_eq!(stagger_window_minutes(1), 0);
+        assert_eq!(stagger_window_minutes(16), 75);
+        assert_eq!(stagger_window_minutes(5000), 95);
+    }
+
+    #[test]
+    fn bulk_staggers_only_above_the_threshold_without_opt_out() {
+        assert!(bulk_stagger_window(BULK_STAGGER_THRESHOLD, false).is_none());
+        assert!(bulk_stagger_window(BULK_STAGGER_THRESHOLD + 1, false).is_some());
+        assert!(bulk_stagger_window(BULK_STAGGER_THRESHOLD + 1, true).is_none());
+    }
+
+    #[test]
     fn bucket_count_is_capped() {
         assert_eq!(bucket_count(0), 0);
         assert_eq!(bucket_count(16), 16);
@@ -882,6 +957,10 @@ pub(crate) mod tests {
         tx.commit().await?;
 
         assert_eq!(outcome.retargeted, 20);
+        assert_eq!(
+            outcome.window_minutes, 90,
+            "the canary downloads nothing, so it doesn't widen the window"
+        );
         let to_target = offsets_by_device(&pool, &all).await?;
         assert_eq!(to_target.get(&canary[0]), Some(&None));
         let mut minutes: Vec<i64> = movers
@@ -904,6 +983,22 @@ pub(crate) mod tests {
             to_next, movers_to_target,
             "who goes first should change with the release"
         );
+        Ok(())
+    }
+
+    #[sqlx::test]
+    #[ignore = "needs the compose Postgres; run with --test-threads=1"]
+    async fn deploy_to_selected_counts_each_device_once(pool: PgPool) -> anyhow::Result<()> {
+        let [target] = insert_releases(&pool).await?;
+        let ids = insert_devices(&pool, BULK_STAGGER_THRESHOLD, None).await?;
+        let doubled: Vec<i32> = ids.iter().chain(&ids).copied().collect();
+
+        let mut tx = pool.begin().await?;
+        let retarget = retarget_selected(&mut tx, target, &doubled, false).await?;
+        tx.commit().await?;
+
+        assert_eq!(retarget.device_count, BULK_STAGGER_THRESHOLD);
+        assert_eq!(retarget.window_minutes, None);
         Ok(())
     }
 }

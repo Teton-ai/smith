@@ -87,6 +87,11 @@ pub struct ApproveDeviceBody {
 pub struct UpdateDevicesRelease {
     pub target_release_id: i32,
     pub devices: Vec<i32>,
+    /// Move every device at once instead of staggering selections above the
+    /// bulk threshold. Emergency use only: a site whose devices all download
+    /// together can lose connectivity.
+    #[serde(default)]
+    pub all_at_once: bool,
 }
 
 #[derive(Debug, Deserialize, Serialize, utoipa::ToSchema)]
