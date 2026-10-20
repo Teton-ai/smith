@@ -69,9 +69,13 @@ const sortByLastSeen = (a: Device, b: Device) => {
 	return new Date(b.last_seen).getTime() - new Date(a.last_seen).getTime();
 };
 
+// Counted from when the device was allowed to move, so a staggered rollout's
+// wait doesn't read as time stuck.
 const getOutdatedDuration = (device: Device) => {
-	if (!device.target_release_id_set_at) return "";
-	const setAt = new Date(device.target_release_id_set_at);
+	const since =
+		device.target_release_eligible_at ?? device.target_release_id_set_at;
+	if (!since) return "";
+	const setAt = new Date(since);
 	const now = new Date();
 	const diffMinutes = Math.floor(
 		(now.getTime() - setAt.getTime()) / (1000 * 60),
