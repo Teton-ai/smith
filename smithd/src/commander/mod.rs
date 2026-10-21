@@ -8,6 +8,7 @@ use crate::settings;
 use crate::shutdown::ShutdownSignals;
 use crate::tunnel::TunnelHandle;
 use crate::updater::UpdaterHandle;
+use crate::utils::net_guard::NetGuard;
 use crate::utils::schema::{SafeCommandRequest, SafeCommandResponse, SafeCommandRx, SafeCommandTx};
 use std::collections::HashMap;
 use tokio::sync::{mpsc, oneshot};
@@ -31,6 +32,18 @@ pub struct Handles {
     pub filemanager: FileManagerHandle,
     pub logstream: LogStreamHandle,
     pub filebrowser: FileBrowserHandle,
+    pub net_guard: NetGuard,
+}
+
+/// Commands that reconfigure or reconnect Wi-Fi. A scan is included because
+/// its directed probes take the radio off channel.
+fn changes_network(command: &SafeCommandTx) -> bool {
+    matches!(
+        command,
+        SafeCommandTx::UpdateNetwork { .. }
+            | SafeCommandTx::ApplyNetworks { .. }
+            | SafeCommandTx::WifiScan
+    )
 }
 
 struct CommandQueueExecutor {
@@ -56,6 +69,7 @@ impl CommandQueueExecutor {
     }
 
     async fn execute_command(&mut self, action: SafeCommandRequest) -> SafeCommandResponse {
+        let _network_busy = changes_network(&action.command).then(|| self.handles.net_guard.hold());
         match action.command {
             SafeCommandTx::Ping => SafeCommandResponse {
                 id: action.id,
@@ -333,5 +347,22 @@ impl CommanderHandle {
         let (tx, rx) = oneshot::channel();
         _ = self.sender.send(CommanderMessage::GetResults { tx }).await;
         rx.await.unwrap_or_default()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn network_commands_hold_the_guard() {
+        assert!(changes_network(&SafeCommandTx::WifiScan));
+        assert!(changes_network(&SafeCommandTx::ApplyNetworks {
+            version: 1,
+            networks: Vec::new(),
+        }));
+        assert!(!changes_network(&SafeCommandTx::Ping));
+        assert!(!changes_network(&SafeCommandTx::ReportNMProfiles));
+        assert!(!changes_network(&SafeCommandTx::TestNetwork));
     }
 }

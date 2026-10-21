@@ -14,6 +14,7 @@ use crate::settings::SettingsHandle;
 use crate::shutdown::ShutdownHandler;
 use crate::tunnel::TunnelHandle;
 use crate::updater::UpdaterHandle;
+use crate::utils::net_guard::NetGuard;
 use crate::utils::system::SystemInfo;
 use tracing::info;
 
@@ -57,6 +58,10 @@ pub async fn run() {
     let filebrowser =
         FileBrowserHandle::new(shutdown.signals(), configuration.clone(), session.clone());
 
+    // Shared by the commander's network commands and link health, which stays
+    // out of NetworkManager while they run.
+    let net_guard = NetGuard::new();
+
     let commander = CommanderHandle::new(
         shutdown.signals(),
         Handles {
@@ -67,6 +72,7 @@ pub async fn run() {
             filemanager: filemanager.clone(),
             logstream: logstream.clone(),
             filebrowser: filebrowser.clone(),
+            net_guard: net_guard.clone(),
         },
     );
 
