@@ -1,12 +1,12 @@
-use crate::downloader::DownloaderHandle;
+use crate::downloader::{DownloaderHandle, ETAG_XATTR, md5_from_etag, md5_of_file};
 use crate::magic::MagicHandle;
 use crate::magic::structure::ConfigPackage;
 use crate::session::SessionHandle;
 use crate::shutdown::ShutdownSignals;
+use crate::updater::apt_install;
 use crate::utils::network::NetworkClient;
 use anyhow::Context;
 use anyhow::Result;
-use md5::{Digest, Md5};
 use std::collections::{HashMap, HashSet};
 use std::fmt::Write;
 use std::path::Component;
@@ -152,42 +152,12 @@ async fn remove_file(path: &Path) -> Result<u64> {
     Ok(size)
 }
 
-/// Set by the downloader from the ETag the API reports for the S3 object.
-const ETAG_XATTR: &str = "user.etag";
-
 #[derive(Debug, PartialEq)]
 enum BlobCheck {
     Verified,
     Missing,
     NoEtag,
     Mismatch,
-}
-
-async fn md5_of_file(path: &Path) -> Result<String> {
-    let path = path.to_path_buf();
-    tokio::task::spawn_blocking(move || {
-        let mut file =
-            std::fs::File::open(&path).with_context(|| format!("opening {}", path.display()))?;
-        let mut hasher = Md5::new();
-        std::io::copy(&mut file, &mut hasher)
-            .with_context(|| format!("hashing {}", path.display()))?;
-        Ok(format!("{:x}", hasher.finalize()))
-    })
-    .await?
-}
-
-/// Package objects are uploaded in one part, so their S3 ETag is the MD5 of
-/// the content. Any other ETag (e.g. a multipart `-N` suffix) means the upload
-/// mode changed and the blob cannot be verified.
-fn md5_from_etag(raw: &[u8]) -> Result<String> {
-    let etag = std::str::from_utf8(raw)
-        .context("blob ETag is not UTF-8")?
-        .trim()
-        .trim_matches('"');
-    if etag.len() != 32 || !etag.bytes().all(|b| b.is_ascii_hexdigit()) {
-        anyhow::bail!("blob ETag {etag} is not an MD5 digest, cannot verify the package");
-    }
-    Ok(etag.to_ascii_lowercase())
 }
 
 async fn check_blob(path: &Path) -> Result<BlobCheck> {
@@ -832,12 +802,7 @@ impl Actor {
             names
         );
 
-        let install_future = Command::new("sudo")
-            .arg("apt")
-            .arg("install")
-            .arg("-y")
-            .arg("--allow-downgrades")
-            .args(to_install.iter().map(|(_, file)| file.as_os_str()))
+        let install_future = apt_install(to_install.iter().map(|(_, file)| file.as_path()))
             .kill_on_drop(true)
             .output();
 
@@ -1400,7 +1365,7 @@ mod tests {
         assert_eq!(
             result.map_err(|e| format!("{e:#}")),
             Err(format!(
-                "checking {}: blob ETag abc-2 is not an MD5 digest, cannot verify the package",
+                "checking {}: ETag abc-2 is not an MD5 digest, cannot verify the content",
                 blob.display()
             ))
         );

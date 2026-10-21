@@ -8,6 +8,7 @@ use crate::shutdown::ShutdownSignals;
 use crate::utils::network::NetworkClient;
 use anyhow::{self, Context};
 use download::download_file_mb;
+pub(crate) use download::{ETAG_XATTR, md5_from_etag, md5_of_file};
 use tokio::sync::Mutex;
 use tokio::{
     sync::{mpsc, oneshot},
