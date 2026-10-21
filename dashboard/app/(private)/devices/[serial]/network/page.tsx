@@ -17,6 +17,7 @@ import {
 import NetworkQualityIndicator from "@/app/components/NetworkQualityIndicator";
 import { RelativeTime } from "@/app/components/RelativeTime";
 import { DeviceDetailLayout } from "../DeviceDetailLayout";
+import NetworkSettingsPanel from "../NetworkSettingsPanel";
 import { DeviceReachability } from "../uptime";
 import WifiPanel from "../WifiPanel";
 
@@ -424,6 +425,7 @@ const NetworkPage = () => {
 					{/* Keyed by serial so filter/reveal state resets when navigating
 					    between devices. */}
 					{device && <WifiPanel key={serial} serial={serial} device={device} />}
+					<NetworkSettingsPanel key={serial} serial={serial} device={device} />
 				</div>
 			</div>
 		</DeviceDetailLayout>

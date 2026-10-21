@@ -92,6 +92,7 @@ export const SIMPLE_COMMANDS = [
 	"WifiScan",
 	"ReportNMProfiles",
 	"RunAudit",
+	"ReportSettings",
 ] as const;
 
 // Curated subset of SIMPLE_COMMANDS/COMMAND_OPTIONS offered in the devices-page
@@ -602,6 +603,8 @@ export const getTxLabel = (
 			return { label: "Report NM Profiles", mono: false };
 		case "RunAudit":
 			return { label: "Run Audit", mono: false };
+		case "ReportSettings":
+			return { label: "Report Settings", mono: false };
 		case "FreeForm": {
 			const p = (parsed.tx as CmdTxFreeForm).FreeForm;
 			return { label: p.cmd, mono: true };

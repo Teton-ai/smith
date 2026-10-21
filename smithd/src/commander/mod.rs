@@ -4,6 +4,7 @@ use crate::filebrowser::FileBrowserHandle;
 use crate::filemanager::FileManagerHandle;
 use crate::logstream::LogStreamHandle;
 use crate::magic::MagicHandle;
+use crate::settings;
 use crate::shutdown::ShutdownSignals;
 use crate::tunnel::TunnelHandle;
 use crate::updater::UpdaterHandle;
@@ -139,6 +140,20 @@ impl CommandQueueExecutor {
             SafeCommandTx::CloseFileSession { session_id } => {
                 files::close_session(action.id, &self.handles.filebrowser, session_id).await
             }
+            SafeCommandTx::ReportSettings => match settings::read_now().await {
+                Some(report) => SafeCommandResponse {
+                    id: action.id,
+                    command: SafeCommandRx::ReportSettings { report },
+                    status: 0,
+                },
+                None => SafeCommandResponse {
+                    id: action.id,
+                    command: SafeCommandRx::ReportSettings {
+                        report: Default::default(),
+                    },
+                    status: -1,
+                },
+            },
             // Issued by a newer api than this daemon understands. Report a
             // failure so the operator sees why the command did nothing instead
             // of it silently disappearing.

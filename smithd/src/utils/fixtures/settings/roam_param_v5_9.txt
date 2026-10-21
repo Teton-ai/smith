@@ -1,0 +1,2 @@
+rssi_diff_th    scanr_exp_ms  scan_interval(unit:2 sec)   rssi_threshold
+10              5000          5                           70         

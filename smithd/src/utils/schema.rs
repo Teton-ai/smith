@@ -235,6 +235,10 @@ pub enum SafeCommandRx {
         session_id: String,
         error: String,
     },
+    /// Sent on change, daily and for the `ReportSettings` command.
+    ReportSettings {
+        report: SettingsReport,
+    },
     /// Fallback for any report this build doesn't recognize; ignored by the api.
     Unknown,
 }
@@ -323,6 +327,7 @@ pub enum SafeCommandTx {
     CloseFileSession {
         session_id: String,
     },
+    ReportSettings,
     /// Fallback for any command this build doesn't recognize. Never issued by
     /// the api: it is produced locally by `deserialize_tx` and reported back
     /// with a failure status so the operator sees why nothing happened.
@@ -449,6 +454,70 @@ pub struct DeviceRegistration {
 #[derive(Serialize, Deserialize, Default, Debug)]
 pub struct DeviceRegistrationResponse {
     pub token: String,
+}
+
+/// One reported setting field. Names both `read_errors` and the settings a
+/// distribution does not support, so the same names are used on both sides.
+#[derive(
+    Type, Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash, utoipa::ToSchema,
+)]
+#[sqlx(type_name = "device_setting", rename_all = "snake_case")]
+#[serde(rename_all = "snake_case")]
+pub enum DeviceSetting {
+    WirelessMode,
+    PowerMgnt,
+    RoamFlags,
+    IdleDiff,
+    BusyDiff,
+    ScanrExpMs,
+    ScanInt,
+    IdleTh,
+    BusyTh,
+    NmWifiPowersave,
+    NmAutoconnectRetries,
+    NmClonedMac,
+    NmScanRandMac,
+    Bgscan,
+    CountryCode,
+    Hostname,
+    NtpServers,
+    NtpLinkServers,
+    NtpFallbackServers,
+    NtpServerInUse,
+    NtpSynchronized,
+    CheckIntervalS,
+}
+
+/// What smithd reads back from the device, sent whole as a `ReportSettings`
+/// response.
+/// `None` means the value is not available on this device (unsupported, not
+/// connected, or listed in `read_errors`).
+#[derive(Serialize, Deserialize, Default, Debug, Clone, PartialEq, utoipa::ToSchema)]
+#[serde(default)]
+pub struct SettingsReport {
+    pub wireless_mode: Option<i16>,
+    pub power_mgnt: Option<i16>,
+    pub roam_flags: Option<i16>,
+    pub idle_diff: Option<i32>,
+    pub busy_diff: Option<i32>,
+    pub scanr_exp_ms: Option<i32>,
+    pub scan_int: Option<i32>,
+    pub idle_th: Option<i32>,
+    pub busy_th: Option<i32>,
+    pub nm_wifi_powersave: Option<i16>,
+    pub nm_autoconnect_retries: Option<i32>,
+    pub nm_cloned_mac: Option<String>,
+    pub nm_scan_rand_mac: Option<bool>,
+    pub bgscan: Option<String>,
+    pub country_code: Option<String>,
+    pub hostname: Option<String>,
+    pub ntp_servers: Option<Vec<String>>,
+    pub ntp_link_servers: Option<Vec<String>>,
+    pub ntp_fallback_servers: Option<Vec<String>>,
+    pub ntp_server_in_use: Option<String>,
+    pub ntp_synchronized: Option<bool>,
+    pub check_interval_s: Option<i32>,
+    pub read_errors: Vec<DeviceSetting>,
 }
 
 #[derive(Type, Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -918,6 +987,14 @@ mod tests {
                 other => panic!("expected an Error, got {other:?}"),
             }
         }
+    }
+
+    #[test]
+    fn settings_report_accepts_partial_reports_and_rejects_unknown_settings() {
+        let report: SettingsReport =
+            serde_json::from_str(r#"{"busy_diff": null, "read_errors": ["bgscan"]}"#).unwrap();
+        assert_eq!(report.read_errors, vec![DeviceSetting::Bgscan]);
+        assert!(serde_json::from_str::<SettingsReport>(r#"{"read_errors": ["nope"]}"#).is_err());
     }
 
     #[test]
