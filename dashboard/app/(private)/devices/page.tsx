@@ -594,14 +594,19 @@ const DevicesPage = () => {
 	};
 
 	// The API decides whether a bulk deploy is staggered; this only explains it.
-	const { data: staggerPolicy } = useApiGetStaggerPolicy(
-		{ device_count: selectedDeviceIds.size },
-		{ query: { enabled: showBulkDeployModal } },
-	);
+	const { data: staggerPolicy, isLoading: staggerPolicyLoading } =
+		useApiGetStaggerPolicy(
+			{ device_count: selectedDeviceIds.size },
+			{ query: { enabled: showBulkDeployModal } },
+		);
 	const bulkDeployStaggered = staggerPolicy?.staggered ?? false;
 	const deployingStaggered = isDeploying && bulkDeployMode === "staggered";
+	// Wait for the policy so the stagger notice is on screen before anyone submits.
 	const bulkDeployDisabled =
-		!selectedReleaseId || hasMixedDistributions || distributionIds.size === 0;
+		!selectedReleaseId ||
+		hasMixedDistributions ||
+		distributionIds.size === 0 ||
+		staggerPolicyLoading;
 
 	// The variant actually dispatched, captured at submit time: `onError` fires
 	// after the form may have been edited (or reset by closing the modal), so
@@ -870,11 +875,16 @@ const DevicesPage = () => {
 		return `Online - ${qualityText} Network (${networkScore}/5)${speedText}\nLast tested: ${lastTested}\nLast seen: ${lastSeenText}`;
 	};
 
+	// A device waiting for its staggered bucket is scheduled, not outdated.
 	const hasUpdatePending = (device: Device) => {
 		return (
 			device.release_id &&
 			device.target_release_id &&
-			device.release_id !== device.target_release_id
+			device.release_id !== device.target_release_id &&
+			!(
+				device.target_release_eligible_at &&
+				new Date(device.target_release_eligible_at).getTime() > Date.now()
+			)
 		);
 	};
 
