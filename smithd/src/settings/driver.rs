@@ -6,7 +6,7 @@ use crate::utils::schema::{DeviceSetting, SettingsReport};
 use anyhow::{Context, Result, anyhow, bail};
 use std::path::{Path, PathBuf};
 
-const SYS_CLASS_NET: &str = "/sys/class/net";
+pub(crate) const SYS_CLASS_NET: &str = "/sys/class/net";
 pub(crate) const VENDOR_MODULE: &str = "rtl8822ce";
 const VENDOR_PARAMS: &str = "/sys/module/rtl8822ce/parameters";
 /// The vendor driver names its proc dir after `DRV_NAME`, not the module.
