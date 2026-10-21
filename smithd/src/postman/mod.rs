@@ -21,6 +21,23 @@ const CMD_ID_UPDATE_SYSTEM_INFO: i32 = -2;
 const CMD_ID_GET_NETWORK: i32 = -4;
 const CMD_ID_REPORT_NM_PROFILES: i32 = -6;
 
+/// Returns an update for the API when the system info changed since the last report.
+async fn refresh_system_info(system_info: &mut SystemInfo) -> Option<SafeCommandResponse> {
+    let new_system_info = SystemInfo::new().await;
+    if new_system_info == *system_info {
+        return None;
+    }
+    let update = SafeCommandResponse {
+        id: CMD_ID_UPDATE_SYSTEM_INFO,
+        command: SafeCommandRx::UpdateSystemInfo {
+            system_info: new_system_info.to_value(),
+        },
+        status: 0,
+    };
+    *system_info = new_system_info;
+    Some(update)
+}
+
 enum PollMode {
     Active { ticks_without_commands: u32 },
     Idle,
@@ -129,7 +146,14 @@ impl Postman {
                         continue;
                     }
 
-                    let responses = self.commander.get_results().await;
+                    let mut responses = self.commander.get_results().await;
+                    // A command can change what system info reports, such as the operational
+                    // mode, so send it with the command result instead of on the next refresh.
+                    if responses.iter().any(|response| response.id > 0)
+                        && let Some(update) = refresh_system_info(&mut system_info).await
+                    {
+                        responses.push(update);
+                    }
 
                     let release_id = self.magic.get_release_id().await.ok();
                     let service_statuses = self.check_services().await;
@@ -166,22 +190,8 @@ impl Postman {
                     }
                 }
                 _ = update_interval.tick() => {
-                    let new_system_info = SystemInfo::new().await;
-                    // Only update the system_info if it has actually changed
-                    if new_system_info != system_info {
-                        system_info = new_system_info.clone();
-                        self.commander
-                            .insert_result(vec![
-                                // Keep the system info in sync.
-                                SafeCommandResponse {
-                                    id: CMD_ID_UPDATE_SYSTEM_INFO,
-                                    command: SafeCommandRx::UpdateSystemInfo {
-                                        system_info: new_system_info.to_value(),
-                                    },
-                                    status: 0,
-                                },
-                            ])
-                            .await;
+                    if let Some(update) = refresh_system_info(&mut system_info).await {
+                        self.commander.insert_result(vec![update]).await;
                     }
                 }
                 _ = self.shutdown.token.cancelled() => {
