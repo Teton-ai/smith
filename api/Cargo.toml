@@ -53,6 +53,8 @@ metrics-exporter-prometheus = "0.8"
 utoipa = { workspace = true }
 utoipa-axum = "0.1"
 utoipa-swagger-ui = { version = "8.0.3", features = ["axum", "vendored"] }
+# utoipa-swagger-ui 8.1.0 build script does not compile with zip >= 2.5; later versions need axum 0.8.
+zip = { version = "~2.4", default-features = false }
 debpkg = "0.6.0"
 axum_typed_multipart = { version = "0.13.1" }
 tempfile = "3.13.0"
