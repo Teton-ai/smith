@@ -47,7 +47,8 @@ pub fn required_permission(command: &SafeCommandTx) -> Permission {
         | GetLogs { .. }
         | ReportNMProfiles
         | WifiScan
-        | ApplyNetworks { .. } => "basic",
+        | ApplyNetworks { .. }
+        | ReportSettings => "basic",
         // Only ever produced by a daemon deserializing a command it doesn't
         // recognize; the api never issues it. Gated as `freeform` so that if one
         // is ever submitted it needs the most privileged action, and rejected

@@ -11,6 +11,7 @@ pub mod nm_watcher;
 pub mod police;
 pub mod postman;
 pub mod session;
+pub mod settings;
 pub mod shutdown;
 pub mod tunnel;
 pub mod updater;
