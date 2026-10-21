@@ -77,7 +77,7 @@ class Smithd:
     def lines(self):
         with open(self.log_path) as f:
             f.seek(self.offset)
-            return f.read()
+            return re.sub(r"\x1b\[[0-9;]*m", "", f.read())
 
     def download(self, remote, local, rate_mb=2.0):
         body = json.dumps({"remote_file": remote, "local_file": local, "rate_mb": rate_mb})
@@ -141,7 +141,7 @@ def dpkg_install(deb):
     """Installs and removes the package. Returns (ok, last error line)."""
     r = sh("dpkg", "-i", deb, check=False)
     ok = r.returncode == 0
-    err = "" if ok else (r.stderr.strip().splitlines() or ["?"])[-1]
+    err = "" if ok else next((l for l in r.stderr.splitlines() if "error" in l), r.stderr.strip())
     sh("dpkg", "--purge", "e2e-big", check=False)
     return ok, err
 
@@ -149,26 +149,72 @@ def dpkg_install(deb):
 # --- the filesystem a power cut hits -------------------------------------
 
 
-def mount_cut():
+DM = "e2ecut"
+
+
+def dm_table(target):
+    loop = sh("losetup", "-j", CUT_IMG).stdout.split(":")[0]
+    sectors = sh("blockdev", "--getsz", loop).stdout.strip()
+    return f"0 {sectors} linear {loop} 0" if target == "linear" else f"0 {sectors} error"
+
+
+def dm_swap(target):
+    sh("dmsetup", "suspend", "--noflush", "--nolockfs", DM)
+    sh("dmsetup", "load", DM, "--table", dm_table(target))
+    sh("dmsetup", "resume", DM)
+
+
+def mount_cut(mode):
+    """ext4 with default options on a loop file; in dm-error mode through a
+    device-mapper device that the cut switches to an error target."""
     os.makedirs(CUT, exist_ok=True)
-    if not os.path.exists(CUT_IMG):
+    fresh = not os.path.exists(CUT_IMG)
+    if fresh:
         sh("truncate", "-s", "2G", CUT_IMG)
-        sh("mkfs.ext4", "-q", "-F", CUT_IMG)
-    sh("mount", "-o", "loop", CUT_IMG, CUT)
+    if mode == "shutdown":
+        if fresh:
+            sh("mkfs.ext4", "-q", "-F", CUT_IMG)
+        sh("mount", "-o", "loop", CUT_IMG, CUT)
+        return
+    sh("losetup", "-f", CUT_IMG)
+    sh("dmsetup", "create", DM, "--table", dm_table("linear"))
+    if fresh:
+        sh("mkfs.ext4", "-q", "-F", f"/dev/mapper/{DM}")
+    sh("mount", f"/dev/mapper/{DM}", CUT)
 
 
-def power_cut():
-    """Stops the filesystem with no journal flush, as a power cut does."""
-    fd = os.open(CUT, os.O_RDONLY)
-    try:
-        fcntl.ioctl(fd, FS_IOC_GOINGDOWN, EXT4_GOING_FLAGS_NOLOGFLUSH.to_bytes(4, "little"))
-    finally:
-        os.close(fd)
+def power_cut(mode):
+    """shutdown: stop the filesystem with no journal flush (EXT4_IOC_SHUTDOWN,
+    NOLOGFLUSH). dm-error: fail every write that has not completed, as the
+    disk loses power."""
+    if mode == "shutdown":
+        fd = os.open(CUT, os.O_RDONLY)
+        try:
+            fcntl.ioctl(fd, FS_IOC_GOINGDOWN, EXT4_GOING_FLAGS_NOLOGFLUSH.to_bytes(4, "little"))
+        finally:
+            os.close(fd)
+    else:
+        dm_swap("error")
 
 
-def remount():
+def remount(mode):
+    """Unmounts while writes still fail, so no cached data reaches the disk, then
+    mounts again: the journal replay a reboot does."""
     sh("umount", CUT)
-    sh("mount", "-o", "loop", CUT_IMG, CUT)
+    if mode == "shutdown":
+        sh("mount", "-o", "loop", CUT_IMG, CUT)
+    else:
+        dm_swap("linear")
+        sh("mount", f"/dev/mapper/{DM}", CUT)
+
+
+def unmount_cut(mode):
+    sh("umount", CUT, check=False)
+    if mode != "shutdown":
+        sh("dmsetup", "remove", DM, check=False)
+        loop = sh("losetup", "-j", CUT_IMG).stdout.split(":")[0]
+        if loop:
+            sh("losetup", "-d", loop, check=False)
 
 
 # --- scenarios -----------------------------------------------------------
@@ -182,21 +228,23 @@ def scenario_powercut(args):
     expected = md5(source)
     size = os.path.getsize(source)
     local = f"{CUT}/{BIG}"
-    mount_cut()
+    mount_cut(args.cut_mode)
     try:
         for trial in range(args.trials):
             for p in (local, local + ".part"):
                 if os.path.exists(p):
                     os.remove(p)
             sh("sync")
-            cut_after = round(rng.uniform(3, size / 2e6 - 3), 1)
+            # Writeback starts only after 30 s (dirty_expire_centisecs), so the cut
+            # comes after that, as in a device download that takes minutes.
+            cut_after = round(rng.uniform(35, size / (args.rate * 1e6) - 5), 1)
 
             smithd = Smithd(args.cut_with)
-            smithd.download(f"packages/{BIG}", local)
+            smithd.download(f"packages/{BIG}", local, rate_mb=args.rate)
             time.sleep(cut_after)
-            power_cut()
+            power_cut(args.cut_mode)
             smithd.kill()
-            remount()
+            remount(args.cut_mode)
 
             part = local + ".part"
             part_len = os.path.getsize(part) if os.path.exists(part) else None
@@ -212,7 +260,8 @@ def scenario_powercut(args):
             final_md5 = md5(local) if os.path.exists(local) else None
             dpkg_ok, dpkg_err = dpkg_install(local) if final_md5 else (None, "")
             emit({
-                "scenario": "powercut", "cut_with": args.cut_with, "resume_with": args.resume_with,
+                "scenario": "powercut", "cut_mode": args.cut_mode,
+                "cut_with": args.cut_with, "resume_with": args.resume_with,
                 "trial": trial, "cut_after_s": cut_after, "part_len": part_len,
                 "part_len_4k_aligned": part_len is not None and part_len % 4096 == 0,
                 "synced_len": synced, "damaged_pages_in_part": bad,
@@ -221,7 +270,7 @@ def scenario_powercut(args):
                 "dpkg_ok": dpkg_ok, "dpkg_error": dpkg_err,
             })
     finally:
-        sh("umount", CUT, check=False)
+        unmount_cut(args.cut_mode)
 
 
 def write_part(local, source, length, zero_at, synced_len, etag):
@@ -343,43 +392,54 @@ def break_dpkg():
     its dependency missing."""
     sh("dpkg", "--purge", *DPKG_PACKAGES, check=False)
     sh("dpkg", "-i", *(f"{CDN}/{n}_1_all.deb" for n in ("snakebrain", "rfdetr-orin", "bell", "smith")))
+    # apt takes an argument as a file only when it ends in .deb.
+    os.makedirs(f"{E2E}/corrupt", exist_ok=True)
+    corrupt = f"{E2E}/corrupt/rfdetr-model_2_all.deb"
+    sh("cp", f"{CDN}/rfdetr-model_2_all.corrupt", corrupt)
     r = sh("apt", "install", "-y", "--allow-downgrades", f"{CDN}/snakebrain_2_all.deb",
-           f"{CDN}/rfdetr-model_2_all.corrupt", f"{CDN}/bell_2_all.deb", check=False)
-    for p in (f"{RUN}/packages",):
-        sh("rm", "-rf", p)
+           corrupt, f"{CDN}/bell_2_all.deb", check=False)
+    sh("rm", "-rf", f"{RUN}/packages")
     return r.returncode, [l for l in r.stderr.splitlines() if "error" in l.lower()][:2]
 
 
 def run_updater_cycle(version, release_id):
     smithd = Smithd(version, {"release_id": 1, "target_release_id": release_id})
-    deadline = time.time() + 600
-    while time.time() < deadline and "Upgrading result:" not in smithd.lines() \
-            and "Updating result: Err" not in smithd.lines():
+    # The first cycle fetches the blobs and the next one writes the manifest and installs.
+    deadline = time.time() + 900
+    while time.time() < deadline:
+        text = smithd.lines()
+        if "Installing " in text and text.count("Upgrading result:") >= 2:
+            break
         time.sleep(1)
     log = smithd.lines()
     smithd.kill()
-    keep = ("Successfully installed", "Unmet dependencies", "Depends:", "remove is disabled",
-            "Upgrading result", "Updating result", "failed ETag")
+    keep = ("Installing ", "Successfully installed", "Unmet dependencies", "Depends:",
+            "remove is disabled", "Upgrading result", "failed ETag")
     return [l.split("  ", 1)[-1][:300] for l in log.splitlines() if any(k in l for k in keep)]
 
 
 def run_smith_updater(version, release_id):
-    """smith-updater reads /etc/smith/packages, so it is pointed at smithd's cache."""
+    """smith-updater reads /etc/smith/packages, so that is its own directory here."""
+    home = f"{E2E}/updater"
+    sh("rm", "-rf", home)
+    os.makedirs(f"{home}/packages/versions")
+    os.makedirs(f"{home}/packages/blobs")
+    with open(f"{home}/magic.toml", "w") as f:
+        f.write(f'[meta]\nmagic_version = 2\nserver = "http://127.0.0.1:8000"\n'
+                f"target_release_id = {release_id}\n")
+    with open(f"{home}/packages/versions/{release_id}", "w") as f:
+        f.write("smith 2 smith_2_all.deb\n")
+    sh("cp", f"{CDN}/smith_2_all.deb", f"{home}/packages/blobs/")
     os.makedirs("/etc/smith", exist_ok=True)
     if os.path.islink("/etc/smith/packages"):
         os.remove("/etc/smith/packages")
-    os.symlink(f"{RUN}/packages", "/etc/smith/packages")
-    os.makedirs(f"{RUN}/packages/versions", exist_ok=True)
-    os.makedirs(f"{RUN}/packages/blobs", exist_ok=True)
-    with open(f"{RUN}/packages/versions/{release_id}", "w") as f:
-        f.write("smith 2 smith_2_all.deb\n")
-    sh("cp", f"{CDN}/smith_2_all.deb", f"{RUN}/packages/blobs/")
-    r = sh(f"{E2E}/bin/smith-updater-{version}", cwd=RUN, check=False,
+    os.symlink(f"{home}/packages", "/etc/smith/packages")
+    r = sh(f"{E2E}/bin/smith-updater-{version}", cwd=home, check=False,
            env=dict(os.environ, RUST_LOG="info"))
     keep = ("Smith installed", "Failed to install smith", "Depends:", "remove is disabled",
-            "Unmet dependencies")
-    return [l.split("  ", 1)[-1][:300] for l in (r.stdout + r.stderr).splitlines()
-            if any(k in l for k in keep)]
+            "Unmet dependencies", "Error")
+    out = re.sub(r"\x1b\[[0-9;]*m", "", r.stdout + r.stderr)
+    return [l.split("  ", 1)[-1][:300] for l in out.splitlines() if any(k in l for k in keep)]
 
 
 def scenario_dpkg(args):
@@ -417,6 +477,8 @@ def main():
     p.add_argument("--resume-with", required=True)
     p.add_argument("--trials", type=int, default=20)
     p.add_argument("--seed", type=int, default=1)
+    p.add_argument("--cut-mode", choices=("shutdown", "dm-error"), default="shutdown")
+    p.add_argument("--rate", type=float, default=0.5, help="MB/s of the download that is cut")
     f = sub.add_parser("faults")
     f.add_argument("--version", required=True)
     f.add_argument("--stall-timeout", type=int, default=150)
