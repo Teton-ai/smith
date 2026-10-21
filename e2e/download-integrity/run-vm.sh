@@ -86,7 +86,9 @@ tar -C "$here" -c harness.py fake_api.py | ssh_vm 'tar -C /opt/e2e -x'
 ssh_vm 'printf "#!/bin/sh\necho reboot \"\$@\" >> /opt/e2e/results/reboot.log\n" > /opt/e2e/shim/reboot && chmod +x /opt/e2e/shim/reboot'
 ssh_vm 'sudo sh -c "nohup python3 /opt/e2e/fake_api.py /opt/e2e/cdn /opt/e2e/state 8000 > /opt/e2e/state/api.log 2>&1 &"'
 
-run() { ssh_vm "sudo python3 /opt/e2e/harness.py $*"; }
+# A failed run does not stop the later runs or the copy of the results.
+status=0
+run() { ssh_vm "sudo python3 /opt/e2e/harness.py $*" || status=$?; }
 if [ $# -gt 0 ]; then
     run "$@"
 elif [ "$image" = noble ]; then
@@ -104,3 +106,4 @@ fi
 mkdir -p "$work/results-$image"
 ssh_vm 'tar -C /opt/e2e/results -c .' | tar -C "$work/results-$image" -x
 python3 "$here/summarize.py" "$work/results-$image/results.jsonl"
+exit "$status"
