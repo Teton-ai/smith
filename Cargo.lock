@@ -352,6 +352,7 @@ dependencies = [
  "utoipa-axum 0.1.3",
  "utoipa-swagger-ui",
  "uuid",
+ "zip",
 ]
 
 [[package]]
