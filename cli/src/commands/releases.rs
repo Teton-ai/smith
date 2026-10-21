@@ -287,6 +287,7 @@ async fn deploy_release(
         let timeout = std::time::Duration::from_secs(15 * 60);
         let start = std::time::Instant::now();
         let mut last_updated = None;
+        let mut timed_out = false;
         loop {
             let devices = api.get_deployment_devices(release_number).await?;
             let updated = devices
@@ -301,16 +302,19 @@ async fn deploy_release(
                 break;
             }
             if start.elapsed() > timeout {
-                println!(
-                    "Not all canary devices updated within {} minutes.",
-                    timeout.as_secs() / 60
-                );
+                timed_out = true;
                 break;
             }
             tokio::time::sleep(std::time::Duration::from_secs(10)).await;
         }
         println!();
         print_deployment(&api, release_number).await?;
+        if timed_out {
+            bail!(
+                "Not all canary devices updated within {} minutes. Check again with `sm releases deployment {release_number}`",
+                timeout.as_secs() / 60
+            );
+        }
     }
 
     println!(

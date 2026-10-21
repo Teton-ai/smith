@@ -505,12 +505,22 @@ async fn poll_bundle(
         progress_bars.push((pb, queued.device, queued.cmd_id, serial));
     }
 
+    // Each result prints when it arrives, so an offline device does not hold
+    // back the output of the others.
+    let print_result = |serial: &str, cmd_id: i32, output: &str| {
+        m.suspend(|| {
+            println!(
+                "\n{} {} (cmd {}):",
+                "Device:".bold(),
+                serial.bright_cyan(),
+                cmd_id
+            );
+            println!("{}", output);
+            println!("{}", "---".dimmed());
+        });
+    };
+
     let mut completed = vec![false; receipt.commands.len()];
-    let mut results: Vec<(String, i32, String)> = receipt
-        .commands
-        .iter()
-        .map(|q| (serial_of(q.device), q.cmd_id, String::new()))
-        .collect();
 
     let mut consecutive_errors = 0;
     while !completed.iter().all(|&c| c) {
@@ -544,7 +554,7 @@ async fn poll_bundle(
 
             // A cancelled command is terminal: it will never produce a response.
             if response.cancelled {
-                results[idx].2 = String::from("(cancelled)");
+                print_result(serial, *command_id, "(cancelled)");
                 pb.finish_with_message(format!(
                     "{} [{}:{}] Cancelled",
                     serial.yellow(),
@@ -563,7 +573,7 @@ async fn poll_bundle(
             }
 
             if let Some(payload) = &response.response {
-                results[idx].2 = render_command_output(payload);
+                print_result(serial, *command_id, &render_command_output(payload));
                 pb.finish_with_message(format!(
                     "{} [{}:{}] Completed ✓",
                     serial.bright_green(),
@@ -577,18 +587,6 @@ async fn poll_bundle(
         if !completed.iter().all(|&c| c) {
             tokio::time::sleep(Duration::from_secs(1)).await;
         }
-    }
-
-    println!("\n{}", "Results:".bold());
-    for (serial, cmd_id, output) in results {
-        println!(
-            "\n{} {} (cmd {}):",
-            "Device:".bold(),
-            serial.bright_cyan(),
-            cmd_id
-        );
-        println!("{}", output);
-        println!("{}", "---".dimmed());
     }
 
     Ok(())
@@ -1575,6 +1573,13 @@ async fn main() -> anyhow::Result<()> {
                 if devices.is_empty() {
                     bail!("No device found matching the selector");
                 }
+
+                // Deduplicate devices
+                let mut seen_ids = HashSet::new();
+                let devices: Vec<_> = devices
+                    .into_iter()
+                    .filter(|device| seen_ids.insert(device.id))
+                    .collect();
 
                 let command = schema::SafeCommandRequest {
                     id: 0,
