@@ -7,7 +7,7 @@ use anyhow::{Context, Result, anyhow, bail};
 use std::path::{Path, PathBuf};
 
 const SYS_CLASS_NET: &str = "/sys/class/net";
-const VENDOR_MODULE: &str = "rtl8822ce";
+pub(crate) const VENDOR_MODULE: &str = "rtl8822ce";
 const VENDOR_PARAMS: &str = "/sys/module/rtl8822ce/parameters";
 /// The vendor driver names its proc dir after `DRV_NAME`, not the module.
 const VENDOR_PROC: &str = "/proc/net/rtl88x2ce";
@@ -324,7 +324,7 @@ pub async fn iw_country(net_dir: &Path, wifi: Option<&WifiInterface>) -> Result<
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use std::os::unix::fs::symlink;
 
@@ -391,7 +391,7 @@ mod tests {
     }
 
     /// Builds a fake `/sys/class/net/<iface>` with a driver and module link.
-    fn fake_iface(root: &Path, name: &str, driver: &str, module: &str) {
+    pub(crate) fn fake_iface(root: &Path, name: &str, driver: &str, module: &str) {
         let iface = root.join("net").join(name);
         let drivers = root.join("drivers").join(driver);
         let modules = root.join("modules").join(module);

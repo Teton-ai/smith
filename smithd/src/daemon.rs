@@ -4,6 +4,7 @@ use crate::control::ControlHandle;
 use crate::downloader::DownloaderHandle;
 use crate::filebrowser::FileBrowserHandle;
 use crate::filemanager::FileManagerHandle;
+use crate::link_health::LinkHealthHandle;
 use crate::logstream::LogStreamHandle;
 use crate::magic::MagicHandle;
 use crate::nm_watcher::NMWatcherHandle;
@@ -91,6 +92,8 @@ pub async fn run() {
 
     // Queues its reports on the commander, so it must be created after it.
     let settings = SettingsHandle::new(shutdown.signals(), commander.clone());
+
+    let _link_health = LinkHealthHandle::new(shutdown.signals(), net_guard.clone());
 
     let _nm_watcher = NMWatcherHandle::new(shutdown.signals(), commander.clone(), settings.clone());
 

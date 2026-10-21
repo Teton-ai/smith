@@ -114,7 +114,7 @@ pub(super) async fn execute(id: i32, network: Network) -> SafeCommandResponse {
     }
 }
 
-async fn execute_nmcli_command(mut cmd: Command) -> Result<std::process::Output> {
+pub(crate) async fn execute_nmcli_command(mut cmd: Command) -> Result<std::process::Output> {
     let future = cmd.kill_on_drop(true).output();
 
     match timeout(Duration::from_secs(60), future).await {
@@ -1004,6 +1004,15 @@ fn parse_iw_interface(output: &str) -> Result<String> {
         }
     }
     Err(anyhow::anyhow!("No wireless interface found"))
+}
+
+/// The BSSID from `iw dev <iface> link` when associated, `None` on
+/// "Not connected.".
+pub(crate) fn associated_bssid(iw_link_stdout: &str) -> Option<String> {
+    iw_link_stdout.lines().find_map(|line| {
+        let rest = line.trim().strip_prefix("Connected to ")?;
+        rest.split_whitespace().next().map(str::to_owned)
+    })
 }
 
 struct IwLinkInfo {
@@ -2857,5 +2866,16 @@ connection.autoconnect-priority:500\n";
         );
 
         assert_eq!(candidate.map(|p| p.name.as_str()), Some("aaa-profile"));
+    }
+
+    #[test]
+    fn associated_bssid_from_iw_link() {
+        let connected = "Connected to 36:70:4e:4e:60:01 (on wlP1p1s0)\n\tSSID: Teton\n\tfreq: 2437\n\tsignal: -31 dBm\n";
+        assert_eq!(
+            associated_bssid(connected).as_deref(),
+            Some("36:70:4e:4e:60:01")
+        );
+        assert_eq!(associated_bssid("Not connected.\n"), None);
+        assert_eq!(associated_bssid(""), None);
     }
 }
