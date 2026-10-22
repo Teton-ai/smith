@@ -2,6 +2,7 @@ use anyhow::Context;
 use clap::Parser;
 use smith::magic::{MagicHandle, structure::ConfigPackage};
 use smith::shutdown::ShutdownHandler;
+use smith::updater::apt_install;
 use std::path::{Path, PathBuf};
 use tokio::time;
 use tracing::{error, info, warn};
@@ -154,13 +155,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     if !package_installed {
         info!("Installing smith {}", package_version);
-        let install_command = format!(
-            "sudo apt install {} -y --allow-downgrades",
-            package_file.display()
-        );
-        let status = tokio::process::Command::new("sh")
-            .arg("-c")
-            .arg(&install_command)
+        let status = apt_install([package_file.as_path()])
             .output()
             .await
             .map_err(|e| {

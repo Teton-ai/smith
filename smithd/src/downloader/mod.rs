@@ -8,12 +8,13 @@ use crate::shutdown::ShutdownSignals;
 use crate::utils::network::NetworkClient;
 use anyhow::{self, Context};
 use download::download_file_mb;
+pub(crate) use download::{ETAG_XATTR, md5_from_etag, md5_of_file};
 use tokio::sync::Mutex;
 use tokio::{
     sync::{mpsc, oneshot},
     time,
 };
-use tracing::info;
+use tracing::{error, info};
 
 #[derive(Debug)]
 enum DownloaderMessage {
@@ -98,14 +99,22 @@ impl Downloader {
                     let _guard = download_lock.lock().await;
 
                     // Do the download
-                    let result =
-                        download_file_mb(magic, session, remote_file, local_file, rate, force_stop)
-                            .await;
+                    let result = download_file_mb(
+                        magic,
+                        session,
+                        remote_file.clone(),
+                        local_file,
+                        rate,
+                        force_stop,
+                    )
+                    .await;
 
-                    if result.is_ok() {
-                        last_download_status.store(true, Ordering::SeqCst);
-                    } else {
-                        last_download_status.store(false, Ordering::SeqCst);
+                    match &result {
+                        Ok(_) => last_download_status.store(true, Ordering::SeqCst),
+                        Err(e) => {
+                            error!(remote = %remote_file, "Download failed: {e:#}");
+                            last_download_status.store(false, Ordering::SeqCst);
+                        }
                     }
 
                     // Reset status
