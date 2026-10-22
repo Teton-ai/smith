@@ -4,6 +4,7 @@ import {
 	ArrowLeft,
 	CheckCircle2,
 	Clock,
+	FastForward,
 	Loader2,
 	Monitor,
 	Rocket,
@@ -17,19 +18,130 @@ import {
 	type DeploymentDeviceWithStatus,
 	type Release,
 	useApiConfirmFullRollout,
+	useApiFinishNow,
 	useApiGetDeploymentDevices,
 	useApiGetReleaseDeployment,
+	useApiGetRolloutProgress,
 	useGetDistributionReleases,
 	useGetRelease,
 	usePromoteRelease,
 } from "@/app/api-client";
 import { Button } from "@/app/components/button";
+import { EmergencyConfirmModal } from "@/app/components/modal";
 import { RelativeTime } from "@/app/components/RelativeTime";
 import { requestErrorMessage } from "@/app/utils/release";
 import {
 	type DeviceServiceHealth,
 	useDeploymentServiceHealth,
 } from "./useDeploymentServiceHealth";
+
+const formatClock = (date: string) =>
+	new Date(date).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+
+/**
+ * Counts every device currently targeting the release, so canaries show as
+ * updated and a device moved to another release since drops out.
+ */
+const StaggeredRolloutProgress = ({ releaseId }: { releaseId: number }) => {
+	const queryClient = useQueryClient();
+	const [confirmOpen, setConfirmOpen] = useState(false);
+	const [finishError, setFinishError] = useState<string | null>(null);
+
+	const { data: progress, queryKey: progressQueryKey } =
+		useApiGetRolloutProgress(releaseId, {
+			query: { refetchInterval: 5000 },
+		});
+
+	const finishNowHook = useApiFinishNow({
+		mutation: {
+			onMutate: () => setFinishError(null),
+			onSuccess: () => {
+				setConfirmOpen(false);
+				queryClient.invalidateQueries({ queryKey: progressQueryKey });
+			},
+			onError: (error) => setFinishError(requestErrorMessage(error)),
+		},
+	});
+
+	// Nothing targets the release any more (superseded, or never rolled out).
+	if (
+		!progress ||
+		progress.scheduled + progress.eligible + progress.updated === 0
+	)
+		return null;
+	const waiting = progress.scheduled > 0;
+
+	return (
+		<div
+			className={`border rounded-lg p-4 ${
+				waiting ? "border-blue-200 bg-blue-50" : "border-green-200 bg-green-50"
+			}`}
+		>
+			<div className="flex items-center space-x-2 mb-3">
+				{waiting ? (
+					<Clock className="w-5 h-5 text-blue-600" />
+				) : (
+					<CheckCircle2 className="w-5 h-5 text-green-600" />
+				)}
+				<h3
+					className={`font-semibold ${waiting ? "text-blue-900" : "text-green-900"}`}
+				>
+					Phase 3: Staggered rollout
+				</h3>
+			</div>
+			<div className="grid grid-cols-3 gap-3 mb-3">
+				{[
+					{ label: "Scheduled", value: progress.scheduled },
+					{ label: "Eligible", value: progress.eligible },
+					{ label: "Updated", value: progress.updated },
+				].map(({ label, value }) => (
+					<div
+						key={label}
+						className="bg-white border border-gray-200 rounded-lg p-3"
+					>
+						<div className="text-xs text-gray-500">{label}</div>
+						<div className="text-xl font-semibold text-gray-900">{value}</div>
+					</div>
+				))}
+			</div>
+			<div className="text-sm text-gray-700 space-y-1">
+				{waiting && progress.next_bucket_at && (
+					<p>Next group opens at {formatClock(progress.next_bucket_at)}.</p>
+				)}
+				{progress.expected_end_at && (
+					<p>
+						{waiting
+							? "Every device is allowed to update by"
+							: "Last group opened at"}{" "}
+						{formatClock(progress.expected_end_at)}.
+					</p>
+				)}
+			</div>
+			{waiting && (
+				<div className="mt-4">
+					<Button
+						variant="secondary"
+						icon={<FastForward className="w-4 h-4" />}
+						onClick={() => setConfirmOpen(true)}
+					>
+						Finish now
+					</Button>
+					{finishError && (
+						<p className="mt-2 text-sm text-red-700">{finishError}</p>
+					)}
+				</div>
+			)}
+			<EmergencyConfirmModal
+				open={confirmOpen}
+				title={`Let all ${progress.scheduled} scheduled devices update now?`}
+				confirmLabel="Finish now"
+				loading={finishNowHook.isPending}
+				onCancel={() => setConfirmOpen(false)}
+				onConfirm={() => finishNowHook.mutate({ releaseId })}
+			/>
+		</div>
+	);
+};
 
 const DeploymentStatusPage = () => {
 	const params = useParams();
@@ -458,7 +570,7 @@ const DeploymentStatusPage = () => {
 											<p>
 												The release has been successfully deployed. All devices
 												in this distribution will update to v{release.version}{" "}
-												as they come online.
+												as their group opens and they come online.
 											</p>
 										</div>
 									)}
@@ -490,6 +602,9 @@ const DeploymentStatusPage = () => {
 										</p>
 									</div>
 								)}
+							{deployment.status === "Done" && (
+								<StaggeredRolloutProgress releaseId={releaseId} />
+							)}
 						</div>
 
 						{deployment.status === "InProgress" && (

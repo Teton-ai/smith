@@ -69,6 +69,7 @@ pub async fn get_device(
             d.release_id,
             d.target_release_id,
             d.target_release_id_set_at,
+            d.target_release_eligible_at,
             d.system_info,
             d.network_id,
             d.current_network_id,
@@ -163,6 +164,7 @@ pub async fn get_devices(
             d.release_id,
             d.target_release_id,
             d.target_release_id_set_at,
+            d.target_release_eligible_at,
             d.follow_latest,
             d.system_info,
             d.modem_id,
@@ -254,10 +256,15 @@ pub async fn get_devices(
                ($5 = true AND d.last_ping >= now() - INTERVAL '3 minutes') OR
                ($5 = false AND d.last_ping < now() - INTERVAL '3 minutes'))
           AND ($6::boolean IS NULL OR
-               ($6 = true AND d.release_id != d.target_release_id) OR
+               -- A device waiting for its staggered bucket is scheduled, not outdated.
+               ($6 = true AND d.release_id != d.target_release_id
+                   AND NOT COALESCE(d.target_release_eligible_at > now(), false)) OR
                ($6 = false AND d.release_id = d.target_release_id))
+          -- Measured from when the device was allowed to move: a device that
+          -- waited for its staggered bucket isn't late for that time.
           AND ($12::bigint IS NULL OR
-               d.target_release_id_set_at <= now() - make_interval(mins => $12::int))
+               COALESCE(d.target_release_eligible_at, d.target_release_id_set_at)
+                   <= now() - make_interval(mins => $12::int))
           AND (CARDINALITY($7::text[]) = 0 OR NOT EXISTS (
               SELECT 1 FROM device_label edl
               JOIN label el ON el.id = edl.label_id
@@ -454,6 +461,7 @@ pub async fn get_devices(
                 release_id: row.release_id,
                 target_release_id: row.target_release_id,
                 target_release_id_set_at: row.target_release_id_set_at,
+                target_release_eligible_at: row.target_release_eligible_at,
                 follow_latest: row.follow_latest,
                 system_info: row.system_info,
                 modem_id: row.modem_id,
@@ -1599,7 +1607,7 @@ pub async fn update_device_target_release(
     }
 
     sqlx::query!(
-        "UPDATE device SET target_release_id = $1, target_release_id_set_at = NOW() WHERE id = $2",
+        "UPDATE device SET target_release_id = $1, target_release_id_set_at = NOW(), target_release_eligible_at = NULL WHERE id = $2",
         target_release_id,
         device_id
     )
@@ -1739,6 +1747,11 @@ pub async fn update_devices_follow_latest(
     }))
 }
 
+/// Set the target release of the given devices, bypassing the canary.
+///
+/// More than 15 devices are staggered like a full rollout: split into up to 20
+/// buckets opening 5 minutes apart, so a site's devices don't all download at
+/// once. Set `all_at_once` to move every device immediately.
 #[utoipa::path(
     put,
     path = "/devices/release",
@@ -1776,15 +1789,23 @@ pub async fn update_devices_target_release(
         return Err(StatusCode::CONFLICT);
     }
 
-    sqlx::query!(
-        "UPDATE device SET target_release_id = $1, target_release_id_set_at = NOW() WHERE id = ANY($2)",
+    let mut tx = state.pg_pool.begin().await.map_err(|err| {
+        error!("Failed to start transaction {err}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+    let retarget = crate::deployment::retarget_selected(
+        &mut tx,
         target_release_id,
-        &devices_release.devices
+        &devices_release.devices,
+        devices_release.all_at_once,
     )
-    .execute(&state.pg_pool)
     .await
     .map_err(|err| {
         error!("Failed to update target release id for devices; {err}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+    tx.commit().await.map_err(|err| {
+        error!("Failed to commit target release update for devices; {err}");
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
 
@@ -1800,8 +1821,15 @@ pub async fn update_devices_target_release(
         .flatten()
         .flatten();
 
-        let device_count = devices_release.devices.len();
+        let device_count = retarget.device_count;
         let triggered_by = user_email.as_deref().unwrap_or("Unknown");
+        let rollout = if let Some(window_minutes) = retarget.window_minutes {
+            format!("staggered over {window_minutes} min")
+        } else if devices_release.all_at_once {
+            "all at once (emergency opt-out)".to_string()
+        } else {
+            "all at once".to_string()
+        };
         let message = json!({
             "blocks": [
                 {
@@ -1809,10 +1837,11 @@ pub async fn update_devices_target_release(
                     "text": {
                         "type": "mrkdwn",
                         "text": format!(
-                            ":warning: *Direct Bulk Deployment - Risk of Drift*\n\n*Devices affected:* {}\n*Target Version:* {} v{}\n*Triggered by:* {}\n\n_This deployment bypasses the canary rollout process._",
+                            ":warning: *Direct Bulk Deployment - Risk of Drift*\n\n*Devices affected:* {}\n*Target Version:* {} v{}\n*Rollout:* {}\n*Triggered by:* {}\n\n_This deployment bypasses the canary rollout process._",
                             device_count,
                             target_release.distribution_name,
                             target_release.version,
+                            rollout,
                             triggered_by
                         )
                     }
@@ -1959,6 +1988,7 @@ pub async fn get_device_info(
         d.release_id,
         d.target_release_id,
         d.target_release_id_set_at,
+        d.target_release_eligible_at,
         d.follow_latest,
         d.system_info,
         d.modem_id,
@@ -2163,6 +2193,7 @@ pub async fn get_device_info(
         release_id: device_row.release_id,
         target_release_id: device_row.target_release_id,
         target_release_id_set_at: device_row.target_release_id_set_at,
+        target_release_eligible_at: device_row.target_release_eligible_at,
         follow_latest: device_row.follow_latest,
         system_info: device_row.system_info,
         modem_id: device_row.modem_id,
@@ -2562,7 +2593,7 @@ pub async fn approve_device(
 
     if let Some(release_id) = target_release_id {
         sqlx::query!(
-            "UPDATE device SET target_release_id = $1, target_release_id_set_at = NOW() WHERE id = $2",
+            "UPDATE device SET target_release_id = $1, target_release_id_set_at = NOW(), target_release_eligible_at = NULL WHERE id = $2",
             release_id,
             device_id
         )
@@ -2636,7 +2667,8 @@ pub async fn revoke_device(
         r#"UPDATE device 
         SET approved = false,
             release_id = NULL,
-            target_release_id = NULL
+            target_release_id = NULL,
+            target_release_eligible_at = NULL
         WHERE id = $1"#,
         device_id
     )

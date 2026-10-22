@@ -380,6 +380,9 @@ async fn start_main_server(
         ))
         .routes(routes!(deployment::route::api_confirm_full_rollout))
         .routes(routes!(deployment::route::api_rollback_release))
+        .routes(routes!(deployment::route::api_get_stagger_policy))
+        .routes(routes!(deployment::route::api_finish_now))
+        .routes(routes!(deployment::route::api_get_rollout_progress))
         .routes(routes!(
             deployment::route::api_get_deployment_service_health
         ))

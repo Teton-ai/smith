@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id FROM device\n         WHERE id = ANY($1) AND release_id IS DISTINCT FROM $2\n         ORDER BY md5(id::text || ':' || $2::int::text), id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4Array",
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "9e820437c1a9e4eb22fab8a0837cd695be3d22a20dcd8bbcf44e74fe5d17012d"
+}

@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT\n            CASE\n                WHEN target_release_eligible_at > NOW() AND release_id IS NOT NULL\n                    THEN release_id\n                ELSE target_release_id\n            END AS \"target_release_id\"\n        FROM device WHERE id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "target_release_id",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "a523f63ebaae6494fc3a237124bd3710eb333bd6418ded59c4ee6156b119e83b"
+}

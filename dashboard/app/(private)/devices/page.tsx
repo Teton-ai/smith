@@ -30,7 +30,7 @@ import {
 	useCommandForm,
 } from "@/app/(private)/commands/shared";
 import LabelAutocomplete from "@/app/components/LabelAutocomplete";
-import { Modal } from "@/app/components/modal";
+import { EmergencyConfirmModal, Modal } from "@/app/components/modal";
 import NetworkQualityIndicator from "@/app/components/NetworkQualityIndicator";
 import { RelativeTime } from "@/app/components/RelativeTime";
 import {
@@ -40,6 +40,7 @@ import {
 	GetDevicesSort,
 	getGetDevicesInfiniteQueryKey,
 	type Release,
+	useApiGetStaggerPolicy,
 	useApproveDevice,
 	useDeleteDevice,
 	useGetDistributionRollouts,
@@ -263,6 +264,11 @@ const DevicesPage = () => {
 		new Set(),
 	);
 	const [showBulkDeployModal, setShowBulkDeployModal] = useState(false);
+	const [showAllAtOnceConfirm, setShowAllAtOnceConfirm] = useState(false);
+	// Which bulk deploy button was used, so only that one shows the spinner.
+	const [bulkDeployMode, setBulkDeployMode] = useState<
+		"staggered" | "allAtOnce"
+	>("staggered");
 	const [selectedReleaseId, setSelectedReleaseId] = useState<
 		number | undefined
 	>(undefined);
@@ -565,6 +571,7 @@ const DevicesPage = () => {
 			mutation: {
 				onSuccess: () => {
 					setShowBulkDeployModal(false);
+					setShowAllAtOnceConfirm(false);
 					setSelectedDeviceIds(new Set());
 					setSelectedReleaseId(undefined);
 				},
@@ -574,15 +581,32 @@ const DevicesPage = () => {
 			},
 		});
 
-	const handleBulkDeploy = () => {
+	const handleBulkDeploy = (allAtOnce: boolean) => {
 		if (!selectedReleaseId) return;
+		setBulkDeployMode(allAtOnce ? "allAtOnce" : "staggered");
 		updateDevicesRelease({
 			data: {
 				target_release_id: selectedReleaseId,
 				devices: Array.from(selectedDeviceIds),
+				all_at_once: allAtOnce,
 			},
 		});
 	};
+
+	// The API decides whether a bulk deploy is staggered; this only explains it.
+	const { data: staggerPolicy, isLoading: staggerPolicyLoading } =
+		useApiGetStaggerPolicy(
+			{ device_count: selectedDeviceIds.size },
+			{ query: { enabled: showBulkDeployModal } },
+		);
+	const bulkDeployStaggered = staggerPolicy?.staggered ?? false;
+	const deployingStaggered = isDeploying && bulkDeployMode === "staggered";
+	// Wait for the policy so the stagger notice is on screen before anyone submits.
+	const bulkDeployDisabled =
+		!selectedReleaseId ||
+		hasMixedDistributions ||
+		distributionIds.size === 0 ||
+		staggerPolicyLoading;
 
 	// The variant actually dispatched, captured at submit time: `onError` fires
 	// after the form may have been edited (or reset by closing the modal), so
@@ -851,11 +875,16 @@ const DevicesPage = () => {
 		return `Online - ${qualityText} Network (${networkScore}/5)${speedText}\nLast tested: ${lastTested}\nLast seen: ${lastSeenText}`;
 	};
 
+	// A device waiting for its staggered bucket is scheduled, not outdated.
 	const hasUpdatePending = (device: Device) => {
 		return (
 			device.release_id &&
 			device.target_release_id &&
-			device.release_id !== device.target_release_id
+			device.release_id !== device.target_release_id &&
+			!(
+				device.target_release_eligible_at &&
+				new Date(device.target_release_eligible_at).getTime() > Date.now()
+			)
 		);
 	};
 
@@ -1735,18 +1764,28 @@ const DevicesPage = () => {
 						>
 							Cancel
 						</Button>
+						{bulkDeployStaggered && (
+							<Button
+								variant="soft"
+								tone="red"
+								disabled={bulkDeployDisabled || isDeploying}
+								onClick={() => setShowAllAtOnceConfirm(true)}
+							>
+								Deploy all at once
+							</Button>
+						)}
 						<Button
 							variant="solid"
 							tone="orange"
-							loading={isDeploying}
-							disabled={
-								!selectedReleaseId ||
-								hasMixedDistributions ||
-								distributionIds.size === 0
-							}
-							onClick={handleBulkDeploy}
+							loading={deployingStaggered}
+							disabled={bulkDeployDisabled}
+							onClick={() => handleBulkDeploy(false)}
 						>
-							{isDeploying ? "Deploying..." : "Deploy"}
+							{deployingStaggered
+								? "Deploying..."
+								: bulkDeployStaggered
+									? "Deploy staggered"
+									: "Deploy"}
 						</Button>
 					</>
 				}
@@ -1767,6 +1806,24 @@ const DevicesPage = () => {
 						</div>
 					</div>
 				</div>
+
+				{staggerPolicy && (
+					<div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
+						<p className="text-blue-800 font-medium">
+							{bulkDeployStaggered
+								? `Staggered over ${staggerPolicy.window_minutes} minutes`
+								: "Deployed all at once"}
+						</p>
+						<p className="text-blue-700 text-sm mt-1">
+							Selections of more than {staggerPolicy.bulk_threshold} devices are
+							moved in groups opening {staggerPolicy.interval_minutes} minutes
+							apart, so a site's devices don't all download at once.
+							{bulkDeployStaggered
+								? ` All ${selectedDeviceIds.size} devices will be allowed to update within ${staggerPolicy.window_minutes} minutes.`
+								: ` These ${selectedDeviceIds.size} devices will update right away.`}
+						</p>
+					</div>
+				)}
 
 				{/* Distribution Mismatch Error */}
 				{hasMixedDistributions && (
@@ -1919,6 +1976,15 @@ const DevicesPage = () => {
 					)}
 				</div>
 			</Modal>
+
+			<EmergencyConfirmModal
+				open={showAllAtOnceConfirm}
+				title="Deploy to all selected devices at once?"
+				confirmLabel="Deploy all at once"
+				loading={isDeploying && bulkDeployMode === "allAtOnce"}
+				onCancel={() => setShowAllAtOnceConfirm(false)}
+				onConfirm={() => handleBulkDeploy(true)}
+			/>
 
 			{/* Bulk Command Modal */}
 			<Modal

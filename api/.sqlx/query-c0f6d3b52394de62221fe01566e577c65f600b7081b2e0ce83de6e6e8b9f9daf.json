@@ -1,0 +1,46 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT\n            COUNT(*) FILTER (\n                WHERE release_id IS DISTINCT FROM target_release_id\n                AND target_release_eligible_at > NOW()\n            ) AS \"scheduled!\",\n            COUNT(*) FILTER (\n                WHERE release_id IS DISTINCT FROM target_release_id\n                AND (target_release_eligible_at IS NULL OR target_release_eligible_at <= NOW())\n            ) AS \"eligible!\",\n            COUNT(*) FILTER (WHERE release_id = target_release_id) AS \"updated!\",\n            MIN(target_release_eligible_at) FILTER (\n                WHERE release_id IS DISTINCT FROM target_release_id\n                AND target_release_eligible_at > NOW()\n            ) AS next_bucket_at,\n            MAX(target_release_eligible_at) AS expected_end_at\n        FROM device\n        WHERE target_release_id = $1 AND archived = false",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "scheduled!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "eligible!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 2,
+        "name": "updated!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 3,
+        "name": "next_bucket_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 4,
+        "name": "expected_end_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4"
+      ]
+    },
+    "nullable": [
+      null,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "c0f6d3b52394de62221fe01566e577c65f600b7081b2e0ce83de6e6e8b9f9daf"
+}

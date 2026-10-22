@@ -356,6 +356,7 @@ export interface Device {
 	serial_number: string;
 	system_info?: SystemInfo;
 	target_release?: Release;
+	target_release_eligible_at?: string;
 	target_release_id?: number;
 	target_release_id_set_at?: string;
 }
@@ -621,6 +622,10 @@ export interface ExtendedTestStatus {
 	status: string;
 }
 
+export interface FinishNowResult {
+	devices_released: number;
+}
+
 export interface FollowLatestRequest {
 	/** Explicit device ids. Mutually exclusive with `labels`. */
 	devices?: number[];
@@ -815,6 +820,7 @@ export interface RawDevice {
 	release_id?: number;
 	serial_number: string;
 	system_info?: unknown;
+	target_release_eligible_at?: string;
 	target_release_id?: number;
 	target_release_id_set_at?: string;
 	token?: string;
@@ -894,6 +900,34 @@ export interface RollbackResult {
 	target_release_id: number;
 }
 
+export interface RolloutProgress {
+	/** Allowed to move but not on the release yet. */
+	eligible: number;
+	/** When the last bucket opens (or opened). */
+	expected_end_at?: string;
+	next_bucket_at?: string;
+	/** Not on the release yet and waiting for their bucket to open. */
+	scheduled: number;
+	/** Already on the release. */
+	updated: number;
+}
+
+export interface StaggerPolicy {
+	/** Deploy to Selected staggers selections of more than this many devices. */
+	bulk_threshold: number;
+	/** Minutes between two buckets opening. */
+	interval_minutes: number;
+	/** Most buckets a staggered rollout is split into. */
+	max_buckets: number;
+	/** Whether Deploy to Selected staggers the requested number of devices. */
+	staggered: boolean;
+	/**
+	 * Minutes until the last bucket opens for that many devices; 0 when not
+	 * staggered.
+	 */
+	window_minutes: number;
+}
+
 export interface StartExtendedTestRequest {
 	/** @minimum 0 */
 	duration_minutes?: number;
@@ -924,6 +958,19 @@ export interface UnhealthyServiceDevice {
 	service_name: string;
 }
 
+/**
+ * Only these keys are changed. Null removes a key; an empty string is stored as a value.
+ */
+export type UpdateDeviceLabelsRequestChanges = { [key: string]: string | null };
+
+/**
+ * Incremental changes: null removes a key; a string sets its value.
+ */
+export interface UpdateDeviceLabelsRequest {
+	/** Only these keys are changed. Null removes a key; an empty string is stored as a value. */
+	changes: UpdateDeviceLabelsRequestChanges;
+}
+
 export interface UpdateDeviceRelease {
 	target_release_id: number;
 }
@@ -935,6 +982,12 @@ export interface UpdateDeviceRequest {
 }
 
 export interface UpdateDevicesRelease {
+	/**
+	 * Move every device at once instead of staggering selections above the
+	 * bulk threshold. Emergency use only: a site whose devices all download
+	 * together can lose connectivity.
+	 */
+	all_at_once?: boolean;
 	devices: number[];
 	target_release_id: number;
 }
@@ -983,6 +1036,14 @@ export interface WifiScanResult {
 	signal?: number;
 	ssid?: string;
 }
+
+export type ApiGetStaggerPolicyParams = {
+	/**
+	 * Devices a Deploy to Selected would target; sets `staggered` and
+	 * `window_minutes` in the response.
+	 */
+	device_count?: number;
+};
 
 export type GetDevicesParams = {
 	serial_number?: string;
@@ -3789,6 +3850,342 @@ export function useGetUnhealthyServices<
 	return withQueryKey(query, queryOptions.queryKey);
 }
 
+/**
+ * @summary How staggered rollouts are paced: full rollouts and Deploy to Selected above
+`bulk_threshold` devices are split into up to `max_buckets` buckets, opening
+`interval_minutes` apart.
+ */
+export const useApiGetStaggerPolicyHook = () => {
+	const apiGetStaggerPolicy = useClientMutator<StaggerPolicy>();
+
+	return useCallback(
+		(params?: ApiGetStaggerPolicyParams, signal?: AbortSignal) => {
+			return apiGetStaggerPolicy({
+				url: `/deployments/stagger-policy`,
+				method: "GET",
+				params,
+				signal,
+			});
+		},
+		[apiGetStaggerPolicy],
+	);
+};
+
+export const getApiGetStaggerPolicyInfiniteQueryKey = (
+	params?: ApiGetStaggerPolicyParams,
+) => {
+	return [
+		"infinite",
+		`/deployments/stagger-policy`,
+		...(params ? [params] : []),
+	] as const;
+};
+
+export const getApiGetStaggerPolicyQueryKey = (
+	params?: ApiGetStaggerPolicyParams,
+) => {
+	return [`/deployments/stagger-policy`, ...(params ? [params] : [])] as const;
+};
+
+export const useApiGetStaggerPolicyInfiniteQueryOptions = <
+	TData = InfiniteData<
+		Awaited<ReturnType<ReturnType<typeof useApiGetStaggerPolicyHook>>>
+	>,
+	TError = unknown,
+>(
+	params?: ApiGetStaggerPolicyParams,
+	options?: {
+		query?: Partial<
+			UseInfiniteQueryOptions<
+				Awaited<ReturnType<ReturnType<typeof useApiGetStaggerPolicyHook>>>,
+				TError,
+				TData
+			>
+		>;
+	},
+) => {
+	const { query: queryOptions } = options ?? {};
+
+	const queryKey =
+		queryOptions?.queryKey ?? getApiGetStaggerPolicyInfiniteQueryKey(params);
+
+	const apiGetStaggerPolicy = useApiGetStaggerPolicyHook();
+
+	const queryFn: QueryFunction<
+		Awaited<ReturnType<ReturnType<typeof useApiGetStaggerPolicyHook>>>
+	> = ({ signal }) => apiGetStaggerPolicy(params, signal);
+
+	return { queryKey, queryFn, ...queryOptions } as UseInfiniteQueryOptions<
+		Awaited<ReturnType<ReturnType<typeof useApiGetStaggerPolicyHook>>>,
+		TError,
+		TData
+	> & { queryKey: DataTag<QueryKey, TData, TError> };
+};
+
+export type ApiGetStaggerPolicyInfiniteQueryResult = NonNullable<
+	Awaited<ReturnType<ReturnType<typeof useApiGetStaggerPolicyHook>>>
+>;
+export type ApiGetStaggerPolicyInfiniteQueryError = unknown;
+
+export function useApiGetStaggerPolicyInfinite<
+	TData = InfiniteData<
+		Awaited<ReturnType<ReturnType<typeof useApiGetStaggerPolicyHook>>>
+	>,
+	TError = unknown,
+>(
+	params: undefined | ApiGetStaggerPolicyParams,
+	options: {
+		query: Partial<
+			UseInfiniteQueryOptions<
+				Awaited<ReturnType<ReturnType<typeof useApiGetStaggerPolicyHook>>>,
+				TError,
+				TData
+			>
+		> &
+			Pick<
+				DefinedInitialDataOptions<
+					Awaited<ReturnType<ReturnType<typeof useApiGetStaggerPolicyHook>>>,
+					TError,
+					Awaited<ReturnType<ReturnType<typeof useApiGetStaggerPolicyHook>>>
+				>,
+				"initialData"
+			>;
+	},
+	queryClient?: QueryClient,
+): DefinedUseInfiniteQueryResult<TData, TError> & {
+	queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useApiGetStaggerPolicyInfinite<
+	TData = InfiniteData<
+		Awaited<ReturnType<ReturnType<typeof useApiGetStaggerPolicyHook>>>
+	>,
+	TError = unknown,
+>(
+	params?: ApiGetStaggerPolicyParams,
+	options?: {
+		query?: Partial<
+			UseInfiniteQueryOptions<
+				Awaited<ReturnType<ReturnType<typeof useApiGetStaggerPolicyHook>>>,
+				TError,
+				TData
+			>
+		> &
+			Pick<
+				UndefinedInitialDataOptions<
+					Awaited<ReturnType<ReturnType<typeof useApiGetStaggerPolicyHook>>>,
+					TError,
+					Awaited<ReturnType<ReturnType<typeof useApiGetStaggerPolicyHook>>>
+				>,
+				"initialData"
+			>;
+	},
+	queryClient?: QueryClient,
+): UseInfiniteQueryResult<TData, TError> & {
+	queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useApiGetStaggerPolicyInfinite<
+	TData = InfiniteData<
+		Awaited<ReturnType<ReturnType<typeof useApiGetStaggerPolicyHook>>>
+	>,
+	TError = unknown,
+>(
+	params?: ApiGetStaggerPolicyParams,
+	options?: {
+		query?: Partial<
+			UseInfiniteQueryOptions<
+				Awaited<ReturnType<ReturnType<typeof useApiGetStaggerPolicyHook>>>,
+				TError,
+				TData
+			>
+		>;
+	},
+	queryClient?: QueryClient,
+): UseInfiniteQueryResult<TData, TError> & {
+	queryKey: DataTag<QueryKey, TData, TError>;
+};
+/**
+ * @summary How staggered rollouts are paced: full rollouts and Deploy to Selected above
+`bulk_threshold` devices are split into up to `max_buckets` buckets, opening
+`interval_minutes` apart.
+ */
+
+export function useApiGetStaggerPolicyInfinite<
+	TData = InfiniteData<
+		Awaited<ReturnType<ReturnType<typeof useApiGetStaggerPolicyHook>>>
+	>,
+	TError = unknown,
+>(
+	params?: ApiGetStaggerPolicyParams,
+	options?: {
+		query?: Partial<
+			UseInfiniteQueryOptions<
+				Awaited<ReturnType<ReturnType<typeof useApiGetStaggerPolicyHook>>>,
+				TError,
+				TData
+			>
+		>;
+	},
+	queryClient?: QueryClient,
+): UseInfiniteQueryResult<TData, TError> & {
+	queryKey: DataTag<QueryKey, TData, TError>;
+} {
+	const queryOptions = useApiGetStaggerPolicyInfiniteQueryOptions(
+		params,
+		options,
+	);
+
+	const query = useInfiniteQuery(
+		queryOptions,
+		queryClient,
+	) as UseInfiniteQueryResult<TData, TError> & {
+		queryKey: DataTag<QueryKey, TData, TError>;
+	};
+
+	return withQueryKey(query, queryOptions.queryKey);
+}
+
+export const useApiGetStaggerPolicyQueryOptions = <
+	TData = Awaited<ReturnType<ReturnType<typeof useApiGetStaggerPolicyHook>>>,
+	TError = unknown,
+>(
+	params?: ApiGetStaggerPolicyParams,
+	options?: {
+		query?: Partial<
+			UseQueryOptions<
+				Awaited<ReturnType<ReturnType<typeof useApiGetStaggerPolicyHook>>>,
+				TError,
+				TData
+			>
+		>;
+	},
+) => {
+	const { query: queryOptions } = options ?? {};
+
+	const queryKey =
+		queryOptions?.queryKey ?? getApiGetStaggerPolicyQueryKey(params);
+
+	const apiGetStaggerPolicy = useApiGetStaggerPolicyHook();
+
+	const queryFn: QueryFunction<
+		Awaited<ReturnType<ReturnType<typeof useApiGetStaggerPolicyHook>>>
+	> = ({ signal }) => apiGetStaggerPolicy(params, signal);
+
+	return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+		Awaited<ReturnType<ReturnType<typeof useApiGetStaggerPolicyHook>>>,
+		TError,
+		TData
+	> & { queryKey: DataTag<QueryKey, TData, TError> };
+};
+
+export type ApiGetStaggerPolicyQueryResult = NonNullable<
+	Awaited<ReturnType<ReturnType<typeof useApiGetStaggerPolicyHook>>>
+>;
+export type ApiGetStaggerPolicyQueryError = unknown;
+
+export function useApiGetStaggerPolicy<
+	TData = Awaited<ReturnType<ReturnType<typeof useApiGetStaggerPolicyHook>>>,
+	TError = unknown,
+>(
+	params: undefined | ApiGetStaggerPolicyParams,
+	options: {
+		query: Partial<
+			UseQueryOptions<
+				Awaited<ReturnType<ReturnType<typeof useApiGetStaggerPolicyHook>>>,
+				TError,
+				TData
+			>
+		> &
+			Pick<
+				DefinedInitialDataOptions<
+					Awaited<ReturnType<ReturnType<typeof useApiGetStaggerPolicyHook>>>,
+					TError,
+					Awaited<ReturnType<ReturnType<typeof useApiGetStaggerPolicyHook>>>
+				>,
+				"initialData"
+			>;
+	},
+	queryClient?: QueryClient,
+): DefinedUseQueryResult<TData, TError> & {
+	queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useApiGetStaggerPolicy<
+	TData = Awaited<ReturnType<ReturnType<typeof useApiGetStaggerPolicyHook>>>,
+	TError = unknown,
+>(
+	params?: ApiGetStaggerPolicyParams,
+	options?: {
+		query?: Partial<
+			UseQueryOptions<
+				Awaited<ReturnType<ReturnType<typeof useApiGetStaggerPolicyHook>>>,
+				TError,
+				TData
+			>
+		> &
+			Pick<
+				UndefinedInitialDataOptions<
+					Awaited<ReturnType<ReturnType<typeof useApiGetStaggerPolicyHook>>>,
+					TError,
+					Awaited<ReturnType<ReturnType<typeof useApiGetStaggerPolicyHook>>>
+				>,
+				"initialData"
+			>;
+	},
+	queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+	queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useApiGetStaggerPolicy<
+	TData = Awaited<ReturnType<ReturnType<typeof useApiGetStaggerPolicyHook>>>,
+	TError = unknown,
+>(
+	params?: ApiGetStaggerPolicyParams,
+	options?: {
+		query?: Partial<
+			UseQueryOptions<
+				Awaited<ReturnType<ReturnType<typeof useApiGetStaggerPolicyHook>>>,
+				TError,
+				TData
+			>
+		>;
+	},
+	queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+	queryKey: DataTag<QueryKey, TData, TError>;
+};
+/**
+ * @summary How staggered rollouts are paced: full rollouts and Deploy to Selected above
+`bulk_threshold` devices are split into up to `max_buckets` buckets, opening
+`interval_minutes` apart.
+ */
+
+export function useApiGetStaggerPolicy<
+	TData = Awaited<ReturnType<ReturnType<typeof useApiGetStaggerPolicyHook>>>,
+	TError = unknown,
+>(
+	params?: ApiGetStaggerPolicyParams,
+	options?: {
+		query?: Partial<
+			UseQueryOptions<
+				Awaited<ReturnType<ReturnType<typeof useApiGetStaggerPolicyHook>>>,
+				TError,
+				TData
+			>
+		>;
+	},
+	queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+	queryKey: DataTag<QueryKey, TData, TError>;
+} {
+	const queryOptions = useApiGetStaggerPolicyQueryOptions(params, options);
+
+	const query = useQuery(queryOptions, queryClient) as UseQueryResult<
+		TData,
+		TError
+	> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+	return withQueryKey(query, queryOptions.queryKey);
+}
+
 export const useGetDeviceHook = () => {
 	const getDevice = useClientMutator<RawDevice>();
 
@@ -4558,6 +4955,12 @@ export const useUpdateDevicesNetwork = <TError = void, TContext = unknown>(
 	);
 };
 
+/**
+ * More than 15 devices are staggered like a full rollout: split into up to 20
+ * buckets opening 5 minutes apart, so a site's devices don't all download at
+ * once. Set `all_at_once` to move every device immediately.
+ * @summary Set the target release of the given devices, bypassing the canary.
+ */
 export const useUpdateDevicesTargetReleaseHook = () => {
 	const updateDevicesTargetRelease = useClientMutator<void>();
 
@@ -4626,6 +5029,9 @@ export type UpdateDevicesTargetReleaseMutationVariables = {
 	data: UpdateDevicesRelease;
 };
 
+/**
+ * @summary Set the target release of the given devices, bypassing the canary.
+ */
 export const useUpdateDevicesTargetRelease = <
 	TError = void | string,
 	TContext = unknown,
@@ -7787,6 +8193,101 @@ export const useUpdateDeviceIntent = <TError = void, TContext = unknown>(
 > => {
 	return useMutation(
 		useUpdateDeviceIntentMutationOptions(options),
+		queryClient,
+	);
+};
+
+export const useUpdateDeviceLabelsHook = () => {
+	const updateDeviceLabels = useClientMutator<void>();
+
+	return useCallback(
+		(
+			deviceId: string,
+			updateDeviceLabelsRequest: UpdateDeviceLabelsRequest,
+			signal?: AbortSignal,
+		) => {
+			return updateDeviceLabels({
+				url: `/devices/${deviceId}/labels`,
+				method: "PATCH",
+				headers: { "Content-Type": "application/json" },
+				data: updateDeviceLabelsRequest,
+				signal,
+			});
+		},
+		[updateDeviceLabels],
+	);
+};
+
+export const getUpdateDeviceLabelsMutationKey = () =>
+	["updateDeviceLabels"] as const;
+
+export const useUpdateDeviceLabelsMutationOptions = <
+	TError = void,
+	TContext = unknown,
+>(options?: {
+	mutation?: UseMutationOptions<
+		Awaited<ReturnType<ReturnType<typeof useUpdateDeviceLabelsHook>>>,
+		TError,
+		UpdateDeviceLabelsMutationVariables,
+		TContext
+	>;
+}): UseMutationOptions<
+	Awaited<ReturnType<ReturnType<typeof useUpdateDeviceLabelsHook>>>,
+	TError,
+	UpdateDeviceLabelsMutationVariables,
+	TContext
+> => {
+	const mutationKey = getUpdateDeviceLabelsMutationKey();
+	const { mutation: mutationOptions } = options
+		? options.mutation &&
+			"mutationKey" in options.mutation &&
+			options.mutation.mutationKey
+			? options
+			: { ...options, mutation: { ...options.mutation, mutationKey } }
+		: { mutation: { mutationKey } };
+
+	const updateDeviceLabels = useUpdateDeviceLabelsHook();
+
+	const mutationFn: MutationFunction<
+		Awaited<ReturnType<ReturnType<typeof useUpdateDeviceLabelsHook>>>,
+		UpdateDeviceLabelsMutationVariables
+	> = (props) => {
+		const { deviceId, data } = props ?? {};
+
+		return updateDeviceLabels(deviceId, data);
+	};
+
+	return { mutationFn, ...mutationOptions };
+};
+
+export type UpdateDeviceLabelsMutationResult = NonNullable<
+	Awaited<ReturnType<ReturnType<typeof useUpdateDeviceLabelsHook>>>
+>;
+export type UpdateDeviceLabelsMutationBody = UpdateDeviceLabelsRequest;
+export type UpdateDeviceLabelsMutationError = void;
+export type UpdateDeviceLabelsMutationVariables = {
+	deviceId: string;
+	data: UpdateDeviceLabelsRequest;
+};
+
+export const useUpdateDeviceLabels = <TError = void, TContext = unknown>(
+	options?: {
+		mutation?: UseMutationOptions<
+			Awaited<ReturnType<ReturnType<typeof useUpdateDeviceLabelsHook>>>,
+			TError,
+			UpdateDeviceLabelsMutationVariables,
+			TContext
+		>;
+	},
+	queryClient?: QueryClient,
+): UseMutationResult<
+	Awaited<ReturnType<ReturnType<typeof useUpdateDeviceLabelsHook>>>,
+	TError,
+	UpdateDeviceLabelsMutationVariables,
+	TContext
+> => {
+	return useMutation(
+		useUpdateDeviceLabelsMutationOptions(options),
 		queryClient,
 	);
 };
@@ -21520,6 +22021,436 @@ export function useApiGetDeploymentDevices<
 		releaseId,
 		options,
 	);
+
+	const query = useQuery(queryOptions, queryClient) as UseQueryResult<
+		TData,
+		TError
+	> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+	return withQueryKey(query, queryOptions.queryKey);
+}
+
+/**
+ * @summary Let every device still waiting for its bucket move to the release now.
+Emergency use only: a site whose devices all download together can lose
+connectivity.
+ */
+export const useApiFinishNowHook = () => {
+	const apiFinishNow = useClientMutator<FinishNowResult>();
+
+	return useCallback(
+		(releaseId: number, signal?: AbortSignal) => {
+			return apiFinishNow({
+				url: `/releases/${releaseId}/deployment/finish-now`,
+				method: "POST",
+				signal,
+			});
+		},
+		[apiFinishNow],
+	);
+};
+
+export const getApiFinishNowMutationKey = () => ["apiFinishNow"] as const;
+
+export const useApiFinishNowMutationOptions = <
+	TError = unknown,
+	TContext = unknown,
+>(options?: {
+	mutation?: UseMutationOptions<
+		Awaited<ReturnType<ReturnType<typeof useApiFinishNowHook>>>,
+		TError,
+		ApiFinishNowMutationVariables,
+		TContext
+	>;
+}): UseMutationOptions<
+	Awaited<ReturnType<ReturnType<typeof useApiFinishNowHook>>>,
+	TError,
+	ApiFinishNowMutationVariables,
+	TContext
+> => {
+	const mutationKey = getApiFinishNowMutationKey();
+	const { mutation: mutationOptions } = options
+		? options.mutation &&
+			"mutationKey" in options.mutation &&
+			options.mutation.mutationKey
+			? options
+			: { ...options, mutation: { ...options.mutation, mutationKey } }
+		: { mutation: { mutationKey } };
+
+	const apiFinishNow = useApiFinishNowHook();
+
+	const mutationFn: MutationFunction<
+		Awaited<ReturnType<ReturnType<typeof useApiFinishNowHook>>>,
+		ApiFinishNowMutationVariables
+	> = (props) => {
+		const { releaseId } = props ?? {};
+
+		return apiFinishNow(releaseId);
+	};
+
+	return { mutationFn, ...mutationOptions };
+};
+
+export type ApiFinishNowMutationResult = NonNullable<
+	Awaited<ReturnType<ReturnType<typeof useApiFinishNowHook>>>
+>;
+
+export type ApiFinishNowMutationError = unknown;
+export type ApiFinishNowMutationVariables = { releaseId: number };
+
+/**
+ * @summary Let every device still waiting for its bucket move to the release now.
+Emergency use only: a site whose devices all download together can lose
+connectivity.
+ */
+export const useApiFinishNow = <TError = unknown, TContext = unknown>(
+	options?: {
+		mutation?: UseMutationOptions<
+			Awaited<ReturnType<ReturnType<typeof useApiFinishNowHook>>>,
+			TError,
+			ApiFinishNowMutationVariables,
+			TContext
+		>;
+	},
+	queryClient?: QueryClient,
+): UseMutationResult<
+	Awaited<ReturnType<ReturnType<typeof useApiFinishNowHook>>>,
+	TError,
+	ApiFinishNowMutationVariables,
+	TContext
+> => {
+	return useMutation(useApiFinishNowMutationOptions(options), queryClient);
+};
+
+/**
+ * @summary Progress of the staggered rollout of a release, over every device currently
+targeting it.
+ */
+export const useApiGetRolloutProgressHook = () => {
+	const apiGetRolloutProgress = useClientMutator<RolloutProgress>();
+
+	return useCallback(
+		(releaseId: number, signal?: AbortSignal) => {
+			return apiGetRolloutProgress({
+				url: `/releases/${releaseId}/deployment/rollout-progress`,
+				method: "GET",
+				signal,
+			});
+		},
+		[apiGetRolloutProgress],
+	);
+};
+
+export const getApiGetRolloutProgressInfiniteQueryKey = (releaseId: number) => {
+	return [
+		"infinite",
+		`/releases/${releaseId}/deployment/rollout-progress`,
+	] as const;
+};
+
+export const getApiGetRolloutProgressQueryKey = (releaseId: number) => {
+	return [`/releases/${releaseId}/deployment/rollout-progress`] as const;
+};
+
+export const useApiGetRolloutProgressInfiniteQueryOptions = <
+	TData = InfiniteData<
+		Awaited<ReturnType<ReturnType<typeof useApiGetRolloutProgressHook>>>
+	>,
+	TError = unknown,
+>(
+	releaseId: number,
+	options?: {
+		query?: Partial<
+			UseInfiniteQueryOptions<
+				Awaited<ReturnType<ReturnType<typeof useApiGetRolloutProgressHook>>>,
+				TError,
+				TData
+			>
+		>;
+	},
+) => {
+	const { query: queryOptions } = options ?? {};
+
+	const queryKey =
+		queryOptions?.queryKey ??
+		getApiGetRolloutProgressInfiniteQueryKey(releaseId);
+
+	const apiGetRolloutProgress = useApiGetRolloutProgressHook();
+
+	const queryFn: QueryFunction<
+		Awaited<ReturnType<ReturnType<typeof useApiGetRolloutProgressHook>>>
+	> = ({ signal }) => apiGetRolloutProgress(releaseId, signal);
+
+	return {
+		queryKey,
+		queryFn,
+		enabled: releaseId !== null && releaseId !== undefined,
+		...queryOptions,
+	} as UseInfiniteQueryOptions<
+		Awaited<ReturnType<ReturnType<typeof useApiGetRolloutProgressHook>>>,
+		TError,
+		TData
+	> & { queryKey: DataTag<QueryKey, TData, TError> };
+};
+
+export type ApiGetRolloutProgressInfiniteQueryResult = NonNullable<
+	Awaited<ReturnType<ReturnType<typeof useApiGetRolloutProgressHook>>>
+>;
+export type ApiGetRolloutProgressInfiniteQueryError = unknown;
+
+export function useApiGetRolloutProgressInfinite<
+	TData = InfiniteData<
+		Awaited<ReturnType<ReturnType<typeof useApiGetRolloutProgressHook>>>
+	>,
+	TError = unknown,
+>(
+	releaseId: number,
+	options: {
+		query: Partial<
+			UseInfiniteQueryOptions<
+				Awaited<ReturnType<ReturnType<typeof useApiGetRolloutProgressHook>>>,
+				TError,
+				TData
+			>
+		> &
+			Pick<
+				DefinedInitialDataOptions<
+					Awaited<ReturnType<ReturnType<typeof useApiGetRolloutProgressHook>>>,
+					TError,
+					Awaited<ReturnType<ReturnType<typeof useApiGetRolloutProgressHook>>>
+				>,
+				"initialData"
+			>;
+	},
+	queryClient?: QueryClient,
+): DefinedUseInfiniteQueryResult<TData, TError> & {
+	queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useApiGetRolloutProgressInfinite<
+	TData = InfiniteData<
+		Awaited<ReturnType<ReturnType<typeof useApiGetRolloutProgressHook>>>
+	>,
+	TError = unknown,
+>(
+	releaseId: number,
+	options?: {
+		query?: Partial<
+			UseInfiniteQueryOptions<
+				Awaited<ReturnType<ReturnType<typeof useApiGetRolloutProgressHook>>>,
+				TError,
+				TData
+			>
+		> &
+			Pick<
+				UndefinedInitialDataOptions<
+					Awaited<ReturnType<ReturnType<typeof useApiGetRolloutProgressHook>>>,
+					TError,
+					Awaited<ReturnType<ReturnType<typeof useApiGetRolloutProgressHook>>>
+				>,
+				"initialData"
+			>;
+	},
+	queryClient?: QueryClient,
+): UseInfiniteQueryResult<TData, TError> & {
+	queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useApiGetRolloutProgressInfinite<
+	TData = InfiniteData<
+		Awaited<ReturnType<ReturnType<typeof useApiGetRolloutProgressHook>>>
+	>,
+	TError = unknown,
+>(
+	releaseId: number,
+	options?: {
+		query?: Partial<
+			UseInfiniteQueryOptions<
+				Awaited<ReturnType<ReturnType<typeof useApiGetRolloutProgressHook>>>,
+				TError,
+				TData
+			>
+		>;
+	},
+	queryClient?: QueryClient,
+): UseInfiniteQueryResult<TData, TError> & {
+	queryKey: DataTag<QueryKey, TData, TError>;
+};
+/**
+ * @summary Progress of the staggered rollout of a release, over every device currently
+targeting it.
+ */
+
+export function useApiGetRolloutProgressInfinite<
+	TData = InfiniteData<
+		Awaited<ReturnType<ReturnType<typeof useApiGetRolloutProgressHook>>>
+	>,
+	TError = unknown,
+>(
+	releaseId: number,
+	options?: {
+		query?: Partial<
+			UseInfiniteQueryOptions<
+				Awaited<ReturnType<ReturnType<typeof useApiGetRolloutProgressHook>>>,
+				TError,
+				TData
+			>
+		>;
+	},
+	queryClient?: QueryClient,
+): UseInfiniteQueryResult<TData, TError> & {
+	queryKey: DataTag<QueryKey, TData, TError>;
+} {
+	const queryOptions = useApiGetRolloutProgressInfiniteQueryOptions(
+		releaseId,
+		options,
+	);
+
+	const query = useInfiniteQuery(
+		queryOptions,
+		queryClient,
+	) as UseInfiniteQueryResult<TData, TError> & {
+		queryKey: DataTag<QueryKey, TData, TError>;
+	};
+
+	return withQueryKey(query, queryOptions.queryKey);
+}
+
+export const useApiGetRolloutProgressQueryOptions = <
+	TData = Awaited<ReturnType<ReturnType<typeof useApiGetRolloutProgressHook>>>,
+	TError = unknown,
+>(
+	releaseId: number,
+	options?: {
+		query?: Partial<
+			UseQueryOptions<
+				Awaited<ReturnType<ReturnType<typeof useApiGetRolloutProgressHook>>>,
+				TError,
+				TData
+			>
+		>;
+	},
+) => {
+	const { query: queryOptions } = options ?? {};
+
+	const queryKey =
+		queryOptions?.queryKey ?? getApiGetRolloutProgressQueryKey(releaseId);
+
+	const apiGetRolloutProgress = useApiGetRolloutProgressHook();
+
+	const queryFn: QueryFunction<
+		Awaited<ReturnType<ReturnType<typeof useApiGetRolloutProgressHook>>>
+	> = ({ signal }) => apiGetRolloutProgress(releaseId, signal);
+
+	return {
+		queryKey,
+		queryFn,
+		enabled: releaseId !== null && releaseId !== undefined,
+		...queryOptions,
+	} as UseQueryOptions<
+		Awaited<ReturnType<ReturnType<typeof useApiGetRolloutProgressHook>>>,
+		TError,
+		TData
+	> & { queryKey: DataTag<QueryKey, TData, TError> };
+};
+
+export type ApiGetRolloutProgressQueryResult = NonNullable<
+	Awaited<ReturnType<ReturnType<typeof useApiGetRolloutProgressHook>>>
+>;
+export type ApiGetRolloutProgressQueryError = unknown;
+
+export function useApiGetRolloutProgress<
+	TData = Awaited<ReturnType<ReturnType<typeof useApiGetRolloutProgressHook>>>,
+	TError = unknown,
+>(
+	releaseId: number,
+	options: {
+		query: Partial<
+			UseQueryOptions<
+				Awaited<ReturnType<ReturnType<typeof useApiGetRolloutProgressHook>>>,
+				TError,
+				TData
+			>
+		> &
+			Pick<
+				DefinedInitialDataOptions<
+					Awaited<ReturnType<ReturnType<typeof useApiGetRolloutProgressHook>>>,
+					TError,
+					Awaited<ReturnType<ReturnType<typeof useApiGetRolloutProgressHook>>>
+				>,
+				"initialData"
+			>;
+	},
+	queryClient?: QueryClient,
+): DefinedUseQueryResult<TData, TError> & {
+	queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useApiGetRolloutProgress<
+	TData = Awaited<ReturnType<ReturnType<typeof useApiGetRolloutProgressHook>>>,
+	TError = unknown,
+>(
+	releaseId: number,
+	options?: {
+		query?: Partial<
+			UseQueryOptions<
+				Awaited<ReturnType<ReturnType<typeof useApiGetRolloutProgressHook>>>,
+				TError,
+				TData
+			>
+		> &
+			Pick<
+				UndefinedInitialDataOptions<
+					Awaited<ReturnType<ReturnType<typeof useApiGetRolloutProgressHook>>>,
+					TError,
+					Awaited<ReturnType<ReturnType<typeof useApiGetRolloutProgressHook>>>
+				>,
+				"initialData"
+			>;
+	},
+	queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+	queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useApiGetRolloutProgress<
+	TData = Awaited<ReturnType<ReturnType<typeof useApiGetRolloutProgressHook>>>,
+	TError = unknown,
+>(
+	releaseId: number,
+	options?: {
+		query?: Partial<
+			UseQueryOptions<
+				Awaited<ReturnType<ReturnType<typeof useApiGetRolloutProgressHook>>>,
+				TError,
+				TData
+			>
+		>;
+	},
+	queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+	queryKey: DataTag<QueryKey, TData, TError>;
+};
+/**
+ * @summary Progress of the staggered rollout of a release, over every device currently
+targeting it.
+ */
+
+export function useApiGetRolloutProgress<
+	TData = Awaited<ReturnType<ReturnType<typeof useApiGetRolloutProgressHook>>>,
+	TError = unknown,
+>(
+	releaseId: number,
+	options?: {
+		query?: Partial<
+			UseQueryOptions<
+				Awaited<ReturnType<ReturnType<typeof useApiGetRolloutProgressHook>>>,
+				TError,
+				TData
+			>
+		>;
+	},
+	queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+	queryKey: DataTag<QueryKey, TData, TError>;
+} {
+	const queryOptions = useApiGetRolloutProgressQueryOptions(releaseId, options);
 
 	const query = useQuery(queryOptions, queryClient) as UseQueryResult<
 		TData,

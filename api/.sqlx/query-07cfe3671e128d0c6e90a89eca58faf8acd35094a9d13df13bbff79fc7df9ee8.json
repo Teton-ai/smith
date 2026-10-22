@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE device d\n         SET target_release_id = $1,\n             target_release_id_set_at = NOW(),\n             target_release_eligible_at = NOW() + make_interval(mins => u.offset_minutes)\n         FROM UNNEST($2::int[], $3::int[]) AS u(id, offset_minutes)\n         WHERE d.id = u.id",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Int4Array",
+        "Int4Array"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "07cfe3671e128d0c6e90a89eca58faf8acd35094a9d13df13bbff79fc7df9ee8"
+}

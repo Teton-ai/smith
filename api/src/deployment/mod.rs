@@ -17,6 +17,150 @@ use crate::slack::send_slack_notification;
 
 pub mod route;
 
+/// Most buckets a staggered retarget is split into; smaller sets get one device
+/// per bucket.
+pub const STAGGER_MAX_BUCKETS: usize = 20;
+pub const STAGGER_INTERVAL_MINUTES: i32 = 5;
+
+/// Deploy to Selected above this many devices is staggered unless the caller
+/// opts out.
+pub const BULK_STAGGER_THRESHOLD: usize = 15;
+
+pub fn bucket_count(device_count: usize) -> usize {
+    device_count.min(STAGGER_MAX_BUCKETS)
+}
+
+/// Consecutive chunks of the ranked devices rather than a modulo, so bucket
+/// sizes differ by at most one device whatever the set size.
+pub fn bucket_for_rank(rank: usize, device_count: usize) -> usize {
+    if device_count == 0 {
+        return 0;
+    }
+    rank * bucket_count(device_count) / device_count
+}
+
+/// Minutes between the first and the last bucket opening.
+pub fn stagger_window_minutes(device_count: usize) -> i32 {
+    bucket_count(device_count).saturating_sub(1) as i32 * STAGGER_INTERVAL_MINUTES
+}
+
+/// Deploy to Selected: the stagger window for `device_count` distinct devices,
+/// or `None` when they all move at once.
+pub fn bulk_stagger_window(device_count: usize, all_at_once: bool) -> Option<i32> {
+    (device_count > BULK_STAGGER_THRESHOLD && !all_at_once)
+        .then(|| stagger_window_minutes(device_count))
+}
+
+pub struct SelectedRetarget {
+    /// Distinct devices retargeted.
+    pub device_count: usize,
+    /// `None` when every device moved at once.
+    pub window_minutes: Option<i32>,
+}
+
+/// Deploy to Selected: staggered above the bulk threshold unless the caller
+/// opts out, immediate otherwise.
+pub async fn retarget_selected(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    release_id: i32,
+    device_ids: &[i32],
+    all_at_once: bool,
+) -> sqlx::Result<SelectedRetarget> {
+    // Duplicates would push a small selection over the threshold.
+    let mut unique_ids = device_ids.to_vec();
+    unique_ids.sort_unstable();
+    unique_ids.dedup();
+
+    if bulk_stagger_window(unique_ids.len(), all_at_once).is_some() {
+        let staggered = stagger_retarget(tx, release_id, &unique_ids).await?;
+        return Ok(SelectedRetarget {
+            device_count: unique_ids.len(),
+            window_minutes: Some(staggered.window_minutes),
+        });
+    }
+
+    sqlx::query!(
+        "UPDATE device SET target_release_id = $1, target_release_id_set_at = NOW(), target_release_eligible_at = NULL WHERE id = ANY($2)",
+        release_id,
+        &unique_ids
+    )
+    .execute(&mut **tx)
+    .await?;
+    Ok(SelectedRetarget {
+        device_count: unique_ids.len(),
+        window_minutes: None,
+    })
+}
+
+pub struct StaggerOutcome {
+    /// Every device now targeting the release, including those already on it.
+    pub retargeted: u64,
+    /// Minutes until the last bucket opens.
+    pub window_minutes: i32,
+}
+
+/// Points `device_ids` at `release_id`, letting each device move only once its
+/// bucket opens.
+pub async fn stagger_retarget(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    release_id: i32,
+    device_ids: &[i32],
+) -> sqlx::Result<StaggerOutcome> {
+    // Devices already on the release (canaries) download nothing, so they take
+    // no bucket slot and keep the buckets even for the devices that do.
+    let already_on_release = sqlx::query!(
+        "UPDATE device
+         SET target_release_id = $1,
+             target_release_id_set_at = NOW(),
+             target_release_eligible_at = NULL
+         WHERE id = ANY($2) AND release_id = $1",
+        release_id,
+        device_ids
+    )
+    .execute(&mut **tx)
+    .await?
+    .rows_affected();
+
+    // Ranked by a hash of device and release, not by id: sites are provisioned
+    // in contiguous ids, and who goes first should change with every release.
+    // md5 in Postgres is stable across API restarts and replicas.
+    let ranked_ids = sqlx::query_scalar!(
+        "SELECT id FROM device
+         WHERE id = ANY($1) AND release_id IS DISTINCT FROM $2
+         ORDER BY md5(id::text || ':' || $2::int::text), id",
+        device_ids,
+        release_id
+    )
+    .fetch_all(&mut **tx)
+    .await?;
+
+    let device_count = ranked_ids.len();
+    let offset_minutes: Vec<i32> = (0..device_count)
+        .map(|rank| bucket_for_rank(rank, device_count) as i32 * STAGGER_INTERVAL_MINUTES)
+        .collect();
+
+    // Eligibility uses the database clock, the same one the poll compares it to.
+    let staggered = sqlx::query!(
+        "UPDATE device d
+         SET target_release_id = $1,
+             target_release_id_set_at = NOW(),
+             target_release_eligible_at = NOW() + make_interval(mins => u.offset_minutes)
+         FROM UNNEST($2::int[], $3::int[]) AS u(id, offset_minutes)
+         WHERE d.id = u.id",
+        release_id,
+        &ranked_ids,
+        &offset_minutes
+    )
+    .execute(&mut **tx)
+    .await?
+    .rows_affected();
+
+    Ok(StaggerOutcome {
+        retargeted: already_on_release + staggered,
+        window_minutes: stagger_window_minutes(device_count),
+    })
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone, ToSchema)]
 pub struct DeploymentDeviceWithStatus {
     pub device_id: i32,
@@ -231,7 +375,7 @@ pub async fn new_deployment(
     sqlx::query!(
         "
         UPDATE device
-        SET target_release_id = $1, target_release_id_set_at = NOW()
+        SET target_release_id = $1, target_release_id_set_at = NOW(), target_release_eligible_at = NULL
         WHERE id IN (
             SELECT device_id FROM deployment_devices WHERE deployment_id = $2
         )
@@ -407,21 +551,24 @@ pub async fn confirm_full_rollout(
         .await?;
 
     // Devices that do not follow latest stay where they are: a fleet-wide
-    // rollout must never move a pinned device. The count reported below comes
-    // from this statement so it can't drift from what was actually retargeted.
-    let device_count = sqlx::query!(
-        "UPDATE device
-             SET target_release_id = $1, target_release_id_set_at = NOW()
+    // rollout must never move a pinned device. The rows stay locked until the
+    // retarget so a concurrent pin is either seen here or waits for us, and the
+    // count reported below comes from the retarget itself.
+    let follower_ids = sqlx::query_scalar!(
+        "SELECT id FROM device
              WHERE device.release_id IN (
-                SELECT id FROM release WHERE distribution_id = $2
+                SELECT id FROM release WHERE distribution_id = $1
              )
-             AND device.follow_latest",
-        release_id,
+             AND device.follow_latest
+             FOR UPDATE",
         release.distribution_id
     )
-    .execute(&mut *tx)
-    .await?
-    .rows_affected();
+    .fetch_all(&mut *tx)
+    .await?;
+
+    let device_count = stagger_retarget(&mut tx, release_id, &follower_ids)
+        .await?
+        .retargeted;
 
     sqlx::query!(
         "UPDATE distribution SET latest_release_id = $1 WHERE id = $2",
@@ -549,7 +696,7 @@ pub async fn rollback_release(
     // so a device still targeting it is exactly what this is meant to rescue.
     let devices_retargeted = sqlx::query!(
         "UPDATE device
-         SET target_release_id = $2, target_release_id_set_at = NOW()
+         SET target_release_id = $2, target_release_id_set_at = NOW(), target_release_eligible_at = NULL
          WHERE target_release_id = $1",
         release_id,
         target_release_id
@@ -596,6 +743,152 @@ pub async fn rollback_release(
         target_release_id,
         devices_retargeted: i64::try_from(devices_retargeted).unwrap_or(i64::MAX),
     })
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, ToSchema)]
+pub struct StaggerPolicy {
+    /// Deploy to Selected staggers selections of more than this many devices.
+    pub bulk_threshold: i32,
+    /// Most buckets a staggered rollout is split into.
+    pub max_buckets: i32,
+    /// Minutes between two buckets opening.
+    pub interval_minutes: i32,
+    /// Whether Deploy to Selected staggers the requested number of devices.
+    pub staggered: bool,
+    /// Minutes until the last bucket opens for that many devices; 0 when not
+    /// staggered.
+    pub window_minutes: i32,
+}
+
+pub fn stagger_policy(device_count: usize) -> StaggerPolicy {
+    let window = bulk_stagger_window(device_count, false);
+    StaggerPolicy {
+        bulk_threshold: BULK_STAGGER_THRESHOLD as i32,
+        max_buckets: STAGGER_MAX_BUCKETS as i32,
+        interval_minutes: STAGGER_INTERVAL_MINUTES,
+        staggered: window.is_some(),
+        window_minutes: window.unwrap_or(0),
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, ToSchema)]
+pub struct FinishNowResult {
+    pub devices_released: i64,
+}
+
+/// Opens every remaining bucket of the release at once.
+pub async fn release_waiting_devices<'e, E>(release_id: i32, executor: E) -> sqlx::Result<u64>
+where
+    E: sqlx::PgExecutor<'e>,
+{
+    Ok(sqlx::query!(
+        "UPDATE device SET target_release_eligible_at = NOW()
+         WHERE target_release_id = $1
+         AND target_release_eligible_at > NOW()
+         AND release_id IS DISTINCT FROM target_release_id
+         AND archived = false",
+        release_id
+    )
+    .execute(executor)
+    .await?
+    .rows_affected())
+}
+
+pub async fn finish_now(
+    release_id: i32,
+    pg_pool: &PgPool,
+    config: &Config,
+    user_email: Option<&str>,
+) -> Result<FinishNowResult, ApiError> {
+    let devices_released = release_waiting_devices(release_id, pg_pool).await?;
+
+    if devices_released > 0
+        && let Some(deployment_slack_hook_url) = &config.deployment_slack_hook_url
+    {
+        let release_info = sqlx::query!(
+            "SELECT r.version, d.name as distribution_name
+             FROM release r
+             JOIN distribution d ON r.distribution_id = d.id
+             WHERE r.id = $1",
+            release_id
+        )
+        .fetch_optional(pg_pool)
+        .await;
+
+        match release_info {
+            Ok(Some(info)) => {
+                let triggered_by = user_email.unwrap_or("Unknown");
+                let message = json!({
+                    "blocks": [
+                        {
+                            "type": "section",
+                            "text": {
+                                "type": "mrkdwn",
+                                "text": format!(
+                                    ":fast_forward: *Staggered Rollout Finished Early*\n\n*Distribution:* {}\n*Version:* {}\n*Devices released at once:* {}\n*Triggered by:* {}",
+                                    info.distribution_name,
+                                    info.version,
+                                    devices_released,
+                                    triggered_by
+                                )
+                            }
+                        }
+                    ]
+                });
+                send_slack_notification(deployment_slack_hook_url, message).await;
+            }
+            Ok(None) => {}
+            Err(err) => tracing::error!("Failed to look up release {release_id} for Slack: {err}"),
+        }
+    }
+
+    Ok(FinishNowResult {
+        devices_released: i64::try_from(devices_released).unwrap_or(i64::MAX),
+    })
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, ToSchema)]
+pub struct RolloutProgress {
+    /// Not on the release yet and waiting for their bucket to open.
+    pub scheduled: i64,
+    /// Allowed to move but not on the release yet.
+    pub eligible: i64,
+    /// Already on the release.
+    pub updated: i64,
+    pub next_bucket_at: Option<chrono::DateTime<chrono::Utc>>,
+    /// When the last bucket opens (or opened).
+    pub expected_end_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+/// Counts every device currently targeting the release, so a device moved to
+/// another release afterwards drops out.
+pub async fn rollout_progress<'e, E>(release_id: i32, executor: E) -> sqlx::Result<RolloutProgress>
+where
+    E: sqlx::PgExecutor<'e>,
+{
+    sqlx::query_as!(
+        RolloutProgress,
+        r#"SELECT
+            COUNT(*) FILTER (
+                WHERE release_id IS DISTINCT FROM target_release_id
+                AND target_release_eligible_at > NOW()
+            ) AS "scheduled!",
+            COUNT(*) FILTER (
+                WHERE release_id IS DISTINCT FROM target_release_id
+                AND (target_release_eligible_at IS NULL OR target_release_eligible_at <= NOW())
+            ) AS "eligible!",
+            COUNT(*) FILTER (WHERE release_id = target_release_id) AS "updated!",
+            MIN(target_release_eligible_at) FILTER (
+                WHERE release_id IS DISTINCT FROM target_release_id
+                AND target_release_eligible_at > NOW()
+            ) AS next_bucket_at,
+            MAX(target_release_eligible_at) AS expected_end_at
+        FROM device
+        WHERE target_release_id = $1 AND archived = false"#,
+        release_id
+    )
+    .fetch_one(executor)
+    .await
 }
 
 pub async fn get_devices_in_deployment(
@@ -693,4 +986,200 @@ pub async fn get_deployment_service_health(
     .await?;
 
     Ok(health)
+}
+
+#[cfg(test)]
+pub(crate) mod tests {
+    use super::*;
+
+    fn bucket_sizes(device_count: usize) -> Vec<usize> {
+        let mut sizes = vec![0; bucket_count(device_count)];
+        for rank in 0..device_count {
+            sizes[bucket_for_rank(rank, device_count)] += 1;
+        }
+        sizes
+    }
+
+    #[test]
+    fn bucket_sizes_differ_by_at_most_one() {
+        for device_count in (1..=200).chain([5000]) {
+            let sizes = bucket_sizes(device_count);
+            let min = sizes.iter().min().copied().unwrap_or(0);
+            let max = sizes.iter().max().copied().unwrap_or(0);
+            assert!(max - min <= 1, "{device_count} devices: sizes {sizes:?}");
+            assert_eq!(sizes.iter().sum::<usize>(), device_count);
+        }
+    }
+
+    #[test]
+    fn window_covers_every_bucket_but_the_first() {
+        assert_eq!(stagger_window_minutes(0), 0);
+        assert_eq!(stagger_window_minutes(1), 0);
+        assert_eq!(stagger_window_minutes(16), 75);
+        assert_eq!(stagger_window_minutes(5000), 95);
+    }
+
+    #[test]
+    fn bulk_staggers_only_above_the_threshold_without_opt_out() {
+        assert!(bulk_stagger_window(BULK_STAGGER_THRESHOLD, false).is_none());
+        assert!(bulk_stagger_window(BULK_STAGGER_THRESHOLD + 1, false).is_some());
+        assert!(bulk_stagger_window(BULK_STAGGER_THRESHOLD + 1, true).is_none());
+    }
+
+    #[test]
+    fn bucket_count_is_capped() {
+        assert_eq!(bucket_count(0), 0);
+        assert_eq!(bucket_count(16), 16);
+        assert_eq!(bucket_count(21), STAGGER_MAX_BUCKETS);
+        assert_eq!(bucket_count(5000), STAGGER_MAX_BUCKETS);
+    }
+
+    /// `N` releases of one distribution, so a test can move devices between them.
+    pub(crate) async fn insert_releases<const N: usize>(pool: &PgPool) -> anyhow::Result<[i32; N]> {
+        let distribution_id: i32 = sqlx::query_scalar(
+            "INSERT INTO distribution (name) VALUES ('stagger-test') RETURNING id",
+        )
+        .fetch_one(pool)
+        .await?;
+        let ids: Vec<i32> = sqlx::query_scalar(
+            "INSERT INTO release (distribution_id, version)
+             SELECT $1, n || '.0.0' FROM generate_series(1, $2) AS n RETURNING id",
+        )
+        .bind(distribution_id)
+        .bind(i32::try_from(N)?)
+        .fetch_all(pool)
+        .await?;
+        ids.try_into()
+            .map_err(|ids| anyhow::anyhow!("expected {N} releases, got {ids:?}"))
+    }
+
+    /// Devices on `release_id`, or with no release reported when `None`.
+    pub(crate) async fn insert_devices(
+        pool: &PgPool,
+        count: usize,
+        release_id: Option<i32>,
+    ) -> anyhow::Result<Vec<i32>> {
+        Ok(sqlx::query_scalar(
+            "INSERT INTO device (serial_number, release_id)
+             SELECT gen_random_uuid()::text, $2 FROM generate_series(1, $1)
+             RETURNING id",
+        )
+        .bind(i32::try_from(count)?)
+        .bind(release_id)
+        .fetch_all(pool)
+        .await?)
+    }
+
+    /// Minutes from now until each device's bucket opens; `None` for no bucket.
+    async fn offsets_by_device(
+        pool: &PgPool,
+        device_ids: &[i32],
+    ) -> anyhow::Result<HashMap<i32, Option<i64>>> {
+        let rows: Vec<(i32, Option<f64>)> = sqlx::query_as(
+            "SELECT id, EXTRACT(EPOCH FROM target_release_eligible_at - NOW())::float8
+             FROM device WHERE id = ANY($1)",
+        )
+        .bind(device_ids)
+        .fetch_all(pool)
+        .await?;
+        Ok(rows
+            .into_iter()
+            .map(|(id, secs)| (id, secs.map(|secs| (secs / 60.0).round() as i64)))
+            .collect())
+    }
+
+    #[sqlx::test]
+    #[ignore = "needs the compose Postgres; run with --test-threads=1"]
+    async fn stagger_retarget_spreads_movers_and_skips_canaries(
+        pool: PgPool,
+    ) -> anyhow::Result<()> {
+        let [current, target, next] = insert_releases(&pool).await?;
+        let movers = insert_devices(&pool, 19, Some(current)).await?;
+        let canary = insert_devices(&pool, 1, Some(target)).await?;
+        let all: Vec<i32> = movers.iter().chain(&canary).copied().collect();
+
+        let mut tx = pool.begin().await?;
+        let outcome = stagger_retarget(&mut tx, target, &all).await?;
+        tx.commit().await?;
+
+        assert_eq!(outcome.retargeted, 20);
+        assert_eq!(
+            outcome.window_minutes, 90,
+            "the canary downloads nothing, so it doesn't widen the window"
+        );
+        let to_target = offsets_by_device(&pool, &all).await?;
+        assert_eq!(to_target.get(&canary[0]), Some(&None));
+        let mut minutes: Vec<i64> = movers
+            .iter()
+            .filter_map(|id| to_target.get(id).copied().flatten())
+            .collect();
+        minutes.sort_unstable();
+        let expected: Vec<i64> = (0..19).map(|bucket| bucket * 5).collect();
+        assert_eq!(minutes, expected, "one mover per bucket, 5 min apart");
+
+        let mut tx = pool.begin().await?;
+        stagger_retarget(&mut tx, next, &movers).await?;
+        tx.commit().await?;
+        let to_next = offsets_by_device(&pool, &movers).await?;
+        let movers_to_target: HashMap<i32, Option<i64>> = movers
+            .iter()
+            .map(|id| (*id, to_target.get(id).copied().flatten()))
+            .collect();
+        assert_ne!(
+            to_next, movers_to_target,
+            "who goes first should change with the release"
+        );
+        Ok(())
+    }
+
+    #[sqlx::test]
+    #[ignore = "needs the compose Postgres; run with --test-threads=1"]
+    async fn deploy_to_selected_counts_each_device_once(pool: PgPool) -> anyhow::Result<()> {
+        let [target] = insert_releases(&pool).await?;
+        let ids = insert_devices(&pool, BULK_STAGGER_THRESHOLD, None).await?;
+        let doubled: Vec<i32> = ids.iter().chain(&ids).copied().collect();
+
+        let mut tx = pool.begin().await?;
+        let retarget = retarget_selected(&mut tx, target, &doubled, false).await?;
+        tx.commit().await?;
+
+        assert_eq!(retarget.device_count, BULK_STAGGER_THRESHOLD);
+        assert_eq!(retarget.window_minutes, None);
+        Ok(())
+    }
+
+    #[sqlx::test]
+    #[ignore = "needs the compose Postgres; run with --test-threads=1"]
+    async fn progress_and_finish_now_follow_the_buckets(pool: PgPool) -> anyhow::Result<()> {
+        let [current, target] = insert_releases(&pool).await?;
+        let ids = insert_devices(&pool, 20, Some(current)).await?;
+        let mut tx = pool.begin().await?;
+        stagger_retarget(&mut tx, target, &ids).await?;
+        tx.commit().await?;
+        // Updated before its bucket opened: counted as updated, and finish now
+        // must leave it alone.
+        sqlx::query("UPDATE device SET release_id = target_release_id WHERE id = $1")
+            .bind(ids[0])
+            .execute(&pool)
+            .await?;
+
+        let progress = rollout_progress(target, &pool).await?;
+        assert_eq!(progress.updated, 1);
+        assert_eq!(progress.scheduled + progress.eligible, 19);
+        assert!(
+            progress.scheduled >= 18,
+            "only bucket 0 is open: {progress:?}"
+        );
+        assert!(progress.next_bucket_at.is_some());
+        assert!(progress.expected_end_at.is_some());
+
+        let released = release_waiting_devices(target, &pool).await?;
+        assert_eq!(i64::try_from(released)?, progress.scheduled);
+
+        let after = rollout_progress(target, &pool).await?;
+        assert_eq!(after.scheduled, 0);
+        assert_eq!(after.eligible, 19);
+        assert_eq!(after.next_bucket_at, None);
+        Ok(())
+    }
 }

@@ -34,6 +34,7 @@ pub struct RawDevice {
     pub release_id: Option<i32>,
     pub target_release_id: Option<i32>,
     pub target_release_id_set_at: Option<DateTime<Utc>>,
+    pub target_release_eligible_at: Option<DateTime<Utc>>,
     pub system_info: Option<serde_json::Value>,
     pub network_id: Option<i32>,
     pub current_network_id: Option<i32>,
@@ -87,6 +88,11 @@ pub struct ApproveDeviceBody {
 pub struct UpdateDevicesRelease {
     pub target_release_id: i32,
     pub devices: Vec<i32>,
+    /// Move every device at once instead of staggering selections above the
+    /// bulk threshold. Emergency use only: a site whose devices all download
+    /// together can lose connectivity.
+    #[serde(default)]
+    pub all_at_once: bool,
 }
 
 #[derive(Debug, Deserialize, Serialize, utoipa::ToSchema)]
@@ -952,12 +958,25 @@ async fn record_ping_without_ip(device_id: i32, pool: &PgPool) -> anyhow::Result
     Ok(())
 }
 
-pub async fn get_target_release(device_id: i32, pool: &PgPool) -> Option<i32> {
+/// The release a polling device should be on. A target whose staggered bucket
+/// hasn't opened yet is answered with the current release rather than nothing:
+/// smithd keeps its cached target when told nothing, so it would carry on
+/// towards an older target.
+pub async fn get_target_release<'e, E>(device_id: i32, executor: E) -> Option<i32>
+where
+    E: sqlx::PgExecutor<'e>,
+{
     if let Ok(device) = sqlx::query!(
-        "SELECT target_release_id FROM device WHERE id = $1",
+        r#"SELECT
+            CASE
+                WHEN target_release_eligible_at > NOW() AND release_id IS NOT NULL
+                    THEN release_id
+                ELSE target_release_id
+            END AS "target_release_id"
+        FROM device WHERE id = $1"#,
         &device_id
     )
-    .fetch_one(pool)
+    .fetch_one(executor)
     .await
     {
         return device.target_release_id;
@@ -1235,6 +1254,46 @@ mod downtime_tests {
         assert_eq!(rows.len(), 1, "expected one outage row, got {rows:?}");
         assert_eq!(rows[0].0, silent_since);
         assert!(rows[0].1.is_some(), "outage still open: {rows:?}");
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod target_release_tests {
+    use super::*;
+    use crate::deployment::tests::{insert_devices, insert_releases};
+
+    #[sqlx::test]
+    #[ignore = "needs the compose Postgres; run with --test-threads=1"]
+    async fn target_is_held_back_until_eligible(pool: PgPool) -> anyhow::Result<()> {
+        let [current, target] = insert_releases(&pool).await?;
+        let reported = insert_devices(&pool, 3, Some(current)).await?;
+        let unreported = insert_devices(&pool, 1, None).await?;
+        let (scheduled, eligible, immediate, unreported) =
+            (reported[0], reported[1], reported[2], unreported[0]);
+
+        sqlx::query(
+            "UPDATE device SET target_release_id = $1,
+                target_release_eligible_at = CASE
+                    WHEN id IN ($2, $4) THEN NOW() + INTERVAL '10 minutes'
+                    WHEN id = $3 THEN NOW() - INTERVAL '1 minute'
+                END",
+        )
+        .bind(target)
+        .bind(scheduled)
+        .bind(eligible)
+        .bind(unreported)
+        .execute(&pool)
+        .await?;
+
+        assert_eq!(get_target_release(scheduled, &pool).await, Some(current));
+        assert_eq!(get_target_release(eligible, &pool).await, Some(target));
+        assert_eq!(get_target_release(immediate, &pool).await, Some(target));
+        assert_eq!(
+            get_target_release(unreported, &pool).await,
+            Some(target),
+            "nothing to stay on, so the bucket doesn't apply"
+        );
         Ok(())
     }
 }

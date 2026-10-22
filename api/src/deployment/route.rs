@@ -1,15 +1,18 @@
 use crate::State;
 use crate::deployment::{
-    Deployment, DeploymentDeviceWithStatus, DeviceServiceHealth, RollbackRequest, RollbackResult,
-    confirm_full_rollout, get_deployment, get_deployment_service_health, get_devices_in_deployment,
-    new_deployment, rollback_release,
+    Deployment, DeploymentDeviceWithStatus, DeviceServiceHealth, FinishNowResult, RollbackRequest,
+    RollbackResult, RolloutProgress, StaggerPolicy, confirm_full_rollout, finish_now,
+    get_deployment, get_deployment_service_health, get_devices_in_deployment, new_deployment,
+    rollback_release, rollout_progress, stagger_policy,
 };
 use crate::error::ApiError;
 use crate::user::CurrentUser;
-use axum::extract::Path;
+use axum::extract::{Path, Query};
 use axum::http::StatusCode;
 use axum::{Extension, Json};
 use models::deployment::DeploymentRequest;
+use serde::Deserialize;
+use utoipa::IntoParams;
 
 const TAG: &str = "deployment";
 
@@ -180,6 +183,106 @@ pub async fn api_rollback_release(
         tracing::error!("Failed to roll back release {release_id}: {e:?}");
     })?;
     Ok(Json(result))
+}
+
+#[derive(Deserialize, Debug, IntoParams)]
+#[into_params(parameter_in = Query)]
+pub struct StaggerPolicyParams {
+    /// Devices a Deploy to Selected would target; sets `staggered` and
+    /// `window_minutes` in the response.
+    device_count: Option<i32>,
+}
+
+/// How staggered rollouts are paced: full rollouts and Deploy to Selected above
+/// `bulk_threshold` devices are split into up to `max_buckets` buckets, opening
+/// `interval_minutes` apart.
+#[utoipa::path(
+  get,
+  path = "/deployments/stagger-policy",
+  params(
+        StaggerPolicyParams
+  ),
+  responses(
+        (status = StatusCode::OK, body = StaggerPolicy),
+  ),
+  security(
+      ("auth_token" = [])
+  ),
+  tag = TAG
+)]
+pub async fn api_get_stagger_policy(
+    Query(params): Query<StaggerPolicyParams>,
+) -> Json<StaggerPolicy> {
+    let device_count = params
+        .device_count
+        .and_then(|count| usize::try_from(count).ok())
+        .unwrap_or(0);
+    Json(stagger_policy(device_count))
+}
+
+/// Let every device still waiting for its bucket move to the release now.
+/// Emergency use only: a site whose devices all download together can lose
+/// connectivity.
+#[utoipa::path(
+  post,
+  path = "/releases/{release_id}/deployment/finish-now",
+    params(
+        ("release_id" = i32, Path),
+    ),
+  responses(
+        (status = StatusCode::OK, body = FinishNowResult),
+  ),
+  security(
+      ("auth_token" = [])
+  ),
+  tag = TAG
+)]
+pub async fn api_finish_now(
+    Path(release_id): Path<i32>,
+    Extension(state): Extension<State>,
+    Extension(current_user): Extension<CurrentUser>,
+) -> Result<Json<FinishNowResult>, ApiError> {
+    let user_email = current_user_email(&state, &current_user).await;
+
+    let result = finish_now(
+        release_id,
+        &state.pg_pool,
+        state.config,
+        user_email.as_deref(),
+    )
+    .await
+    .inspect_err(|e| {
+        tracing::error!("Failed to finish the rollout of release {release_id} now: {e:?}");
+    })?;
+    Ok(Json(result))
+}
+
+/// Progress of the staggered rollout of a release, over every device currently
+/// targeting it.
+#[utoipa::path(
+  get,
+  path = "/releases/{release_id}/deployment/rollout-progress",
+    params(
+        ("release_id" = i32, Path),
+    ),
+  responses(
+        (status = StatusCode::OK, body = RolloutProgress),
+  ),
+  security(
+      ("auth_token" = [])
+  ),
+  tag = TAG
+)]
+pub async fn api_get_rollout_progress(
+    Path(release_id): Path<i32>,
+    Extension(state): Extension<State>,
+) -> Result<Json<RolloutProgress>, ApiError> {
+    let progress = rollout_progress(release_id, &state.pg_pool)
+        .await
+        .inspect_err(|e| {
+            tracing::error!("Failed to get rollout progress for release {release_id}: {e:?}");
+        })?;
+    Ok(Json(progress))
 }
 
 async fn current_user_email(state: &State, current_user: &CurrentUser) -> Option<String> {

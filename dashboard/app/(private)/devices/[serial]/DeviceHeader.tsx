@@ -4,6 +4,7 @@ import { Button, DropdownMenu, LabelChip } from "@teton/smith-ui";
 import {
 	BarChart3,
 	Check,
+	Clock,
 	Copy,
 	Cpu,
 	ExternalLink,
@@ -105,7 +106,8 @@ const VISIBLE_LABELS = 3;
 const UPDATING_GRACE_MINUTES = 30;
 
 /**
- * Where a device stands against its target release: `updating` while the
+ * Where a device stands against its target release: `scheduled` while a
+ * staggered rollout hasn't reached its bucket yet, `updating` while the
  * upgrade is plausibly in flight, `outdated` once it has clearly failed, and
  * `null` when the device is already on target.
  *
@@ -114,17 +116,29 @@ const UPDATING_GRACE_MINUTES = 30;
  */
 export const getDeviceUpdateStatus = (
 	device: Device | undefined,
-): { status: "updating" | "outdated"; duration: string } | null => {
+):
+	| { status: "scheduled"; eligibleAt: Date }
+	| { status: "updating" | "outdated"; duration: string }
+	| null => {
 	const pending =
 		device?.release_id &&
 		device.target_release_id &&
 		device.release_id !== device.target_release_id;
 	if (!pending) return null;
 
-	if (!device?.target_release_id_set_at)
-		return { status: "outdated", duration: "" }; // No timestamp = legacy
+	if (device.target_release_eligible_at) {
+		const eligibleAt = new Date(device.target_release_eligible_at);
+		if (eligibleAt.getTime() > Date.now())
+			return { status: "scheduled", eligibleAt };
+	}
 
-	const setAt = new Date(device.target_release_id_set_at);
+	// The grace runs from when the device was allowed to move, not from when a
+	// staggered rollout wrote its target.
+	const since =
+		device.target_release_eligible_at ?? device.target_release_id_set_at;
+	if (!since) return { status: "outdated", duration: "" }; // No timestamp = legacy
+
+	const setAt = new Date(since);
 	const now = new Date();
 	const diffMinutes = Math.floor(
 		(now.getTime() - setAt.getTime()) / (1000 * 60),
@@ -346,6 +360,7 @@ const DeviceHeader: React.FC<DeviceHeaderProps> = ({ device, serial }) => {
 	const getDeviceName = () => device?.serial_number || serial;
 
 	const status = getDeviceStatus();
+	const update = getDeviceUpdateStatus(device);
 	const labels = Object.entries(device.labels ?? {});
 	const grafanaUrl = getGrafanaUrl();
 	// The device runs its distribution's build, so that's what its hardware is.
@@ -367,7 +382,9 @@ const DeviceHeader: React.FC<DeviceHeaderProps> = ({ device, serial }) => {
 					</Tooltip>
 					<div className="flex-1 min-w-0">
 						{/* No update chips here: a stalled update is the Overview's alert,
-						    and an in-flight one isn't a problem worth a header badge. */}
+						    and an in-flight one isn't a problem worth a header badge. A
+						    scheduled one only gets a plain line, so nobody mistakes the
+						    wait for a stuck update. */}
 						<div className="flex items-center gap-2 min-w-0">
 							<Tooltip content={getStatusTooltip()}>
 								<span
@@ -402,6 +419,20 @@ const DeviceHeader: React.FC<DeviceHeaderProps> = ({ device, serial }) => {
 										<span>v{device.release.version}</span>
 									</Link>
 								</div>
+							)}
+							{update?.status === "scheduled" && (
+								<Tooltip content="Waiting for its turn in a staggered rollout">
+									<span className="flex items-center space-x-1 cursor-help">
+										<Clock className="w-4 h-4" />
+										<span>
+											Scheduled, eligible at{" "}
+											{update.eligibleAt.toLocaleTimeString([], {
+												hour: "2-digit",
+												minute: "2-digit",
+											})}
+										</span>
+									</span>
+								</Tooltip>
 							)}
 							{labels.length > 0 && (
 								<div className="flex flex-wrap items-center gap-1.5">
