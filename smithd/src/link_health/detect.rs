@@ -22,6 +22,7 @@ pub(crate) const NM_DEVICE_STATE_DISCONNECTED: u32 = 30;
 pub(crate) const NM_DEVICE_STATE_ACTIVATED: u32 = 100;
 pub(crate) const NM_DEVICE_STATE_FAILED: u32 = 120;
 pub(crate) const NM_DEVICE_STATE_REASON_NO_SECRETS: u32 = 7;
+const NM_DEVICE_STATE_REASON_USER_REQUESTED: u32 = 39;
 /// NM blocks autoconnect after a no-secrets failure; give it time to recover
 /// on its own before forcing an activation.
 const LOCKOUT_FIRST_ATTEMPT: Duration = Duration::from_secs(2 * 60);
@@ -227,9 +228,11 @@ impl LockoutTracker {
     /// failure on to DISCONNECTED with reason NONE and keeps the autoconnect
     /// block on the profile, where D-Bus does not expose it, so a device found
     /// disconnected is treated as a possible lockout. The wait and the
-    /// association check before acting keep a false alarm cheap.
+    /// association check before acting keep a false alarm cheap. A deliberate
+    /// disconnect (`nmcli device disconnect`) is left alone.
     pub fn on_initial_state(&mut self, state: u32, reason: u32, now: Instant) -> LockoutNote {
-        let stranded = matches!(state, NM_DEVICE_STATE_DISCONNECTED | NM_DEVICE_STATE_FAILED);
+        let stranded = matches!(state, NM_DEVICE_STATE_DISCONNECTED | NM_DEVICE_STATE_FAILED)
+            && reason != NM_DEVICE_STATE_REASON_USER_REQUESTED;
         if stranded && self.incident.is_none() {
             return self.on_state_changed(state, NM_DEVICE_STATE_REASON_NO_SECRETS, now);
         }
@@ -474,6 +477,14 @@ mod tests {
         );
         // Unavailable (20): radio off or no firmware, nothing to activate.
         assert_eq!(l.on_initial_state(20, 0, t0), LockoutNote::None);
+        assert_eq!(
+            l.on_initial_state(
+                NM_DEVICE_STATE_DISCONNECTED,
+                NM_DEVICE_STATE_REASON_USER_REQUESTED,
+                t0
+            ),
+            LockoutNote::None
+        );
         assert!(!l.due(t0 + HOUR));
     }
 

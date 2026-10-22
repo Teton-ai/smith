@@ -169,7 +169,10 @@ async fn run(
             "DeviceRemoved subscribe"
         );
         let mut wifi = WifiDevice::default();
-        wifi.resolve(&conn, &nm_proxy, &device_events).await;
+        setup!(
+            wifi.resolve(&conn, &nm_proxy, &device_events).await,
+            "Wi-Fi device subscribe"
+        );
 
         // We intentionally do NOT subscribe to Settings.Connection.Updated: nmcli --show-secrets
         // (which execute_report_nm_profiles calls) causes NM to fire Updated on every profile it
@@ -214,11 +217,17 @@ async fn run(
                 // A driver reload gives the Wi-Fi device a new object path.
                 signal = device_added_stream.next() => match signal {
                     None => on_stream_end!("DeviceAdded"),
-                    Some(_) => wifi.resolve(&conn, &nm_proxy, &device_events).await,
+                    Some(_) => setup!(
+                        wifi.resolve(&conn, &nm_proxy, &device_events).await,
+                        "Wi-Fi device subscribe"
+                    ),
                 },
                 signal = device_removed_stream.next() => match signal {
                     None => on_stream_end!("DeviceRemoved"),
-                    Some(_) => wifi.resolve(&conn, &nm_proxy, &device_events).await,
+                    Some(_) => setup!(
+                        wifi.resolve(&conn, &nm_proxy, &device_events).await,
+                        "Wi-Fi device subscribe"
+                    ),
                 },
                 signal = async { wifi.stream.as_mut()?.next().await }, if wifi.stream.is_some() => match signal {
                     None => on_stream_end!("Device StateChanged"),
@@ -249,7 +258,8 @@ async fn run(
 }
 
 /// The Wi-Fi device link health watches, re-resolved whenever NM adds or
-/// removes a device.
+/// removes a device. A failed subscription is an error so the watcher's
+/// reconnect path retries it; having no Wi-Fi device is not.
 #[derive(Default)]
 struct WifiDevice {
     resolved: bool,
@@ -263,7 +273,7 @@ impl WifiDevice {
         conn: &Connection,
         nm: &NetworkManagerProxy<'_>,
         device_events: &mpsc::Sender<DeviceStateEvent>,
-    ) {
+    ) -> zbus::Result<()> {
         let path = match wifi_interface(Path::new(SYS_CLASS_NET)).await {
             Some(iface) => match nm.get_device_by_ip_iface(&iface.name).await {
                 Ok(path) => Some(path),
@@ -277,7 +287,7 @@ impl WifiDevice {
         let same_device = self.resolved && path == self.path;
         let nothing_to_retry = self.stream.is_some() || path.is_none();
         if same_device && nothing_to_retry {
-            return;
+            return Ok(());
         }
         self.resolved = true;
         self.stream = None;
@@ -285,29 +295,14 @@ impl WifiDevice {
 
         let Some(path) = path else {
             info!("NM watcher: no Wi-Fi device; not watching Wi-Fi state");
-            return;
+            return Ok(());
         };
-        let proxy = match device::DeviceProxy::builder(conn).path(path.clone()) {
-            Ok(builder) => builder.build().await,
-            Err(e) => Err(e),
-        };
-        let proxy = match proxy {
-            Ok(proxy) => proxy,
-            Err(e) => {
-                warn!("NM watcher: Device proxy failed: {e}");
-                return;
-            }
-        };
-        match proxy.receive_state_changed().await {
-            Ok(stream) => {
-                info!("NM watcher: watching Wi-Fi device {}", path.as_str());
-                self.stream = Some(stream);
-            }
-            Err(e) => {
-                warn!("NM watcher: Device StateChanged subscribe failed: {e}");
-                return;
-            }
-        }
+        let proxy = device::DeviceProxy::builder(conn)
+            .path(path.clone())?
+            .build()
+            .await?;
+        self.stream = Some(proxy.receive_state_changed().await?);
+        info!("NM watcher: watching Wi-Fi device {}", path.as_str());
 
         // A lockout from before we subscribed (boot, D-Bus reconnect) would
         // otherwise be missed; its reason is already gone, hence `seeded`.
@@ -323,6 +318,7 @@ impl WifiDevice {
             ),
             Err(e) => warn!("NM watcher: reading Wi-Fi device StateReason failed: {e}"),
         }
+        Ok(())
     }
 }
 
