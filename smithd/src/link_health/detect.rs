@@ -18,6 +18,7 @@ const RECOVERY_CHECK: Duration = Duration::from_secs(60);
 const NOT_ASSOCIATED_RECHECK: Duration = Duration::from_secs(60);
 
 /// NetworkManager `NMDeviceState` and `NMDeviceStateReason` values.
+pub(crate) const NM_DEVICE_STATE_DISCONNECTED: u32 = 30;
 pub(crate) const NM_DEVICE_STATE_ACTIVATED: u32 = 100;
 pub(crate) const NM_DEVICE_STATE_FAILED: u32 = 120;
 pub(crate) const NM_DEVICE_STATE_REASON_NO_SECRETS: u32 = 7;
@@ -220,6 +221,19 @@ impl LockoutTracker {
             return LockoutNote::OtherFailure { reason };
         }
         LockoutNote::None
+    }
+
+    /// The device's state when we started watching it. NM moves a no-secrets
+    /// failure on to DISCONNECTED with reason NONE and keeps the autoconnect
+    /// block on the profile, where D-Bus does not expose it, so a device found
+    /// disconnected is treated as a possible lockout. The wait and the
+    /// association check before acting keep a false alarm cheap.
+    pub fn on_initial_state(&mut self, state: u32, reason: u32, now: Instant) -> LockoutNote {
+        let stranded = matches!(state, NM_DEVICE_STATE_DISCONNECTED | NM_DEVICE_STATE_FAILED);
+        if stranded && self.incident.is_none() {
+            return self.on_state_changed(state, NM_DEVICE_STATE_REASON_NO_SECRETS, now);
+        }
+        self.on_state_changed(state, reason, now)
     }
 
     /// Ends the incident without an event, when the link is seen up anyway.
@@ -440,6 +454,26 @@ mod tests {
                 attempts: 1
             }
         );
+        assert!(!l.due(t0 + HOUR));
+    }
+
+    #[test]
+    fn a_disconnected_device_at_startup_is_a_possible_lockout() {
+        let t0 = Instant::now();
+        let mut l = LockoutTracker::default();
+        assert_eq!(
+            l.on_initial_state(NM_DEVICE_STATE_DISCONNECTED, 0, t0),
+            LockoutNote::Started
+        );
+        assert!(l.due(t0 + LOCKOUT_FIRST_ATTEMPT));
+
+        let mut l = LockoutTracker::default();
+        assert_eq!(
+            l.on_initial_state(NM_DEVICE_STATE_ACTIVATED, 0, t0),
+            LockoutNote::None
+        );
+        // Unavailable (20): radio off or no firmware, nothing to activate.
+        assert_eq!(l.on_initial_state(20, 0, t0), LockoutNote::None);
         assert!(!l.due(t0 + HOUR));
     }
 

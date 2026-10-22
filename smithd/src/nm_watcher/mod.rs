@@ -228,6 +228,7 @@ async fn run(
                                 new: *args.new_state(),
                                 old: *args.old_state(),
                                 reason: *args.reason(),
+                                seeded: false,
                             };
                             forward(&device_events, event);
                         }
@@ -308,8 +309,8 @@ impl WifiDevice {
             }
         }
 
-        // A lockout that began before we subscribed (at boot, or while D-Bus
-        // was reconnecting) would otherwise never be seen.
+        // A lockout from before we subscribed (boot, D-Bus reconnect) would
+        // otherwise be missed; its reason is already gone, hence `seeded`.
         match proxy.state_reason().await {
             Ok((state, reason)) => forward(
                 device_events,
@@ -317,6 +318,7 @@ impl WifiDevice {
                     new: state,
                     old: state,
                     reason,
+                    seeded: true,
                 },
             ),
             Err(e) => warn!("NM watcher: reading Wi-Fi device StateReason failed: {e}"),

@@ -42,6 +42,8 @@ pub struct DeviceStateEvent {
     pub new: u32,
     pub old: u32,
     pub reason: u32,
+    /// Read from the device's current state when subscribing, not a signal.
+    pub seeded: bool,
 }
 
 /// The device side effects, behind a trait so the actor can be tested.
@@ -191,9 +193,12 @@ impl<R: Recovery> LinkHealth<R> {
             reason = event.reason,
             "Wi-Fi device state changed"
         );
-        let note = self
-            .lockout
-            .on_state_changed(event.new, event.reason, Instant::now());
+        let now = Instant::now();
+        let note = if event.seeded {
+            self.lockout.on_initial_state(event.new, event.reason, now)
+        } else {
+            self.lockout.on_state_changed(event.new, event.reason, now)
+        };
         match note {
             LockoutNote::None => {}
             LockoutNote::Started => info!(
@@ -456,6 +461,7 @@ mod tests {
             new: detect::NM_DEVICE_STATE_FAILED,
             old: 50,
             reason: detect::NM_DEVICE_STATE_REASON_NO_SECRETS,
+            seeded: false,
         }
     }
 
@@ -550,6 +556,25 @@ mod tests {
         lh.on_tick().await;
         assert_eq!(fake.connects.load(Ordering::SeqCst), 1);
         tokio::time::advance(TICK).await;
+        lh.on_tick().await;
+        assert_eq!(fake.connects.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_device_found_disconnected_at_startup_is_activated() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        fake_iface(root, "wlP1p1s0", "rtw_8822ce", "rtw88_8822ce");
+        let fake = Fake::default();
+        let mut lh = LinkHealth::new(NetGuard::new(), &fake, paths(root));
+
+        lh.on_device_state(DeviceStateEvent {
+            new: detect::NM_DEVICE_STATE_DISCONNECTED,
+            old: detect::NM_DEVICE_STATE_DISCONNECTED,
+            reason: 0,
+            seeded: true,
+        });
+        tokio::time::advance(Duration::from_secs(120)).await;
         lh.on_tick().await;
         assert_eq!(fake.connects.load(Ordering::SeqCst), 1);
     }
