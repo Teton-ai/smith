@@ -1,0 +1,56 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        WITH lan AS (\n            SELECT\n                dia.gateway_mac,\n                network(dia.address) AS network,\n                MIN(host(dia.gateway_ip)) AS gateway_ip,\n                COUNT(DISTINCT d.id) AS device_count,\n                COUNT(DISTINCT d.id) FILTER (WHERE d.last_ping > NOW() - INTERVAL '3 minutes')\n                    AS online_count,\n                MIN(d.ip_address_id) AS ip_address_id\n            FROM device_interface_address dia\n            JOIN device d ON d.id = dia.device_id\n            WHERE dia.gateway_mac IS NOT NULL\n              AND NOT d.archived\n            GROUP BY dia.gateway_mac, network(dia.address)\n        )\n        SELECT\n            lan.gateway_mac::text AS \"gateway_mac!\",\n            lan.network::text AS \"network!\",\n            lan.gateway_ip AS \"gateway_ip!\",\n            lan.device_count AS \"device_count!\",\n            lan.online_count AS \"online_count!\",\n            host(ip.ip_address) AS public_ip,\n            ip.name AS public_ip_name\n        FROM lan\n        LEFT JOIN ip_address ip ON ip.id = lan.ip_address_id\n        ORDER BY lan.device_count DESC, 2, 1\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "gateway_mac!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "network!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "gateway_ip!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "device_count!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 4,
+        "name": "online_count!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 5,
+        "name": "public_ip",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "public_ip_name",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      true
+    ]
+  },
+  "hash": "1a7694ff3220b39a5db9243791afba4111ac60e9ed60d5f6971af4397af73eb7"
+}

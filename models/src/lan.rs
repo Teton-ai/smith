@@ -31,3 +31,24 @@ pub struct LanDevice {
 pub struct LanListResponse {
     pub lans: Vec<Lan>,
 }
+
+/// A LAN without its members, for the fleet-wide overview.
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct LanSummary {
+    /// Stable identifier derived from `gateway_mac` and `network`.
+    pub key: String,
+    /// Subnet in CIDR notation, e.g. `192.168.1.0/24`.
+    pub network: String,
+    pub gateway_ip: String,
+    pub gateway_mac: String,
+    pub device_count: i64,
+    pub online_count: i64,
+    /// Public IP of one of its devices, which usually all share it.
+    pub public_ip: Option<String>,
+    pub public_ip_name: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct LanSummaryListResponse {
+    pub lans: Vec<LanSummary>,
+}
