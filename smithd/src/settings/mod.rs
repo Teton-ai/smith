@@ -3,7 +3,7 @@
 //! here writes to the system.
 
 mod actor;
-mod driver;
+pub(crate) mod driver;
 mod nm;
 mod ntp;
 mod read;
