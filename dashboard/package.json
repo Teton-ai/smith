@@ -6,6 +6,7 @@
 		"dev": "vite",
 		"build": "vite build",
 		"preview": "vite preview",
+		"test": "node --experimental-strip-types --test tests/*.test.mjs",
 		"lint": "biome check --write",
 		"gen-api-client": "orval --config ./orval.config.ts && biome check --write app/api-client.ts"
 	},

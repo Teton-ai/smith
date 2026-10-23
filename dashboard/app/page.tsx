@@ -3,6 +3,7 @@ import { Button, Card } from "@teton/smith-ui";
 import { AlertTriangle, Loader2, LogIn } from "lucide-react";
 import { useEffect } from "react";
 import { useNavigate, useSearchParams } from "react-router";
+import { getReturnToPath } from "@/app/utils/returnTo";
 
 const LoginPage = () => {
 	const { isLoading, error, loginWithPopup } = useAuth0();
@@ -59,13 +60,10 @@ export default function Home() {
 	const { isLoading, isAuthenticated } = useAuth0();
 	const navigate = useNavigate();
 	const [searchParams] = useSearchParams();
-	const requested = searchParams.get("returnTo");
-	const destination =
-		requested?.startsWith("/") &&
-		!requested.startsWith("//") &&
-		!requested.includes("\\")
-			? requested
-			: "/dashboard";
+	const destination = getReturnToPath(
+		searchParams.get("returnTo"),
+		window.location.origin,
+	);
 
 	useEffect(() => {
 		if (!isLoading && isAuthenticated) {
