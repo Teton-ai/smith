@@ -10,7 +10,7 @@ pub fn setup_metrics_recorder() -> PrometheusHandle {
         0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0,
     ];
 
-    // 64 KiB to 512 MiB, x4 steps.
+    // 64 KiB to 1 GiB, x4 steps.
     const UPLOAD_BYTES: &[f64] = &[
         65_536.0,
         262_144.0,
@@ -19,7 +19,7 @@ pub fn setup_metrics_recorder() -> PrometheusHandle {
         16_777_216.0,
         67_108_864.0,
         268_435_456.0,
-        536_870_912.0,
+        1_073_741_824.0,
     ];
 
     PrometheusBuilder::new()

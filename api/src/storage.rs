@@ -22,9 +22,10 @@ pub const OS_SIGNED_URL_TTL_SECONDS: u64 = 24 * 60 * 60;
 pub struct Storage;
 
 /// Records in-flight, outcome and size for one upload; Drop covers every exit path.
+/// `result` is "client" while waiting on the request body, "error" while waiting on S3.
 struct UploadMetrics {
     bytes: u64,
-    ok: bool,
+    result: &'static str,
 }
 
 impl UploadMetrics {
@@ -32,7 +33,7 @@ impl UploadMetrics {
         metrics::increment_gauge!("smith_uploads_in_flight", 1.0);
         Self {
             bytes: 0,
-            ok: false,
+            result: "client",
         }
     }
 }
@@ -40,11 +41,9 @@ impl UploadMetrics {
 impl Drop for UploadMetrics {
     fn drop(&mut self) {
         metrics::decrement_gauge!("smith_uploads_in_flight", 1.0);
-        if self.ok {
-            metrics::increment_counter!("smith_uploads_total", "result" => "ok");
+        metrics::increment_counter!("smith_uploads_total", "result" => self.result);
+        if self.result == "ok" {
             metrics::histogram!("smith_upload_bytes", self.bytes as f64);
-        } else {
-            metrics::increment_counter!("smith_uploads_total", "result" => "error");
         }
     }
 }
@@ -87,12 +86,15 @@ impl Storage {
         // Anything that fits in one chunk skips multipart entirely.
         let first_chunk = read_chunk_async(reader).await?;
         metrics.bytes = first_chunk.len() as u64;
+        metrics.result = "error";
         if first_chunk.len() < CHUNK_SIZE {
             let response = bucket
                 .put_object_with_content_type(object_key, &first_chunk, CONTENT_TYPE)
                 .await?;
             let status = response.status_code();
-            metrics.ok = (200..300).contains(&status);
+            if (200..300).contains(&status) {
+                metrics.result = "ok";
+            }
             return Ok(status);
         }
 
@@ -123,7 +125,9 @@ impl Storage {
                     break;
                 }
                 part_number += 1;
+                metrics.result = "client";
                 chunk = read_chunk_async(reader).await?;
+                metrics.result = "error";
                 metrics.bytes += chunk.len() as u64;
                 // An exact multiple of CHUNK_SIZE has no trailing part to send.
                 if chunk.is_empty() {
@@ -153,7 +157,9 @@ impl Storage {
         }
         .await;
 
-        metrics.ok = result.is_ok();
+        if result.is_ok() {
+            metrics.result = "ok";
+        }
         if result.is_err() {
             // Parts of an abandoned upload are billed until the upload is aborted.
             if let Err(abort_error) = bucket.abort_upload(object_key, &upload_id).await {
@@ -386,5 +392,57 @@ impl Storage {
         let (head, _code) = bucket.head_object(object_key).await?;
         head.content_length
             .ok_or_else(|| anyhow::anyhow!("Content-Length missing for {object_key}"))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::UploadMetrics;
+    use metrics_util::{DebugValue, DebuggingRecorder};
+
+    #[test]
+    fn upload_metrics_record_one_outcome_per_upload() {
+        let recorder = DebuggingRecorder::new();
+        let snapshotter = recorder.snapshotter();
+        recorder.install().expect("no other recorder in tests");
+
+        // (name, result at drop, bytes, histogram sample expected)
+        let cases = [
+            ("ok", "ok", 42u64, Some(42.0)),
+            ("s3 error", "error", 7, None),
+            ("client error", "client", 7, None),
+        ];
+        for (name, result, bytes, want_sample) in cases {
+            let mut guard = UploadMetrics::start();
+            guard.bytes = bytes;
+            guard.result = result;
+            drop(guard);
+
+            let (mut gauge, mut counter, mut samples) = (None, None, Vec::new());
+            for (key, _, _, value) in snapshotter.snapshot().into_vec() {
+                let (key, name) = (key.key().clone(), key.key().name().to_string());
+                match (name.as_str(), value) {
+                    ("smith_uploads_in_flight", DebugValue::Gauge(g)) => {
+                        gauge = Some(g.into_inner())
+                    }
+                    ("smith_uploads_total", DebugValue::Counter(c))
+                        if key.labels().any(|l| l.value() == result) =>
+                    {
+                        counter = Some(c)
+                    }
+                    ("smith_upload_bytes", DebugValue::Histogram(h)) => {
+                        samples.extend(h.into_iter().map(|v| v.into_inner()))
+                    }
+                    _ => {}
+                }
+            }
+            assert_eq!(gauge, Some(0.0), "{name}: gauge");
+            assert_eq!(counter, Some(1), "{name}: counter");
+            assert_eq!(
+                samples,
+                want_sample.into_iter().collect::<Vec<_>>(),
+                "{name}: histogram"
+            );
+        }
     }
 }
