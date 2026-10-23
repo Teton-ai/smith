@@ -1,3 +1,4 @@
+import { useAuth0 } from "@auth0/auth0-react";
 import { Badge, Button, Card, Select } from "@teton/smith-ui";
 import { AlertCircle, Loader2, Send } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -6,10 +7,17 @@ import {
 	type BundleWithCommands,
 	type BundleWithCommandsPaginated,
 	type DeviceCommandResponse,
+	useGetBundle,
 	useGetBundleCommandsInfinite,
 	useGetUsers,
 } from "@/app/api-client";
 import { useClientMutator } from "@/app/api-client-mutator";
+import {
+	SelectionMessage,
+	selectionSearch,
+	useRevealSelection,
+	validBundleId,
+} from "./selection";
 import {
 	CommandBody,
 	CommandHeader,
@@ -94,18 +102,17 @@ const BundleDetail = ({ bundle }: { bundle: BundleWithCommands }) => {
 		return list;
 	}, [bundle]);
 
-	const [selectedDevice, setSelectedDevice] = useState<number>(
-		devices[0]?.device ?? -1,
-	);
-
-	// If the selected device isn't in this bundle (e.g. bundle just changed),
-	// sync to the first device immediately to avoid a stale highlight.
-	const firstDevice = devices[0]?.device ?? -1;
-	const deviceInBundle = devices.find((d) => d.device === selectedDevice);
-	if (!deviceInBundle && selectedDevice !== firstDevice) {
-		setSelectedDevice(firstDevice);
-	}
-	const selected = deviceInBundle ?? devices[0] ?? null;
+	const [searchParams, setSearchParams] = useSearchParams();
+	const deviceSerial = searchParams.get("device");
+	const selected = devices.find((d) => d.serial === deviceSerial) ?? null;
+	useEffect(() => {
+		if (deviceSerial === null && devices[0]) {
+			setSearchParams(
+				selectionSearch(searchParams, { device: devices[0].serial }),
+				{ replace: true },
+			);
+		}
+	}, [deviceSerial, devices, searchParams, setSearchParams]);
 
 	return (
 		<div className="flex h-full overflow-hidden">
@@ -113,13 +120,12 @@ const BundleDetail = ({ bundle }: { bundle: BundleWithCommands }) => {
 			<div className="w-2/5 border-r border-gray-200 overflow-y-auto overflow-x-hidden shrink-0">
 				{devices.map((d) => {
 					const stats = getBundleStats(d.commands);
-					const isSelected = d.device === selectedDevice;
+					const isSelected = d.serial === deviceSerial;
 					return (
-						<button
+						<Link
 							key={d.device}
-							type="button"
-							onClick={() => setSelectedDevice(d.device)}
-							className={`w-full text-left px-4 py-3 border-b border-gray-100 last:border-b-0 transition-colors cursor-pointer ${
+							to={selectionSearch(searchParams, { device: d.serial })}
+							className={`block w-full text-left px-4 py-3 border-b border-gray-100 last:border-b-0 transition-colors cursor-pointer ${
 								isSelected
 									? "bg-blue-50 border-l-2 border-l-blue-500"
 									: "hover:bg-gray-50 border-l-2 border-l-transparent"
@@ -157,7 +163,7 @@ const BundleDetail = ({ bundle }: { bundle: BundleWithCommands }) => {
 									</Badge>
 								)}
 							</div>
-						</button>
+						</Link>
 					);
 				})}
 			</div>
@@ -183,7 +189,9 @@ const BundleDetail = ({ bundle }: { bundle: BundleWithCommands }) => {
 					</>
 				) : (
 					<div className="flex items-center justify-center h-full text-gray-400 text-sm">
-						Select a device to see its responses
+						{deviceSerial !== null
+							? "Device not found in this bundle"
+							: "Select a device to see its responses"}
 					</div>
 				)}
 			</div>
@@ -227,7 +235,7 @@ const useTriggeredByFilter = () => {
 
 	// Mirror a restored preset into the URL so a copied link is explicit.
 	useEffect(() => {
-		if (byParam == null && savedPreset) {
+		if (byParam == null && savedPreset && !searchParams.has("id")) {
 			setSearchParams(
 				(prev) => {
 					const next = new URLSearchParams(prev);
@@ -237,7 +245,7 @@ const useTriggeredByFilter = () => {
 				{ replace: true },
 			);
 		}
-	}, [byParam, savedPreset, setSearchParams]);
+	}, [byParam, savedPreset, searchParams, setSearchParams]);
 
 	const setValue = (value: string) => {
 		// Saved before the URL changes: with `by` gone, the old preset would
@@ -247,13 +255,18 @@ const useTriggeredByFilter = () => {
 			setSavedPreset(value);
 		}
 		const next = new URLSearchParams(searchParams);
+		next.delete("id");
+		next.delete("device");
 		if (value) next.set("by", value);
 		else next.delete("by");
 		setSearchParams(next);
 	};
 
 	// null = All.
-	return { value: byParam ?? (savedPreset || null), setValue };
+	return {
+		value: byParam ?? (searchParams.has("id") ? null : savedPreset || null),
+		setValue,
+	};
 };
 
 // ---------------------------------------------------------------------------
@@ -261,6 +274,7 @@ const useTriggeredByFilter = () => {
 // ---------------------------------------------------------------------------
 
 const CommandsPage = () => {
+	const { user } = useAuth0();
 	const fetcher = useClientMutator<BundleWithCommandsPaginated>();
 
 	// null = All. Otherwise "people", "system", "me", or a user id.
@@ -277,6 +291,8 @@ const CommandsPage = () => {
 		fetchNextPage,
 		hasNextPage,
 		isFetchingNextPage,
+		isFetching,
+		isFetchNextPageError,
 	} = useGetBundleCommandsInfinite({
 		query: {
 			// The generated key is static, so it has to carry the filter or React
@@ -304,7 +320,13 @@ const CommandsPage = () => {
 		},
 	});
 
-	const [selectedUuid, setSelectedUuid] = useState<string | null>(null);
+	const [searchParams, setSearchParams] = useSearchParams();
+	const id = searchParams.get("id");
+	const validId = validBundleId(id);
+	const selectedUuid = validId ? id.toLowerCase() : null;
+	const detail = useGetBundle(selectedUuid ?? "", {
+		query: { enabled: validId, refetchInterval: 5000 },
+	});
 	const scrollRef = useRef<HTMLDivElement>(null);
 
 	const handleScroll = useCallback(() => {
@@ -325,23 +347,47 @@ const CommandsPage = () => {
 		});
 	}, [bundleData]);
 
-	// The previous filter's selection is meaningless once the list changes.
-	// Adjusted during render, not in an effect, so it covers every path the
-	// filter can change by (select, back/forward, pasted URL).
-	const [filterOfSelection, setFilterOfSelection] = useState(triggeredBy);
-	if (filterOfSelection !== triggeredBy) {
-		setFilterOfSelection(triggeredBy);
-		setSelectedUuid(null);
-	}
-
-	// Auto-select first bundle
 	useEffect(() => {
-		if (bundles.length > 0 && selectedUuid === null) {
-			setSelectedUuid(bundles[0].uuid);
+		if (bundles.length > 0 && id === null) {
+			setSearchParams(
+				selectionSearch(searchParams, {
+					id: bundles[0].uuid,
+					by: triggeredBy,
+					device: bundles[0].responses[0]?.serial_number ?? null,
+				}),
+				{ replace: true },
+			);
 		}
-	}, [bundles, selectedUuid]);
+	}, [bundles, id, triggeredBy, searchParams, setSearchParams]);
 
-	const selectedBundle = bundles.find((b) => b.uuid === selectedUuid) ?? null;
+	const selectedBundle =
+		detail.data ?? bundles.find((b) => b.uuid === selectedUuid) ?? null;
+	const filterEmail =
+		triggeredBy === "me"
+			? user?.email
+			: users?.find((person) => String(person.id) === triggeredBy)?.email;
+	// An individual user's filter still works without users:read. When its
+	// email cannot be resolved, let the filtered history locate the bundle.
+	const unresolvedUserFilter =
+		!!triggeredBy &&
+		!NAMED_PRESETS.includes(triggeredBy) &&
+		filterEmail == null;
+	const selectionMatchesFilter =
+		!triggeredBy ||
+		(triggeredBy === "people" && !!selectedBundle?.user_email) ||
+		(triggeredBy === "system" && selectedBundle?.user_email == null) ||
+		unresolvedUserFilter ||
+		(filterEmail != null && selectedBundle?.user_email === filterEmail);
+	useRevealSelection({
+		selectionKey:
+			selectedUuid === null ? null : `${triggeredBy}:${selectedUuid}`,
+		containerRef: scrollRef,
+		enabled: selectedBundle !== null && selectionMatchesFilter,
+		hasNextPage,
+		isFetching,
+		isFetchNextPageError,
+		fetchNextPage,
+	});
 
 	// Accounts without an email would render as blank rows, so drop them.
 	const userOptions = useMemo(
@@ -399,7 +445,7 @@ const CommandsPage = () => {
 		</div>
 	);
 
-	if (isLoading) {
+	if (isLoading && id === null) {
 		return wrap(
 			<div className="flex items-center justify-center py-12">
 				<Loader2 className="w-6 h-6 animate-spin text-gray-400" />
@@ -409,7 +455,7 @@ const CommandsPage = () => {
 
 	// A failed background refetch also sets `isError`, so gate on having nothing
 	// to show: never blank a rendered list because one 5s poll blipped.
-	if (isError && bundles.length === 0) {
+	if (isError && bundles.length === 0 && id === null) {
 		return wrap(
 			<Card className="text-center py-12">
 				<AlertCircle className="w-12 h-12 text-red-300 mx-auto mb-3" />
@@ -421,7 +467,7 @@ const CommandsPage = () => {
 		);
 	}
 
-	if (bundles.length === 0) {
+	if (bundles.length === 0 && id === null) {
 		return wrap(
 			<Card className="text-center py-12">
 				<Send className="w-12 h-12 text-gray-300 mx-auto mb-3" />
@@ -472,7 +518,10 @@ const CommandsPage = () => {
 							<CommandListRow
 								key={bundle.uuid}
 								selected={bundle.uuid === selectedUuid}
-								onClick={() => setSelectedUuid(bundle.uuid)}
+								to={selectionSearch(searchParams, {
+									id: bundle.uuid,
+									device: bundle.responses[0]?.serial_number ?? null,
+								})}
 								title={commandLabel}
 								trigger={bundle.user_email}
 								time={bundle.created_on}
@@ -504,6 +553,11 @@ const CommandsPage = () => {
 						);
 					})}
 				</div>
+				{isFetchNextPageError && (
+					<Button variant="soft" tone="gray" onClick={() => fetchNextPage()}>
+						Retry loading history
+					</Button>
+				)}
 				{isFetchingNextPage && (
 					<div className="flex items-center justify-center py-3 border-t border-gray-200 shrink-0">
 						<Loader2 className="w-4 h-4 animate-spin text-gray-400" />
@@ -516,9 +570,12 @@ const CommandsPage = () => {
 				{selectedBundle != null ? (
 					<BundleDetail bundle={selectedBundle} />
 				) : (
-					<div className="flex items-center justify-center h-full text-gray-400 text-sm">
-						Select a bundle to see its details
-					</div>
+					<SelectionMessage
+						invalid={id !== null && !validId}
+						loading={validId && detail.isPending}
+						error={detail.error}
+						kind="bundle"
+					/>
 				)}
 			</div>
 		</Card>,

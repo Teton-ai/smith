@@ -617,11 +617,11 @@ const DevicesPage = () => {
 	const { mutate: issueCommands, isPending: isIssuingCommands } =
 		useIssueCommandsToDevices({
 			mutation: {
-				onSuccess: () => {
+				onSuccess: (receipt) => {
 					setShowBulkCommandModal(false);
 					setSelectedDeviceIds(new Set());
 					resetBulkCommandForm();
-					navigate("/commands");
+					navigate(`/commands?id=${receipt.uuid}`);
 				},
 				onError: (error) => {
 					console.error("Failed to issue commands:", error);

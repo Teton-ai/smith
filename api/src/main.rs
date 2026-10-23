@@ -359,6 +359,7 @@ async fn start_main_server(
             device::route::issue_commands_to_device,
             device::route::get_all_commands_for_device
         ))
+        .routes(routes!(device::route::get_command_for_device))
         .routes(routes!(device::route::get_services_for_device))
         .routes(routes!(device::route::get_audit_for_device))
         .routes(routes!(device::route::get_settings_for_device))

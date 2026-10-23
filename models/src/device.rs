@@ -113,7 +113,7 @@ pub struct DeviceFilter {
     pub order: Option<DeviceSortDirection>,
 }
 
-#[derive(Debug, Serialize, Deserialize, utoipa::ToSchema, Clone)]
+#[derive(Debug, Serialize, Deserialize, utoipa::ToSchema, Clone, sqlx::FromRow)]
 pub struct DeviceCommandResponse {
     pub device: i32,
     pub serial_number: String,

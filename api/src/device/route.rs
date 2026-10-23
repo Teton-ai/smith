@@ -1190,6 +1190,61 @@ pub async fn get_ledger_for_device(
     Ok(Json(ledger_paginated))
 }
 
+#[utoipa::path(
+    get,
+    path = "/devices/{device_id}/commands/{command_id}",
+    params(("device_id" = String, Path), ("command_id" = i32, Path)),
+    responses(
+        (status = 200, description = "Device command and its response", body = DeviceCommandResponse),
+        (status = 404, description = "Device or command not found"),
+        (status = 500, description = "Failed to fetch command"),
+    ),
+    security(("auth_token" = [])),
+    tag = DEVICES_TAG
+)]
+pub async fn get_command_for_device(
+    Path((device_id, command_id)): Path<(String, i32)>,
+    Extension(state): Extension<State>,
+) -> Result<Json<DeviceCommandResponse>, StatusCode> {
+    load_command_for_device(&state.pg_pool, &device_id, command_id)
+        .await
+        .map(Json)
+}
+
+async fn load_command_for_device(
+    pool: &sqlx::PgPool,
+    device_id: &str,
+    command_id: i32,
+) -> Result<DeviceCommandResponse, StatusCode> {
+    let mut command = sqlx::query_as::<_, DeviceCommandResponse>(
+        r#"SELECT cq.device_id as device, d.serial_number, cq.id as cmd_id,
+            cq.created_at as issued_at, cq.cmd as cmd_data, cq.canceled as cancelled,
+            cq.fetched, cq.fetched_at, cr.id as response_id,
+            cr.created_at as response_at, cr.response, cr.status,
+            u.email as user_email, cq.bundle as bundle_id
+        FROM command_queue cq
+        JOIN device d ON cq.device_id = d.id
+        LEFT JOIN command_response cr ON cq.id = cr.command_id
+        LEFT JOIN command_bundles cb ON cq.bundle = cb.uuid
+        LEFT JOIN auth.users u ON cb.user_id = u.id
+        WHERE cq.id = $2 AND CASE
+            WHEN $1 ~ '^[0-9]+$' AND length($1) <= 10 THEN d.id::bigint = $1::bigint
+            ELSE d.serial_number = $1
+        END"#,
+    )
+    .bind(device_id)
+    .bind(command_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(|err| {
+        error!("Failed to fetch device command {err}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?
+    .ok_or(StatusCode::NOT_FOUND)?;
+    command.cmd_data = crate::command::redact_cmd_data(command.cmd_data);
+    Ok(command)
+}
+
 #[derive(Deserialize, Debug, IntoParams)]
 #[into_params(parameter_in = Query)]
 pub struct PaginationId {
@@ -4640,6 +4695,86 @@ mod label_updates {
         .await??;
         assert_eq!(labels_of(&pool, one).await?, labels(&[("env", "test")]));
         assert!(labels_of(&pool, two).await?.is_empty());
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod command_links {
+    use super::load_command_for_device;
+    use axum::http::StatusCode;
+    use serde_json::json;
+    use sqlx::PgPool;
+
+    #[sqlx::test]
+    #[ignore = "needs the compose Postgres; run with --test-threads=1"]
+    async fn command_detail_is_scoped_and_redacted(pool: PgPool) -> anyhow::Result<()> {
+        let device: i32 = sqlx::query_scalar(
+            "INSERT INTO device (serial_number) VALUES ('command-links') RETURNING id",
+        )
+        .fetch_one(&pool)
+        .await?;
+        sqlx::query("INSERT INTO device (serial_number) VALUES ('other-device')")
+            .execute(&pool)
+            .await?;
+        let user: i32 = sqlx::query_scalar(
+            "INSERT INTO auth.users (auth0_user_id, email) VALUES ('command-links', 'links@example.com') RETURNING id",
+        )
+        .fetch_one(&pool)
+        .await?;
+        let bundle: uuid::Uuid =
+            sqlx::query_scalar("INSERT INTO command_bundles (user_id) VALUES ($1) RETURNING uuid")
+                .bind(user)
+                .fetch_one(&pool)
+                .await?;
+        let command: i32 = sqlx::query_scalar(
+            "INSERT INTO command_queue (device_id, cmd, bundle, continue_on_error) VALUES ($1, $2, $3, false) RETURNING id",
+        )
+        .bind(device)
+        .bind(json!({"ApplyNetworks": {"networks": [{"credentials": {"psk": "secret", "key_mgmt": "wpa-psk"}}]}}))
+        .bind(bundle)
+        .fetch_one(&pool)
+        .await?;
+
+        for identifier in ["command-links".to_string(), device.to_string()] {
+            let result = load_command_for_device(&pool, &identifier, command)
+                .await
+                .map_err(|status| anyhow::anyhow!("{status}"))?;
+            assert_eq!(result.cmd_id, command);
+            assert_eq!(result.bundle_id, bundle);
+            assert_eq!(result.user_email.as_deref(), Some("links@example.com"));
+            assert!(result.response.is_none());
+            let credentials = &result.cmd_data["ApplyNetworks"]["networks"][0]["credentials"];
+            assert!(credentials.get("psk").is_none());
+            assert_eq!(credentials["key_mgmt"], "wpa-psk");
+        }
+        for (identifier, id) in [
+            ("other-device", command),
+            ("missing-device", command),
+            ("command-links", i32::MAX),
+            ("9999999999", command),
+        ] {
+            assert_eq!(
+                load_command_for_device(&pool, identifier, id)
+                    .await
+                    .unwrap_err(),
+                StatusCode::NOT_FOUND
+            );
+        }
+
+        sqlx::query("INSERT INTO command_response (command_id, response, status, device_id) VALUES ($1, $2, 0, $3)")
+            .bind(command)
+            .bind(json!({"output": "done"}))
+            .bind(device)
+            .execute(&pool)
+            .await?;
+        let result = load_command_for_device(&pool, "command-links", command)
+            .await
+            .map_err(|status| anyhow::anyhow!("{status}"))?;
+        assert_eq!(result.response, Some(json!({"output": "done"})));
+        assert_eq!(result.status, Some(0));
+        assert!(result.response_id.is_some());
+        assert!(result.response_at.is_some());
         Ok(())
     }
 }
