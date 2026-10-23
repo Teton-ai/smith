@@ -209,6 +209,13 @@ impl<R: Recovery> LinkHealth<R> {
                 "Wi-Fi failed with no secrets; NM will not retry it by itself"
             ),
             LockoutNote::Recovered { .. } => log_lockout_recovered(note),
+            LockoutNote::Cancelled { elapsed } => info!(
+                target: "link_health",
+                kind = "no_secrets",
+                outcome = "cancelled",
+                elapsed_s = elapsed.as_secs(),
+                "Wi-Fi disconnected on request; not reconnecting it"
+            ),
             LockoutNote::OtherFailure { reason } => info!(
                 target: "link_health",
                 old = event.old,
@@ -577,6 +584,26 @@ mod tests {
         tokio::time::advance(Duration::from_secs(120)).await;
         lh.on_tick().await;
         assert_eq!(fake.connects.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_user_disconnect_stops_the_lockout_recovery() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        fake_iface(root, "wlP1p1s0", "rtw_8822ce", "rtw88_8822ce");
+        let fake = Fake::default();
+        let mut lh = LinkHealth::new(NetGuard::new(), &fake, paths(root));
+
+        lh.on_device_state(no_secrets());
+        lh.on_device_state(DeviceStateEvent {
+            new: detect::NM_DEVICE_STATE_DISCONNECTED,
+            old: detect::NM_DEVICE_STATE_FAILED,
+            reason: detect::NM_DEVICE_STATE_REASON_USER_REQUESTED,
+            seeded: false,
+        });
+        tokio::time::advance(Duration::from_secs(60 * 60)).await;
+        lh.on_tick().await;
+        assert_eq!(fake.connects.load(Ordering::SeqCst), 0);
     }
 
     #[tokio::test(start_paused = true)]

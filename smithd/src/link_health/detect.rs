@@ -22,7 +22,7 @@ pub(crate) const NM_DEVICE_STATE_DISCONNECTED: u32 = 30;
 pub(crate) const NM_DEVICE_STATE_ACTIVATED: u32 = 100;
 pub(crate) const NM_DEVICE_STATE_FAILED: u32 = 120;
 pub(crate) const NM_DEVICE_STATE_REASON_NO_SECRETS: u32 = 7;
-const NM_DEVICE_STATE_REASON_USER_REQUESTED: u32 = 39;
+pub(crate) const NM_DEVICE_STATE_REASON_USER_REQUESTED: u32 = 39;
 /// NM blocks autoconnect after a no-secrets failure; give it time to recover
 /// on its own before forcing an activation.
 const LOCKOUT_FIRST_ATTEMPT: Duration = Duration::from_secs(2 * 60);
@@ -178,6 +178,10 @@ pub(crate) enum LockoutNote {
         elapsed: Duration,
         attempts: u32,
     },
+    /// Someone disconnected the device on purpose; never reconnect over that.
+    Cancelled {
+        elapsed: Duration,
+    },
     /// Any other Wi-Fi failure, logged to learn whether it strands devices too.
     OtherFailure {
         reason: u32,
@@ -203,6 +207,16 @@ impl LockoutTracker {
                 Some(incident) => LockoutNote::Recovered {
                     elapsed: now.saturating_duration_since(incident.started),
                     attempts: incident.attempts,
+                },
+                None => LockoutNote::None,
+            };
+        }
+        // A command that disconnects mid-incident cancels it too; if the device
+        // is still locked out afterwards, NM reports a fresh NO_SECRETS.
+        if reason == NM_DEVICE_STATE_REASON_USER_REQUESTED {
+            return match self.incident.take() {
+                Some(incident) => LockoutNote::Cancelled {
+                    elapsed: now.saturating_duration_since(incident.started),
                 },
                 None => LockoutNote::None,
             };
@@ -456,6 +470,61 @@ mod tests {
                 elapsed: LOCKOUT_FIRST_ATTEMPT + TICK,
                 attempts: 1
             }
+        );
+        assert!(!l.due(t0 + HOUR));
+    }
+
+    #[test]
+    fn a_user_disconnect_cancels_the_lockout_until_the_next_failure() {
+        let t0 = Instant::now();
+        let mut l = LockoutTracker::default();
+        l.on_state_changed(
+            NM_DEVICE_STATE_FAILED,
+            NM_DEVICE_STATE_REASON_NO_SECRETS,
+            t0,
+        );
+        // DEACTIVATING (110), then DISCONNECTED, both with reason 39.
+        assert_eq!(
+            l.on_state_changed(110, NM_DEVICE_STATE_REASON_USER_REQUESTED, t0 + TICK),
+            LockoutNote::Cancelled { elapsed: TICK }
+        );
+        assert_eq!(
+            l.on_state_changed(
+                NM_DEVICE_STATE_DISCONNECTED,
+                NM_DEVICE_STATE_REASON_USER_REQUESTED,
+                t0 + TICK
+            ),
+            LockoutNote::None
+        );
+        assert!(!l.due(t0 + HOUR));
+
+        assert_eq!(
+            l.on_state_changed(
+                NM_DEVICE_STATE_FAILED,
+                NM_DEVICE_STATE_REASON_NO_SECRETS,
+                t0 + HOUR
+            ),
+            LockoutNote::Started
+        );
+        assert!(l.due(t0 + HOUR + LOCKOUT_FIRST_ATTEMPT));
+    }
+
+    #[test]
+    fn a_user_disconnect_seen_at_startup_cancels_an_open_lockout() {
+        let t0 = Instant::now();
+        let mut l = LockoutTracker::default();
+        l.on_state_changed(
+            NM_DEVICE_STATE_FAILED,
+            NM_DEVICE_STATE_REASON_NO_SECRETS,
+            t0,
+        );
+        assert_eq!(
+            l.on_initial_state(
+                NM_DEVICE_STATE_DISCONNECTED,
+                NM_DEVICE_STATE_REASON_USER_REQUESTED,
+                t0 + TICK
+            ),
+            LockoutNote::Cancelled { elapsed: TICK }
         );
         assert!(!l.due(t0 + HOUR));
     }

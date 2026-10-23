@@ -19,6 +19,11 @@ const DEBOUNCE: Duration = Duration::from_secs(2);
 const NM_STATE_DISCONNECTING: u32 = 30;
 const NM_STATE_CONNECTING: u32 = 40;
 
+/// `NM_STATE_CONNECTED_GLOBAL`: full connectivity through some device.
+const NM_STATE_CONNECTED_GLOBAL: u32 = 70;
+/// What NM answers for an interface it does not know, as opposed to a failure.
+const NM_ERROR_UNKNOWN_DEVICE: &str = "org.freedesktop.NetworkManager.UnknownDevice";
+
 const RETRY_INITIAL: Duration = Duration::from_secs(1);
 const RETRY_MAX: Duration = Duration::from_secs(60);
 
@@ -38,6 +43,11 @@ trait NetworkManager {
     fn device_removed(&self, device_path: OwnedObjectPath) -> zbus::Result<()>;
 
     fn get_device_by_ip_iface(&self, iface: &str) -> zbus::Result<OwnedObjectPath>;
+
+    /// Named apart from the `StateChanged` signal, whose generated stream would
+    /// clash with the property's.
+    #[zbus(property, name = "State")]
+    fn global_state(&self) -> zbus::Result<u32>;
 }
 
 /// Own module: its `StateChanged` would clash with the manager's generated types.
@@ -277,10 +287,13 @@ impl WifiDevice {
         let path = match wifi_interface(Path::new(SYS_CLASS_NET)).await {
             Some(iface) => match nm.get_device_by_ip_iface(&iface.name).await {
                 Ok(path) => Some(path),
-                Err(e) => {
-                    warn!("NM watcher: no NM device for {}: {e}", iface.name);
+                Err(zbus::Error::MethodError(name, _, _))
+                    if name.as_str() == NM_ERROR_UNKNOWN_DEVICE =>
+                {
+                    info!("NM watcher: NM does not manage {}", iface.name);
                     None
                 }
+                Err(e) => return Err(e),
             },
             None => None,
         };
@@ -305,19 +318,20 @@ impl WifiDevice {
         info!("NM watcher: watching Wi-Fi device {}", path.as_str());
 
         // A lockout from before we subscribed (boot, D-Bus reconnect) would
-        // otherwise be missed; its reason is already gone, hence `seeded`.
-        match proxy.state_reason().await {
-            Ok((state, reason)) => forward(
-                device_events,
-                DeviceStateEvent {
-                    new: state,
-                    old: state,
-                    reason,
-                    seeded: true,
-                },
-            ),
-            Err(e) => warn!("NM watcher: reading Wi-Fi device StateReason failed: {e}"),
-        }
+        // otherwise be missed; its reason is already gone, hence `seeded`. When
+        // another device already gives full connectivity, an idle Wi-Fi is not
+        // stranded, so it is passed on as a plain state.
+        let (state, reason) = proxy.state_reason().await?;
+        let online_elsewhere = nm.global_state().await? >= NM_STATE_CONNECTED_GLOBAL;
+        forward(
+            device_events,
+            DeviceStateEvent {
+                new: state,
+                old: state,
+                reason,
+                seeded: !online_elsewhere,
+            },
+        );
         Ok(())
     }
 }
