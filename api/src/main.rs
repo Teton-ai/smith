@@ -19,7 +19,7 @@ use std::io::Read;
 use std::sync::Arc;
 use tokio::net::TcpListener;
 use tokio::sync::broadcast::Sender;
-use tokio::sync::{Mutex, broadcast};
+use tokio::sync::{Mutex, Semaphore, broadcast};
 use tower::ServiceBuilder;
 use tower_http::cors::CorsLayer;
 use tower_http::decompression::RequestDecompressionLayer;
@@ -74,6 +74,7 @@ pub struct State {
     accounts: Arc<AccountsConfig>,
     jwks_client: DebugJwksClient,
     device_jwt_signer: DeviceJwtSigner,
+    upload_permits: Arc<Semaphore>,
 }
 
 fn main() {
@@ -225,6 +226,7 @@ async fn start_main_server(
         accounts: Arc::new(accounts),
         jwks_client,
         device_jwt_signer,
+        upload_permits: Arc::new(Semaphore::new(config.max_concurrent_uploads)),
     };
 
     // An unreachable device cannot report its own absence, so downtime has to be
