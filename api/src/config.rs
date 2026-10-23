@@ -213,6 +213,7 @@ pub struct Config {
     /// confirmed.
     pub network_gc_interval_seconds: u64,
     pub mcp: Option<McpConfig>,
+    pub max_concurrent_uploads: usize,
 }
 
 /// Builds the M2M-sub -> holder map from one env var per known holder. Missing
@@ -284,6 +285,10 @@ impl Config {
                 // finds nothing new.
                 .unwrap_or(2 * 24 * 60 * 60),
             mcp,
+            max_concurrent_uploads: env::var("MAX_CONCURRENT_UPLOADS")
+                .ok()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(48),
         })
     }
 }
