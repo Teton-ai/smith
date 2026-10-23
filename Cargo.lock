@@ -318,7 +318,7 @@ checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 
 [[package]]
 name = "api"
-version = "0.2.218"
+version = "0.2.219"
 dependencies = [
  "anyhow",
  "axum 0.7.9",
@@ -1190,7 +1190,7 @@ checksum = "1c133bc6a41be0d194c306b5506d15e6feeea7b1d6604bd3f8310dfb2ca96486"
 
 [[package]]
 name = "cli"
-version = "0.2.218"
+version = "0.2.219"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1503,9 +1503,9 @@ dependencies = [
 
 [[package]]
 name = "crypto-bigint"
-version = "0.7.5"
+version = "0.7.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1a52aa3fcda4e6302a9f48734f234d35d4721b96f8fe07d073f07ce9df4f0271"
+checksum = "6bb08299a6046833a879ace115697f12fd2bd6c8d3e93c909ffc9e0738e7cae0"
 dependencies = [
  "cpubits",
  "ctutils",
@@ -1545,7 +1545,7 @@ version = "0.7.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3633a51a39c69ebbaa4feaa694bd83d241e4093901c84a0963b19d9bb3f0cf8f"
 dependencies = [
- "crypto-bigint 0.7.5",
+ "crypto-bigint 0.7.6",
  "rand_core 0.10.1",
 ]
 
@@ -2058,7 +2058,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9d65aa39b3a5c1c9c1b745c9a019234bb7a21b77abcb4f4d266d706e2d577d65"
 dependencies = [
  "base16ct 1.0.0",
- "crypto-bigint 0.7.5",
+ "crypto-bigint 0.7.6",
  "crypto-common 0.2.2",
  "digest 0.11.3",
  "ff 0.14.0",
@@ -3699,7 +3699,7 @@ dependencies = [
 
 [[package]]
 name = "models"
-version = "0.2.218"
+version = "0.2.219"
 dependencies = [
  "axum 0.7.9",
  "chrono",
@@ -4680,7 +4680,7 @@ version = "0.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c555a6e4eb7d4e158fcb028c835c3b8642206ddc279b5c6b202ef9a8bdb592f4"
 dependencies = [
- "crypto-bigint 0.7.5",
+ "crypto-bigint 0.7.6",
  "crypto-common 0.2.2",
  "ff 0.14.0",
  "rand_core 0.10.1",
@@ -5148,7 +5148,7 @@ version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b4a459cddafb3fe76b31fd8f1108007566c40301feb64dc7b54656eb7388172b"
 dependencies = [
- "crypto-bigint 0.7.5",
+ "crypto-bigint 0.7.6",
  "hmac 0.13.0",
 ]
 
@@ -5240,7 +5240,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "30b2aa4ba0d89f73d1e332df05be0eeab8840351c36ca5654341dfdb57bb3caf"
 dependencies = [
  "const-oid 0.10.2",
- "crypto-bigint 0.7.5",
+ "crypto-bigint 0.7.6",
  "crypto-primes",
  "digest 0.11.3",
  "pkcs1 0.8.0-rc.4",
@@ -5266,7 +5266,7 @@ dependencies = [
  "bytes",
  "cbc",
  "cipher",
- "crypto-bigint 0.7.5",
+ "crypto-bigint 0.7.6",
  "ctr",
  "curve25519-dalek 5.0.0",
  "data-encoding",
@@ -6134,7 +6134,7 @@ checksum = "e8e2fb0f499abb4d162f2bedad68f5ef91a1682b5a03596ddb67efd37768d100"
 
 [[package]]
 name = "smith"
-version = "0.2.218"
+version = "0.2.219"
 dependencies = [
  "anyhow",
  "axum 0.8.9",
@@ -6174,7 +6174,7 @@ dependencies = [
 
 [[package]]
 name = "smith-e2e"
-version = "0.2.218"
+version = "0.2.219"
 dependencies = [
  "anyhow",
  "reqwest",
@@ -6186,7 +6186,7 @@ dependencies = [
 
 [[package]]
 name = "smith-updater"
-version = "0.2.218"
+version = "0.2.219"
 dependencies = [
  "anyhow",
  "clap",
@@ -6499,7 +6499,7 @@ checksum = "7b54d0ed0498daf3f78d82e00e28c8eec9d75a067c4cfbcc7a0f7d0f4077749e"
 dependencies = [
  "base64ct",
  "bytes",
- "crypto-bigint 0.7.5",
+ "crypto-bigint 0.7.6",
  "ctutils",
  "digest 0.11.3",
  "pem-rfc7468 1.0.0",
