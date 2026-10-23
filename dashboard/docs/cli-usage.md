@@ -195,6 +195,32 @@ sm unpin -l experiment=build-b
 
 Both commands list the devices and their target release, then ask for confirmation. `--yes` skips the prompt. Unpinning does not update a device at once: it gets the next full rollout of its distribution.
 
+### Releasing packages
+
+A new release copies the packages of the deployed release and swaps in the packages you name. It goes to canary devices first, and to the fleet only when you confirm it.
+
+```sh
+# See the packages of the deployed release
+sm releases get --distro 6
+sm releases packages 140
+
+# Draft 1.5.0 with packages 812 and 815 in place of their older versions
+sm releases draft --distro 6 --version 1.5.0 --package 812 --package 815
+
+# Change the draft: swap in or add package 820, remove package 790
+sm releases set-package 141 820
+sm releases remove-package 141 790
+
+# Publish it and send it to the canary devices
+sm releases publish 141
+sm releases deploy 141
+
+# Check the canary, then roll out to the fleet
+sm releases deployment 141
+sm logs ABC123 DEF456 --unit smithd --since "30 min ago"
+sm releases confirm 141
+```
+
 ## Tips
 
 - **Use aliases** to save typing: `sm get d` instead of `sm get device`, `sm status svc` instead of `sm status service`
