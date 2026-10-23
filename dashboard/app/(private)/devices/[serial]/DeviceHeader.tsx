@@ -226,10 +226,15 @@ const DeviceHeader: React.FC<DeviceHeaderProps> = ({ device, serial }) => {
 	const { mutate: issueCommands, isPending: isIssuingCommands } =
 		useIssueCommandsToDevices({
 			mutation: {
-				onSuccess: () => {
+				onSuccess: (receipt) => {
 					setShowRunModal(false);
 					resetRunCommand();
-					navigate(`/devices/${serial}/commands`);
+					const commandId = receipt.commands.find(
+						(command) => command.device === device.id,
+					)?.cmd_id;
+					navigate(
+						`/devices/${serial}/commands${commandId != null ? `?id=${commandId}` : ""}`,
+					);
 				},
 				onError: (error) => {
 					console.error("Failed to issue command:", error);

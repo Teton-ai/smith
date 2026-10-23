@@ -2,7 +2,7 @@ import { useAuth0 } from "@auth0/auth0-react";
 import { Button, Card } from "@teton/smith-ui";
 import { AlertTriangle, Loader2, LogIn } from "lucide-react";
 import { useEffect } from "react";
-import { useNavigate } from "react-router";
+import { useNavigate, useSearchParams } from "react-router";
 
 const LoginPage = () => {
 	const { isLoading, error, loginWithPopup } = useAuth0();
@@ -58,14 +58,22 @@ const LoginPage = () => {
 export default function Home() {
 	const { isLoading, isAuthenticated } = useAuth0();
 	const navigate = useNavigate();
+	const [searchParams] = useSearchParams();
+	const requested = searchParams.get("returnTo");
+	const destination =
+		requested?.startsWith("/") &&
+		!requested.startsWith("//") &&
+		!requested.includes("\\")
+			? requested
+			: "/dashboard";
 
 	useEffect(() => {
 		if (!isLoading && isAuthenticated) {
-			navigate("/dashboard");
+			navigate(destination, { replace: true });
 		}
-	}, [isLoading, isAuthenticated, navigate]);
+	}, [isLoading, isAuthenticated, navigate, destination]);
 
-	// Once authenticated we navigate to /dashboard; show a centered spinner
+	// Once authenticated we restore the requested page; show a centered spinner
 	// during that redirect instead of flashing the login card.
 	if (!isLoading && isAuthenticated) {
 		return (

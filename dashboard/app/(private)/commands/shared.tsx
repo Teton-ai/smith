@@ -1245,6 +1245,7 @@ export const renderRxDetail = (response: unknown) => {
 // bundle carry no user_email, the bundle owns it.
 export const CommandListRow = ({
 	selected,
+	to,
 	onClick,
 	title,
 	mono = false,
@@ -1254,7 +1255,8 @@ export const CommandListRow = ({
 	time,
 }: {
 	selected: boolean;
-	onClick: () => void;
+	to?: string;
+	onClick?: () => void;
 	title: string;
 	mono?: boolean;
 	badge?: ReactNode;
@@ -1264,6 +1266,7 @@ export const CommandListRow = ({
 	time: string;
 }) => (
 	<ListRow
+		to={to}
 		onClick={onClick}
 		hover={selected ? "bg-blue-50" : "hover:bg-gray-50"}
 		className={

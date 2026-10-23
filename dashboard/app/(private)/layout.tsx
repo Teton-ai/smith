@@ -13,7 +13,7 @@ import {
 	Terminal,
 } from "lucide-react";
 import { useEffect, useState } from "react";
-import { Outlet, useNavigate } from "react-router";
+import { Outlet, useLocation, useNavigate } from "react-router";
 import { CommandPalette } from "@/app/components/CommandPalette";
 import Profile from "@/app/components/profile";
 import Sidebar, { type NavItem } from "@/app/components/sidebar";
@@ -109,6 +109,7 @@ function useCommandPaletteShortcut(open: () => void) {
 export default function PrivateLayout() {
 	const { isAuthenticated, isLoading } = useAuth0();
 	const navigate = useNavigate();
+	const location = useLocation();
 	const apiVersion = useApiVersion();
 	const [paletteOpen, setPaletteOpen] = useState(false);
 	useKeyboardNav();
@@ -116,9 +117,12 @@ export default function PrivateLayout() {
 
 	useEffect(() => {
 		if (!isLoading && !isAuthenticated) {
-			navigate("/");
+			navigate(
+				`/?returnTo=${encodeURIComponent(location.pathname + location.search + location.hash)}`,
+				{ replace: true },
+			);
 		}
-	}, [isLoading, isAuthenticated, navigate]);
+	}, [isLoading, isAuthenticated, navigate, location]);
 
 	if (isLoading || !isAuthenticated) {
 		return null;

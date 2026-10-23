@@ -1,7 +1,14 @@
-import { Badge, Card } from "@teton/smith-ui";
+import { useQuery } from "@tanstack/react-query";
+import { Badge, Button, Card } from "@teton/smith-ui";
 import { Loader2, Send } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useParams } from "react-router";
+import { useParams, useSearchParams } from "react-router";
+import {
+	SelectionMessage,
+	selectionSearch,
+	useRevealSelection,
+	validCommandId,
+} from "@/app/(private)/commands/selection";
 import {
 	CommandBody,
 	CommandHeader,
@@ -56,17 +63,24 @@ const ResponseDetail = ({ cmd }: { cmd: DeviceCommandResponse }) => {
 // ---------------------------------------------------------------------------
 
 const CommandsPage = () => {
-	const { serial } = useParams<{ serial: string }>();
-	const [selectedId, setSelectedId] = useState<number | null>(null);
+	const { serial = "" } = useParams<{ serial: string }>();
+	const [searchParams, setSearchParams] = useSearchParams();
+	const id = searchParams.get("id");
+	const validId = validCommandId(id);
+	const selectedId = validId ? Number(id) : null;
+	const detailFetcher = useClientMutator<DeviceCommandResponse>();
 	const scrollRef = useRef<HTMLDivElement>(null);
 	const fetcher = useClientMutator<CommandsPaginated>();
 
 	const {
 		data: commandsData,
 		isLoading: commandsLoading,
+		isError: commandsError,
 		fetchNextPage,
 		hasNextPage,
 		isFetchingNextPage,
+		isFetching,
+		isFetchNextPageError,
 	} = useGetAllCommandsForDeviceInfinite(serial, undefined, {
 		query: {
 			initialPageParam: undefined as number | undefined,
@@ -111,12 +125,36 @@ const CommandsPage = () => {
 	const loading = commandsLoading || deviceLoading;
 
 	useEffect(() => {
-		if (commands.length > 0 && selectedId === null) {
-			setSelectedId(commands[0].cmd_id);
+		if (commands.length > 0 && id === null) {
+			setSearchParams(
+				selectionSearch(searchParams, { id: String(commands[0].cmd_id) }),
+				{ replace: true },
+			);
 		}
-	}, [commands, selectedId]);
+	}, [commands, id, searchParams, setSearchParams]);
 
-	const selectedCmd = commands.find((c) => c.cmd_id === selectedId) ?? null;
+	const detail = useQuery({
+		queryKey: [`/devices/${serial}/commands/${selectedId}`],
+		queryFn: ({ signal }) =>
+			detailFetcher({
+				url: `/devices/${serial}/commands/${selectedId}`,
+				method: "GET",
+				signal,
+			}),
+		enabled: validId && !!serial,
+		refetchInterval: 5000,
+	});
+	const selectedCmd =
+		detail.data ?? commands.find((c) => c.cmd_id === selectedId) ?? null;
+	useRevealSelection({
+		selectionKey: selectedId === null ? null : `${serial}:${selectedId}`,
+		containerRef: scrollRef,
+		enabled: selectedCmd !== null,
+		hasNextPage,
+		isFetching,
+		isFetchNextPageError,
+		fetchNextPage,
+	});
 
 	return (
 		<DeviceDetailLayout
@@ -126,16 +164,20 @@ const CommandsPage = () => {
 			fill
 		>
 			{/* Main content */}
-			{loading ? (
+			{loading && id === null ? (
 				<div className="flex items-center justify-center py-12">
 					<Loader2 className="w-6 h-6 animate-spin text-gray-400" />
 				</div>
-			) : commands.length === 0 ? (
+			) : commands.length === 0 && id === null ? (
 				<Card className="text-center py-12">
 					<Send className="w-12 h-12 text-gray-300 mx-auto mb-3" />
-					<p className="text-gray-500">No commands found</p>
+					<p className="text-gray-500">
+						{commandsError ? "Failed to load commands" : "No commands found"}
+					</p>
 					<p className="text-sm text-gray-400 mt-1">
-						Run a command from the device header above
+						{commandsError
+							? "The request will retry automatically."
+							: "Run a command from the device header above"}
 					</p>
 				</Card>
 			) : (
@@ -155,7 +197,9 @@ const CommandsPage = () => {
 									<CommandListRow
 										key={cmd.cmd_id}
 										selected={cmd.cmd_id === selectedId}
-										onClick={() => setSelectedId(cmd.cmd_id)}
+										to={selectionSearch(searchParams, {
+											id: String(cmd.cmd_id),
+										})}
 										title={label}
 										mono={mono}
 										badge={
@@ -167,6 +211,15 @@ const CommandsPage = () => {
 								);
 							})}
 						</div>
+						{isFetchNextPageError && (
+							<Button
+								variant="soft"
+								tone="gray"
+								onClick={() => fetchNextPage()}
+							>
+								Retry loading history
+							</Button>
+						)}
 						{isFetchingNextPage && (
 							<div className="flex items-center justify-center py-3 border-t border-gray-200 shrink-0">
 								<Loader2 className="w-4 h-4 animate-spin text-gray-400" />
@@ -179,9 +232,12 @@ const CommandsPage = () => {
 						{selectedCmd != null ? (
 							<ResponseDetail cmd={selectedCmd} />
 						) : (
-							<div className="flex items-center justify-center h-full text-gray-400 text-sm">
-								Select a command to see its output
-							</div>
+							<SelectionMessage
+								invalid={id !== null && !validId}
+								loading={validId && detail.isPending}
+								error={detail.error}
+								kind="command"
+							/>
 						)}
 					</div>
 				</Card>
