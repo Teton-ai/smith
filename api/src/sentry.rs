@@ -13,7 +13,7 @@ impl Sentry {
                 sentry::ClientOptions {
                     release: sentry::release_name!(),
                     send_default_pii: true,
-                    traces_sample_rate: 1.0,
+                    traces_sample_rate: 0.15,
                     ..Default::default()
                 },
             )));
