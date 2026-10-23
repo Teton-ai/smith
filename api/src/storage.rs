@@ -21,6 +21,34 @@ pub const OS_SIGNED_URL_TTL_SECONDS: u64 = 24 * 60 * 60;
 
 pub struct Storage;
 
+/// Records in-flight, outcome and size for one upload; Drop covers every exit path.
+struct UploadMetrics {
+    bytes: u64,
+    ok: bool,
+}
+
+impl UploadMetrics {
+    fn start() -> Self {
+        metrics::increment_gauge!("smith_uploads_in_flight", 1.0);
+        Self {
+            bytes: 0,
+            ok: false,
+        }
+    }
+}
+
+impl Drop for UploadMetrics {
+    fn drop(&mut self) {
+        metrics::decrement_gauge!("smith_uploads_in_flight", 1.0);
+        if self.ok {
+            metrics::increment_counter!("smith_uploads_total", "result" => "ok");
+            metrics::histogram!("smith_upload_bytes", self.bytes as f64);
+        } else {
+            metrics::increment_counter!("smith_uploads_total", "result" => "error");
+        }
+    }
+}
+
 impl Storage {
     pub async fn save_to_s3(
         bucket_name: &str,
@@ -53,15 +81,19 @@ impl Storage {
     {
         const CONTENT_TYPE: &str = "application/octet-stream";
 
+        let mut metrics = UploadMetrics::start();
         let bucket = Self::bucket(bucket_name)?;
 
         // Anything that fits in one chunk skips multipart entirely.
         let first_chunk = read_chunk_async(reader).await?;
+        metrics.bytes = first_chunk.len() as u64;
         if first_chunk.len() < CHUNK_SIZE {
             let response = bucket
                 .put_object_with_content_type(object_key, &first_chunk, CONTENT_TYPE)
                 .await?;
-            return Ok(response.status_code());
+            let status = response.status_code();
+            metrics.ok = (200..300).contains(&status);
+            return Ok(status);
         }
 
         let upload_id = bucket
@@ -92,6 +124,7 @@ impl Storage {
                 }
                 part_number += 1;
                 chunk = read_chunk_async(reader).await?;
+                metrics.bytes += chunk.len() as u64;
                 // An exact multiple of CHUNK_SIZE has no trailing part to send.
                 if chunk.is_empty() {
                     break;
@@ -120,6 +153,7 @@ impl Storage {
         }
         .await;
 
+        metrics.ok = result.is_ok();
         if result.is_err() {
             // Parts of an abandoned upload are billed until the upload is aborted.
             if let Err(abort_error) = bucket.abort_upload(object_key, &upload_id).await {

@@ -10,10 +10,27 @@ pub fn setup_metrics_recorder() -> PrometheusHandle {
         0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0,
     ];
 
+    // 64 KiB to 512 MiB, x4 steps.
+    const UPLOAD_BYTES: &[f64] = &[
+        65_536.0,
+        262_144.0,
+        1_048_576.0,
+        4_194_304.0,
+        16_777_216.0,
+        67_108_864.0,
+        268_435_456.0,
+        536_870_912.0,
+    ];
+
     PrometheusBuilder::new()
         .set_buckets_for_metric(
             Matcher::Full("http_requests_duration_seconds".to_string()),
             EXPONENTIAL_SECONDS,
+        )
+        .expect("error: failed to build prometheus recorder")
+        .set_buckets_for_metric(
+            Matcher::Full("smith_upload_bytes".to_string()),
+            UPLOAD_BYTES,
         )
         .expect("error: failed to build prometheus recorder")
         .install_recorder()
