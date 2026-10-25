@@ -64,3 +64,6 @@ toml = "0.8.20"
 cloudfront_sign = "0.4.1"
 uuid = { version = "1.0", features = ["v4"] }
 rand = "0.10.2"
+
+[dev-dependencies]
+metrics-util = "0.11"
