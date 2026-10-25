@@ -94,9 +94,19 @@ const Chevron = ({ open }: { open: boolean }) =>
 	);
 
 const LanDevices = ({ lanKey, serial }: { lanKey: string; serial: string }) => {
-	const { data: lan, isLoading } = useGetLan(lanParams(lanKey), {
+	const {
+		data: lan,
+		isLoading,
+		isError,
+	} = useGetLan(lanParams(lanKey), {
 		query: { refetchInterval: REFRESH_MS },
 	});
+
+	if (isError) {
+		return (
+			<p className="px-6 py-3 text-sm text-gray-500">Failed to load devices.</p>
+		);
+	}
 
 	if (isLoading || !lan) {
 		return (
@@ -174,7 +184,7 @@ const NetworkMapPage = () => {
 	const sites = useMemo(() => {
 		const term = search.trim().toLowerCase();
 		const visible = lans.filter((lan) => {
-			if (deviceLanKeys && !deviceLanKeys.has(lan.key)) {
+			if (serial && !deviceLanKeys?.has(lan.key)) {
 				return false;
 			}
 
@@ -182,7 +192,7 @@ const NetworkMapPage = () => {
 		});
 
 		return groupSites(visible);
-	}, [lans, search, deviceLanKeys]);
+	}, [lans, search, serial, deviceLanKeys]);
 
 	const lanCount = sites.reduce((n, site) => n + site.lans.length, 0);
 	const offline = sites.reduce((n, site) => n + site.total - site.online, 0);
@@ -300,10 +310,14 @@ const NetworkMapPage = () => {
 												}`}
 											>
 												<td className="px-4 py-3 text-sm font-medium text-gray-900">
-													<span className="flex items-center gap-2">
+													<button
+														type="button"
+														aria-expanded={open}
+														className="flex items-center gap-2 text-left"
+													>
 														<Chevron open={open} />
 														{site.name}
-													</span>
+													</button>
 												</td>
 												<td className="whitespace-nowrap px-4 py-3 text-sm text-gray-600">
 													{site.lans.length}
@@ -332,10 +346,14 @@ const NetworkMapPage = () => {
 																className="cursor-pointer bg-gray-50 hover:bg-gray-100"
 															>
 																<td className="whitespace-nowrap py-2 pl-10 pr-4 font-mono text-sm text-gray-700">
-																	<span className="flex items-center gap-2">
+																	<button
+																		type="button"
+																		aria-expanded={expanded}
+																		className="flex items-center gap-2 text-left"
+																	>
 																		<Chevron open={expanded} />
 																		{lan.network} · {lan.gateway_ip}
-																	</span>
+																	</button>
 																</td>
 																<td />
 																<td className="whitespace-nowrap px-4 py-2 text-sm text-gray-600">
