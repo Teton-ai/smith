@@ -683,11 +683,13 @@ export interface LanListResponse {
  * A LAN without its members, for the fleet-wide overview.
  */
 export interface LanSummary {
+	departments: string[];
 	device_count: number;
 	gateway_ip: string;
 	gateway_mac: string;
 	/** Stable identifier derived from `gateway_mac` and `network`. */
 	key: string;
+	last_seen?: string;
 	/** Subnet in CIDR notation, e.g. `192.168.1.0/24`. */
 	network: string;
 	online_count: number;

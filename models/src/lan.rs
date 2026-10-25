@@ -43,6 +43,8 @@ pub struct LanSummary {
     pub gateway_mac: String,
     pub device_count: i64,
     pub online_count: i64,
+    pub last_seen: Option<DateTime<Utc>>,
+    pub departments: Vec<String>,
     /// Public IP of one of its devices, which usually all share it.
     pub public_ip: Option<String>,
     pub public_ip_name: Option<String>,
