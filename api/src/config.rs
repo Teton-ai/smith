@@ -288,7 +288,7 @@ impl Config {
             max_concurrent_uploads: env::var("MAX_CONCURRENT_UPLOADS")
                 .ok()
                 .and_then(|s| s.parse().ok())
-                .unwrap_or(48),
+                .unwrap_or(64),
         })
     }
 }
