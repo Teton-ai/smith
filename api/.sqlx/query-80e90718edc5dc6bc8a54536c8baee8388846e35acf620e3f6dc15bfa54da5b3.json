@@ -33,7 +33,8 @@
                 "ntp_server_in_use",
                 "ntp_synchronized",
                 "check_interval_s",
-                "ap_country_code"
+                "ap_country_code",
+                "wifi_power_save_on"
               ]
             }
           }

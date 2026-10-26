@@ -488,6 +488,7 @@ pub enum DeviceSetting {
     NtpSynchronized,
     CheckIntervalS,
     ApCountryCode,
+    WifiPowerSaveOn,
 }
 
 /// Why a managed setting is not running its wanted value.
@@ -541,6 +542,9 @@ pub struct SettingsReport {
     pub check_interval_s: Option<i32>,
     /// Country the access point of the current connection announces.
     pub ap_country_code: Option<String>,
+    /// Power save as the Wi-Fi interface runs it (`iw`), which an NM default
+    /// only reaches on the next activation.
+    pub wifi_power_save_on: Option<bool>,
     pub read_errors: Vec<DeviceSetting>,
     /// Version of the last `ApplySettings` this device applied; `None` until it
     /// receives one.
