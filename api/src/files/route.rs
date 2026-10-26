@@ -4,7 +4,7 @@ use crate::handlers::AuthedDevice;
 use crate::home::add_commands;
 use crate::middlewares::authorization;
 use crate::relay::{self, Direction, Kind};
-use crate::storage::Storage;
+use crate::storage::{Storage, UploadMetrics};
 use crate::user::CurrentUser;
 use axum::{
     Extension,
@@ -606,6 +606,7 @@ pub async fn upload_file(
         &state.config.assets_bucket_name,
         &pending.object_key,
         &mut reader,
+        &mut UploadMetrics::start(),
     )
     .await
     .map_err(|e| {
