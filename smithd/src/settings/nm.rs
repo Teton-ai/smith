@@ -146,12 +146,24 @@ fn parse_nm_powersave(value: &str) -> Result<i16> {
 /// `[connection]` last, the first value found for a key wins. A section with
 /// `match-device` counts only when it selects `wifi` (without it, it applies to
 /// every device); a matching `stop-match=yes` ends the search for its kind.
+/// The autoconnect retries default is a `[main]` key; NetworkManager rejects
+/// `connection.autoconnect-retries` in `[connection]` as unknown.
 pub fn parse_nm_config(text: &str, wifi: Option<&WifiInterface>) -> Result<NmConfig> {
     let (mut powersave, mut retries, mut cloned_mac, mut scan_rand_mac) = (None, None, None, None);
     let (mut device_stopped, mut connection_stopped) = (false, false);
     let mut sections = parse_nm_sections(text);
     sections.sort_by_key(|section| !section.name.contains('-'));
     for section in sections {
+        if section.name == "main" {
+            if let Some((_, value)) = section
+                .entries
+                .iter()
+                .find(|(key, _)| key == "autoconnect-retries-default")
+            {
+                retries = Some(parse_int(value)?);
+            }
+            continue;
+        }
         let kind = if section.name == "device" || section.name.starts_with("device-") {
             "device"
         } else if section.name == "connection" || section.name.starts_with("connection-") {
@@ -184,9 +196,6 @@ pub fn parse_nm_config(text: &str, wifi: Option<&WifiInterface>) -> Result<NmCon
                 }
                 ("connection", "wifi.powersave") if powersave.is_none() => {
                     powersave = Some(parse_nm_powersave(value)?)
-                }
-                ("connection", "connection.autoconnect-retries") if retries.is_none() => {
-                    retries = Some(parse_int(value)?)
                 }
                 ("connection", "wifi.cloned-mac-address") if cloned_mac.is_none() => {
                     cloned_mac = Some(value.clone())
@@ -257,10 +266,21 @@ mod tests {
             config,
             NmConfig {
                 wifi_powersave: NM_POWERSAVE_DISABLE,
-                autoconnect_retries: 0,
+                autoconnect_retries: NM_DEFAULT_AUTOCONNECT_RETRIES,
                 cloned_mac: "stable".to_owned(),
                 scan_rand_mac: NM_DEFAULT_SCAN_RAND_MAC,
             }
         );
+    }
+
+    #[test]
+    fn autoconnect_retries_default_comes_from_main() {
+        let text = "[main]\nplugins=ifupdown,keyfile\nautoconnect-retries-default=0\n\n\
+            [connection]\nconnection.autoconnect-retries=7\n";
+        let config = parse_nm_config(text, Some(&vendor_wifi())).unwrap();
+        assert_eq!(config.autoconnect_retries, 0);
+
+        let config = parse_nm_config("[main]\nplugins=keyfile\n", Some(&vendor_wifi())).unwrap();
+        assert_eq!(config.autoconnect_retries, NM_DEFAULT_AUTOCONNECT_RETRIES);
     }
 }
