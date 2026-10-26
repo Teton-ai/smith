@@ -23,13 +23,13 @@ pub struct Storage;
 
 /// Records in-flight, outcome and size for one upload; Drop covers every exit path.
 /// `result` is "client" while waiting on the request body, "error" while waiting on S3.
-struct UploadMetrics {
-    bytes: u64,
+pub struct UploadMetrics {
+    pub bytes: u64,
     result: &'static str,
 }
 
 impl UploadMetrics {
-    fn start() -> Self {
+    pub fn start() -> Self {
         metrics::increment_gauge!("smith_uploads_in_flight", 1.0);
         Self {
             bytes: 0,
@@ -74,13 +74,13 @@ impl Storage {
         bucket_name: &str,
         object_key: &str,
         reader: &mut R,
+        metrics: &mut UploadMetrics,
     ) -> anyhow::Result<u16>
     where
         R: tokio::io::AsyncRead + Unpin + ?Sized,
     {
         const CONTENT_TYPE: &str = "application/octet-stream";
 
-        let mut metrics = UploadMetrics::start();
         let bucket = Self::bucket(bucket_name)?;
 
         // Anything that fits in one chunk skips multipart entirely.

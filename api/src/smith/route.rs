@@ -3,7 +3,7 @@ use crate::device::{
 };
 use crate::handlers::AuthedDevice;
 use crate::ip_address::extract_client_ip;
-use crate::storage::Storage;
+use crate::storage::{Storage, UploadMetrics};
 use crate::{State, storage};
 use axum::body::{Body, Bytes};
 use axum::extract::{ConnectInfo, Multipart, Path, Query};
@@ -19,9 +19,9 @@ use smith::utils::schema::{
 use std::convert::Infallible;
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::SystemTime;
+use std::time::{Instant, SystemTime};
 use tokio_util::io::StreamReader;
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 use utoipa::{IntoParams, ToSchema};
 
 #[utoipa::path(
@@ -314,7 +314,7 @@ fn uploads_busy() -> Response {
   ),
 )]
 pub async fn upload_file(
-    _device: AuthedDevice,
+    device: AuthedDevice,
     path: Option<Path<String>>,
     Extension(state): Extension<State>,
     Query(params): Query<UploadParams>,
@@ -336,10 +336,25 @@ pub async fn upload_file(
         file_name.push('/');
     }
 
+    let started = Instant::now();
+    let mut upload_metrics = UploadMetrics::start();
+    let log_abort = |bytes: u64, key: &str| {
+        warn!(
+            serial = %device.serial_number,
+            bytes,
+            elapsed_ms = started.elapsed().as_millis() as u64,
+            key,
+            "Device upload aborted by client"
+        );
+    };
+
     let field = multipart
         .next_field()
         .await
-        .map_err(|_| StatusCode::BAD_REQUEST)?
+        .map_err(|_| {
+            log_abort(0, &file_name);
+            StatusCode::BAD_REQUEST
+        })?
         .ok_or(StatusCode::BAD_REQUEST)?;
     let Some(local_file_name) = field.file_name() else {
         return Err(StatusCode::BAD_REQUEST.into());
@@ -360,10 +375,11 @@ pub async fn upload_file(
         })
     }));
 
-    let status = Storage::stream_to_s3(bucket_name, &file_name, &mut reader)
+    let status = Storage::stream_to_s3(bucket_name, &file_name, &mut reader, &mut upload_metrics)
         .await
         .map_err(|err| {
             if client_error.load(Ordering::Relaxed) {
+                log_abort(upload_metrics.bytes, &file_name);
                 return StatusCode::BAD_REQUEST;
             }
             error!("Failed to stream {file_name} to S3: {err:?}");
