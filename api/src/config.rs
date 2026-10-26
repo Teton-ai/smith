@@ -3,6 +3,7 @@ use axum::http::HeaderMap;
 use std::collections::HashMap;
 use std::env;
 use std::time::Duration;
+use tokio::sync::Semaphore;
 use tracing::{info, warn};
 
 #[derive(Debug)]
@@ -213,6 +214,7 @@ pub struct Config {
     /// confirmed.
     pub network_gc_interval_seconds: u64,
     pub mcp: Option<McpConfig>,
+    pub max_concurrent_uploads: usize,
 }
 
 /// Builds the M2M-sub -> holder map from one env var per known holder. Missing
@@ -233,6 +235,40 @@ fn known_holders_from_env() -> HashMap<String, String> {
         ),
     }
     holders
+}
+
+fn parse_max_concurrent_uploads(value: Option<&str>) -> anyhow::Result<usize> {
+    let limit = value.and_then(|s| s.parse().ok()).unwrap_or(64);
+    anyhow::ensure!(
+        limit <= Semaphore::MAX_PERMITS,
+        "MAX_CONCURRENT_UPLOADS must not exceed {}",
+        Semaphore::MAX_PERMITS
+    );
+    Ok(limit)
+}
+
+#[cfg(test)]
+mod upload_limit_tests {
+    use super::parse_max_concurrent_uploads;
+    use tokio::sync::Semaphore;
+
+    #[test]
+    fn upload_limit_defaults_and_bounds() {
+        let max = Semaphore::MAX_PERMITS;
+        let maximum = max.to_string();
+        let oversized = (Semaphore::MAX_PERMITS + 1).to_string();
+        let cases = [
+            ("missing", None, Some(64)),
+            ("malformed", Some("invalid"), Some(64)),
+            ("zero", Some("0"), Some(0)),
+            ("normal", Some("32"), Some(32)),
+            ("maximum", Some(maximum.as_str()), Some(max)),
+            ("oversized", Some(oversized.as_str()), None),
+        ];
+        for (name, value, expected) in cases {
+            assert_eq!(parse_max_concurrent_uploads(value).ok(), expected, "{name}");
+        }
+    }
 }
 
 impl Config {
@@ -284,6 +320,9 @@ impl Config {
                 // finds nothing new.
                 .unwrap_or(2 * 24 * 60 * 60),
             mcp,
+            max_concurrent_uploads: parse_max_concurrent_uploads(
+                env::var("MAX_CONCURRENT_UPLOADS").ok().as_deref(),
+            )?,
         })
     }
 }

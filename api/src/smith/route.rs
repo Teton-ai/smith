@@ -7,8 +7,8 @@ use crate::storage::Storage;
 use crate::{State, storage};
 use axum::body::{Body, Bytes};
 use axum::extract::{ConnectInfo, Multipart, Path, Query};
-use axum::http::{HeaderMap, StatusCode};
-use axum::response::Response;
+use axum::http::{HeaderMap, StatusCode, header};
+use axum::response::{IntoResponse, Response};
 use axum::{Extension, Json};
 use futures::{StreamExt, stream};
 use serde::{Deserialize, Serialize};
@@ -288,6 +288,15 @@ pub struct UploadParams {
     sensitive: bool,
 }
 
+// The reject carries no body: the device-side proxy forwards any JSON body to its caller as a success.
+fn uploads_busy() -> Response {
+    (
+        StatusCode::SERVICE_UNAVAILABLE,
+        [(header::RETRY_AFTER, "30")],
+    )
+        .into_response()
+}
+
 #[utoipa::path(
   post,
   path = "/smith/upload",
@@ -297,7 +306,8 @@ pub struct UploadParams {
   responses(
         (status = 200, description = "File uploaded successfully", body = UploadResult),
         (status = 400, description = "Bad request"),
-        (status = 500, description = "Internal server error")
+        (status = 500, description = "Internal server error"),
+        (status = 503, description = "Too many uploads in progress, retry after the Retry-After delay")
   ),
   security(
         ("device_token" = [])
@@ -309,7 +319,11 @@ pub async fn upload_file(
     Extension(state): Extension<State>,
     Query(params): Query<UploadParams>,
     mut multipart: Multipart,
-) -> Result<Json<UploadResult>, StatusCode> {
+) -> axum::response::Result<Json<UploadResult>> {
+    let Ok(_permit) = state.upload_permits.try_acquire() else {
+        return Err(uploads_busy().into());
+    };
+
     let bucket_name = if params.sensitive {
         &state.config.data_engine_bucket_name
     } else {
@@ -328,12 +342,12 @@ pub async fn upload_file(
         .map_err(|_| StatusCode::BAD_REQUEST)?
         .ok_or(StatusCode::BAD_REQUEST)?;
     let Some(local_file_name) = field.file_name() else {
-        return Err(StatusCode::BAD_REQUEST);
+        return Err(StatusCode::BAD_REQUEST.into());
     };
     file_name.push_str(local_file_name);
 
     if file_name.is_empty() {
-        return Err(StatusCode::BAD_REQUEST);
+        return Err(StatusCode::BAD_REQUEST.into());
     }
 
     // A broken multipart body is the client's fault; only an S3 failure is ours.
@@ -358,7 +372,7 @@ pub async fn upload_file(
 
     if !(200..300).contains(&status) {
         error!("S3 rejected {file_name} with status {status}");
-        return Err(StatusCode::INTERNAL_SERVER_ERROR);
+        return Err(StatusCode::INTERNAL_SERVER_ERROR.into());
     }
 
     Ok(Json(UploadResult {
@@ -448,4 +462,20 @@ pub async fn test_upload(body: axum::body::Bytes) -> Json<UploadTestResult> {
     Json(UploadTestResult {
         bytes_received: body.len(),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn uploads_busy_is_503_with_retry_after_and_empty_body() {
+        let resp = uploads_busy();
+        assert_eq!(resp.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(resp.headers()[header::RETRY_AFTER], "30");
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        assert!(body.is_empty());
+    }
 }
