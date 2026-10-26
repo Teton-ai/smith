@@ -129,7 +129,7 @@ impl Actor {
             .insert_result(vec![SafeCommandResponse {
                 id: CMD_ID_REPORT_SETTINGS,
                 command: SafeCommandRx::ReportSettings {
-                    report: reading.report.clone(),
+                    report: Box::new(reading.report.clone()),
                 },
                 status: 0,
             }])

@@ -32,7 +32,8 @@
                 "ntp_fallback_servers",
                 "ntp_server_in_use",
                 "ntp_synchronized",
-                "check_interval_s"
+                "check_interval_s",
+                "ap_country_code"
               ]
             }
           }

@@ -3227,6 +3227,33 @@ pub async fn load_device_settings(
     .transpose()
     .map_err(|err| sqlx::Error::Decode(Box::new(err)))?;
 
+    let reported = match reported {
+        Some(mut reported) => {
+            reported.report.apply_status = sqlx::query!(
+                r#"
+                SELECT setting as "setting: schema::DeviceSetting",
+                       state as "state: schema::SettingApplyState",
+                       reason
+                FROM device_setting_apply_status
+                WHERE device_id = $1
+                ORDER BY setting
+                "#,
+                device.id
+            )
+            .fetch_all(pool)
+            .await?
+            .into_iter()
+            .map(|row| schema::SettingStatus {
+                setting: row.setting,
+                state: row.state,
+                reason: row.reason,
+            })
+            .collect();
+            Some(reported)
+        }
+        None => None,
+    };
+
     let unsupported = match device.distribution_id {
         Some(distribution_id) => {
             sqlx::query_scalar!(
