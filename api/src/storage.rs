@@ -24,7 +24,7 @@ pub struct Storage;
 /// Records in-flight, outcome and size for one upload; Drop covers every exit path.
 /// `result` is "client" while waiting on the request body, "error" while waiting on S3.
 pub struct UploadMetrics {
-    pub bytes: u64,
+    bytes: u64,
     result: &'static str,
 }
 

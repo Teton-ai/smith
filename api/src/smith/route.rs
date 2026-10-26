@@ -18,7 +18,7 @@ use smith::utils::schema::{
 };
 use std::convert::Infallible;
 use std::net::SocketAddr;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Instant, SystemTime};
 use tokio_util::io::StreamReader;
 use tracing::{debug, error, info, warn};
@@ -338,12 +338,13 @@ pub async fn upload_file(
 
     let started = Instant::now();
     let mut upload_metrics = UploadMetrics::start();
-    let log_abort = |bytes: u64, key: &str| {
+    let log_abort = |bytes: u64, key: &str, err: &dyn std::fmt::Display| {
         warn!(
             serial = %device.serial_number,
             bytes,
             elapsed_ms = started.elapsed().as_millis() as u64,
             key,
+            error = %err,
             "Device upload aborted by client"
         );
     };
@@ -351,8 +352,8 @@ pub async fn upload_file(
     let field = multipart
         .next_field()
         .await
-        .map_err(|_| {
-            log_abort(0, &file_name);
+        .map_err(|err| {
+            log_abort(0, &file_name, &err);
             StatusCode::BAD_REQUEST
         })?
         .ok_or(StatusCode::BAD_REQUEST)?;
@@ -367,19 +368,24 @@ pub async fn upload_file(
 
     // A broken multipart body is the client's fault; only an S3 failure is ours.
     let client_error = AtomicBool::new(false);
+    let received = AtomicU64::new(0);
     // Streaming the field costs a couple of chunks of memory, not the whole file.
     let mut reader = StreamReader::new(field.map(|chunk| {
-        chunk.map_err(|err| {
-            client_error.store(true, Ordering::Relaxed);
-            std::io::Error::other(err)
-        })
+        chunk
+            .inspect(|bytes| {
+                received.fetch_add(bytes.len() as u64, Ordering::Relaxed);
+            })
+            .map_err(|err| {
+                client_error.store(true, Ordering::Relaxed);
+                std::io::Error::other(err)
+            })
     }));
 
     let status = Storage::stream_to_s3(bucket_name, &file_name, &mut reader, &mut upload_metrics)
         .await
         .map_err(|err| {
             if client_error.load(Ordering::Relaxed) {
-                log_abort(upload_metrics.bytes, &file_name);
+                log_abort(received.load(Ordering::Relaxed), &file_name, &err);
                 return StatusCode::BAD_REQUEST;
             }
             error!("Failed to stream {file_name} to S3: {err:?}");
