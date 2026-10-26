@@ -11,6 +11,7 @@ concurrency:
 
 permissions:
   contents: read
+  id-token: write
 
 jobs:
   publish:
@@ -24,6 +25,9 @@ jobs:
         with:
           node-version: 22
           registry-url: https://registry.npmjs.org
+
+      - name: Setup npm for trusted publishing
+        run: npm install --global npm@11
 
       - name: Resolve version from Cargo.toml
         run: |
@@ -41,8 +45,6 @@ jobs:
 
       - name: Publish
         run: npm publish -w @teton/smith-ui
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Report Status
         if: always()
