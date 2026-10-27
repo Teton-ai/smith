@@ -379,7 +379,7 @@ pub async fn issue_commands_to_devices(
         return Err(StatusCode::BAD_REQUEST);
     }
 
-    if !authorization::reject_unknown_commands(&bundle_commands.commands) {
+    if !authorization::reject_unqueueable_commands(&bundle_commands.commands) {
         return Err(StatusCode::BAD_REQUEST);
     }
 
@@ -856,6 +856,9 @@ pub async fn create_recipe(
     if !authorization::check(current_user, "recipes", "write") {
         return Err(StatusCode::FORBIDDEN);
     }
+    if !authorization::reject_unqueueable_commands(&recipe.commands) {
+        return Err(StatusCode::BAD_REQUEST);
+    }
 
     let commands = serde_json::to_value(&recipe.commands).map_err(|err| {
         error!("Failed to serialize recipe commands into JSON {err}");
@@ -910,6 +913,9 @@ pub async fn update_recipe(
 ) -> Result<StatusCode, StatusCode> {
     if !authorization::check(current_user, "recipes", "write") {
         return Err(StatusCode::FORBIDDEN);
+    }
+    if !authorization::reject_unqueueable_commands(&recipe.commands) {
+        return Err(StatusCode::BAD_REQUEST);
     }
 
     let commands = serde_json::to_value(&recipe.commands).map_err(|err| {
