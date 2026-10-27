@@ -785,6 +785,54 @@ pub async fn add_commands(
 /// struct and the table in step; `apply_status` has no column and goes to
 /// `device_setting_apply_status`. Inside an open transaction `begin` makes this
 /// a savepoint, so a failure rolls back only this report.
+pub async fn save_settings_report(
+    conn: &mut PgConnection,
+    device_id: i32,
+    report: &schema::SettingsReport,
+) -> Result<()> {
+    let statuses = serde_json::to_value(&report.apply_status)?;
+    let report = serde_json::to_value(report)?;
+    let mut tx = conn.begin().await?;
+    sqlx::query!(
+        "DELETE FROM device_settings_reported WHERE device_id = $1",
+        device_id
+    )
+    .execute(&mut *tx)
+    .await?;
+    sqlx::query!(
+        r#"
+        INSERT INTO device_settings_reported
+        SELECT * FROM jsonb_populate_record(
+            NULL::device_settings_reported,
+            $2::jsonb || jsonb_build_object('device_id', $1::int4, 'reported_at', NOW())
+        )
+        "#,
+        device_id,
+        report,
+    )
+    .execute(&mut *tx)
+    .await?;
+    sqlx::query!(
+        "DELETE FROM device_setting_apply_status WHERE device_id = $1",
+        device_id
+    )
+    .execute(&mut *tx)
+    .await?;
+    sqlx::query!(
+        r#"
+        INSERT INTO device_setting_apply_status (device_id, setting, state, reason)
+        SELECT $1, s.setting, s.state, s.reason
+        FROM jsonb_populate_recordset(NULL::device_setting_apply_status, $2::jsonb) s
+        "#,
+        device_id,
+        statuses,
+    )
+    .execute(&mut *tx)
+    .await?;
+    tx.commit().await?;
+    Ok(())
+}
+
 /// Clears the needs-a-newer-smithd flag and stores the report read back after
 /// the apply, as smithd sent it. A failed read (status -1) comes with an empty
 /// report, which is not stored. In its own savepoint, so a failure leaves the
@@ -827,54 +875,6 @@ async fn flag_needs_newer_smithd(
          )",
         device_id,
         command_id
-    )
-    .execute(&mut *tx)
-    .await?;
-    tx.commit().await?;
-    Ok(())
-}
-
-pub async fn save_settings_report(
-    conn: &mut PgConnection,
-    device_id: i32,
-    report: &schema::SettingsReport,
-) -> Result<()> {
-    let statuses = serde_json::to_value(&report.apply_status)?;
-    let report = serde_json::to_value(report)?;
-    let mut tx = conn.begin().await?;
-    sqlx::query!(
-        "DELETE FROM device_settings_reported WHERE device_id = $1",
-        device_id
-    )
-    .execute(&mut *tx)
-    .await?;
-    sqlx::query!(
-        r#"
-        INSERT INTO device_settings_reported
-        SELECT * FROM jsonb_populate_record(
-            NULL::device_settings_reported,
-            $2::jsonb || jsonb_build_object('device_id', $1::int4, 'reported_at', NOW())
-        )
-        "#,
-        device_id,
-        report,
-    )
-    .execute(&mut *tx)
-    .await?;
-    sqlx::query!(
-        "DELETE FROM device_setting_apply_status WHERE device_id = $1",
-        device_id
-    )
-    .execute(&mut *tx)
-    .await?;
-    sqlx::query!(
-        r#"
-        INSERT INTO device_setting_apply_status (device_id, setting, state, reason)
-        SELECT $1, s.setting, s.state, s.reason
-        FROM jsonb_populate_recordset(NULL::device_setting_apply_status, $2::jsonb) s
-        "#,
-        device_id,
-        statuses,
     )
     .execute(&mut *tx)
     .await?;
