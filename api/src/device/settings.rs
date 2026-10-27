@@ -619,13 +619,20 @@ fn can_apply_settings(current_user: CurrentUser) -> bool {
         && authorization::check(current_user, "devices", "write")
 }
 
+/// Who queues an Apply: a user, or the API for a device still flagged for its
+/// automatic apply.
+enum ApplyBy {
+    User(i32),
+    AutoApply,
+}
+
 /// One `ApplySettings` per device with its resolved set at its current
 /// version, queued as one staggered bundle. Devices at version 0 have nothing
 /// to apply and are skipped; `None` when none is left.
 async fn queue_settings_apply(
     pool: &sqlx::PgPool,
     device_ids: &[i32],
-    user_id: Option<i32>,
+    by: ApplyBy,
 ) -> Result<Option<BundleReceipt>, StatusCode> {
     let db_error = |context: &'static str| {
         move |err: sqlx::Error| {
@@ -640,7 +647,27 @@ async fn queue_settings_apply(
     // No row lock: every home poll writes its device row, so locking thousands
     // of devices would stall their polls until the bundle commits. An edit
     // landing after the resolution only leaves the device pending.
-    let commands: Vec<(i32, SafeCommandRequest)> = load_settings_inputs(&mut *tx, device_ids)
+    let (device_ids, user_id) = match by {
+        ApplyBy::User(user_id) => (device_ids.to_vec(), Some(user_id)),
+        // Claimed in this transaction, so a concurrent Apply or a second poll
+        // that also read the flag finds it cleared and queues nothing.
+        ApplyBy::AutoApply => {
+            let claimed = sqlx::query_scalar!(
+                "UPDATE device SET settings_auto_apply = false
+                 WHERE id = ANY($1) AND settings_auto_apply
+                 RETURNING id",
+                device_ids
+            )
+            .fetch_all(&mut *tx)
+            .await
+            .map_err(db_error("Failed to claim the automatic settings apply"))?;
+            (claimed, None)
+        }
+    };
+    if device_ids.is_empty() {
+        return Ok(None);
+    }
+    let commands: Vec<(i32, SafeCommandRequest)> = load_settings_inputs(&mut *tx, &device_ids)
         .await
         .map_err(db_error("Failed to resolve settings to apply"))?
         .into_iter()
@@ -710,7 +737,7 @@ pub async fn apply_settings_for_device(
     }
     let resolved_id = resolve_device_id(&device_id, &state.pg_pool).await?;
     let device_ids = active_devices(&state.pg_pool, &[resolved_id]).await?;
-    queue_settings_apply(&state.pg_pool, &device_ids, Some(user_id))
+    queue_settings_apply(&state.pg_pool, &device_ids, ApplyBy::User(user_id))
         .await?
         .map(|receipt| (StatusCode::ACCEPTED, Json(receipt)))
         .ok_or(StatusCode::BAD_REQUEST)
@@ -742,7 +769,7 @@ pub async fn apply_settings_for_devices(
         return Err(StatusCode::FORBIDDEN);
     }
     let device_ids = active_devices(&state.pg_pool, &body.devices).await?;
-    queue_settings_apply(&state.pg_pool, &device_ids, Some(user_id))
+    queue_settings_apply(&state.pg_pool, &device_ids, ApplyBy::User(user_id))
         .await?
         .map(|receipt| (StatusCode::ACCEPTED, Json(receipt)))
         .ok_or(StatusCode::BAD_REQUEST)
@@ -792,7 +819,7 @@ pub async fn auto_apply_settings(pool: &sqlx::PgPool, device_id: i32) -> Result<
     .execute(pool)
     .await
     .map_err(db_error("Failed to set the first settings version"))?;
-    queue_settings_apply(pool, &[device_id], None).await?;
+    queue_settings_apply(pool, &[device_id], ApplyBy::AutoApply).await?;
     Ok(())
 }
 
@@ -1425,13 +1452,13 @@ mod tests {
             .execute(&pool)
             .await?;
         assert_eq!(
-            queue_settings_apply(&pool, &ids[..1], Some(user_id))
+            queue_settings_apply(&pool, &ids[..1], ApplyBy::User(user_id))
                 .await
                 .map(|r| r.is_none()),
             Ok(true)
         );
 
-        let receipt = queue_settings_apply(&pool, &ids, Some(user_id))
+        let receipt = queue_settings_apply(&pool, &ids, ApplyBy::User(user_id))
             .await
             .unwrap()
             .unwrap();
@@ -1524,6 +1551,23 @@ mod tests {
         .fetch_one(&pool)
         .await?;
         assert_eq!(author, None, "a system bundle");
+
+        // A poll that read the flag before an Apply cleared it queues nothing.
+        sqlx::query("UPDATE device SET settings_auto_apply = true WHERE id = $1")
+            .bind(device_id)
+            .execute(&pool)
+            .await?;
+        sqlx::query("UPDATE device SET settings_auto_apply = false WHERE id = $1")
+            .bind(device_id)
+            .execute(&pool)
+            .await?;
+        assert_eq!(
+            queue_settings_apply(&pool, &[device_id], ApplyBy::AutoApply)
+                .await
+                .map(|receipt| receipt.is_none()),
+            Ok(true)
+        );
+        assert_eq!(applies().await?.len(), 1);
         Ok(())
     }
 
