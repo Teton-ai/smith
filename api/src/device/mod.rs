@@ -15,6 +15,7 @@ use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
 pub mod route;
+pub mod settings;
 
 // TODO: Change this, this needs to be device and the other is PublicDevice, API type
 #[derive(Debug, Serialize, utoipa::ToSchema, Clone)]

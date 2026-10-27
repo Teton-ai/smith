@@ -35,7 +35,7 @@ use tracing::{error, warn};
 use utoipa::IntoParams;
 
 const DEVICE_TAG: &str = "device";
-const DEVICES_TAG: &str = "devices";
+pub(crate) const DEVICES_TAG: &str = "devices";
 
 #[utoipa::path(
     get,
@@ -3131,152 +3131,6 @@ pub async fn get_audit_for_device(
     }))
 }
 
-#[derive(serde::Serialize, utoipa::ToSchema)]
-pub struct ReportedSettings {
-    #[serde(flatten)]
-    pub report: schema::SettingsReport,
-    /// When the device last sent this report (on change, daily or on request).
-    pub reported_at: DateTime<Utc>,
-}
-
-#[derive(serde::Serialize, utoipa::ToSchema)]
-pub struct DeviceSettings {
-    /// `None` when the device never reported (smithd without settings
-    /// reporting).
-    pub reported: Option<ReportedSettings>,
-    /// Settings devices of this distribution cannot have; show them as not
-    /// used rather than as read errors.
-    pub unsupported: Vec<schema::DeviceSetting>,
-}
-
-#[utoipa::path(
-    get,
-    path = "/devices/{device_id}/settings",
-    params(
-        ("device_id" = String, Path, description = "Device ID or serial number"),
-    ),
-    responses(
-        (status = StatusCode::OK, description = "Settings the device reports it runs", body = DeviceSettings),
-        (status = StatusCode::NOT_FOUND, description = "Device not found"),
-        (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to retrieve settings"),
-    ),
-    security(
-        ("auth_token" = [])
-    ),
-    tag = DEVICES_TAG
-)]
-pub async fn get_settings_for_device(
-    Path(device_id): Path<String>,
-    Extension(state): Extension<State>,
-) -> Result<Json<DeviceSettings>, StatusCode> {
-    load_device_settings(&state.pg_pool, &device_id)
-        .await
-        .map_err(|err| {
-            error!("Failed to fetch settings for device: {err}");
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?
-        .map(Json)
-        .ok_or(StatusCode::NOT_FOUND)
-}
-
-/// `None` when no device matches `device_id` (id or serial number).
-pub async fn load_device_settings(
-    pool: &sqlx::PgPool,
-    device_id: &str,
-) -> Result<Option<DeviceSettings>, sqlx::Error> {
-    let Some(device) = sqlx::query!(
-        r#"
-        SELECT d.id, r.distribution_id as "distribution_id?"
-        FROM device d
-        LEFT JOIN release r ON r.id = d.release_id
-        WHERE
-            CASE
-                WHEN $1 ~ '^[0-9]+$' AND length($1) <= 10 THEN
-                    d.id = $1::int4
-                ELSE
-                    d.serial_number = $1
-            END
-        "#,
-        device_id
-    )
-    .fetch_optional(pool)
-    .await?
-    else {
-        return Ok(None);
-    };
-
-    // Read back by column name into the same struct the device sent, so the
-    // column list lives only in the table (see `save_settings_report`).
-    let reported = sqlx::query!(
-        r#"
-        SELECT to_jsonb(dsr) - 'device_id' - 'reported_at' AS "report!",
-               reported_at
-        FROM device_settings_reported dsr
-        WHERE device_id = $1
-        "#,
-        device.id
-    )
-    .fetch_optional(pool)
-    .await?
-    .map(|row| {
-        serde_json::from_value(row.report).map(|report| ReportedSettings {
-            report,
-            reported_at: row.reported_at,
-        })
-    })
-    .transpose()
-    .map_err(|err| sqlx::Error::Decode(Box::new(err)))?;
-
-    let reported = match reported {
-        Some(mut reported) => {
-            reported.report.apply_status = sqlx::query!(
-                r#"
-                SELECT setting as "setting: schema::DeviceSetting",
-                       state as "state: schema::SettingApplyState",
-                       reason
-                FROM device_setting_apply_status
-                WHERE device_id = $1
-                ORDER BY setting
-                "#,
-                device.id
-            )
-            .fetch_all(pool)
-            .await?
-            .into_iter()
-            .map(|row| schema::SettingStatus {
-                setting: row.setting,
-                state: row.state,
-                reason: row.reason,
-            })
-            .collect();
-            Some(reported)
-        }
-        None => None,
-    };
-
-    let unsupported = match device.distribution_id {
-        Some(distribution_id) => {
-            sqlx::query_scalar!(
-                r#"
-            SELECT setting as "setting: schema::DeviceSetting"
-            FROM distribution_unsupported_setting
-            WHERE distribution_id = $1
-            ORDER BY setting
-            "#,
-                distribution_id
-            )
-            .fetch_all(pool)
-            .await?
-        }
-        None => Vec::new(),
-    };
-
-    Ok(Some(DeviceSettings {
-        reported,
-        unsupported,
-    }))
-}
-
 #[utoipa::path(
     get,
     path = "/devices/{device_id}/configured-networks",
@@ -3441,7 +3295,10 @@ pub async fn get_wifi_scan_for_device(
     Ok(Json(results))
 }
 
-async fn resolve_device_id(device_id: &str, pool: &sqlx::PgPool) -> Result<i32, StatusCode> {
+pub(crate) async fn resolve_device_id(
+    device_id: &str,
+    pool: &sqlx::PgPool,
+) -> Result<i32, StatusCode> {
     sqlx::query_scalar!(
         r#"
         SELECT id FROM device
@@ -4056,10 +3913,8 @@ pub async fn apply_device_intent(
 
 #[cfg(test)]
 mod tests {
-    use super::{load_device_settings, parse_search_terms, wire_credentials};
+    use super::{parse_search_terms, wire_credentials};
     use serde_json::json;
-    use smith::utils::schema::{DeviceSetting, SettingsReport};
-    use sqlx::PgPool;
 
     // Mirrors the legacy inline heuristic in apply_device_intent exactly.
     // Used to verify the dual-read path produces byte-identical output for
@@ -4173,60 +4028,6 @@ mod tests {
         assert_eq!(parse_search_terms(&search).len(), 50);
         assert_eq!(parse_search_terms(&search)[0], "0");
         assert_eq!(parse_search_terms(&search)[49], "49");
-    }
-
-    #[sqlx::test]
-    #[ignore = "needs the compose Postgres; run with --test-threads=1"]
-    async fn device_settings_never_reported_then_reported(pool: PgPool) -> anyhow::Result<()> {
-        let distribution_id: i32 = sqlx::query_scalar(
-            "INSERT INTO distribution (name) VALUES ('orin-nx-l4t-35.3.1-test') RETURNING id",
-        )
-        .fetch_one(&pool)
-        .await?;
-        sqlx::query(
-            "INSERT INTO distribution_unsupported_setting (distribution_id, setting)
-             VALUES ($1, 'busy_th'), ($1, 'busy_diff')",
-        )
-        .bind(distribution_id)
-        .execute(&pool)
-        .await?;
-        let release_id: i32 = sqlx::query_scalar(
-            "INSERT INTO release (distribution_id, version) VALUES ($1, '1.0.0') RETURNING id",
-        )
-        .bind(distribution_id)
-        .fetch_one(&pool)
-        .await?;
-        let device_id: i32 = sqlx::query_scalar(
-            "INSERT INTO device (serial_number, release_id) VALUES ('settings-get', $1) RETURNING id",
-        )
-        .bind(release_id)
-        .fetch_one(&pool)
-        .await?;
-
-        assert!(
-            load_device_settings(&pool, "unknown-serial")
-                .await?
-                .is_none()
-        );
-
-        let settings = load_device_settings(&pool, "settings-get").await?.unwrap();
-        assert!(settings.reported.is_none());
-        assert_eq!(
-            settings.unsupported,
-            vec![DeviceSetting::BusyDiff, DeviceSetting::BusyTh]
-        );
-
-        let report = SettingsReport {
-            wireless_mode: Some(95),
-            read_errors: vec![DeviceSetting::Bgscan],
-            ..Default::default()
-        };
-        crate::home::save_settings_report(&mut *pool.acquire().await?, device_id, &report).await?;
-        let settings = load_device_settings(&pool, &device_id.to_string())
-            .await?
-            .unwrap();
-        assert_eq!(settings.reported.unwrap().report, report);
-        Ok(())
     }
 }
 

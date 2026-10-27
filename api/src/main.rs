@@ -364,7 +364,7 @@ async fn start_main_server(
         .routes(routes!(device::route::get_command_for_device))
         .routes(routes!(device::route::get_services_for_device))
         .routes(routes!(device::route::get_audit_for_device))
-        .routes(routes!(device::route::get_settings_for_device))
+        .routes(routes!(device::settings::get_settings_for_device))
         .routes(routes!(device::route::get_configured_networks_for_device))
         .routes(routes!(device::route::get_wifi_scan_for_device))
         .routes(routes!(
