@@ -338,13 +338,21 @@ pub async fn upload_file(
 
     let started = Instant::now();
     let mut upload_metrics = UploadMetrics::start();
-    let log_abort = |bytes: u64, key: &str, err: &dyn std::fmt::Display| {
+    let log_abort = |bytes: u64, key: &str, err: &(dyn std::error::Error + 'static)| {
+        // Display of multipart errors hides the cause, so log the whole source chain.
+        let mut error = err.to_string();
+        let mut source = err.source();
+        while let Some(cause) = source {
+            error.push_str(": ");
+            error.push_str(&cause.to_string());
+            source = cause.source();
+        }
         warn!(
             serial = %device.serial_number,
             bytes,
             elapsed_ms = started.elapsed().as_millis() as u64,
             key,
-            error = %err,
+            error,
             "Device upload aborted by client"
         );
     };
@@ -385,7 +393,7 @@ pub async fn upload_file(
         .await
         .map_err(|err| {
             if client_error.load(Ordering::Relaxed) {
-                log_abort(received.load(Ordering::Relaxed), &file_name, &err);
+                log_abort(received.load(Ordering::Relaxed), &file_name, &*err);
                 return StatusCode::BAD_REQUEST;
             }
             error!("Failed to stream {file_name} to S3: {err:?}");
