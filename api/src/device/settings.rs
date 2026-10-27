@@ -440,7 +440,7 @@ pub async fn save_settings_changes(
     if requested.len() > 1 && matches!(changes.hostname, Some(SettingChange::Pin(_))) {
         return Err(SettingsEditError::Invalid);
     }
-    // Serializes concurrent edits and Applies of the same devices.
+    // Serializes concurrent edits of the same devices.
     let locked = sqlx::query_scalar!(
         "SELECT id FROM device WHERE id = ANY($1) AND NOT archived ORDER BY id FOR UPDATE",
         &requested
@@ -640,13 +640,9 @@ async fn queue_settings_apply(
         .begin()
         .await
         .map_err(db_error("Failed to start transaction"))?;
-    // Held until the bundle commits, so an edit can't land between the
-    // resolution and the queued commands.
-    sqlx::query("SELECT id FROM device WHERE id = ANY($1) ORDER BY id FOR UPDATE")
-        .bind(device_ids)
-        .execute(&mut *tx)
-        .await
-        .map_err(db_error("Failed to lock devices to apply settings to"))?;
+    // No row lock: every home poll writes its device row, so locking thousands
+    // of devices would stall their polls until the bundle commits. An edit
+    // landing after the resolution only leaves the device pending.
     let commands: Vec<(i32, SafeCommandRequest)> = load_settings_inputs(&mut *tx, device_ids)
         .await
         .map_err(db_error("Failed to resolve settings to apply"))?
@@ -676,7 +672,7 @@ async fn queue_settings_apply(
     let receipt = queue_bundle(&mut tx, &entries, user_id).await?;
     let queued: Vec<i32> = commands.iter().map(|(device, _)| *device).collect();
     sqlx::query!(
-        "UPDATE device SET settings_auto_apply = false WHERE id = ANY($1)",
+        "UPDATE device SET settings_auto_apply = false WHERE id = ANY($1) AND settings_auto_apply",
         &queued
     )
     .execute(&mut *tx)

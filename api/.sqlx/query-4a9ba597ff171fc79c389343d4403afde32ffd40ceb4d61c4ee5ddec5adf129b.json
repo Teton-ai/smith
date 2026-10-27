@@ -1,0 +1,19 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO command_queue (id, device_id, cmd, continue_on_error, canceled, bundle, available_at)\n        SELECT u.id, u.device_id, u.cmd, u.continue_on_error, false, $5, COALESCE(u.placeholder, now())\n        FROM UNNEST($1::int4[], $2::int4[], $3::jsonb[], $4::bool[], $6::timestamptz[])\n            AS u(id, device_id, cmd, continue_on_error, placeholder)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int4Array",
+        "Int4Array",
+        "JsonbArray",
+        "BoolArray",
+        "Uuid",
+        "TimestamptzArray"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "4a9ba597ff171fc79c389343d4403afde32ffd40ceb4d61c4ee5ddec5adf129b"
+}

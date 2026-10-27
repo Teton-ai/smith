@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT nextval(pg_get_serial_sequence('command_queue', 'id'))::int4 AS \"id!\"\n           FROM generate_series(1, $1::int4)",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "fdf0836829efdf71d2245ec5835026aa6e202211ffcfeb434c6da998a16f217c"
+}

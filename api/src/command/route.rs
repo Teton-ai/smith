@@ -202,8 +202,14 @@ pub async fn queue_bundle(
     // drifting per row).
     let far_future_placeholder = Utc::now() + Duration::from_secs(24 * 60 * 60);
 
-    let mut queued = Vec::with_capacity(entries.iter().map(|(_, c)| c.len()).sum());
-    let mut pending_corrections: Vec<(i32, i32)> = Vec::new();
+    // Rows in wave order, inserted in one statement: one round trip per row
+    // would keep a bundle of thousands of devices open for seconds.
+    let row_count: usize = entries.iter().map(|(_, c)| c.len()).sum();
+    let mut row_devices = Vec::with_capacity(row_count);
+    let mut row_cmds = Vec::with_capacity(row_count);
+    let mut row_continue = Vec::with_capacity(row_count);
+    let mut row_placeholders = Vec::with_capacity(row_count);
+    let mut row_offsets = Vec::with_capacity(row_count);
     for DeviceWaveOffset { device_id, offset } in &wave_offsets {
         let commands = commands_by_device
             .get(device_id)
@@ -220,45 +226,70 @@ pub async fn queue_bundle(
                 Some(paced_from) if i >= paced_from => *offset,
                 _ => None,
             };
-            let placeholder = row_offset.map(|_| far_future_placeholder);
             let cmd = serde_json::to_value(command.command.clone()).map_err(|err| {
                 error!("Failed to serialize command into JSON {err}");
                 StatusCode::INTERNAL_SERVER_ERROR
             })?;
-            let row = sqlx::query!(
-                r#"INSERT INTO command_queue (device_id, cmd, continue_on_error, canceled, bundle, available_at)
-                VALUES (
-                    $1,
-                    $2::jsonb,
-                    $3,
-                    false,
-                    $4,
-                    COALESCE($5, now())
-                )
-                RETURNING id"#,
-                device_id,
-                cmd,
-                command.continue_on_error,
-                bundle_id.uuid,
-                placeholder
-            )
-            .fetch_one(&mut *conn)
-            .await
-            .map_err(|err| {
-                error!("Failed to insert command for device {err}");
-                StatusCode::INTERNAL_SERVER_ERROR
-            })?;
-
-            if let Some(offset) = row_offset {
-                pending_corrections.push((row.id, offset.as_secs() as i32));
-            }
-
-            queued.push(QueuedCommand {
-                device: *device_id,
-                cmd_id: row.id,
-            });
+            row_devices.push(*device_id);
+            row_cmds.push(cmd);
+            row_continue.push(command.continue_on_error);
+            row_placeholders.push(row_offset.map(|_| far_future_placeholder));
+            row_offsets.push(row_offset);
         }
     }
+
+    // Ids are reserved first so each row's id is known by position, without
+    // relying on the order an INSERT ... RETURNING hands them back.
+    let ids: Vec<i32> = sqlx::query_scalar!(
+        r#"SELECT nextval(pg_get_serial_sequence('command_queue', 'id'))::int4 AS "id!"
+           FROM generate_series(1, $1::int4)"#,
+        i32::try_from(row_count).unwrap_or(i32::MAX)
+    )
+    .fetch_all(&mut *conn)
+    .await
+    .map_err(|err| {
+        error!("Failed to reserve command ids {err}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+    if ids.len() != row_count {
+        error!(
+            "Reserved {} command ids for {row_count} commands",
+            ids.len()
+        );
+        return Err(StatusCode::INTERNAL_SERVER_ERROR);
+    }
+    sqlx::query!(
+        r#"INSERT INTO command_queue (id, device_id, cmd, continue_on_error, canceled, bundle, available_at)
+        SELECT u.id, u.device_id, u.cmd, u.continue_on_error, false, $5, COALESCE(u.placeholder, now())
+        FROM UNNEST($1::int4[], $2::int4[], $3::jsonb[], $4::bool[], $6::timestamptz[])
+            AS u(id, device_id, cmd, continue_on_error, placeholder)"#,
+        &ids,
+        &row_devices,
+        &row_cmds,
+        &row_continue,
+        bundle_id.uuid,
+        &row_placeholders as &[Option<chrono::DateTime<Utc>>],
+    )
+    .execute(&mut *conn)
+    .await
+    .map_err(|err| {
+        error!("Failed to insert commands for devices {err}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    let pending_corrections: Vec<(i32, i32)> = ids
+        .iter()
+        .zip(&row_offsets)
+        .filter_map(|(id, offset)| offset.map(|offset| (*id, offset.as_secs() as i32)))
+        .collect();
+    let queued: Vec<QueuedCommand> = ids
+        .iter()
+        .zip(&row_devices)
+        .map(|(id, device)| QueuedCommand {
+            device: *device,
+            cmd_id: *id,
+        })
+        .collect();
 
     if !pending_corrections.is_empty() {
         let ids: Vec<i32> = pending_corrections.iter().map(|(id, _)| *id).collect();
