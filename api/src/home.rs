@@ -535,6 +535,20 @@ pub async fn save_responses(
                     error!(device_id, "Failed to store settings report: {err:?}");
                 }
             }
+            SafeCommandRx::ApplySettingsResult { .. } => {
+                // Display only: a failure here must not drop the rest of the poll.
+                if let Err(err) = save_apply_settings_result(&mut tx, device_id, &response).await {
+                    error!(device_id, "Failed to store settings apply result: {err:?}");
+                }
+            }
+            SafeCommandRx::Unknown if response.status == -1 && response.id > 0 => {
+                if let Err(err) = flag_needs_newer_smithd(&mut tx, device_id, response.id).await {
+                    error!(
+                        device_id,
+                        "Failed to flag a device needing a newer smithd: {err:?}"
+                    );
+                }
+            }
             _ => {}
         }
         let mut response_json = match &response.command {
@@ -771,6 +785,55 @@ pub async fn add_commands(
 /// struct and the table in step; `apply_status` has no column and goes to
 /// `device_setting_apply_status`. Inside an open transaction `begin` makes this
 /// a savepoint, so a failure rolls back only this report.
+/// Clears the needs-a-newer-smithd flag and stores the report read back after
+/// the apply, as smithd sent it. A failed read (status -1) comes with an empty
+/// report, which is not stored. In its own savepoint, so a failure leaves the
+/// poll's transaction usable.
+async fn save_apply_settings_result(
+    conn: &mut PgConnection,
+    device_id: i32,
+    response: &schema::SafeCommandResponse,
+) -> Result<()> {
+    let SafeCommandRx::ApplySettingsResult { report, .. } = &response.command else {
+        return Ok(());
+    };
+    let mut tx = conn.begin().await?;
+    sqlx::query!(
+        "UPDATE device SET settings_needs_newer_smithd = false WHERE id = $1",
+        device_id
+    )
+    .execute(&mut *tx)
+    .await?;
+    if response.status == 0 {
+        save_settings_report(&mut tx, device_id, report).await?;
+    }
+    tx.commit().await?;
+    Ok(())
+}
+
+/// Flags the device when the command it could not parse was an
+/// `ApplySettings`, so the dashboard can say why nothing was applied.
+async fn flag_needs_newer_smithd(
+    conn: &mut PgConnection,
+    device_id: i32,
+    command_id: i32,
+) -> Result<()> {
+    let mut tx = conn.begin().await?;
+    sqlx::query!(
+        "UPDATE device SET settings_needs_newer_smithd = true
+         WHERE id = $1 AND EXISTS (
+             SELECT 1 FROM command_queue
+             WHERE id = $2 AND device_id = $1 AND cmd::jsonb ? 'ApplySettings'
+         )",
+        device_id,
+        command_id
+    )
+    .execute(&mut *tx)
+    .await?;
+    tx.commit().await?;
+    Ok(())
+}
+
 pub async fn save_settings_report(
     conn: &mut PgConnection,
     device_id: i32,
@@ -821,7 +884,7 @@ pub async fn save_settings_report(
 
 #[cfg(test)]
 mod tests {
-    use super::{map_key_mgmt, save_settings_report, schema};
+    use super::{map_key_mgmt, save_responses, save_settings_report, schema};
     use sqlx::PgPool;
 
     #[test]
@@ -931,6 +994,108 @@ mod tests {
         .fetch_one(&pool)
         .await?;
         assert_eq!(statuses, 0);
+        Ok(())
+    }
+
+    #[sqlx::test]
+    #[ignore = "needs the compose Postgres; run with --test-threads=1"]
+    async fn apply_settings_results_store_the_report(pool: PgPool) -> anyhow::Result<()> {
+        use schema::{HomePost, SafeCommandResponse, SafeCommandRx, SettingsReport};
+
+        let device_id: i32 =
+            sqlx::query_scalar("INSERT INTO device (serial_number) VALUES ('r') RETURNING id")
+                .fetch_one(&pool)
+                .await?;
+        let command_id: i32 = sqlx::query_scalar(
+            "WITH b AS (INSERT INTO command_bundles DEFAULT VALUES RETURNING uuid)
+             INSERT INTO command_queue (device_id, cmd, continue_on_error, canceled, bundle)
+             SELECT $1, '{\"ApplySettings\": {\"version\": 2, \"settings\": {}}}', false, false, uuid
+             FROM b
+             RETURNING id",
+        )
+        .bind(device_id)
+        .fetch_one(&pool)
+        .await?;
+        let post = |command: SafeCommandRx, status: i32| {
+            HomePost::new(
+                vec![SafeCommandResponse {
+                    id: command_id,
+                    command,
+                    status,
+                }],
+                None,
+                vec![],
+            )
+        };
+        let stored = |pool: PgPool| async move {
+            sqlx::query_as::<_, (Option<i32>, Option<String>)>(
+                "SELECT applied_version, hostname FROM device_settings_reported WHERE device_id = $1",
+            )
+            .bind(device_id)
+            .fetch_optional(&pool)
+            .await
+        };
+
+        // An older smithd answers Unknown: the device shows as needing a newer
+        // smithd until it answers an apply.
+        save_responses(device_id, "r", post(SafeCommandRx::Unknown, -1), &pool).await?;
+        let needs_newer = |pool: PgPool| async move {
+            crate::device::settings::load_device_settings(&pool, "r")
+                .await
+                .map(|settings| settings.map(|s| s.needs_newer_smithd))
+        };
+        assert_eq!(needs_newer(pool.clone()).await?, Some(true));
+
+        // Applied: the report is stored as smithd sent it.
+        let applied = SafeCommandRx::ApplySettingsResult {
+            applied_version: 2,
+            reverted: false,
+            report: Box::new(SettingsReport {
+                applied_version: Some(2),
+                hostname: Some("a".to_owned()),
+                ..Default::default()
+            }),
+        };
+        save_responses(device_id, "r", post(applied, 0), &pool).await?;
+        assert_eq!(needs_newer(pool.clone()).await?, Some(false));
+        assert_eq!(
+            stored(pool.clone()).await?,
+            Some((Some(2), Some("a".to_owned())))
+        );
+
+        // A failed read is answered with an empty report: nothing is stored.
+        let failed = SafeCommandRx::ApplySettingsResult {
+            applied_version: 2,
+            reverted: false,
+            report: Box::default(),
+        };
+        save_responses(device_id, "r", post(failed, -1), &pool).await?;
+        assert_eq!(
+            stored(pool.clone()).await?,
+            Some((Some(2), Some("a".to_owned())))
+        );
+
+        // A command that isn't an ApplySettings answered Unknown doesn't flag it.
+        let ping: i32 = sqlx::query_scalar(
+            "INSERT INTO command_queue (device_id, cmd, continue_on_error, canceled, bundle)
+             SELECT $1, '\"Ping\"', false, false, bundle FROM command_queue WHERE id = $2
+             RETURNING id",
+        )
+        .bind(device_id)
+        .bind(command_id)
+        .fetch_one(&pool)
+        .await?;
+        let unknown_ping = HomePost::new(
+            vec![SafeCommandResponse {
+                id: ping,
+                command: SafeCommandRx::Unknown,
+                status: -1,
+            }],
+            None,
+            vec![],
+        );
+        save_responses(device_id, "r", unknown_ping, &pool).await?;
+        assert_eq!(needs_newer(pool.clone()).await?, Some(false));
         Ok(())
     }
 

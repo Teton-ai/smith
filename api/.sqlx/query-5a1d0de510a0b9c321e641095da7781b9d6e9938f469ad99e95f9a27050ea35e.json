@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE device SET settings_needs_newer_smithd = false WHERE id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "5a1d0de510a0b9c321e641095da7781b9d6e9938f469ad99e95f9a27050ea35e"
+}
