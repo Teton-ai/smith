@@ -237,6 +237,7 @@ async fn start_main_server(
     // go down to a day, so the real cleanup has to run here.
     files::spawn_sweeper(state.pg_pool.clone(), &config.assets_bucket_name);
     os::spawn_sweeper(state.pg_pool.clone(), &config.packages_bucket_name);
+    smith::uploads::spawn_sweeper(state.pg_pool.clone());
 
     // Every pre-existing network has zero ledger references until App API
     // seeds it, so this only runs once seeding is confirmed (network::gc).
@@ -447,6 +448,10 @@ async fn start_main_server(
         .routes(routes!(telemetry::route::modem))
         .routes(routes!(telemetry::route::victoria))
         .routes(routes!(smith::route::upload_file))
+        .routes(routes!(smith::uploads::open))
+        .routes(routes!(smith::uploads::put_part))
+        .routes(routes!(smith::uploads::complete))
+        .routes(routes!(smith::uploads::abort))
         .routes(routes!(smith::route::download_file))
         .routes(routes!(smith::route::fetch_package))
         .routes(routes!(smith::route::list_release_packages))

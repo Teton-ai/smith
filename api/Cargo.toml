@@ -24,6 +24,7 @@ jsonwebtoken = "10.3"
 ed25519-dalek = { version = "2.1.1", features = ["pkcs8", "pem"] }
 base64 = "0.22"
 sha2 = "0.10"
+quick-xml = "0.37"
 reqwest = { version = "0.12.8", features = ["json"] }
 sentry = { version = "0.45.0", features = ["tower-axum-matched-path", "panic"] }
 serde = { workspace = true }

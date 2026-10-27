@@ -337,6 +337,7 @@ dependencies = [
  "metrics-exporter-prometheus",
  "metrics-util",
  "models",
+ "quick-xml 0.37.5",
  "rand 0.10.3",
  "reqwest",
  "rmcp",

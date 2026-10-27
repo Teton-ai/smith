@@ -138,21 +138,8 @@ impl Storage {
             let response = bucket
                 .complete_multipart_upload(object_key, &upload_id, parts)
                 .await?;
-            // A failed complete must be an Err so the abort below runs.
             let status = response.status_code();
-            if !(200..300).contains(&status) {
-                anyhow::bail!(
-                    "CompleteMultipartUpload for {object_key} failed with status {status}"
-                )
-            }
-            // S3 can embed the real error in a 200 body instead of the status.
-            let body = response.as_str()?;
-            if body.contains("<Error>") {
-                anyhow::bail!(
-                    "CompleteMultipartUpload for {object_key} returned an error body: {}",
-                    body.chars().take(200).collect::<String>()
-                )
-            }
+            validate_completion(status, response.as_str()?)?;
             Ok::<u16, anyhow::Error>(status)
         }
         .await;
@@ -362,15 +349,73 @@ impl Storage {
             .complete_multipart_upload(object_key, upload_id, parts)
             .await?;
 
-        // `complete_multipart_upload` hands back the response without checking
-        // it, and S3 reports some failures here with a 200 body, so the status
-        // is inspected rather than assumed.
-        let status = response.status_code();
-        if !(200..300).contains(&status) {
-            anyhow::bail!("CompleteMultipartUpload for {object_key} failed with status {status}");
-        }
+        validate_completion(response.status_code(), response.as_str()?)?;
 
         Ok(())
+    }
+
+    /// Keeps other parts when S3 rejects this part. rust-s3's chunk helper aborts them.
+    pub async fn upload_session_part(
+        bucket_name: &str,
+        object_key: &str,
+        upload_id: &str,
+        part_number: i32,
+        bytes: Vec<u8>,
+    ) -> anyhow::Result<String> {
+        let urls =
+            Self::presign_upload_parts(bucket_name, object_key, upload_id, &[part_number], 900)
+                .await?;
+        let (_, url) = urls
+            .first()
+            .ok_or_else(|| anyhow::anyhow!("Missing part URL"))?;
+        let response = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(300))
+            .redirect(reqwest::redirect::Policy::none())
+            .build()?
+            .put(url)
+            .body(bytes)
+            .send()
+            .await
+            .map_err(|e| e.without_url())?;
+        anyhow::ensure!(response.status().is_success(), "S3 rejected upload part");
+        Ok(response
+            .headers()
+            .get("etag")
+            .ok_or_else(|| anyhow::anyhow!("S3 part has no ETag"))?
+            .to_str()?
+            .to_owned())
+    }
+
+    /// Checks the bytes, including recovery after a lost completion reply.
+    pub async fn matches_object(
+        bucket_name: &str,
+        object_key: &str,
+        size: i64,
+        checksum: &str,
+    ) -> anyhow::Result<bool> {
+        use futures::StreamExt;
+        use sha2::{Digest, Sha256};
+        let bucket = Self::bucket(bucket_name)?;
+        let mut response = match bucket.get_object_stream(object_key).await {
+            Ok(response) => response,
+            Err(s3::error::S3Error::HttpFailWithBody(404, _)) => return Ok(false),
+            Err(e) => return Err(e.into()),
+        };
+        if response.status_code == 404 {
+            return Ok(false);
+        }
+        anyhow::ensure!(response.status_code == 200, "S3 object read failed");
+        let mut digest = Sha256::new();
+        let mut received = 0i64;
+        while let Some(chunk) = response.bytes().next().await {
+            let chunk = chunk?;
+            received += chunk.len() as i64;
+            if received > size {
+                return Ok(false);
+            }
+            digest.update(&chunk);
+        }
+        Ok(received == size && format!("{:x}", digest.finalize()) == checksum)
     }
 
     /// Discards an upload and the parts already stored for it. Uncompleted
@@ -395,9 +440,43 @@ impl Storage {
     }
 }
 
+fn validate_completion(status: u16, body: &str) -> anyhow::Result<()> {
+    anyhow::ensure!(
+        (200..300).contains(&status),
+        "S3 completion status {status}"
+    );
+    let mut reader = quick_xml::Reader::from_str(body);
+    loop {
+        match reader.read_event()? {
+            quick_xml::events::Event::Start(e) => {
+                anyhow::ensure!(
+                    e.local_name().as_ref() == b"CompleteMultipartUploadResult",
+                    "S3 completion error body"
+                );
+                return Ok(());
+            }
+            quick_xml::events::Event::Eof => anyhow::bail!("S3 completion body is empty"),
+            _ => {}
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::UploadMetrics;
+    use super::{UploadMetrics, validate_completion};
+
+    #[test]
+    fn completion_rejects_http_and_embedded_errors() {
+        assert!(validate_completion(200, "<?xml version=\"1.0\"?>\n<CompleteMultipartUploadResult><ETag>ok</ETag></CompleteMultipartUploadResult>").is_ok());
+        for (status, body) in [
+            (500, "<Error/>"),
+            (200, " \n<Error><Code>InternalError</Code></Error>"),
+            (200, "<Error />"),
+            (200, ""),
+        ] {
+            assert!(validate_completion(status, body).is_err());
+        }
+    }
     use metrics_util::{DebugValue, DebuggingRecorder};
 
     #[test]
