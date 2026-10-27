@@ -114,7 +114,7 @@ jobs:
               throw new Error(`No merger found for release PR #${pr.number}`);
             }
             // Use the PR's merger so workflow reruns keep the original attribution.
-            core.setOutput('body', `Released by @${pr.merged_by.login} · [PR #${pr.number}](${pr.html_url})`);
+            core.setOutput('body', `Released by @${pr.merged_by.login}`);
 
       - name: Create GitHub Release
         if: |
