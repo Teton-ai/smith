@@ -41,9 +41,6 @@ pub struct DeviceSettings {
     /// Bumped by every edit that changes the pins; ahead of the reported
     /// `applied_version` while edits are not applied.
     pub settings_version: i32,
-    /// The device answered its latest `ApplySettings` as a command it does not
-    /// know.
-    pub needs_newer_smithd: bool,
 }
 
 /// One value per managed field, as stored in `device_settings` and
@@ -918,7 +915,7 @@ pub async fn load_device_settings(
 ) -> Result<Option<DeviceSettings>, sqlx::Error> {
     let Some(device) = sqlx::query!(
         r#"
-        SELECT d.id, d.settings_needs_newer_smithd
+        SELECT d.id
         FROM device d
         WHERE
             CASE
@@ -996,7 +993,6 @@ pub async fn load_device_settings(
         wanted: inputs.pins,
         defaults: inputs.defaults,
         settings_version: inputs.settings_version,
-        needs_newer_smithd: device.settings_needs_newer_smithd,
     }))
 }
 

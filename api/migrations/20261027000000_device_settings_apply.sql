@@ -2,11 +2,7 @@
 -- the api into one full set per device when someone presses Apply.
 
 -- Bumped on every edit of the device's pins; 0 means nothing to apply.
--- settings_needs_newer_smithd: the device answered its latest ApplySettings as
--- a command it does not know; cleared by its next ApplySettingsResult.
-ALTER TABLE device
-    ADD COLUMN settings_version int4 NOT NULL DEFAULT 0,
-    ADD COLUMN settings_needs_newer_smithd boolean NOT NULL DEFAULT false;
+ALTER TABLE device ADD COLUMN settings_version int4 NOT NULL DEFAULT 0;
 
 -- A device with this set gets its resolved settings on a home poll, without an
 -- Apply press, once it has defaults or pins. Devices that exist now start false

@@ -171,8 +171,7 @@ impl CommandQueueExecutor {
                 },
             },
             // Understood but not applied by this build yet: answered like an
-            // unknown command, so the api shows the device as needing a newer
-            // smithd.
+            // unknown command, so the command history shows why nothing changed.
             SafeCommandTx::ApplySettings { version, .. } => {
                 warn!(
                     command_id = action.id,
