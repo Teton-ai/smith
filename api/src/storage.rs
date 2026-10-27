@@ -377,7 +377,18 @@ impl Storage {
             .send()
             .await
             .map_err(|e| e.without_url())?;
-        anyhow::ensure!(response.status().is_success(), "S3 rejected upload part");
+        if !response.status().is_success() {
+            let status = response.status().as_u16();
+            let body = response.text().await.map_err(|e| e.without_url())?;
+            if missing_upload_body(&body) {
+                return Err(s3::error::S3Error::HttpFailWithBody(
+                    status,
+                    "<Error><Code>NoSuchUpload</Code></Error>".into(),
+                )
+                .into());
+            }
+            anyhow::bail!("S3 rejected upload part ({status})");
+        }
         Ok(response
             .headers()
             .get("etag")
@@ -440,7 +451,31 @@ impl Storage {
     }
 }
 
+pub fn is_missing_upload(error: &anyhow::Error) -> bool {
+    error.downcast_ref::<s3::error::S3Error>().is_some_and(|error| {
+        matches!(error, s3::error::S3Error::HttpFailWithBody(_, body) if missing_upload_body(body))
+    })
+}
+
+fn missing_upload_body(body: &str) -> bool {
+    let mut reader = quick_xml::Reader::from_str(body);
+    loop {
+        match reader.read_event() {
+            Ok(quick_xml::events::Event::Start(e)) if e.local_name().as_ref() == b"Code" => {
+                return reader
+                    .read_text(e.name())
+                    .is_ok_and(|code| code == "NoSuchUpload");
+            }
+            Ok(quick_xml::events::Event::Eof) | Err(_) => return false,
+            _ => {}
+        }
+    }
+}
+
 fn validate_completion(status: u16, body: &str) -> anyhow::Result<()> {
+    if missing_upload_body(body) {
+        return Err(s3::error::S3Error::HttpFailWithBody(status, body.to_owned()).into());
+    }
     anyhow::ensure!(
         (200..300).contains(&status),
         "S3 completion status {status}"
@@ -468,6 +503,11 @@ mod tests {
     #[test]
     fn completion_rejects_http_and_embedded_errors() {
         assert!(validate_completion(200, "<?xml version=\"1.0\"?>\n<CompleteMultipartUploadResult><ETag>ok</ETag></CompleteMultipartUploadResult>").is_ok());
+        for status in [200, 404] {
+            let error = validate_completion(status, "<Error><Code>NoSuchUpload</Code></Error>")
+                .unwrap_err();
+            assert!(super::is_missing_upload(&error));
+        }
         for (status, body) in [
             (500, "<Error/>"),
             (200, " \n<Error><Code>InternalError</Code></Error>"),

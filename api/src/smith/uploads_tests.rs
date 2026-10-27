@@ -59,14 +59,21 @@ fn test_state(pool: PgPool) -> anyhow::Result<State> {
 }
 
 fn router(state: State) -> Router {
+    router_at(state, "/smith")
+}
+
+fn router_at(state: State, prefix: &str) -> Router {
     Router::new()
-        .route("/smith/upload-sessions", post(open))
+        .route(&format!("{prefix}/upload-sessions"), post(open))
         .route(
-            "/smith/upload-sessions/:id/parts/:number",
+            &format!("{prefix}/upload-sessions/:id/parts/:number"),
             put(put_part).layer(axum::extract::DefaultBodyLimit::max(PART_SIZE as usize)),
         )
-        .route("/smith/upload-sessions/:id/complete", post(complete))
-        .route("/smith/upload-sessions/:id", delete(abort))
+        .route(
+            &format!("{prefix}/upload-sessions/:id/complete"),
+            post(complete),
+        )
+        .route(&format!("{prefix}/upload-sessions/:id"), delete(abort))
         .layer(Extension(state))
 }
 
@@ -82,6 +89,15 @@ async fn durable_routes_verify_bytes_binding_completion_and_cleanup() -> anyhow:
     let app = router(state.clone());
     let server = tokio::spawn(async move { axum::serve(listener, app).await });
     let client = reqwest::Client::new();
+    let capacity = state.upload_permits.acquire_many(4).await?;
+    let response = client
+        .post(format!("{base}/{}/complete", Uuid::new_v4()))
+        .bearer_auth(&token)
+        .send()
+        .await?;
+    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(response.headers()["retry-after"], "5");
+    drop(capacity);
     let bytes: Vec<u8> = (0..PART_SIZE + 29).map(|n| (n % 251) as u8).collect();
     let checksum = format!("{:x}", Sha256::digest(&bytes));
     for sensitive in [false, true] {
@@ -223,6 +239,77 @@ async fn durable_routes_verify_bytes_binding_completion_and_cleanup() -> anyhow:
             .await?;
         assert_eq!(receipt.url, Some(format!("s3://{bucket}/{key}")));
     }
+    for missing_on_complete in [false, true] {
+        let key = format!("expired-s3/{}", Uuid::new_v4());
+        let body = b"replacement upload";
+        let identity = serde_json::json!({"key": key, "size_bytes":body.len(), "checksum":format!("{:x}", Sha256::digest(body)), "sensitive":false});
+        let opened: UploadPlan = client
+            .post(&base)
+            .bearer_auth(&token)
+            .json(&identity)
+            .send()
+            .await?
+            .json()
+            .await?;
+        let url = format!("{base}/{}", opened.session_id);
+        let put = || {
+            client
+                .put(format!("{url}/parts/1"))
+                .bearer_auth(&token)
+                .header("x-content-sha256", format!("{:x}", Sha256::digest(body)))
+                .body(body.to_vec())
+        };
+        if missing_on_complete {
+            assert_eq!(put().send().await?.status(), StatusCode::OK);
+        }
+        let old: String =
+            sqlx::query_scalar("SELECT upload_id FROM device_upload_session WHERE id=$1")
+                .bind(opened.session_id)
+                .fetch_one(&pool)
+                .await?;
+        Storage::abort_multipart("upload-assets", &key, &old).await?;
+        let response = if missing_on_complete {
+            client
+                .post(format!("{url}/complete"))
+                .bearer_auth(&token)
+                .send()
+                .await?
+        } else {
+            put().send().await?
+        };
+        assert_eq!(response.status(), StatusCode::CONFLICT);
+        let fresh: UploadPlan = client
+            .post(&base)
+            .bearer_auth(&token)
+            .json(&identity)
+            .send()
+            .await?
+            .json()
+            .await?;
+        assert_eq!(fresh.session_id, opened.session_id);
+        assert_eq!(fresh.missing_parts, vec![1]);
+        assert!(fresh.confirmed_parts.is_empty());
+        let replacement: String =
+            sqlx::query_scalar("SELECT upload_id FROM device_upload_session WHERE id=$1")
+                .bind(opened.session_id)
+                .fetch_one(&pool)
+                .await?;
+        assert_ne!(old, replacement);
+        assert_eq!(put().send().await?.status(), StatusCode::OK);
+        assert_eq!(
+            client
+                .post(format!("{url}/complete"))
+                .bearer_auth(&token)
+                .send()
+                .await?
+                .status(),
+            StatusCode::OK
+        );
+        assert_eq!(
+            Storage::download_from_s3("upload-assets", &key).await?,
+            body
+        );
+    }
     let invalid: UploadPlan = client.post(&base).bearer_auth(&token).json(&serde_json::json!({
         "key":format!("bad-checksum/{}",Uuid::new_v4()), "size_bytes":3, "checksum":"0".repeat(64), "sensitive":false,
     })).send().await?.json().await?;
@@ -276,10 +363,12 @@ async fn durable_routes_verify_bytes_binding_completion_and_cleanup() -> anyhow:
         .send()
         .await?;
     assert_eq!(response.status(), StatusCode::OK);
-    sqlx::query("UPDATE device_upload_session SET touched_at=now()-interval '15 days' WHERE id=$1")
-        .bind(abandoned.session_id)
-        .execute(&pool)
-        .await?;
+    sqlx::query(
+        "UPDATE device_upload_session SET created_at=now()-interval '13 hours' WHERE id=$1",
+    )
+    .bind(abandoned.session_id)
+    .execute(&pool)
+    .await?;
     sweep(&pool).await.map_err(|s| anyhow::anyhow!(s))?;
     let remaining: i64 =
         sqlx::query_scalar("SELECT count(*) FROM device_upload_session WHERE id=$1")
@@ -304,7 +393,7 @@ async fn durable_routes_verify_bytes_binding_completion_and_cleanup() -> anyhow:
 
 #[tokio::test]
 #[ignore = "Requires Postgres, S3, and the Plex test binary; see api/tests/resumable-uploads.md"]
-async fn plex_contract_resumes_across_real_smith_routes() -> anyhow::Result<()> {
+async fn brain_contract_resumes_across_real_smith_routes() -> anyhow::Result<()> {
     use axum::{middleware, response::IntoResponse};
     use std::sync::atomic::{AtomicBool, Ordering};
     let pool = PgPool::connect(&std::env::var("UPLOAD_TEST_DATABASE_URL")?).await?;
@@ -316,8 +405,8 @@ async fn plex_contract_resumes_across_real_smith_routes() -> anyhow::Result<()> 
     let trace = attempts.clone();
     let fail_part = Arc::new(AtomicBool::new(true));
     let lose_complete = Arc::new(AtomicBool::new(true));
-    let app = router(state).layer(middleware::from_fn(
-        move |request: axum::extract::Request, next: middleware::Next| {
+    let app = router_at(state, "").layer(middleware::from_fn(
+        move |mut request: axum::extract::Request, next: middleware::Next| {
             let fail_part = fail_part.clone();
             let lose_complete = lose_complete.clone();
             let trace = trace.clone();
@@ -330,8 +419,14 @@ async fn plex_contract_resumes_across_real_smith_routes() -> anyhow::Result<()> 
                     trace.lock().await.push(number);
                 }
                 if path.ends_with("/parts/2") && fail_part.swap(false, Ordering::SeqCst) {
+                    axum::body::to_bytes(request.into_body(), PART_SIZE as usize)
+                        .await
+                        .unwrap();
                     return StatusCode::SERVICE_UNAVAILABLE.into_response();
                 }
+                request
+                    .headers_mut()
+                    .insert("authorization", "Bearer test-device-jwt".parse().unwrap());
                 let response = next.run(request).await;
                 if path.ends_with("/complete")
                     && response.status().is_success()
@@ -344,16 +439,16 @@ async fn plex_contract_resumes_across_real_smith_routes() -> anyhow::Result<()> 
         },
     ));
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
-    let base = format!("http://{}/smith", listener.local_addr()?);
+    let base = format!("http://{}", listener.local_addr()?);
     let server = tokio::spawn(async move { axum::serve(listener, app).await });
     let key = format!("contract/{}.mp4", Uuid::new_v4());
     let output = tokio::time::timeout(
         Duration::from_secs(180),
-        tokio::process::Command::new(std::env::var("UPLOAD_TEST_PLEX_BINARY")?)
+        tokio::process::Command::new(std::env::var("UPLOAD_TEST_BRAIN_BINARY")?)
             .args([
                 "--ignored",
                 "--exact",
-                "server::upload::resume_tests::real_smith_upload",
+                "s3_uploader::resumable::tests::real_smith_upload",
                 "--nocapture",
             ])
             .env("UPLOAD_TEST_SMITH_URL", base)
@@ -364,9 +459,10 @@ async fn plex_contract_resumes_across_real_smith_routes() -> anyhow::Result<()> 
     .await??;
     assert!(
         output.status.success(),
-        "{}\n{}",
+        "{}\n{}\nattempts: {:?}",
         String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
+        String::from_utf8_lossy(&output.stderr),
+        *attempts.lock().await
     );
     assert_eq!(*attempts.lock().await, vec![1, 2, 2]);
     let expected: Vec<u8> = (0..PART_SIZE + 27).map(|n| (n % 251) as u8).collect();

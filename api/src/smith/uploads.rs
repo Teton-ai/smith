@@ -1,5 +1,10 @@
 use crate::{State, handlers::AuthedDevice, storage::Storage};
-use axum::{Extension, Json, extract::Path, http::StatusCode};
+use axum::{
+    Extension, Json,
+    extract::Path,
+    http::StatusCode,
+    response::{IntoResponse, Response},
+};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use sqlx::{FromRow, PgPool, Postgres, Transaction};
@@ -9,6 +14,26 @@ use uuid::Uuid;
 
 pub const PART_SIZE: i64 = 5 * 1024 * 1024;
 const MAX_SIZE: i64 = 512_000_000;
+
+pub struct UploadError(StatusCode);
+
+impl From<StatusCode> for UploadError {
+    fn from(status: StatusCode) -> Self {
+        Self(status)
+    }
+}
+
+impl IntoResponse for UploadError {
+    fn into_response(self) -> Response {
+        let mut response = self.0.into_response();
+        if self.0 == StatusCode::SERVICE_UNAVAILABLE {
+            response
+                .headers_mut()
+                .insert("retry-after", axum::http::HeaderValue::from_static("5"));
+        }
+        response
+    }
+}
 
 #[derive(Deserialize, ToSchema)]
 pub struct OpenUpload {
@@ -45,6 +70,7 @@ struct Session {
     checksum: String,
     upload_id: Option<String>,
     completed_at: Option<chrono::DateTime<chrono::Utc>>,
+    created_at: chrono::DateTime<chrono::Utc>,
 }
 
 fn internal(error: impl std::fmt::Display) -> StatusCode {
@@ -136,7 +162,7 @@ pub async fn open(
     device: AuthedDevice,
     Extension(state): Extension<State>,
     Json(request): Json<OpenUpload>,
-) -> Result<Json<UploadPlan>, StatusCode> {
+) -> Result<Json<UploadPlan>, UploadError> {
     validate(&request)?;
     let bucket = if request.sensitive {
         &state.config.data_engine_bucket_name
@@ -154,6 +180,16 @@ pub async fn open(
         "SELECT * FROM device_upload_session WHERE device_id=$1 AND bucket=$2 AND object_key=$3 AND size_bytes=$4 AND checksum=$5 FOR UPDATE",
     ).bind(device.id).bind(bucket).bind(&request.key).bind(request.size_bytes).bind(&request.checksum)
         .fetch_optional(&mut *tx).await.map_err(internal)?;
+    let existing = match existing {
+        Some(session)
+            if session.completed_at.is_none()
+                && session.created_at < chrono::Utc::now() - chrono::Duration::hours(12) =>
+        {
+            discard(&mut tx, &session).await?;
+            None
+        }
+        other => other,
+    };
     let session = if let Some(session) = existing {
         session
     } else {
@@ -172,6 +208,7 @@ pub async fn open(
             checksum: request.checksum,
             upload_id: None,
             completed_at: None,
+            created_at: chrono::Utc::now(),
         }
     };
     let mut session = session;
@@ -212,7 +249,7 @@ pub async fn put_part(
     Extension(state): Extension<State>,
     Path((id, number)): Path<(Uuid, i32)>,
     request: axum::extract::Request,
-) -> Result<Json<ConfirmedPart>, StatusCode> {
+) -> Result<Json<ConfirmedPart>, UploadError> {
     let _permit = state
         .upload_permits
         .try_acquire()
@@ -220,7 +257,7 @@ pub async fn put_part(
     let mut tx = state.pg_pool.begin().await.map_err(internal)?;
     let session = owned_session(&mut tx, id, device.id).await?;
     if session.completed_at.is_some() {
-        return Err(StatusCode::CONFLICT);
+        return Err(StatusCode::CONFLICT.into());
     }
     let claimed_checksum = request
         .headers()
@@ -233,10 +270,10 @@ pub async fn put_part(
         .map_err(|_| StatusCode::PAYLOAD_TOO_LARGE)?;
     let checksum = format!("{:x}", Sha256::digest(&body));
     if claimed_checksum != checksum {
-        return Err(StatusCode::BAD_REQUEST);
+        return Err(StatusCode::BAD_REQUEST.into());
     }
     if body.len() != part_length(session.size_bytes, number)? {
-        return Err(StatusCode::BAD_REQUEST);
+        return Err(StatusCode::BAD_REQUEST.into());
     }
     if let Some(part) = parts(&mut tx, id)
         .await?
@@ -244,21 +281,29 @@ pub async fn put_part(
         .find(|p| p.part_number == number)
     {
         if part.checksum != checksum {
-            return Err(StatusCode::CONFLICT);
+            return Err(StatusCode::CONFLICT.into());
         }
         tx.commit().await.map_err(internal)?;
         return Ok(Json(part));
     }
     let upload_id = session.upload_id.as_deref().ok_or(StatusCode::CONFLICT)?;
-    let etag = Storage::upload_session_part(
+    let result = Storage::upload_session_part(
         &session.bucket,
         &session.object_key,
         upload_id,
         number,
         body.to_vec(),
     )
-    .await
-    .map_err(internal)?;
+    .await;
+    let etag = match result {
+        Ok(etag) => etag,
+        Err(error) if crate::storage::is_missing_upload(&error) => {
+            restart_multipart(&mut tx, &session).await?;
+            tx.commit().await.map_err(internal)?;
+            return Err(StatusCode::CONFLICT.into());
+        }
+        Err(error) => return Err(internal(error).into()),
+    };
     sqlx::query("INSERT INTO device_upload_part (session_id, part_number, etag, checksum) VALUES ($1,$2,$3,$4)")
         .bind(id).bind(number).bind(&etag).bind(&checksum).execute(&mut *tx).await.map_err(internal)?;
     sqlx::query("UPDATE device_upload_session SET touched_at=now() WHERE id=$1")
@@ -281,7 +326,7 @@ pub async fn complete(
     device: AuthedDevice,
     Extension(state): Extension<State>,
     Path(id): Path<Uuid>,
-) -> Result<Json<super::route::UploadResult>, StatusCode> {
+) -> Result<Json<super::route::UploadResult>, UploadError> {
     let _permit = state
         .upload_permits
         .try_acquire()
@@ -296,7 +341,7 @@ pub async fn complete(
                 .enumerate()
                 .any(|(i, p)| p.part_number != i as i32 + 1)
         {
-            return Err(StatusCode::CONFLICT);
+            return Err(StatusCode::CONFLICT.into());
         }
         // S3 may have completed before the prior API process or database transaction failed.
         if !Storage::matches_object(
@@ -308,7 +353,7 @@ pub async fn complete(
         .await
         .map_err(internal)?
         {
-            Storage::complete_multipart(
+            let result = Storage::complete_multipart(
                 &session.bucket,
                 &session.object_key,
                 session.upload_id.as_deref().ok_or(StatusCode::CONFLICT)?,
@@ -320,8 +365,15 @@ pub async fn complete(
                     })
                     .collect(),
             )
-            .await
-            .map_err(internal)?;
+            .await;
+            if let Err(error) = result {
+                if crate::storage::is_missing_upload(&error) {
+                    restart_multipart(&mut tx, &session).await?;
+                    tx.commit().await.map_err(internal)?;
+                    return Err(StatusCode::CONFLICT.into());
+                }
+                return Err(internal(error).into());
+            }
             if !Storage::matches_object(
                 &session.bucket,
                 &session.object_key,
@@ -331,7 +383,7 @@ pub async fn complete(
             .await
             .map_err(internal)?
             {
-                return Err(StatusCode::UNPROCESSABLE_ENTITY);
+                return Err(StatusCode::UNPROCESSABLE_ENTITY.into());
             }
         }
         sqlx::query("UPDATE device_upload_session SET completed_at=now(), touched_at=now(), upload_id=NULL WHERE id=$1")
@@ -358,6 +410,32 @@ pub async fn abort(
     Ok(StatusCode::NO_CONTENT)
 }
 
+async fn restart_multipart(
+    tx: &mut Transaction<'_, Postgres>,
+    session: &Session,
+) -> Result<(), StatusCode> {
+    let upload_id = Storage::initiate_multipart(
+        &session.bucket,
+        &session.object_key,
+        "application/octet-stream",
+        "attachment",
+    )
+    .await
+    .map_err(internal)?;
+    sqlx::query("DELETE FROM device_upload_part WHERE session_id=$1")
+        .bind(session.id)
+        .execute(&mut **tx)
+        .await
+        .map_err(internal)?;
+    sqlx::query("UPDATE device_upload_session SET upload_id=$2, touched_at=now() WHERE id=$1")
+        .bind(session.id)
+        .bind(upload_id)
+        .execute(&mut **tx)
+        .await
+        .map_err(internal)?;
+    Ok(())
+}
+
 async fn discard(tx: &mut Transaction<'_, Postgres>, session: &Session) -> Result<(), StatusCode> {
     if let Some(upload_id) = &session.upload_id {
         match Storage::abort_multipart(&session.bucket, &session.object_key, upload_id).await {
@@ -382,7 +460,7 @@ async fn sweep(pool: &PgPool) -> Result<(), StatusCode> {
     loop {
         let mut tx = pool.begin().await.map_err(internal)?;
         let session = sqlx::query_as::<_, Session>(
-            "SELECT * FROM device_upload_session WHERE touched_at < now() - interval '14 days' OR (completed_at IS NULL AND created_at < now() - interval '14 days') ORDER BY touched_at LIMIT 1 FOR UPDATE SKIP LOCKED",
+            "SELECT * FROM device_upload_session WHERE (completed_at IS NOT NULL AND touched_at < now() - interval '14 days') OR (completed_at IS NULL AND created_at < now() - interval '12 hours') ORDER BY touched_at LIMIT 1 FOR UPDATE SKIP LOCKED",
         ).fetch_optional(&mut *tx).await.map_err(internal)?;
         let Some(session) = session else {
             return Ok(());
