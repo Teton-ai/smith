@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                INSERT INTO device_settings\n                SELECT * FROM jsonb_populate_record(\n                    NULL::device_settings,\n                    $2::jsonb || jsonb_build_object(\n                        'device_id', $1::int4, 'updated_at', now(), 'updated_by', $3::int4\n                    )\n                )\n                ON CONFLICT (device_id) DO UPDATE SET\n                    updated_at = EXCLUDED.updated_at,\n                    updated_by = EXCLUDED.updated_by,\n                    wireless_mode = EXCLUDED.wireless_mode,\n                    power_mgnt = EXCLUDED.power_mgnt,\n                    roam_flags = EXCLUDED.roam_flags,\n                    idle_diff = EXCLUDED.idle_diff,\n                    busy_diff = EXCLUDED.busy_diff,\n                    scanr_exp_ms = EXCLUDED.scanr_exp_ms,\n                    scan_int = EXCLUDED.scan_int,\n                    idle_th = EXCLUDED.idle_th,\n                    busy_th = EXCLUDED.busy_th,\n                    nm_wifi_powersave = EXCLUDED.nm_wifi_powersave,\n                    nm_autoconnect_retries = EXCLUDED.nm_autoconnect_retries,\n                    nm_cloned_mac = EXCLUDED.nm_cloned_mac,\n                    nm_scan_rand_mac = EXCLUDED.nm_scan_rand_mac,\n                    hostname = EXCLUDED.hostname,\n                    ntp_servers = EXCLUDED.ntp_servers,\n                    bgscan = EXCLUDED.bgscan\n                ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Jsonb",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "bc9ca301300c5744ffe9ddd4752a7066ed4b04ce99db1762067af62ee30b1e11"
+}
