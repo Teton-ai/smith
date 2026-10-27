@@ -141,6 +141,15 @@ fn parse_nm_powersave(value: &str) -> Result<i16> {
     }
 }
 
+/// NetworkManager accepts 0 to `i32::MAX` and falls back to its built-in value
+/// for anything else, empty and negative included (`nm-config-data.c`).
+fn parse_retries_default(value: &str) -> i32 {
+    parse_int::<i32>(value)
+        .ok()
+        .filter(|retries| *retries >= 0)
+        .unwrap_or(NM_DEFAULT_AUTOCONNECT_RETRIES)
+}
+
 /// Reads `[device*]` / `[connection*]` the way NetworkManager does
 /// (NetworkManager.conf(5)): sections in order, plain `[device]` /
 /// `[connection]` last, the first value found for a key wins. A section with
@@ -160,7 +169,7 @@ pub fn parse_nm_config(text: &str, wifi: Option<&WifiInterface>) -> Result<NmCon
                 .iter()
                 .find(|(key, _)| key == "autoconnect-retries-default")
             {
-                retries = Some(parse_int(value)?);
+                retries = Some(parse_retries_default(value));
             }
             continue;
         }
@@ -282,5 +291,14 @@ mod tests {
 
         let config = parse_nm_config("[main]\nplugins=keyfile\n", Some(&vendor_wifi())).unwrap();
         assert_eq!(config.autoconnect_retries, NM_DEFAULT_AUTOCONNECT_RETRIES);
+
+        for invalid in ["", "abc", "-1", "4294967296"] {
+            let text = format!("[main]\nautoconnect-retries-default={invalid}\n");
+            let config = parse_nm_config(&text, Some(&vendor_wifi())).unwrap();
+            assert_eq!(
+                config.autoconnect_retries, NM_DEFAULT_AUTOCONNECT_RETRIES,
+                "{invalid:?}"
+            );
+        }
     }
 }
