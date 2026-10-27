@@ -215,4 +215,101 @@ mod tests {
         assert_eq!(settings.reported.unwrap().report, report);
         Ok(())
     }
+
+    #[sqlx::test]
+    #[ignore = "needs the compose Postgres; run with --test-threads=1"]
+    async fn device_settings_checks_keep_groups_whole(pool: PgPool) -> anyhow::Result<()> {
+        let device_id: i32 =
+            sqlx::query_scalar("INSERT INTO device (serial_number) VALUES ('c') RETURNING id")
+                .fetch_one(&pool)
+                .await?;
+        let insert = |columns: &str, values: &str| {
+            format!("INSERT INTO device_settings (device_id, {columns}) VALUES ($1, {values})")
+        };
+        let rejected = [
+            ("idle_diff", "15"),
+            ("idle_diff, scanr_exp_ms, scan_int", "15, 10000, 5"),
+            ("busy_diff", "15"),
+            ("nm_cloned_mac", "'preserve'"),
+            ("updated_by", "1"),
+        ];
+        for (columns, values) in rejected {
+            assert!(
+                sqlx::query(&insert(columns, values))
+                    .bind(device_id)
+                    .execute(&pool)
+                    .await
+                    .is_err(),
+                "{columns} should be rejected"
+            );
+        }
+        // The busy fields may stay NULL inside a set roam group.
+        sqlx::query(&insert(
+            "idle_diff, scanr_exp_ms, scan_int, idle_th, nm_cloned_mac, nm_scan_rand_mac",
+            "15, 10000, 5, 30, 'preserve', false",
+        ))
+        .bind(device_id)
+        .execute(&pool)
+        .await?;
+
+        let distribution_id: i32 = sqlx::query_scalar(
+            "INSERT INTO distribution (name) VALUES ('checks-test') RETURNING id",
+        )
+        .fetch_one(&pool)
+        .await?;
+        for (columns, values) in [("nm_scan_rand_mac", "false"), ("scan_int", "5")] {
+            assert!(
+                sqlx::query(&format!(
+                    "INSERT INTO distribution_setting_default (distribution_id, {columns}) VALUES ($1, {values})"
+                ))
+                .bind(distribution_id)
+                .execute(&pool)
+                .await
+                .is_err(),
+                "default {columns} should be rejected"
+            );
+        }
+        // A default row may be empty: nothing managed.
+        sqlx::query("INSERT INTO distribution_setting_default (distribution_id) VALUES ($1)")
+            .bind(distribution_id)
+            .execute(&pool)
+            .await?;
+        Ok(())
+    }
+
+    #[sqlx::test]
+    #[ignore = "needs the compose Postgres; run with --test-threads=1"]
+    async fn audit_keeps_changes_made_outside_the_api_and_removed_rows(
+        pool: PgPool,
+    ) -> anyhow::Result<()> {
+        let device_id: i32 =
+            sqlx::query_scalar("INSERT INTO device (serial_number) VALUES ('a') RETURNING id")
+                .fetch_one(&pool)
+                .await?;
+        // Like a migration: no smith.user_id set.
+        sqlx::query("INSERT INTO device_settings (device_id, wireless_mode) VALUES ($1, 95)")
+            .bind(device_id)
+            .execute(&pool)
+            .await?;
+        sqlx::query("DELETE FROM device_settings WHERE device_id = $1")
+            .bind(device_id)
+            .execute(&pool)
+            .await?;
+
+        let rows: Vec<(Option<i32>, String, Option<i16>)> = sqlx::query_as(
+            "SELECT changed_by, operation, wireless_mode FROM device_settings_audit
+             WHERE device_id = $1 ORDER BY audit_id",
+        )
+        .bind(device_id)
+        .fetch_all(&pool)
+        .await?;
+        assert_eq!(
+            rows,
+            vec![
+                (None, "INSERT".to_owned(), Some(95)),
+                (None, "DELETE".to_owned(), Some(95)),
+            ]
+        );
+        Ok(())
+    }
 }
