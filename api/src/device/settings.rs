@@ -3,13 +3,16 @@
 
 use super::route::{DEVICES_TAG, resolve_device_id};
 use crate::State;
+use crate::command::route::queue_bundle;
 use crate::middlewares::authorization;
 use crate::user::CurrentUser;
 use axum::extract::Path;
 use axum::http::StatusCode;
 use axum::{Extension, Json};
+use models::command::BundleReceipt;
 use serde::Deserialize;
 use smith::utils::schema;
+use smith::utils::schema::SafeCommandRequest;
 use sqlx::types::chrono::{DateTime, Utc};
 use tracing::error;
 
@@ -603,6 +606,171 @@ pub async fn update_settings_for_devices(
     ))
 }
 
+/// The devices of a bulk Apply, as selected (and filtered) on the Devices page.
+#[derive(Deserialize, Debug, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ApplySettingsDevices {
+    pub devices: Vec<i32>,
+}
+
+fn can_apply_settings(current_user: CurrentUser) -> bool {
+    let command = authorization::required_permission(&schema::SafeCommandTx::ApplySettings {
+        version: 0,
+        settings: Default::default(),
+    });
+    current_user.has_permission(&command.resource, &command.action)
+        && authorization::check(current_user, "devices", "write")
+}
+
+/// One `ApplySettings` per device with its resolved set at its current
+/// version, queued as one staggered bundle. Devices at version 0 have nothing
+/// to apply and are skipped; `None` when none is left.
+async fn queue_settings_apply(
+    pool: &sqlx::PgPool,
+    device_ids: &[i32],
+    user_id: i32,
+) -> Result<Option<BundleReceipt>, StatusCode> {
+    let db_error = |context: &'static str| {
+        move |err: sqlx::Error| {
+            error!("{context}: {err}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        }
+    };
+    let mut tx = pool
+        .begin()
+        .await
+        .map_err(db_error("Failed to start transaction"))?;
+    // Held until the bundle commits, so an edit can't land between the
+    // resolution and the queued commands.
+    sqlx::query("SELECT id FROM device WHERE id = ANY($1) ORDER BY id FOR UPDATE")
+        .bind(device_ids)
+        .execute(&mut *tx)
+        .await
+        .map_err(db_error("Failed to lock devices to apply settings to"))?;
+    let commands: Vec<(i32, SafeCommandRequest)> = load_settings_inputs(&mut *tx, device_ids)
+        .await
+        .map_err(db_error("Failed to resolve settings to apply"))?
+        .into_iter()
+        .filter(|input| input.settings_version > 0)
+        .map(|input| {
+            (
+                input.device_id,
+                SafeCommandRequest {
+                    id: 0,
+                    command: schema::SafeCommandTx::ApplySettings {
+                        version: input.settings_version,
+                        settings: input.resolve(),
+                    },
+                    continue_on_error: false,
+                },
+            )
+        })
+        .collect();
+    if commands.is_empty() {
+        return Ok(None);
+    }
+    let entries: Vec<(i32, &[SafeCommandRequest])> = commands
+        .iter()
+        .map(|(device, command)| (*device, std::slice::from_ref(command)))
+        .collect();
+    let receipt = queue_bundle(&mut tx, &entries, user_id).await?;
+    tx.commit()
+        .await
+        .map_err(db_error("Failed to commit the settings apply"))?;
+    Ok(Some(receipt))
+}
+
+#[utoipa::path(
+    post,
+    path = "/devices/{device_id}/settings/apply",
+    params(
+        ("device_id" = String, Path, description = "Device ID or serial number"),
+    ),
+    responses(
+        (status = StatusCode::ACCEPTED, description = "ApplySettings queued with the resolved set; also re-applies an applied version", body = BundleReceipt),
+        (status = StatusCode::BAD_REQUEST, description = "Nothing to apply (settings version 0)"),
+        (status = StatusCode::FORBIDDEN, description = "Missing devices:write or commands:basic"),
+        (status = StatusCode::NOT_FOUND, description = "Device not found or archived"),
+        (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to queue the command"),
+    ),
+    security(
+        ("auth_token" = [])
+    ),
+    tag = DEVICES_TAG
+)]
+pub async fn apply_settings_for_device(
+    Path(device_id): Path<String>,
+    Extension(state): Extension<State>,
+    Extension(current_user): Extension<CurrentUser>,
+) -> Result<(StatusCode, Json<BundleReceipt>), StatusCode> {
+    let user_id = current_user.user_id;
+    if !can_apply_settings(current_user) {
+        return Err(StatusCode::FORBIDDEN);
+    }
+    let resolved_id = resolve_device_id(&device_id, &state.pg_pool).await?;
+    let device_ids = active_devices(&state.pg_pool, &[resolved_id]).await?;
+    queue_settings_apply(&state.pg_pool, &device_ids, user_id)
+        .await?
+        .map(|receipt| (StatusCode::ACCEPTED, Json(receipt)))
+        .ok_or(StatusCode::BAD_REQUEST)
+}
+
+#[utoipa::path(
+    post,
+    path = "/devices/settings/apply",
+    request_body = ApplySettingsDevices,
+    responses(
+        (status = StatusCode::ACCEPTED, description = "ApplySettings queued for every listed device with something to apply, as one staggered bundle", body = BundleReceipt),
+        (status = StatusCode::BAD_REQUEST, description = "No devices, or nothing to apply"),
+        (status = StatusCode::FORBIDDEN, description = "Missing devices:write or commands:basic"),
+        (status = StatusCode::NOT_FOUND, description = "A device id was not found or is archived"),
+        (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to queue the commands"),
+    ),
+    security(
+        ("auth_token" = [])
+    ),
+    tag = DEVICES_TAG
+)]
+pub async fn apply_settings_for_devices(
+    Extension(state): Extension<State>,
+    Extension(current_user): Extension<CurrentUser>,
+    Json(body): Json<ApplySettingsDevices>,
+) -> Result<(StatusCode, Json<BundleReceipt>), StatusCode> {
+    let user_id = current_user.user_id;
+    if !can_apply_settings(current_user) {
+        return Err(StatusCode::FORBIDDEN);
+    }
+    let device_ids = active_devices(&state.pg_pool, &body.devices).await?;
+    queue_settings_apply(&state.pg_pool, &device_ids, user_id)
+        .await?
+        .map(|receipt| (StatusCode::ACCEPTED, Json(receipt)))
+        .ok_or(StatusCode::BAD_REQUEST)
+}
+
+/// `devices` sorted and deduplicated; 404 when one is unknown or archived.
+async fn active_devices(pool: &sqlx::PgPool, devices: &[i32]) -> Result<Vec<i32>, StatusCode> {
+    if devices.is_empty() {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    let mut requested = devices.to_vec();
+    requested.sort_unstable();
+    requested.dedup();
+    let active = sqlx::query_scalar!(
+        "SELECT id FROM device WHERE id = ANY($1) AND NOT archived ORDER BY id",
+        &requested
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|err| {
+        error!("Failed to look up devices to apply settings to: {err}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+    if active != requested {
+        return Err(StatusCode::NOT_FOUND);
+    }
+    Ok(active)
+}
+
 /// Pins, defaults and unsupported settings of `device_ids`, in one query.
 /// Devices without a release have no distribution, so only their pins count.
 pub async fn load_settings_inputs<'e, E>(
@@ -786,6 +954,7 @@ mod tests {
     use serde_json::json;
     use smith::utils::schema::{DeviceSetting, Managed, RoamTuning, SettingsReport};
     use sqlx::PgPool;
+    use std::collections::HashMap;
 
     #[sqlx::test]
     #[ignore = "needs the compose Postgres; run with --test-threads=1"]
@@ -1164,6 +1333,113 @@ mod tests {
             .fetch_one(&pool)
             .await?;
         assert_eq!(rows, 2, "the hostname pin keeps the first row");
+        Ok(())
+    }
+
+    #[sqlx::test]
+    #[ignore = "needs the compose Postgres; run with --test-threads=1"]
+    async fn settings_apply_queues_one_bundle_with_the_resolved_sets(
+        pool: PgPool,
+    ) -> anyhow::Result<()> {
+        let user_id: i32 = sqlx::query_scalar(
+            "INSERT INTO auth.users (auth0_user_id, email) VALUES ('apply', 'apply@test') RETURNING id",
+        )
+        .fetch_one(&pool)
+        .await?;
+        let distribution_id: i32 =
+            sqlx::query_scalar("INSERT INTO distribution (name) VALUES ('apply') RETURNING id")
+                .fetch_one(&pool)
+                .await?;
+        sqlx::query(
+            "INSERT INTO distribution_setting_default (distribution_id, wireless_mode)
+             VALUES ($1, 11)",
+        )
+        .bind(distribution_id)
+        .execute(&pool)
+        .await?;
+        let release_id: i32 = sqlx::query_scalar(
+            "INSERT INTO release (distribution_id, version) VALUES ($1, '1.0.0') RETURNING id",
+        )
+        .bind(distribution_id)
+        .fetch_one(&pool)
+        .await?;
+        let ids: Vec<i32> = sqlx::query_scalar(
+            "INSERT INTO device (serial_number, release_id, settings_version)
+             SELECT 'apply-' || n, $1, 1 FROM generate_series(1, 3) n
+             RETURNING id",
+        )
+        .bind(release_id)
+        .fetch_all(&pool)
+        .await?;
+        // Nothing to apply on this one.
+        sqlx::query("UPDATE device SET settings_version = 0 WHERE id = $1")
+            .bind(ids[0])
+            .execute(&pool)
+            .await?;
+        assert_eq!(
+            queue_settings_apply(&pool, &ids[..1], user_id)
+                .await
+                .map(|r| r.is_none()),
+            Ok(true)
+        );
+
+        let receipt = queue_settings_apply(&pool, &ids, user_id)
+            .await
+            .unwrap()
+            .unwrap();
+        let rows: Vec<(i32, serde_json::Value)> = sqlx::query_as(
+            "SELECT device_id, cmd::jsonb FROM command_queue WHERE bundle = $1 ORDER BY device_id",
+        )
+        .bind(receipt.uuid)
+        .fetch_all(&pool)
+        .await?;
+        assert_eq!(
+            rows.iter().map(|(device, _)| *device).collect::<Vec<_>>(),
+            ids[1..],
+            "one per device in one bundle, version 0 skipped"
+        );
+        assert_eq!(rows[0].1["ApplySettings"]["version"], 1);
+        assert_eq!(
+            rows[0].1["ApplySettings"]["settings"]["wireless_mode"]["Set"],
+            11
+        );
+        Ok(())
+    }
+
+    #[sqlx::test]
+    #[ignore = "needs the compose Postgres; run with --test-threads=1"]
+    async fn settings_apply_takes_only_known_active_devices(pool: PgPool) -> anyhow::Result<()> {
+        use axum::http::StatusCode;
+
+        let mut ids = HashMap::new();
+        for (serial, archived) in [("a", false), ("b", false), ("d", true)] {
+            let id: i32 = sqlx::query_scalar(
+                "INSERT INTO device (serial_number, archived) VALUES ($1, $2) RETURNING id",
+            )
+            .bind(serial)
+            .bind(archived)
+            .fetch_one(&pool)
+            .await?;
+            ids.insert(serial, id);
+        }
+        assert_eq!(
+            active_devices(&pool, &[ids["b"], ids["a"], ids["a"]]).await,
+            Ok(vec![ids["a"], ids["b"]])
+        );
+        assert_eq!(
+            active_devices(&pool, &[ids["a"], ids["d"]]).await,
+            Err(StatusCode::NOT_FOUND),
+            "archived"
+        );
+        assert_eq!(
+            active_devices(&pool, &[ids["a"], i32::MAX]).await,
+            Err(StatusCode::NOT_FOUND),
+            "unknown"
+        );
+        assert_eq!(
+            active_devices(&pool, &[]).await,
+            Err(StatusCode::BAD_REQUEST)
+        );
         Ok(())
     }
 

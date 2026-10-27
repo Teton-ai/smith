@@ -369,6 +369,8 @@ async fn start_main_server(
             device::settings::update_settings_for_device
         ))
         .routes(routes!(device::settings::update_settings_for_devices))
+        .routes(routes!(device::settings::apply_settings_for_device))
+        .routes(routes!(device::settings::apply_settings_for_devices))
         .routes(routes!(device::route::get_configured_networks_for_device))
         .routes(routes!(device::route::get_wifi_scan_for_device))
         .routes(routes!(

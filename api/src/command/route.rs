@@ -15,7 +15,7 @@ use rand::seq::SliceRandom;
 use sentry::types::Uuid;
 use serde::Deserialize;
 use smith::utils::schema::{SafeCommandRequest, SafeCommandTx};
-use sqlx::PgPool;
+use sqlx::{PgConnection, PgPool};
 use std::collections::HashMap;
 use std::time::Duration;
 use tracing::error;
@@ -94,12 +94,12 @@ fn stagger_policy(cmd: &SafeCommandTx, device_count: usize) -> Option<StaggerPol
 }
 
 /// Strictest policy across `commands`: smallest wave, longest duration.
-fn merged_stagger_policy(
-    commands: &[SafeCommandRequest],
+fn merged_stagger_policy<'a>(
+    commands: impl IntoIterator<Item = &'a SafeCommandRequest>,
     device_count: usize,
 ) -> Option<StaggerPolicy> {
     commands
-        .iter()
+        .into_iter()
         .filter_map(|c| stagger_policy(&c.command, device_count))
         .reduce(|a, b| StaggerPolicy {
             wave_size: a.wave_size.min(b.wave_size),
@@ -150,31 +150,47 @@ async fn queue_commands_bundle(
     commands: &[SafeCommandRequest],
     user_id: i32,
 ) -> Result<BundleReceipt, StatusCode> {
+    let entries: Vec<(i32, &[SafeCommandRequest])> =
+        devices.iter().map(|&device| (device, commands)).collect();
     let mut tx = pg_pool.begin().await.map_err(|err| {
         error!("Failed to start transaction {err}");
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
+    let receipt = queue_bundle(&mut tx, &entries, user_id).await?;
+    tx.commit().await.map_err(|err| {
+        error!("Failed to commit transaction {err}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+    Ok(receipt)
+}
 
+/// Queue each device's own commands as one bundle, staggered across the
+/// devices, in the caller's transaction, so the settings Apply can resolve and
+/// queue under one lock.
+pub async fn queue_bundle(
+    conn: &mut PgConnection,
+    entries: &[(i32, &[SafeCommandRequest])],
+    user_id: i32,
+) -> Result<BundleReceipt, StatusCode> {
     let bundle_id = sqlx::query!(
         r#"INSERT INTO command_bundles (user_id) VALUES ($1) RETURNING uuid"#,
         user_id
     )
-    .fetch_one(&mut *tx)
+    .fetch_one(&mut *conn)
     .await
     .map_err(|err| {
         error!("Failed to insert command bundle {err}");
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
 
-    let policy = merged_stagger_policy(commands, devices.len());
-    let wave_offsets = assign_wave_offsets(devices, policy.as_ref());
-
-    // Once a paced command appears, every later command inherits its
-    // offset too, exempt or not: `get_commands` has no cross-poll ordering
-    // guarantee, so a later command can't be allowed to fetch ahead of it.
-    let first_paced_index = commands
-        .iter()
-        .position(|c| stagger_policy(&c.command, devices.len()).is_some());
+    let devices: Vec<i32> = entries.iter().map(|(device, _)| *device).collect();
+    // A device listed twice gets the same commands, so a lookup by id is enough.
+    let commands_by_device: HashMap<i32, &[SafeCommandRequest]> = entries.iter().copied().collect();
+    let policy = merged_stagger_policy(
+        entries.iter().flat_map(|(_, commands)| commands.iter()),
+        devices.len(),
+    );
+    let wave_offsets = assign_wave_offsets(&devices, policy.as_ref());
 
     // Two-phase: a slow insert could let real time pass an early wave's
     // schedule before anything commits and becomes visible, collapsing
@@ -185,9 +201,19 @@ async fn queue_commands_bundle(
     // drifting per row).
     let far_future_placeholder = Utc::now() + Duration::from_secs(24 * 60 * 60);
 
-    let mut queued = Vec::with_capacity(devices.len() * commands.len());
+    let mut queued = Vec::with_capacity(entries.iter().map(|(_, c)| c.len()).sum());
     let mut pending_corrections: Vec<(i32, i32)> = Vec::new();
     for DeviceWaveOffset { device_id, offset } in &wave_offsets {
+        let commands = commands_by_device
+            .get(device_id)
+            .copied()
+            .unwrap_or_default();
+        // Once a paced command appears, every later command inherits its
+        // offset too, exempt or not: `get_commands` has no cross-poll ordering
+        // guarantee, so a later command can't be allowed to fetch ahead of it.
+        let first_paced_index = commands
+            .iter()
+            .position(|c| stagger_policy(&c.command, devices.len()).is_some());
         for (i, command) in commands.iter().enumerate() {
             let row_offset = match first_paced_index {
                 Some(paced_from) if i >= paced_from => *offset,
@@ -215,7 +241,7 @@ async fn queue_commands_bundle(
                 bundle_id.uuid,
                 placeholder
             )
-            .fetch_one(&mut *tx)
+            .fetch_one(&mut *conn)
             .await
             .map_err(|err| {
                 error!("Failed to insert command for device {err}");
@@ -246,18 +272,13 @@ async fn queue_commands_bundle(
             &ids,
             &offset_secs,
         )
-        .execute(&mut *tx)
+        .execute(&mut *conn)
         .await
         .map_err(|err| {
             error!("Failed to finalize staggered availability {err}");
             StatusCode::INTERNAL_SERVER_ERROR
         })?;
     }
-
-    tx.commit().await.map_err(|err| {
-        error!("Failed to commit transaction {err}");
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
 
     Ok(BundleReceipt {
         uuid: bundle_id.uuid,
