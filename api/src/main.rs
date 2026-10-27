@@ -27,7 +27,10 @@ use tower_http::trace::TraceLayer;
 use tracing::info;
 use utoipa::openapi::security::{Http, HttpAuthScheme, SecurityScheme};
 use utoipa::{Modify, OpenApi};
-use utoipa_axum::{router::OpenApiRouter, routes};
+use utoipa_axum::{
+    router::{OpenApiRouter, UtoipaMethodRouterExt},
+    routes,
+};
 use utoipa_swagger_ui::SwaggerUi;
 
 mod auth;
@@ -448,7 +451,7 @@ async fn start_main_server(
         .routes(routes!(telemetry::route::modem))
         .routes(routes!(telemetry::route::victoria))
         .routes(routes!(smith::route::upload_file))
-        .routes(routes!(smith::uploads::open))
+        .routes(routes!(smith::uploads::open).layer(DefaultBodyLimit::max(16 * 1024)))
         .routes(routes!(smith::uploads::put_part))
         .routes(routes!(smith::uploads::complete))
         .routes(routes!(smith::uploads::abort))
