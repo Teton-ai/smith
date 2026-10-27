@@ -237,7 +237,8 @@ pub enum SafeCommandRx {
     },
     /// Sent on change, daily and for the `ReportSettings` command.
     ReportSettings {
-        report: SettingsReport,
+        // Boxed: by far the largest response, it would size every other one.
+        report: Box<SettingsReport>,
     },
     /// Fallback for any report this build doesn't recognize; ignored by the api.
     Unknown,
@@ -486,6 +487,28 @@ pub enum DeviceSetting {
     NtpServerInUse,
     NtpSynchronized,
     CheckIntervalS,
+    ApCountryCode,
+    WifiPowerSaveOn,
+}
+
+/// Why a managed setting is not running its wanted value.
+#[derive(
+    Type, Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash, utoipa::ToSchema,
+)]
+#[sqlx(type_name = "device_setting_apply_state", rename_all = "snake_case")]
+#[serde(rename_all = "snake_case")]
+pub enum SettingApplyState {
+    /// Still wrong after its apply attempts.
+    Failed,
+    /// Put back because the device lost the api after the apply.
+    Reverted,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, utoipa::ToSchema)]
+pub struct SettingStatus {
+    pub setting: DeviceSetting,
+    pub state: SettingApplyState,
+    pub reason: String,
 }
 
 /// What smithd reads back from the device, sent whole as a `ReportSettings`
@@ -517,7 +540,19 @@ pub struct SettingsReport {
     pub ntp_server_in_use: Option<String>,
     pub ntp_synchronized: Option<bool>,
     pub check_interval_s: Option<i32>,
+    /// Country the access point of the current connection announces.
+    pub ap_country_code: Option<String>,
+    /// Power save as the Wi-Fi interface runs it (`iw`), which an NM default
+    /// only reaches on the next activation.
+    pub wifi_power_save_on: Option<bool>,
     pub read_errors: Vec<DeviceSetting>,
+    /// Version of the last `ApplySettings` this device applied; `None` until it
+    /// receives one.
+    pub applied_version: Option<i32>,
+    /// Only settings that are not running their wanted value.
+    pub apply_status: Vec<SettingStatus>,
+    /// Settings that drifted and were put back since the previous report.
+    pub corrected: Vec<DeviceSetting>,
 }
 
 #[derive(Type, Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -995,6 +1030,31 @@ mod tests {
             serde_json::from_str(r#"{"busy_diff": null, "read_errors": ["bgscan"]}"#).unwrap();
         assert_eq!(report.read_errors, vec![DeviceSetting::Bgscan]);
         assert!(serde_json::from_str::<SettingsReport>(r#"{"read_errors": ["nope"]}"#).is_err());
+    }
+
+    #[test]
+    fn settings_report_apply_fields_round_trip_and_default_for_old_reports() {
+        let old: SettingsReport =
+            serde_json::from_str(r#"{"hostname": "a", "read_errors": []}"#).unwrap();
+        assert_eq!(old.applied_version, None);
+        assert!(old.apply_status.is_empty() && old.corrected.is_empty());
+        assert_eq!(old.ap_country_code, None);
+
+        let new = SettingsReport {
+            ap_country_code: Some("DK".to_owned()),
+            applied_version: Some(2),
+            apply_status: vec![SettingStatus {
+                setting: DeviceSetting::PowerMgnt,
+                state: SettingApplyState::Reverted,
+                reason: "no connectivity after apply".to_owned(),
+            }],
+            corrected: vec![DeviceSetting::IdleDiff],
+            ..Default::default()
+        };
+        let json = serde_json::to_value(&new).unwrap();
+        assert_eq!(json["apply_status"][0]["state"], "reverted");
+        assert_eq!(json["corrected"][0], "idle_diff");
+        assert_eq!(serde_json::from_value::<SettingsReport>(json).unwrap(), new);
     }
 
     #[test]

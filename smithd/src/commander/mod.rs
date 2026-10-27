@@ -157,7 +157,9 @@ impl CommandQueueExecutor {
             SafeCommandTx::ReportSettings => match settings::read_now().await {
                 Some(report) => SafeCommandResponse {
                     id: action.id,
-                    command: SafeCommandRx::ReportSettings { report },
+                    command: SafeCommandRx::ReportSettings {
+                        report: Box::new(report),
+                    },
                     status: 0,
                 },
                 None => SafeCommandResponse {

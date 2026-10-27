@@ -766,16 +766,17 @@ pub async fn add_commands(
     Ok(command_ids)
 }
 
-/// Replaces the device's reported settings. Errors propagate so the device gets
-/// no 204 and resends. JSON keys map to columns by name (`jsonb_populate_record`);
-/// `settings_report_matches_the_table` keeps the struct and the table in step.
-/// Replaces the device's stored report. Inside an open transaction `begin`
-/// makes this a savepoint, so a failure rolls back only this report.
+/// Replaces the device's stored report. JSON keys map to columns by name
+/// (`jsonb_populate_record`); `settings_report_matches_the_table` keeps the
+/// struct and the table in step; `apply_status` has no column and goes to
+/// `device_setting_apply_status`. Inside an open transaction `begin` makes this
+/// a savepoint, so a failure rolls back only this report.
 pub async fn save_settings_report(
     conn: &mut PgConnection,
     device_id: i32,
     report: &schema::SettingsReport,
 ) -> Result<()> {
+    let statuses = serde_json::to_value(&report.apply_status)?;
     let report = serde_json::to_value(report)?;
     let mut tx = conn.begin().await?;
     sqlx::query!(
@@ -794,6 +795,23 @@ pub async fn save_settings_report(
         "#,
         device_id,
         report,
+    )
+    .execute(&mut *tx)
+    .await?;
+    sqlx::query!(
+        "DELETE FROM device_setting_apply_status WHERE device_id = $1",
+        device_id
+    )
+    .execute(&mut *tx)
+    .await?;
+    sqlx::query!(
+        r#"
+        INSERT INTO device_setting_apply_status (device_id, setting, state, reason)
+        SELECT $1, s.setting, s.state, s.reason
+        FROM jsonb_populate_recordset(NULL::device_setting_apply_status, $2::jsonb) s
+        "#,
+        device_id,
+        statuses,
     )
     .execute(&mut *tx)
     .await?;
@@ -855,6 +873,69 @@ mod tests {
 
     #[sqlx::test]
     #[ignore = "needs the compose Postgres; run with --test-threads=1"]
+    async fn settings_report_stores_apply_fields_and_replaces_statuses(
+        pool: PgPool,
+    ) -> anyhow::Result<()> {
+        let device_id: i32 =
+            sqlx::query_scalar("INSERT INTO device (serial_number) VALUES ('s') RETURNING id")
+                .fetch_one(&pool)
+                .await?;
+        let failed = schema::SettingStatus {
+            setting: schema::DeviceSetting::WirelessMode,
+            state: schema::SettingApplyState::Failed,
+            reason: "still 95 after the reload".to_owned(),
+        };
+        let first = schema::SettingsReport {
+            ap_country_code: Some("DK".to_owned()),
+            applied_version: Some(3),
+            corrected: vec![schema::DeviceSetting::IdleTh],
+            apply_status: vec![failed],
+            ..Default::default()
+        };
+        let mut conn = pool.acquire().await?;
+        save_settings_report(&mut conn, device_id, &first).await?;
+
+        let row: (Option<String>, Option<i32>, Vec<String>) = sqlx::query_as(
+            "SELECT ap_country_code, applied_version, corrected::text[]
+             FROM device_settings_reported WHERE device_id = $1",
+        )
+        .bind(device_id)
+        .fetch_one(&pool)
+        .await?;
+        assert_eq!(
+            row,
+            (Some("DK".to_owned()), Some(3), vec!["idle_th".to_owned()])
+        );
+        let statuses: Vec<(String, String, String)> = sqlx::query_as(
+            "SELECT setting::text, state::text, reason FROM device_setting_apply_status
+             WHERE device_id = $1",
+        )
+        .bind(device_id)
+        .fetch_all(&pool)
+        .await?;
+        assert_eq!(
+            statuses,
+            vec![(
+                "wireless_mode".to_owned(),
+                "failed".to_owned(),
+                "still 95 after the reload".to_owned()
+            )]
+        );
+
+        // A report from a smithd without these fields clears them.
+        save_settings_report(&mut conn, device_id, &schema::SettingsReport::default()).await?;
+        let statuses: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM device_setting_apply_status WHERE device_id = $1",
+        )
+        .bind(device_id)
+        .fetch_one(&pool)
+        .await?;
+        assert_eq!(statuses, 0);
+        Ok(())
+    }
+
+    #[sqlx::test]
+    #[ignore = "needs the compose Postgres; run with --test-threads=1"]
     async fn settings_report_matches_the_table(pool: PgPool) -> anyhow::Result<()> {
         use std::collections::BTreeSet;
 
@@ -876,8 +957,9 @@ mod tests {
             .into_iter()
             .map(str::to_owned)
             .collect();
+        let own_table: BTreeSet<String> = ["apply_status".to_owned()].into_iter().collect();
         assert_eq!(
-            fields,
+            &fields - &own_table,
             &columns - &server_side,
             "SettingsReport fields and device_settings_reported columns differ"
         );
@@ -888,9 +970,15 @@ mod tests {
                 .await?
                 .into_iter()
                 .collect();
+        let not_settings = [
+            "read_errors",
+            "applied_version",
+            "apply_status",
+            "corrected",
+        ];
         let settings: BTreeSet<String> = fields
             .into_iter()
-            .filter(|field| field != "read_errors")
+            .filter(|field| !not_settings.contains(&field.as_str()))
             .collect();
         assert_eq!(
             enum_values, settings,

@@ -26,13 +26,14 @@ pub fn check_interval_s() -> i32 {
     i32::try_from(check_interval().as_secs()).unwrap_or(i32::MAX)
 }
 
-/// The part of a report that counts as a change. The NTP server in use and the
-/// sync flag move on their own (chrony hops between pool servers), so they are
-/// sent with every report but never trigger one.
+/// The part of a report that counts as a change. The NTP server in use moves on
+/// its own (chrony hops between pool servers), so it is sent with every report
+/// but never triggers one. The sync flag does count: the first report after a
+/// boot is usually taken before the first sync and would otherwise stay
+/// unsynchronized until the daily report.
 fn change_key(report: &SettingsReport) -> SettingsReport {
     SettingsReport {
         ntp_server_in_use: None,
-        ntp_synchronized: None,
         ..report.clone()
     }
 }
@@ -128,7 +129,7 @@ impl Actor {
             .insert_result(vec![SafeCommandResponse {
                 id: CMD_ID_REPORT_SETTINGS,
                 command: SafeCommandRx::ReportSettings {
-                    report: reading.report.clone(),
+                    report: Box::new(reading.report.clone()),
                 },
                 status: 0,
             }])
@@ -148,7 +149,12 @@ mod tests {
         let a = SettingsReport {
             hostname: Some("a".to_owned()),
             ntp_server_in_use: Some("185.125.190.122".to_owned()),
+            ntp_synchronized: Some(false),
             ..Default::default()
+        };
+        let synced = SettingsReport {
+            ntp_synchronized: Some(true),
+            ..a.clone()
         };
         let renamed = SettingsReport {
             hostname: Some("b".to_owned()),
@@ -163,6 +169,7 @@ mod tests {
         assert!(!should_send(&a, Some(&a), hour), "unchanged");
         assert!(!should_send(&hopped, Some(&a), hour), "NTP hop");
         assert!(should_send(&renamed, Some(&a), hour), "changed");
+        assert!(should_send(&synced, Some(&a), hour), "sync flip");
         assert!(should_send(&a, None, hour), "never sent");
         assert!(should_send(&a, Some(&a), FULL_REPORT_EVERY), "daily");
     }

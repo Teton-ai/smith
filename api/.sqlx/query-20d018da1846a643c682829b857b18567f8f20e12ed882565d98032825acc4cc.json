@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        INSERT INTO device_setting_apply_status (device_id, setting, state, reason)\n        SELECT $1, s.setting, s.state, s.reason\n        FROM jsonb_populate_recordset(NULL::device_setting_apply_status, $2::jsonb) s\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Jsonb"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "20d018da1846a643c682829b857b18567f8f20e12ed882565d98032825acc4cc"
+}

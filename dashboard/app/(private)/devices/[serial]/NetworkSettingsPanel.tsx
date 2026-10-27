@@ -10,6 +10,7 @@ import {
 } from "@/app/api-client";
 import { RelativeTime } from "@/app/components/RelativeTime";
 import { Tooltip } from "@/app/components/tooltip";
+import { countryDiffersFromAp } from "@/app/utils/country";
 
 const POLL_INTERVAL_MS = 30_000;
 /** A requested report lands after the device's next poll plus its POST. */
@@ -381,6 +382,28 @@ const NetworkSettingsPanel = ({
 								) : (
 									r.country_code
 								)}
+							</SettingValue>
+						</InfoRow>
+						<InfoRow
+							label={
+								<SettingLabel
+									text="AP country"
+									info="Country the connected access point announces; the device's country should match it"
+								/>
+							}
+						>
+							<SettingValue settings={settings} field="ap_country_code">
+								{r.ap_country_code !== undefined &&
+									(countryDiffersFromAp(r.country_code, r.ap_country_code) ? (
+										<span className="flex flex-col items-end">
+											<span>{r.ap_country_code}</span>
+											<span className="text-xs text-amber-600">
+												Differs from the device's country
+											</span>
+										</span>
+									) : (
+										r.ap_country_code
+									))}
 							</SettingValue>
 						</InfoRow>
 					</section>
