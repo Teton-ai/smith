@@ -87,12 +87,42 @@ jobs:
           COMMIT_MSG=$(git log -1 --pretty=format:%s)
           echo "COMMIT_MSG=$COMMIT_MSG" >> $GITHUB_ENV
 
+      - name: Identify releaser
+        id: releaser
+        if: |
+          startsWith(env.COMMIT_MSG, format('chore(release): v{0}', env.VERSION))
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const pullRequests = await github.paginate(github.rest.repos.listPullRequestsAssociatedWithCommit, {
+              ...context.repo,
+              commit_sha: context.sha,
+              per_page: 100,
+            });
+            const releasePr = pullRequests.find((pr) =>
+              pr.merged_at && pr.merge_commit_sha === context.sha &&
+              pr.base.ref === 'main' && pr.head.ref === `chore/release-v${process.env.VERSION}`
+            );
+            if (!releasePr) {
+              throw new Error(`No merged release PR found for ${context.sha}`);
+            }
+            const { data: pr } = await github.rest.pulls.get({
+              ...context.repo,
+              pull_number: releasePr.number,
+            });
+            if (!pr.merged_by?.login) {
+              throw new Error(`No merger found for release PR #${pr.number}`);
+            }
+            // Use the PR's merger so workflow reruns keep the original attribution.
+            core.setOutput('body', `Released by @${pr.merged_by.login} · [PR #${pr.number}](${pr.html_url})`);
+
       - name: Create GitHub Release
         if: |
-          startsWith(env.COMMIT_MSG, format('chore(release): v', env.VERSION))
+          startsWith(env.COMMIT_MSG, format('chore(release): v{0}', env.VERSION))
         uses: softprops/action-gh-release@v2.4.2
         with:
           tag_name: v${{ env.VERSION }}
+          body: ${{ steps.releaser.outputs.body }}
           generate_release_notes: true
           make_latest: true
         env:
