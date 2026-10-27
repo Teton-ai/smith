@@ -87,6 +87,24 @@ jobs:
           COMMIT_MSG=$(git log -1 --pretty=format:%s)
           echo "COMMIT_MSG=$COMMIT_MSG" >> $GITHUB_ENV
 
+      - name: Check release does not already exist
+        if: |
+          startsWith(env.COMMIT_MSG, format('chore(release): v{0}', env.VERSION))
+        uses: actions/github-script@v8
+        with:
+          github-token: ${{ secrets.RELEASE_PR_TOKEN }}
+          script: |
+            const tag = `v${process.env.VERSION}`;
+            try {
+              await github.rest.repos.getReleaseByTag({ ...context.repo, tag });
+            } catch (error) {
+              if (error.status === 404) {
+                return;
+              }
+              throw error;
+            }
+            throw new Error(`Release ${tag} already exists; refusing to overwrite it.`);
+
       - name: Identify releaser
         id: releaser
         if: |
