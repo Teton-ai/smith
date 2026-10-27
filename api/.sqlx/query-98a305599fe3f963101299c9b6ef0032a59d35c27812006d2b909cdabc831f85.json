@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE device SET settings_version = 1 WHERE id = $1 AND settings_version = 0",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "98a305599fe3f963101299c9b6ef0032a59d35c27812006d2b909cdabc831f85"
+}

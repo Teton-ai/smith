@@ -98,6 +98,14 @@ pub async fn home(
         .inspect_err(|err| {
             error!("Error saving responses: {:?}", err);
         });
+    // Before fetching commands, so an automatic settings apply leaves with this
+    // poll. Its errors are logged where they happen and never fail the poll.
+    if crate::device::settings::auto_apply_settings(&state.pg_pool, device.id)
+        .await
+        .is_err()
+    {
+        error!(device_id = device.id, "Automatic settings apply failed");
+    }
 
     let target_release_id = get_target_release(device.id, &state.pg_pool).await;
 

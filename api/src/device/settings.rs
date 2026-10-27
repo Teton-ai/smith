@@ -628,7 +628,7 @@ fn can_apply_settings(current_user: CurrentUser) -> bool {
 async fn queue_settings_apply(
     pool: &sqlx::PgPool,
     device_ids: &[i32],
-    user_id: i32,
+    user_id: Option<i32>,
 ) -> Result<Option<BundleReceipt>, StatusCode> {
     let db_error = |context: &'static str| {
         move |err: sqlx::Error| {
@@ -674,6 +674,14 @@ async fn queue_settings_apply(
         .map(|(device, command)| (*device, std::slice::from_ref(command)))
         .collect();
     let receipt = queue_bundle(&mut tx, &entries, user_id).await?;
+    let queued: Vec<i32> = commands.iter().map(|(device, _)| *device).collect();
+    sqlx::query!(
+        "UPDATE device SET settings_auto_apply = false WHERE id = ANY($1)",
+        &queued
+    )
+    .execute(&mut *tx)
+    .await
+    .map_err(db_error("Failed to clear the automatic settings apply"))?;
     tx.commit()
         .await
         .map_err(db_error("Failed to commit the settings apply"))?;
@@ -709,7 +717,7 @@ pub async fn apply_settings_for_device(
     }
     let resolved_id = resolve_device_id(&device_id, &state.pg_pool).await?;
     let device_ids = active_devices(&state.pg_pool, &[resolved_id]).await?;
-    queue_settings_apply(&state.pg_pool, &device_ids, user_id)
+    queue_settings_apply(&state.pg_pool, &device_ids, Some(user_id))
         .await?
         .map(|receipt| (StatusCode::ACCEPTED, Json(receipt)))
         .ok_or(StatusCode::BAD_REQUEST)
@@ -741,10 +749,58 @@ pub async fn apply_settings_for_devices(
         return Err(StatusCode::FORBIDDEN);
     }
     let device_ids = active_devices(&state.pg_pool, &body.devices).await?;
-    queue_settings_apply(&state.pg_pool, &device_ids, user_id)
+    queue_settings_apply(&state.pg_pool, &device_ids, Some(user_id))
         .await?
         .map(|receipt| (StatusCode::ACCEPTED, Json(receipt)))
         .ok_or(StatusCode::BAD_REQUEST)
+}
+
+/// Called on every home poll. A device flagged for it (registered after the
+/// settings tables were added) gets its resolved set queued without an Apply
+/// press, once it has defaults or pins, so a new device picks up its
+/// distribution's defaults by itself. Sent once: any queued Apply clears the
+/// flag.
+pub async fn auto_apply_settings(pool: &sqlx::PgPool, device_id: i32) -> Result<(), StatusCode> {
+    let db_error = |context: &'static str| {
+        move |err: sqlx::Error| {
+            error!(device_id, "{context}: {err}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        }
+    };
+    let flagged = sqlx::query_scalar!(
+        "SELECT settings_auto_apply FROM device WHERE id = $1",
+        device_id
+    )
+    .fetch_optional(pool)
+    .await
+    .map_err(db_error("Failed to read the automatic settings apply flag"))?
+    .unwrap_or(false);
+    if !flagged {
+        return Ok(());
+    }
+    let has_settings = load_settings_inputs(pool, &[device_id])
+        .await
+        .map_err(db_error(
+            "Failed to resolve settings to apply automatically",
+        ))?
+        .iter()
+        .any(|input| {
+            input.pins != SettingValues::default() || input.defaults != SettingValues::default()
+        });
+    if !has_settings {
+        return Ok(());
+    }
+    // Version 0 means never edited, which Apply skips; the defaults still have
+    // to go out, as version 1.
+    sqlx::query!(
+        "UPDATE device SET settings_version = 1 WHERE id = $1 AND settings_version = 0",
+        device_id
+    )
+    .execute(pool)
+    .await
+    .map_err(db_error("Failed to set the first settings version"))?;
+    queue_settings_apply(pool, &[device_id], None).await?;
+    Ok(())
 }
 
 /// `devices` sorted and deduplicated; 404 when one is unknown or archived.
@@ -1377,13 +1433,13 @@ mod tests {
             .execute(&pool)
             .await?;
         assert_eq!(
-            queue_settings_apply(&pool, &ids[..1], user_id)
+            queue_settings_apply(&pool, &ids[..1], Some(user_id))
                 .await
                 .map(|r| r.is_none()),
             Ok(true)
         );
 
-        let receipt = queue_settings_apply(&pool, &ids, user_id)
+        let receipt = queue_settings_apply(&pool, &ids, Some(user_id))
             .await
             .unwrap()
             .unwrap();
@@ -1403,6 +1459,79 @@ mod tests {
             rows[0].1["ApplySettings"]["settings"]["wireless_mode"]["Set"],
             11
         );
+        let flagged: Vec<bool> =
+            sqlx::query_scalar("SELECT settings_auto_apply FROM device ORDER BY id")
+                .fetch_all(&pool)
+                .await?;
+        assert_eq!(
+            flagged,
+            vec![true, false, false],
+            "an Apply replaces the automatic one"
+        );
+        Ok(())
+    }
+
+    #[sqlx::test]
+    #[ignore = "needs the compose Postgres; run with --test-threads=1"]
+    async fn new_devices_get_their_defaults_once_without_an_apply(
+        pool: PgPool,
+    ) -> anyhow::Result<()> {
+        let distribution_id: i32 =
+            sqlx::query_scalar("INSERT INTO distribution (name) VALUES ('auto') RETURNING id")
+                .fetch_one(&pool)
+                .await?;
+        let release_id: i32 = sqlx::query_scalar(
+            "INSERT INTO release (distribution_id, version) VALUES ($1, '1.0.0') RETURNING id",
+        )
+        .bind(distribution_id)
+        .fetch_one(&pool)
+        .await?;
+        let device_id: i32 = sqlx::query_scalar(
+            "INSERT INTO device (serial_number, release_id) VALUES ('new', $1) RETURNING id",
+        )
+        .bind(release_id)
+        .fetch_one(&pool)
+        .await?;
+        let applies = || {
+            let pool = pool.clone();
+            async move {
+                sqlx::query_as::<_, (serde_json::Value,)>(
+                    "SELECT cmd::jsonb FROM command_queue WHERE device_id = $1",
+                )
+                .bind(device_id)
+                .fetch_all(&pool)
+                .await
+            }
+        };
+
+        // No defaults and no pins yet: nothing to send, the flag waits.
+        auto_apply_settings(&pool, device_id).await.unwrap();
+        assert!(applies().await?.is_empty());
+
+        sqlx::query(
+            "INSERT INTO distribution_setting_default (distribution_id, wireless_mode)
+             VALUES ($1, 11)",
+        )
+        .bind(distribution_id)
+        .execute(&pool)
+        .await?;
+        auto_apply_settings(&pool, device_id).await.unwrap();
+        auto_apply_settings(&pool, device_id).await.unwrap();
+        let sent = applies().await?;
+        assert_eq!(sent.len(), 1, "sent once");
+        assert_eq!(sent[0].0["ApplySettings"]["version"], 1);
+        assert_eq!(
+            sent[0].0["ApplySettings"]["settings"]["wireless_mode"]["Set"],
+            11
+        );
+        let author: Option<i32> = sqlx::query_scalar(
+            "SELECT b.user_id FROM command_bundles b JOIN command_queue q ON q.bundle = b.uuid
+             WHERE q.device_id = $1",
+        )
+        .bind(device_id)
+        .fetch_one(&pool)
+        .await?;
+        assert_eq!(author, None, "a system bundle");
         Ok(())
     }
 

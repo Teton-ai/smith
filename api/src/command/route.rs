@@ -156,7 +156,7 @@ async fn queue_commands_bundle(
         error!("Failed to start transaction {err}");
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
-    let receipt = queue_bundle(&mut tx, &entries, user_id).await?;
+    let receipt = queue_bundle(&mut tx, &entries, Some(user_id)).await?;
     tx.commit().await.map_err(|err| {
         error!("Failed to commit transaction {err}");
         StatusCode::INTERNAL_SERVER_ERROR
@@ -170,7 +170,8 @@ async fn queue_commands_bundle(
 pub async fn queue_bundle(
     conn: &mut PgConnection,
     entries: &[(i32, &[SafeCommandRequest])],
-    user_id: i32,
+    // `None` for a bundle the api queues by itself, listed as a system bundle.
+    user_id: Option<i32>,
 ) -> Result<BundleReceipt, StatusCode> {
     let bundle_id = sqlx::query!(
         r#"INSERT INTO command_bundles (user_id) VALUES ($1) RETURNING uuid"#,

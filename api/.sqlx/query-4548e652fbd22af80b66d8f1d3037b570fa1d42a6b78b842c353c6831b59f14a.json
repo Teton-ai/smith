@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE device SET settings_auto_apply = false WHERE id = ANY($1)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int4Array"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "4548e652fbd22af80b66d8f1d3037b570fa1d42a6b78b842c353c6831b59f14a"
+}
