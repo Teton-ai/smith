@@ -38,6 +38,8 @@ const EXTENDED_NETWORK_TEST_MAX_MINUTES: u32 = 60;
 const SECONDS_PER_MINUTE: u64 = 60;
 const DEFAULT_WAVE_FRACTION: f64 = 0.10;
 const DEFAULT_WAVE_DURATION: Duration = Duration::from_secs(20);
+const APPLY_SETTINGS_WAVE_FRACTION: f64 = 0.10;
+const APPLY_SETTINGS_WAVE_DURATION: Duration = Duration::from_secs(20);
 
 fn bundle_relative_wave_size(device_count: usize, fraction: f64) -> u32 {
     ((device_count as f64 * fraction).round() as u32).max(1)
@@ -67,6 +69,12 @@ fn stagger_policy(cmd: &SafeCommandTx, device_count: usize) -> Option<StaggerPol
                     EXTENDED_NETWORK_TEST_MAX_MINUTES,
                 )) * SECONDS_PER_MINUTE,
             ),
+        }),
+        // A driver reload or NM re-activation takes the device offline for
+        // 10 to 20 s; its own arm so tuning it doesn't move the default.
+        SafeCommandTx::ApplySettings { .. } => Some(StaggerPolicy {
+            wave_size: bundle_relative_wave_size(device_count, APPLY_SETTINGS_WAVE_FRACTION),
+            wave_duration: APPLY_SETTINGS_WAVE_DURATION,
         }),
         // Interactive/session commands: no contention to pace, and waiting
         // would only add latency.
@@ -1137,6 +1145,19 @@ mod stagger_tests {
         )
         .expect("ExtendedNetworkTest should be paced");
         assert_eq!(large.wave_size, 5); // round(50 * 0.10) = 5
+    }
+
+    #[test]
+    fn apply_settings_has_its_own_bundle_relative_policy() {
+        let apply = SafeCommandTx::ApplySettings {
+            version: 1,
+            settings: Default::default(),
+        };
+        let policy = stagger_policy(&apply, 30).expect("ApplySettings should be paced");
+        assert_eq!(policy.wave_size, 3); // round(30 * 0.10) = 3
+        assert_eq!(policy.wave_duration, APPLY_SETTINGS_WAVE_DURATION);
+        let small = stagger_policy(&apply, 4).expect("ApplySettings should be paced");
+        assert_eq!(small.wave_size, 1);
     }
 
     #[test]
