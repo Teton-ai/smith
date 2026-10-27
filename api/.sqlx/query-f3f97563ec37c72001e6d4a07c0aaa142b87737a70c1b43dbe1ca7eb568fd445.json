@@ -1,0 +1,85 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT d.id,\n               d.settings_version,\n               to_jsonb(ds) AS pins,\n               to_jsonb(dsd) AS defaults,\n               COALESCE(u.settings, '{}') AS \"unsupported!: Vec<schema::DeviceSetting>\"\n        FROM device d\n        LEFT JOIN release r ON r.id = d.release_id\n        LEFT JOIN device_settings ds ON ds.device_id = d.id\n        LEFT JOIN distribution_setting_default dsd ON dsd.distribution_id = r.distribution_id\n        LEFT JOIN LATERAL (\n            SELECT array_agg(setting ORDER BY setting) AS settings\n            FROM distribution_unsupported_setting\n            WHERE distribution_id = r.distribution_id\n        ) u ON true\n        WHERE d.id = ANY($1)\n        ORDER BY d.id\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "settings_version",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 2,
+        "name": "pins",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 3,
+        "name": "defaults",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 4,
+        "name": "unsupported!: Vec<schema::DeviceSetting>",
+        "type_info": {
+          "Custom": {
+            "name": "device_setting[]",
+            "kind": {
+              "Array": {
+                "Custom": {
+                  "name": "device_setting",
+                  "kind": {
+                    "Enum": [
+                      "wireless_mode",
+                      "power_mgnt",
+                      "roam_flags",
+                      "idle_diff",
+                      "busy_diff",
+                      "scanr_exp_ms",
+                      "scan_int",
+                      "idle_th",
+                      "busy_th",
+                      "nm_wifi_powersave",
+                      "nm_autoconnect_retries",
+                      "nm_cloned_mac",
+                      "nm_scan_rand_mac",
+                      "bgscan",
+                      "country_code",
+                      "hostname",
+                      "ntp_servers",
+                      "ntp_link_servers",
+                      "ntp_fallback_servers",
+                      "ntp_server_in_use",
+                      "ntp_synchronized",
+                      "check_interval_s",
+                      "ap_country_code",
+                      "wifi_power_save_on"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4Array"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "f3f97563ec37c72001e6d4a07c0aaa142b87737a70c1b43dbe1ca7eb568fd445"
+}
