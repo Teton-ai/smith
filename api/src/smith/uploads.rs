@@ -1,31 +1,33 @@
-use crate::{State, handlers::AuthedDevice, storage::Storage};
+use crate::{
+    State,
+    handlers::AuthedDevice,
+    storage::{Storage, UploadPart},
+    upload_token::{TokenError, UploadClaims},
+};
 use axum::{
     Extension, Json,
     extract::Path,
-    http::StatusCode,
+    http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
 };
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
-use sqlx::{FromRow, PgPool, Postgres, Transaction};
-use std::time::Duration;
 use utoipa::ToSchema;
-use uuid::Uuid;
 
 pub const PART_SIZE: i64 = 5 * 1024 * 1024;
 const MAX_SIZE: i64 = 512_000_000;
+const TOKEN_TTL_SECONDS: i64 = 24 * 60 * 60;
 
-pub struct UploadError(StatusCode);
+pub struct UploadError(StatusCode, &'static str);
 
 impl From<StatusCode> for UploadError {
     fn from(status: StatusCode) -> Self {
-        Self(status)
+        Self(status, "UploadRejected")
     }
 }
 
 impl IntoResponse for UploadError {
     fn into_response(self) -> Response {
-        let mut response = self.0.into_response();
+        let mut response = (self.0, Json(serde_json::json!({"code":self.1}))).into_response();
         if self.0 == StatusCode::SERVICE_UNAVAILABLE {
             response
                 .headers_mut()
@@ -33,6 +35,22 @@ impl IntoResponse for UploadError {
         }
         response
     }
+}
+
+fn storage_error(error: anyhow::Error) -> UploadError {
+    if crate::storage::is_missing_upload(&error) {
+        return UploadError(StatusCode::GONE, "NoSuchUpload");
+    }
+    tracing::error!("Multipart storage operation failed");
+    UploadError(StatusCode::BAD_GATEWAY, "StorageUnavailable")
+}
+
+fn capacity(state: &State) -> Result<tokio::sync::OwnedSemaphorePermit, UploadError> {
+    state
+        .upload_permits
+        .clone()
+        .try_acquire_owned()
+        .map_err(|_| UploadError(StatusCode::SERVICE_UNAVAILABLE, "UploadCapacity"))
 }
 
 #[derive(Deserialize, ToSchema)]
@@ -44,38 +62,18 @@ pub struct OpenUpload {
     sensitive: bool,
 }
 
-#[derive(Serialize, Deserialize, FromRow, ToSchema)]
-pub struct ConfirmedPart {
-    part_number: i32,
-    etag: String,
-    checksum: String,
+#[derive(Serialize, Deserialize, ToSchema)]
+pub struct OpenedUpload {
+    upload_id: String,
+    token: String,
+    part_size: i64,
 }
 
 #[derive(Serialize, Deserialize, ToSchema)]
 pub struct UploadPlan {
-    session_id: Uuid,
-    part_size: i64,
-    confirmed_parts: Vec<ConfirmedPart>,
+    confirmed_parts: Vec<UploadPart>,
     missing_parts: Vec<i32>,
-    /// Present only after the object bytes have been verified.
     url: Option<String>,
-}
-
-#[derive(FromRow)]
-struct Session {
-    id: Uuid,
-    bucket: String,
-    object_key: String,
-    size_bytes: i64,
-    checksum: String,
-    upload_id: Option<String>,
-    completed_at: Option<chrono::DateTime<chrono::Utc>>,
-    created_at: chrono::DateTime<chrono::Utc>,
-}
-
-fn internal(error: impl std::fmt::Display) -> StatusCode {
-    tracing::error!("Device upload session failed: {error}");
-    StatusCode::INTERNAL_SERVER_ERROR
 }
 
 fn validate(request: &OpenUpload) -> Result<(), StatusCode> {
@@ -104,383 +102,218 @@ fn part_count(size: i64) -> i32 {
     ((size + PART_SIZE - 1) / PART_SIZE) as i32
 }
 
-fn part_length(size: i64, number: i32) -> Result<usize, StatusCode> {
+fn part_length(size: i64, number: i32) -> Result<i64, UploadError> {
     if number < 1 || number > part_count(size) {
-        return Err(StatusCode::BAD_REQUEST);
+        return Err(StatusCode::BAD_REQUEST.into());
     }
-    Ok((size - i64::from(number - 1) * PART_SIZE).min(PART_SIZE) as usize)
+    Ok((size - i64::from(number - 1) * PART_SIZE).min(PART_SIZE))
 }
 
-async fn owned_session(
-    tx: &mut Transaction<'_, Postgres>,
-    id: Uuid,
-    device_id: i32,
-) -> Result<Session, StatusCode> {
-    sqlx::query_as::<_, Session>(
-        "SELECT * FROM device_upload_session WHERE id = $1 AND device_id = $2 FOR UPDATE",
+fn claims(
+    device: &AuthedDevice,
+    state: &State,
+    headers: &HeaderMap,
+) -> Result<UploadClaims, UploadError> {
+    let token = headers
+        .get("x-upload-token")
+        .and_then(|v| v.to_str().ok())
+        .ok_or(UploadError(StatusCode::FORBIDDEN, "InvalidUploadToken"))?;
+    state
+        .config
+        .upload_token_key
+        .verify(token, device.id, chrono::Utc::now().timestamp())
+        .map_err(|e| match e {
+            TokenError::Invalid => UploadError(StatusCode::FORBIDDEN, "InvalidUploadToken"),
+            TokenError::Expired => UploadError(StatusCode::GONE, "UploadTokenExpired"),
+        })
+}
+
+fn object_url(claims: &UploadClaims) -> String {
+    format!("s3://{}/{}", claims.bucket, claims.key)
+}
+
+async fn matches_object(claims: &UploadClaims) -> Result<bool, UploadError> {
+    Storage::matches_object(
+        &claims.bucket,
+        &claims.key,
+        claims.size_bytes,
+        &claims.checksum,
     )
-    .bind(id)
-    .bind(device_id)
-    .fetch_optional(&mut **tx)
     .await
-    .map_err(internal)?
-    .ok_or(StatusCode::NOT_FOUND)
+    .map_err(storage_error)
 }
 
-async fn parts(
-    tx: &mut Transaction<'_, Postgres>,
-    id: Uuid,
-) -> Result<Vec<ConfirmedPart>, StatusCode> {
-    sqlx::query_as::<_, ConfirmedPart>(
-        "SELECT part_number, etag, checksum FROM device_upload_part WHERE session_id = $1 ORDER BY part_number",
-    ).bind(id).fetch_all(&mut **tx).await.map_err(internal)
-}
-
-async fn plan(
-    tx: &mut Transaction<'_, Postgres>,
-    session: &Session,
-) -> Result<UploadPlan, StatusCode> {
-    let confirmed_parts = parts(tx, session.id).await?;
-    let missing_parts = (1..=part_count(session.size_bytes))
-        .filter(|n| !confirmed_parts.iter().any(|p| p.part_number == *n))
+async fn plan(claims: &UploadClaims) -> Result<UploadPlan, UploadError> {
+    if matches_object(claims).await? {
+        return Ok(UploadPlan {
+            confirmed_parts: vec![],
+            missing_parts: vec![],
+            url: Some(object_url(claims)),
+        });
+    }
+    let mut confirmed_parts =
+        Storage::list_upload_parts(&claims.bucket, &claims.key, &claims.upload_id)
+            .await
+            .map_err(storage_error)?;
+    confirmed_parts.sort_by_key(|p| p.part_number);
+    if confirmed_parts
+        .windows(2)
+        .any(|pair| pair[0].part_number == pair[1].part_number)
+    {
+        return Err(UploadError(StatusCode::CONFLICT, "InvalidParts"));
+    }
+    for part in &confirmed_parts {
+        if part.etag.is_empty()
+            || part.size_bytes != part_length(claims.size_bytes, part.part_number)?
+        {
+            return Err(UploadError(StatusCode::CONFLICT, "InvalidParts"));
+        }
+    }
+    let missing_parts = (1..=part_count(claims.size_bytes))
+        .filter(|n| !confirmed_parts.iter().any(|part| part.part_number == *n))
         .collect();
     Ok(UploadPlan {
-        session_id: session.id,
-        part_size: PART_SIZE,
         confirmed_parts,
         missing_parts,
-        url: session
-            .completed_at
-            .map(|_| format!("s3://{}/{}", session.bucket, session.object_key)),
+        url: None,
     })
 }
 
-#[utoipa::path(post, path = "/smith/upload-sessions", request_body = OpenUpload,
-    responses((status = 200, body = UploadPlan), (status = 400, description = "Invalid upload"),
-    (status = 409, description = "Key already has an active upload")), security(("device_token" = [])))]
+#[utoipa::path(post,path="/smith/upload-sessions",request_body=OpenUpload,
+    responses((status=200,body=OpenedUpload),(status=400,description="Invalid upload"),(status=503,description="Upload capacity reached")),security(("device_token"=[])))]
 pub async fn open(
     device: AuthedDevice,
     Extension(state): Extension<State>,
     Json(request): Json<OpenUpload>,
-) -> Result<Json<UploadPlan>, UploadError> {
+) -> Result<Json<OpenedUpload>, UploadError> {
     validate(&request)?;
+    let _permit = capacity(&state)?;
     let bucket = if request.sensitive {
         &state.config.data_engine_bucket_name
     } else {
         &state.config.assets_bucket_name
     };
-    let mut tx = state.pg_pool.begin().await.map_err(internal)?;
-    // A device has one identity for each immutable file, even across API replicas.
-    sqlx::query("SELECT pg_advisory_xact_lock($1)")
-        .bind(i64::from(device.id))
-        .execute(&mut *tx)
-        .await
-        .map_err(internal)?;
-    let existing = sqlx::query_as::<_, Session>(
-        "SELECT * FROM device_upload_session WHERE device_id=$1 AND bucket=$2 AND object_key=$3 AND size_bytes=$4 AND checksum=$5 FOR UPDATE",
-    ).bind(device.id).bind(bucket).bind(&request.key).bind(request.size_bytes).bind(&request.checksum)
-        .fetch_optional(&mut *tx).await.map_err(internal)?;
-    let existing = match existing {
-        Some(session)
-            if session.completed_at.is_none()
-                && session.created_at < chrono::Utc::now() - chrono::Duration::hours(12) =>
-        {
-            discard(&mut tx, &session).await?;
-            None
-        }
-        other => other,
-    };
-    let session = if let Some(session) = existing {
-        session
-    } else {
-        let id = Uuid::new_v4();
-        // Lifecycle rules cover an S3 upload whose creation reply is lost.
-        sqlx::query("INSERT INTO device_upload_session(id, device_id, bucket, object_key, size_bytes, checksum) VALUES ($1,$2,$3,$4,$5,$6)")
-            .bind(id).bind(device.id).bind(bucket).bind(&request.key).bind(request.size_bytes).bind(&request.checksum)
-            .execute(&mut *tx).await.map_err(|e| {
-                if e.as_database_error().is_some_and(|e| e.is_unique_violation()) { StatusCode::CONFLICT } else { internal(e) }
-            })?;
-        Session {
-            id,
-            bucket: bucket.clone(),
-            object_key: request.key,
-            size_bytes: request.size_bytes,
-            checksum: request.checksum,
-            upload_id: None,
-            completed_at: None,
-            created_at: chrono::Utc::now(),
-        }
-    };
-    let mut session = session;
-    if session.upload_id.is_none() && session.completed_at.is_none() {
-        let upload_id = Storage::initiate_multipart(
-            &session.bucket,
-            &session.object_key,
-            "application/octet-stream",
-            "attachment",
-        )
-        .await
-        .map_err(internal)?;
-        sqlx::query("UPDATE device_upload_session SET upload_id=$2 WHERE id=$1")
-            .bind(session.id)
-            .bind(&upload_id)
-            .execute(&mut *tx)
-            .await
-            .map_err(internal)?;
-        session.upload_id = Some(upload_id);
-    }
-    sqlx::query("UPDATE device_upload_session SET touched_at=now() WHERE id=$1")
-        .bind(session.id)
-        .execute(&mut *tx)
-        .await
-        .map_err(internal)?;
-    let result = plan(&mut tx, &session).await?;
-    tx.commit().await.map_err(internal)?;
-    Ok(Json(result))
-}
-
-#[utoipa::path(put, path = "/smith/upload-sessions/{id}/parts/{number}",
-    params(("id" = Uuid, Path), ("number" = i32, Path), ("x-content-sha256" = String, Header)),
-    request_body(content = Vec<u8>, content_type = "application/octet-stream"),
-    responses((status = 200, body = ConfirmedPart), (status = 400, description = "Invalid part"),
-    (status = 404, description = "Session not owned by device")), security(("device_token" = [])))]
-pub async fn put_part(
-    device: AuthedDevice,
-    Extension(state): Extension<State>,
-    Path((id, number)): Path<(Uuid, i32)>,
-    request: axum::extract::Request,
-) -> Result<Json<ConfirmedPart>, UploadError> {
-    let _permit = state
-        .upload_permits
-        .try_acquire()
-        .map_err(|_| StatusCode::SERVICE_UNAVAILABLE)?;
-    let mut tx = state.pg_pool.begin().await.map_err(internal)?;
-    let session = owned_session(&mut tx, id, device.id).await?;
-    if session.completed_at.is_some() {
-        return Err(StatusCode::CONFLICT.into());
-    }
-    let claimed_checksum = request
-        .headers()
-        .get("x-content-sha256")
-        .and_then(|h| h.to_str().ok())
-        .ok_or(StatusCode::BAD_REQUEST)?
-        .to_owned();
-    let body = axum::body::to_bytes(request.into_body(), PART_SIZE as usize)
-        .await
-        .map_err(|_| StatusCode::PAYLOAD_TOO_LARGE)?;
-    let checksum = format!("{:x}", Sha256::digest(&body));
-    if claimed_checksum != checksum {
-        return Err(StatusCode::BAD_REQUEST.into());
-    }
-    if body.len() != part_length(session.size_bytes, number)? {
-        return Err(StatusCode::BAD_REQUEST.into());
-    }
-    if let Some(part) = parts(&mut tx, id)
-        .await?
-        .into_iter()
-        .find(|p| p.part_number == number)
-    {
-        if part.checksum != checksum {
-            return Err(StatusCode::CONFLICT.into());
-        }
-        tx.commit().await.map_err(internal)?;
-        return Ok(Json(part));
-    }
-    let upload_id = session.upload_id.as_deref().ok_or(StatusCode::CONFLICT)?;
-    let result = Storage::upload_session_part(
-        &session.bucket,
-        &session.object_key,
-        upload_id,
-        number,
-        body.to_vec(),
-    )
-    .await;
-    let etag = match result {
-        Ok(etag) => etag,
-        Err(error) if crate::storage::is_missing_upload(&error) => {
-            restart_multipart(&mut tx, &session).await?;
-            tx.commit().await.map_err(internal)?;
-            return Err(StatusCode::CONFLICT.into());
-        }
-        Err(error) => return Err(internal(error).into()),
-    };
-    sqlx::query("INSERT INTO device_upload_part (session_id, part_number, etag, checksum) VALUES ($1,$2,$3,$4)")
-        .bind(id).bind(number).bind(&etag).bind(&checksum).execute(&mut *tx).await.map_err(internal)?;
-    sqlx::query("UPDATE device_upload_session SET touched_at=now() WHERE id=$1")
-        .bind(id)
-        .execute(&mut *tx)
-        .await
-        .map_err(internal)?;
-    tx.commit().await.map_err(internal)?;
-    Ok(Json(ConfirmedPart {
-        part_number: number,
-        etag,
-        checksum,
-    }))
-}
-
-#[utoipa::path(post, path = "/smith/upload-sessions/{id}/complete", params(("id" = Uuid, Path)),
-    responses((status = 200, body = super::route::UploadResult), (status = 409, description = "Missing parts"),
-    (status = 404, description = "Session not owned by device")), security(("device_token" = [])))]
-pub async fn complete(
-    device: AuthedDevice,
-    Extension(state): Extension<State>,
-    Path(id): Path<Uuid>,
-) -> Result<Json<super::route::UploadResult>, UploadError> {
-    let _permit = state
-        .upload_permits
-        .try_acquire()
-        .map_err(|_| StatusCode::SERVICE_UNAVAILABLE)?;
-    let mut tx = state.pg_pool.begin().await.map_err(internal)?;
-    let session = owned_session(&mut tx, id, device.id).await?;
-    if session.completed_at.is_none() {
-        let confirmed = parts(&mut tx, id).await?;
-        if confirmed.len() != part_count(session.size_bytes) as usize
-            || confirmed
-                .iter()
-                .enumerate()
-                .any(|(i, p)| p.part_number != i as i32 + 1)
-        {
-            return Err(StatusCode::CONFLICT.into());
-        }
-        // S3 may have completed before the prior API process or database transaction failed.
-        if !Storage::matches_object(
-            &session.bucket,
-            &session.object_key,
-            session.size_bytes,
-            &session.checksum,
-        )
-        .await
-        .map_err(internal)?
-        {
-            let result = Storage::complete_multipart(
-                &session.bucket,
-                &session.object_key,
-                session.upload_id.as_deref().ok_or(StatusCode::CONFLICT)?,
-                confirmed
-                    .into_iter()
-                    .map(|p| s3::serde_types::Part {
-                        part_number: p.part_number as u32,
-                        etag: p.etag,
-                    })
-                    .collect(),
-            )
-            .await;
-            if let Err(error) = result {
-                if crate::storage::is_missing_upload(&error) {
-                    restart_multipart(&mut tx, &session).await?;
-                    tx.commit().await.map_err(internal)?;
-                    return Err(StatusCode::CONFLICT.into());
-                }
-                return Err(internal(error).into());
-            }
-            if !Storage::matches_object(
-                &session.bucket,
-                &session.object_key,
-                session.size_bytes,
-                &session.checksum,
-            )
-            .await
-            .map_err(internal)?
-            {
-                return Err(StatusCode::UNPROCESSABLE_ENTITY.into());
-            }
-        }
-        sqlx::query("UPDATE device_upload_session SET completed_at=now(), touched_at=now(), upload_id=NULL WHERE id=$1")
-            .bind(id).execute(&mut *tx).await.map_err(internal)?;
-    }
-    tx.commit().await.map_err(internal)?;
-    Ok(Json(super::route::UploadResult {
-        url: format!("s3://{}/{}", session.bucket, session.object_key),
-    }))
-}
-
-#[utoipa::path(delete, path = "/smith/upload-sessions/{id}", params(("id" = Uuid, Path)),
-    responses((status = 204, description = "Upload aborted"), (status = 404, description = "Session not owned by device")),
-    security(("device_token" = [])))]
-pub async fn abort(
-    device: AuthedDevice,
-    Extension(state): Extension<State>,
-    Path(id): Path<Uuid>,
-) -> Result<StatusCode, StatusCode> {
-    let mut tx = state.pg_pool.begin().await.map_err(internal)?;
-    let session = owned_session(&mut tx, id, device.id).await?;
-    discard(&mut tx, &session).await?;
-    tx.commit().await.map_err(internal)?;
-    Ok(StatusCode::NO_CONTENT)
-}
-
-async fn restart_multipart(
-    tx: &mut Transaction<'_, Postgres>,
-    session: &Session,
-) -> Result<(), StatusCode> {
     let upload_id = Storage::initiate_multipart(
-        &session.bucket,
-        &session.object_key,
+        bucket,
+        &request.key,
         "application/octet-stream",
         "attachment",
     )
     .await
-    .map_err(internal)?;
-    sqlx::query("DELETE FROM device_upload_part WHERE session_id=$1")
-        .bind(session.id)
-        .execute(&mut **tx)
-        .await
-        .map_err(internal)?;
-    sqlx::query("UPDATE device_upload_session SET upload_id=$2, touched_at=now() WHERE id=$1")
-        .bind(session.id)
-        .bind(upload_id)
-        .execute(&mut **tx)
-        .await
-        .map_err(internal)?;
-    Ok(())
+    .map_err(storage_error)?;
+    let claims = UploadClaims {
+        device_id: device.id,
+        bucket: bucket.clone(),
+        key: request.key,
+        upload_id: upload_id.clone(),
+        size_bytes: request.size_bytes,
+        checksum: request.checksum,
+        expires_at: chrono::Utc::now().timestamp() + TOKEN_TTL_SECONDS,
+    };
+    let token = state
+        .config
+        .upload_token_key
+        .sign(&claims)
+        .map_err(|_| UploadError(StatusCode::INTERNAL_SERVER_ERROR, "TokenSigningFailed"))?;
+    Ok(Json(OpenedUpload {
+        upload_id,
+        token,
+        part_size: PART_SIZE,
+    }))
 }
 
-async fn discard(tx: &mut Transaction<'_, Postgres>, session: &Session) -> Result<(), StatusCode> {
-    if let Some(upload_id) = &session.upload_id {
-        match Storage::abort_multipart(&session.bucket, &session.object_key, upload_id).await {
-            Ok(()) => {}
-            Err(e)
-                if e.downcast_ref::<s3::error::S3Error>()
-                    .is_some_and(|e| matches!(e, s3::error::S3Error::HttpFailWithBody(404, _))) => {
-            }
-            Err(e) => return Err(internal(e)),
+#[utoipa::path(get,path="/smith/upload-sessions/status",params(("x-upload-token"=String,Header)),
+    responses((status=200,body=UploadPlan),(status=403,description="Invalid token or device"),(status=410,description="Upload no longer exists")),security(("device_token"=[])))]
+pub async fn status(
+    device: AuthedDevice,
+    Extension(state): Extension<State>,
+    headers: HeaderMap,
+) -> Result<Json<UploadPlan>, UploadError> {
+    let claims = claims(&device, &state, &headers)?;
+    let _permit = capacity(&state)?;
+    Ok(Json(plan(&claims).await?))
+}
+
+#[utoipa::path(put,path="/smith/upload-sessions/parts/{number}",params(("number"=i32,Path),("x-upload-token"=String,Header)),
+    request_body(content=Vec<u8>,content_type="application/octet-stream"),responses((status=200,body=UploadPart),(status=400,description="Invalid part length"),(status=410,description="Upload no longer exists")),security(("device_token"=[])))]
+pub async fn put_part(
+    device: AuthedDevice,
+    Extension(state): Extension<State>,
+    Path(number): Path<i32>,
+    request: axum::extract::Request,
+) -> Result<Json<UploadPart>, UploadError> {
+    let claims = claims(&device, &state, request.headers())?;
+    let size = part_length(claims.size_bytes, number)?;
+    if request
+        .headers()
+        .get("content-length")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.parse::<i64>().ok())
+        != Some(size)
+    {
+        return Err(UploadError(StatusCode::BAD_REQUEST, "InvalidPartLength"));
+    }
+    let _permit = capacity(&state)?;
+    let body = reqwest::Body::wrap_stream(request.into_body().into_data_stream());
+    let etag = Storage::upload_session_part(
+        &claims.bucket,
+        &claims.key,
+        &claims.upload_id,
+        number,
+        body,
+        size as u64,
+    )
+    .await
+    .map_err(storage_error)?;
+    Ok(Json(UploadPart {
+        part_number: number,
+        etag,
+        size_bytes: size,
+    }))
+}
+
+#[utoipa::path(post,path="/smith/upload-sessions/complete",params(("x-upload-token"=String,Header)),
+    responses((status=200,body=super::route::UploadResult),(status=409,description="Missing or invalid parts"),(status=410,description="Upload no longer exists")),security(("device_token"=[])))]
+pub async fn complete(
+    device: AuthedDevice,
+    Extension(state): Extension<State>,
+    headers: HeaderMap,
+) -> Result<Json<super::route::UploadResult>, UploadError> {
+    let claims = claims(&device, &state, &headers)?;
+    let _permit = capacity(&state)?;
+    let plan = plan(&claims).await?;
+    if plan.url.is_none() {
+        if !plan.missing_parts.is_empty() {
+            return Err(UploadError(StatusCode::CONFLICT, "MissingParts"));
+        }
+        let result = Storage::complete_multipart(
+            &claims.bucket,
+            &claims.key,
+            &claims.upload_id,
+            plan.confirmed_parts
+                .into_iter()
+                .map(|part| s3::serde_types::Part {
+                    part_number: part.part_number as u32,
+                    etag: part.etag,
+                })
+                .collect(),
+        )
+        .await;
+        if let Err(error) = result
+            && !matches_object(&claims).await?
+        {
+            return Err(storage_error(error));
+        }
+        if !matches_object(&claims).await? {
+            return Err(UploadError(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "ChecksumMismatch",
+            ));
         }
     }
-    sqlx::query("DELETE FROM device_upload_session WHERE id=$1")
-        .bind(session.id)
-        .execute(&mut **tx)
-        .await
-        .map_err(internal)?;
-    Ok(())
-}
-
-async fn sweep(pool: &PgPool) -> Result<(), StatusCode> {
-    // Keep completed receipts beyond Brain's seven-day queue lifetime.
-    loop {
-        let mut tx = pool.begin().await.map_err(internal)?;
-        let session = sqlx::query_as::<_, Session>(
-            "SELECT * FROM device_upload_session WHERE (completed_at IS NOT NULL AND touched_at < now() - interval '14 days') OR (completed_at IS NULL AND created_at < now() - interval '12 hours') ORDER BY touched_at LIMIT 1 FOR UPDATE SKIP LOCKED",
-        ).fetch_optional(&mut *tx).await.map_err(internal)?;
-        let Some(session) = session else {
-            return Ok(());
-        };
-        discard(&mut tx, &session).await?;
-        tx.commit().await.map_err(internal)?;
-    }
-}
-
-pub fn spawn_sweeper(pool: PgPool) {
-    tokio::spawn(async move {
-        let mut ticker = tokio::time::interval(Duration::from_secs(3600));
-        ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-        loop {
-            ticker.tick().await;
-            if let Err(status) = sweep(&pool).await {
-                tracing::error!(%status, "Failed to sweep device uploads");
-            }
-        }
-    });
+    Ok(Json(super::route::UploadResult {
+        url: object_url(&claims),
+    }))
 }
 
 #[cfg(test)]
@@ -496,12 +329,9 @@ mod tests {
             sensitive: true,
         };
         assert_eq!(validate(&request), Ok(()));
-        assert_eq!(part_length(request.size_bytes, 1), Ok(PART_SIZE as usize));
-        assert_eq!(part_length(request.size_bytes, 2), Ok(1));
-        assert_eq!(
-            part_length(request.size_bytes, 3),
-            Err(StatusCode::BAD_REQUEST)
-        );
+        assert_eq!(part_length(request.size_bytes, 1).ok(), Some(PART_SIZE));
+        assert_eq!(part_length(request.size_bytes, 2).ok(), Some(1));
+        assert!(part_length(request.size_bytes, 3).is_err());
         for key in ["", "/clip", "clips/../clip", "clips//clip", "clips/\\clip"] {
             request.key = key.into();
             assert_eq!(validate(&request), Err(StatusCode::BAD_REQUEST));

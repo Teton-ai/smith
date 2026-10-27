@@ -19,6 +19,31 @@ pub const PACKAGE_SIGNED_URL_TTL_SECONDS: u64 = 60 * 60;
 /// slow transfer -- smithd reuses the same one when it resumes.
 pub const OS_SIGNED_URL_TTL_SECONDS: u64 = 24 * 60 * 60;
 
+#[derive(serde::Serialize, serde::Deserialize, utoipa::ToSchema)]
+pub struct UploadPart {
+    pub part_number: i32,
+    pub etag: String,
+    pub size_bytes: i64,
+}
+
+#[derive(serde::Deserialize)]
+struct ListedUploadParts {
+    #[serde(rename = "Part", default)]
+    parts: Vec<ListedUploadPart>,
+    #[serde(rename = "IsTruncated", default)]
+    is_truncated: bool,
+}
+
+#[derive(serde::Deserialize)]
+struct ListedUploadPart {
+    #[serde(rename = "PartNumber")]
+    part_number: i32,
+    #[serde(rename = "ETag")]
+    etag: String,
+    #[serde(rename = "Size")]
+    size_bytes: i64,
+}
+
 pub struct Storage;
 
 /// Records in-flight, outcome and size for one upload; Drop covers every exit path.
@@ -360,7 +385,8 @@ impl Storage {
         object_key: &str,
         upload_id: &str,
         part_number: i32,
-        bytes: Vec<u8>,
+        body: reqwest::Body,
+        size: u64,
     ) -> anyhow::Result<String> {
         let urls =
             Self::presign_upload_parts(bucket_name, object_key, upload_id, &[part_number], 900)
@@ -369,11 +395,12 @@ impl Storage {
             .first()
             .ok_or_else(|| anyhow::anyhow!("Missing part URL"))?;
         let response = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(300))
+            .connect_timeout(std::time::Duration::from_secs(10))
             .redirect(reqwest::redirect::Policy::none())
             .build()?
             .put(url)
-            .body(bytes)
+            .header("content-length", size)
+            .body(body)
             .send()
             .await
             .map_err(|e| e.without_url())?;
@@ -395,6 +422,51 @@ impl Storage {
             .ok_or_else(|| anyhow::anyhow!("S3 part has no ETag"))?
             .to_str()?
             .to_owned())
+    }
+
+    pub async fn list_upload_parts(
+        bucket_name: &str,
+        object_key: &str,
+        upload_id: &str,
+    ) -> anyhow::Result<Vec<UploadPart>> {
+        let bucket = Self::bucket(bucket_name)?;
+        let queries = HashMap::from([
+            ("uploadId".to_owned(), upload_id.to_owned()),
+            ("max-parts".to_owned(), "1000".to_owned()),
+        ]);
+        let url = bucket.presign_get(object_key, 900, Some(queries)).await?;
+        let response = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(30))
+            .redirect(reqwest::redirect::Policy::none())
+            .build()?
+            .get(url)
+            .send()
+            .await
+            .map_err(|e| e.without_url())?;
+        let status = response.status().as_u16();
+        let body = response.text().await.map_err(|e| e.without_url())?;
+        if missing_upload_body(&body) {
+            return Err(s3::error::S3Error::HttpFailWithBody(
+                status,
+                "<Error><Code>NoSuchUpload</Code></Error>".into(),
+            )
+            .into());
+        }
+        anyhow::ensure!(status == 200, "S3 rejected part listing ({status})");
+        let listed: ListedUploadParts = quick_xml::de::from_str(&body)?;
+        anyhow::ensure!(
+            !listed.is_truncated,
+            "S3 part list exceeds the permitted upload size"
+        );
+        Ok(listed
+            .parts
+            .into_iter()
+            .map(|p| UploadPart {
+                part_number: p.part_number,
+                etag: p.etag,
+                size_bytes: p.size_bytes,
+            })
+            .collect())
     }
 
     /// Checks the bytes, including recovery after a lost completion reply.

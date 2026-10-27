@@ -215,6 +215,7 @@ pub struct Config {
     pub network_gc_interval_seconds: u64,
     pub mcp: Option<McpConfig>,
     pub max_concurrent_uploads: usize,
+    pub upload_token_key: crate::upload_token::UploadTokenKey,
 }
 
 /// Builds the M2M-sub -> holder map from one env var per known holder. Missing
@@ -320,6 +321,9 @@ impl Config {
                 // finds nothing new.
                 .unwrap_or(2 * 24 * 60 * 60),
             mcp,
+            upload_token_key: crate::upload_token::UploadTokenKey::new(
+                &env::var("UPLOAD_TOKEN_SECRET").context("UPLOAD_TOKEN_SECRET is required.")?,
+            )?,
             max_concurrent_uploads: parse_max_concurrent_uploads(
                 env::var("MAX_CONCURRENT_UPLOADS").ok().as_deref(),
             )?,

@@ -6,11 +6,14 @@ use crate::{
 };
 use axum::{
     Router,
-    routing::{delete, post, put},
+    routing::{get, post, put},
 };
 use ed25519_dalek::pkcs8::EncodePrivateKey;
-use std::{collections::HashMap, sync::Arc};
+use sha2::{Digest, Sha256};
+use sqlx::PgPool;
+use std::{collections::HashMap, sync::Arc, time::Duration};
 use tokio::sync::{Mutex, Semaphore, broadcast};
+use uuid::Uuid;
 
 fn test_state(pool: PgPool) -> anyhow::Result<State> {
     let pem = ed25519_dalek::SigningKey::from_bytes(&[7; 32]).to_pkcs8_pem(Default::default())?;
@@ -42,6 +45,7 @@ fn test_state(pool: PgPool) -> anyhow::Result<State> {
         network_gc_interval_seconds: 3600,
         mcp: None,
         max_concurrent_uploads: 4,
+        upload_token_key: crate::upload_token::UploadTokenKey::new(&"test-key".repeat(8))?,
     }));
     Ok(State {
         pg_pool: pool,
@@ -65,149 +69,236 @@ fn router(state: State) -> Router {
 fn router_at(state: State, prefix: &str) -> Router {
     Router::new()
         .route(&format!("{prefix}/upload-sessions"), post(open))
+        .route(&format!("{prefix}/upload-sessions/status"), get(status))
         .route(
-            &format!("{prefix}/upload-sessions/:id/parts/:number"),
-            put(put_part).layer(axum::extract::DefaultBodyLimit::max(PART_SIZE as usize)),
+            &format!("{prefix}/upload-sessions/parts/:number"),
+            put(put_part),
         )
         .route(
-            &format!("{prefix}/upload-sessions/:id/complete"),
+            &format!("{prefix}/upload-sessions/complete"),
             post(complete),
         )
-        .route(&format!("{prefix}/upload-sessions/:id"), delete(abort))
         .layer(Extension(state))
 }
 
+async fn call(
+    app: &Router,
+    method: &str,
+    path: &str,
+    device_token: &str,
+    token: Option<&str>,
+    body: Vec<u8>,
+) -> anyhow::Result<axum::response::Response> {
+    use tower::ServiceExt;
+    let mut request = axum::http::Request::builder().method(method).uri(path);
+    if !device_token.is_empty() {
+        request = request.header("authorization", format!("Bearer {device_token}"));
+    }
+    if let Some(token) = token {
+        let mut value = axum::http::HeaderValue::from_str(token)?;
+        value.set_sensitive(true);
+        request = request.header("x-upload-token", value);
+    }
+    request = request
+        .header("content-length", body.len())
+        .header("content-type", "application/json");
+    Ok(app
+        .clone()
+        .oneshot(request.body(axum::body::Body::from(body))?)
+        .await?)
+}
+
+async fn response_json<T: serde::de::DeserializeOwned>(
+    response: axum::response::Response,
+) -> anyhow::Result<T> {
+    anyhow::ensure!(
+        response.status().is_success(),
+        "Unexpected route status: {}",
+        response.status()
+    );
+    let bytes = axum::body::to_bytes(response.into_body(), 16 * 1024).await?;
+    Ok(serde_json::from_slice(&bytes)?)
+}
+
+async fn open_upload(
+    app: &Router,
+    credential: &str,
+    identity: &serde_json::Value,
+) -> anyhow::Result<OpenedUpload> {
+    response_json(
+        call(
+            app,
+            "POST",
+            "/smith/upload-sessions",
+            credential,
+            None,
+            serde_json::to_vec(identity)?,
+        )
+        .await?,
+    )
+    .await
+}
+
+async fn upload_plan(app: &Router, credential: &str, token: &str) -> anyhow::Result<UploadPlan> {
+    response_json(
+        call(
+            app,
+            "GET",
+            "/smith/upload-sessions/status",
+            credential,
+            Some(token),
+            vec![],
+        )
+        .await?,
+    )
+    .await
+}
+
 #[tokio::test]
-#[ignore = "Requires task-local Postgres and S3; see api/tests/resumable-uploads.md"]
-async fn durable_routes_verify_bytes_binding_completion_and_cleanup() -> anyhow::Result<()> {
+#[ignore = "Requires isolated Postgres and S3; see api/tests/resumable-uploads.md"]
+async fn stateless_routes_verify_tokens_parts_and_completion() -> anyhow::Result<()> {
     let pool = PgPool::connect(&std::env::var("UPLOAD_TEST_DATABASE_URL")?).await?;
-    let state = test_state(pool.clone())?;
-    let token = state.device_jwt_signer.mint(1, "one")?;
+    let state = test_state(pool)?;
+    let credential = state.device_jwt_signer.mint(1, "one")?;
     let foreign = state.device_jwt_signer.mint(2, "two")?;
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
-    let base = format!("http://{}/smith/upload-sessions", listener.local_addr()?);
     let app = router(state.clone());
-    let server = tokio::spawn(async move { axum::serve(listener, app).await });
-    let client = reqwest::Client::new();
+    let base = "/smith/upload-sessions";
     let capacity = state.upload_permits.acquire_many(4).await?;
-    let response = client
-        .post(format!("{base}/{}/complete", Uuid::new_v4()))
-        .bearer_auth(&token)
-        .send()
-        .await?;
+    let response = call(&app, "POST", base, &credential, None, b"{}".to_vec()).await?;
+    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    let identity =
+        serde_json::json!({"key":"capacity/test", "size_bytes":3,"checksum":"a".repeat(64)});
+    let response = call(
+        &app,
+        "POST",
+        base,
+        &credential,
+        None,
+        serde_json::to_vec(&identity)?,
+    )
+    .await?;
     assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
     assert_eq!(response.headers()["retry-after"], "5");
     drop(capacity);
     let bytes: Vec<u8> = (0..PART_SIZE + 29).map(|n| (n % 251) as u8).collect();
     let checksum = format!("{:x}", Sha256::digest(&bytes));
     for sensitive in [false, true] {
-        let key = format!("clips/{}.mp4", Uuid::new_v4());
+        let key = format!("clips/{}.mp4", uuid::Uuid::new_v4());
         let identity = serde_json::json!({"key":key,"size_bytes":bytes.len(),"checksum":checksum,"sensitive":sensitive});
-        let response = client.post(&base).json(&identity).send().await?;
-        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
-        let response = client
-            .post(&base)
-            .bearer_auth(&token)
-            .json(&identity)
-            .send()
-            .await?;
         assert_eq!(
-            response.status(),
-            StatusCode::OK,
-            "{}",
-            response.text().await?
-        );
-        let opened: UploadPlan = client
-            .post(&base)
-            .bearer_auth(&token)
-            .json(&identity)
-            .send()
-            .await?
-            .json()
-            .await?;
-        let session_url = format!("{base}/{}", opened.session_id);
-        assert_eq!(opened.missing_parts, vec![1, 2]);
-        for (method, suffix) in [
-            (reqwest::Method::DELETE, ""),
-            (reqwest::Method::POST, "/complete"),
-            (reqwest::Method::PUT, "/parts/1"),
-        ] {
-            let response = client
-                .request(method, format!("{session_url}{suffix}"))
-                .bearer_auth(&foreign)
-                .header(
-                    "x-content-sha256",
-                    format!("{:x}", Sha256::digest(&bytes[..PART_SIZE as usize])),
-                )
-                .body(bytes[..PART_SIZE as usize].to_vec())
-                .send()
-                .await?;
-            assert_eq!(response.status(), StatusCode::NOT_FOUND);
-        }
-        let first = &bytes[..PART_SIZE as usize];
-        let put = |number, data: Vec<u8>| {
-            client
-                .put(format!("{session_url}/parts/{number}"))
-                .bearer_auth(&token)
-                .header("x-content-sha256", format!("{:x}", Sha256::digest(&data)))
-                .body(data)
-        };
-        let response = put(1, first.to_vec()).send().await?;
-        assert_eq!(
-            response.status(),
-            StatusCode::OK,
-            "{}",
-            response.text().await?
-        );
-        let resumed: UploadPlan = client
-            .post(&base)
-            .bearer_auth(&token)
-            .json(&identity)
-            .send()
-            .await?
-            .json()
-            .await?;
-        assert_eq!(resumed.session_id, opened.session_id);
-        assert_eq!(resumed.missing_parts, vec![2]);
-        assert_eq!(resumed.confirmed_parts.len(), 1);
-        assert_eq!(
-            client
-                .post(format!("{session_url}/complete"))
-                .bearer_auth(&token)
-                .send()
+            call(&app, "POST", base, "", None, serde_json::to_vec(&identity)?)
                 .await?
                 .status(),
+            StatusCode::UNAUTHORIZED
+        );
+        let opened = open_upload(&app, &credential, &identity).await?;
+        assert!(!opened.upload_id.is_empty());
+        assert_eq!(opened.part_size, PART_SIZE);
+        let listed = upload_plan(&app, &credential, &opened.token).await?;
+        assert_eq!(listed.missing_parts, vec![1, 2]);
+        assert!(listed.confirmed_parts.is_empty());
+        for (method, suffix) in [
+            ("GET", "/status"),
+            ("POST", "/complete"),
+            ("PUT", "/parts/1"),
+        ] {
+            assert_eq!(
+                call(
+                    &app,
+                    method,
+                    &format!("{base}{suffix}"),
+                    &foreign,
+                    Some(&opened.token),
+                    bytes[..PART_SIZE as usize].to_vec()
+                )
+                .await?
+                .status(),
+                StatusCode::FORBIDDEN
+            );
+        }
+        assert_eq!(
+            call(
+                &app,
+                "GET",
+                &format!("{base}/status"),
+                &credential,
+                Some("not-a-token"),
+                vec![]
+            )
+            .await?
+            .status(),
+            StatusCode::FORBIDDEN
+        );
+        assert_eq!(
+            call(
+                &app,
+                "PUT",
+                &format!("{base}/parts/1"),
+                &credential,
+                Some(&opened.token),
+                vec![1]
+            )
+            .await?
+            .status(),
+            StatusCode::BAD_REQUEST
+        );
+        let first: UploadPart = response_json(
+            call(
+                &app,
+                "PUT",
+                &format!("{base}/parts/1"),
+                &credential,
+                Some(&opened.token),
+                bytes[..PART_SIZE as usize].to_vec(),
+            )
+            .await?,
+        )
+        .await?;
+        assert_eq!(first.part_number, 1);
+        assert_eq!(first.size_bytes, PART_SIZE);
+        let listed = upload_plan(&app, &credential, &opened.token).await?;
+        assert_eq!(listed.missing_parts, vec![2]);
+        assert_eq!(listed.confirmed_parts.len(), 1);
+        assert_eq!(listed.confirmed_parts[0].etag, first.etag);
+        assert_eq!(
+            call(
+                &app,
+                "POST",
+                &format!("{base}/complete"),
+                &credential,
+                Some(&opened.token),
+                vec![]
+            )
+            .await?
+            .status(),
             StatusCode::CONFLICT
         );
-        let response = put(2, bytes[PART_SIZE as usize..].to_vec()).send().await?;
         assert_eq!(
-            response.status(),
-            StatusCode::OK,
-            "{}",
-            response.text().await?
+            call(
+                &app,
+                "PUT",
+                &format!("{base}/parts/2"),
+                &credential,
+                Some(&opened.token),
+                bytes[PART_SIZE as usize..].to_vec()
+            )
+            .await?
+            .status(),
+            StatusCode::OK
         );
         let bucket = if sensitive {
             "upload-sensitive"
         } else {
             "upload-assets"
         };
-        // Covers a lost S3 completion reply before the database receipt.
+        // Covers a lost storage completion reply.
         if sensitive {
-            let mut tx = pool.begin().await?;
-            let session = owned_session(&mut tx, opened.session_id, 1)
-                .await
-                .map_err(|s| anyhow::anyhow!(s))?;
-            let uploaded = parts(&mut tx, opened.session_id)
-                .await
-                .map_err(|s| anyhow::anyhow!(s))?;
+            let parts = Storage::list_upload_parts(bucket, &key, &opened.upload_id).await?;
             Storage::complete_multipart(
                 bucket,
                 &key,
-                session
-                    .upload_id
-                    .as_deref()
-                    .ok_or_else(|| anyhow::anyhow!("No upload ID"))?,
-                uploaded
+                &opened.upload_id,
+                parts
                     .into_iter()
                     .map(|p| s3::serde_types::Part {
                         part_number: p.part_number as u32,
@@ -216,93 +307,98 @@ async fn durable_routes_verify_bytes_binding_completion_and_cleanup() -> anyhow:
                     .collect(),
             )
             .await?;
-            tx.rollback().await?;
         }
         for _ in 0..2 {
-            let response = client
-                .post(format!("{session_url}/complete"))
-                .bearer_auth(&token)
-                .send()
-                .await?;
-            assert_eq!(response.status(), StatusCode::OK);
-            let result: serde_json::Value = response.json().await?;
+            let result: serde_json::Value = response_json(
+                call(
+                    &app,
+                    "POST",
+                    &format!("{base}/complete"),
+                    &credential,
+                    Some(&opened.token),
+                    vec![],
+                )
+                .await?,
+            )
+            .await?;
             assert_eq!(result["url"], format!("s3://{bucket}/{key}"));
         }
         assert_eq!(Storage::download_from_s3(bucket, &key).await?, bytes);
-        let receipt: UploadPlan = client
-            .post(&base)
-            .bearer_auth(&token)
-            .json(&identity)
-            .send()
-            .await?
-            .json()
-            .await?;
-        assert_eq!(receipt.url, Some(format!("s3://{bucket}/{key}")));
+        let finished = upload_plan(&app, &credential, &opened.token).await?;
+        assert_eq!(finished.url, Some(format!("s3://{bucket}/{key}")));
     }
+    let body = b"replacement upload";
     for missing_on_complete in [false, true] {
-        let key = format!("expired-s3/{}", Uuid::new_v4());
-        let body = b"replacement upload";
-        let identity = serde_json::json!({"key": key, "size_bytes":body.len(), "checksum":format!("{:x}", Sha256::digest(body)), "sensitive":false});
-        let opened: UploadPlan = client
-            .post(&base)
-            .bearer_auth(&token)
-            .json(&identity)
-            .send()
-            .await?
-            .json()
-            .await?;
-        let url = format!("{base}/{}", opened.session_id);
-        let put = || {
-            client
-                .put(format!("{url}/parts/1"))
-                .bearer_auth(&token)
-                .header("x-content-sha256", format!("{:x}", Sha256::digest(body)))
-                .body(body.to_vec())
-        };
+        let key = format!("missing/{}", uuid::Uuid::new_v4());
+        let identity = serde_json::json!({"key":key,"size_bytes":body.len(),"checksum":format!("{:x}",Sha256::digest(body))});
+        let opened = open_upload(&app, &credential, &identity).await?;
         if missing_on_complete {
-            assert_eq!(put().send().await?.status(), StatusCode::OK);
-        }
-        let old: String =
-            sqlx::query_scalar("SELECT upload_id FROM device_upload_session WHERE id=$1")
-                .bind(opened.session_id)
-                .fetch_one(&pool)
-                .await?;
-        Storage::abort_multipart("upload-assets", &key, &old).await?;
-        let response = if missing_on_complete {
-            client
-                .post(format!("{url}/complete"))
-                .bearer_auth(&token)
-                .send()
-                .await?
-        } else {
-            put().send().await?
-        };
-        assert_eq!(response.status(), StatusCode::CONFLICT);
-        let fresh: UploadPlan = client
-            .post(&base)
-            .bearer_auth(&token)
-            .json(&identity)
-            .send()
-            .await?
-            .json()
-            .await?;
-        assert_eq!(fresh.session_id, opened.session_id);
-        assert_eq!(fresh.missing_parts, vec![1]);
-        assert!(fresh.confirmed_parts.is_empty());
-        let replacement: String =
-            sqlx::query_scalar("SELECT upload_id FROM device_upload_session WHERE id=$1")
-                .bind(opened.session_id)
-                .fetch_one(&pool)
-                .await?;
-        assert_ne!(old, replacement);
-        assert_eq!(put().send().await?.status(), StatusCode::OK);
-        assert_eq!(
-            client
-                .post(format!("{url}/complete"))
-                .bearer_auth(&token)
-                .send()
+            assert_eq!(
+                call(
+                    &app,
+                    "PUT",
+                    &format!("{base}/parts/1"),
+                    &credential,
+                    Some(&opened.token),
+                    body.to_vec()
+                )
                 .await?
                 .status(),
+                StatusCode::OK
+            );
+        }
+        Storage::abort_multipart("upload-assets", &key, &opened.upload_id).await?;
+        for (method, path, data) in [
+            ("GET", "/status", vec![]),
+            ("PUT", "/parts/1", body.to_vec()),
+            ("POST", "/complete", vec![]),
+        ] {
+            let response = call(
+                &app,
+                method,
+                &format!("{base}{path}"),
+                &credential,
+                Some(&opened.token),
+                data,
+            )
+            .await?;
+            assert_eq!(response.status(), StatusCode::GONE);
+            let error: serde_json::Value =
+                serde_json::from_slice(&axum::body::to_bytes(response.into_body(), 1024).await?)?;
+            assert_eq!(error["code"], "NoSuchUpload");
+        }
+        let fresh = open_upload(&app, &credential, &identity).await?;
+        assert_ne!(fresh.upload_id, opened.upload_id);
+        assert_eq!(
+            upload_plan(&app, &credential, &fresh.token)
+                .await?
+                .missing_parts,
+            vec![1]
+        );
+        assert_eq!(
+            call(
+                &app,
+                "PUT",
+                &format!("{base}/parts/1"),
+                &credential,
+                Some(&fresh.token),
+                body.to_vec()
+            )
+            .await?
+            .status(),
+            StatusCode::OK
+        );
+        assert_eq!(
+            call(
+                &app,
+                "POST",
+                &format!("{base}/complete"),
+                &credential,
+                Some(&fresh.token),
+                vec![]
+            )
+            .await?
+            .status(),
             StatusCode::OK
         );
         assert_eq!(
@@ -310,90 +406,61 @@ async fn durable_routes_verify_bytes_binding_completion_and_cleanup() -> anyhow:
             body
         );
     }
-    let invalid: UploadPlan = client.post(&base).bearer_auth(&token).json(&serde_json::json!({
-        "key":format!("bad-checksum/{}",Uuid::new_v4()), "size_bytes":3, "checksum":"0".repeat(64), "sensitive":false,
-    })).send().await?.json().await?;
-    let response = client
-        .put(format!("{base}/{}/parts/1", invalid.session_id))
-        .bearer_auth(&token)
-        .header("x-content-sha256", format!("{:x}", Sha256::digest(b"abc")))
-        .body("abc")
-        .send()
-        .await?;
-    assert_eq!(response.status(), StatusCode::OK);
-    let response = client
-        .post(format!("{base}/{}/complete", invalid.session_id))
-        .bearer_auth(&token)
-        .send()
-        .await?;
-    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
-    let completed: bool = sqlx::query_scalar(
-        "SELECT completed_at IS NOT NULL FROM device_upload_session WHERE id=$1",
-    )
-    .bind(invalid.session_id)
-    .fetch_one(&pool)
-    .await?;
-    assert!(!completed);
-    let key = format!("abandoned/{}", Uuid::new_v4());
-    let identity = serde_json::json!({"key":key,"size_bytes":bytes.len(),"checksum":checksum,"sensitive":true});
-    let abandoned: UploadPlan = client
-        .post(&base)
-        .bearer_auth(&token)
-        .json(&identity)
-        .send()
+    let bad = open_upload(&app,&credential,&serde_json::json!({"key":format!("checksum/{}",uuid::Uuid::new_v4()),"size_bytes":3,"checksum":"0".repeat(64)})).await?;
+    assert_eq!(
+        call(
+            &app,
+            "PUT",
+            &format!("{base}/parts/1"),
+            &credential,
+            Some(&bad.token),
+            b"abc".to_vec()
+        )
         .await?
-        .json()
-        .await?;
-    let mut tx = pool.begin().await?;
-    let session = owned_session(&mut tx, abandoned.session_id, 1)
-        .await
-        .map_err(|s| anyhow::anyhow!(s))?;
-    let upload_id = session
-        .upload_id
-        .ok_or_else(|| anyhow::anyhow!("No upload ID"))?;
-    tx.rollback().await?;
-    let response = client
-        .put(format!("{base}/{}/parts/1", abandoned.session_id))
-        .bearer_auth(&token)
-        .header(
-            "x-content-sha256",
-            format!("{:x}", Sha256::digest(&bytes[..PART_SIZE as usize])),
-        )
-        .body(bytes[..PART_SIZE as usize].to_vec())
-        .send()
-        .await?;
-    assert_eq!(response.status(), StatusCode::OK);
-    sqlx::query(
-        "UPDATE device_upload_session SET created_at=now()-interval '13 hours' WHERE id=$1",
-    )
-    .bind(abandoned.session_id)
-    .execute(&pool)
-    .await?;
-    sweep(&pool).await.map_err(|s| anyhow::anyhow!(s))?;
-    let remaining: i64 =
-        sqlx::query_scalar("SELECT count(*) FROM device_upload_session WHERE id=$1")
-            .bind(abandoned.session_id)
-            .fetch_one(&pool)
-            .await?;
-    assert_eq!(remaining, 0);
-    assert!(
-        Storage::upload_session_part(
-            "upload-sensitive",
-            &key,
-            &upload_id,
-            1,
-            bytes[..PART_SIZE as usize].to_vec()
-        )
-        .await
-        .is_err()
+        .status(),
+        StatusCode::OK
     );
-    server.abort();
+    assert_eq!(
+        call(
+            &app,
+            "POST",
+            &format!("{base}/complete"),
+            &credential,
+            Some(&bad.token),
+            vec![]
+        )
+        .await?
+        .status(),
+        StatusCode::UNPROCESSABLE_ENTITY
+    );
+    let expired = state.config.upload_token_key.sign(&UploadClaims {
+        device_id: 1,
+        bucket: "upload-assets".into(),
+        key: "expired".into(),
+        upload_id: "expired".into(),
+        size_bytes: 3,
+        checksum: "a".repeat(64),
+        expires_at: chrono::Utc::now().timestamp() - 1,
+    })?;
+    assert_eq!(
+        call(
+            &app,
+            "GET",
+            &format!("{base}/status"),
+            &credential,
+            Some(&expired),
+            vec![]
+        )
+        .await?
+        .status(),
+        StatusCode::GONE
+    );
     Ok(())
 }
 
 #[tokio::test]
-#[ignore = "Requires Postgres, S3, and the Plex test binary; see api/tests/resumable-uploads.md"]
-async fn brain_contract_resumes_across_real_smith_routes() -> anyhow::Result<()> {
+#[ignore = "Requires Postgres, S3, and an upload client executable; see api/tests/resumable-uploads.md"]
+async fn client_contract_resumes_across_real_smith_routes() -> anyhow::Result<()> {
     use axum::{middleware, response::IntoResponse};
     use std::sync::atomic::{AtomicBool, Ordering};
     let pool = PgPool::connect(&std::env::var("UPLOAD_TEST_DATABASE_URL")?).await?;
@@ -444,13 +511,7 @@ async fn brain_contract_resumes_across_real_smith_routes() -> anyhow::Result<()>
     let key = format!("contract/{}.mp4", Uuid::new_v4());
     let output = tokio::time::timeout(
         Duration::from_secs(180),
-        tokio::process::Command::new(std::env::var("UPLOAD_TEST_BRAIN_BINARY")?)
-            .args([
-                "--ignored",
-                "--exact",
-                "s3_uploader::resumable::tests::real_smith_upload",
-                "--nocapture",
-            ])
+        tokio::process::Command::new(std::env::var("UPLOAD_TEST_CLIENT_BINARY")?)
             .env("UPLOAD_TEST_SMITH_URL", base)
             .env("UPLOAD_TEST_KEY", &key)
             .kill_on_drop(true)
@@ -470,12 +531,6 @@ async fn brain_contract_resumes_across_real_smith_routes() -> anyhow::Result<()>
         Storage::download_from_s3("upload-sensitive", &key).await?,
         expected
     );
-    let stored: (String,String,Option<chrono::DateTime<chrono::Utc>>) = sqlx::query_as(
-        "SELECT bucket,object_key,completed_at FROM device_upload_session WHERE device_id=1 AND object_key=$1",
-    ).bind(&key).fetch_one(&pool).await?;
-    assert_eq!(stored.0, "upload-sensitive");
-    assert_eq!(stored.1, key);
-    assert!(stored.2.is_some());
     server.abort();
     Ok(())
 }

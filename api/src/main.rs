@@ -23,7 +23,7 @@ use tokio::sync::{Mutex, Semaphore, broadcast};
 use tower::ServiceBuilder;
 use tower_http::cors::CorsLayer;
 use tower_http::decompression::RequestDecompressionLayer;
-use tower_http::trace::TraceLayer;
+use tower_http::{sensitive_headers::SetSensitiveRequestHeadersLayer, trace::TraceLayer};
 use tracing::info;
 use utoipa::openapi::security::{Http, HttpAuthScheme, SecurityScheme};
 use utoipa::{Modify, OpenApi};
@@ -66,6 +66,7 @@ pub mod slack;
 mod smith;
 mod storage;
 mod telemetry;
+mod upload_token;
 mod user;
 
 #[derive(Clone, Debug)]
@@ -240,7 +241,6 @@ async fn start_main_server(
     // go down to a day, so the real cleanup has to run here.
     files::spawn_sweeper(state.pg_pool.clone(), &config.assets_bucket_name);
     os::spawn_sweeper(state.pg_pool.clone(), &config.packages_bucket_name);
-    smith::uploads::spawn_sweeper(state.pg_pool.clone());
 
     // Every pre-existing network has zero ledger references until App API
     // seeds it, so this only runs once seeding is confirmed (network::gc).
@@ -454,7 +454,7 @@ async fn start_main_server(
         .routes(routes!(smith::uploads::open).layer(DefaultBodyLimit::max(16 * 1024)))
         .routes(routes!(smith::uploads::put_part))
         .routes(routes!(smith::uploads::complete))
-        .routes(routes!(smith::uploads::abort))
+        .routes(routes!(smith::uploads::status))
         .routes(routes!(smith::route::download_file))
         .routes(routes!(smith::route::fetch_package))
         .routes(routes!(smith::route::list_release_packages))
@@ -516,6 +516,9 @@ async fn start_main_server(
                 )
             }),
         )
+        .layer(SetSensitiveRequestHeadersLayer::new([
+            axum::http::HeaderName::from_static("x-upload-token"),
+        ]))
         .layer(Extension(state));
 
     let listener = TcpListener::bind("0.0.0.0:8080")
