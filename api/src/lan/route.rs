@@ -6,11 +6,13 @@ use axum::http::StatusCode;
 use axum::{Extension, Json};
 use models::lan::{Lan, LanDevice, LanListResponse, LanSummary, LanSummaryListResponse};
 use serde::Deserialize;
+use sqlx::PgPool;
 use sqlx::types::ipnetwork::IpNetwork;
 use tracing::error;
 use utoipa::IntoParams;
 
 const LAN_TAG: &str = "lan";
+const DEPARTMENT_LABEL: &str = "department";
 
 #[utoipa::path(
     get,
@@ -115,8 +117,8 @@ pub async fn get_lans_for_device(
 #[utoipa::path(
     get,
     path = "/lans",
-    description = "Every local network in the fleet with how many devices are on it, largest \
-                   first. LANs are inferred the same way as for `/devices/{serial_number}/lans`; \
+    description = "Every local network in the fleet with how many devices are on it, those \
+                   with offline devices first. LANs are inferred the same way as for `/devices/{serial_number}/lans`; \
                    fetch a LAN's devices with `/lans/devices`.",
     responses(
         (status = 200, description = "LANs without their devices", body = LanSummaryListResponse),
@@ -136,6 +138,15 @@ pub async fn get_lans(
         return Err(StatusCode::FORBIDDEN);
     }
 
+    let lans = lan_summaries(&state.pg_pool).await.map_err(|err| {
+        error!("Failed to get LANs: {err}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    Ok(Json(LanSummaryListResponse { lans }))
+}
+
+async fn lan_summaries(pool: &PgPool) -> sqlx::Result<Vec<LanSummary>> {
     let rows = sqlx::query!(
         r#"
         WITH lan AS (
@@ -146,9 +157,13 @@ pub async fn get_lans(
                 COUNT(DISTINCT d.id) AS device_count,
                 COUNT(DISTINCT d.id) FILTER (WHERE d.last_ping > NOW() - INTERVAL '3 minutes')
                     AS online_count,
-                MIN(d.ip_address_id) AS ip_address_id
+                MIN(d.ip_address_id) AS ip_address_id,
+                MAX(d.last_ping) AS last_seen,
+                ARRAY_REMOVE(ARRAY_AGG(DISTINCT dl.value ORDER BY dl.value), NULL) AS departments
             FROM device_interface_address dia
             JOIN device d ON d.id = dia.device_id
+            LEFT JOIN label l ON l.name = $1
+            LEFT JOIN device_label dl ON dl.device_id = d.id AND dl.label_id = l.id
             WHERE dia.gateway_mac IS NOT NULL
               AND NOT d.archived
             GROUP BY dia.gateway_mac, network(dia.address)
@@ -159,19 +174,18 @@ pub async fn get_lans(
             lan.gateway_ip AS "gateway_ip!",
             lan.device_count AS "device_count!",
             lan.online_count AS "online_count!",
+            lan.last_seen,
+            lan.departments AS "departments!",
             host(ip.ip_address) AS public_ip,
             ip.name AS public_ip_name
         FROM lan
         LEFT JOIN ip_address ip ON ip.id = lan.ip_address_id
-        ORDER BY lan.device_count DESC, 2, 1
-        "#
+        ORDER BY lan.device_count - lan.online_count DESC, lan.device_count DESC, 2, 1
+        "#,
+        DEPARTMENT_LABEL
     )
-    .fetch_all(&state.pg_pool)
-    .await
-    .map_err(|err| {
-        error!("Failed to get LANs: {err}");
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
+    .fetch_all(pool)
+    .await?;
 
     let lans = rows
         .into_iter()
@@ -182,12 +196,14 @@ pub async fn get_lans(
             gateway_mac: row.gateway_mac,
             device_count: row.device_count,
             online_count: row.online_count,
+            last_seen: row.last_seen,
+            departments: row.departments,
             public_ip: row.public_ip,
             public_ip_name: row.public_ip_name,
         })
         .collect();
 
-    Ok(Json(LanSummaryListResponse { lans }))
+    Ok(lans)
 }
 
 #[derive(Deserialize, Debug, IntoParams)]
@@ -294,4 +310,78 @@ pub async fn get_lan(
     }
 
     lan.map(Json).ok_or(StatusCode::NOT_FOUND)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    async fn add_device(
+        pool: &PgPool,
+        serial: &str,
+        online: bool,
+        gateway_mac: &str,
+        department: &str,
+    ) -> anyhow::Result<()> {
+        let last_ping = if online {
+            "now()"
+        } else {
+            "now() - interval '1 hour'"
+        };
+        let id: i32 = sqlx::query_scalar(&format!(
+            "INSERT INTO device (serial_number, last_ping) VALUES ($1, {last_ping}) RETURNING id"
+        ))
+        .bind(serial)
+        .fetch_one(pool)
+        .await?;
+
+        sqlx::query(
+            "INSERT INTO device_interface_address (device_id, interface, address, gateway_ip, gateway_mac)
+             VALUES ($1, 'wlan0', '192.168.1.10/24', '192.168.1.1', $2::macaddr)",
+        )
+        .bind(id)
+        .bind(gateway_mac)
+        .execute(pool)
+        .await?;
+
+        sqlx::query(
+            "INSERT INTO device_label (device_id, label_id, value)
+             SELECT $1, id, $2 FROM label WHERE name = $3",
+        )
+        .bind(id)
+        .bind(department)
+        .bind(DEPARTMENT_LABEL)
+        .execute(pool)
+        .await?;
+
+        Ok(())
+    }
+
+    #[sqlx::test]
+    #[ignore = "needs the compose Postgres; run with --test-threads=1"]
+    async fn lans_with_offline_devices_come_first(pool: PgPool) -> anyhow::Result<()> {
+        sqlx::query("INSERT INTO label (name) VALUES ($1)")
+            .bind(DEPARTMENT_LABEL)
+            .execute(&pool)
+            .await?;
+        add_device(&pool, "a1", true, "00:00:00:00:00:0a", "big").await?;
+        add_device(&pool, "a2", true, "00:00:00:00:00:0a", "big").await?;
+        add_device(&pool, "b1", false, "00:00:00:00:00:0b", "west").await?;
+        add_device(&pool, "b2", true, "00:00:00:00:00:0b", "east").await?;
+
+        let lans = lan_summaries(&pool).await?;
+
+        let got: Vec<_> = lans
+            .iter()
+            .map(|lan| (lan.online_count, lan.departments.clone()))
+            .collect();
+        assert_eq!(
+            got,
+            vec![
+                (1, vec!["east".to_owned(), "west".to_owned()]),
+                (2, vec!["big".to_owned()]),
+            ]
+        );
+        Ok(())
+    }
 }
