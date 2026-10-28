@@ -768,23 +768,20 @@ pub async fn apply_settings_for_devices(
 }
 
 /// Called on every home poll. A device nobody has edited yet (settings version
-/// 0) gets its resolved set queued without an Apply press, once it has a pin or
-/// its distribution has defaults, so a new device picks up its defaults by
-/// itself. Existing devices are moved to version 1 by the launch migration in
-/// the same transaction that adds the first defaults, so they are never picked
-/// up here.
+/// 0) gets its resolved set queued without an Apply press once its distribution
+/// has defaults, so a new device picks up its defaults by itself. Pins are not
+/// checked: an edit moves a device to version 1. The migration that adds the
+/// first defaults must move existing devices to version 1 in the same
+/// transaction, so they are never picked up here.
 pub async fn auto_apply_settings(pool: &sqlx::PgPool, device_id: i32) -> Result<(), StatusCode> {
     // One indexed read per poll; the resolution only runs for a device that is
     // due.
     let due = sqlx::query_scalar!(
         r#"
-        SELECT d.settings_version = 0 AND NOT d.archived AND (
-            EXISTS (SELECT 1 FROM device_settings ds WHERE ds.device_id = d.id)
-            OR EXISTS (
-                SELECT 1 FROM distribution_setting_default dsd
-                WHERE dsd.distribution_id = r.distribution_id
-                  AND jsonb_strip_nulls(to_jsonb(dsd) - 'distribution_id') <> '{}'::jsonb
-            )
+        SELECT d.settings_version = 0 AND NOT d.archived AND EXISTS (
+            SELECT 1 FROM distribution_setting_default dsd
+            WHERE dsd.distribution_id = r.distribution_id
+              AND jsonb_strip_nulls(to_jsonb(dsd) - 'distribution_id') <> '{}'::jsonb
         ) AS "due!"
         FROM device d
         LEFT JOIN release r ON r.id = d.release_id
