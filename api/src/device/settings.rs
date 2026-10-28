@@ -619,8 +619,8 @@ fn can_apply_settings(current_user: CurrentUser) -> bool {
         && authorization::check(current_user, "devices", "write")
 }
 
-/// Who queues an Apply: a user, or the API for a device still flagged for its
-/// automatic apply.
+/// Who queues an Apply: a user, or the API for a device nobody has edited yet
+/// (settings version 0).
 enum ApplyBy {
     User(i32),
     AutoApply,
@@ -649,12 +649,12 @@ async fn queue_settings_apply(
     // landing after the resolution only leaves the device pending.
     let (device_ids, user_id) = match by {
         ApplyBy::User(user_id) => (device_ids.to_vec(), Some(user_id)),
-        // Claimed in this transaction, so a concurrent Apply or a second poll
-        // that also read the flag finds it cleared and queues nothing.
+        // Version 0 is what Apply skips, so the claim moves it to 1 in this
+        // transaction; a second poll that also saw 0 finds 1 and queues nothing.
         ApplyBy::AutoApply => {
             let claimed = sqlx::query_scalar!(
-                "UPDATE device SET settings_auto_apply = false
-                 WHERE id = ANY($1) AND settings_auto_apply
+                "UPDATE device SET settings_version = 1
+                 WHERE id = ANY($1) AND settings_version = 0
                  RETURNING id",
                 device_ids
             )
@@ -694,14 +694,6 @@ async fn queue_settings_apply(
         .map(|(device, command)| (*device, std::slice::from_ref(command)))
         .collect();
     let receipt = queue_bundle(&mut tx, &entries, user_id).await?;
-    let queued: Vec<i32> = commands.iter().map(|(device, _)| *device).collect();
-    sqlx::query!(
-        "UPDATE device SET settings_auto_apply = false WHERE id = ANY($1) AND settings_auto_apply",
-        &queued
-    )
-    .execute(&mut *tx)
-    .await
-    .map_err(db_error("Failed to clear the automatic settings apply"))?;
     tx.commit()
         .await
         .map_err(db_error("Failed to commit the settings apply"))?;
@@ -775,50 +767,44 @@ pub async fn apply_settings_for_devices(
         .ok_or(StatusCode::BAD_REQUEST)
 }
 
-/// Called on every home poll. A device flagged for it (registered after the
-/// settings tables were added) gets its resolved set queued without an Apply
-/// press, once it has defaults or pins, so a new device picks up its
-/// distribution's defaults by itself. Sent once: any queued Apply clears the
-/// flag.
+/// Called on every home poll. A device nobody has edited yet (settings version
+/// 0) gets its resolved set queued without an Apply press, once it has a pin or
+/// its distribution has defaults, so a new device picks up its defaults by
+/// itself. Existing devices are moved to version 1 by the launch migration in
+/// the same transaction that adds the first defaults, so they are never picked
+/// up here.
 pub async fn auto_apply_settings(pool: &sqlx::PgPool, device_id: i32) -> Result<(), StatusCode> {
-    let db_error = |context: &'static str| {
-        move |err: sqlx::Error| {
-            error!(device_id, "{context}: {err}");
-            StatusCode::INTERNAL_SERVER_ERROR
-        }
-    };
-    let flagged = sqlx::query_scalar!(
-        "SELECT settings_auto_apply FROM device WHERE id = $1",
+    // One indexed read per poll; the resolution only runs for a device that is
+    // due.
+    let due = sqlx::query_scalar!(
+        r#"
+        SELECT d.settings_version = 0 AND NOT d.archived AND (
+            EXISTS (SELECT 1 FROM device_settings ds WHERE ds.device_id = d.id)
+            OR EXISTS (
+                SELECT 1 FROM distribution_setting_default dsd
+                WHERE dsd.distribution_id = r.distribution_id
+                  AND jsonb_strip_nulls(to_jsonb(dsd) - 'distribution_id') <> '{}'::jsonb
+            )
+        ) AS "due!"
+        FROM device d
+        LEFT JOIN release r ON r.id = d.release_id
+        WHERE d.id = $1
+        "#,
         device_id
     )
     .fetch_optional(pool)
     .await
-    .map_err(db_error("Failed to read the automatic settings apply flag"))?
+    .map_err(|err| {
+        error!(
+            device_id,
+            "Failed to check the automatic settings apply: {err}"
+        );
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?
     .unwrap_or(false);
-    if !flagged {
+    if !due {
         return Ok(());
     }
-    let has_settings = load_settings_inputs(pool, &[device_id])
-        .await
-        .map_err(db_error(
-            "Failed to resolve settings to apply automatically",
-        ))?
-        .iter()
-        .any(|input| {
-            input.pins != SettingValues::default() || input.defaults != SettingValues::default()
-        });
-    if !has_settings {
-        return Ok(());
-    }
-    // Version 0 means never edited, which Apply skips; the defaults still have
-    // to go out, as version 1.
-    sqlx::query!(
-        "UPDATE device SET settings_version = 1 WHERE id = $1 AND settings_version = 0",
-        device_id
-    )
-    .execute(pool)
-    .await
-    .map_err(db_error("Failed to set the first settings version"))?;
     queue_settings_apply(pool, &[device_id], ApplyBy::AutoApply).await?;
     Ok(())
 }
@@ -1478,15 +1464,6 @@ mod tests {
             rows[0].1["ApplySettings"]["settings"]["wireless_mode"]["Set"],
             11
         );
-        let flagged: Vec<bool> =
-            sqlx::query_scalar("SELECT settings_auto_apply FROM device ORDER BY id")
-                .fetch_all(&pool)
-                .await?;
-        assert_eq!(
-            flagged,
-            vec![true, false, false],
-            "an Apply replaces the automatic one"
-        );
         Ok(())
     }
 
@@ -1511,6 +1488,14 @@ mod tests {
         .bind(release_id)
         .fetch_one(&pool)
         .await?;
+        // Like every device after the launch migration.
+        let existing: i32 = sqlx::query_scalar(
+            "INSERT INTO device (serial_number, release_id, settings_version)
+             VALUES ('existing', $1, 1) RETURNING id",
+        )
+        .bind(release_id)
+        .fetch_one(&pool)
+        .await?;
         let applies = || {
             let pool = pool.clone();
             async move {
@@ -1523,19 +1508,33 @@ mod tests {
             }
         };
 
-        // No defaults and no pins yet: nothing to send, the flag waits.
+        // No defaults, then a defaults row that manages nothing: nothing to send.
+        auto_apply_settings(&pool, device_id).await.unwrap();
+        sqlx::query("INSERT INTO distribution_setting_default (distribution_id) VALUES ($1)")
+            .bind(distribution_id)
+            .execute(&pool)
+            .await?;
         auto_apply_settings(&pool, device_id).await.unwrap();
         assert!(applies().await?.is_empty());
 
         sqlx::query(
-            "INSERT INTO distribution_setting_default (distribution_id, wireless_mode)
-             VALUES ($1, 11)",
+            "UPDATE distribution_setting_default SET wireless_mode = 11 WHERE distribution_id = $1",
         )
         .bind(distribution_id)
         .execute(&pool)
         .await?;
         auto_apply_settings(&pool, device_id).await.unwrap();
         auto_apply_settings(&pool, device_id).await.unwrap();
+        auto_apply_settings(&pool, existing).await.unwrap();
+        let existing_commands: i64 =
+            sqlx::query_scalar("SELECT count(*) FROM command_queue WHERE device_id = $1")
+                .bind(existing)
+                .fetch_one(&pool)
+                .await?;
+        assert_eq!(
+            existing_commands, 0,
+            "a device past version 0 waits for an Apply"
+        );
         let sent = applies().await?;
         assert_eq!(sent.len(), 1, "sent once");
         assert_eq!(sent[0].0["ApplySettings"]["version"], 1);
@@ -1552,15 +1551,8 @@ mod tests {
         .await?;
         assert_eq!(author, None, "a system bundle");
 
-        // A poll that read the flag before an Apply cleared it queues nothing.
-        sqlx::query("UPDATE device SET settings_auto_apply = true WHERE id = $1")
-            .bind(device_id)
-            .execute(&pool)
-            .await?;
-        sqlx::query("UPDATE device SET settings_auto_apply = false WHERE id = $1")
-            .bind(device_id)
-            .execute(&pool)
-            .await?;
+        // A poll that saw version 0 just before another one claimed it queues
+        // nothing: the device is at 1 now.
         assert_eq!(
             queue_settings_apply(&pool, &[device_id], ApplyBy::AutoApply)
                 .await

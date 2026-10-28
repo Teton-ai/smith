@@ -165,8 +165,8 @@ async fn queue_commands_bundle(
 }
 
 /// Queue each device's own commands as one bundle, staggered across the
-/// devices, in the caller's transaction, so the settings Apply can resolve and
-/// queue under one lock.
+/// devices, in the caller's transaction, so the settings Apply can claim,
+/// resolve and queue in one transaction.
 pub async fn queue_bundle(
     conn: &mut PgConnection,
     entries: &[(i32, &[SafeCommandRequest])],

@@ -1,15 +1,10 @@
 -- Wanted settings: per distribution defaults and per device pins, resolved by
 -- the api into one full set per device when someone presses Apply.
 
--- Bumped on every edit of the device's pins; 0 means nothing to apply.
+-- Bumped on every edit of the device's pins; 0 means nothing decided for the
+-- device yet. A device still at 0 once it has defaults or pins gets them on its
+-- next home poll, without an Apply press.
 ALTER TABLE device ADD COLUMN settings_version int4 NOT NULL DEFAULT 0;
-
--- A device with this set gets its resolved settings on a home poll, without an
--- Apply press, once it has defaults or pins. Devices that exist now start false
--- and wait for the explicit, staggered launch Apply; devices registered later
--- start true, so they pick up their distribution's defaults by themselves.
-ALTER TABLE device ADD COLUMN settings_auto_apply boolean NOT NULL DEFAULT false;
-ALTER TABLE device ALTER COLUMN settings_auto_apply SET DEFAULT true;
 
 -- NULL means "inherit the distribution default". A row exists only while the
 -- device has at least one pin.
