@@ -318,7 +318,7 @@ checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 
 [[package]]
 name = "api"
-version = "0.2.227"
+version = "0.2.228"
 dependencies = [
  "anyhow",
  "axum 0.7.9",
@@ -606,9 +606,9 @@ dependencies = [
 
 [[package]]
 name = "aws-lc-rs"
-version = "1.18.2"
+version = "1.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "faac5829c2b74c28f830747e7818ccfb684261b5f48a1118b1e2a13d36dfab13"
+checksum = "048006790404103c488e6c5616b3e7e702a71292aadda08e8f7698a9e0d2eb53"
 dependencies = [
  "aws-lc-sys",
  "untrusted 0.7.1",
@@ -617,9 +617,9 @@ dependencies = [
 
 [[package]]
 name = "aws-lc-sys"
-version = "0.46.0"
+version = "0.47.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f1622d8446a2d4b2ce0c7eefc73dd43a99779028d5ee5c2dd8073a658ba8a2bc"
+checksum = "8bfbe32ac36b3c428696ce315464181bc4029d689fd58e3f2a4e58c252242f52"
 dependencies = [
  "cc",
  "cmake",
@@ -1192,7 +1192,7 @@ checksum = "1c133bc6a41be0d194c306b5506d15e6feeea7b1d6604bd3f8310dfb2ca96486"
 
 [[package]]
 name = "cli"
-version = "0.2.227"
+version = "0.2.228"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3692,7 +3692,7 @@ dependencies = [
 
 [[package]]
 name = "models"
-version = "0.2.227"
+version = "0.2.228"
 dependencies = [
  "axum 0.7.9",
  "chrono",
@@ -6128,7 +6128,7 @@ checksum = "e8e2fb0f499abb4d162f2bedad68f5ef91a1682b5a03596ddb67efd37768d100"
 
 [[package]]
 name = "smith"
-version = "0.2.227"
+version = "0.2.228"
 dependencies = [
  "anyhow",
  "axum 0.8.9",
@@ -6168,7 +6168,7 @@ dependencies = [
 
 [[package]]
 name = "smith-e2e"
-version = "0.2.227"
+version = "0.2.228"
 dependencies = [
  "anyhow",
  "reqwest",
@@ -6180,7 +6180,7 @@ dependencies = [
 
 [[package]]
 name = "smith-updater"
-version = "0.2.227"
+version = "0.2.228"
 dependencies = [
  "anyhow",
  "clap",
