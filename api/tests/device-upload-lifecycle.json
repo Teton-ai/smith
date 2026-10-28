@@ -1,0 +1,10 @@
+{
+  "Rules": [
+    {
+      "ID": "abort-abandoned-device-multipart-uploads",
+      "Status": "Enabled",
+      "Filter": { "Prefix": "" },
+      "AbortIncompleteMultipartUpload": { "DaysAfterInitiation": 1 }
+    }
+  ]
+}

@@ -19,6 +19,31 @@ pub const PACKAGE_SIGNED_URL_TTL_SECONDS: u64 = 60 * 60;
 /// slow transfer -- smithd reuses the same one when it resumes.
 pub const OS_SIGNED_URL_TTL_SECONDS: u64 = 24 * 60 * 60;
 
+#[derive(serde::Serialize, serde::Deserialize, utoipa::ToSchema)]
+pub struct UploadPart {
+    pub part_number: i32,
+    pub etag: String,
+    pub size_bytes: i64,
+}
+
+#[derive(serde::Deserialize)]
+struct ListedUploadParts {
+    #[serde(rename = "Part", default)]
+    parts: Vec<ListedUploadPart>,
+    #[serde(rename = "IsTruncated", default)]
+    is_truncated: bool,
+}
+
+#[derive(serde::Deserialize)]
+struct ListedUploadPart {
+    #[serde(rename = "PartNumber")]
+    part_number: i32,
+    #[serde(rename = "ETag")]
+    etag: String,
+    #[serde(rename = "Size")]
+    size_bytes: i64,
+}
+
 pub struct Storage;
 
 /// Records in-flight, outcome and size for one upload; Drop covers every exit path.
@@ -138,21 +163,8 @@ impl Storage {
             let response = bucket
                 .complete_multipart_upload(object_key, &upload_id, parts)
                 .await?;
-            // A failed complete must be an Err so the abort below runs.
             let status = response.status_code();
-            if !(200..300).contains(&status) {
-                anyhow::bail!(
-                    "CompleteMultipartUpload for {object_key} failed with status {status}"
-                )
-            }
-            // S3 can embed the real error in a 200 body instead of the status.
-            let body = response.as_str()?;
-            if body.contains("<Error>") {
-                anyhow::bail!(
-                    "CompleteMultipartUpload for {object_key} returned an error body: {}",
-                    body.chars().take(200).collect::<String>()
-                )
-            }
+            validate_completion(status, response.as_str()?)?;
             Ok::<u16, anyhow::Error>(status)
         }
         .await;
@@ -362,15 +374,152 @@ impl Storage {
             .complete_multipart_upload(object_key, upload_id, parts)
             .await?;
 
-        // `complete_multipart_upload` hands back the response without checking
-        // it, and S3 reports some failures here with a 200 body, so the status
-        // is inspected rather than assumed.
-        let status = response.status_code();
-        if !(200..300).contains(&status) {
-            anyhow::bail!("CompleteMultipartUpload for {object_key} failed with status {status}");
-        }
+        validate_completion(response.status_code(), response.as_str()?)?;
 
         Ok(())
+    }
+
+    /// Keeps other parts when S3 rejects this part. rust-s3's chunk helper aborts them.
+    pub async fn upload_session_part(
+        bucket_name: &str,
+        object_key: &str,
+        upload_id: &str,
+        part_number: i32,
+        body: reqwest::Body,
+        size: u64,
+    ) -> anyhow::Result<String> {
+        let urls =
+            Self::presign_upload_parts(bucket_name, object_key, upload_id, &[part_number], 900)
+                .await?;
+        let (_, url) = urls
+            .first()
+            .ok_or_else(|| anyhow::anyhow!("Missing part URL"))?;
+        let response = reqwest::Client::builder()
+            .connect_timeout(std::time::Duration::from_secs(10))
+            .redirect(reqwest::redirect::Policy::none())
+            .build()?
+            .put(url)
+            .header("content-length", size)
+            .body(body)
+            .send()
+            .await
+            .map_err(|e| e.without_url())?;
+        if !response.status().is_success() {
+            let status = response.status().as_u16();
+            let body = response.text().await.map_err(|e| e.without_url())?;
+            if missing_upload_body(&body) {
+                return Err(s3::error::S3Error::HttpFailWithBody(
+                    status,
+                    "<Error><Code>NoSuchUpload</Code></Error>".into(),
+                )
+                .into());
+            }
+            anyhow::bail!("S3 rejected upload part ({status})");
+        }
+        Ok(response
+            .headers()
+            .get("etag")
+            .ok_or_else(|| anyhow::anyhow!("S3 part has no ETag"))?
+            .to_str()?
+            .to_owned())
+    }
+
+    pub async fn list_upload_parts(
+        bucket_name: &str,
+        object_key: &str,
+        upload_id: &str,
+    ) -> anyhow::Result<Vec<UploadPart>> {
+        let bucket = Self::bucket(bucket_name)?;
+        let queries = HashMap::from([
+            ("uploadId".to_owned(), upload_id.to_owned()),
+            ("max-parts".to_owned(), "1000".to_owned()),
+        ]);
+        let url = bucket.presign_get(object_key, 900, Some(queries)).await?;
+        let response = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(30))
+            .redirect(reqwest::redirect::Policy::none())
+            .build()?
+            .get(url)
+            .send()
+            .await
+            .map_err(|e| e.without_url())?;
+        let status = response.status().as_u16();
+        let body = response.text().await.map_err(|e| e.without_url())?;
+        if missing_upload_body(&body) {
+            return Err(s3::error::S3Error::HttpFailWithBody(
+                status,
+                "<Error><Code>NoSuchUpload</Code></Error>".into(),
+            )
+            .into());
+        }
+        anyhow::ensure!(status == 200, "S3 rejected part listing ({status})");
+        let listed: ListedUploadParts = quick_xml::de::from_str(&body)?;
+        anyhow::ensure!(
+            !listed.is_truncated,
+            "S3 part list exceeds the permitted upload size"
+        );
+        Ok(listed
+            .parts
+            .into_iter()
+            .map(|p| UploadPart {
+                part_number: p.part_number,
+                etag: p.etag,
+                size_bytes: p.size_bytes,
+            })
+            .collect())
+    }
+
+    /// Checks the bytes, including recovery after a lost completion reply.
+    pub async fn matches_object(
+        bucket_name: &str,
+        object_key: &str,
+        size: i64,
+        checksum: &str,
+    ) -> anyhow::Result<bool> {
+        let bucket = Self::bucket(bucket_name)?;
+        Self::matches_bucket_object(&bucket, object_key, size, checksum).await
+    }
+
+    async fn matches_bucket_object(
+        bucket: &Bucket,
+        object_key: &str,
+        size: i64,
+        checksum: &str,
+    ) -> anyhow::Result<bool> {
+        use futures::StreamExt;
+        use sha2::{Digest, Sha256};
+        let (head, status) = match bucket.head_object(object_key).await {
+            Ok(response) => response,
+            Err(s3::error::S3Error::HttpFailWithBody(404, _)) => return Ok(false),
+            Err(error) => return Err(error.into()),
+        };
+        if status == 404 {
+            return Ok(false);
+        }
+        anyhow::ensure!(status == 200, "S3 object metadata read failed");
+        if head.content_length != Some(size) {
+            return Ok(false);
+        }
+        let mut response = match bucket.get_object_stream(object_key).await {
+            Ok(response) => response,
+            Err(s3::error::S3Error::HttpFailWithBody(404, _)) => return Ok(false),
+            Err(e) => return Err(e.into()),
+        };
+        if response.status_code == 404 {
+            return Ok(false);
+        }
+        anyhow::ensure!(response.status_code == 200, "S3 object read failed");
+        let mut digest = Sha256::new();
+        let mut received = 0i64;
+        while let Some(chunk) = response.bytes().next().await {
+            let chunk = chunk?;
+            received += chunk.len() as i64;
+            if received > size {
+                return Ok(false);
+            }
+            digest.update(&chunk);
+        }
+        Ok(received == size && format!("{:x}", digest.finalize()) == checksum)
     }
 
     /// Discards an upload and the parts already stored for it. Uncompleted
@@ -395,9 +544,144 @@ impl Storage {
     }
 }
 
+pub fn is_missing_upload(error: &anyhow::Error) -> bool {
+    error.downcast_ref::<s3::error::S3Error>().is_some_and(|error| {
+        matches!(error, s3::error::S3Error::HttpFailWithBody(_, body) if missing_upload_body(body))
+    })
+}
+
+fn missing_upload_body(body: &str) -> bool {
+    let mut reader = quick_xml::Reader::from_str(body);
+    loop {
+        match reader.read_event() {
+            Ok(quick_xml::events::Event::Start(e)) if e.local_name().as_ref() == b"Code" => {
+                return reader
+                    .read_text(e.name())
+                    .is_ok_and(|code| code == "NoSuchUpload");
+            }
+            Ok(quick_xml::events::Event::Eof) | Err(_) => return false,
+            _ => {}
+        }
+    }
+}
+
+fn validate_completion(status: u16, body: &str) -> anyhow::Result<()> {
+    if missing_upload_body(body) {
+        return Err(s3::error::S3Error::HttpFailWithBody(status, body.to_owned()).into());
+    }
+    anyhow::ensure!(
+        (200..300).contains(&status),
+        "S3 completion status {status}"
+    );
+    let mut reader = quick_xml::Reader::from_str(body);
+    loop {
+        match reader.read_event()? {
+            quick_xml::events::Event::Start(e) => {
+                anyhow::ensure!(
+                    e.local_name().as_ref() == b"CompleteMultipartUploadResult",
+                    "S3 completion error body"
+                );
+                return Ok(());
+            }
+            quick_xml::events::Event::Eof => anyhow::bail!("S3 completion body is empty"),
+            _ => {}
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::UploadMetrics;
+    use super::{UploadMetrics, validate_completion};
+
+    #[tokio::test]
+    async fn object_verification_checks_metadata_before_reading_bytes() -> anyhow::Result<()> {
+        use axum::{
+            Router,
+            body::Body,
+            http::{Method, Request, StatusCode},
+            response::Response,
+            routing::any,
+        };
+        use sha2::{Digest, Sha256};
+        use std::sync::{Arc, Mutex};
+        for (head_status, declared_size, checksum_matches, expected) in [
+            (200, 4, true, Some(false)),
+            (404, 5, true, Some(false)),
+            (503, 5, true, None),
+            (200, 5, true, Some(true)),
+            (200, 5, false, Some(false)),
+        ] {
+            let calls = Arc::new(Mutex::new(Vec::new()));
+            let seen = calls.clone();
+            let app = Router::new().fallback(any(move |request: Request<Body>| {
+                let seen = seen.clone();
+                async move {
+                    let method = request.method().clone();
+                    seen.lock().unwrap().push(method.clone());
+                    let status = if method == Method::HEAD {
+                        head_status
+                    } else {
+                        200
+                    };
+                    Response::builder()
+                        .status(status)
+                        .header("content-length", "5")
+                        .body(Body::from("bytes"))
+                        .unwrap()
+                }
+            }));
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+            let endpoint = format!("http://{}", listener.local_addr()?);
+            let server = tokio::spawn(async move { axum::serve(listener, app).await });
+            let bucket = s3::Bucket::new(
+                "bucket",
+                s3::Region::Custom {
+                    region: "test".into(),
+                    endpoint,
+                },
+                s3::creds::Credentials::new(Some("test"), Some("test"), None, None, None)?,
+            )?
+            .with_path_style();
+            let checksum = if checksum_matches {
+                format!("{:x}", Sha256::digest(b"bytes"))
+            } else {
+                "a".repeat(64)
+            };
+            let result =
+                super::Storage::matches_bucket_object(&bucket, "object", declared_size, &checksum)
+                    .await;
+            server.abort();
+            match expected {
+                Some(value) => assert_eq!(result?, value),
+                None => assert!(result.is_err()),
+            }
+            let expected_calls = if head_status == StatusCode::OK.as_u16() && declared_size == 5 {
+                vec![Method::HEAD, Method::GET]
+            } else {
+                vec![Method::HEAD]
+            };
+            assert_eq!(*calls.lock().unwrap(), expected_calls);
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn completion_rejects_http_and_embedded_errors() {
+        assert!(validate_completion(200, "<?xml version=\"1.0\"?>\n<CompleteMultipartUploadResult><ETag>ok</ETag></CompleteMultipartUploadResult>").is_ok());
+        for status in [200, 404] {
+            let error = validate_completion(status, "<Error><Code>NoSuchUpload</Code></Error>")
+                .unwrap_err();
+            assert!(super::is_missing_upload(&error));
+        }
+        for (status, body) in [
+            (500, "<Error/>"),
+            (200, " \n<Error><Code>InternalError</Code></Error>"),
+            (200, "<Error />"),
+            (200, ""),
+        ] {
+            assert!(validate_completion(status, body).is_err());
+        }
+    }
     use metrics_util::{DebugValue, DebuggingRecorder};
 
     #[test]
