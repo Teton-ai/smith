@@ -3304,7 +3304,9 @@ pub(crate) async fn resolve_device_id(
         SELECT id FROM device
         WHERE
             CASE
-                WHEN $1 ~ '^[0-9]+$' AND length($1) <= 10 THEN
+                -- Only a number that fits int4 is an id; anything else is a
+                -- serial, so an out of range number is a 404, not a cast error.
+                WHEN $1 ~ '^[0-9]{1,9}$' OR ($1 ~ '^[0-9]{10}$' AND $1 <= '2147483647') THEN
                     id = $1::int4
                 ELSE
                     serial_number = $1

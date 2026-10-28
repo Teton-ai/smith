@@ -929,7 +929,7 @@ pub async fn load_device_settings(
         FROM device d
         WHERE
             CASE
-                WHEN $1 ~ '^[0-9]+$' AND length($1) <= 10 THEN
+                WHEN $1 ~ '^[0-9]{1,9}$' OR ($1 ~ '^[0-9]{10}$' AND $1 <= '2147483647') THEN
                     d.id = $1::int4
                 ELSE
                     d.serial_number = $1
@@ -1046,6 +1046,12 @@ mod tests {
             load_device_settings(&pool, "unknown-serial")
                 .await?
                 .is_none()
+        );
+        // Ten digits above int4: looked up as a serial, not cast.
+        assert!(load_device_settings(&pool, "4294967296").await?.is_none());
+        assert_eq!(
+            crate::device::route::resolve_device_id("4294967296", &pool).await,
+            Err(StatusCode::NOT_FOUND)
         );
 
         let settings = load_device_settings(&pool, "settings-get").await?.unwrap();
