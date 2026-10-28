@@ -1,10 +1,13 @@
 -- Wanted settings: per distribution defaults and per device pins, resolved by
 -- the api into one full set per device when someone presses Apply.
 
--- Bumped on every edit of the device's pins; 0 means nothing decided for the
--- device yet. A device still at 0 once its distribution has defaults gets them
--- on its next home poll, without an Apply press.
+-- Bumped on every edit of the device's pins. 0 means nothing decided for the
+-- device yet: a device still at 0 once its distribution has defaults gets them
+-- on its next home poll, without an Apply press. Only devices created after this
+-- migration start at 0; existing ones start at 1, so adding defaults never
+-- applies them automatically and they wait for an explicit, staggered Apply.
 ALTER TABLE device ADD COLUMN settings_version int4 NOT NULL DEFAULT 0;
+UPDATE device SET settings_version = 1;
 
 -- NULL means "inherit the distribution default". A row exists only while the
 -- device has at least one pin.

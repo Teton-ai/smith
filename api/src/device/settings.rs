@@ -770,9 +770,9 @@ pub async fn apply_settings_for_devices(
 /// Called on every home poll. A device nobody has edited yet (settings version
 /// 0) gets its resolved set queued without an Apply press once its distribution
 /// has defaults, so a new device picks up its defaults by itself. Pins are not
-/// checked: an edit moves a device to version 1. The migration that adds the
-/// first defaults must move existing devices to version 1 in the same
-/// transaction, so they are never picked up here.
+/// checked: an edit moves a device to version 1. Devices that existed when the
+/// settings tables were added start at version 1, so they are never picked up
+/// here.
 pub async fn auto_apply_settings(pool: &sqlx::PgPool, device_id: i32) -> Result<(), StatusCode> {
     // One indexed read per poll; the resolution only runs for a device that is
     // due.
