@@ -21,15 +21,16 @@ use anyhow::{Context, Result, bail};
 use detect::{LockoutNote, LockoutTracker, RoamDetector, RoamEvent, RoamLimit, parse_trx_info};
 use tokio::process::Command;
 use tokio::sync::mpsc;
-use tokio::time::{Duration, Instant, MissedTickBehavior, interval, sleep, timeout};
+use tokio::time::{Duration, Instant, MissedTickBehavior, interval, timeout};
 use tracing::{debug, info, warn};
 
 const TICK: Duration = Duration::from_secs(15);
 const READ_TIMEOUT: Duration = Duration::from_secs(5);
 /// NM keeps moving for a while after the commander's nmcli calls return.
 const NETWORK_SETTLE: Duration = Duration::from_secs(60);
-/// Between `nmcli device disconnect` and `connect`, so NM sees a clean stop.
-const RECONNECT_PAUSE: Duration = Duration::from_secs(2);
+/// `nmcli connection up` waits 90 s by default, past the 60 s cap of
+/// `execute_nmcli_command`.
+const CONNECTION_UP_WAIT: &str = "45";
 /// A driver reload or rename is rare; failed reads also force a fresh lookup.
 const IFACE_REFRESH: Duration = Duration::from_secs(5 * 60);
 /// A reconnect can emit a dozen state changes while the actor is busy in
@@ -69,6 +70,39 @@ async fn nmcli(args: &[&str]) -> Result<()> {
     Ok(())
 }
 
+/// The UUID of the profile active on `iface`, from
+/// `nmcli -g GENERAL.CON-UUID device show`; empty or `--` when none is.
+fn parse_con_uuid(output: &str) -> Option<String> {
+    let uuid = output.trim();
+    (!uuid.is_empty() && uuid != "--").then(|| uuid.to_owned())
+}
+
+async fn active_connection(iface: &str) -> Result<String> {
+    let mut cmd = Command::new("nmcli");
+    cmd.args(["-g", "GENERAL.CON-UUID", "device", "show", iface]);
+    let output = execute_nmcli_command(cmd).await?;
+    if !output.status.success() {
+        bail!(
+            "nmcli device show {iface} failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
+    }
+    parse_con_uuid(&String::from_utf8_lossy(&output.stdout))
+        .with_context(|| format!("no profile active on {iface}"))
+}
+
+fn connection_up_args<'a>(uuid: &'a str, iface: &'a str) -> [&'a str; 7] {
+    [
+        "--wait",
+        CONNECTION_UP_WAIT,
+        "connection",
+        "up",
+        uuid,
+        "ifname",
+        iface,
+    ]
+}
+
 /// Every path through a recovery leaves the device with autoconnect on, so NM
 /// keeps retrying by itself when our own connect fails.
 async fn enable_autoconnect(iface: &str) {
@@ -99,16 +133,17 @@ impl Recovery for Nmcli {
         }
     }
 
-    /// `nmcli device disconnect` also turns autoconnect off for the device,
-    /// so it is turned back on before anything else can fail.
+    /// Re-activating the active profile makes NM tear the link down first, a
+    /// local disconnect in the driver that flushes the roam buffer. Unlike
+    /// `nmcli device disconnect` it leaves the profile's autoconnect alone,
+    /// and unlike `nmcli device connect` it does not need the AP in NM's scan
+    /// list: that pair stranded a device until Police (Lake Oswego room 17,
+    /// 2026-10-28).
     async fn reconnect(&self, iface: &str) -> Result<()> {
-        let disconnected = nmcli(&["device", "disconnect", iface]).await;
-        enable_autoconnect(iface).await;
-        disconnected.context("disconnect")?;
-        sleep(RECONNECT_PAUSE).await;
-        nmcli(&["device", "connect", iface])
+        let uuid = active_connection(iface).await?;
+        nmcli(&connection_up_args(&uuid, iface))
             .await
-            .context("connect")
+            .context("connection up")
     }
 
     async fn connect(&self, iface: &str) -> Result<()> {
@@ -256,13 +291,7 @@ impl<R: Recovery> LinkHealth<R> {
                 },
                 "Roam buffer stuck but recovery is rate limited"
             ),
-            RoamEvent::Recovered { elapsed } => info!(
-                target: "link_health",
-                kind = "roam_stall",
-                outcome = "recovered",
-                elapsed_s = elapsed.as_secs(),
-                "Roam buffer cleared"
-            ),
+            RoamEvent::Recovered { elapsed } => self.roam_cleared(&iface.name, elapsed).await,
             RoamEvent::StillStuck { count } => warn!(
                 target: "link_health",
                 kind = "roam_stall",
@@ -379,6 +408,28 @@ impl<R: Recovery> LinkHealth<R> {
         self.roam.recovered(Instant::now());
     }
 
+    /// A down interface also reads as a cleared buffer, so the link is
+    /// checked before calling it recovered.
+    async fn roam_cleared(&self, iface: &str, elapsed: Duration) {
+        if self.recovery.associated_bssid(iface).await.is_some() {
+            info!(
+                target: "link_health",
+                kind = "roam_stall",
+                outcome = "recovered",
+                elapsed_s = elapsed.as_secs(),
+                "Roam buffer cleared"
+            );
+        } else {
+            warn!(
+                target: "link_health",
+                kind = "roam_stall",
+                outcome = "cleared_not_connected",
+                elapsed_s = elapsed.as_secs(),
+                "Roam buffer cleared but Wi-Fi is not connected"
+            );
+        }
+    }
+
     fn wait_for_guard(&mut self, kind: &'static str) {
         if !self.guard_wait_logged {
             self.guard_wait_logged = true;
@@ -418,6 +469,8 @@ mod tests {
         association_checks: AtomicU32,
         reconnects: AtomicU32,
         connects: AtomicU32,
+        /// The reconnect leaves the device unassociated, as on 2026-10-28.
+        reconnect_drops_link: AtomicBool,
     }
 
     impl Fake {
@@ -437,6 +490,9 @@ mod tests {
         }
         async fn reconnect(&self, _iface: &str) -> Result<()> {
             self.reconnects.fetch_add(1, Ordering::SeqCst);
+            if self.reconnect_drops_link.load(Ordering::SeqCst) {
+                self.associated.store(false, Ordering::SeqCst);
+            }
             Ok(())
         }
         async fn connect(&self, _iface: &str) -> Result<()> {
@@ -622,5 +678,78 @@ mod tests {
         tokio::time::advance(Duration::from_secs(30 * 60)).await;
         lh.on_tick().await;
         assert_eq!(fake.connects.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn reads_the_active_profile_uuid() {
+        assert_eq!(
+            parse_con_uuid("3aaa88cb-19a7-4b0e-9f66-c176c4473df9\n").as_deref(),
+            Some("3aaa88cb-19a7-4b0e-9f66-c176c4473df9")
+        );
+        assert_eq!(parse_con_uuid("--\n"), None);
+        assert_eq!(parse_con_uuid(""), None);
+    }
+
+    #[test]
+    fn reconnects_by_profile_without_a_device_disconnect() {
+        let args = connection_up_args("3aaa88cb", "wlP1p1s0");
+        assert_eq!(
+            args,
+            [
+                "--wait",
+                "45",
+                "connection",
+                "up",
+                "3aaa88cb",
+                "ifname",
+                "wlP1p1s0"
+            ]
+        );
+        assert!(!args.contains(&"disconnect"));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_cleared_buffer_is_checked_against_the_link() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        fake_iface(root, "wlP1p1s0", "rtl88x2ce", VENDOR_MODULE);
+        write_trx(root, "TX: roam_buf_pkt=1:20");
+        let fake = Fake::associated();
+        fake.reconnect_drops_link.store(true, Ordering::SeqCst);
+        let mut lh = LinkHealth::new(NetGuard::new(), &fake, paths(root));
+
+        lh.on_tick().await;
+        tokio::time::advance(TICK).await;
+        lh.on_tick().await;
+        assert_eq!(fake.reconnects.load(Ordering::SeqCst), 1);
+        assert_eq!(fake.association_checks.load(Ordering::SeqCst), 1);
+
+        // The interface is down, so the driver reports an empty buffer.
+        write_trx(root, "TX: roam_buf_pkt=0:0");
+        tokio::time::advance(TICK).await;
+        lh.on_tick().await;
+        assert_eq!(fake.association_checks.load(Ordering::SeqCst), 2);
+        assert_eq!(fake.reconnects.load(Ordering::SeqCst), 1);
+    }
+
+    /// Platform A (L4T 35, driver v5.9) names the interface `wlan0` and its
+    /// `trx_info` has no `roam_buf_pkt` line, so the roam path stays idle.
+    #[tokio::test(start_paused = true)]
+    async fn platform_a_wlan0_without_a_roam_buf_line_never_reconnects() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        fake_iface(root, "wlan0", "rtl88x2ce", VENDOR_MODULE);
+        let dir = root.join("proc/wlan0");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("trx_info"), "free_xmitframe_cnt=256\n").unwrap();
+        let fake = Fake::associated();
+        let mut lh = LinkHealth::new(NetGuard::new(), &fake, paths(root));
+        for _ in 0..4 {
+            lh.on_tick().await;
+            tokio::time::advance(TICK).await;
+        }
+        assert_eq!(lh.iface.as_ref().map(|i| i.name.as_str()), Some("wlan0"));
+        assert!(lh.roam_unavailable_logged);
+        assert_eq!(fake.reconnects.load(Ordering::SeqCst), 0);
     }
 }
