@@ -170,6 +170,19 @@ impl CommandQueueExecutor {
                     status: -1,
                 },
             },
+            // Understood but not applied by this build yet: answered like an
+            // unknown command, so the command history shows why nothing changed.
+            SafeCommandTx::ApplySettings { version, .. } => {
+                warn!(
+                    command_id = action.id,
+                    version, "ApplySettings is not supported by this smithd yet; upgrade smithd"
+                );
+                SafeCommandResponse {
+                    id: action.id,
+                    command: SafeCommandRx::Unknown,
+                    status: -1,
+                }
+            }
             // Issued by a newer api than this daemon understands. Report a
             // failure so the operator sees why the command did nothing instead
             // of it silently disappearing.

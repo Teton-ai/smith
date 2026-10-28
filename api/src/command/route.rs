@@ -15,7 +15,7 @@ use rand::seq::SliceRandom;
 use sentry::types::Uuid;
 use serde::Deserialize;
 use smith::utils::schema::{SafeCommandRequest, SafeCommandTx};
-use sqlx::PgPool;
+use sqlx::{PgConnection, PgPool};
 use std::collections::HashMap;
 use std::time::Duration;
 use tracing::error;
@@ -38,6 +38,8 @@ const EXTENDED_NETWORK_TEST_MAX_MINUTES: u32 = 60;
 const SECONDS_PER_MINUTE: u64 = 60;
 const DEFAULT_WAVE_FRACTION: f64 = 0.10;
 const DEFAULT_WAVE_DURATION: Duration = Duration::from_secs(20);
+const APPLY_SETTINGS_WAVE_FRACTION: f64 = 0.10;
+const APPLY_SETTINGS_WAVE_DURATION: Duration = Duration::from_secs(20);
 
 fn bundle_relative_wave_size(device_count: usize, fraction: f64) -> u32 {
     ((device_count as f64 * fraction).round() as u32).max(1)
@@ -68,6 +70,12 @@ fn stagger_policy(cmd: &SafeCommandTx, device_count: usize) -> Option<StaggerPol
                 )) * SECONDS_PER_MINUTE,
             ),
         }),
+        // A driver reload or NM re-activation takes the device offline for
+        // 10 to 20 s; its own arm so tuning it doesn't move the default.
+        SafeCommandTx::ApplySettings { .. } => Some(StaggerPolicy {
+            wave_size: bundle_relative_wave_size(device_count, APPLY_SETTINGS_WAVE_FRACTION),
+            wave_duration: APPLY_SETTINGS_WAVE_DURATION,
+        }),
         // Interactive/session commands: no contention to pace, and waiting
         // would only add latency.
         SafeCommandTx::OpenTunnel { .. }
@@ -86,12 +94,12 @@ fn stagger_policy(cmd: &SafeCommandTx, device_count: usize) -> Option<StaggerPol
 }
 
 /// Strictest policy across `commands`: smallest wave, longest duration.
-fn merged_stagger_policy(
-    commands: &[SafeCommandRequest],
+fn merged_stagger_policy<'a>(
+    commands: impl IntoIterator<Item = &'a SafeCommandRequest>,
     device_count: usize,
 ) -> Option<StaggerPolicy> {
     commands
-        .iter()
+        .into_iter()
         .filter_map(|c| stagger_policy(&c.command, device_count))
         .reduce(|a, b| StaggerPolicy {
             wave_size: a.wave_size.min(b.wave_size),
@@ -142,31 +150,48 @@ async fn queue_commands_bundle(
     commands: &[SafeCommandRequest],
     user_id: i32,
 ) -> Result<BundleReceipt, StatusCode> {
+    let entries: Vec<(i32, &[SafeCommandRequest])> =
+        devices.iter().map(|&device| (device, commands)).collect();
     let mut tx = pg_pool.begin().await.map_err(|err| {
         error!("Failed to start transaction {err}");
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
+    let receipt = queue_bundle(&mut tx, &entries, Some(user_id)).await?;
+    tx.commit().await.map_err(|err| {
+        error!("Failed to commit transaction {err}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+    Ok(receipt)
+}
 
+/// Queue each device's own commands as one bundle, staggered across the
+/// devices, in the caller's transaction, so the settings Apply can claim,
+/// resolve and queue in one transaction.
+pub async fn queue_bundle(
+    conn: &mut PgConnection,
+    entries: &[(i32, &[SafeCommandRequest])],
+    // `None` for a bundle the api queues by itself, listed as a system bundle.
+    user_id: Option<i32>,
+) -> Result<BundleReceipt, StatusCode> {
     let bundle_id = sqlx::query!(
         r#"INSERT INTO command_bundles (user_id) VALUES ($1) RETURNING uuid"#,
         user_id
     )
-    .fetch_one(&mut *tx)
+    .fetch_one(&mut *conn)
     .await
     .map_err(|err| {
         error!("Failed to insert command bundle {err}");
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
 
-    let policy = merged_stagger_policy(commands, devices.len());
-    let wave_offsets = assign_wave_offsets(devices, policy.as_ref());
-
-    // Once a paced command appears, every later command inherits its
-    // offset too, exempt or not: `get_commands` has no cross-poll ordering
-    // guarantee, so a later command can't be allowed to fetch ahead of it.
-    let first_paced_index = commands
-        .iter()
-        .position(|c| stagger_policy(&c.command, devices.len()).is_some());
+    let devices: Vec<i32> = entries.iter().map(|(device, _)| *device).collect();
+    // A device listed twice gets the same commands, so a lookup by id is enough.
+    let commands_by_device: HashMap<i32, &[SafeCommandRequest]> = entries.iter().copied().collect();
+    let policy = merged_stagger_policy(
+        entries.iter().flat_map(|(_, commands)| commands.iter()),
+        devices.len(),
+    );
+    let wave_offsets = assign_wave_offsets(&devices, policy.as_ref());
 
     // Two-phase: a slow insert could let real time pass an early wave's
     // schedule before anything commits and becomes visible, collapsing
@@ -177,53 +202,94 @@ async fn queue_commands_bundle(
     // drifting per row).
     let far_future_placeholder = Utc::now() + Duration::from_secs(24 * 60 * 60);
 
-    let mut queued = Vec::with_capacity(devices.len() * commands.len());
-    let mut pending_corrections: Vec<(i32, i32)> = Vec::new();
+    // Rows in wave order, inserted in one statement: one round trip per row
+    // would keep a bundle of thousands of devices open for seconds.
+    let row_count: usize = entries.iter().map(|(_, c)| c.len()).sum();
+    let mut row_devices = Vec::with_capacity(row_count);
+    let mut row_cmds = Vec::with_capacity(row_count);
+    let mut row_continue = Vec::with_capacity(row_count);
+    let mut row_placeholders = Vec::with_capacity(row_count);
+    let mut row_offsets = Vec::with_capacity(row_count);
     for DeviceWaveOffset { device_id, offset } in &wave_offsets {
+        let commands = commands_by_device
+            .get(device_id)
+            .copied()
+            .unwrap_or_default();
+        // Once a paced command appears, every later command inherits its
+        // offset too, exempt or not: `get_commands` has no cross-poll ordering
+        // guarantee, so a later command can't be allowed to fetch ahead of it.
+        let first_paced_index = commands
+            .iter()
+            .position(|c| stagger_policy(&c.command, devices.len()).is_some());
         for (i, command) in commands.iter().enumerate() {
             let row_offset = match first_paced_index {
                 Some(paced_from) if i >= paced_from => *offset,
                 _ => None,
             };
-            let placeholder = row_offset.map(|_| far_future_placeholder);
             let cmd = serde_json::to_value(command.command.clone()).map_err(|err| {
                 error!("Failed to serialize command into JSON {err}");
                 StatusCode::INTERNAL_SERVER_ERROR
             })?;
-            let row = sqlx::query!(
-                r#"INSERT INTO command_queue (device_id, cmd, continue_on_error, canceled, bundle, available_at)
-                VALUES (
-                    $1,
-                    $2::jsonb,
-                    $3,
-                    false,
-                    $4,
-                    COALESCE($5, now())
-                )
-                RETURNING id"#,
-                device_id,
-                cmd,
-                command.continue_on_error,
-                bundle_id.uuid,
-                placeholder
-            )
-            .fetch_one(&mut *tx)
-            .await
-            .map_err(|err| {
-                error!("Failed to insert command for device {err}");
-                StatusCode::INTERNAL_SERVER_ERROR
-            })?;
-
-            if let Some(offset) = row_offset {
-                pending_corrections.push((row.id, offset.as_secs() as i32));
-            }
-
-            queued.push(QueuedCommand {
-                device: *device_id,
-                cmd_id: row.id,
-            });
+            row_devices.push(*device_id);
+            row_cmds.push(cmd);
+            row_continue.push(command.continue_on_error);
+            row_placeholders.push(row_offset.map(|_| far_future_placeholder));
+            row_offsets.push(row_offset);
         }
     }
+
+    // Ids are reserved first so each row's id is known by position, without
+    // relying on the order an INSERT ... RETURNING hands them back.
+    let ids: Vec<i32> = sqlx::query_scalar!(
+        r#"SELECT nextval(pg_get_serial_sequence('command_queue', 'id'))::int4 AS "id!"
+           FROM generate_series(1, $1::int4)"#,
+        i32::try_from(row_count).unwrap_or(i32::MAX)
+    )
+    .fetch_all(&mut *conn)
+    .await
+    .map_err(|err| {
+        error!("Failed to reserve command ids {err}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+    if ids.len() != row_count {
+        error!(
+            "Reserved {} command ids for {row_count} commands",
+            ids.len()
+        );
+        return Err(StatusCode::INTERNAL_SERVER_ERROR);
+    }
+    sqlx::query!(
+        r#"INSERT INTO command_queue (id, device_id, cmd, continue_on_error, canceled, bundle, available_at)
+        SELECT u.id, u.device_id, u.cmd, u.continue_on_error, false, $5, COALESCE(u.placeholder, now())
+        FROM UNNEST($1::int4[], $2::int4[], $3::jsonb[], $4::bool[], $6::timestamptz[])
+            AS u(id, device_id, cmd, continue_on_error, placeholder)"#,
+        &ids,
+        &row_devices,
+        &row_cmds,
+        &row_continue,
+        bundle_id.uuid,
+        &row_placeholders as &[Option<chrono::DateTime<Utc>>],
+    )
+    .execute(&mut *conn)
+    .await
+    .map_err(|err| {
+        error!("Failed to insert commands for devices {err}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    let pending_corrections: Vec<(i32, i32)> = ids
+        .iter()
+        .zip(&row_offsets)
+        .filter_map(|(id, offset)| offset.map(|offset| (*id, offset.as_secs() as i32)))
+        .collect();
+    let queued: Vec<QueuedCommand> = ids
+        .iter()
+        .zip(&row_devices)
+        .map(|(id, device)| QueuedCommand {
+            device: *device,
+            cmd_id: *id,
+        })
+        .collect();
 
     if !pending_corrections.is_empty() {
         let ids: Vec<i32> = pending_corrections.iter().map(|(id, _)| *id).collect();
@@ -238,18 +304,13 @@ async fn queue_commands_bundle(
             &ids,
             &offset_secs,
         )
-        .execute(&mut *tx)
+        .execute(&mut *conn)
         .await
         .map_err(|err| {
             error!("Failed to finalize staggered availability {err}");
             StatusCode::INTERNAL_SERVER_ERROR
         })?;
     }
-
-    tx.commit().await.map_err(|err| {
-        error!("Failed to commit transaction {err}");
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
 
     Ok(BundleReceipt {
         uuid: bundle_id.uuid,
@@ -318,7 +379,7 @@ pub async fn issue_commands_to_devices(
         return Err(StatusCode::BAD_REQUEST);
     }
 
-    if !authorization::reject_unknown_commands(&bundle_commands.commands) {
+    if !authorization::reject_unqueueable_commands(&bundle_commands.commands) {
         return Err(StatusCode::BAD_REQUEST);
     }
 
@@ -795,6 +856,9 @@ pub async fn create_recipe(
     if !authorization::check(current_user, "recipes", "write") {
         return Err(StatusCode::FORBIDDEN);
     }
+    if !authorization::reject_unqueueable_commands(&recipe.commands) {
+        return Err(StatusCode::BAD_REQUEST);
+    }
 
     let commands = serde_json::to_value(&recipe.commands).map_err(|err| {
         error!("Failed to serialize recipe commands into JSON {err}");
@@ -849,6 +913,9 @@ pub async fn update_recipe(
 ) -> Result<StatusCode, StatusCode> {
     if !authorization::check(current_user, "recipes", "write") {
         return Err(StatusCode::FORBIDDEN);
+    }
+    if !authorization::reject_unqueueable_commands(&recipe.commands) {
+        return Err(StatusCode::BAD_REQUEST);
     }
 
     let commands = serde_json::to_value(&recipe.commands).map_err(|err| {
@@ -1137,6 +1204,19 @@ mod stagger_tests {
         )
         .expect("ExtendedNetworkTest should be paced");
         assert_eq!(large.wave_size, 5); // round(50 * 0.10) = 5
+    }
+
+    #[test]
+    fn apply_settings_has_its_own_bundle_relative_policy() {
+        let apply = SafeCommandTx::ApplySettings {
+            version: 1,
+            settings: Default::default(),
+        };
+        let policy = stagger_policy(&apply, 30).expect("ApplySettings should be paced");
+        assert_eq!(policy.wave_size, 3); // round(30 * 0.10) = 3
+        assert_eq!(policy.wave_duration, APPLY_SETTINGS_WAVE_DURATION);
+        let small = stagger_policy(&apply, 4).expect("ApplySettings should be paced");
+        assert_eq!(small.wave_size, 1);
     }
 
     #[test]

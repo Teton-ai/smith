@@ -529,7 +529,10 @@ pub async fn save_responses(
                     .await?;
                 }
             }
-            SafeCommandRx::ReportSettings { ref report } if response.status == 0 => {
+            SafeCommandRx::ReportSettings { ref report }
+            | SafeCommandRx::ApplySettingsResult { ref report, .. }
+                if response.status == 0 =>
+            {
                 // Display only: a bad report must not drop the rest of the poll.
                 if let Err(err) = save_settings_report(&mut tx, device_id, report).await {
                     error!(device_id, "Failed to store settings report: {err:?}");
@@ -821,7 +824,7 @@ pub async fn save_settings_report(
 
 #[cfg(test)]
 mod tests {
-    use super::{map_key_mgmt, save_settings_report, schema};
+    use super::{map_key_mgmt, save_responses, save_settings_report, schema};
     use sqlx::PgPool;
 
     #[test]
@@ -931,6 +934,66 @@ mod tests {
         .fetch_one(&pool)
         .await?;
         assert_eq!(statuses, 0);
+        Ok(())
+    }
+
+    #[sqlx::test]
+    #[ignore = "needs the compose Postgres; run with --test-threads=1"]
+    async fn apply_settings_results_store_the_report(pool: PgPool) -> anyhow::Result<()> {
+        use schema::{HomePost, SafeCommandResponse, SafeCommandRx, SettingsReport};
+
+        let device_id: i32 =
+            sqlx::query_scalar("INSERT INTO device (serial_number) VALUES ('r') RETURNING id")
+                .fetch_one(&pool)
+                .await?;
+        let post = |command: SafeCommandRx, status: i32| {
+            HomePost::new(
+                vec![SafeCommandResponse {
+                    id: -1,
+                    command,
+                    status,
+                }],
+                None,
+                vec![],
+            )
+        };
+        let stored = |pool: PgPool| async move {
+            sqlx::query_as::<_, (Option<i32>, Option<String>)>(
+                "SELECT applied_version, hostname FROM device_settings_reported WHERE device_id = $1",
+            )
+            .bind(device_id)
+            .fetch_optional(&pool)
+            .await
+        };
+
+        // Applied: the report is stored as smithd sent it.
+        let applied = SafeCommandRx::ApplySettingsResult {
+            applied_version: 2,
+            reverted: false,
+            report: Box::new(SettingsReport {
+                applied_version: Some(2),
+                hostname: Some("a".to_owned()),
+                ..Default::default()
+            }),
+        };
+        save_responses(device_id, "r", post(applied, 0), &pool).await?;
+        assert_eq!(
+            stored(pool.clone()).await?,
+            Some((Some(2), Some("a".to_owned())))
+        );
+
+        // A failed read is answered with an empty report: nothing is stored.
+        let failed = SafeCommandRx::ApplySettingsResult {
+            applied_version: 2,
+            reverted: false,
+            report: Box::default(),
+        };
+        save_responses(device_id, "r", post(failed, -1), &pool).await?;
+        assert_eq!(
+            stored(pool.clone()).await?,
+            Some((Some(2), Some("a".to_owned())))
+        );
+
         Ok(())
     }
 

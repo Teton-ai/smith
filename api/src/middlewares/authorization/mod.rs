@@ -48,11 +48,12 @@ pub fn required_permission(command: &SafeCommandTx) -> Permission {
         | ReportNMProfiles
         | WifiScan
         | ApplyNetworks { .. }
-        | ReportSettings => "basic",
+        | ReportSettings
+        | ApplySettings { .. } => "basic",
         // Only ever produced by a daemon deserializing a command it doesn't
         // recognize; the api never issues it. Gated as `freeform` so that if one
         // is ever submitted it needs the most privileged action, and rejected
-        // outright at the enqueue path — see `reject_unknown_commands`.
+        // outright at the enqueue path — see `reject_unqueueable_commands`.
         Unknown => "freeform",
     };
     Permission {
@@ -61,14 +62,20 @@ pub fn required_permission(command: &SafeCommandTx) -> Permission {
     }
 }
 
-/// `SafeCommandTx::Unknown` is a daemon-side deserialization fallback, not a real
-/// command. It reaches here only if a client posts an unrecognized command name,
-/// in which case queueing it would waste a round trip to a device that can only
-/// fail it. Returns false if the bundle contains one.
-pub fn reject_unknown_commands(commands: &[SafeCommandRequest]) -> bool {
-    !commands
-        .iter()
-        .any(|req| matches!(req.command, SafeCommandTx::Unknown))
+/// Commands the generic paths (raw bundles, per device commands, recipes) must
+/// refuse. `SafeCommandTx::Unknown` is a daemon-side deserialization fallback,
+/// not a real command: it reaches here only if a client posts an unrecognized
+/// command name, and queueing it would waste a round trip to a device that can
+/// only fail it. `ApplySettings` is only sent by the settings endpoints, which
+/// resolve and validate the set per device; posted raw it would skip both.
+/// Returns false if the bundle contains one.
+pub fn reject_unqueueable_commands(commands: &[SafeCommandRequest]) -> bool {
+    !commands.iter().any(|req| {
+        matches!(
+            req.command,
+            SafeCommandTx::Unknown | SafeCommandTx::ApplySettings { .. }
+        )
+    })
 }
 
 /// Returns true only if `current_user` is allowed to dispatch every command in
@@ -231,5 +238,33 @@ impl std::fmt::Display for AuthorizationConfig {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn request(command: SafeCommandTx) -> SafeCommandRequest {
+        SafeCommandRequest {
+            id: 0,
+            command,
+            continue_on_error: false,
+        }
+    }
+
+    #[test]
+    fn generic_paths_refuse_unknown_and_raw_apply_settings() {
+        assert!(reject_unqueueable_commands(&[request(SafeCommandTx::Ping)]));
+        assert!(!reject_unqueueable_commands(&[
+            request(SafeCommandTx::Ping),
+            request(SafeCommandTx::Unknown),
+        ]));
+        assert!(!reject_unqueueable_commands(&[request(
+            SafeCommandTx::ApplySettings {
+                version: 1,
+                settings: Default::default(),
+            }
+        )]));
     }
 }

@@ -240,6 +240,13 @@ pub enum SafeCommandRx {
         // Boxed: by far the largest response, it would size every other one.
         report: Box<SettingsReport>,
     },
+    /// `report` is read back after the apply; `reverted` when the device put
+    /// its previous settings back after losing the api.
+    ApplySettingsResult {
+        applied_version: i32,
+        reverted: bool,
+        report: Box<SettingsReport>,
+    },
     /// Fallback for any report this build doesn't recognize; ignored by the api.
     Unknown,
 }
@@ -329,6 +336,12 @@ pub enum SafeCommandTx {
         session_id: String,
     },
     ReportSettings,
+    /// Issued only through the settings apply endpoints, which resolve
+    /// `settings` per device; not offered as a free command.
+    ApplySettings {
+        version: i32,
+        settings: WantedSettings,
+    },
     /// Fallback for any command this build doesn't recognize. Never issued by
     /// the api: it is produced locally by `deserialize_tx` and reported back
     /// with a failure status so the operator sees why nothing happened.
@@ -553,6 +566,48 @@ pub struct SettingsReport {
     pub apply_status: Vec<SettingStatus>,
     /// Settings that drifted and were put back since the previous report.
     pub corrected: Vec<DeviceSetting>,
+}
+
+/// One setting group of an `ApplySettings`. `Unmanaged` removes smithd's own
+/// file or value for it; a group left out of the command is left as it is.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, utoipa::ToSchema)]
+pub enum Managed<T> {
+    Set(T),
+    Unmanaged,
+}
+
+/// The six `roam_param` fields, written together. The busy fields are `None`
+/// on drivers without them (v5.9).
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, utoipa::ToSchema)]
+pub struct RoamTuning {
+    pub idle_diff: i32,
+    pub busy_diff: Option<i32>,
+    pub scanr_exp_ms: i32,
+    pub scan_int: i32,
+    pub idle_th: i32,
+    pub busy_th: Option<i32>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, utoipa::ToSchema)]
+pub struct MacRandomization {
+    pub cloned_mac: String,
+    pub scan_rand_mac: bool,
+}
+
+/// The full resolved set for one device, never a patch.
+#[derive(Serialize, Deserialize, Default, Debug, Clone, PartialEq, utoipa::ToSchema)]
+#[serde(default)]
+pub struct WantedSettings {
+    pub wireless_mode: Option<Managed<i16>>,
+    pub power_mgnt: Option<Managed<i16>>,
+    pub roam_flags: Option<Managed<i16>>,
+    pub roam_tuning: Option<Managed<RoamTuning>>,
+    pub nm_wifi_powersave: Option<Managed<i16>>,
+    pub nm_autoconnect_retries: Option<Managed<i32>>,
+    pub mac: Option<Managed<MacRandomization>>,
+    pub hostname: Option<Managed<String>>,
+    pub ntp_servers: Option<Managed<Vec<String>>>,
+    pub bgscan: Option<Managed<String>>,
 }
 
 #[derive(Type, Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -1055,6 +1110,69 @@ mod tests {
         assert_eq!(json["apply_status"][0]["state"], "reverted");
         assert_eq!(json["corrected"][0], "idle_diff");
         assert_eq!(serde_json::from_value::<SettingsReport>(json).unwrap(), new);
+    }
+
+    #[test]
+    fn apply_settings_carries_set_unmanaged_and_absent_groups() {
+        let json = serde_json::json!({
+            "ApplySettings": {
+                "version": 3,
+                "settings": {
+                    "wireless_mode": {"Set": 11},
+                    "roam_tuning": {"Set": {
+                        "idle_diff": 15, "busy_diff": 15, "scanr_exp_ms": 10000,
+                        "scan_int": 5, "idle_th": 30, "busy_th": 30
+                    }},
+                    "hostname": "Unmanaged"
+                }
+            }
+        });
+        let SafeCommandTx::ApplySettings { version, settings } =
+            serde_json::from_value(json.clone()).unwrap()
+        else {
+            panic!("expected ApplySettings");
+        };
+        assert_eq!(version, 3);
+        assert_eq!(settings.wireless_mode, Some(Managed::Set(11)));
+        assert_eq!(settings.hostname, Some(Managed::Unmanaged));
+        assert_eq!(settings.ntp_servers, None, "absent group");
+        assert!(matches!(
+            settings.roam_tuning,
+            Some(Managed::Set(RoamTuning {
+                busy_th: Some(30),
+                ..
+            }))
+        ));
+        let encoded =
+            serde_json::to_value(SafeCommandTx::ApplySettings { version, settings }).unwrap();
+        assert_eq!(
+            encoded["ApplySettings"]["settings"]["hostname"],
+            "Unmanaged"
+        );
+        assert_eq!(
+            encoded["ApplySettings"]["settings"]["wireless_mode"]["Set"],
+            11
+        );
+    }
+
+    #[test]
+    fn apply_settings_result_round_trips() {
+        let result = SafeCommandRx::ApplySettingsResult {
+            applied_version: 3,
+            reverted: true,
+            report: Box::new(SettingsReport {
+                applied_version: Some(3),
+                ..Default::default()
+            }),
+        };
+        let encoded = serde_json::to_value(&result).unwrap();
+        assert_eq!(encoded["ApplySettingsResult"]["reverted"], true);
+        let SafeCommandRx::ApplySettingsResult { report, .. } =
+            serde_json::from_value(encoded).unwrap()
+        else {
+            panic!("expected ApplySettingsResult");
+        };
+        assert_eq!(report.applied_version, Some(3));
     }
 
     #[test]

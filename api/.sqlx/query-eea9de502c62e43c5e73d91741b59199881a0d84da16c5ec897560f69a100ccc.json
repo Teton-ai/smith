@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT d.settings_version = 0 AND NOT d.archived AND EXISTS (\n            SELECT 1 FROM distribution_setting_default dsd\n            WHERE dsd.distribution_id = r.distribution_id\n              AND jsonb_strip_nulls(to_jsonb(dsd) - 'distribution_id') <> '{}'::jsonb\n        ) AS \"due!\"\n        FROM device d\n        LEFT JOIN release r ON r.id = d.release_id\n        WHERE d.id = $1\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "due!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "eea9de502c62e43c5e73d91741b59199881a0d84da16c5ec897560f69a100ccc"
+}
