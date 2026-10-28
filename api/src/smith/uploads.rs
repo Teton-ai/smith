@@ -299,12 +299,13 @@ pub async fn complete(
                 .collect(),
         )
         .await;
+        let verified = matches_object(&claims).await?;
         if let Err(error) = result
-            && !matches_object(&claims).await?
+            && !verified
         {
             return Err(storage_error(error));
         }
-        if !matches_object(&claims).await? {
+        if !verified {
             return Err(UploadError(
                 StatusCode::UNPROCESSABLE_ENTITY,
                 "ChecksumMismatch",

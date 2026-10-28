@@ -41,7 +41,7 @@ SQLX_OFFLINE=true cargo test -p api client_contract_resumes_across_real_smith_ro
 
 ## Protocol and deployment
 
-Set `UPLOAD_TOKEN_SECRET` to a random secret with at least 32 bytes. All API instances must use the same secret. Keep it stable across restarts. Secret rotation invalidates outstanding upload tokens, so clients must open fresh uploads after rotation.
+Set `UPLOAD_TOKEN_SECRET` to a random secret with at least 32 bytes. `make init` and `make test.e2e` generate a stable throwaway secret for local use. All API instances must use the same secret. Keep it stable across restarts. Secret rotation invalidates outstanding upload tokens, so clients must open fresh uploads after rotation.
 
 Deploy the upload endpoints before enabling resumable transfers in clients. Keep the existing whole-file route available during rollout. Clients can use it when the upload API is unavailable. No upload database migration is required.
 

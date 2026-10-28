@@ -476,9 +476,30 @@ impl Storage {
         size: i64,
         checksum: &str,
     ) -> anyhow::Result<bool> {
+        let bucket = Self::bucket(bucket_name)?;
+        Self::matches_bucket_object(&bucket, object_key, size, checksum).await
+    }
+
+    async fn matches_bucket_object(
+        bucket: &Bucket,
+        object_key: &str,
+        size: i64,
+        checksum: &str,
+    ) -> anyhow::Result<bool> {
         use futures::StreamExt;
         use sha2::{Digest, Sha256};
-        let bucket = Self::bucket(bucket_name)?;
+        let (head, status) = match bucket.head_object(object_key).await {
+            Ok(response) => response,
+            Err(s3::error::S3Error::HttpFailWithBody(404, _)) => return Ok(false),
+            Err(error) => return Err(error.into()),
+        };
+        if status == 404 {
+            return Ok(false);
+        }
+        anyhow::ensure!(status == 200, "S3 object metadata read failed");
+        if head.content_length != Some(size) {
+            return Ok(false);
+        }
         let mut response = match bucket.get_object_stream(object_key).await {
             Ok(response) => response,
             Err(s3::error::S3Error::HttpFailWithBody(404, _)) => return Ok(false),
@@ -571,6 +592,78 @@ fn validate_completion(status: u16, body: &str) -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::{UploadMetrics, validate_completion};
+
+    #[tokio::test]
+    async fn object_verification_checks_metadata_before_reading_bytes() -> anyhow::Result<()> {
+        use axum::{
+            Router,
+            body::Body,
+            http::{Method, Request, StatusCode},
+            response::Response,
+            routing::any,
+        };
+        use sha2::{Digest, Sha256};
+        use std::sync::{Arc, Mutex};
+        for (head_status, declared_size, checksum_matches, expected) in [
+            (200, 4, true, Some(false)),
+            (404, 5, true, Some(false)),
+            (503, 5, true, None),
+            (200, 5, true, Some(true)),
+            (200, 5, false, Some(false)),
+        ] {
+            let calls = Arc::new(Mutex::new(Vec::new()));
+            let seen = calls.clone();
+            let app = Router::new().fallback(any(move |request: Request<Body>| {
+                let seen = seen.clone();
+                async move {
+                    let method = request.method().clone();
+                    seen.lock().unwrap().push(method.clone());
+                    let status = if method == Method::HEAD {
+                        head_status
+                    } else {
+                        200
+                    };
+                    Response::builder()
+                        .status(status)
+                        .header("content-length", "5")
+                        .body(Body::from("bytes"))
+                        .unwrap()
+                }
+            }));
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+            let endpoint = format!("http://{}", listener.local_addr()?);
+            let server = tokio::spawn(async move { axum::serve(listener, app).await });
+            let bucket = s3::Bucket::new(
+                "bucket",
+                s3::Region::Custom {
+                    region: "test".into(),
+                    endpoint,
+                },
+                s3::creds::Credentials::new(Some("test"), Some("test"), None, None, None)?,
+            )?
+            .with_path_style();
+            let checksum = if checksum_matches {
+                format!("{:x}", Sha256::digest(b"bytes"))
+            } else {
+                "a".repeat(64)
+            };
+            let result =
+                super::Storage::matches_bucket_object(&bucket, "object", declared_size, &checksum)
+                    .await;
+            server.abort();
+            match expected {
+                Some(value) => assert_eq!(result?, value),
+                None => assert!(result.is_err()),
+            }
+            let expected_calls = if head_status == StatusCode::OK.as_u16() && declared_size == 5 {
+                vec![Method::HEAD, Method::GET]
+            } else {
+                vec![Method::HEAD]
+            };
+            assert_eq!(*calls.lock().unwrap(), expected_calls);
+        }
+        Ok(())
+    }
 
     #[test]
     fn completion_rejects_http_and_embedded_errors() {
