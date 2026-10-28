@@ -318,7 +318,7 @@ checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 
 [[package]]
 name = "api"
-version = "0.2.226"
+version = "0.2.227"
 dependencies = [
  "anyhow",
  "axum 0.7.9",
@@ -1192,7 +1192,7 @@ checksum = "1c133bc6a41be0d194c306b5506d15e6feeea7b1d6604bd3f8310dfb2ca96486"
 
 [[package]]
 name = "cli"
-version = "0.2.226"
+version = "0.2.227"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3692,7 +3692,7 @@ dependencies = [
 
 [[package]]
 name = "models"
-version = "0.2.226"
+version = "0.2.227"
 dependencies = [
  "axum 0.7.9",
  "chrono",
@@ -6128,7 +6128,7 @@ checksum = "e8e2fb0f499abb4d162f2bedad68f5ef91a1682b5a03596ddb67efd37768d100"
 
 [[package]]
 name = "smith"
-version = "0.2.226"
+version = "0.2.227"
 dependencies = [
  "anyhow",
  "axum 0.8.9",
@@ -6168,7 +6168,7 @@ dependencies = [
 
 [[package]]
 name = "smith-e2e"
-version = "0.2.226"
+version = "0.2.227"
 dependencies = [
  "anyhow",
  "reqwest",
@@ -6180,7 +6180,7 @@ dependencies = [
 
 [[package]]
 name = "smith-updater"
-version = "0.2.226"
+version = "0.2.227"
 dependencies = [
  "anyhow",
  "clap",
@@ -7241,9 +7241,9 @@ checksum = "c6f5d3c3b1bf09027a88a6bc961fc00497d651009560b5463668dc81b0fa87a8"
 
 [[package]]
 name = "unicode-width"
-version = "0.2.2"
+version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b4ac048d71ede7ee76d585517add45da530660ef4390e49b098733c6e897f254"
+checksum = "ca718471876992059f251e33aafc334346ada08042b7661dd1fe313a9bced557"
 
 [[package]]
 name = "unicode-xid"
@@ -7991,9 +7991,9 @@ checksum = "3ad82d2a33cdc9674dc7465672f271e096168fcdbe0f799d9e6db8c5892679dc"
 
 [[package]]
 name = "xattr"
-version = "1.6.1"
+version = "1.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "32e45ad4206f6d2479085147f02bc2ef834ac85886624a23575ae137c8aa8156"
+checksum = "963d6fab92d5504b971dc8bd90ca743c2575e590bc8071ea5bc571598667ae08"
 dependencies = [
  "libc",
  "rustix",
