@@ -91,12 +91,13 @@ async fn active_connection(iface: &str) -> Result<String> {
         .with_context(|| format!("no profile active on {iface}"))
 }
 
-fn connection_up_args<'a>(uuid: &'a str, iface: &'a str) -> [&'a str; 7] {
+fn connection_up_args<'a>(uuid: &'a str, iface: &'a str) -> [&'a str; 8] {
     [
         "--wait",
         CONNECTION_UP_WAIT,
         "connection",
         "up",
+        "uuid",
         uuid,
         "ifname",
         iface,
@@ -140,6 +141,7 @@ impl Recovery for Nmcli {
     /// list: that pair stranded a device until Police (Lake Oswego room 17,
     /// 2026-10-28).
     async fn reconnect(&self, iface: &str) -> Result<()> {
+        enable_autoconnect(iface).await;
         let uuid = active_connection(iface).await?;
         nmcli(&connection_up_args(&uuid, iface))
             .await
@@ -700,6 +702,7 @@ mod tests {
                 "45",
                 "connection",
                 "up",
+                "uuid",
                 "3aaa88cb",
                 "ifname",
                 "wlP1p1s0"
