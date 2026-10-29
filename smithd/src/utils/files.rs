@@ -426,11 +426,11 @@ pub async fn save_wanted_settings(settings: &StoredSettings) -> Result<()> {
     save_json(Path::new(SETTINGS_PATH), settings).await
 }
 
-/// Missing or unreadable means nothing was spent on the stored version yet.
-pub async fn load_settings_state() -> SettingsState {
-    load_json(Path::new(SETTINGS_STATE_PATH))
-        .await
-        .unwrap_or_default()
+/// `None` when missing: nothing was spent on the stored version yet. An
+/// unreadable or corrupt file is an error rather than a fresh state, since a
+/// fresh state would allow another reload and forget a revert.
+pub async fn load_settings_state() -> Result<Option<SettingsState>> {
+    read_json(Path::new(SETTINGS_STATE_PATH)).await
 }
 
 pub async fn save_settings_state(state: &SettingsState) -> Result<()> {
@@ -440,15 +440,20 @@ pub async fn save_settings_state(state: &SettingsState) -> Result<()> {
 /// A corrupt file is logged and treated as missing: the next `ApplySettings`
 /// replaces it, and smithd must keep running meanwhile.
 async fn load_json<T: DeserializeOwned>(path: &Path) -> Option<T> {
+    read_json(path)
+        .await
+        .inspect_err(|err| error!("Ignoring {}: {err:#}", path.display()))
+        .ok()
+        .flatten()
+}
+
+async fn read_json<T: DeserializeOwned>(path: &Path) -> Result<Option<T>> {
     match tokio::fs::read_to_string(path).await {
         Ok(text) => serde_json::from_str(&text)
-            .inspect_err(|err| error!("Ignoring corrupt {}: {err}", path.display()))
-            .ok(),
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => None,
-        Err(err) => {
-            error!("Reading {}: {err}", path.display());
-            None
-        }
+            .map(Some)
+            .with_context(|| format!("parsing {}", path.display())),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(err) => Err(err).with_context(|| format!("reading {}", path.display())),
     }
 }
 
@@ -554,7 +559,10 @@ mod settings_file_tests {
         };
         let path = tmp.path().join("settings-state.json");
         save_json(&path, &state).await.unwrap();
-        assert_eq!(load_json::<SettingsState>(&path).await, Some(state));
+        assert_eq!(
+            read_json::<SettingsState>(&path).await.unwrap(),
+            Some(state)
+        );
     }
 
     #[tokio::test]
@@ -562,6 +570,14 @@ mod settings_file_tests {
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().join("settings.json");
         assert_eq!(load_json::<StoredSettings>(&path).await, None);
+    }
+
+    #[tokio::test]
+    async fn a_corrupt_state_file_is_an_error_not_a_fresh_state() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("settings-state.json");
+        std::fs::write(&path, "{\"disruptions\": ").unwrap();
+        assert!(read_json::<SettingsState>(&path).await.is_err());
     }
 
     #[tokio::test]
