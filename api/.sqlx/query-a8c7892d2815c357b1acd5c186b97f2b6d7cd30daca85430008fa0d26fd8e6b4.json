@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id, ip_address_id FROM device\n         WHERE id = ANY($1) AND release_id IS DISTINCT FROM $2\n         ORDER BY md5(id::text || ':' || $2::int::text), id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "ip_address_id",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4Array",
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false,
+      true
+    ]
+  },
+  "hash": "a8c7892d2815c357b1acd5c186b97f2b6d7cd30daca85430008fa0d26fd8e6b4"
+}

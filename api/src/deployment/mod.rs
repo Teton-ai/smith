@@ -1,4 +1,5 @@
-use std::collections::HashMap;
+use std::cmp::Reverse;
+use std::collections::{HashMap, VecDeque};
 
 use chrono::{DateTime, Utc};
 use models::deployment::Deployment;
@@ -49,6 +50,66 @@ pub fn stagger_window_minutes(device_count: usize) -> i32 {
 pub fn bulk_stagger_window(device_count: usize, all_at_once: bool) -> Option<i32> {
     (device_count > BULK_STAGGER_THRESHOLD && !all_at_once)
         .then(|| stagger_window_minutes(device_count))
+}
+
+#[derive(PartialEq, Eq, Hash)]
+enum Network {
+    Ip(i64),
+    /// A device without an IP is a network of its own.
+    Alone(i32),
+}
+
+/// Each pick takes the next device (input = tie-break order) of the network with most left; a network
+/// that took `ceil(left / groups left)` in the current group waits while others can fill it.
+pub fn spread_by_network(
+    devices: impl IntoIterator<Item = (i32, Option<i64>)>,
+    group_of: impl Fn(usize) -> usize,
+) -> Vec<i32> {
+    let mut by_network: HashMap<Network, VecDeque<(usize, i32)>> = HashMap::new();
+    let mut device_count = 0usize;
+    for (position, (id, ip)) in devices.into_iter().enumerate() {
+        by_network
+            .entry(ip.map_or(Network::Alone(id), Network::Ip))
+            .or_default()
+            .push_back((position, id));
+        device_count += 1;
+    }
+    let group_count = device_count
+        .checked_sub(1)
+        .map_or(0, |last| group_of(last) + 1);
+    // (devices left, quota in the current group, picked in the current group)
+    let mut networks: Vec<_> = by_network.into_values().map(|left| (left, 0, 0)).collect();
+
+    let mut order = Vec::with_capacity(device_count);
+    let mut current_group = None;
+    loop {
+        let group = group_of(order.len());
+        if current_group != Some(group) {
+            current_group = Some(group);
+            let groups_left = group_count.saturating_sub(group).max(1);
+            for (left, quota, picked) in &mut networks {
+                *quota = left.len().div_ceil(groups_left);
+                *picked = 0;
+            }
+        }
+        let Some((left, _, picked)) = networks
+            .iter_mut()
+            .filter(|(left, _, _)| !left.is_empty())
+            .min_by_key(|(left, quota, picked)| {
+                (
+                    picked >= quota,
+                    Reverse(left.len()),
+                    left.front().map(|d| d.0),
+                )
+            })
+        else {
+            return order;
+        };
+        if let Some((_, id)) = left.pop_front() {
+            order.push(id);
+            *picked += 1;
+        }
+    }
 }
 
 pub struct SelectedRetarget {
@@ -124,8 +185,8 @@ pub async fn stagger_retarget(
     // Ranked by a hash of device and release, not by id: sites are provisioned
     // in contiguous ids, and who goes first should change with every release.
     // md5 in Postgres is stable across API restarts and replicas.
-    let ranked_ids = sqlx::query_scalar!(
-        "SELECT id FROM device
+    let devices = sqlx::query!(
+        "SELECT id, ip_address_id FROM device
          WHERE id = ANY($1) AND release_id IS DISTINCT FROM $2
          ORDER BY md5(id::text || ':' || $2::int::text), id",
         device_ids,
@@ -134,7 +195,10 @@ pub async fn stagger_retarget(
     .fetch_all(&mut **tx)
     .await?;
 
-    let device_count = ranked_ids.len();
+    let device_count = devices.len();
+    let ranked_ids = spread_by_network(devices.iter().map(|d| (d.id, d.ip_address_id)), |rank| {
+        bucket_for_rank(rank, device_count)
+    });
     let offset_minutes: Vec<i32> = (0..device_count)
         .map(|rank| bucket_for_rank(rank, device_count) as i32 * STAGGER_INTERVAL_MINUTES)
         .collect();
@@ -329,37 +393,52 @@ pub async fn new_deployment(
         .execute(&mut *tx)
         .await?
     } else {
-        sqlx::query!(
-            "
-            WITH selected_devices AS (
-                SELECT d.id FROM device d
-                JOIN release r ON d.release_id = r.id
-                LEFT JOIN device_network dn ON d.id = dn.device_id
-                WHERE d.last_ping > NOW() - INTERVAL '3 minutes'
-                AND d.release_id = d.target_release_id
-                AND d.release_id <> $3
-                AND d.follow_latest
-                AND r.distribution_id = $1
-                ORDER BY
-                    -- Deprioritize devices with unhealthy watchdog services
-                    CASE WHEN EXISTS (
-                        SELECT 1 FROM device_service_status dss
-                        JOIN release_services rs ON rs.id = dss.release_service_id
-                        WHERE dss.device_id = d.id
-                          AND rs.release_id = d.release_id
-                          AND rs.watchdog_sec IS NOT NULL
-                          AND dss.active_state != 'active'
-                    ) THEN 1 ELSE 0 END ASC,
-                    COALESCE(dn.network_score, 0) DESC,
-                    d.last_ping DESC
-                LIMIT 10
-            )
-            INSERT INTO deployment_devices (deployment_id, device_id)
-            SELECT $2, id FROM selected_devices
-            ",
+        let eligible = sqlx::query!(
+            r#"
+            SELECT d.id, d.ip_address_id,
+                -- Unhealthy watchdog services only fill canary slots healthy devices leave
+                NOT EXISTS (
+                    SELECT 1 FROM device_service_status dss
+                    JOIN release_services rs ON rs.id = dss.release_service_id
+                    WHERE dss.device_id = d.id
+                      AND rs.release_id = d.release_id
+                      AND rs.watchdog_sec IS NOT NULL
+                      AND dss.active_state != 'active'
+                ) AS "healthy!"
+            FROM device d
+            JOIN release r ON d.release_id = r.id
+            LEFT JOIN device_network dn ON d.id = dn.device_id
+            WHERE d.last_ping > NOW() - INTERVAL '3 minutes'
+            AND d.release_id = d.target_release_id
+            AND d.release_id <> $2
+            AND d.follow_latest
+            AND r.distribution_id = $1
+            ORDER BY
+                COALESCE(dn.network_score, 0) DESC,
+                d.last_ping DESC
+            "#,
             release.distribution_id,
-            deployment.id,
             release_id
+        )
+        .fetch_all(&mut *tx)
+        .await?;
+        const CANARY_COUNT: usize = 10;
+        let (healthy, unhealthy): (Vec<_>, Vec<_>) = eligible.iter().partition(|d| d.healthy);
+        let selected: Vec<i32> = [healthy, unhealthy]
+            .into_iter()
+            .flat_map(|devices| {
+                // One group of CANARY_COUNT, then one-device groups, so every network's quota is 1.
+                spread_by_network(
+                    devices.into_iter().map(|d| (d.id, d.ip_address_id)),
+                    |rank| if rank < CANARY_COUNT { 0 } else { rank },
+                )
+            })
+            .take(CANARY_COUNT)
+            .collect();
+        sqlx::query!(
+            "INSERT INTO deployment_devices (deployment_id, device_id) SELECT $1, UNNEST($2::int[])",
+            deployment.id,
+            &selected
         )
         .execute(&mut *tx)
         .await?
@@ -1032,6 +1111,59 @@ pub(crate) mod tests {
         assert_eq!(bucket_count(16), 16);
         assert_eq!(bucket_count(21), STAGGER_MAX_BUCKETS);
         assert_eq!(bucket_count(5000), STAGGER_MAX_BUCKETS);
+    }
+
+    #[test]
+    fn spread_by_network_drains_biggest_networks_within_group_quota() {
+        // Letters name networks; E has no IP, so each E device is a network of its own.
+        let five_networks = [
+            ('A', 9, Some(1)),
+            ('B', 9, Some(2)),
+            ('C', 3, Some(3)),
+            ('D', 2, Some(4)),
+            ('E', 2, None),
+        ];
+        let big_site = [('A', 10, Some(1)), ('E', 6, None)];
+        let canary = |rank: usize, _| if rank < 10 { 0 } else { rank };
+        let groups_of_four = |rank: usize, _| rank / 4;
+        let cases = [
+            (
+                "stagger",
+                &five_networks[..],
+                bucket_for_rank as fn(usize, usize) -> usize,
+                "AB|A|B|A|BA|B|A|B|AB|A|B|C|AB|C|D|A|BC|D|E|E",
+            ),
+            (
+                "canary",
+                &five_networks,
+                canary,
+                "ABCDEEABAB|A|B|A|B|A|B|A|B|A|B|C|A|B|C|D",
+            ),
+            (
+                "big site never piles up at the tail",
+                &big_site,
+                groups_of_four,
+                "AAAE|AAAE|AAEE|AAEE",
+            ),
+        ];
+        for (name, networks, group_of, want) in cases {
+            let devices: Vec<(i32, Option<i64>, char)> = networks
+                .iter()
+                .flat_map(|&(name, count, ip)| std::iter::repeat_n((ip, name), count))
+                .zip(1..)
+                .map(|((ip, name), id)| (id, ip, name))
+                .collect();
+            let group_of = |rank| group_of(rank, devices.len());
+            let order = spread_by_network(devices.iter().map(|&(id, ip, _)| (id, ip)), group_of);
+            let mut got = String::new();
+            for (rank, id) in order.iter().enumerate() {
+                if rank > 0 && group_of(rank) != group_of(rank - 1) {
+                    got.push('|');
+                }
+                got.extend(devices.iter().find(|d| d.0 == *id).map(|d| d.2));
+            }
+            assert_eq!(got, want, "{name}");
+        }
     }
 
     /// `N` releases of one distribution, so a test can move devices between them.
