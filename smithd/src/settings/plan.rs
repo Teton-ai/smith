@@ -1,8 +1,6 @@
 //! Decides what one apply does, from the wanted settings, what the device
 //! runs, and the files smithd wrote earlier. Pure, so every rule is unit
 //! tested; the executors in `apply` carry the plan out.
-// Unused until the settings actor applies settings.
-#![allow(dead_code)]
 
 use super::driver::VENDOR_MODULE;
 use super::nm::parse_nm_sections;
@@ -133,6 +131,21 @@ pub struct ApplyPlan {
 impl ApplyPlan {
     pub fn disrupts(&self) -> bool {
         self.driver_reload || self.nm_reactivate
+    }
+
+    /// Whether the plan changes anything on the device.
+    pub fn has_steps(&self) -> bool {
+        self.driver_file != FileChange::Keep
+            || self.nm_file != FileChange::Keep
+            || self.ntp_file != FileChange::Keep
+            || self.driver_reload
+            || self.roam_flags.is_some()
+            || self.roam_tuning.is_some()
+            || self.nm_reload
+            || self.nm_reactivate
+            || self.ntp_reload
+            || self.hostname.is_some()
+            || self.bgscan.is_some()
     }
 }
 

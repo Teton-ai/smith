@@ -1,15 +1,19 @@
 //! Carries out an [`ApplyPlan`](super::plan::ApplyPlan): writes and removes
 //! the files smithd owns and runs the system commands, each step on its own
-//! so the actor decides their order.
-// Unused until the settings actor applies settings.
-#![allow(dead_code)]
+//! so the actor decides their order. [`DeviceSystem`] gives the actor these
+//! steps, the reads and the saves on the real device.
 
+use super::actor::{OwnedFile, Step, System, check_interval_s};
 use super::driver::{DriverPaths, VENDOR_MODULE};
 use super::ntp::{CHRONY_CONF, CHRONY_SOURCES_DIR, timesyncd_running};
 use super::plan::{FileChange, NtpDaemon, OwnedFiles};
-use super::read::{run, run_for};
-use crate::utils::files::write_file_atomic;
-use crate::utils::schema::RoamTuning;
+use super::read::{Reading, SettingsReader, run, run_for, set_bgscan};
+use crate::commander::CommanderHandle;
+use crate::police::PoliceHandle;
+use crate::utils::files::{
+    SettingsState, StoredSettings, save_settings_state, save_wanted_settings, write_file_atomic,
+};
+use crate::utils::schema::{RoamTuning, SafeCommandResponse};
 use anyhow::{Context, Result, anyhow, bail};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -35,6 +39,10 @@ const VENDOR_POLL: Duration = Duration::from_millis(500);
 /// How long `nmcli` waits for the activation, and the cap on the process.
 const NM_ACTIVATION_WAIT_S: &str = "30";
 const NM_ACTIVATION_TIMEOUT: Duration = Duration::from_secs(40);
+
+/// Keeps Police from rebooting a device whose link is down because an apply
+/// took it down on purpose. Covers a reload, the reconnection and a revert.
+const APPLY_POLICE_HOLD_S: u64 = 5 * 60;
 
 /// The files smithd owns. Overridable so tests can point at a temp dir.
 pub struct OwnedPaths {
@@ -294,6 +302,98 @@ pub async fn set_hostname(hostname: &str) -> Result<()> {
         write_file_atomic(Path::new(HOSTS), &updated, 0o644).await?;
     }
     Ok(())
+}
+
+/// The real device, as opposed to the fake one in the tests.
+pub struct DeviceSystem {
+    reader: SettingsReader,
+    paths: OwnedPaths,
+    wifi: Option<String>,
+    commander: CommanderHandle,
+    police: PoliceHandle,
+}
+
+impl DeviceSystem {
+    pub fn new(commander: CommanderHandle, police: PoliceHandle) -> Self {
+        Self {
+            reader: SettingsReader::default(),
+            paths: OwnedPaths::default(),
+            wifi: None,
+            commander,
+            police,
+        }
+    }
+
+    fn wifi(&self) -> Result<&str> {
+        self.wifi
+            .as_deref()
+            .ok_or_else(|| anyhow!("no Wi-Fi interface"))
+    }
+}
+
+impl System for DeviceSystem {
+    async fn read(&mut self) -> Reading {
+        let reading = self.reader.read(check_interval_s()).await;
+        self.wifi = reading.wifi.as_ref().map(|w| w.name.clone());
+        reading
+    }
+
+    async fn ntp_daemon(&mut self) -> Result<Option<NtpDaemon>> {
+        let conn = self.reader.connection().await?;
+        detect_ntp_daemon(&conn).await
+    }
+
+    async fn owned_files(&mut self, ntp: Option<NtpDaemon>) -> Result<OwnedFiles> {
+        self.paths.read(ntp).await
+    }
+
+    async fn run(&mut self, step: Step<'_>) -> Result<()> {
+        match step {
+            Step::File(file, change) => {
+                let path = match file {
+                    OwnedFile::Driver => &self.paths.driver,
+                    OwnedFile::Nm => &self.paths.nm,
+                    OwnedFile::Ntp(daemon) => self.paths.ntp(daemon),
+                };
+                change_file(path, change).await
+            }
+            Step::ReloadNm => reload_nm().await,
+            Step::ReloadDriver => reload_driver(self.reader.driver_paths(), self.wifi()?).await,
+            Step::RoamFlags(flags) => {
+                write_roam_flags(self.reader.driver_paths(), self.wifi()?, flags).await
+            }
+            Step::RoamTuning(tuning, busy) => {
+                write_roam_tuning(self.reader.driver_paths(), self.wifi()?, tuning, busy).await
+            }
+            Step::ReactivateWifi => reactivate_wifi(self.wifi()?).await,
+            Step::ReloadNtp(daemon) => reload_ntp(daemon).await,
+            Step::Hostname(hostname) => set_hostname(hostname).await,
+            Step::Bgscan(bgscan) => {
+                let conn = self.reader.connection().await?;
+                set_bgscan(&conn, bgscan).await
+            }
+        }
+    }
+
+    async fn save_wanted(&mut self, wanted: &StoredSettings) -> Result<()> {
+        save_wanted_settings(wanted).await
+    }
+
+    async fn save_state(&mut self, state: &SettingsState) -> Result<()> {
+        save_settings_state(state).await
+    }
+
+    async fn hold_police(&mut self, hold: bool) {
+        if hold {
+            self.police.hold(Some(APPLY_POLICE_HOLD_S)).await;
+        } else {
+            self.police.release_hold().await;
+        }
+    }
+
+    async fn queue_report(&mut self, response: SafeCommandResponse) {
+        self.commander.insert_result(vec![response]).await;
+    }
 }
 
 #[cfg(test)]
