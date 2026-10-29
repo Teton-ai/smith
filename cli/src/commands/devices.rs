@@ -110,7 +110,7 @@ pub async fn set_pinned(
     if !pin {
         println!(
             "\n{}",
-            "Unpinned devices receive the next full rollout of their distribution.".yellow()
+            "Unpinned devices target the latest release of their distribution now, if one is available.".yellow()
         );
     }
 

@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "WITH selected AS (\n                SELECT id, follow_latest FROM device\n                WHERE NOT archived\n                AND id IN (\n                    SELECT dl.device_id\n                    FROM device_label dl\n                    JOIN label l ON l.id = dl.label_id\n                    WHERE l.name || '=' || dl.value = ANY($2)\n                    GROUP BY dl.device_id\n                    HAVING COUNT(DISTINCT l.name || '=' || dl.value)\n                        = (SELECT COUNT(DISTINCT term) FROM UNNEST($2::text[]) AS term)\n                )\n                FOR UPDATE\n            )\n            UPDATE device SET follow_latest = $1\n            FROM selected WHERE device.id = selected.id\n            RETURNING CASE WHEN $1 AND NOT selected.follow_latest THEN device.id END AS \"unpinned_id?\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "unpinned_id?",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Bool",
+        "TextArray"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "e06699dabdef7e412992d68e67da71e0af414b4dccb92fa240eb5ca94c829d00"
+}
