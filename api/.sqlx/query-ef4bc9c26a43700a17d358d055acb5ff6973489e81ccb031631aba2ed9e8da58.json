@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO deployment_devices (deployment_id, device_id) SELECT $1, UNNEST($2::int[])",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Int4Array"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "ef4bc9c26a43700a17d358d055acb5ff6973489e81ccb031631aba2ed9e8da58"
+}

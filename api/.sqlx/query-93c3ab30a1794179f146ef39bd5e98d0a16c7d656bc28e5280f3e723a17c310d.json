@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT d.id, d.ip_address_id FROM device d\n            JOIN release r ON d.release_id = r.id\n            LEFT JOIN device_network dn ON d.id = dn.device_id\n            WHERE d.last_ping > NOW() - INTERVAL '3 minutes'\n            AND d.release_id = d.target_release_id\n            AND d.release_id <> $2\n            AND d.follow_latest\n            AND r.distribution_id = $1\n            ORDER BY\n                -- Deprioritize devices with unhealthy watchdog services\n                CASE WHEN EXISTS (\n                    SELECT 1 FROM device_service_status dss\n                    JOIN release_services rs ON rs.id = dss.release_service_id\n                    WHERE dss.device_id = d.id\n                      AND rs.release_id = d.release_id\n                      AND rs.watchdog_sec IS NOT NULL\n                      AND dss.active_state != 'active'\n                ) THEN 1 ELSE 0 END ASC,\n                COALESCE(dn.network_score, 0) DESC,\n                d.last_ping DESC\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "ip_address_id",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false,
+      true
+    ]
+  },
+  "hash": "93c3ab30a1794179f146ef39bd5e98d0a16c7d656bc28e5280f3e723a17c310d"
+}
