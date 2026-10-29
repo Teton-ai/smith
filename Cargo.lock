@@ -318,7 +318,7 @@ checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 
 [[package]]
 name = "api"
-version = "0.2.228"
+version = "0.2.229"
 dependencies = [
  "anyhow",
  "axum 0.7.9",
@@ -1192,7 +1192,7 @@ checksum = "1c133bc6a41be0d194c306b5506d15e6feeea7b1d6604bd3f8310dfb2ca96486"
 
 [[package]]
 name = "cli"
-version = "0.2.228"
+version = "0.2.229"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1562,9 +1562,9 @@ dependencies = [
 
 [[package]]
 name = "ctutils"
-version = "0.4.6"
+version = "0.4.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fe3e9d21d39e6f39ff46e03d5b621424f88ee23d8a1672c6bfc9ccc7f2da4f6a"
+checksum = "a2376ffd6f96d8a9db59875b4b6b0237d6900b5baf64279714e05493ce64828a"
 dependencies = [
  "cmov",
  "subtle",
@@ -3692,7 +3692,7 @@ dependencies = [
 
 [[package]]
 name = "models"
-version = "0.2.228"
+version = "0.2.229"
 dependencies = [
  "axum 0.7.9",
  "chrono",
@@ -6128,7 +6128,7 @@ checksum = "e8e2fb0f499abb4d162f2bedad68f5ef91a1682b5a03596ddb67efd37768d100"
 
 [[package]]
 name = "smith"
-version = "0.2.228"
+version = "0.2.229"
 dependencies = [
  "anyhow",
  "axum 0.8.9",
@@ -6168,7 +6168,7 @@ dependencies = [
 
 [[package]]
 name = "smith-e2e"
-version = "0.2.228"
+version = "0.2.229"
 dependencies = [
  "anyhow",
  "reqwest",
@@ -6180,7 +6180,7 @@ dependencies = [
 
 [[package]]
 name = "smith-updater"
-version = "0.2.228"
+version = "0.2.229"
 dependencies = [
  "anyhow",
  "clap",
