@@ -11,9 +11,9 @@ use zbus::proxy::CacheProperties;
 
 const TIMESYNC_BUS_NAME: &str = "org.freedesktop.timesync1";
 
-const CHRONY_CONF: &str = "/etc/chrony/chrony.conf";
+pub(super) const CHRONY_CONF: &str = "/etc/chrony/chrony.conf";
 const CHRONY_CONF_DIR: &str = "/etc/chrony/conf.d";
-const CHRONY_SOURCES_DIR: &str = "/etc/chrony/sources.d";
+pub(super) const CHRONY_SOURCES_DIR: &str = "/etc/chrony/sources.d";
 /// Servers chrony learned from DHCP.
 const CHRONY_DHCP_DIR: &str = "/run/chrony-dhcp";
 
@@ -134,7 +134,7 @@ async fn read_synchronized(conn: &Connection) -> Result<bool> {
 
 /// NameHasOwner never bus-activates timesyncd, which must not start next to
 /// chrony.
-async fn timesyncd_running(conn: &Connection) -> Result<bool> {
+pub(super) async fn timesyncd_running(conn: &Connection) -> Result<bool> {
     let dbus = zbus::fdo::DBusProxy::new(conn).await?;
     let name = zbus::names::BusName::try_from(TIMESYNC_BUS_NAME)?;
     Ok(dbus.name_has_owner(name).await?)

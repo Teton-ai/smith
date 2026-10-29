@@ -12,7 +12,7 @@ use std::time::Duration;
 use tracing::{debug, warn};
 use zbus::Connection;
 use zbus::proxy::CacheProperties;
-use zbus::zvariant::{OwnedObjectPath, OwnedValue};
+use zbus::zvariant::{OwnedObjectPath, OwnedValue, Value};
 
 const HOSTNAME_PATH: &str = "/etc/hostname";
 /// Upper bound for every helper process (`iw`, `chronyc`, `NetworkManager`),
@@ -59,6 +59,10 @@ trait WpaBss {
 trait WpaNetwork {
     #[zbus(property)]
     fn properties(&self) -> zbus::Result<HashMap<String, OwnedValue>>;
+
+    /// Sets only the given keys; string values are quoted by wpa_supplicant.
+    #[zbus(property)]
+    fn set_properties(&self, properties: HashMap<&str, Value<'_>>) -> zbus::Result<()>;
 }
 
 pub(super) fn parse_int<T: std::str::FromStr>(text: &str) -> Result<T>
@@ -71,9 +75,17 @@ where
 }
 
 pub(super) async fn run(program: impl AsRef<OsStr>, args: &[&str]) -> Result<String> {
+    run_for(PROCESS_TIMEOUT, program, args).await
+}
+
+pub(super) async fn run_for(
+    timeout: Duration,
+    program: impl AsRef<OsStr>,
+    args: &[&str],
+) -> Result<String> {
     let name = program.as_ref().to_string_lossy().into_owned();
     let output = tokio::time::timeout(
-        PROCESS_TIMEOUT,
+        timeout,
         tokio::process::Command::new(program).args(args).output(),
     )
     .await
@@ -93,10 +105,9 @@ pub fn unquote(value: &str) -> &str {
         .unwrap_or(value)
 }
 
-/// bgscan of the network wpa_supplicant is connected to, on any interface.
-/// `None` when no interface is connected (e.g. a device on Ethernet) or the
-/// network has no bgscan set.
-async fn read_bgscan(conn: &Connection) -> Result<Option<String>> {
+/// The network wpa_supplicant is connected to, on any interface. `None` when
+/// no interface is connected (e.g. a device on Ethernet).
+async fn current_network(conn: &Connection) -> Result<Option<WpaNetworkProxy<'static>>> {
     let supplicant = WpaSupplicantProxy::builder(conn)
         .cache_properties(CacheProperties::No)
         .build()
@@ -116,16 +127,38 @@ async fn read_bgscan(conn: &Connection) -> Result<Option<String>> {
             .cache_properties(CacheProperties::No)
             .build()
             .await?;
-        let properties = network.properties().await?;
-        return Ok(match properties.get("bgscan") {
-            Some(value) => {
-                let value = String::try_from(value.try_clone()?)?;
-                Some(unquote(&value).to_owned()).filter(|v| !v.is_empty())
-            }
-            None => None,
-        });
+        return Ok(Some(network));
     }
     Ok(None)
+}
+
+/// bgscan of the current network; `None` when not connected or unset.
+async fn read_bgscan(conn: &Connection) -> Result<Option<String>> {
+    let Some(network) = current_network(conn).await? else {
+        return Ok(None);
+    };
+    let properties = network.properties().await?;
+    Ok(match properties.get("bgscan") {
+        Some(value) => {
+            let value = String::try_from(value.try_clone()?)?;
+            Some(unquote(&value).to_owned()).filter(|v| !v.is_empty())
+        }
+        None => None,
+    })
+}
+
+/// Sets bgscan on the current network. NM sets its own on every activation,
+/// so local enforcement sets it again after one.
+// Unused until the settings actor applies settings.
+#[allow(dead_code)]
+pub(super) async fn set_bgscan(conn: &Connection, bgscan: &str) -> Result<()> {
+    let network = current_network(conn)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("Wi-Fi is not connected"))?;
+    network
+        .set_properties(HashMap::from([("bgscan", Value::from(bgscan))]))
+        .await
+        .context("setting bgscan")
 }
 
 /// Information element id of the Country element (IEEE 802.11 9.4.2.8).

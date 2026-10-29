@@ -1,6 +1,9 @@
+use crate::utils::schema::WantedSettings;
 use anyhow::{Context, Result, anyhow};
 use fs2::FileExt;
 use nix::unistd::{Gid, Uid, User, chown};
+use serde::de::DeserializeOwned;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
@@ -349,7 +352,7 @@ async fn reload_sshd() -> Result<()> {
 
 /// Atomically replace `path` with `contents` at the given mode, via a temp file
 /// in the same directory (same pattern as the authorized_keys writers above).
-async fn write_file_atomic(path: &Path, contents: &str, mode: u32) -> Result<()> {
+pub(crate) async fn write_file_atomic(path: &Path, contents: &str, mode: u32) -> Result<()> {
     let path = path.to_owned();
     let contents = contents.to_owned();
     task::spawn_blocking(move || -> Result<()> {
@@ -389,6 +392,80 @@ pub async fn save_last_applied_networks(ssids: &[String]) -> Result<()> {
         .context("creating /etc/smith")?;
     let json = serde_json::to_string(ssids).context("serializing last-applied networks")?;
     write_file_atomic(Path::new(LAST_APPLIED_PATH), &json, 0o600).await
+}
+
+const SETTINGS_PATH: &str = "/etc/smith/settings.json";
+const SETTINGS_STATE_PATH: &str = "/etc/smith/settings-state.json";
+
+/// The last `ApplySettings` received. Written only when one arrives; the
+/// settings actor enforces it on every check and applies it at boot.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub struct StoredSettings {
+    pub version: i32,
+    pub settings: WantedSettings,
+}
+
+/// What must survive a restart about the stored version, so a restart can
+/// neither apply a reverted version at boot nor loop driver reloads. Kept for
+/// one version only: a new `ApplySettings`, or a Re-apply of the same version,
+/// starts a fresh state.
+#[derive(Serialize, Deserialize, Default, Debug, Clone, PartialEq)]
+#[serde(default)]
+pub struct SettingsState {
+    pub version: i32,
+    pub reverted: bool,
+    /// Driver reloads and NM re-activations done for this version.
+    pub disruptions: u32,
+}
+
+pub async fn load_wanted_settings() -> Option<StoredSettings> {
+    load_json(Path::new(SETTINGS_PATH)).await
+}
+
+pub async fn save_wanted_settings(settings: &StoredSettings) -> Result<()> {
+    save_json(Path::new(SETTINGS_PATH), settings).await
+}
+
+/// `None` when missing: nothing was spent on the stored version yet. An
+/// unreadable or corrupt file is an error rather than a fresh state, since a
+/// fresh state would allow another reload and forget a revert.
+pub async fn load_settings_state() -> Result<Option<SettingsState>> {
+    read_json(Path::new(SETTINGS_STATE_PATH)).await
+}
+
+pub async fn save_settings_state(state: &SettingsState) -> Result<()> {
+    save_json(Path::new(SETTINGS_STATE_PATH), state).await
+}
+
+/// A corrupt file is logged and treated as missing: the next `ApplySettings`
+/// replaces it, and smithd must keep running meanwhile.
+async fn load_json<T: DeserializeOwned>(path: &Path) -> Option<T> {
+    read_json(path)
+        .await
+        .inspect_err(|err| error!("Ignoring {}: {err:#}", path.display()))
+        .ok()
+        .flatten()
+}
+
+async fn read_json<T: DeserializeOwned>(path: &Path) -> Result<Option<T>> {
+    match tokio::fs::read_to_string(path).await {
+        Ok(text) => serde_json::from_str(&text)
+            .map(Some)
+            .with_context(|| format!("parsing {}", path.display())),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(err) => Err(err).with_context(|| format!("reading {}", path.display())),
+    }
+}
+
+async fn save_json<T: Serialize>(path: &Path, value: &T) -> Result<()> {
+    if let Some(dir) = path.parent() {
+        tokio::fs::create_dir_all(dir)
+            .await
+            .with_context(|| format!("creating {dir:?}"))?;
+    }
+    let json =
+        serde_json::to_string(value).with_context(|| format!("serializing {}", path.display()))?;
+    write_file_atomic(path, &json, 0o600).await
 }
 
 const EXTERNAL_BLOB_VOLUME: &str = "/mnt/crypt_UDA";
@@ -452,5 +529,62 @@ mod blob_dir_tests {
     #[test]
     fn missing_volume_is_rejected() {
         assert!(external_blobs_dir(Path::new("/nonexistent/smith-volume"), 0).is_err());
+    }
+}
+
+#[cfg(test)]
+mod settings_file_tests {
+    use super::*;
+    use crate::utils::schema::Managed;
+
+    #[tokio::test]
+    async fn settings_round_trip() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("smith/settings.json");
+        let stored = StoredSettings {
+            version: 3,
+            settings: WantedSettings {
+                wireless_mode: Some(Managed::Set(95)),
+                bgscan: Some(Managed::Unmanaged),
+                ..Default::default()
+            },
+        };
+        save_json(&path, &stored).await.unwrap();
+        assert_eq!(load_json::<StoredSettings>(&path).await, Some(stored));
+
+        let state = SettingsState {
+            version: 3,
+            reverted: true,
+            disruptions: 1,
+        };
+        let path = tmp.path().join("settings-state.json");
+        save_json(&path, &state).await.unwrap();
+        assert_eq!(
+            read_json::<SettingsState>(&path).await.unwrap(),
+            Some(state)
+        );
+    }
+
+    #[tokio::test]
+    async fn a_missing_settings_file_reads_as_none() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("settings.json");
+        assert_eq!(load_json::<StoredSettings>(&path).await, None);
+    }
+
+    #[tokio::test]
+    async fn a_corrupt_state_file_is_an_error_not_a_fresh_state() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("settings-state.json");
+        std::fs::write(&path, "{\"disruptions\": ").unwrap();
+        assert!(read_json::<SettingsState>(&path).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn a_corrupt_settings_file_reads_as_none() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("settings.json");
+        std::fs::write(&path, "{\"version\": ").unwrap();
+        assert_eq!(load_json::<StoredSettings>(&path).await, None);
     }
 }
