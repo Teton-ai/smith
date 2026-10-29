@@ -427,10 +427,10 @@ pub async fn new_deployment(
         let selected: Vec<i32> = [healthy, unhealthy]
             .into_iter()
             .flat_map(|devices| {
-                // Canaries are the first group of a rollout in groups of CANARY_COUNT.
+                // One group of CANARY_COUNT, then one-device groups, so every network's quota is 1.
                 spread_by_network(
                     devices.into_iter().map(|d| (d.id, d.ip_address_id)),
-                    |rank| rank / CANARY_COUNT,
+                    |rank| if rank < CANARY_COUNT { 0 } else { rank },
                 )
             })
             .take(CANARY_COUNT)
@@ -1124,7 +1124,7 @@ pub(crate) mod tests {
             ('E', 2, None),
         ];
         let big_site = [('A', 10, Some(1)), ('E', 6, None)];
-        let canary = |rank: usize, _| rank / 10;
+        let canary = |rank: usize, _| if rank < 10 { 0 } else { rank };
         let groups_of_four = |rank: usize, _| rank / 4;
         let cases = [
             (
@@ -1137,7 +1137,7 @@ pub(crate) mod tests {
                 "canary",
                 &five_networks,
                 canary,
-                "ABABABCDEE|ABABABCDAB|ABABC",
+                "ABCDEEABAB|A|B|A|B|A|B|A|B|A|B|C|A|B|C|D",
             ),
             (
                 "big site never piles up at the tail",
