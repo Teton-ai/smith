@@ -5,6 +5,7 @@
 #![allow(dead_code)]
 
 use super::driver::{DriverPaths, VENDOR_MODULE};
+use super::ntp::{CHRONY_CONF, CHRONY_SOURCES_DIR, timesyncd_running};
 use super::plan::{FileChange, NtpDaemon, OwnedFiles};
 use super::read::{run, run_for};
 use crate::utils::files::write_file_atomic;
@@ -13,11 +14,15 @@ use anyhow::{Context, Result, anyhow, bail};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 use tracing::warn;
+use zbus::Connection;
 
 const DRIVER_CONF: &str = "/etc/modprobe.d/zz-smith-rtl8822ce.conf";
 const NM_CONF: &str = "/etc/NetworkManager/conf.d/zz-smith.conf";
 const CHRONY_SOURCES: &str = "/etc/chrony/sources.d/smith.sources";
 const TIMESYNCD_CONF: &str = "/etc/systemd/timesyncd.conf.d/zz-smith.conf";
+const HOSTS: &str = "/etc/hosts";
+/// Debian's address for the machine's own name.
+const HOSTS_SELF_ADDRESS: &str = "127.0.1.1";
 
 /// `rmmod` waits for the interface to go down and `modprobe` loads firmware.
 const DRIVER_TIMEOUT: Duration = Duration::from_secs(30);
@@ -216,6 +221,81 @@ pub async fn reactivate_wifi(interface: &str) -> Result<()> {
     Ok(())
 }
 
+/// timesyncd when it runs, else chrony when its config reads the
+/// `sources.d` dir our file goes in.
+fn ntp_daemon(timesyncd_running: bool, chrony_conf: Option<&str>) -> Result<Option<NtpDaemon>> {
+    if timesyncd_running {
+        return Ok(Some(NtpDaemon::Timesyncd));
+    }
+    let Some(conf) = chrony_conf else {
+        return Ok(None);
+    };
+    let reads_sources = conf.lines().any(|line| {
+        let mut words = line.split_whitespace();
+        words.next() == Some("sourcedir") && words.next() == Some(CHRONY_SOURCES_DIR)
+    });
+    if !reads_sources {
+        bail!("{CHRONY_CONF} has no sourcedir {CHRONY_SOURCES_DIR}");
+    }
+    Ok(Some(NtpDaemon::Chrony))
+}
+
+pub async fn detect_ntp_daemon(conn: &Connection) -> Result<Option<NtpDaemon>> {
+    let timesyncd = timesyncd_running(conn).await?;
+    let chrony_conf = read_optional(Path::new(CHRONY_CONF)).await?;
+    ntp_daemon(timesyncd, chrony_conf.as_deref())
+}
+
+/// chrony re-reads its source files live; timesyncd only reads its config at
+/// start.
+fn ntp_reload_command(daemon: NtpDaemon) -> (&'static str, &'static [&'static str]) {
+    match daemon {
+        NtpDaemon::Chrony => ("chronyc", &["reload", "sources"]),
+        NtpDaemon::Timesyncd => ("systemctl", &["restart", "systemd-timesyncd"]),
+    }
+}
+
+pub async fn reload_ntp(daemon: NtpDaemon) -> Result<()> {
+    let (program, args) = ntp_reload_command(daemon);
+    run(program, args).await?;
+    Ok(())
+}
+
+/// `/etc/hosts` with the `127.0.1.1` line naming `hostname`, added when there
+/// is none, so the new name still resolves locally.
+fn hosts_with_hostname(hosts: &str, hostname: &str) -> String {
+    let own_line = format!("{HOSTS_SELF_ADDRESS}\t{hostname}");
+    let mut found = false;
+    let mut text = String::with_capacity(hosts.len() + own_line.len() + 1);
+    for line in hosts.lines() {
+        if line.split_whitespace().next() == Some(HOSTS_SELF_ADDRESS) {
+            if !found {
+                text.push_str(&own_line);
+                text.push('\n');
+            }
+            found = true;
+        } else {
+            text.push_str(line);
+            text.push('\n');
+        }
+    }
+    if !found {
+        text.push_str(&own_line);
+        text.push('\n');
+    }
+    text
+}
+
+pub async fn set_hostname(hostname: &str) -> Result<()> {
+    run("hostnamectl", &["set-hostname", hostname]).await?;
+    let hosts = read_optional(Path::new(HOSTS)).await?.unwrap_or_default();
+    let updated = hosts_with_hostname(&hosts, hostname);
+    if updated != hosts {
+        write_file_atomic(Path::new(HOSTS), &updated, 0o644).await?;
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -276,6 +356,70 @@ mod tests {
     #[test]
     fn no_active_connection_on_the_interface_gives_no_uuid() {
         assert_eq!(active_uuid(ACTIVE, "wlan0"), None);
+    }
+
+    const CHRONY_CONF: &str = include_str!("../utils/fixtures/settings/chrony_conf_platform_c.txt");
+
+    #[test]
+    fn a_running_timesyncd_wins_over_a_chrony_config() {
+        assert_eq!(
+            ntp_daemon(true, Some(CHRONY_CONF)).unwrap(),
+            Some(NtpDaemon::Timesyncd)
+        );
+    }
+
+    #[test]
+    fn chrony_is_used_when_its_config_reads_sources_d() {
+        assert_eq!(
+            ntp_daemon(false, Some(CHRONY_CONF)).unwrap(),
+            Some(NtpDaemon::Chrony)
+        );
+    }
+
+    #[test]
+    fn chrony_without_sourcedir_sources_d_is_an_error() {
+        let conf = CHRONY_CONF.replace("sourcedir /etc/chrony/sources.d", "");
+        assert!(ntp_daemon(false, Some(&conf)).is_err());
+    }
+
+    #[test]
+    fn no_ntp_daemon_without_timesyncd_or_a_chrony_config() {
+        assert_eq!(ntp_daemon(false, None).unwrap(), None);
+    }
+
+    #[test]
+    fn ntp_reload_per_daemon() {
+        assert_eq!(
+            ntp_reload_command(NtpDaemon::Chrony),
+            ("chronyc", &["reload", "sources"][..])
+        );
+        assert_eq!(
+            ntp_reload_command(NtpDaemon::Timesyncd),
+            ("systemctl", &["restart", "systemd-timesyncd"][..])
+        );
+    }
+
+    #[test]
+    fn hosts_self_line_is_replaced_in_place() {
+        let hosts = "127.0.0.1\tlocalhost\n127.0.1.1\torin-1\n\n::1 ip6-localhost\n";
+        assert_eq!(
+            hosts_with_hostname(hosts, "byag-12"),
+            "127.0.0.1\tlocalhost\n127.0.1.1\tbyag-12\n\n::1 ip6-localhost\n"
+        );
+    }
+
+    #[test]
+    fn hosts_self_line_is_added_when_missing() {
+        assert_eq!(
+            hosts_with_hostname("127.0.0.1 localhost\n", "byag-12"),
+            "127.0.0.1 localhost\n127.0.1.1\tbyag-12\n"
+        );
+    }
+
+    #[test]
+    fn duplicate_hosts_self_lines_collapse_into_one() {
+        let twice = "127.0.1.1 a\n127.0.1.1 b\n";
+        assert_eq!(hosts_with_hostname(twice, "c"), "127.0.1.1\tc\n");
     }
 
     fn owned_paths(root: &Path) -> OwnedPaths {
