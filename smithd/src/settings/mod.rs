@@ -6,6 +6,7 @@ mod actor;
 pub(crate) mod driver;
 mod nm;
 mod ntp;
+mod plan;
 mod read;
 
 use crate::commander::CommanderHandle;

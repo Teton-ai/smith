@@ -33,12 +33,12 @@ pub struct NmConfig {
     pub scan_rand_mac: bool,
 }
 
-struct NmSection {
-    name: String,
-    entries: Vec<(String, String)>,
+pub(super) struct NmSection {
+    pub name: String,
+    pub entries: Vec<(String, String)>,
 }
 
-fn parse_nm_sections(text: &str) -> Vec<NmSection> {
+pub(super) fn parse_nm_sections(text: &str) -> Vec<NmSection> {
     let mut sections: Vec<NmSection> = Vec::new();
     for line in text.lines().map(str::trim) {
         if line.is_empty() || line.starts_with('#') {
