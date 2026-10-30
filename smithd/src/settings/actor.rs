@@ -350,13 +350,19 @@ impl<S: System> Actor<S> {
         if self.state.as_ref().is_none_or(|s| s.reverted) {
             return reading.report;
         }
-        let ntp = self
-            .system
-            .ntp_daemon()
-            .await
-            .inspect_err(|err| warn!("settings: NTP daemon: {err:#}"))
-            .ok()
-            .flatten();
+        // A detection error says nothing about the daemon, so NTP is left out
+        // of this check rather than spending its attempts on "no daemon".
+        let (ntp, wanted) = match self.system.ntp_daemon().await {
+            Ok(ntp) => (ntp, wanted),
+            Err(err) => {
+                warn!("settings: NTP daemon: {err:#}; NTP left for the next check");
+                let settings = WantedSettings {
+                    ntp_servers: None,
+                    ..wanted.settings
+                };
+                (None, StoredSettings { settings, ..wanted })
+            }
+        };
         let files = match self.system.owned_files(ntp).await {
             Ok(files) => files,
             Err(err) => {
@@ -618,6 +624,7 @@ mod tests {
         no_wifi: bool,
         files_unreadable: bool,
         wanted_unwritable: bool,
+        ntp_detection_fails: bool,
     }
 
     #[derive(Clone, Default)]
@@ -645,6 +652,9 @@ mod tests {
         }
 
         async fn ntp_daemon(&mut self) -> Result<Option<NtpDaemon>> {
+            if self.device().ntp_detection_fails {
+                return Err(anyhow!("D-Bus timeout"));
+            }
             Ok(None)
         }
 
@@ -950,6 +960,21 @@ mod tests {
             Some(3),
             "previous set kept"
         );
+    }
+
+    #[tokio::test]
+    async fn an_ntp_detection_error_spends_no_ntp_attempt() {
+        let system = FakeSystem::default();
+        system.device().ntp_detection_fails = true;
+        let settings = WantedSettings {
+            ntp_servers: Some(Managed::Set(vec!["10.122.0.1".to_owned()])),
+            ..Default::default()
+        };
+        let mut actor = actor(system, Some(stored(4, settings)));
+        for _ in 0..3 {
+            check(&mut actor).await;
+        }
+        assert!(actor.attempts.is_empty());
     }
 
     #[test]

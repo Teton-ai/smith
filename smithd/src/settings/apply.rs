@@ -225,28 +225,28 @@ pub async fn reactivate_wifi(interface: &str) -> Result<()> {
 }
 
 /// timesyncd when it runs, else chrony when its config reads the
-/// `sources.d` dir our file goes in.
-fn ntp_daemon(timesyncd_running: bool, chrony_conf: Option<&str>) -> Result<Option<NtpDaemon>> {
+/// `sources.d` dir our file goes in. A chrony that would ignore our file is no
+/// daemon smithd can manage.
+fn ntp_daemon(timesyncd_running: bool, chrony_conf: Option<&str>) -> Option<NtpDaemon> {
     if timesyncd_running {
-        return Ok(Some(NtpDaemon::Timesyncd));
+        return Some(NtpDaemon::Timesyncd);
     }
-    let Some(conf) = chrony_conf else {
-        return Ok(None);
-    };
+    let conf = chrony_conf?;
     let reads_sources = conf.lines().any(|line| {
         let mut words = line.split_whitespace();
         words.next() == Some("sourcedir") && words.next() == Some(CHRONY_SOURCES_DIR)
     });
     if !reads_sources {
-        bail!("{CHRONY_CONF} has no sourcedir {CHRONY_SOURCES_DIR}");
+        warn!("settings: {CHRONY_CONF} has no sourcedir {CHRONY_SOURCES_DIR}");
+        return None;
     }
-    Ok(Some(NtpDaemon::Chrony))
+    Some(NtpDaemon::Chrony)
 }
 
 pub async fn detect_ntp_daemon(conn: &Connection) -> Result<Option<NtpDaemon>> {
     let timesyncd = timesyncd_running(conn).await?;
     let chrony_conf = read_optional(Path::new(CHRONY_CONF)).await?;
-    ntp_daemon(timesyncd, chrony_conf.as_deref())
+    Ok(ntp_daemon(timesyncd, chrony_conf.as_deref()))
 }
 
 /// chrony re-reads its source files live; timesyncd only reads its config at
@@ -448,7 +448,7 @@ mod tests {
     #[test]
     fn a_running_timesyncd_wins_over_a_chrony_config() {
         assert_eq!(
-            ntp_daemon(true, Some(CHRONY_CONF)).unwrap(),
+            ntp_daemon(true, Some(CHRONY_CONF)),
             Some(NtpDaemon::Timesyncd)
         );
     }
@@ -456,20 +456,20 @@ mod tests {
     #[test]
     fn chrony_is_used_when_its_config_reads_sources_d() {
         assert_eq!(
-            ntp_daemon(false, Some(CHRONY_CONF)).unwrap(),
+            ntp_daemon(false, Some(CHRONY_CONF)),
             Some(NtpDaemon::Chrony)
         );
     }
 
     #[test]
-    fn chrony_without_sourcedir_sources_d_is_an_error() {
+    fn chrony_without_sourcedir_sources_d_is_not_manageable() {
         let conf = CHRONY_CONF.replace("sourcedir /etc/chrony/sources.d", "");
-        assert!(ntp_daemon(false, Some(&conf)).is_err());
+        assert_eq!(ntp_daemon(false, Some(&conf)), None);
     }
 
     #[test]
     fn no_ntp_daemon_without_timesyncd_or_a_chrony_config() {
-        assert_eq!(ntp_daemon(false, None).unwrap(), None);
+        assert_eq!(ntp_daemon(false, None), None);
     }
 
     #[test]
