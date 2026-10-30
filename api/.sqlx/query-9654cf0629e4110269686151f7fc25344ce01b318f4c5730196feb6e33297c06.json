@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "WITH selected AS (\n                SELECT id, follow_latest FROM device WHERE id = ANY($2) FOR UPDATE\n            )\n            UPDATE device SET follow_latest = $1\n            FROM selected WHERE device.id = selected.id\n            RETURNING CASE WHEN $1 AND NOT selected.follow_latest THEN device.id END AS \"unpinned_id?\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "unpinned_id?",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Bool",
+        "Int4Array"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "9654cf0629e4110269686151f7fc25344ce01b318f4c5730196feb6e33297c06"
+}

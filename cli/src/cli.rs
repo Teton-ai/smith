@@ -516,8 +516,8 @@ Examples:
 
     /// Unpin devices so they follow fleet-wide rollouts again
     ///
-    /// Unpinning does not update the device now. It receives the next full
-    /// rollout of its distribution.
+    /// Unpinning sets the target to the latest release of the device's
+    /// distribution, if one is available. Future full rollouts also update the device.
     #[command(after_long_help = "\
 Examples:
   sm unpin ABC123

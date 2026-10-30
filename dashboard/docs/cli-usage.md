@@ -193,7 +193,7 @@ sm get d --pinned
 sm unpin -l experiment=build-b
 ```
 
-Both commands list the devices and their target release, then ask for confirmation. `--yes` skips the prompt. Unpinning does not update a device at once: it gets the next full rollout of its distribution.
+Both commands list the devices and their target release, then ask for confirmation. `--yes` skips the prompt. Unpinning sets the target to the latest release of the device's distribution, if one is available. Future full rollouts also update the device.
 
 ## Tips
 

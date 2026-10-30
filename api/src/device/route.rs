@@ -1747,59 +1747,110 @@ pub async fn update_devices_follow_latest(
         return Err(StatusCode::FORBIDDEN);
     }
 
+    let devices_updated = set_devices_follow_latest(&state.pg_pool, body).await?;
+    Ok(Json(FollowLatestUpdated {
+        devices_updated: devices_updated as i64,
+    }))
+}
+
+async fn set_devices_follow_latest(
+    pool: &sqlx::PgPool,
+    body: FollowLatestRequest,
+) -> Result<u64, StatusCode> {
     let ids = body.devices.filter(|d| !d.is_empty());
     let labels = body.labels.filter(|l| !l.is_empty());
 
-    // Exactly one selector: with neither this would silently flip the whole
-    // fleet, and with both it is ambiguous which one the caller meant.
-    let devices_updated = match (ids, labels) {
-        (Some(ids), None) => sqlx::query!(
-            "UPDATE device SET follow_latest = $1 WHERE id = ANY($2)",
+    let mut tx = pool.begin().await.map_err(|err| {
+        error!("Failed to start follow_latest transaction: {err}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    let updated = match (ids, labels) {
+        (Some(ids), None) => sqlx::query_scalar!(
+            r#"WITH selected AS (
+                SELECT id, follow_latest FROM device WHERE id = ANY($2) FOR UPDATE
+            )
+            UPDATE device SET follow_latest = $1
+            FROM selected WHERE device.id = selected.id
+            RETURNING CASE WHEN $1 AND NOT selected.follow_latest THEN device.id END AS "unpinned_id?""#,
             body.follow_latest,
             &ids
         )
-        .execute(&state.pg_pool)
-        .await
-        .map_err(|err| {
-            error!("Failed to update follow_latest for devices: {err}");
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?
-        .rows_affected(),
-        (None, Some(labels)) => sqlx::query!(
-            // Every listed label must be present, unlike the OR matching used
-            // for canary selection: this flips whether a device receives fleet
-            // rollouts at all, so a selector must narrow, never widen.
-            // Archived devices are excluded, matching the device listing.
-            "UPDATE device SET follow_latest = $1
-             WHERE NOT archived
-             AND id IN (
-                SELECT dl.device_id
-                FROM device_label dl
-                JOIN label l ON l.id = dl.label_id
-                WHERE l.name || '=' || dl.value = ANY($2)
-                GROUP BY dl.device_id
-                HAVING COUNT(DISTINCT l.name || '=' || dl.value)
-                    = (SELECT COUNT(DISTINCT term) FROM UNNEST($2::text[]) AS term)
-             )",
+        .fetch_all(&mut *tx)
+        .await,
+        (None, Some(labels)) => sqlx::query_scalar!(
+            r#"WITH selected AS (
+                SELECT id, follow_latest FROM device
+                WHERE NOT archived
+                AND id IN (
+                    SELECT dl.device_id
+                    FROM device_label dl
+                    JOIN label l ON l.id = dl.label_id
+                    WHERE l.name || '=' || dl.value = ANY($2)
+                    GROUP BY dl.device_id
+                    HAVING COUNT(DISTINCT l.name || '=' || dl.value)
+                        = (SELECT COUNT(DISTINCT term) FROM UNNEST($2::text[]) AS term)
+                )
+                FOR UPDATE
+            )
+            UPDATE device SET follow_latest = $1
+            FROM selected WHERE device.id = selected.id
+            RETURNING CASE WHEN $1 AND NOT selected.follow_latest THEN device.id END AS "unpinned_id?""#,
             body.follow_latest,
             &labels
         )
-        .execute(&state.pg_pool)
-        .await
-        .map_err(|err| {
-            error!("Failed to update follow_latest for devices: {err}");
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?
-        .rows_affected(),
+        .fetch_all(&mut *tx)
+        .await,
         _ => {
             error!("follow-latest requires exactly one of `devices` or `labels`");
             return Err(StatusCode::BAD_REQUEST);
         }
-    };
+    }
+    .map_err(|err| {
+        error!("Failed to update follow_latest for devices: {err}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
 
-    Ok(Json(FollowLatestUpdated {
-        devices_updated: devices_updated as i64,
-    }))
+    let devices_updated = updated.len() as u64;
+    let unpinned_ids: Vec<i32> = updated.into_iter().flatten().collect();
+    if !unpinned_ids.is_empty() {
+        let targets = sqlx::query!(
+            r#"SELECT device.id, distribution.latest_release_id AS "latest_release_id!"
+            FROM device
+            JOIN release ON release.id = device.release_id
+            JOIN distribution ON distribution.id = release.distribution_id
+            WHERE device.id = ANY($1)
+            AND distribution.latest_release_id IS NOT NULL
+            AND device.target_release_id IS DISTINCT FROM distribution.latest_release_id"#,
+            &unpinned_ids
+        )
+        .fetch_all(&mut *tx)
+        .await
+        .map_err(|err| {
+            error!("Failed to get latest releases for unpinned devices: {err}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+        let mut by_release: HashMap<i32, Vec<i32>> = HashMap::new();
+        for target in targets {
+            by_release
+                .entry(target.latest_release_id)
+                .or_default()
+                .push(target.id);
+        }
+        for (release_id, ids) in by_release {
+            crate::deployment::retarget_selected(&mut tx, release_id, &ids, false)
+                .await
+                .map_err(|err| {
+                    error!("Failed to assign latest release to unpinned devices: {err}");
+                    StatusCode::INTERNAL_SERVER_ERROR
+                })?;
+        }
+    }
+    tx.commit().await.map_err(|err| {
+        error!("Failed to commit follow_latest update: {err}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+    Ok(devices_updated)
 }
 
 /// Set the target release of the given devices, bypassing the canary.
@@ -4605,6 +4656,152 @@ mod command_links {
         assert_eq!(result.status, Some(0));
         assert!(result.response_id.is_some());
         assert!(result.response_at.is_some());
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod follow_latest_updates {
+    use super::{FollowLatestRequest, set_devices_follow_latest};
+    use crate::deployment::tests::insert_releases;
+    use chrono::{DateTime, Utc};
+    use sqlx::PgPool;
+
+    async fn check_unpin(
+        pool: &PgPool,
+        following: bool,
+        has_latest: bool,
+        targets_latest: bool,
+        by_label: bool,
+    ) -> anyhow::Result<()> {
+        let [old, latest] = insert_releases(pool).await?;
+        if has_latest {
+            sqlx::query("UPDATE distribution SET latest_release_id = $1 WHERE id = (SELECT distribution_id FROM release WHERE id = $1)")
+                .bind(latest).execute(pool).await?;
+        }
+        let target = if targets_latest { latest } else { old };
+        let id: i32 = sqlx::query_scalar(
+            "INSERT INTO device (serial_number, release_id, target_release_id, follow_latest,
+             target_release_id_set_at, target_release_eligible_at)
+             VALUES ('unpin-test', $1, $2, $3, '2020-01-01', '2099-01-01') RETURNING id",
+        )
+        .bind(old)
+        .bind(target)
+        .bind(following)
+        .fetch_one(pool)
+        .await?;
+        if by_label {
+            let label: i32 =
+                sqlx::query_scalar("INSERT INTO label (name) VALUES ('site') RETURNING id")
+                    .fetch_one(pool)
+                    .await?;
+            sqlx::query(
+                "INSERT INTO device_label (device_id, label_id, value) VALUES ($1, $2, 'test')",
+            )
+            .bind(id)
+            .bind(label)
+            .execute(pool)
+            .await?;
+        }
+        let updated = set_devices_follow_latest(
+            pool,
+            FollowLatestRequest {
+                devices: (!by_label).then_some(vec![id]),
+                labels: by_label.then_some(vec!["site=test".to_string()]),
+                follow_latest: true,
+            },
+        )
+        .await
+        .map_err(|status| anyhow::anyhow!("unexpected status: {status}"))?;
+        assert_eq!(updated, 1);
+        let (actual_following, actual_target, assigned, eligible): (bool, Option<i32>, Option<DateTime<Utc>>, Option<DateTime<Utc>>) =
+            sqlx::query_as("SELECT follow_latest, target_release_id, target_release_id_set_at, target_release_eligible_at FROM device WHERE id = $1")
+            .bind(id).fetch_one(pool).await?;
+        assert!(actual_following);
+        let retargeted = !following && has_latest && !targets_latest;
+        assert_eq!(
+            actual_target,
+            Some(if retargeted { latest } else { target })
+        );
+        let original_assigned: DateTime<Utc> = "2020-01-01T00:00:00Z".parse()?;
+        let original_eligible: DateTime<Utc> = "2099-01-01T00:00:00Z".parse()?;
+        if retargeted {
+            assert!(assigned.is_some_and(|time| time > original_assigned));
+            assert_eq!(eligible, None);
+        } else {
+            assert_eq!(assigned, Some(original_assigned));
+            assert_eq!(eligible, Some(original_eligible));
+        }
+        Ok(())
+    }
+
+    #[sqlx::test]
+    #[ignore = "needs Postgres with pg_partman; run with --test-threads=1"]
+    async fn unpin_assigns_latest(pool: PgPool) -> anyhow::Result<()> {
+        check_unpin(&pool, false, true, false, false).await
+    }
+
+    #[sqlx::test]
+    #[ignore = "needs Postgres with pg_partman; run with --test-threads=1"]
+    async fn unpin_by_label_assigns_latest(pool: PgPool) -> anyhow::Result<()> {
+        check_unpin(&pool, false, true, false, true).await
+    }
+
+    #[sqlx::test]
+    #[ignore = "needs Postgres with pg_partman; run with --test-threads=1"]
+    async fn already_following_keeps_target(pool: PgPool) -> anyhow::Result<()> {
+        check_unpin(&pool, true, true, false, false).await
+    }
+
+    #[sqlx::test]
+    #[ignore = "needs Postgres with pg_partman; run with --test-threads=1"]
+    async fn no_latest_keeps_target(pool: PgPool) -> anyhow::Result<()> {
+        check_unpin(&pool, false, false, false, false).await
+    }
+
+    #[sqlx::test]
+    #[ignore = "needs Postgres with pg_partman; run with --test-threads=1"]
+    async fn same_target_keeps_assignment(pool: PgPool) -> anyhow::Result<()> {
+        check_unpin(&pool, false, true, true, false).await
+    }
+
+    #[sqlx::test]
+    #[ignore = "needs Postgres with pg_partman; run with --test-threads=1"]
+    async fn assignment_failure_keeps_device_pinned(pool: PgPool) -> anyhow::Result<()> {
+        let [old, latest] = insert_releases(&pool).await?;
+        sqlx::query("UPDATE distribution SET latest_release_id = $1 WHERE id = (SELECT distribution_id FROM release WHERE id = $1)")
+            .bind(latest).execute(&pool).await?;
+        let id: i32 = sqlx::query_scalar(
+            "INSERT INTO device (serial_number, release_id, target_release_id)
+             VALUES ('unpin-rollback', $1, $1) RETURNING id",
+        )
+        .bind(old)
+        .fetch_one(&pool)
+        .await?;
+        sqlx::raw_sql(
+            "CREATE FUNCTION reject_target() RETURNS trigger LANGUAGE plpgsql AS $$
+             BEGIN RAISE EXCEPTION 'target assignment failed'; END; $$;
+             CREATE TRIGGER reject_target BEFORE UPDATE OF target_release_id ON device
+             FOR EACH ROW EXECUTE FUNCTION reject_target();",
+        )
+        .execute(&pool)
+        .await?;
+        let result = set_devices_follow_latest(
+            &pool,
+            FollowLatestRequest {
+                devices: Some(vec![id]),
+                labels: None,
+                follow_latest: true,
+            },
+        )
+        .await;
+        assert_eq!(result, Err(axum::http::StatusCode::INTERNAL_SERVER_ERROR));
+        let state: (bool, Option<i32>) =
+            sqlx::query_as("SELECT follow_latest, target_release_id FROM device WHERE id = $1")
+                .bind(id)
+                .fetch_one(&pool)
+                .await?;
+        assert_eq!(state, (false, Some(old)));
         Ok(())
     }
 }
