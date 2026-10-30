@@ -9,7 +9,6 @@ use super::ntp::{CHRONY_CONF, CHRONY_SOURCES_DIR, timesyncd_running};
 use super::plan::{FileChange, NtpDaemon, OwnedFiles};
 use super::read::{Reading, SettingsReader, run, run_for, set_bgscan};
 use crate::commander::CommanderHandle;
-use crate::police::PoliceHandle;
 use crate::utils::files::{
     SettingsState, StoredSettings, save_settings_state, save_wanted_settings, write_file_atomic,
 };
@@ -39,10 +38,6 @@ const VENDOR_POLL: Duration = Duration::from_millis(500);
 /// How long `nmcli` waits for the activation, and the cap on the process.
 const NM_ACTIVATION_WAIT_S: &str = "30";
 const NM_ACTIVATION_TIMEOUT: Duration = Duration::from_secs(40);
-
-/// Keeps Police from rebooting a device whose link is down because an apply
-/// took it down on purpose. Covers a reload, the reconnection and a revert.
-const APPLY_POLICE_HOLD_S: u64 = 5 * 60;
 
 /// The files smithd owns. Overridable so tests can point at a temp dir.
 pub struct OwnedPaths {
@@ -310,17 +305,15 @@ pub struct DeviceSystem {
     paths: OwnedPaths,
     wifi: Option<String>,
     commander: CommanderHandle,
-    police: PoliceHandle,
 }
 
 impl DeviceSystem {
-    pub fn new(commander: CommanderHandle, police: PoliceHandle) -> Self {
+    pub fn new(commander: CommanderHandle) -> Self {
         Self {
             reader: SettingsReader::default(),
             paths: OwnedPaths::default(),
             wifi: None,
             commander,
-            police,
         }
     }
 
@@ -381,14 +374,6 @@ impl System for DeviceSystem {
 
     async fn save_state(&mut self, state: &SettingsState) -> Result<()> {
         save_settings_state(state).await
-    }
-
-    async fn hold_police(&mut self, hold: bool) {
-        if hold {
-            self.police.hold(Some(APPLY_POLICE_HOLD_S)).await;
-        } else {
-            self.police.release_hold().await;
-        }
     }
 
     async fn queue_report(&mut self, response: SafeCommandResponse) {

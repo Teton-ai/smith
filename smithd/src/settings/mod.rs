@@ -11,7 +11,6 @@ mod plan;
 mod read;
 
 use crate::commander::CommanderHandle;
-use crate::police::PoliceHandle;
 use crate::shutdown::ShutdownSignals;
 use crate::utils::schema::{SafeCommandRx, SettingsReport, WantedSettings};
 use actor::{Actor, ActorMessage};
@@ -32,13 +31,9 @@ pub struct SettingsHandle {
 }
 
 impl SettingsHandle {
-    pub fn new(
-        shutdown: ShutdownSignals,
-        commander: CommanderHandle,
-        police: PoliceHandle,
-    ) -> Self {
+    pub fn new(shutdown: ShutdownSignals, commander: CommanderHandle) -> Self {
         let (sender, receiver) = mpsc::channel(8);
-        let system = DeviceSystem::new(commander, police);
+        let system = DeviceSystem::new(commander);
         tokio::spawn(async move {
             let mut actor = Actor::load(shutdown, receiver, system).await;
             actor.run().await

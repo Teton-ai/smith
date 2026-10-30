@@ -129,10 +129,6 @@ pub struct ApplyPlan {
 }
 
 impl ApplyPlan {
-    pub fn disrupts(&self) -> bool {
-        self.driver_reload || self.nm_reactivate
-    }
-
     /// Whether the plan changes anything on the device.
     pub fn has_steps(&self) -> bool {
         self.driver_file != FileChange::Keep
@@ -658,7 +654,6 @@ mod tests {
         );
         assert!(plan.driver_reload);
         assert_eq!(plan.attempted, vec![Group::WirelessMode, Group::PowerMgnt]);
-        assert!(plan.disrupts());
     }
 
     #[test]
@@ -841,7 +836,7 @@ mod tests {
             format!("{HEADER}\n[main]\nautoconnect-retries-default=0\n")
         );
         assert!(plan.nm_reload);
-        assert!(!plan.disrupts());
+        assert!(!plan.nm_reactivate && !plan.driver_reload);
     }
 
     fn power_save_in_file() -> Case {

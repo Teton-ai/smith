@@ -149,7 +149,6 @@ pub trait System: Send {
     fn run(&mut self, step: Step<'_>) -> impl Future<Output = Result<()>> + Send;
     fn save_wanted(&mut self, wanted: &StoredSettings) -> impl Future<Output = Result<()>> + Send;
     fn save_state(&mut self, state: &SettingsState) -> impl Future<Output = Result<()>> + Send;
-    fn hold_police(&mut self, hold: bool) -> impl Future<Output = ()> + Send;
     fn queue_report(&mut self, response: SafeCommandResponse) -> impl Future<Output = ()> + Send;
 }
 
@@ -319,9 +318,6 @@ impl<S: System> Actor<S> {
         if self.state.as_ref().is_none_or(|s| s.reverted) {
             return reading.report;
         }
-        let mut report = reading.report.clone();
-        report.applied_version = Some(wanted.version);
-
         let ntp = self
             .system
             .ntp_daemon()
@@ -333,9 +329,11 @@ impl<S: System> Actor<S> {
             Ok(files) => files,
             Err(err) => {
                 error!("settings: reading smithd's own files: {err:#}; not applying");
-                return report;
+                return reading.report;
             }
         };
+        let mut report = reading.report.clone();
+        report.applied_version = Some(wanted.version);
         let first = self.plan(&wanted, &reading, &files, ntp);
 
         if !first.has_steps() {
@@ -465,10 +463,6 @@ impl<S: System> Actor<S> {
             steps.push(Step::Bgscan(bgscan));
         }
 
-        let disrupts = plan.disrupts();
-        if disrupts {
-            self.system.hold_police(true).await;
-        }
         let mut errors = Vec::new();
         for step in steps {
             let disruptive = matches!(step, Step::ReloadDriver | Step::ReactivateWifi);
@@ -495,9 +489,6 @@ impl<S: System> Actor<S> {
                         }),
                 );
             }
-        }
-        if disrupts {
-            self.system.hold_police(false).await;
         }
         errors
     }
@@ -569,6 +560,7 @@ mod tests {
         steps: Vec<String>,
         stuck: Option<Group>,
         no_wifi: bool,
+        files_unreadable: bool,
     }
 
     #[derive(Clone, Default)]
@@ -600,7 +592,11 @@ mod tests {
         }
 
         async fn owned_files(&mut self, _ntp: Option<NtpDaemon>) -> Result<OwnedFiles> {
-            Ok(self.device().files.clone())
+            let device = self.device();
+            if device.files_unreadable {
+                return Err(anyhow!("EACCES"));
+            }
+            Ok(device.files.clone())
         }
 
         async fn run(&mut self, step: Step<'_>) -> Result<()> {
@@ -633,10 +629,6 @@ mod tests {
             let step = format!("save_state({})", state.disruptions);
             self.device().steps.push(step);
             Ok(())
-        }
-
-        async fn hold_police(&mut self, hold: bool) {
-            self.device().steps.push(format!("hold_police({hold})"));
         }
 
         async fn queue_report(&mut self, _response: SafeCommandResponse) {}
@@ -747,15 +739,13 @@ mod tests {
             steps,
             [
                 "save_state",
-                "hold_police",
                 "File",
                 "File",
                 "ReloadNm",
                 "save_state",
                 "ReloadDriver",
                 "RoamFlags",
-                "Hostname",
-                "hold_police"
+                "Hostname"
             ]
         );
     }
@@ -839,6 +829,17 @@ mod tests {
             Some(0),
             "steps: {steps:?}"
         );
+    }
+
+    #[tokio::test]
+    async fn unreadable_owned_files_apply_nothing_and_report_no_applied_version() {
+        let system = FakeSystem::default();
+        system.device().files_unreadable = true;
+        system.device().report.hostname = Some("orin-1".to_owned());
+        let mut actor = actor(system.clone(), Some(stored(4, hostname("byag-12"))));
+        let report = check(&mut actor).await;
+        assert!(system.device().steps.is_empty());
+        assert_eq!(report.applied_version, None);
     }
 
     #[test]
