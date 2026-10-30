@@ -340,14 +340,18 @@ impl Planner<'_> {
             self.plan.attempted.push(group);
             return true;
         };
+        self.fail(group, &reason);
+        false
+    }
+
+    fn fail(&mut self, group: Group, reason: &str) {
         self.plan
             .failed
             .extend(group.settings().iter().map(|setting| SettingStatus {
                 setting: *setting,
                 state: SettingApplyState::Failed,
-                reason: reason.clone(),
+                reason: reason.to_owned(),
             }));
-        false
     }
 
     fn driver(&mut self) {
@@ -480,9 +484,12 @@ impl Planner<'_> {
             return;
         };
         let current = self.input.files.ntp.as_deref();
+        // Nothing is tried without a daemon, so no attempt is spent: a daemon
+        // that appears later (chrony config fixed, package installed) is
+        // applied on the next check.
         let Some(daemon) = self.input.ntp_daemon else {
             if let Managed::Set(_) = wanted {
-                self.act(Group::NtpServers, true, &"no NTP daemon", false);
+                self.fail(Group::NtpServers, "no NTP daemon");
             }
             return;
         };
@@ -980,13 +987,21 @@ mod tests {
     }
 
     #[test]
-    fn ntp_without_a_daemon_counts_as_an_attempt() {
+    fn ntp_without_a_daemon_fails_without_an_attempt() {
         let mut case = ntp_case();
         case.ntp_daemon = None;
         let plan = case.plan();
         assert_eq!(plan.ntp_file, FileChange::Keep);
         assert!(!plan.ntp_reload);
-        assert_eq!(plan.attempted, vec![Group::NtpServers]);
+        assert!(plan.attempted.is_empty());
+        assert_eq!(
+            plan.failed,
+            [SettingStatus {
+                setting: DeviceSetting::NtpServers,
+                state: SettingApplyState::Failed,
+                reason: "no NTP daemon".to_owned(),
+            }]
+        );
     }
 
     #[test]

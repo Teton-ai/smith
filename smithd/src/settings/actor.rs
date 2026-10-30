@@ -351,7 +351,7 @@ impl<S: System> Actor<S> {
             return reading.report;
         }
         // A detection error says nothing about the daemon, so NTP is left out
-        // of this check rather than spending its attempts on "no daemon".
+        // of this check rather than reported failed for "no NTP daemon".
         let (ntp, wanted) = match self.system.ntp_daemon().await {
             Ok(ntp) => (ntp, wanted),
             Err(err) => {
@@ -373,8 +373,6 @@ impl<S: System> Actor<S> {
         let mut report = reading.report.clone();
         report.applied_version = Some(wanted.version);
         let first = self.plan(&wanted, &reading, &files, ntp);
-        // Before the no-step return: a group can be attempted without a step
-        // (NTP servers with no NTP daemon), and must still reach its limit.
         for group in &first.attempted {
             *self.attempts.entry(*group).or_insert(0) += 1;
         }
@@ -625,6 +623,7 @@ mod tests {
         files_unreadable: bool,
         wanted_unwritable: bool,
         ntp_detection_fails: bool,
+        ntp_daemon: Option<NtpDaemon>,
     }
 
     #[derive(Clone, Default)]
@@ -655,7 +654,7 @@ mod tests {
             if self.device().ntp_detection_fails {
                 return Err(anyhow!("D-Bus timeout"));
             }
-            Ok(None)
+            Ok(self.device().ntp_daemon)
         }
 
         async fn owned_files(&mut self, _ntp: Option<NtpDaemon>) -> Result<OwnedFiles> {
@@ -912,16 +911,17 @@ mod tests {
         assert_eq!(report.applied_version, None);
     }
 
-    #[tokio::test]
-    async fn ntp_servers_without_an_ntp_daemon_fail_once_two_attempts_are_spent() {
-        let system = FakeSystem::default();
-        let settings = WantedSettings {
+    fn ntp_servers() -> WantedSettings {
+        WantedSettings {
             ntp_servers: Some(Managed::Set(vec!["10.122.0.1".to_owned()])),
             ..Default::default()
-        };
-        let mut actor = actor(system, Some(stored(4, settings)));
-        assert!(check(&mut actor).await.apply_status.is_empty(), "attempt 1");
-        check(&mut actor).await;
+        }
+    }
+
+    #[tokio::test]
+    async fn ntp_servers_without_an_ntp_daemon_fail_at_once_and_spend_no_attempt() {
+        let system = FakeSystem::default();
+        let mut actor = actor(system, Some(stored(4, ntp_servers())));
         let failed: Vec<_> = check(&mut actor)
             .await
             .apply_status
@@ -929,6 +929,26 @@ mod tests {
             .map(|s| s.setting)
             .collect();
         assert_eq!(failed, [DeviceSetting::NtpServers]);
+        assert!(actor.attempts.is_empty());
+    }
+
+    #[tokio::test]
+    async fn ntp_servers_are_applied_once_an_ntp_daemon_appears() {
+        let system = FakeSystem::default();
+        let mut actor = actor(system.clone(), Some(stored(4, ntp_servers())));
+        for _ in 0..3 {
+            check(&mut actor).await;
+        }
+        system.device().ntp_daemon = Some(NtpDaemon::Chrony);
+        check(&mut actor).await;
+        assert!(
+            system
+                .device()
+                .steps
+                .contains(&"ReloadNtp(Chrony)".to_owned()),
+            "steps: {:?}",
+            system.device().steps
+        );
     }
 
     #[tokio::test]
@@ -966,11 +986,7 @@ mod tests {
     async fn an_ntp_detection_error_spends_no_ntp_attempt() {
         let system = FakeSystem::default();
         system.device().ntp_detection_fails = true;
-        let settings = WantedSettings {
-            ntp_servers: Some(Managed::Set(vec!["10.122.0.1".to_owned()])),
-            ..Default::default()
-        };
-        let mut actor = actor(system, Some(stored(4, settings)));
+        let mut actor = actor(system, Some(stored(4, ntp_servers())));
         for _ in 0..3 {
             check(&mut actor).await;
         }
