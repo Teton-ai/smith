@@ -335,6 +335,11 @@ impl<S: System> Actor<S> {
         let mut report = reading.report.clone();
         report.applied_version = Some(wanted.version);
         let first = self.plan(&wanted, &reading, &files, ntp);
+        // Before the no-step return: a group can be attempted without a step
+        // (NTP servers with no NTP daemon), and must still reach its limit.
+        for group in &first.attempted {
+            *self.attempts.entry(*group).or_insert(0) += 1;
+        }
 
         if !first.has_steps() {
             self.settle(&first);
@@ -344,9 +349,6 @@ impl<S: System> Actor<S> {
         }
 
         let errors = self.execute(&first, ntp, &reading).await;
-        for group in &first.attempted {
-            *self.attempts.entry(*group).or_insert(0) += 1;
-        }
 
         let after = self.read().await.unwrap_or(reading);
         let files = self.system.owned_files(ntp).await.unwrap_or(files);
@@ -840,6 +842,25 @@ mod tests {
         let report = check(&mut actor).await;
         assert!(system.device().steps.is_empty());
         assert_eq!(report.applied_version, None);
+    }
+
+    #[tokio::test]
+    async fn ntp_servers_without_an_ntp_daemon_fail_once_two_attempts_are_spent() {
+        let system = FakeSystem::default();
+        let settings = WantedSettings {
+            ntp_servers: Some(Managed::Set(vec!["10.122.0.1".to_owned()])),
+            ..Default::default()
+        };
+        let mut actor = actor(system, Some(stored(4, settings)));
+        assert!(check(&mut actor).await.apply_status.is_empty(), "attempt 1");
+        check(&mut actor).await;
+        let failed: Vec<_> = check(&mut actor)
+            .await
+            .apply_status
+            .into_iter()
+            .map(|s| s.setting)
+            .collect();
+        assert_eq!(failed, [DeviceSetting::NtpServers]);
     }
 
     #[test]
