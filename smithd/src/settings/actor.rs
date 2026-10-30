@@ -282,8 +282,14 @@ impl<S: System> Actor<S> {
     async fn apply(&mut self, version: i32, settings: WantedSettings) -> SafeCommandRx {
         info!("Applying settings version {version}");
         let wanted = StoredSettings { version, settings };
+        // Applied without a boot copy, the set would be replaced by the
+        // previous version's at the next restart while the api counts it as
+        // applied, so it is refused and the previous set stays in force.
         if let Err(err) = self.system.save_wanted(&wanted).await {
-            error!("Saving settings version {version}: {err:#}; applying it without a boot copy");
+            error!("Saving settings version {version}: {err:#}; not applying it");
+            return self
+                .refuse(&wanted, format!("could not store settings: {err:#}"))
+                .await;
         }
         let state = SettingsState {
             version,
@@ -301,6 +307,32 @@ impl<S: System> Actor<S> {
         self.sent(report.clone());
         SafeCommandRx::ApplySettingsResult {
             applied_version: version,
+            reverted: false,
+            report: Box::new(report),
+        }
+    }
+
+    /// Answers an apply that was not run: the report is a plain read with the
+    /// previously applied version, and every requested setting is failed.
+    async fn refuse(&mut self, wanted: &StoredSettings, reason: String) -> SafeCommandRx {
+        let previous = self
+            .wanted
+            .as_ref()
+            .filter(|_| self.state.as_ref().is_some_and(|s| !s.reverted))
+            .map(|w| w.version);
+        let mut report = self.read().await.unwrap_or_default().report;
+        report.applied_version = previous;
+        report.apply_status = requested_groups(&wanted.settings)
+            .into_iter()
+            .flat_map(|group| group.settings())
+            .map(|setting| SettingStatus {
+                setting: *setting,
+                state: SettingApplyState::Failed,
+                reason: reason.clone(),
+            })
+            .collect();
+        SafeCommandRx::ApplySettingsResult {
+            applied_version: previous.unwrap_or(0),
             reverted: false,
             report: Box::new(report),
         }
@@ -496,6 +528,28 @@ impl<S: System> Actor<S> {
     }
 }
 
+/// The groups an `ApplySettings` gives an instruction for.
+fn requested_groups(settings: &WantedSettings) -> Vec<Group> {
+    [
+        (settings.wireless_mode.is_some(), Group::WirelessMode),
+        (settings.power_mgnt.is_some(), Group::PowerMgnt),
+        (settings.roam_flags.is_some(), Group::RoamFlags),
+        (settings.roam_tuning.is_some(), Group::RoamTuning),
+        (settings.nm_wifi_powersave.is_some(), Group::NmWifiPowersave),
+        (
+            settings.nm_autoconnect_retries.is_some(),
+            Group::NmAutoconnectRetries,
+        ),
+        (settings.mac.is_some(), Group::Mac),
+        (settings.hostname.is_some(), Group::Hostname),
+        (settings.ntp_servers.is_some(), Group::NtpServers),
+        (settings.bgscan.is_some(), Group::Bgscan),
+    ]
+    .into_iter()
+    .filter_map(|(requested, group)| requested.then_some(group))
+    .collect()
+}
+
 /// One status per setting: a step error is more specific than the planner's
 /// reason, and the api stores one row per setting.
 fn dedup_statuses(first: Vec<SettingStatus>, then: Vec<SettingStatus>) -> Vec<SettingStatus> {
@@ -563,6 +617,7 @@ mod tests {
         stuck: Option<Group>,
         no_wifi: bool,
         files_unreadable: bool,
+        wanted_unwritable: bool,
     }
 
     #[derive(Clone, Default)]
@@ -624,6 +679,9 @@ mod tests {
         }
 
         async fn save_wanted(&mut self, _wanted: &StoredSettings) -> Result<()> {
+            if self.device().wanted_unwritable {
+                return Err(anyhow!("EROFS"));
+            }
             Ok(())
         }
 
@@ -861,6 +919,37 @@ mod tests {
             .map(|s| s.setting)
             .collect();
         assert_eq!(failed, [DeviceSetting::NtpServers]);
+    }
+
+    #[tokio::test]
+    async fn an_apply_whose_set_cannot_be_stored_is_refused() {
+        let system = FakeSystem::default();
+        system.device().report.hostname = Some("orin-1".to_owned());
+        let mut actor = actor(system.clone(), Some(stored(3, hostname("orin-1"))));
+        system.device().wanted_unwritable = true;
+        let SafeCommandRx::ApplySettingsResult {
+            applied_version,
+            report,
+            ..
+        } = actor.apply(4, hostname("byag-12")).await
+        else {
+            panic!("expected ApplySettingsResult");
+        };
+        assert!(system.device().steps.is_empty());
+        assert_eq!((applied_version, report.applied_version), (3, Some(3)));
+        assert_eq!(
+            report.apply_status,
+            [SettingStatus {
+                setting: DeviceSetting::Hostname,
+                state: SettingApplyState::Failed,
+                reason: "could not store settings: EROFS".to_owned(),
+            }]
+        );
+        assert_eq!(
+            actor.wanted.map(|w| w.version),
+            Some(3),
+            "previous set kept"
+        );
     }
 
     #[test]
