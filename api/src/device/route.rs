@@ -4,7 +4,7 @@ use crate::device::{
     DeviceLedgerItem, DeviceLedgerItemPaginated, DeviceNetworkIntent, DeviceRelease, DeviceUptime,
     FollowLatestRequest, FollowLatestUpdated, LabelWithValues, NewVariable, Note,
     PatchIntentRequest, RawDevice, SMITHD_SERVICE_NAME, ServiceOutage, UpdateDeviceRelease,
-    UpdateDevicesRelease, Variable, WifiScanResult,
+    UpdateDevicesRelease, Variable, WifiScanResult, as_device_id,
 };
 use crate::event::PublicEvent;
 use crate::handlers::AuthedDevice;
@@ -562,13 +562,14 @@ pub async fn get_health_for_device(
         FROM device
         WHERE
             CASE
-                WHEN $1 ~ '^[0-9]+$' AND (length($1) < 10 OR (length($1) = 10 AND $1 <= '2147483647')) THEN
-                    id = $1::int4
+                WHEN $2::int4 IS NOT NULL THEN
+                    id = $2
                 ELSE
                     serial_number = $1
             END
         "#,
-        device_id
+        device_id,
+        as_device_id(&device_id),
     )
     .fetch_optional(&state.pg_pool)
     .await
@@ -643,14 +644,15 @@ pub async fn get_uptime_for_device(
         ) m
         WHERE
             CASE
-                WHEN $1 ~ '^[0-9]+$' AND (length($1) < 10 OR (length($1) = 10 AND $1 <= '2147483647')) THEN
-                    d.id = $1::int4
+                WHEN $3::int4 IS NOT NULL THEN
+                    d.id = $3
                 ELSE
                     d.serial_number = $1
             END
         "#,
         device_id,
         crate::device::DOWNTIME_EPOCH_MIGRATION_VERSION,
+        as_device_id(&device_id),
     )
     .fetch_optional(&state.pg_pool)
     .await
@@ -1228,12 +1230,13 @@ async fn load_command_for_device(
         LEFT JOIN command_bundles cb ON cq.bundle = cb.uuid
         LEFT JOIN auth.users u ON cb.user_id = u.id
         WHERE cq.id = $2 AND CASE
-            WHEN $1 ~ '^[0-9]+$' AND (length($1) < 10 OR (length($1) = 10 AND $1 <= '2147483647')) THEN d.id::bigint = $1::bigint
+            WHEN $3::int4 IS NOT NULL THEN d.id = $3
             ELSE d.serial_number = $1
         END"#,
     )
     .bind(device_id)
     .bind(command_id)
+    .bind(as_device_id(device_id))
     .fetch_optional(pool)
     .await
     .map_err(|err| {
@@ -1291,13 +1294,14 @@ pub async fn get_all_commands_for_device(
         FROM device
         WHERE
             CASE
-                WHEN $1 ~ '^[0-9]+$' AND (length($1) < 10 OR (length($1) = 10 AND $1 <= '2147483647')) THEN
-                    id = $1::int4
+                WHEN $2::int4 IS NOT NULL THEN
+                    id = $2
                 ELSE
                     serial_number = $1
             END
         ",
-        device_id
+        device_id,
+        as_device_id(&device_id),
     )
     .fetch_optional(&mut *tx)
     .await
@@ -2001,13 +2005,14 @@ pub async fn issue_commands_to_device(
         FROM device
         WHERE
             CASE
-                WHEN $1 ~ '^[0-9]+$' AND (length($1) < 10 OR (length($1) = 10 AND $1 <= '2147483647')) THEN
-                    id = $1::int4
+                WHEN $2::int4 IS NOT NULL THEN
+                    id = $2
                 ELSE
                     serial_number = $1
             END
         ",
-        device_id
+        device_id,
+        as_device_id(&device_id),
     )
     .fetch_optional(&mut *tx)
     .await
@@ -2169,14 +2174,15 @@ pub async fn get_device_info(
         LEFT JOIN label l ON l.id = dl.label_id
         WHERE
             CASE
-                WHEN $1 ~ '^[0-9]+$' AND (length($1) < 10 OR (length($1) = 10 AND $1 <= '2147483647')) THEN
-                    d.id = $1::int4
+                WHEN $2::int4 IS NOT NULL THEN
+                    d.id = $2
                 ELSE
                     d.serial_number = $1
             END
         GROUP BY d.id, ip.id, m.id, r.id, rd.id, tr.id, trd.id, dn.device_id
         "#,
-        device_id
+        device_id,
+        as_device_id(&device_id),
     )
     .fetch_one(&state.pg_pool)
     .await
@@ -2499,16 +2505,15 @@ async fn write_device_labels(
         r#"
         SELECT id FROM device
         WHERE CASE
-            WHEN $1 ~ '^[0-9]+$'
-                 AND (length($1) < 10 OR
-                      (length($1) = 10 AND $1 <= '2147483647')) THEN
-                id = $1::int4
+            WHEN $2::int4 IS NOT NULL THEN
+                id = $2
             ELSE
                 serial_number = $1
         END
         FOR UPDATE
         "#,
-        device_id
+        device_id,
+        as_device_id(device_id),
     )
     .fetch_optional(&mut **tx)
     .await
@@ -3062,13 +3067,14 @@ pub async fn get_services_for_device(
         FROM device
         WHERE
             CASE
-                WHEN $1 ~ '^[0-9]+$' AND (length($1) < 10 OR (length($1) = 10 AND $1 <= '2147483647')) THEN
-                    id = $1::int4
+                WHEN $2::int4 IS NOT NULL THEN
+                    id = $2
                 ELSE
                     serial_number = $1
             END
         "#,
-        device_id
+        device_id,
+        as_device_id(&device_id),
     )
     .fetch_optional(&state.pg_pool)
     .await
@@ -3158,13 +3164,14 @@ pub async fn get_audit_for_device(
         LEFT JOIN device_audit da ON da.device_id = d.id
         WHERE
             CASE
-                WHEN $1 ~ '^[0-9]+$' AND (length($1) < 10 OR (length($1) = 10 AND $1 <= '2147483647')) THEN
-                    d.id = $1::int4
+                WHEN $2::int4 IS NOT NULL THEN
+                    d.id = $2
                 ELSE
                     d.serial_number = $1
             END
         "#,
-        device_id
+        device_id,
+        as_device_id(&device_id),
     )
     .fetch_optional(&state.pg_pool)
     .await
@@ -3213,13 +3220,14 @@ pub async fn get_configured_networks_for_device(
         SELECT id FROM device
         WHERE
             CASE
-                WHEN $1 ~ '^[0-9]+$' AND (length($1) < 10 OR (length($1) = 10 AND $1 <= '2147483647')) THEN
-                    id = $1::int4
+                WHEN $2::int4 IS NOT NULL THEN
+                    id = $2
                 ELSE
                     serial_number = $1
             END
         "#,
-        device_id
+        device_id,
+        as_device_id(&device_id),
     )
     .fetch_optional(&state.pg_pool)
     .await
@@ -3305,14 +3313,15 @@ pub async fn get_wifi_scan_for_device(
         LEFT JOIN wifi_scan_result w ON w.device_id = d.id
         WHERE
             CASE
-                WHEN $1 ~ '^[0-9]+$' AND (length($1) < 10 OR (length($1) = 10 AND $1 <= '2147483647')) THEN
-                    d.id = $1::int4
+                WHEN $2::int4 IS NOT NULL THEN
+                    d.id = $2
                 ELSE
                     d.serial_number = $1
             END
         ORDER BY w.signal DESC NULLS LAST
         "#,
-        device_id
+        device_id,
+        as_device_id(&device_id),
     )
     .fetch_all(&state.pg_pool)
     .await
@@ -3355,15 +3364,14 @@ pub(crate) async fn resolve_device_id(
         SELECT id FROM device
         WHERE
             CASE
-                -- Only a number that fits int4 is an id; anything else is a
-                -- serial, so an out of range number is a 404, not a cast error.
-                WHEN $1 ~ '^[0-9]{1,9}$' OR ($1 ~ '^[0-9]{10}$' AND $1 <= '2147483647') THEN
-                    id = $1::int4
+                WHEN $2::int4 IS NOT NULL THEN
+                    id = $2
                 ELSE
                     serial_number = $1
             END
         "#,
-        device_id
+        device_id,
+        as_device_id(device_id),
     )
     .fetch_optional(pool)
     .await

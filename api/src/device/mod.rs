@@ -17,6 +17,37 @@ use uuid::Uuid;
 pub mod route;
 pub mod settings;
 
+/// The device id to look up when `identifier` is one; otherwise it is a serial number.
+/// Serials can be all digits too, so anything that doesn't fit an id must stay a serial,
+/// including forms `parse` would accept such as `+5` or long runs of leading zeros.
+pub(crate) fn as_device_id(identifier: &str) -> Option<i32> {
+    let looks_like_id = identifier.len() <= 10 && identifier.bytes().all(|b| b.is_ascii_digit());
+    looks_like_id.then(|| identifier.parse().ok()).flatten()
+}
+
+#[cfg(test)]
+mod as_device_id_tests {
+    use super::as_device_id;
+
+    #[test]
+    fn only_digits_that_fit_an_id_are_ids() {
+        assert_eq!(as_device_id("6571"), Some(6571));
+        assert_eq!(as_device_id("2147483647"), Some(i32::MAX));
+
+        for serial in [
+            "2147483648",
+            "3765007587",
+            "000000000012",
+            "+5",
+            "-5",
+            "",
+            "serial-1",
+        ] {
+            assert_eq!(as_device_id(serial), None, "{serial}");
+        }
+    }
+}
+
 // TODO: Change this, this needs to be device and the other is PublicDevice, API type
 #[derive(Debug, Serialize, utoipa::ToSchema, Clone)]
 pub struct RawDevice {
