@@ -1,7 +1,7 @@
 //! Collects every setting into one [`SettingsReport`], plus the readers too
 //! small for their own module (bgscan, hostname) and shared helpers.
 
-use super::driver::{DriverPaths, iw_country, read_driver, wifi_interface};
+use super::driver::{DriverPaths, WifiInterface, iw_country, read_driver, wifi_interface};
 use super::nm::{NM_FIELDS, read_nm_config};
 use super::ntp::{NTP_FIELDS, read_ntp};
 use crate::utils::schema::{DeviceSetting, SettingsReport};
@@ -132,25 +132,25 @@ async fn current_network(conn: &Connection) -> Result<Option<WpaNetworkProxy<'st
     Ok(None)
 }
 
-/// bgscan of the current network; `None` when not connected or unset.
-async fn read_bgscan(conn: &Connection) -> Result<Option<String>> {
+/// Whether wpa_supplicant has a current network, and its bgscan (`None` when
+/// not connected or unset).
+async fn read_bgscan(conn: &Connection) -> Result<(bool, Option<String>)> {
     let Some(network) = current_network(conn).await? else {
-        return Ok(None);
+        return Ok((false, None));
     };
     let properties = network.properties().await?;
-    Ok(match properties.get("bgscan") {
+    let bgscan = match properties.get("bgscan") {
         Some(value) => {
             let value = String::try_from(value.try_clone()?)?;
             Some(unquote(&value).to_owned()).filter(|v| !v.is_empty())
         }
         None => None,
-    })
+    };
+    Ok((true, bgscan))
 }
 
 /// Sets bgscan on the current network. NM sets its own on every activation,
 /// so local enforcement sets it again after one.
-// Unused until the settings actor applies settings.
-#[allow(dead_code)]
 pub(super) async fn set_bgscan(conn: &Connection, bgscan: &str) -> Result<()> {
     let network = current_network(conn)
         .await?
@@ -228,13 +228,20 @@ pub struct SettingsReader {
 }
 
 /// One full read. `vendor_present` feeds the reload hold in the actor.
+#[derive(Debug, Clone, Default)]
 pub struct Reading {
     pub report: SettingsReport,
     pub vendor_present: bool,
+    pub wifi: Option<WifiInterface>,
+    pub wifi_connected: bool,
 }
 
 impl SettingsReader {
-    async fn connection(&mut self) -> Result<Connection> {
+    pub(super) fn driver_paths(&self) -> &DriverPaths {
+        &self.driver_paths
+    }
+
+    pub(super) async fn connection(&mut self) -> Result<Connection> {
         if let Some(conn) = &self.conn {
             return Ok(conn.clone());
         }
@@ -299,10 +306,14 @@ impl SettingsReader {
             }
         }
 
+        let mut wifi_connected = false;
         match self.connection().await {
             Ok(conn) => {
                 match read_bgscan(&conn).await {
-                    Ok(bgscan) => report.bgscan = bgscan,
+                    Ok((connected, bgscan)) => {
+                        wifi_connected = connected;
+                        report.bgscan = bgscan;
+                    }
                     Err(err) => {
                         warn!("settings: bgscan: {err:#}");
                         report.read_errors.push(DeviceSetting::Bgscan);
@@ -329,6 +340,8 @@ impl SettingsReader {
         Reading {
             report,
             vendor_present: driver.vendor_present,
+            wifi,
+            wifi_connected,
         }
     }
 }
