@@ -59,8 +59,8 @@ pub async fn run() {
     let filebrowser =
         FileBrowserHandle::new(shutdown.signals(), configuration.clone(), session.clone());
 
-    // Shared by the commander's network commands and link health, which stays
-    // out of NetworkManager while they run.
+    // Shared by the writers that change networks (the commander, the settings
+    // actor) and link health's recoveries, so neither runs during the other.
     let net_guard = NetGuard::new();
 
     let commander = CommanderHandle::new(
@@ -91,7 +91,7 @@ pub async fn run() {
     );
 
     // Queues its reports on the commander, so it must be created after it.
-    let settings = SettingsHandle::new(shutdown.signals(), commander.clone());
+    let settings = SettingsHandle::new(shutdown.signals(), commander.clone(), net_guard.clone());
 
     let link_health = LinkHealthHandle::new(shutdown.signals(), net_guard.clone());
 

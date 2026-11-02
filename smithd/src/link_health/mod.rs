@@ -7,8 +7,9 @@
 //! - **No-secrets lockout**: when an AP refuses the association, NM can fail
 //!   the device with `NO_SECRETS` and then block autoconnect for good.
 //!
-//! Recovery goes through nmcli and stays out of the way while the commander
-//! changes networks (see [`NetGuard`]). Everything is logged on target
+//! Recovery goes through nmcli, waits while the commander or the settings
+//! actor changes networks, and holds them off while it runs (see
+//! [`NetGuard`]). Everything is logged on target
 //! `link_health`; nothing is reported to the api.
 
 mod detect;
@@ -266,13 +267,12 @@ impl<R: Recovery> LinkHealth<R> {
         let Some(iface) = self.wifi_interface().await else {
             return;
         };
-        let quiet = self.net_guard.is_quiet(NETWORK_SETTLE);
-        if quiet {
+        if self.net_guard.is_quiet(NETWORK_SETTLE) {
             self.guard_wait_logged = false;
         }
 
         if self.lockout.due(Instant::now()) {
-            self.recover_lockout(&iface.name, quiet).await;
+            self.recover_lockout(&iface.name).await;
         }
 
         let read = if iface.module == VENDOR_MODULE {
@@ -282,7 +282,7 @@ impl<R: Recovery> LinkHealth<R> {
         };
         match self.roam.observe(read, Instant::now()) {
             RoamEvent::Idle => {}
-            RoamEvent::Stall { count } => self.recover_roam_stall(&iface.name, count, quiet).await,
+            RoamEvent::Stall { count } => self.recover_roam_stall(&iface.name, count).await,
             RoamEvent::Limited(limit) => info!(
                 target: "link_health",
                 kind = "roam_stall",
@@ -347,11 +347,11 @@ impl<R: Recovery> LinkHealth<R> {
         }
     }
 
-    async fn recover_lockout(&mut self, iface: &str, quiet: bool) {
-        if !quiet {
+    async fn recover_lockout(&mut self, iface: &str) {
+        let Some(_recovering) = self.net_guard.try_recovery(NETWORK_SETTLE) else {
             self.wait_for_guard("no_secrets");
             return;
-        }
+        };
         // The ACTIVATED event that ends an incident can be dropped when the
         // queue is full; never reconnect a link that is already up.
         if self.recovery.associated_bssid(iface).await.is_some() {
@@ -378,11 +378,11 @@ impl<R: Recovery> LinkHealth<R> {
         }
     }
 
-    async fn recover_roam_stall(&mut self, iface: &str, count: u32, quiet: bool) {
-        if !quiet {
+    async fn recover_roam_stall(&mut self, iface: &str, count: u32) {
+        let Some(_recovering) = self.net_guard.try_recovery(NETWORK_SETTLE) else {
             self.wait_for_guard("roam_stall");
             return;
-        }
+        };
         let Some(bssid) = self.recovery.associated_bssid(iface).await else {
             debug!(target: "link_health", "Roam buffer stuck while not associated; checking again later");
             self.roam.defer(Instant::now());
@@ -462,6 +462,7 @@ fn log_lockout_recovered(note: LockoutNote) {
 mod tests {
     use super::*;
     use crate::settings::driver::tests::fake_iface;
+    use futures::FutureExt;
     use std::path::Path;
     use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
@@ -473,6 +474,9 @@ mod tests {
         connects: AtomicU32,
         /// The reconnect leaves the device unassociated, as on 2026-10-28.
         reconnect_drops_link: AtomicBool,
+        /// Set to whether a settings change could start during the reconnect.
+        guard: Option<NetGuard>,
+        change_blocked_during_reconnect: AtomicBool,
     }
 
     impl Fake {
@@ -492,6 +496,14 @@ mod tests {
         }
         async fn reconnect(&self, _iface: &str) -> Result<()> {
             self.reconnects.fetch_add(1, Ordering::SeqCst);
+            if let Some(guard) = &self.guard {
+                let blocked = guard
+                    .hold_after_recovery(Duration::ZERO)
+                    .now_or_never()
+                    .is_none();
+                self.change_blocked_during_reconnect
+                    .store(blocked, Ordering::SeqCst);
+            }
             if self.reconnect_drops_link.load(Ordering::SeqCst) {
                 self.associated.store(false, Ordering::SeqCst);
             }
@@ -571,6 +583,26 @@ mod tests {
         lh.on_tick().await;
         assert_eq!(fake.reconnects.load(Ordering::SeqCst), 1);
         assert!(!lh.guard_wait_logged);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_reconnect_holds_off_settings_changes_while_it_runs() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        fake_iface(root, "wlP1p1s0", "rtl88x2ce", VENDOR_MODULE);
+        write_trx(root, "TX: roam_buf_pkt=1:20");
+        let guard = NetGuard::new();
+        let fake = Fake {
+            guard: Some(guard.clone()),
+            ..Fake::associated()
+        };
+        let mut lh = LinkHealth::new(guard, &fake, paths(root));
+
+        lh.on_tick().await;
+        tokio::time::advance(TICK).await;
+        lh.on_tick().await;
+        assert_eq!(fake.reconnects.load(Ordering::SeqCst), 1);
+        assert!(fake.change_blocked_during_reconnect.load(Ordering::SeqCst));
     }
 
     #[tokio::test(start_paused = true)]
