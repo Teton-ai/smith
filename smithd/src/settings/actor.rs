@@ -1,9 +1,9 @@
-use super::READ_TIMEOUT;
 use super::apply::DeviceSystem;
 use super::plan::{
     ApplyPlan, FileChange, Group, MAX_DISRUPTIONS, NtpDaemon, OwnedFiles, PlanInput, plan,
 };
 use super::read::Reading;
+use super::{READ_TIMEOUT, unanswered};
 use crate::postman::LastPoll;
 use crate::shutdown::ShutdownSignals;
 use crate::utils::files::{
@@ -64,10 +64,17 @@ fn change_key(report: &SettingsReport) -> SettingsReport {
 
 pub enum ActorMessage {
     CheckNow,
+    /// `ApplySettings` command `id`.
     Apply {
+        id: i32,
         version: i32,
         settings: WantedSettings,
-        reply: oneshot::Sender<SafeCommandRx>,
+        reply: oneshot::Sender<SafeCommandResponse>,
+    },
+    /// `ReportSettings` command `id`.
+    Report {
+        id: i32,
+        reply: oneshot::Sender<SafeCommandResponse>,
     },
 }
 
@@ -249,10 +256,16 @@ impl<S: System> Actor<S> {
                 _ = interval.tick() => self.check().await,
                 Some(message) = self.receiver.recv() => match message {
                     ActorMessage::CheckNow => self.check().await,
-                    ActorMessage::Apply { version, settings, reply } => {
-                        let result = self.apply(version, settings).await;
+                    ActorMessage::Apply { id, version, settings, reply } => {
+                        let result = self.apply(id, version, settings).await;
                         if reply.send(result).is_err() {
                             warn!("ApplySettings {version} finished after its caller left");
+                        }
+                    }
+                    ActorMessage::Report { id, reply } => {
+                        let result = self.report(id).await;
+                        if reply.send(result).is_err() {
+                            warn!("ReportSettings {id} finished after its caller left");
                         }
                     }
                 },
@@ -324,9 +337,32 @@ impl<S: System> Actor<S> {
         self.last_sent_at = Instant::now();
     }
 
+    /// The `ReportSettings` command: a check run now, whose report is the
+    /// answer rather than queued.
+    async fn report(&mut self, id: i32) -> SafeCommandResponse {
+        let Some(reading) = self.read().await else {
+            let report = Box::default();
+            return unanswered(id, SafeCommandRx::ReportSettings { report });
+        };
+        let report = self.enforce(reading, true).await;
+        self.sent(report.clone());
+        SafeCommandResponse {
+            id,
+            command: SafeCommandRx::ReportSettings {
+                report: Box::new(report),
+            },
+            status: 0,
+        }
+    }
+
     /// Stores the set, starts its version afresh (a Re-apply of the same
-    /// version included) and applies it now.
-    async fn apply(&mut self, version: i32, settings: WantedSettings) -> SafeCommandRx {
+    /// version included) and applies it now, answering command `id`.
+    async fn apply(
+        &mut self,
+        id: i32,
+        version: i32,
+        settings: WantedSettings,
+    ) -> SafeCommandResponse {
         info!("Applying settings version {version}");
         let wanted = StoredSettings { version, settings };
         // Applied without a boot copy, the set would be replaced by the
@@ -335,7 +371,7 @@ impl<S: System> Actor<S> {
         if let Err(err) = self.system.save_wanted(&wanted).await {
             error!("Saving settings version {version}: {err:#}; not applying it");
             return self
-                .refuse(&wanted, format!("could not store settings: {err:#}"))
+                .refuse(id, &wanted, format!("could not store settings: {err:#}"))
                 .await;
         }
         let state = SettingsState {
@@ -349,25 +385,51 @@ impl<S: System> Actor<S> {
         self.state = Some(state);
         self.attempts.clear();
 
-        let reading = self.read().await.unwrap_or_default();
+        // Planned on an empty report, every setting would look drifted. The
+        // set is stored, so the next check applies it.
+        let Some(reading) = self.read().await else {
+            let command = SafeCommandRx::ApplySettingsResult {
+                applied_version: version,
+                reverted: false,
+                report: Box::default(),
+            };
+            return unanswered(id, command);
+        };
         let report = self.enforce(reading, false).await;
         self.sent(report.clone());
-        SafeCommandRx::ApplySettingsResult {
-            applied_version: version,
-            reverted: self.state.as_ref().is_some_and(|s| s.reverted),
-            report: Box::new(report),
+        SafeCommandResponse {
+            id,
+            command: SafeCommandRx::ApplySettingsResult {
+                applied_version: version,
+                reverted: self.state.as_ref().is_some_and(|s| s.reverted),
+                report: Box::new(report),
+            },
+            status: 0,
         }
     }
 
     /// Answers an apply that was not run: the report is a plain read with the
     /// previously applied version, and every requested setting is failed.
-    async fn refuse(&mut self, wanted: &StoredSettings, reason: String) -> SafeCommandRx {
+    async fn refuse(
+        &mut self,
+        id: i32,
+        wanted: &StoredSettings,
+        reason: String,
+    ) -> SafeCommandResponse {
         let previous = self
             .wanted
             .as_ref()
             .filter(|_| self.state.as_ref().is_some_and(|s| !s.reverted))
             .map(|w| w.version);
-        let mut report = self.read().await.unwrap_or_default().report;
+        let Some(reading) = self.read().await else {
+            let command = SafeCommandRx::ApplySettingsResult {
+                applied_version: previous.unwrap_or(0),
+                reverted: false,
+                report: Box::default(),
+            };
+            return unanswered(id, command);
+        };
+        let mut report = reading.report;
         report.applied_version = previous;
         report.apply_status = requested_groups(&wanted.settings)
             .into_iter()
@@ -378,10 +440,14 @@ impl<S: System> Actor<S> {
                 reason: reason.clone(),
             })
             .collect();
-        SafeCommandRx::ApplySettingsResult {
-            applied_version: previous.unwrap_or(0),
-            reverted: false,
-            report: Box::new(report),
+        SafeCommandResponse {
+            id,
+            command: SafeCommandRx::ApplySettingsResult {
+                applied_version: previous.unwrap_or(0),
+                reverted: false,
+                report: Box::new(report),
+            },
+            status: 0,
         }
     }
 
@@ -781,6 +847,7 @@ mod tests {
         /// A home poll succeeds this long after a reload or re-activation;
         /// `None` means the api stays unreachable.
         api_back_after: Option<Duration>,
+        read_hangs: bool,
     }
 
     #[derive(Clone)]
@@ -811,6 +878,10 @@ mod tests {
 
     impl System for FakeSystem {
         async fn read(&mut self) -> Reading {
+            let hangs = self.device().read_hangs;
+            if hangs {
+                std::future::pending::<()>().await;
+            }
             let device = self.device();
             Reading {
                 report: device.report.clone(),
@@ -991,7 +1062,7 @@ mod tests {
             ..Default::default()
         };
         let mut actor = actor(system.clone(), None);
-        actor.apply(4, settings).await;
+        actor.apply(1, 4, settings).await;
 
         let steps: Vec<String> = system
             .device()
@@ -1027,7 +1098,7 @@ mod tests {
             wireless_mode: Some(Managed::Set(11)),
             ..Default::default()
         };
-        let apply = tokio::spawn(async move { actor.apply(4, settings).await });
+        let apply = tokio::spawn(async move { actor.apply(1, 4, settings).await });
         let reloaded = || system.device().steps.iter().any(|s| s == "ReloadDriver");
 
         time::sleep(Duration::from_secs(120)).await;
@@ -1070,7 +1141,7 @@ mod tests {
         let mut actor = actor(system.clone(), None);
         let SafeCommandRx::ApplySettingsResult {
             reverted, report, ..
-        } = actor.apply(4, wireless_mode(11)).await
+        } = actor.apply(1, 4, wireless_mode(11)).await.command
         else {
             panic!("expected ApplySettingsResult");
         };
@@ -1116,7 +1187,7 @@ mod tests {
         let system = FakeSystem::default().api_back_after(Duration::from_secs(20));
         system.device().report.wireless_mode = Some(95);
         let mut actor = actor(system.clone(), None);
-        actor.apply(4, wireless_mode(11)).await;
+        actor.apply(1, 4, wireless_mode(11)).await;
         let reloads = system
             .device()
             .steps
@@ -1246,7 +1317,7 @@ mod tests {
             wireless_mode: Some(Managed::Set(11)),
             ..Default::default()
         };
-        actor.apply(4, settings).await;
+        actor.apply(1, 4, settings).await;
         let steps = system.device().steps.clone();
         assert!(!steps.iter().any(|s| s == "ReloadDriver"));
         assert_eq!(
@@ -1317,7 +1388,7 @@ mod tests {
             applied_version,
             report,
             ..
-        } = actor.apply(4, hostname("byag-12")).await
+        } = actor.apply(1, 4, hostname("byag-12")).await.command
         else {
             panic!("expected ApplySettingsResult");
         };
@@ -1367,8 +1438,35 @@ mod tests {
         );
     }
 
+    #[tokio::test(start_paused = true)]
+    async fn an_apply_whose_read_times_out_is_stored_and_not_planned() {
+        let system = FakeSystem::default();
+        system.device().read_hangs = true;
+        let mut actor = actor(system.clone(), None);
+        let answer = actor.apply(7, 4, wireless_mode(11)).await;
+        assert_eq!((answer.id, answer.status), (7, -1));
+        assert_eq!(system.device().steps, ["save_state(0)"]);
+        assert_eq!(actor.wanted.map(|w| w.version), Some(4));
+    }
+
     #[tokio::test]
-    async fn consecutive_applies_run_in_order_and_each_is_answered() {
+    async fn a_report_command_carries_the_applied_version() {
+        let system = FakeSystem::default();
+        system.device().report.hostname = Some("byag-12".to_owned());
+        let mut actor = actor(system, Some(stored(4, hostname("byag-12"))));
+        let SafeCommandResponse {
+            id,
+            command: SafeCommandRx::ReportSettings { report },
+            status,
+        } = actor.report(8).await
+        else {
+            panic!("expected ReportSettings");
+        };
+        assert_eq!((id, status, report.applied_version), (8, 0, Some(4)));
+    }
+
+    #[tokio::test]
+    async fn consecutive_applies_run_in_order_and_each_is_answered_under_its_command_id() {
         let system = FakeSystem::default();
         system.device().report.hostname = Some("orin-1".to_owned());
         let (sender, receiver) = mpsc::channel(8);
@@ -1377,10 +1475,11 @@ mod tests {
         tokio::spawn(async move { actor.run().await });
 
         let mut replies = Vec::new();
-        for (version, name) in [(1, "first"), (2, "second")] {
+        for (id, version, name) in [(101, 1, "first"), (102, 2, "second")] {
             let (reply, answer) = oneshot::channel();
             sender
                 .send(ActorMessage::Apply {
+                    id,
                     version,
                     settings: hostname(name),
                     reply,
@@ -1389,22 +1488,27 @@ mod tests {
                 .unwrap();
             replies.push(answer);
         }
-        let mut versions = Vec::new();
+        let mut answers = Vec::new();
         for answer in replies {
             match answer.await.unwrap() {
-                SafeCommandRx::ApplySettingsResult {
-                    applied_version,
-                    report,
-                    ..
-                } => versions.push((applied_version, report.hostname)),
+                SafeCommandResponse {
+                    id,
+                    command:
+                        SafeCommandRx::ApplySettingsResult {
+                            applied_version,
+                            report,
+                            ..
+                        },
+                    status,
+                } => answers.push((id, status, applied_version, report.hostname)),
                 other => panic!("unexpected {other:?}"),
             }
         }
         assert_eq!(
-            versions,
+            answers,
             [
-                (1, Some("first".to_owned())),
-                (2, Some("second".to_owned()))
+                (101, 0, 1, Some("first".to_owned())),
+                (102, 0, 2, Some("second".to_owned()))
             ]
         );
         let hostnames: Vec<_> = system

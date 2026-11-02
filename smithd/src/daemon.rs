@@ -63,6 +63,11 @@ pub async fn run() {
     // actor) and link health's recoveries, so neither runs during the other.
     let net_guard = NetGuard::new();
 
+    // The commander delegates the settings commands to the settings actor,
+    // which queues its own reports on the commander: the handle exists first,
+    // the actor starts once the commander does.
+    let (settings, settings_inbox) = SettingsHandle::new();
+
     let commander = CommanderHandle::new(
         shutdown.signals(),
         Handles {
@@ -74,6 +79,7 @@ pub async fn run() {
             logstream: logstream.clone(),
             filebrowser: filebrowser.clone(),
             net_guard: net_guard.clone(),
+            settings: settings.clone(),
         },
     );
 
@@ -90,9 +96,8 @@ pub async fn run() {
         session.clone(),
     );
 
-    // Queues its reports on the commander, so it must be created after it, and
-    // follows the postman's polls to revert an apply that lost the api.
-    let settings = SettingsHandle::new(
+    // Follows the postman's polls to revert an apply that lost the api.
+    settings_inbox.spawn(
         shutdown.signals(),
         commander.clone(),
         net_guard.clone(),
