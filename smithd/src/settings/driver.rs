@@ -8,6 +8,13 @@ use std::path::{Path, PathBuf};
 
 pub(crate) const SYS_CLASS_NET: &str = "/sys/class/net";
 pub(crate) const VENDOR_MODULE: &str = "rtl8822ce";
+/// Both driver modules for the Realtek 8822ce Wi-Fi chip shared by platforms A, B and
+/// C: the vendor out-of-tree driver and the upstream in-tree `rtw88` driver. Link
+/// health's Police-countdown reload is only safe on these; every other hardware class
+/// (Overview PCs, GPU servers) has a module name that matches neither.
+// Wired into link health's escalation check in a later task.
+#[allow(dead_code)]
+pub(crate) const RELOADABLE_WIFI_MODULES: [&str; 2] = [VENDOR_MODULE, "rtw88_8822ce"];
 const VENDOR_PARAMS: &str = "/sys/module/rtl8822ce/parameters";
 /// The vendor driver names its proc dir after `DRV_NAME`, not the module.
 const VENDOR_PROC: &str = "/proc/net/rtl88x2ce";

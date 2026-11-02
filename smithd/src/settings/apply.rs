@@ -1,10 +1,11 @@
 //! Carries out an [`ApplyPlan`](super::plan::ApplyPlan): writes and removes
 //! the files smithd owns and runs the system commands, each step on its own
 //! so the actor decides their order.
-// Unused until the settings actor applies settings.
+// Most of this is unused until the settings actor applies settings;
+// `reload_driver` is already called by link health's Police-countdown escalation.
 #![allow(dead_code)]
 
-use super::driver::{DriverPaths, VENDOR_MODULE};
+use super::driver::DriverPaths;
 use super::ntp::{CHRONY_CONF, CHRONY_SOURCES_DIR, timesyncd_running};
 use super::plan::{FileChange, NtpDaemon, OwnedFiles};
 use super::read::{run, run_for};
@@ -28,8 +29,8 @@ const HOSTS_SELF_ADDRESS: &str = "127.0.1.1";
 const DRIVER_TIMEOUT: Duration = Duration::from_secs(30);
 const MODPROBE_TRIES: u32 = 3;
 const MODPROBE_RETRY_DELAY: Duration = Duration::from_secs(2);
-/// The interface's proc dir comes back a few seconds after `modprobe`; the
-/// roam values can only be written once it is there.
+/// The interface comes back under `/sys/class/net` a few seconds after
+/// `modprobe`; the roam values can only be written once it is there.
 const VENDOR_BACK_TIMEOUT: Duration = Duration::from_secs(30);
 const VENDOR_POLL: Duration = Duration::from_millis(500);
 /// How long `nmcli` waits for the activation, and the cap on the process.
@@ -104,15 +105,16 @@ pub async fn change_file(path: &Path, change: &FileChange) -> Result<()> {
 
 /// `rmmod` then `modprobe`: `modprobe -r` would also unload the modules the
 /// driver depends on.
-fn driver_reload_steps() -> [(&'static str, [&'static str; 1]); 2] {
-    [("rmmod", [VENDOR_MODULE]), ("modprobe", [VENDOR_MODULE])]
+fn driver_reload_steps(module: &str) -> [(&'static str, [&str; 1]); 2] {
+    [("rmmod", [module]), ("modprobe", [module])]
 }
 
-/// Reloads the vendor driver so it reads its modprobe.d options, then waits
-/// for the interface to come back. `modprobe` is retried: the device has no
-/// Wi-Fi until it succeeds.
-pub async fn reload_driver(paths: &DriverPaths, interface: &str) -> Result<()> {
-    let [(rmmod, rmmod_args), (modprobe, modprobe_args)] = driver_reload_steps();
+/// Reloads `module` so it reads its modprobe.d options, then waits for the
+/// interface to come back. `modprobe` is retried: the device has no Wi-Fi
+/// until it succeeds. Generic over the driver module so callers can target
+/// either the vendor `rtl8822ce` driver or the upstream `rtw88` one.
+pub async fn reload_driver(paths: &DriverPaths, module: &str, interface: &str) -> Result<()> {
+    let [(rmmod, rmmod_args), (modprobe, modprobe_args)] = driver_reload_steps(module);
     run_for(DRIVER_TIMEOUT, rmmod, &rmmod_args).await?;
     let mut tries = 0;
     loop {
@@ -120,17 +122,17 @@ pub async fn reload_driver(paths: &DriverPaths, interface: &str) -> Result<()> {
         match run_for(DRIVER_TIMEOUT, modprobe, &modprobe_args).await {
             Ok(_) => break,
             Err(err) if tries < MODPROBE_TRIES => {
-                warn!("settings: modprobe {VENDOR_MODULE} failed, retrying: {err:#}");
+                warn!("settings: modprobe {module} failed, retrying: {err:#}");
                 tokio::time::sleep(MODPROBE_RETRY_DELAY).await;
             }
             Err(err) => return Err(err),
         }
     }
-    let proc_dir = paths.proc.join(interface);
+    let iface_dir = paths.net.join(interface);
     let deadline = tokio::time::Instant::now() + VENDOR_BACK_TIMEOUT;
-    while !tokio::fs::try_exists(&proc_dir).await.unwrap_or(false) {
+    while !tokio::fs::try_exists(&iface_dir).await.unwrap_or(false) {
         if tokio::time::Instant::now() >= deadline {
-            bail!("{} did not come back after the reload", proc_dir.display());
+            bail!("{} did not come back after the reload", iface_dir.display());
         }
         tokio::time::sleep(VENDOR_POLL).await;
     }
@@ -314,8 +316,8 @@ mod tests {
     #[test]
     fn driver_reload_is_rmmod_then_modprobe_never_modprobe_r() {
         assert_eq!(
-            driver_reload_steps(),
-            [("rmmod", ["rtl8822ce"]), ("modprobe", ["rtl8822ce"])]
+            driver_reload_steps("rtw88_8822ce"),
+            [("rmmod", ["rtw88_8822ce"]), ("modprobe", ["rtw88_8822ce"])]
         );
     }
 
