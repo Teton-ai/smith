@@ -2855,6 +2855,7 @@ pub async fn approve_device(
     tag = DEVICES_TAG
 )]
 pub async fn revoke_device(
+    Extension(current_user): Extension<CurrentUser>,
     Path(device_id): Path<i32>,
     Extension(state): Extension<State>,
 ) -> axum::response::Result<Json<bool>, StatusCode> {
@@ -2882,10 +2883,11 @@ pub async fn revoke_device(
     })?;
 
     sqlx::query!(
-        r#"INSERT INTO ledger (device_id, "class", "text") VALUES ($1, $2, $3)"#,
+        r#"INSERT INTO ledger (device_id, "class", "text", user_id) VALUES ($1, $2, $3, $4)"#,
         device_id,
         "revoked",
-        format!("Device approval revoked.")
+        "Device approval revoked.",
+        current_user.user_id
     )
     .execute(&mut *tx)
     .await
