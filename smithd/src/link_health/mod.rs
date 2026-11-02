@@ -52,6 +52,9 @@ trait Recovery {
     async fn associated_bssid(&self, iface: &str) -> Option<String>;
     async fn reconnect(&self, iface: &str) -> Result<()>;
     async fn connect(&self, iface: &str) -> Result<()>;
+    // Wired into LinkHealth::on_tick in a later task.
+    #[allow(dead_code)]
+    async fn reload_driver(&self, paths: &DriverPaths, module: &str, iface: &str) -> Result<()>;
 }
 
 struct Nmcli;
@@ -151,6 +154,10 @@ impl Recovery for Nmcli {
     async fn connect(&self, iface: &str) -> Result<()> {
         enable_autoconnect(iface).await;
         nmcli(&["device", "connect", iface]).await
+    }
+
+    async fn reload_driver(&self, paths: &DriverPaths, module: &str, iface: &str) -> Result<()> {
+        crate::settings::apply::reload_driver(paths, module, iface).await
     }
 }
 
@@ -471,8 +478,10 @@ mod tests {
         association_checks: AtomicU32,
         reconnects: AtomicU32,
         connects: AtomicU32,
+        reloads: AtomicU32,
         /// The reconnect leaves the device unassociated, as on 2026-10-28.
         reconnect_drops_link: AtomicBool,
+        reload_fails: AtomicBool,
     }
 
     impl Fake {
@@ -499,6 +508,18 @@ mod tests {
         }
         async fn connect(&self, _iface: &str) -> Result<()> {
             self.connects.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        }
+        async fn reload_driver(
+            &self,
+            _paths: &DriverPaths,
+            _module: &str,
+            _iface: &str,
+        ) -> Result<()> {
+            self.reloads.fetch_add(1, Ordering::SeqCst);
+            if self.reload_fails.load(Ordering::SeqCst) {
+                bail!("fake reload failure");
+            }
             Ok(())
         }
     }
