@@ -160,7 +160,7 @@ impl Recovery for Nmcli {
     }
 
     async fn reload_driver(&self, paths: &DriverPaths, module: &str, iface: &str) -> Result<()> {
-        crate::settings::apply::reload_driver(paths, module, iface).await
+        crate::settings::reload_driver(paths, module, iface).await
     }
 }
 
@@ -408,14 +408,14 @@ impl<R: Recovery> LinkHealth<R> {
             escalate::Due::Nothing => {}
             escalate::Due::Reassociate if lockout_acted => {
                 self.escalation.mark(escalate::Step::Reassociated);
-                info!(
-                    target: "link_health",
-                    kind = "api_unreachable",
-                    step = "reassociate",
-                    outcome = "merged_with_lockout",
+                log_escalation_step(
+                    "reassociate",
+                    "merged_with_lockout",
                     schedule_id,
                     elapsed_s,
-                    "No-secrets recovery already reassociated; skipping a separate reconnect"
+                    format_args!(
+                        "No-secrets recovery already reassociated; skipping a separate reconnect"
+                    ),
                 );
             }
             escalate::Due::Reassociate => {
@@ -426,23 +426,19 @@ impl<R: Recovery> LinkHealth<R> {
                 let result = self.recovery.reconnect(&iface.name).await;
                 self.escalation.mark(escalate::Step::Reassociated);
                 match result {
-                    Ok(()) => info!(
-                        target: "link_health",
-                        kind = "api_unreachable",
-                        step = "reassociate",
-                        outcome = "ok",
+                    Ok(()) => log_escalation_step(
+                        "reassociate",
+                        "ok",
                         schedule_id,
                         elapsed_s,
-                        "Reassociated ahead of the Police reboot"
+                        format_args!("Reassociated ahead of the Police reboot"),
                     ),
-                    Err(err) => warn!(
-                        target: "link_health",
-                        kind = "api_unreachable",
-                        step = "reassociate",
-                        outcome = "failed",
+                    Err(err) => log_escalation_step(
+                        "reassociate",
+                        "failed",
                         schedule_id,
                         elapsed_s,
-                        "Reassociation failed: {err:#}"
+                        format_args!("Reassociation failed: {err:#}"),
                     ),
                 }
             }
@@ -464,29 +460,31 @@ impl<R: Recovery> LinkHealth<R> {
                     self.wait_for_guard("api_unreachable");
                     return;
                 }
+                // NetGuard is advisory on our side only: the commander never
+                // checks it before running a network command, so one landing
+                // during this ~150s reload targets an interface that is
+                // briefly gone (rmmod'd) and will fail outright. Accepted:
+                // closing this needs the commander to defer its own network
+                // commands, which is a separate, larger change.
                 let result = self
                     .recovery
                     .reload_driver(&self.paths, &iface.module, &iface.name)
                     .await;
                 self.escalation.mark(escalate::Step::Reloaded);
                 match result {
-                    Ok(()) => info!(
-                        target: "link_health",
-                        kind = "api_unreachable",
-                        step = "reload",
-                        outcome = "ok",
+                    Ok(()) => log_escalation_step(
+                        "reload",
+                        "ok",
                         schedule_id,
                         elapsed_s,
-                        "Reloaded the Wi-Fi driver ahead of the Police reboot"
+                        format_args!("Reloaded the Wi-Fi driver ahead of the Police reboot"),
                     ),
-                    Err(err) => warn!(
-                        target: "link_health",
-                        kind = "api_unreachable",
-                        step = "reload",
-                        outcome = "failed",
+                    Err(err) => log_escalation_step(
+                        "reload",
+                        "failed",
                         schedule_id,
                         elapsed_s,
-                        "Driver reload failed: {err:#}"
+                        format_args!("Driver reload failed: {err:#}"),
                     ),
                 }
             }
@@ -560,6 +558,37 @@ impl<R: Recovery> LinkHealth<R> {
     }
 }
 
+/// Logs one Police-countdown escalation step's outcome on target `link_health`.
+fn log_escalation_step(
+    step: &'static str,
+    outcome: &'static str,
+    schedule_id: u32,
+    elapsed_s: u64,
+    message: std::fmt::Arguments<'_>,
+) {
+    if outcome == "failed" {
+        warn!(
+            target: "link_health",
+            kind = "api_unreachable",
+            step,
+            outcome,
+            schedule_id,
+            elapsed_s,
+            "{message}"
+        );
+    } else {
+        info!(
+            target: "link_health",
+            kind = "api_unreachable",
+            step,
+            outcome,
+            schedule_id,
+            elapsed_s,
+            "{message}"
+        );
+    }
+}
+
 fn log_lockout_recovered(note: LockoutNote) {
     if let LockoutNote::Recovered { elapsed, attempts } = note {
         info!(
@@ -587,7 +616,7 @@ mod tests {
 
     /// Police only arms after `ARM_AFTER` of uptime, so the paused clock must pass it first.
     async fn pending_reboot() -> (PoliceHandle, u32) {
-        let police = PoliceHandle::new(ShutdownHandler::new().signals());
+        let police = police_handle();
         // A round-trip guarantees the actor has started before the clock
         // advances past its arming interval.
         let _ = police.status().await;
@@ -661,6 +690,12 @@ mod tests {
         }
     }
 
+    /// A `LinkHealth` with a fresh `NetGuard` and no reboot ever pending, for
+    /// tests that don't need a custom guard or `PoliceHandle`.
+    fn lh<'a>(root: &Path, fake: &'a Fake) -> LinkHealth<&'a Fake> {
+        LinkHealth::new(NetGuard::new(), fake, paths(root), police_handle())
+    }
+
     fn write_trx(root: &Path, line: &str) {
         let dir = root.join("proc/wlP1p1s0");
         std::fs::create_dir_all(&dir).unwrap();
@@ -687,7 +722,7 @@ mod tests {
         fake_iface(root, "wlP1p1s0", "rtl88x2ce", VENDOR_MODULE);
         write_trx(root, "TX: roam_buf_pkt=1:20");
         let fake = Fake::associated();
-        let mut lh = LinkHealth::new(NetGuard::new(), &fake, paths(root), police_handle());
+        let mut lh = lh(root, &fake);
 
         lh.on_tick().await;
         assert_eq!(fake.reconnects.load(Ordering::SeqCst), 0);
@@ -729,7 +764,7 @@ mod tests {
         let root = tmp.path();
         fake_iface(root, "wlP1p1s0", "rtl88x2ce", VENDOR_MODULE);
         let fake = Fake::associated();
-        let mut lh = LinkHealth::new(NetGuard::new(), &fake, paths(root), police_handle());
+        let mut lh = lh(root, &fake);
         for _ in 0..4 {
             lh.on_tick().await;
             tokio::time::advance(TICK).await;
@@ -745,7 +780,7 @@ mod tests {
         fake_iface(root, "wlP1p1s0", "rtl88x2ce", VENDOR_MODULE);
         write_trx(root, "TX: roam_buf_pkt=1:20");
         let fake = Fake::default();
-        let mut lh = LinkHealth::new(NetGuard::new(), &fake, paths(root), police_handle());
+        let mut lh = lh(root, &fake);
 
         // Two reads to declare the stall, then 2 more minutes of ticks.
         for _ in 0..10 {
@@ -762,7 +797,7 @@ mod tests {
         let root = tmp.path();
         fake_iface(root, "wlP1p1s0", "rtw_8822ce", "rtw88_8822ce");
         let fake = Fake::default();
-        let mut lh = LinkHealth::new(NetGuard::new(), &fake, paths(root), police_handle());
+        let mut lh = lh(root, &fake);
 
         lh.on_device_state(no_secrets());
         lh.on_tick().await;
@@ -781,7 +816,7 @@ mod tests {
         let root = tmp.path();
         fake_iface(root, "wlP1p1s0", "rtw_8822ce", "rtw88_8822ce");
         let fake = Fake::default();
-        let mut lh = LinkHealth::new(NetGuard::new(), &fake, paths(root), police_handle());
+        let mut lh = lh(root, &fake);
 
         lh.on_device_state(DeviceStateEvent {
             new: detect::NM_DEVICE_STATE_DISCONNECTED,
@@ -800,7 +835,7 @@ mod tests {
         let root = tmp.path();
         fake_iface(root, "wlP1p1s0", "rtw_8822ce", "rtw88_8822ce");
         let fake = Fake::default();
-        let mut lh = LinkHealth::new(NetGuard::new(), &fake, paths(root), police_handle());
+        let mut lh = lh(root, &fake);
 
         lh.on_device_state(no_secrets());
         lh.on_device_state(DeviceStateEvent {
@@ -820,7 +855,7 @@ mod tests {
         let root = tmp.path();
         fake_iface(root, "wlP1p1s0", "rtw_8822ce", "rtw88_8822ce");
         let fake = Fake::default();
-        let mut lh = LinkHealth::new(NetGuard::new(), &fake, paths(root), police_handle());
+        let mut lh = lh(root, &fake);
 
         lh.on_device_state(no_secrets());
         // The ACTIVATED event never arrives, but the link is back.
@@ -869,7 +904,7 @@ mod tests {
         write_trx(root, "TX: roam_buf_pkt=1:20");
         let fake = Fake::associated();
         fake.reconnect_drops_link.store(true, Ordering::SeqCst);
-        let mut lh = LinkHealth::new(NetGuard::new(), &fake, paths(root), police_handle());
+        let mut lh = lh(root, &fake);
 
         lh.on_tick().await;
         tokio::time::advance(TICK).await;
@@ -896,7 +931,7 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("trx_info"), "free_xmitframe_cnt=256\n").unwrap();
         let fake = Fake::associated();
-        let mut lh = LinkHealth::new(NetGuard::new(), &fake, paths(root), police_handle());
+        let mut lh = lh(root, &fake);
         for _ in 0..4 {
             lh.on_tick().await;
             tokio::time::advance(TICK).await;
@@ -918,7 +953,7 @@ mod tests {
         lh.on_tick().await;
         assert_eq!(fake.reconnects.load(Ordering::SeqCst), 0);
 
-        tokio::time::advance(Duration::from_secs(5 * 60)).await;
+        tokio::time::advance(escalate::REASSOCIATE_AT).await;
         lh.on_tick().await;
         assert_eq!(fake.reconnects.load(Ordering::SeqCst), 1);
 
@@ -936,11 +971,11 @@ mod tests {
         let (police, _id) = pending_reboot().await;
         let mut lh = LinkHealth::new(NetGuard::new(), &fake, paths(root), police);
 
-        tokio::time::advance(Duration::from_secs(5 * 60)).await;
+        tokio::time::advance(escalate::REASSOCIATE_AT).await;
         lh.on_tick().await;
         assert_eq!(fake.reconnects.load(Ordering::SeqCst), 1);
 
-        tokio::time::advance(Duration::from_secs(10 * 60)).await;
+        tokio::time::advance(escalate::RELOAD_AT - escalate::REASSOCIATE_AT).await;
         lh.on_tick().await;
         assert_eq!(fake.reloads.load(Ordering::SeqCst), 1);
         assert_eq!(fake.reconnects.load(Ordering::SeqCst), 1);
@@ -957,7 +992,7 @@ mod tests {
         let hold = guard.hold();
         let mut lh = LinkHealth::new(guard.clone(), &fake, paths(root), police);
 
-        tokio::time::advance(Duration::from_secs(5 * 60)).await;
+        tokio::time::advance(escalate::REASSOCIATE_AT).await;
         lh.on_tick().await;
         assert_eq!(fake.reconnects.load(Ordering::SeqCst), 0);
 
@@ -981,7 +1016,7 @@ mod tests {
         let mut lh = LinkHealth::new(NetGuard::new(), &fake, paths(root), police);
 
         lh.on_device_state(no_secrets());
-        tokio::time::advance(Duration::from_secs(5 * 60)).await;
+        tokio::time::advance(escalate::REASSOCIATE_AT).await;
         lh.on_tick().await;
 
         assert_eq!(fake.connects.load(Ordering::SeqCst), 1);
@@ -997,9 +1032,9 @@ mod tests {
         let (police, _id) = pending_reboot().await;
         let mut lh = LinkHealth::new(NetGuard::new(), &fake, paths(root), police);
 
-        tokio::time::advance(Duration::from_secs(5 * 60)).await;
+        tokio::time::advance(escalate::REASSOCIATE_AT).await;
         lh.on_tick().await;
-        tokio::time::advance(Duration::from_secs(10 * 60)).await;
+        tokio::time::advance(escalate::RELOAD_AT - escalate::REASSOCIATE_AT).await;
         lh.on_tick().await;
 
         assert_eq!(fake.reloads.load(Ordering::SeqCst), 1);
@@ -1014,9 +1049,9 @@ mod tests {
         let (police, _id) = pending_reboot().await;
         let mut lh = LinkHealth::new(NetGuard::new(), &fake, paths(root), police);
 
-        tokio::time::advance(Duration::from_secs(5 * 60)).await;
+        tokio::time::advance(escalate::REASSOCIATE_AT).await;
         lh.on_tick().await;
-        tokio::time::advance(Duration::from_secs(10 * 60)).await;
+        tokio::time::advance(escalate::RELOAD_AT - escalate::REASSOCIATE_AT).await;
         lh.on_tick().await;
         assert_eq!(fake.reloads.load(Ordering::SeqCst), 0);
 
@@ -1034,7 +1069,7 @@ mod tests {
         let (police, id) = pending_reboot().await;
         let mut lh = LinkHealth::new(NetGuard::new(), &fake, paths(root), police.clone());
 
-        tokio::time::advance(Duration::from_secs(5 * 60)).await;
+        tokio::time::advance(escalate::REASSOCIATE_AT).await;
         lh.on_tick().await;
         assert_eq!(fake.reconnects.load(Ordering::SeqCst), 1);
 
@@ -1048,7 +1083,7 @@ mod tests {
             .await
             .expect("police stays armed once arming has happened");
         assert_ne!(new_id, id);
-        tokio::time::advance(Duration::from_secs(5 * 60)).await;
+        tokio::time::advance(escalate::REASSOCIATE_AT).await;
         lh.on_tick().await;
         assert_eq!(fake.reconnects.load(Ordering::SeqCst), 2);
     }

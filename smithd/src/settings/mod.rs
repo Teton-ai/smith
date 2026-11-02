@@ -3,12 +3,14 @@
 //! here writes to the system.
 
 mod actor;
-pub(crate) mod apply;
+mod apply;
 pub(crate) mod driver;
 mod nm;
 mod ntp;
 mod plan;
 mod read;
+
+pub(crate) use apply::reload_driver;
 
 use crate::commander::CommanderHandle;
 use crate::shutdown::ShutdownSignals;

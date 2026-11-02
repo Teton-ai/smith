@@ -4,14 +4,14 @@
 use crate::police::RebootStatus;
 use tokio::time::Duration;
 
-const REASSOCIATE_AT: Duration = Duration::from_secs(5 * 60);
-const RELOAD_AT: Duration = Duration::from_secs(15 * 60);
+pub(super) const REASSOCIATE_AT: Duration = Duration::from_secs(5 * 60);
+pub(super) const RELOAD_AT: Duration = Duration::from_secs(15 * 60);
 
 /// Furthest escalation step attempted for the current `schedule_id`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub(super) enum Step {
     #[default]
-    None,
+    NotStarted,
     Reassociated,
     Reloaded,
 }
@@ -37,16 +37,16 @@ impl Escalation {
     pub(super) fn due(&mut self, status: &RebootStatus) -> Due {
         let Some(schedule_id) = status.schedule_id else {
             self.schedule_id = None;
-            self.step = Step::None;
+            self.step = Step::NotStarted;
             return Due::Nothing;
         };
         if self.schedule_id != Some(schedule_id) {
             self.schedule_id = Some(schedule_id);
-            self.step = Step::None;
+            self.step = Step::NotStarted;
         }
 
         let elapsed = Duration::from_secs(status.elapsed_seconds);
-        if self.step == Step::None && elapsed >= REASSOCIATE_AT {
+        if self.step == Step::NotStarted && elapsed >= REASSOCIATE_AT {
             return Due::Reassociate;
         }
         if self.step != Step::Reloaded && elapsed >= RELOAD_AT {

@@ -29,9 +29,9 @@ const DRIVER_TIMEOUT: Duration = Duration::from_secs(30);
 const MODPROBE_TRIES: u32 = 3;
 const MODPROBE_RETRY_DELAY: Duration = Duration::from_secs(2);
 /// The interface comes back under `/sys/class/net` a few seconds after
-/// `modprobe`; the roam values can only be written once it is there.
-const VENDOR_BACK_TIMEOUT: Duration = Duration::from_secs(30);
-const VENDOR_POLL: Duration = Duration::from_millis(500);
+/// `modprobe`; callers can't use it before then.
+const DRIVER_BACK_TIMEOUT: Duration = Duration::from_secs(30);
+const DRIVER_POLL: Duration = Duration::from_millis(500);
 /// How long `nmcli` waits for the activation, and the cap on the process.
 const NM_ACTIVATION_WAIT_S: &str = "30";
 const NM_ACTIVATION_TIMEOUT: Duration = Duration::from_secs(40);
@@ -127,12 +127,12 @@ pub async fn reload_driver(paths: &DriverPaths, module: &str, interface: &str) -
         }
     }
     let iface_dir = paths.net.join(interface);
-    let deadline = tokio::time::Instant::now() + VENDOR_BACK_TIMEOUT;
+    let deadline = tokio::time::Instant::now() + DRIVER_BACK_TIMEOUT;
     while !tokio::fs::try_exists(&iface_dir).await.unwrap_or(false) {
         if tokio::time::Instant::now() >= deadline {
             bail!("{} did not come back after the reload", iface_dir.display());
         }
-        tokio::time::sleep(VENDOR_POLL).await;
+        tokio::time::sleep(DRIVER_POLL).await;
     }
     Ok(())
 }
