@@ -342,6 +342,9 @@ export interface SystemInfo {
 
 export interface Device {
 	approved: boolean;
+	/** Approving account's email (or subject if no email was available), saved at approval time. */
+	approved_by?: string;
+	approved_at?: string;
 	created_on: string;
 	follow_latest: boolean;
 	has_token?: boolean;

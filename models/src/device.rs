@@ -26,6 +26,9 @@ pub struct Device {
     pub online: bool,
     pub created_on: DateTime<Utc>,
     pub approved: bool,
+    /// Approving account's email (or subject if no email was available), saved at approval time.
+    pub approved_by: Option<String>,
+    pub approved_at: Option<DateTime<Utc>>,
     pub has_token: Option<bool>,
     pub release_id: Option<i32>,
     pub target_release_id: Option<i32>,

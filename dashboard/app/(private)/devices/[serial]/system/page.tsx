@@ -152,6 +152,22 @@ const SystemPage = () => {
 								</InfoRow>
 							)}
 
+							<InfoRow label="Approval">
+								{device.approved ? "Approved" : "Pending approval"}
+							</InfoRow>
+							{device.approved && (
+								<>
+									<InfoRow label="Approved by">
+										{device.approved_by || "Not recorded"}
+									</InfoRow>
+									<InfoRow label="Approved at">
+										{device.approved_at
+											? new Date(device.approved_at).toLocaleString()
+											: "Not recorded"}
+									</InfoRow>
+								</>
+							)}
+
 							{device.created_on && (
 								<InfoRow label="Registration Date">
 									{new Date(device.created_on).toLocaleString()}
