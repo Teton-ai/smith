@@ -12,8 +12,12 @@ use crate::utils::system::SystemInfo;
 use anyhow::{Result, anyhow};
 use reqwest::{Response, StatusCode};
 use std::time::{Duration, Instant};
-use tokio::{sync::mpsc, time};
+use tokio::sync::{mpsc, watch};
+use tokio::time;
 use tracing::{error, info, warn};
+
+/// When the last home poll succeeded; `None` until the first one does.
+pub type LastPoll = watch::Receiver<Option<time::Instant>>;
 
 const CMD_ID_GET_VARIABLES: i32 = -1;
 const CMD_ID_UPDATE_SYSTEM_INFO: i32 = -2;
@@ -118,6 +122,7 @@ struct Postman {
     failing_since: Option<Instant>,
     poll_mode: PollMode,
     services_to_check: Vec<ServiceCheck>,
+    last_poll: watch::Sender<Option<time::Instant>>,
 }
 
 #[derive(Debug)]
@@ -131,6 +136,7 @@ impl Postman {
         commander: CommanderHandle,
         magic: MagicHandle,
         session: SessionHandle,
+        last_poll: watch::Sender<Option<time::Instant>>,
     ) -> Self {
         let network = NetworkClient::default();
 
@@ -148,6 +154,7 @@ impl Postman {
             failing_since: None,
             poll_mode: PollMode::Idle,
             services_to_check: Vec::new(),
+            last_poll,
         }
     }
 
@@ -417,6 +424,7 @@ impl Postman {
             Ok((status_code, response)) => match status_code {
                 StatusCode::OK => {
                     info!("Posting successful");
+                    self.last_poll.send_replace(Some(time::Instant::now()));
                     // The api stored the results even if its answer does not parse.
                     Ok(response.json().await.unwrap_or_else(|err| {
                         warn!("Could not parse the /home answer, running no commands: {err}");
@@ -498,6 +506,7 @@ impl Postman {
 #[derive(Clone)]
 pub struct PostmanHandle {
     _sender: mpsc::Sender<PostmanMessage>,
+    last_poll: LastPoll,
 }
 
 impl PostmanHandle {
@@ -509,10 +518,24 @@ impl PostmanHandle {
         session: SessionHandle,
     ) -> Self {
         let (_sender, receiver) = mpsc::channel(8);
-        let mut actor = Postman::new(shutdown, police, receiver, commander, magic, session);
+        let (poll_sender, last_poll) = watch::channel(None);
+        let mut actor = Postman::new(
+            shutdown,
+            police,
+            receiver,
+            commander,
+            magic,
+            session,
+            poll_sender,
+        );
         tokio::spawn(async move { actor.run().await });
 
-        Self { _sender }
+        Self { _sender, last_poll }
+    }
+
+    /// Follows the time of the last successful home poll.
+    pub fn last_poll(&self) -> LastPoll {
+        self.last_poll.clone()
     }
 }
 

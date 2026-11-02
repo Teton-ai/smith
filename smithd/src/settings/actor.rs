@@ -4,9 +4,11 @@ use super::plan::{
     ApplyPlan, FileChange, Group, MAX_DISRUPTIONS, NtpDaemon, OwnedFiles, PlanInput, plan,
 };
 use super::read::Reading;
+use crate::postman::LastPoll;
 use crate::shutdown::ShutdownSignals;
 use crate::utils::files::{
-    SettingsState, StoredSettings, load_settings_state, load_wanted_settings,
+    Disruption, SettingsBackup, SettingsState, StoredSettings, load_settings_state,
+    load_wanted_settings,
 };
 use crate::utils::net_guard::{NetGuard, NetGuardHold};
 use crate::utils::schema::{
@@ -26,6 +28,11 @@ const CMD_ID_REPORT_SETTINGS: i32 = -7;
 /// NM keeps moving for a while after link health's nmcli calls return; a
 /// driver reload or re-activation in that window would fight the recovery.
 const RECOVERY_SETTLE: Duration = Duration::from_secs(30);
+
+/// How long the api may stay unreachable after a driver reload or Wi-Fi
+/// re-activation before the replaced files are put back (FR19a).
+const REVERT_DEADLINE: Duration = Duration::from_secs(90);
+const REVERTED: &str = "reverted: no connectivity after apply";
 
 /// Fixed for now; clamped to the bounds below once it becomes configurable.
 const CHECK_INTERVAL_S: u64 = 60;
@@ -155,6 +162,22 @@ pub trait System: Send {
     fn save_wanted(&mut self, wanted: &StoredSettings) -> impl Future<Output = Result<()>> + Send;
     fn save_state(&mut self, state: &SettingsState) -> impl Future<Output = Result<()>> + Send;
     fn queue_report(&mut self, response: SafeCommandResponse) -> impl Future<Output = ()> + Send;
+    fn last_poll(&self) -> LastPoll;
+}
+
+/// True once a home poll succeeds later than `after`, within `deadline`. A
+/// poll from before `after` proves nothing about the link since.
+async fn polled_after(mut last_poll: LastPoll, after: Instant, deadline: Duration) -> bool {
+    let polled = last_poll.wait_for(|at| at.is_some_and(|at| at > after));
+    matches!(time::timeout(deadline, polled).await, Ok(Ok(_)))
+}
+
+/// What a backed up file is put back to.
+fn restore(backup: &Option<String>) -> FileChange {
+    match backup {
+        Some(text) => FileChange::Write(text.clone()),
+        None => FileChange::Remove,
+    }
 }
 
 pub struct Actor<S> {
@@ -213,6 +236,7 @@ impl<S: System> Actor<S> {
 
     pub async fn run(&mut self) {
         info!("Settings reporter starting");
+        self.revert_unconfirmed().await;
 
         // The first tick fires at once, so a stored set is applied at boot
         // without contacting the api.
@@ -236,6 +260,20 @@ impl<S: System> Actor<S> {
         }
 
         info!("Settings reporter shut down");
+    }
+
+    /// A backup still on disk at start means smithd stopped between a
+    /// disruption and the api's answer, so nothing proved the new files keep
+    /// the device online.
+    async fn revert_unconfirmed(&mut self) {
+        if self.state.as_ref().is_none_or(|s| s.backup.is_none()) {
+            return;
+        }
+        warn!("settings: smithd stopped before the api was reached after the last apply");
+        // Learns the Wi-Fi interface the redone step needs.
+        self.read().await;
+        let _network_busy = self.net_guard.hold_after_recovery(RECOVERY_SETTLE).await;
+        self.revert().await;
     }
 
     async fn read(&mut self) -> Option<Reading> {
@@ -316,7 +354,7 @@ impl<S: System> Actor<S> {
         self.sent(report.clone());
         SafeCommandRx::ApplySettingsResult {
             applied_version: version,
-            reverted: false,
+            reverted: self.state.as_ref().is_some_and(|s| s.reverted),
             report: Box::new(report),
         }
     }
@@ -357,7 +395,7 @@ impl<S: System> Actor<S> {
         // A reverted version, or one whose state is unreadable, is not
         // applied, so it is not reported as applied either.
         if self.state.as_ref().is_none_or(|s| s.reverted) {
-            return reading.report;
+            return self.reverted_report(reading.report);
         }
         // A detection error says nothing about the daemon, so NTP is left out
         // of this check rather than reported failed for "no NTP daemon".
@@ -393,9 +431,12 @@ impl<S: System> Actor<S> {
             return report;
         }
 
-        let errors = self.execute(&first, ntp, &reading).await;
+        let errors = self.execute(&first, ntp, &reading, &files).await;
 
         let after = self.read().await.unwrap_or(reading);
+        if self.state.as_ref().is_some_and(|s| s.reverted) {
+            return self.reverted_report(after.report);
+        }
         let files = self.system.owned_files(ntp).await.unwrap_or(files);
         let second = self.plan(&wanted, &after, &files, ntp);
         self.settle(&second);
@@ -450,13 +491,34 @@ impl<S: System> Actor<S> {
         }
     }
 
-    /// Counts the disruption on disk before taking it, so a restart in the
-    /// middle cannot take it twice. `false` when it could not be recorded.
-    async fn spend_disruption(&mut self) -> bool {
+    /// The report of a version that is not applied. A reverted one carries
+    /// its revert on every report, since the api replaces the statuses each
+    /// time.
+    fn reverted_report(&self, mut report: SettingsReport) -> SettingsReport {
+        let reverted = self.state.as_ref().is_some_and(|s| s.reverted);
+        if let (true, Some(wanted)) = (reverted, &self.wanted) {
+            report.apply_status = requested_groups(&wanted.settings)
+                .into_iter()
+                .flat_map(|group| group.settings())
+                .map(|setting| SettingStatus {
+                    setting: *setting,
+                    state: SettingApplyState::Reverted,
+                    reason: REVERTED.to_owned(),
+                })
+                .collect();
+        }
+        report
+    }
+
+    /// Counts the disruption and backs up the files it takes into use, on
+    /// disk before taking it, so a restart in the middle can neither take it
+    /// twice nor lose the way back. `false` when it could not be recorded.
+    async fn spend_disruption(&mut self, backup: SettingsBackup) -> bool {
         let Some(state) = self.state.as_mut() else {
             return false;
         };
         state.disruptions += 1;
+        state.backup = Some(backup);
         match self.system.save_state(state).await {
             Ok(()) => true,
             Err(err) => {
@@ -469,12 +531,15 @@ impl<S: System> Actor<S> {
     /// Runs the plan in a fixed order: files, NM reload (so a driver reload
     /// reconnects with the new drop-in), driver reload, roam values (which a
     /// reload resets), NM re-activation, NTP, hostname, then bgscan (which NM
-    /// overwrites on activation). Returns a status per failed step.
+    /// overwrites on activation). After a driver reload or re-activation it
+    /// waits for the api and reverts without it. Returns a status per failed
+    /// step.
     async fn execute(
         &mut self,
         plan: &ApplyPlan,
         ntp: Option<NtpDaemon>,
         reading: &Reading,
+        before: &OwnedFiles,
     ) -> Vec<SettingStatus> {
         let busy_supported = reading.report.busy_diff.is_some();
         let mut steps = vec![
@@ -514,19 +579,36 @@ impl<S: System> Actor<S> {
         // Taken before the first reload or re-activation and kept to the end,
         // so link health neither runs during it nor right after.
         let mut network_busy: Option<NetGuardHold> = None;
+        let mut disrupted_at = None;
         for step in steps {
-            let disruptive = matches!(step, Step::ReloadDriver | Step::ReactivateWifi);
-            if disruptive && network_busy.is_none() {
+            let disruption = match step {
+                Step::ReloadDriver => Some(Disruption::ReloadDriver),
+                Step::ReactivateWifi => Some(Disruption::ReactivateWifi),
+                _ => None,
+            };
+            if disruption.is_some() && network_busy.is_none() {
                 network_busy = Some(self.net_guard.hold_after_recovery(RECOVERY_SETTLE).await);
             }
             // Checked before spending the version's one disruption on a step
             // that cannot run.
-            let result = if disruptive && reading.wifi.is_none() {
-                Err(anyhow!("no Wi-Fi interface"))
-            } else if disruptive && !self.spend_disruption().await {
-                Err(anyhow!("could not record the disruption"))
-            } else {
-                self.system.run(step).await
+            let result = match disruption {
+                Some(_) if reading.wifi.is_none() => Err(anyhow!("no Wi-Fi interface")),
+                Some(disruption) => {
+                    let backup = SettingsBackup {
+                        driver: before.driver.clone(),
+                        nm: before.nm.clone(),
+                        disruption,
+                    };
+                    if self.spend_disruption(backup).await {
+                        let result = self.system.run(step).await;
+                        // A failed reload can leave the link down too.
+                        disrupted_at = Some(Instant::now());
+                        result
+                    } else {
+                        Err(anyhow!("could not record the disruption"))
+                    }
+                }
+                None => self.system.run(step).await,
             };
             if let Err(err) = result {
                 error!("settings: {step:?} failed: {err:#}");
@@ -543,7 +625,63 @@ impl<S: System> Actor<S> {
                 );
             }
         }
+        if let Some(at) = disrupted_at {
+            if polled_after(self.system.last_poll(), at, REVERT_DEADLINE).await {
+                self.confirm().await;
+            } else {
+                warn!(
+                    "settings: api not reached within {REVERT_DEADLINE:?} of the apply; reverting"
+                );
+                self.revert().await;
+            }
+        }
         errors
+    }
+
+    /// The api was reached after the disruption: its backup is no longer
+    /// needed, and a restart must not revert the version.
+    async fn confirm(&mut self) {
+        let Some(state) = self.state.as_mut() else {
+            return;
+        };
+        state.backup = None;
+        if let Err(err) = self.system.save_state(state).await {
+            error!("settings: clearing the apply backup: {err:#}; a restart will revert it");
+        }
+    }
+
+    /// Puts the backed up files back and redoes the step that takes them into
+    /// use, then marks the version reverted, so it is neither enforced nor
+    /// applied at boot until a new version or a Re-apply. A device still
+    /// offline after this is left to Police.
+    async fn revert(&mut self) {
+        let Some(backup) = self.state.as_mut().and_then(|s| s.backup.take()) else {
+            return;
+        };
+        let driver = restore(&backup.driver);
+        let nm = restore(&backup.nm);
+        let redo = match backup.disruption {
+            Disruption::ReloadDriver => Step::ReloadDriver,
+            Disruption::ReactivateWifi => Step::ReactivateWifi,
+        };
+        for step in [
+            Step::File(OwnedFile::Driver, &driver),
+            Step::File(OwnedFile::Nm, &nm),
+            Step::ReloadNm,
+            redo,
+        ] {
+            if let Err(err) = self.system.run(step).await {
+                error!("settings: reverting, {step:?} failed: {err:#}");
+            }
+        }
+        let Some(state) = self.state.as_mut() else {
+            return;
+        };
+        state.reverted = true;
+        info!("settings: version {} reverted", state.version);
+        if let Err(err) = self.system.save_state(state).await {
+            error!("settings: recording the revert: {err:#}");
+        }
     }
 }
 
@@ -588,6 +726,7 @@ mod tests {
     use crate::shutdown::ShutdownHandler;
     use crate::utils::schema::Managed;
     use std::sync::{Arc, Mutex};
+    use tokio::sync::watch;
 
     #[test]
     fn sends_on_change_or_daily_but_not_on_ntp_hops() {
@@ -639,14 +778,34 @@ mod tests {
         wanted_unwritable: bool,
         ntp_detection_fails: bool,
         ntp_daemon: Option<NtpDaemon>,
+        /// A home poll succeeds this long after a reload or re-activation;
+        /// `None` means the api stays unreachable.
+        api_back_after: Option<Duration>,
     }
 
-    #[derive(Clone, Default)]
-    struct FakeSystem(Arc<Mutex<Device>>);
+    #[derive(Clone)]
+    struct FakeSystem {
+        device: Arc<Mutex<Device>>,
+        polls: Arc<watch::Sender<Option<Instant>>>,
+    }
+
+    impl Default for FakeSystem {
+        fn default() -> Self {
+            Self {
+                device: Arc::default(),
+                polls: Arc::new(watch::Sender::new(None)),
+            }
+        }
+    }
 
     impl FakeSystem {
         fn device(&self) -> std::sync::MutexGuard<'_, Device> {
-            self.0.lock().unwrap()
+            self.device.lock().unwrap()
+        }
+
+        fn api_back_after(self, after: Duration) -> Self {
+            self.device().api_back_after = Some(after);
+            self
         }
     }
 
@@ -683,6 +842,15 @@ mod tests {
         async fn run(&mut self, step: Step<'_>) -> Result<()> {
             let mut device = self.device();
             device.steps.push(format!("{step:?}"));
+            if matches!(step, Step::ReloadDriver | Step::ReactivateWifi)
+                && let Some(after) = device.api_back_after
+            {
+                let polls = Arc::clone(&self.polls);
+                tokio::spawn(async move {
+                    time::sleep(after).await;
+                    polls.send_replace(Some(Instant::now()));
+                });
+            }
             let stuck = device.stuck;
             match step {
                 Step::File(OwnedFile::Driver, change) => {
@@ -716,6 +884,10 @@ mod tests {
         }
 
         async fn queue_report(&mut self, _response: SafeCommandResponse) {}
+
+        fn last_poll(&self) -> LastPoll {
+            self.polls.subscribe()
+        }
     }
 
     fn stored(version: i32, settings: WantedSettings) -> StoredSettings {
@@ -803,26 +975,8 @@ mod tests {
     }
 
     #[tokio::test(start_paused = true)]
-    async fn a_reload_waits_for_a_link_recovery_to_finish() {
-        let system = FakeSystem::default();
-        system.device().report.wireless_mode = Some(95);
-        let mut actor = actor(system.clone(), None);
-        let guard = NetGuard::new();
-        actor.net_guard = guard.clone();
-        let recovery = guard.try_recovery(Duration::ZERO);
-        let apply = tokio::spawn(async move { actor.apply(4, wireless_mode(11)).await });
-        let reloaded = || system.device().steps.iter().any(|s| s == "ReloadDriver");
-
-        time::sleep(Duration::from_secs(120)).await;
-        assert!(!reloaded(), "recovery still running");
-        drop(recovery);
-        apply.await.unwrap();
-        assert!(reloaded());
-    }
-
-    #[tokio::test]
     async fn steps_run_in_the_fixed_order_with_the_disruption_saved_before_the_reload() {
-        let system = FakeSystem::default();
+        let system = FakeSystem::default().api_back_after(Duration::from_secs(20));
         system.device().report = SettingsReport {
             wireless_mode: Some(95),
             roam_flags: Some(3),
@@ -855,9 +1009,160 @@ mod tests {
                 "save_state",
                 "ReloadDriver",
                 "RoamFlags",
-                "Hostname"
+                "Hostname",
+                "save_state"
             ]
         );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_reload_waits_for_a_link_recovery_to_finish() {
+        let system = FakeSystem::default();
+        system.device().report.wireless_mode = Some(95);
+        let mut actor = actor(system.clone(), None);
+        let guard = NetGuard::new();
+        actor.net_guard = guard.clone();
+        let recovery = guard.try_recovery(Duration::ZERO);
+        let settings = WantedSettings {
+            wireless_mode: Some(Managed::Set(11)),
+            ..Default::default()
+        };
+        let apply = tokio::spawn(async move { actor.apply(4, settings).await });
+        let reloaded = || system.device().steps.iter().any(|s| s == "ReloadDriver");
+
+        time::sleep(Duration::from_secs(120)).await;
+        assert!(!reloaded(), "recovery still running");
+        drop(recovery);
+        apply.await.unwrap();
+        assert!(reloaded());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn the_api_answering_in_time_counts_only_after_the_apply() {
+        let (polls, last_poll) = watch::channel(None);
+        let applied_at = Instant::now();
+        tokio::spawn(async move {
+            time::sleep(Duration::from_secs(30)).await;
+            polls.send_replace(Some(Instant::now()));
+            // Kept open: a closed channel would end the wait on its own.
+            time::sleep(REVERT_DEADLINE).await;
+        });
+        assert!(polled_after(last_poll, applied_at, REVERT_DEADLINE).await);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn no_poll_within_the_deadline_is_no_connectivity() {
+        let (_polls, last_poll) = watch::channel(None);
+        assert!(!polled_after(last_poll, Instant::now(), REVERT_DEADLINE).await);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_poll_from_before_the_apply_does_not_count() {
+        let (_polls, last_poll) = watch::channel(Some(Instant::now()));
+        time::advance(Duration::from_secs(1)).await;
+        assert!(!polled_after(last_poll, Instant::now(), REVERT_DEADLINE).await);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn an_apply_that_loses_the_api_is_reverted_and_reported_reverted() {
+        let system = FakeSystem::default();
+        system.device().report.wireless_mode = Some(95);
+        let mut actor = actor(system.clone(), None);
+        let SafeCommandRx::ApplySettingsResult {
+            reverted, report, ..
+        } = actor.apply(4, wireless_mode(11)).await
+        else {
+            panic!("expected ApplySettingsResult");
+        };
+
+        let steps = system.device().steps.clone();
+        let after_reload = steps
+            .iter()
+            .position(|s| s == "ReloadDriver")
+            .map_or(&[][..], |i| &steps[i + 1..]);
+        assert_eq!(
+            after_reload,
+            [
+                "File(Driver, Remove)",
+                "File(Nm, Remove)",
+                "ReloadNm",
+                "ReloadDriver",
+                "save_state(1)"
+            ]
+        );
+        assert!(reverted);
+        assert_eq!(report.applied_version, None);
+        assert_eq!(
+            report.apply_status,
+            [SettingStatus {
+                setting: DeviceSetting::WirelessMode,
+                state: SettingApplyState::Reverted,
+                reason: REVERTED.to_owned(),
+            }]
+        );
+        assert_eq!(
+            actor.state,
+            Some(SettingsState {
+                version: 4,
+                reverted: true,
+                disruptions: 1,
+                backup: None,
+            })
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn an_apply_that_reaches_the_api_is_kept_and_drops_its_backup() {
+        let system = FakeSystem::default().api_back_after(Duration::from_secs(20));
+        system.device().report.wireless_mode = Some(95);
+        let mut actor = actor(system.clone(), None);
+        actor.apply(4, wireless_mode(11)).await;
+        let reloads = system
+            .device()
+            .steps
+            .iter()
+            .filter(|s| *s == "ReloadDriver")
+            .count();
+        assert_eq!(reloads, 1);
+        assert_eq!(
+            actor.state,
+            Some(SettingsState {
+                version: 4,
+                reverted: false,
+                disruptions: 1,
+                backup: None,
+            })
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_backup_left_by_a_restart_is_reverted_at_start() {
+        let system = FakeSystem::default();
+        let wanted = stored(4, wireless_mode(11));
+        let unconfirmed = SettingsState {
+            version: 4,
+            reverted: false,
+            disruptions: 1,
+            backup: Some(SettingsBackup {
+                driver: Some("options rtl8822ce rtw_wireless_mode=95\n".to_owned()),
+                nm: None,
+                disruption: Disruption::ReloadDriver,
+            }),
+        };
+        let state = initial_state(Some(&wanted), Ok(Some(unconfirmed)));
+        let mut actor = actor_with(system.clone(), Some(wanted), state, mpsc::channel(8).1);
+        actor.revert_unconfirmed().await;
+        assert_eq!(
+            system.device().steps,
+            [
+                "File(Driver, Write(\"options rtl8822ce rtw_wireless_mode=95\\n\"))",
+                "File(Nm, Remove)",
+                "ReloadNm",
+                "ReloadDriver",
+                "save_state(1)"
+            ]
+        );
+        assert!(actor.state.is_some_and(|s| s.reverted));
     }
 
     #[tokio::test]
@@ -875,6 +1180,7 @@ mod tests {
             version: 4,
             reverted: false,
             disruptions: MAX_DISRUPTIONS,
+            backup: None,
         };
         let state = initial_state(Some(&wanted), Ok(Some(spent)));
         let mut actor = actor_with(system.clone(), Some(wanted), state, mpsc::channel(8).1);
@@ -905,7 +1211,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_reverted_version_is_neither_applied_nor_reported_applied() {
+    async fn a_reverted_version_is_not_applied_and_keeps_reporting_its_revert() {
         let system = FakeSystem::default();
         system.device().report.hostname = Some("orin-1".to_owned());
         let wanted = stored(4, hostname("byag-12"));
@@ -913,12 +1219,21 @@ mod tests {
             version: 4,
             reverted: true,
             disruptions: 1,
+            backup: None,
         };
         let state = initial_state(Some(&wanted), Ok(Some(reverted)));
         let mut actor = actor_with(system.clone(), Some(wanted), state, mpsc::channel(8).1);
         let report = check(&mut actor).await;
         assert!(system.device().steps.is_empty());
         assert_eq!(report.applied_version, None);
+        assert_eq!(
+            report.apply_status,
+            [SettingStatus {
+                setting: DeviceSetting::Hostname,
+                state: SettingApplyState::Reverted,
+                reason: REVERTED.to_owned(),
+            }]
+        );
     }
 
     #[tokio::test]
@@ -1041,6 +1356,7 @@ mod tests {
             version: 4,
             reverted: true,
             disruptions: 1,
+            backup: None,
         };
         assert_eq!(
             initial_state(Some(&wanted), Ok(Some(old))),
