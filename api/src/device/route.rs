@@ -562,7 +562,7 @@ pub async fn get_health_for_device(
         FROM device
         WHERE
             CASE
-                WHEN $1 ~ '^[0-9]+$' AND length($1) <= 10 THEN
+                WHEN $1 ~ '^[0-9]+$' AND (length($1) < 10 OR (length($1) = 10 AND $1 <= '2147483647')) THEN
                     id = $1::int4
                 ELSE
                     serial_number = $1
@@ -643,7 +643,7 @@ pub async fn get_uptime_for_device(
         ) m
         WHERE
             CASE
-                WHEN $1 ~ '^[0-9]+$' AND length($1) <= 10 THEN
+                WHEN $1 ~ '^[0-9]+$' AND (length($1) < 10 OR (length($1) = 10 AND $1 <= '2147483647')) THEN
                     d.id = $1::int4
                 ELSE
                     d.serial_number = $1
@@ -1228,7 +1228,7 @@ async fn load_command_for_device(
         LEFT JOIN command_bundles cb ON cq.bundle = cb.uuid
         LEFT JOIN auth.users u ON cb.user_id = u.id
         WHERE cq.id = $2 AND CASE
-            WHEN $1 ~ '^[0-9]+$' AND length($1) <= 10 THEN d.id::bigint = $1::bigint
+            WHEN $1 ~ '^[0-9]+$' AND (length($1) < 10 OR (length($1) = 10 AND $1 <= '2147483647')) THEN d.id::bigint = $1::bigint
             ELSE d.serial_number = $1
         END"#,
     )
@@ -1291,7 +1291,7 @@ pub async fn get_all_commands_for_device(
         FROM device
         WHERE
             CASE
-                WHEN $1 ~ '^[0-9]+$' AND length($1) <= 10 THEN
+                WHEN $1 ~ '^[0-9]+$' AND (length($1) < 10 OR (length($1) = 10 AND $1 <= '2147483647')) THEN
                     id = $1::int4
                 ELSE
                     serial_number = $1
@@ -2001,7 +2001,7 @@ pub async fn issue_commands_to_device(
         FROM device
         WHERE
             CASE
-                WHEN $1 ~ '^[0-9]+$' AND length($1) <= 10 THEN
+                WHEN $1 ~ '^[0-9]+$' AND (length($1) < 10 OR (length($1) = 10 AND $1 <= '2147483647')) THEN
                     id = $1::int4
                 ELSE
                     serial_number = $1
@@ -2169,7 +2169,7 @@ pub async fn get_device_info(
         LEFT JOIN label l ON l.id = dl.label_id
         WHERE
             CASE
-                WHEN $1 ~ '^[0-9]+$' AND length($1) <= 10 THEN
+                WHEN $1 ~ '^[0-9]+$' AND (length($1) < 10 OR (length($1) = 10 AND $1 <= '2147483647')) THEN
                     d.id = $1::int4
                 ELSE
                     d.serial_number = $1
@@ -3062,7 +3062,7 @@ pub async fn get_services_for_device(
         FROM device
         WHERE
             CASE
-                WHEN $1 ~ '^[0-9]+$' AND length($1) <= 10 THEN
+                WHEN $1 ~ '^[0-9]+$' AND (length($1) < 10 OR (length($1) = 10 AND $1 <= '2147483647')) THEN
                     id = $1::int4
                 ELSE
                     serial_number = $1
@@ -3158,7 +3158,7 @@ pub async fn get_audit_for_device(
         LEFT JOIN device_audit da ON da.device_id = d.id
         WHERE
             CASE
-                WHEN $1 ~ '^[0-9]+$' AND length($1) <= 10 THEN
+                WHEN $1 ~ '^[0-9]+$' AND (length($1) < 10 OR (length($1) = 10 AND $1 <= '2147483647')) THEN
                     d.id = $1::int4
                 ELSE
                     d.serial_number = $1
@@ -3213,7 +3213,7 @@ pub async fn get_configured_networks_for_device(
         SELECT id FROM device
         WHERE
             CASE
-                WHEN $1 ~ '^[0-9]+$' AND length($1) <= 10 THEN
+                WHEN $1 ~ '^[0-9]+$' AND (length($1) < 10 OR (length($1) = 10 AND $1 <= '2147483647')) THEN
                     id = $1::int4
                 ELSE
                     serial_number = $1
@@ -3305,7 +3305,7 @@ pub async fn get_wifi_scan_for_device(
         LEFT JOIN wifi_scan_result w ON w.device_id = d.id
         WHERE
             CASE
-                WHEN $1 ~ '^[0-9]+$' AND length($1) <= 10 THEN
+                WHEN $1 ~ '^[0-9]+$' AND (length($1) < 10 OR (length($1) = 10 AND $1 <= '2147483647')) THEN
                     d.id = $1::int4
                 ELSE
                     d.serial_number = $1
@@ -4582,7 +4582,7 @@ mod label_updates {
 
 #[cfg(test)]
 mod command_links {
-    use super::load_command_for_device;
+    use super::{load_command_for_device, resolve_device_id};
     use axum::http::StatusCode;
     use serde_json::json;
     use sqlx::PgPool;
@@ -4656,6 +4656,56 @@ mod command_links {
         assert_eq!(result.status, Some(0));
         assert!(result.response_id.is_some());
         assert!(result.response_at.is_some());
+        Ok(())
+    }
+
+    // All-digit serials can exceed int4: they must be looked up as serials, not cast to an id.
+    #[sqlx::test]
+    #[ignore = "needs the compose Postgres; run with --test-threads=1"]
+    async fn numeric_identifiers_beyond_int4_are_serial_numbers(
+        pool: PgPool,
+    ) -> anyhow::Result<()> {
+        let device: i32 = sqlx::query_scalar(
+            "INSERT INTO device (serial_number) VALUES ('3765007587') RETURNING id",
+        )
+        .fetch_one(&pool)
+        .await?;
+        let user: i32 = sqlx::query_scalar(
+            "INSERT INTO auth.users (auth0_user_id, email) VALUES ('int4-limit', 'int4@example.com') RETURNING id",
+        )
+        .fetch_one(&pool)
+        .await?;
+        let bundle: uuid::Uuid =
+            sqlx::query_scalar("INSERT INTO command_bundles (user_id) VALUES ($1) RETURNING uuid")
+                .bind(user)
+                .fetch_one(&pool)
+                .await?;
+        let command: i32 = sqlx::query_scalar(
+            "INSERT INTO command_queue (device_id, cmd, bundle, continue_on_error) VALUES ($1, $2, $3, false) RETURNING id",
+        )
+        .bind(device)
+        .bind(json!({"Ping": {}}))
+        .bind(bundle)
+        .fetch_one(&pool)
+        .await?;
+
+        assert_eq!(resolve_device_id("3765007587", &pool).await, Ok(device));
+        assert_eq!(
+            resolve_device_id(&device.to_string(), &pool).await,
+            Ok(device)
+        );
+        // Either side of the int4 limit: the last valid id and the first serial-only value.
+        for identifier in ["2147483647", "2147483648"] {
+            assert_eq!(
+                resolve_device_id(identifier, &pool).await,
+                Err(StatusCode::NOT_FOUND)
+            );
+        }
+
+        let result = load_command_for_device(&pool, "3765007587", command)
+            .await
+            .map_err(|status| anyhow::anyhow!("{status}"))?;
+        assert_eq!(result.cmd_id, command);
         Ok(())
     }
 }

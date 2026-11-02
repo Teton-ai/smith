@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT w.ssid, w.bssid AS \"bssid?\", w.signal, w.rate, w.security, w.channel,\n               w.scanned_at AS \"scanned_at?\"\n        FROM device d\n        LEFT JOIN wifi_scan_result w ON w.device_id = d.id\n        WHERE\n            CASE\n                WHEN $1 ~ '^[0-9]+$' AND length($1) <= 10 THEN\n                    d.id = $1::int4\n                ELSE\n                    d.serial_number = $1\n            END\n        ORDER BY w.signal DESC NULLS LAST\n        ",
+  "query": "\n        SELECT w.ssid, w.bssid AS \"bssid?\", w.signal, w.rate, w.security, w.channel,\n               w.scanned_at AS \"scanned_at?\"\n        FROM device d\n        LEFT JOIN wifi_scan_result w ON w.device_id = d.id\n        WHERE\n            CASE\n                WHEN $1 ~ '^[0-9]+$' AND (length($1) < 10 OR (length($1) = 10 AND $1 <= '2147483647')) THEN\n                    d.id = $1::int4\n                ELSE\n                    d.serial_number = $1\n            END\n        ORDER BY w.signal DESC NULLS LAST\n        ",
   "describe": {
     "columns": [
       {
@@ -54,5 +54,5 @@
       false
     ]
   },
-  "hash": "3cb912cf16cd23ac93671955242af022683a60777d3bf2718364c8f12ba9c203"
+  "hash": "d9389a4bdaac805d8432b792826c4ccc17c6e0fddc70d2c47add442c9bf59c64"
 }

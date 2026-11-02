@@ -325,7 +325,7 @@ pub async fn get_telemetry_for_device(
         SELECT serial_number FROM device
         WHERE
             CASE
-                WHEN $1 ~ '^[0-9]+$' AND length($1) <= 10 THEN
+                WHEN $1 ~ '^[0-9]+$' AND (length($1) < 10 OR (length($1) = 10 AND $1 <= '2147483647')) THEN
                     id = $1::int4
                 ELSE
                     serial_number = $1

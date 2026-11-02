@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT id\n        FROM device\n        WHERE\n            CASE\n                WHEN $1 ~ '^[0-9]+$' AND (length($1) < 10 OR (length($1) = 10 AND $1 <= '2147483647')) THEN\n                    id = $1::int4\n                ELSE\n                    serial_number = $1\n            END\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "562315dba7a35d9d77144e1e26cee54a796bdd174c03acaf9f07c561cd6015ac"
+}
