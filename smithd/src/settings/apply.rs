@@ -4,7 +4,7 @@
 //! steps, the reads and the saves on the real device.
 
 use super::actor::{OwnedFile, Step, System, check_interval_s};
-use super::driver::{DriverPaths, VENDOR_MODULE};
+use super::driver::{DriverPaths, VENDOR_MODULE, wifi_interface};
 use super::ntp::{CHRONY_CONF, CHRONY_SOURCES_DIR, timesyncd_running};
 use super::plan::{FileChange, NtpDaemon, OwnedFiles};
 use super::read::{Reading, SettingsReader, run, run_for, set_bgscan};
@@ -114,8 +114,9 @@ fn driver_reload_steps() -> [(&'static str, [&'static str; 1]); 2] {
 
 /// Reloads the vendor driver so it reads its modprobe.d options, then waits
 /// for the interface to come back. `modprobe` is retried: the device has no
-/// Wi-Fi until it succeeds.
-pub async fn reload_driver(paths: &DriverPaths, interface: &str) -> Result<()> {
+/// Wi-Fi until it succeeds. Without a known `interface` (options that kept it
+/// from coming up, found at boot), the vendor interface is looked up instead.
+pub async fn reload_driver(paths: &DriverPaths, interface: Option<&str>) -> Result<()> {
     let [(rmmod, rmmod_args), (modprobe, modprobe_args)] = driver_reload_steps();
     run_for(DRIVER_TIMEOUT, rmmod, &rmmod_args).await?;
     let mut tries = 0;
@@ -130,15 +131,31 @@ pub async fn reload_driver(paths: &DriverPaths, interface: &str) -> Result<()> {
             Err(err) => return Err(err),
         }
     }
-    let proc_dir = paths.proc.join(interface);
     let deadline = tokio::time::Instant::now() + VENDOR_BACK_TIMEOUT;
-    while !tokio::fs::try_exists(&proc_dir).await.unwrap_or(false) {
+    while !vendor_interface_back(paths, interface).await {
         if tokio::time::Instant::now() >= deadline {
-            bail!("{} did not come back after the reload", proc_dir.display());
+            bail!("the {VENDOR_MODULE} interface did not come back after the reload");
         }
         tokio::time::sleep(VENDOR_POLL).await;
     }
     Ok(())
+}
+
+/// The roam values can only be written once the interface's proc dir exists.
+async fn vendor_interface_back(paths: &DriverPaths, interface: Option<&str>) -> bool {
+    let name = match interface {
+        Some(name) => Some(name.to_owned()),
+        None => wifi_interface(&paths.net)
+            .await
+            .filter(|i| i.module == VENDOR_MODULE)
+            .map(|i| i.name),
+    };
+    match name {
+        Some(name) => tokio::fs::try_exists(paths.proc.join(name))
+            .await
+            .unwrap_or(false),
+        None => false,
+    }
 }
 
 /// Values in the driver's `roam_param` order; drivers without the busy fields
@@ -354,7 +371,9 @@ impl System for DeviceSystem {
                 change_file(path, change).await
             }
             Step::ReloadNm => reload_nm().await,
-            Step::ReloadDriver => reload_driver(self.reader.driver_paths(), self.wifi()?).await,
+            Step::ReloadDriver => {
+                reload_driver(self.reader.driver_paths(), self.wifi.as_deref()).await
+            }
             Step::RoamFlags(flags) => {
                 write_roam_flags(self.reader.driver_paths(), self.wifi()?, flags).await
             }
@@ -391,6 +410,33 @@ impl System for DeviceSystem {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::settings::driver::tests::fake_iface;
+
+    fn driver_paths(root: &Path) -> DriverPaths {
+        DriverPaths {
+            net: root.join("net"),
+            params: root.join("params"),
+            proc: root.join("proc"),
+        }
+    }
+
+    #[tokio::test]
+    async fn a_reload_without_a_known_interface_waits_for_the_vendor_one() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        fake_iface(root, "wlP1p1s0", "rtl88x2ce", VENDOR_MODULE);
+        std::fs::create_dir_all(root.join("proc/wlP1p1s0")).unwrap();
+        assert!(vendor_interface_back(&driver_paths(root), None).await);
+    }
+
+    #[tokio::test]
+    async fn another_wifi_interface_is_not_the_vendor_one_back() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        fake_iface(root, "wlan0", "rtw88_8822ce", "rtw88_8822ce");
+        std::fs::create_dir_all(root.join("proc/wlan0")).unwrap();
+        assert!(!vendor_interface_back(&driver_paths(root), None).await);
+    }
 
     fn tuning() -> RoamTuning {
         RoamTuning {

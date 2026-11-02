@@ -63,6 +63,16 @@ fn unanswered(id: i32, command: SafeCommandRx) -> SafeCommandResponse {
     }
 }
 
+/// An `ApplySettings` answered without a read of the device.
+fn unread_apply(id: i32, applied_version: i32) -> SafeCommandResponse {
+    let command = SafeCommandRx::ApplySettingsResult {
+        applied_version,
+        reverted: false,
+        report: Box::default(),
+    };
+    unanswered(id, command)
+}
+
 impl SettingsHandle {
     pub fn new() -> (Self, SettingsInbox) {
         let (sender, receiver) = mpsc::channel(8);
@@ -104,16 +114,7 @@ impl SettingsHandle {
                 reply,
             })
             .await;
-        answer.unwrap_or_else(|| {
-            unanswered(
-                id,
-                SafeCommandRx::ApplySettingsResult {
-                    applied_version: version,
-                    reverted: false,
-                    report: Box::default(),
-                },
-            )
-        })
+        answer.unwrap_or_else(|| unread_apply(id, version))
     }
 
     /// Answers command `id` with the report of a check run now.

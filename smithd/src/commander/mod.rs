@@ -37,7 +37,9 @@ pub struct Handles {
 }
 
 /// Commands that reconfigure or reconnect Wi-Fi. A scan is included because
-/// its directed probes take the radio off channel.
+/// its directed probes take the radio off channel. `ApplySettings` holds it for
+/// the whole apply, the 90 s wait included; the settings actor takes its own
+/// hold too, for the reloads its checks make outside any command.
 fn changes_network(command: &SafeCommandTx) -> bool {
     matches!(
         command,
@@ -157,8 +159,7 @@ impl CommandQueueExecutor {
                 files::close_session(action.id, &self.handles.filebrowser, session_id).await
             }
             SafeCommandTx::ReportSettings => self.handles.settings.report(action.id).await,
-            // Later commands wait behind the apply, up to about 4 minutes with
-            // a revert.
+            // Later commands wait behind the apply, which can take minutes when it reverts.
             SafeCommandTx::ApplySettings { version, settings } => {
                 self.handles
                     .settings

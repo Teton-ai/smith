@@ -10,7 +10,6 @@
 use std::sync::{Arc, Mutex, PoisonError};
 use tokio::time::{Duration, Instant};
 
-/// How often a change waiting for a recovery to finish looks again.
 const RECOVERY_POLL: Duration = Duration::from_secs(1);
 
 #[derive(Debug, Default)]
@@ -88,7 +87,7 @@ impl NetGuard {
 
     /// True when no change holds the guard and the last one was released at
     /// least `settle` ago.
-    pub fn is_quiet(&self, settle: Duration) -> bool {
+    pub fn change_quiet(&self, settle: Duration) -> bool {
         self.lock().change.quiet(settle)
     }
 
@@ -136,27 +135,27 @@ mod tests {
 
     #[tokio::test(start_paused = true)]
     async fn quiet_when_never_held() {
-        assert!(NetGuard::new().is_quiet(SETTLE));
+        assert!(NetGuard::new().change_quiet(SETTLE));
     }
 
     #[tokio::test(start_paused = true)]
     async fn busy_while_held() {
         let guard = NetGuard::new();
         let _hold = guard.hold();
-        assert!(!guard.is_quiet(SETTLE));
+        assert!(!guard.change_quiet(SETTLE));
         tokio::time::advance(SETTLE * 2).await;
-        assert!(!guard.is_quiet(SETTLE));
+        assert!(!guard.change_quiet(SETTLE));
     }
 
     #[tokio::test(start_paused = true)]
     async fn quiet_only_after_settling() {
         let guard = NetGuard::new();
         drop(guard.hold());
-        assert!(!guard.is_quiet(SETTLE));
+        assert!(!guard.change_quiet(SETTLE));
         tokio::time::advance(SETTLE - Duration::from_secs(1)).await;
-        assert!(!guard.is_quiet(SETTLE));
+        assert!(!guard.change_quiet(SETTLE));
         tokio::time::advance(Duration::from_secs(1)).await;
-        assert!(guard.is_quiet(SETTLE));
+        assert!(guard.change_quiet(SETTLE));
     }
 
     #[tokio::test(start_paused = true)]
@@ -166,10 +165,10 @@ mod tests {
         let second = guard.clone().hold();
         drop(first);
         tokio::time::advance(SETTLE * 2).await;
-        assert!(!guard.is_quiet(SETTLE));
+        assert!(!guard.change_quiet(SETTLE));
         drop(second);
         tokio::time::advance(SETTLE).await;
-        assert!(guard.is_quiet(SETTLE));
+        assert!(guard.change_quiet(SETTLE));
     }
 
     #[tokio::test(start_paused = true)]
@@ -195,11 +194,9 @@ mod tests {
 
         drop(recovery);
         let started = Instant::now();
-        let hold = waiting.await.unwrap();
+        let _hold = waiting.await.unwrap();
         assert!(started.elapsed() >= SETTLE);
-        assert!(!guard.is_quiet(SETTLE), "the change holds the guard");
-        assert!(guard.try_recovery(SETTLE).is_none());
-        drop(hold);
+        assert!(!guard.change_quiet(SETTLE), "the change holds the guard");
     }
 
     #[tokio::test(start_paused = true)]

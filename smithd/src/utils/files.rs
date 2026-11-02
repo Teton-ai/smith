@@ -1,4 +1,4 @@
-use crate::utils::schema::WantedSettings;
+use crate::utils::schema::{RoamTuning, WantedSettings};
 use anyhow::{Context, Result, anyhow};
 use fs2::FileExt;
 use nix::unistd::{Gid, Uid, User, chown};
@@ -429,6 +429,15 @@ pub struct SettingsBackup {
     pub driver: Option<String>,
     pub nm: Option<String>,
     pub disruption: Disruption,
+    /// Running before the apply, written back after the revert: a driver
+    /// reload resets the roam values and an activation the bgscan. `None`
+    /// when the device did not report them.
+    #[serde(default)]
+    pub roam_flags: Option<i16>,
+    #[serde(default)]
+    pub roam_tuning: Option<RoamTuning>,
+    #[serde(default)]
+    pub bgscan: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
@@ -579,6 +588,9 @@ mod settings_file_tests {
                 driver: None,
                 nm: Some("[device]\nwifi.scan-rand-mac-address=no\n".to_owned()),
                 disruption: Disruption::ReactivateWifi,
+                roam_flags: Some(3),
+                roam_tuning: None,
+                bgscan: Some("simple:30:-70:86400".to_owned()),
             }),
         };
         let path = tmp.path().join("settings-state.json");

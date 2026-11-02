@@ -425,7 +425,6 @@ impl PostmanHandle {
         Self { _sender, last_poll }
     }
 
-    /// Follows the time of the last successful home poll.
     pub fn last_poll(&self) -> LastPoll {
         self.last_poll.clone()
     }

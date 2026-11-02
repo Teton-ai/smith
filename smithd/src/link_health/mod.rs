@@ -267,7 +267,7 @@ impl<R: Recovery> LinkHealth<R> {
         let Some(iface) = self.wifi_interface().await else {
             return;
         };
-        if self.net_guard.is_quiet(NETWORK_SETTLE) {
+        if self.net_guard.change_quiet(NETWORK_SETTLE) {
             self.guard_wait_logged = false;
         }
 
@@ -474,7 +474,7 @@ mod tests {
         connects: AtomicU32,
         /// The reconnect leaves the device unassociated, as on 2026-10-28.
         reconnect_drops_link: AtomicBool,
-        /// Set to whether a settings change could start during the reconnect.
+        /// Probed during the reconnect to see whether a settings change could start.
         guard: Option<NetGuard>,
         change_blocked_during_reconnect: AtomicBool,
     }

@@ -63,9 +63,7 @@ pub async fn run() {
     // actor) and link health's recoveries, so neither runs during the other.
     let net_guard = NetGuard::new();
 
-    // The commander delegates the settings commands to the settings actor,
-    // which queues its own reports on the commander: the handle exists first,
-    // the actor starts once the commander does.
+    // The actor queues its reports on the commander, so it starts after it.
     let (settings, settings_inbox) = SettingsHandle::new();
 
     let commander = CommanderHandle::new(
