@@ -82,7 +82,7 @@ pub async fn run() {
     let auditor = AuditorHandle::new(shutdown.signals(), commander.clone());
     auditor.run_audit().await;
 
-    let _postman = PostmanHandle::new(
+    let postman = PostmanHandle::new(
         shutdown.signals(),
         police.clone(),
         commander.clone(),
@@ -90,8 +90,14 @@ pub async fn run() {
         session.clone(),
     );
 
-    // Queues its reports on the commander, so it must be created after it.
-    let settings = SettingsHandle::new(shutdown.signals(), commander.clone(), net_guard.clone());
+    // Queues its reports on the commander, so it must be created after it, and
+    // follows the postman's polls to revert an apply that lost the api.
+    let settings = SettingsHandle::new(
+        shutdown.signals(),
+        commander.clone(),
+        net_guard.clone(),
+        postman.last_poll(),
+    );
 
     let link_health = LinkHealthHandle::new(shutdown.signals(), net_guard.clone());
 

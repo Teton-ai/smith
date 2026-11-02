@@ -416,6 +416,25 @@ pub struct SettingsState {
     pub reverted: bool,
     /// Driver reloads and NM re-activations done for this version.
     pub disruptions: u32,
+    /// Saved with the disruption, before it runs, and cleared once a home poll
+    /// succeeds after it. Still set at boot means smithd stopped before the
+    /// api was reached again, so the version is reverted.
+    pub backup: Option<SettingsBackup>,
+}
+
+/// The files a disruption is about to replace (`None` for absent ones) and
+/// the step that takes them into use, redone after restoring them.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub struct SettingsBackup {
+    pub driver: Option<String>,
+    pub nm: Option<String>,
+    pub disruption: Disruption,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Disruption {
+    ReloadDriver,
+    ReactivateWifi,
 }
 
 pub async fn load_wanted_settings() -> Option<StoredSettings> {
@@ -554,8 +573,13 @@ mod settings_file_tests {
 
         let state = SettingsState {
             version: 3,
-            reverted: true,
+            reverted: false,
             disruptions: 1,
+            backup: Some(SettingsBackup {
+                driver: None,
+                nm: Some("[device]\nwifi.scan-rand-mac-address=no\n".to_owned()),
+                disruption: Disruption::ReactivateWifi,
+            }),
         };
         let path = tmp.path().join("settings-state.json");
         save_json(&path, &state).await.unwrap();
