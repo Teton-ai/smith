@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT serial_number, approved FROM device WHERE id = $1 FOR UPDATE",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "serial_number",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "approved",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "78cc3fe522532a2cbcf92c6b8e12e7496d731b5288b78e1dc94ece102e416350"
+}

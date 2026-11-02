@@ -256,8 +256,14 @@ impl SmithMcp {
 
     /// Full details for one device: system info, network, modem, IP and releases.
     #[tool(annotations(read_only_hint = true, open_world_hint = false))]
-    async fn get_device(&self, Parameters(params): Parameters<DeviceParams>) -> ToolResult {
+    async fn get_device(
+        &self,
+        Parameters(params): Parameters<DeviceParams>,
+        Extension(parts): Extension<Parts>,
+    ) -> ToolResult {
+        let user = current_user(&parts)?;
         let AxumJson(device) = call(device_route::get_device_info(
+            AxumExtension(user),
             Path(params.device),
             AxumExtension(self.state.clone()),
         ))
@@ -726,7 +732,7 @@ impl SmithMcp {
 
         let mut ids = Vec::with_capacity(devices.len());
         for device in devices {
-            let AxumJson(info) = call(device_route::get_device_info(
+            let AxumJson(info) = call(device_route::load_device_info(
                 Path(device.clone()),
                 AxumExtension(self.state.clone()),
             ))

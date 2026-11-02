@@ -342,9 +342,11 @@ export interface SystemInfo {
 
 export interface Device {
 	approved: boolean;
-	/** Approving account's email (or subject if no email was available), saved at approval time. */
-	approved_by?: string;
 	approved_at?: string;
+	/** Approving account's email, or its subject if it has none. Only returned by
+the single-device endpoint, to callers with the `users:read` permission. */
+	approved_by_email?: string;
+	approved_by_user_id?: number;
 	created_on: string;
 	follow_latest: boolean;
 	has_token?: boolean;
