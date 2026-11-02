@@ -1,8 +1,7 @@
 //! Carries out an [`ApplyPlan`](super::plan::ApplyPlan): writes and removes
 //! the files smithd owns and runs the system commands, each step on its own
 //! so the actor decides their order.
-// Most of this is unused until the settings actor applies settings;
-// `reload_driver` is already called by link health's Police-countdown escalation.
+// Mostly unused until the settings actor applies settings; `reload_driver` is used by link health.
 #![allow(dead_code)]
 
 use super::driver::DriverPaths;
@@ -111,8 +110,7 @@ fn driver_reload_steps(module: &str) -> [(&'static str, [&str; 1]); 2] {
 
 /// Reloads `module` so it reads its modprobe.d options, then waits for the
 /// interface to come back. `modprobe` is retried: the device has no Wi-Fi
-/// until it succeeds. Generic over the driver module so callers can target
-/// either the vendor `rtl8822ce` driver or the upstream `rtw88` one.
+/// until it succeeds.
 pub async fn reload_driver(paths: &DriverPaths, module: &str, interface: &str) -> Result<()> {
     let [(rmmod, rmmod_args), (modprobe, modprobe_args)] = driver_reload_steps(module);
     run_for(DRIVER_TIMEOUT, rmmod, &rmmod_args).await?;

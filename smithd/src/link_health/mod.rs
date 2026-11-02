@@ -12,13 +12,18 @@
 //! `link_health`; nothing is reported to the api.
 
 mod detect;
+mod escalate;
 
 use crate::commander::network::{associated_bssid, execute_nmcli_command};
-use crate::settings::driver::{DriverPaths, VENDOR_MODULE, WifiInterface, wifi_interface};
+use crate::police::PoliceHandle;
+use crate::settings::driver::{
+    DriverPaths, RELOADABLE_WIFI_MODULES, VENDOR_MODULE, WifiInterface, wifi_interface,
+};
 use crate::shutdown::ShutdownSignals;
 use crate::utils::net_guard::NetGuard;
 use anyhow::{Context, Result, bail};
 use detect::{LockoutNote, LockoutTracker, RoamDetector, RoamEvent, RoamLimit, parse_trx_info};
+use escalate::Escalation;
 use tokio::process::Command;
 use tokio::sync::mpsc;
 use tokio::time::{Duration, Instant, MissedTickBehavior, interval, timeout};
@@ -52,8 +57,6 @@ trait Recovery {
     async fn associated_bssid(&self, iface: &str) -> Option<String>;
     async fn reconnect(&self, iface: &str) -> Result<()>;
     async fn connect(&self, iface: &str) -> Result<()>;
-    // Wired into LinkHealth::on_tick in a later task.
-    #[allow(dead_code)]
     async fn reload_driver(&self, paths: &DriverPaths, module: &str, iface: &str) -> Result<()>;
 }
 
@@ -166,9 +169,9 @@ pub struct LinkHealthHandle {
 }
 
 impl LinkHealthHandle {
-    pub fn new(shutdown: ShutdownSignals, net_guard: NetGuard) -> Self {
+    pub fn new(shutdown: ShutdownSignals, net_guard: NetGuard, police: PoliceHandle) -> Self {
         let (device_events, receiver) = mpsc::channel(EVENT_QUEUE);
-        let mut actor = LinkHealth::new(net_guard, Nmcli, DriverPaths::default());
+        let mut actor = LinkHealth::new(net_guard, Nmcli, DriverPaths::default(), police);
         tokio::spawn(async move { actor.run(shutdown, receiver).await });
         Self { device_events }
     }
@@ -183,6 +186,8 @@ struct LinkHealth<R> {
     net_guard: NetGuard,
     recovery: R,
     paths: DriverPaths,
+    police: PoliceHandle,
+    escalation: Escalation,
     roam: RoamDetector,
     lockout: LockoutTracker,
     iface: Option<WifiInterface>,
@@ -194,11 +199,13 @@ struct LinkHealth<R> {
 }
 
 impl<R: Recovery> LinkHealth<R> {
-    fn new(net_guard: NetGuard, recovery: R, paths: DriverPaths) -> Self {
+    fn new(net_guard: NetGuard, recovery: R, paths: DriverPaths, police: PoliceHandle) -> Self {
         Self {
             net_guard,
             recovery,
             paths,
+            police,
+            escalation: Escalation::default(),
             roam: RoamDetector::default(),
             lockout: LockoutTracker::default(),
             iface: None,
@@ -278,9 +285,13 @@ impl<R: Recovery> LinkHealth<R> {
             self.guard_wait_logged = false;
         }
 
-        if self.lockout.due(Instant::now()) {
-            self.recover_lockout(&iface.name, quiet).await;
-        }
+        let lockout_acted = if self.lockout.due(Instant::now()) {
+            self.recover_lockout(&iface.name, quiet).await
+        } else {
+            false
+        };
+
+        self.check_escalation(&iface, quiet, lockout_acted).await;
 
         let read = if iface.module == VENDOR_MODULE {
             self.read_roam_buf(&iface.name).await
@@ -354,16 +365,17 @@ impl<R: Recovery> LinkHealth<R> {
         }
     }
 
-    async fn recover_lockout(&mut self, iface: &str, quiet: bool) {
+    /// Returns whether it called `connect()`.
+    async fn recover_lockout(&mut self, iface: &str, quiet: bool) -> bool {
         if !quiet {
             self.wait_for_guard("no_secrets");
-            return;
+            return false;
         }
         // The ACTIVATED event that ends an incident can be dropped when the
         // queue is full; never reconnect a link that is already up.
         if self.recovery.associated_bssid(iface).await.is_some() {
             log_lockout_recovered(self.lockout.resolved(Instant::now()));
-            return;
+            return false;
         }
 
         let result = self.recovery.connect(iface).await;
@@ -382,6 +394,102 @@ impl<R: Recovery> LinkHealth<R> {
                 action = "activate",
                 "Wi-Fi activation failed: {err:#}"
             ),
+        }
+        true
+    }
+
+    /// Escalates while Police has a reboot pending: reassociate at 5 minutes, reload at 15.
+    /// A `connect()` by `recover_lockout` this tick already counts as the reassociation.
+    async fn check_escalation(&mut self, iface: &WifiInterface, quiet: bool, lockout_acted: bool) {
+        let status = self.police.status().await;
+        let schedule_id = status.schedule_id.unwrap_or_default();
+        let elapsed_s = status.elapsed_seconds;
+        match self.escalation.due(&status) {
+            escalate::Due::Nothing => {}
+            escalate::Due::Reassociate if lockout_acted => {
+                self.escalation.mark(escalate::Step::Reassociated);
+                info!(
+                    target: "link_health",
+                    kind = "api_unreachable",
+                    step = "reassociate",
+                    outcome = "merged_with_lockout",
+                    schedule_id,
+                    elapsed_s,
+                    "No-secrets recovery already reassociated; skipping a separate reconnect"
+                );
+            }
+            escalate::Due::Reassociate => {
+                if !quiet {
+                    self.wait_for_guard("api_unreachable");
+                    return;
+                }
+                let result = self.recovery.reconnect(&iface.name).await;
+                self.escalation.mark(escalate::Step::Reassociated);
+                match result {
+                    Ok(()) => info!(
+                        target: "link_health",
+                        kind = "api_unreachable",
+                        step = "reassociate",
+                        outcome = "ok",
+                        schedule_id,
+                        elapsed_s,
+                        "Reassociated ahead of the Police reboot"
+                    ),
+                    Err(err) => warn!(
+                        target: "link_health",
+                        kind = "api_unreachable",
+                        step = "reassociate",
+                        outcome = "failed",
+                        schedule_id,
+                        elapsed_s,
+                        "Reassociation failed: {err:#}"
+                    ),
+                }
+            }
+            escalate::Due::Reload if !RELOADABLE_WIFI_MODULES.contains(&iface.module.as_str()) => {
+                self.escalation.mark(escalate::Step::Reloaded);
+                info!(
+                    target: "link_health",
+                    kind = "api_unreachable",
+                    step = "reload",
+                    outcome = "skipped_unsupported_driver",
+                    schedule_id,
+                    elapsed_s,
+                    module = %iface.module,
+                    "Driver reload not supported on this module"
+                );
+            }
+            escalate::Due::Reload => {
+                if !quiet {
+                    self.wait_for_guard("api_unreachable");
+                    return;
+                }
+                let result = self
+                    .recovery
+                    .reload_driver(&self.paths, &iface.module, &iface.name)
+                    .await;
+                self.escalation.mark(escalate::Step::Reloaded);
+                match result {
+                    Ok(()) => info!(
+                        target: "link_health",
+                        kind = "api_unreachable",
+                        step = "reload",
+                        outcome = "ok",
+                        schedule_id,
+                        elapsed_s,
+                        "Reloaded the Wi-Fi driver ahead of the Police reboot"
+                    ),
+                    Err(err) => warn!(
+                        target: "link_health",
+                        kind = "api_unreachable",
+                        step = "reload",
+                        outcome = "failed",
+                        schedule_id,
+                        elapsed_s,
+                        "Driver reload failed: {err:#}"
+                    ),
+                }
+            }
         }
     }
 
@@ -469,8 +577,29 @@ fn log_lockout_recovered(note: LockoutNote) {
 mod tests {
     use super::*;
     use crate::settings::driver::tests::fake_iface;
+    use crate::shutdown::ShutdownHandler;
     use std::path::Path;
     use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+
+    fn police_handle() -> PoliceHandle {
+        PoliceHandle::new(ShutdownHandler::new().signals())
+    }
+
+    /// Police only arms after `ARM_AFTER` of uptime, so the paused clock must pass it first.
+    async fn pending_reboot() -> (PoliceHandle, u32) {
+        let police = PoliceHandle::new(ShutdownHandler::new().signals());
+        // A round-trip guarantees the actor has started before the clock
+        // advances past its arming interval.
+        let _ = police.status().await;
+        tokio::time::advance(crate::police::ARM_AFTER + Duration::from_secs(1)).await;
+        for _ in 0..100 {
+            if let Some(id) = police.report_problem_starting().await {
+                return (police, id);
+            }
+            tokio::task::yield_now().await;
+        }
+        panic!("police did not arm after ARM_AFTER");
+    }
 
     #[derive(Default)]
     struct Fake {
@@ -558,7 +687,7 @@ mod tests {
         fake_iface(root, "wlP1p1s0", "rtl88x2ce", VENDOR_MODULE);
         write_trx(root, "TX: roam_buf_pkt=1:20");
         let fake = Fake::associated();
-        let mut lh = LinkHealth::new(NetGuard::new(), &fake, paths(root));
+        let mut lh = LinkHealth::new(NetGuard::new(), &fake, paths(root), police_handle());
 
         lh.on_tick().await;
         assert_eq!(fake.reconnects.load(Ordering::SeqCst), 0);
@@ -579,7 +708,7 @@ mod tests {
         let fake = Fake::associated();
         let guard = NetGuard::new();
         let hold = guard.hold();
-        let mut lh = LinkHealth::new(guard.clone(), &fake, paths(root));
+        let mut lh = LinkHealth::new(guard.clone(), &fake, paths(root), police_handle());
 
         lh.on_tick().await;
         tokio::time::advance(TICK).await;
@@ -600,7 +729,7 @@ mod tests {
         let root = tmp.path();
         fake_iface(root, "wlP1p1s0", "rtl88x2ce", VENDOR_MODULE);
         let fake = Fake::associated();
-        let mut lh = LinkHealth::new(NetGuard::new(), &fake, paths(root));
+        let mut lh = LinkHealth::new(NetGuard::new(), &fake, paths(root), police_handle());
         for _ in 0..4 {
             lh.on_tick().await;
             tokio::time::advance(TICK).await;
@@ -616,7 +745,7 @@ mod tests {
         fake_iface(root, "wlP1p1s0", "rtl88x2ce", VENDOR_MODULE);
         write_trx(root, "TX: roam_buf_pkt=1:20");
         let fake = Fake::default();
-        let mut lh = LinkHealth::new(NetGuard::new(), &fake, paths(root));
+        let mut lh = LinkHealth::new(NetGuard::new(), &fake, paths(root), police_handle());
 
         // Two reads to declare the stall, then 2 more minutes of ticks.
         for _ in 0..10 {
@@ -633,7 +762,7 @@ mod tests {
         let root = tmp.path();
         fake_iface(root, "wlP1p1s0", "rtw_8822ce", "rtw88_8822ce");
         let fake = Fake::default();
-        let mut lh = LinkHealth::new(NetGuard::new(), &fake, paths(root));
+        let mut lh = LinkHealth::new(NetGuard::new(), &fake, paths(root), police_handle());
 
         lh.on_device_state(no_secrets());
         lh.on_tick().await;
@@ -652,7 +781,7 @@ mod tests {
         let root = tmp.path();
         fake_iface(root, "wlP1p1s0", "rtw_8822ce", "rtw88_8822ce");
         let fake = Fake::default();
-        let mut lh = LinkHealth::new(NetGuard::new(), &fake, paths(root));
+        let mut lh = LinkHealth::new(NetGuard::new(), &fake, paths(root), police_handle());
 
         lh.on_device_state(DeviceStateEvent {
             new: detect::NM_DEVICE_STATE_DISCONNECTED,
@@ -671,7 +800,7 @@ mod tests {
         let root = tmp.path();
         fake_iface(root, "wlP1p1s0", "rtw_8822ce", "rtw88_8822ce");
         let fake = Fake::default();
-        let mut lh = LinkHealth::new(NetGuard::new(), &fake, paths(root));
+        let mut lh = LinkHealth::new(NetGuard::new(), &fake, paths(root), police_handle());
 
         lh.on_device_state(no_secrets());
         lh.on_device_state(DeviceStateEvent {
@@ -691,7 +820,7 @@ mod tests {
         let root = tmp.path();
         fake_iface(root, "wlP1p1s0", "rtw_8822ce", "rtw88_8822ce");
         let fake = Fake::default();
-        let mut lh = LinkHealth::new(NetGuard::new(), &fake, paths(root));
+        let mut lh = LinkHealth::new(NetGuard::new(), &fake, paths(root), police_handle());
 
         lh.on_device_state(no_secrets());
         // The ACTIVATED event never arrives, but the link is back.
@@ -740,7 +869,7 @@ mod tests {
         write_trx(root, "TX: roam_buf_pkt=1:20");
         let fake = Fake::associated();
         fake.reconnect_drops_link.store(true, Ordering::SeqCst);
-        let mut lh = LinkHealth::new(NetGuard::new(), &fake, paths(root));
+        let mut lh = LinkHealth::new(NetGuard::new(), &fake, paths(root), police_handle());
 
         lh.on_tick().await;
         tokio::time::advance(TICK).await;
@@ -767,7 +896,7 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("trx_info"), "free_xmitframe_cnt=256\n").unwrap();
         let fake = Fake::associated();
-        let mut lh = LinkHealth::new(NetGuard::new(), &fake, paths(root));
+        let mut lh = LinkHealth::new(NetGuard::new(), &fake, paths(root), police_handle());
         for _ in 0..4 {
             lh.on_tick().await;
             tokio::time::advance(TICK).await;
@@ -775,5 +904,152 @@ mod tests {
         assert_eq!(lh.iface.as_ref().map(|i| i.name.as_str()), Some("wlan0"));
         assert!(lh.roam_unavailable_logged);
         assert_eq!(fake.reconnects.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn reassociation_fires_once_at_five_minutes_on_a_pending_reboot() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        fake_iface(root, "wlP1p1s0", "rtl88x2ce", VENDOR_MODULE);
+        let fake = Fake::associated();
+        let (police, _id) = pending_reboot().await;
+        let mut lh = LinkHealth::new(NetGuard::new(), &fake, paths(root), police);
+
+        lh.on_tick().await;
+        assert_eq!(fake.reconnects.load(Ordering::SeqCst), 0);
+
+        tokio::time::advance(Duration::from_secs(5 * 60)).await;
+        lh.on_tick().await;
+        assert_eq!(fake.reconnects.load(Ordering::SeqCst), 1);
+
+        tokio::time::advance(TICK).await;
+        lh.on_tick().await;
+        assert_eq!(fake.reconnects.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn reload_fires_once_at_fifteen_minutes_after_reassociation_already_ran() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        fake_iface(root, "wlP1p1s0", "rtl88x2ce", VENDOR_MODULE);
+        let fake = Fake::associated();
+        let (police, _id) = pending_reboot().await;
+        let mut lh = LinkHealth::new(NetGuard::new(), &fake, paths(root), police);
+
+        tokio::time::advance(Duration::from_secs(5 * 60)).await;
+        lh.on_tick().await;
+        assert_eq!(fake.reconnects.load(Ordering::SeqCst), 1);
+
+        tokio::time::advance(Duration::from_secs(10 * 60)).await;
+        lh.on_tick().await;
+        assert_eq!(fake.reloads.load(Ordering::SeqCst), 1);
+        assert_eq!(fake.reconnects.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_held_guard_defers_the_reassociation_without_refiring_it() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        fake_iface(root, "wlP1p1s0", "rtl88x2ce", VENDOR_MODULE);
+        let fake = Fake::associated();
+        let (police, _id) = pending_reboot().await;
+        let guard = NetGuard::new();
+        let hold = guard.hold();
+        let mut lh = LinkHealth::new(guard.clone(), &fake, paths(root), police);
+
+        tokio::time::advance(Duration::from_secs(5 * 60)).await;
+        lh.on_tick().await;
+        assert_eq!(fake.reconnects.load(Ordering::SeqCst), 0);
+
+        drop(hold);
+        tokio::time::advance(NETWORK_SETTLE).await;
+        lh.on_tick().await;
+        assert_eq!(fake.reconnects.load(Ordering::SeqCst), 1);
+
+        tokio::time::advance(TICK).await;
+        lh.on_tick().await;
+        assert_eq!(fake.reconnects.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_same_tick_lockout_recovery_satisfies_the_reassociation_step() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        fake_iface(root, "wlP1p1s0", "rtw_8822ce", "rtw88_8822ce");
+        let fake = Fake::default();
+        let (police, _id) = pending_reboot().await;
+        let mut lh = LinkHealth::new(NetGuard::new(), &fake, paths(root), police);
+
+        lh.on_device_state(no_secrets());
+        tokio::time::advance(Duration::from_secs(5 * 60)).await;
+        lh.on_tick().await;
+
+        assert_eq!(fake.connects.load(Ordering::SeqCst), 1);
+        assert_eq!(fake.reconnects.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn the_reload_allowlist_covers_the_upstream_rtw88_driver_too() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        fake_iface(root, "wlP1p1s0", "rtw_8822ce", "rtw88_8822ce");
+        let fake = Fake::associated();
+        let (police, _id) = pending_reboot().await;
+        let mut lh = LinkHealth::new(NetGuard::new(), &fake, paths(root), police);
+
+        tokio::time::advance(Duration::from_secs(5 * 60)).await;
+        lh.on_tick().await;
+        tokio::time::advance(Duration::from_secs(10 * 60)).await;
+        lh.on_tick().await;
+
+        assert_eq!(fake.reloads.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_device_on_an_unlisted_driver_skips_the_reload_and_never_retries() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        fake_iface(root, "wlP1p1s0", "iwlwifi", "iwlwifi");
+        let fake = Fake::associated();
+        let (police, _id) = pending_reboot().await;
+        let mut lh = LinkHealth::new(NetGuard::new(), &fake, paths(root), police);
+
+        tokio::time::advance(Duration::from_secs(5 * 60)).await;
+        lh.on_tick().await;
+        tokio::time::advance(Duration::from_secs(10 * 60)).await;
+        lh.on_tick().await;
+        assert_eq!(fake.reloads.load(Ordering::SeqCst), 0);
+
+        tokio::time::advance(TICK).await;
+        lh.on_tick().await;
+        assert_eq!(fake.reloads.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_cancelled_and_rescheduled_reboot_gets_fresh_escalation() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        fake_iface(root, "wlP1p1s0", "rtl88x2ce", VENDOR_MODULE);
+        let fake = Fake::associated();
+        let (police, id) = pending_reboot().await;
+        let mut lh = LinkHealth::new(NetGuard::new(), &fake, paths(root), police.clone());
+
+        tokio::time::advance(Duration::from_secs(5 * 60)).await;
+        lh.on_tick().await;
+        assert_eq!(fake.reconnects.load(Ordering::SeqCst), 1);
+
+        police.report_problem_solved(id).await;
+        tokio::time::advance(TICK).await;
+        lh.on_tick().await;
+        assert_eq!(fake.reconnects.load(Ordering::SeqCst), 1);
+
+        let new_id = police
+            .report_problem_starting()
+            .await
+            .expect("police stays armed once arming has happened");
+        assert_ne!(new_id, id);
+        tokio::time::advance(Duration::from_secs(5 * 60)).await;
+        lh.on_tick().await;
+        assert_eq!(fake.reconnects.load(Ordering::SeqCst), 2);
     }
 }

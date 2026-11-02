@@ -93,7 +93,7 @@ pub async fn run() {
     // Queues its reports on the commander, so it must be created after it.
     let settings = SettingsHandle::new(shutdown.signals(), commander.clone());
 
-    let link_health = LinkHealthHandle::new(shutdown.signals(), net_guard.clone());
+    let link_health = LinkHealthHandle::new(shutdown.signals(), net_guard.clone(), police.clone());
 
     let _nm_watcher = NMWatcherHandle::new(
         shutdown.signals(),
