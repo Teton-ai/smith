@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT d.id\n        FROM device d\n        WHERE\n            CASE\n                WHEN $2::int4 IS NOT NULL THEN\n                    d.id = $2\n                ELSE\n                    d.serial_number = $1\n            END\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "454766dcdbf6aaec75f9271fcfb7095839d261a16608d20bb4967467bdc78bc8"
+}

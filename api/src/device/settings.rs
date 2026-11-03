@@ -1,6 +1,7 @@
 //! Device settings: what devices report, the pins and distribution defaults
 //! they should run, and the edit and Apply endpoints that send them.
 
+use super::as_device_id;
 use super::route::{DEVICES_TAG, resolve_device_id};
 use crate::State;
 use crate::command::route::queue_bundle;
@@ -929,13 +930,14 @@ pub async fn load_device_settings(
         FROM device d
         WHERE
             CASE
-                WHEN $1 ~ '^[0-9]{1,9}$' OR ($1 ~ '^[0-9]{10}$' AND $1 <= '2147483647') THEN
-                    d.id = $1::int4
+                WHEN $2::int4 IS NOT NULL THEN
+                    d.id = $2
                 ELSE
                     d.serial_number = $1
             END
         "#,
-        device_id
+        device_id,
+        as_device_id(device_id),
     )
     .fetch_optional(pool)
     .await?
