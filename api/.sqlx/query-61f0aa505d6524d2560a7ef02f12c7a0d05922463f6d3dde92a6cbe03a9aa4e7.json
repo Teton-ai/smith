@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT id, follow_latest FROM device\n        WHERE CASE\n            WHEN $2::int4 IS NOT NULL THEN\n                id = $2\n            ELSE\n                serial_number = $1\n        END\n        FOR UPDATE\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "follow_latest",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "61f0aa505d6524d2560a7ef02f12c7a0d05922463f6d3dde92a6cbe03a9aa4e7"
+}

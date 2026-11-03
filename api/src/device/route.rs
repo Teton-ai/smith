@@ -2,9 +2,9 @@ use crate::State;
 use crate::device::{
     ApplyIntentResponse, ApproveDeviceBody, ConfiguredNetwork, CreateIntentRequest, DeviceHealth,
     DeviceLedgerItem, DeviceLedgerItemPaginated, DeviceNetworkIntent, DeviceRelease, DeviceUptime,
-    FollowLatestRequest, FollowLatestUpdated, LabelWithValues, NewVariable, Note,
+    FollowLatestRequest, FollowLatestUpdated, LabelWithValues, NewVariable, Note, PINNED_TAG,
     PatchIntentRequest, RawDevice, SMITHD_SERVICE_NAME, ServiceOutage, UpdateDeviceRelease,
-    UpdateDevicesRelease, Variable, WifiScanResult, as_device_id,
+    UpdateDevicesRelease, Variable, WifiScanResult, as_device_id, normalize_label_selectors,
 };
 use crate::event::PublicEvent;
 use crate::handlers::AuthedDevice;
@@ -149,6 +149,8 @@ pub async fn get_devices(
     let sort_labels_desc = matches!(filter.sort, Some(DeviceSortField::Labels))
         && matches!(filter.order, Some(DeviceSortDirection::Desc));
     let search_terms = parse_search_terms(filter.search.as_deref().unwrap_or(""));
+    let labels = normalize_label_selectors(&filter.labels);
+    let exclude_labels = normalize_label_selectors(&filter.exclude_labels);
 
     #[allow(deprecated)]
     let devices = sqlx::query!(
@@ -321,10 +323,10 @@ pub async fn get_devices(
         filter.serial_number,
         filter.approved,
         filter.archived,
-        filter.labels.as_slice(),
+        labels.as_slice(),
         filter.online,
         filter.outdated,
-        filter.exclude_labels.as_slice(),
+        exclude_labels.as_slice(),
         filter.limit.unwrap_or(100).clamp(1, 1000),
         filter.offset.unwrap_or(0).max(0),
         search_terms.as_slice(),
@@ -1768,7 +1770,10 @@ async fn set_devices_follow_latest(
     body: FollowLatestRequest,
 ) -> Result<u64, StatusCode> {
     let ids = body.devices.filter(|d| !d.is_empty());
-    let labels = body.labels.filter(|l| !l.is_empty());
+    let labels = body
+        .labels
+        .filter(|l| !l.is_empty())
+        .map(normalize_label_selectors);
 
     let mut tx = pool.begin().await.map_err(|err| {
         error!("Failed to start follow_latest transaction: {err}");
@@ -2415,6 +2420,7 @@ pub struct UpdateDeviceRequest {
     responses(
         (status = StatusCode::OK, description = "Device updated successfully"),
         (status = StatusCode::NOT_FOUND, description = "Device not found"),
+        (status = StatusCode::CONFLICT, description = "The `pinned` tag follows the device's pin state, so the new labels must keep it as it is"),
         (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to update device"),
     ),
     security(
@@ -2427,11 +2433,11 @@ pub async fn update_device(
     Extension(state): Extension<State>,
     Extension(current_user): Extension<CurrentUser>,
     Json(payload): Json<UpdateDeviceRequest>,
-) -> axum::response::Result<StatusCode, StatusCode> {
+) -> axum::response::Result<StatusCode> {
     let allowed = authorization::check(current_user, "devices", "write");
 
     if !allowed {
-        return Err(StatusCode::FORBIDDEN);
+        return Err(StatusCode::FORBIDDEN.into());
     }
 
     if let Some(labels) = payload.labels {
@@ -2439,7 +2445,9 @@ pub async fn update_device(
             error!("Failed to start transaction {err}");
             StatusCode::INTERNAL_SERVER_ERROR
         })?;
-        replace_device_labels(&mut tx, &device_id, labels).await?;
+        replace_device_labels(&mut tx, &device_id, labels)
+            .await
+            .map_err(explain_label_conflict)?;
         tx.commit().await.map_err(|err| {
             error!("Failed to commit transaction {err}");
             StatusCode::INTERNAL_SERVER_ERROR
@@ -2452,7 +2460,7 @@ pub async fn update_device(
 /// Incremental changes: null removes a key; a string sets its value.
 #[derive(serde::Deserialize, utoipa::ToSchema)]
 pub struct UpdateDeviceLabelsRequest {
-    /// Only these keys are changed. Null removes a key; an empty string is stored as a value.
+    /// Only these keys are changed. Null removes a key; an empty string sets a tag.
     pub changes: HashMap<String, Option<String>>,
 }
 
@@ -2465,6 +2473,7 @@ pub struct UpdateDeviceLabelsRequest {
         (status = StatusCode::OK, description = "Label changes applied; other keys are preserved"),
         (status = StatusCode::FORBIDDEN, description = "Forbidden"),
         (status = StatusCode::NOT_FOUND, description = "Device not found"),
+        (status = StatusCode::CONFLICT, description = "The `pinned` tag follows the device's pin state and cannot be changed directly"),
         (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to update labels"),
     ),
     security(("auth_token" = [])),
@@ -2475,15 +2484,17 @@ pub async fn update_device_labels(
     Extension(state): Extension<State>,
     Extension(current_user): Extension<CurrentUser>,
     Json(payload): Json<UpdateDeviceLabelsRequest>,
-) -> Result<StatusCode, StatusCode> {
+) -> axum::response::Result<StatusCode> {
     if !authorization::check(current_user, "devices", "write") {
-        return Err(StatusCode::FORBIDDEN);
+        return Err(StatusCode::FORBIDDEN.into());
     }
     let mut tx = state.pg_pool.begin().await.map_err(|err| {
         error!("Failed to start label transaction {err}");
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
-    change_device_labels(&mut tx, &device_id, payload.changes).await?;
+    change_device_labels(&mut tx, &device_id, payload.changes)
+        .await
+        .map_err(explain_label_conflict)?;
     tx.commit().await.map_err(|err| {
         error!("Failed to commit label changes {err}");
         StatusCode::INTERNAL_SERVER_ERROR
@@ -2491,9 +2502,25 @@ pub async fn update_device_labels(
     Ok(StatusCode::OK)
 }
 
+// CONFLICT only comes from the pinned tag checks, and a bare status would not
+// tell the caller to pin or unpin instead.
+fn explain_label_conflict(status: StatusCode) -> axum::response::ErrorResponse {
+    if status == StatusCode::CONFLICT {
+        (
+            status,
+            "The `pinned` tag follows the device's pin state. Pin or unpin the device instead.",
+        )
+            .into()
+    } else {
+        status.into()
+    }
+}
+
 // All label writers take this shared lock before any device/label row locks.
 // Global deletion takes it exclusively, so its cascade cannot race a writer.
 // Shared locks allow updates on different devices to proceed concurrently.
+// The pinned tag trigger skips this lock: global deletion refuses that tag,
+// and the trigger still locks the device row before any label row.
 const LABEL_REGISTRY_LOCK: i64 = 0x534d_4954_484c_424c; // "SMITHLBL"
 
 async fn replace_device_labels(
@@ -2532,9 +2559,9 @@ async fn write_device_labels(
             StatusCode::INTERNAL_SERVER_ERROR
         })?;
     // Serialize replacements even when the device currently has no labels.
-    let device_id = sqlx::query_scalar!(
+    let device = sqlx::query!(
         r#"
-        SELECT id FROM device
+        SELECT id, follow_latest FROM device
         WHERE CASE
             WHEN $2::int4 IS NOT NULL THEN
                 id = $2
@@ -2553,6 +2580,17 @@ async fn write_device_labels(
         StatusCode::INTERNAL_SERVER_ERROR
     })?
     .ok_or(StatusCode::NOT_FOUND)?;
+    let device_id = device.id;
+
+    // Without `changed_keys` every label is replaced, so leaving `pinned` out of
+    // a replacement counts as removing it. Restating its current state is fine.
+    let writes_pinned = changed_keys
+        .as_ref()
+        .is_none_or(|keys| keys.iter().any(|key| key == PINNED_TAG));
+    let current_pinned = (!device.follow_latest).then_some("");
+    if writes_pinned && labels.get(PINNED_TAG).map(String::as_str) != current_pinned {
+        return Err(StatusCode::CONFLICT);
+    }
 
     let (keys, values): (Vec<_>, Vec<_>) = labels.into_iter().unzip();
     // Insert shared dictionary entries in the same order on every device.
@@ -2612,6 +2650,9 @@ async fn write_device_labels(
 }
 
 async fn delete_label_globally(pool: &sqlx::PgPool, key: &str) -> Result<(), StatusCode> {
+    if key == PINNED_TAG {
+        return Err(StatusCode::CONFLICT);
+    }
     let mut tx = pool.begin().await.map_err(|err| {
         error!("Failed to start global label deletion {err}");
         StatusCode::INTERNAL_SERVER_ERROR
@@ -2653,6 +2694,7 @@ async fn delete_label_globally(pool: &sqlx::PgPool, key: &str) -> Result<(), Sta
     responses(
         (status = StatusCode::NO_CONTENT, description = "Label deleted from all devices"),
         (status = StatusCode::FORBIDDEN, description = "Forbidden"),
+        (status = StatusCode::CONFLICT, description = "The `pinned` tag follows each device's pin state and cannot be deleted"),
         (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to delete label"),
     ),
     security(
@@ -2664,14 +2706,16 @@ pub async fn delete_label(
     Path(key): Path<String>,
     Extension(state): Extension<State>,
     Extension(current_user): Extension<CurrentUser>,
-) -> axum::response::Result<StatusCode, StatusCode> {
+) -> axum::response::Result<StatusCode> {
     let allowed = authorization::check(current_user, "devices", "write");
 
     if !allowed {
-        return Err(StatusCode::FORBIDDEN);
+        return Err(StatusCode::FORBIDDEN.into());
     }
 
-    delete_label_globally(&state.pg_pool, &key).await?;
+    delete_label_globally(&state.pg_pool, &key)
+        .await
+        .map_err(explain_label_conflict)?;
 
     Ok(StatusCode::NO_CONTENT)
 }
@@ -4194,7 +4238,10 @@ mod tests {
 /// `DATABASE_URL=... cargo test -p api label_updates -- --ignored --test-threads=1`.
 #[cfg(test)]
 mod label_updates {
-    use super::{change_device_labels, delete_label_globally, replace_device_labels};
+    use super::{
+        change_device_labels, delete_label_globally, normalize_label_selectors,
+        replace_device_labels,
+    };
     use axum::http::StatusCode;
     use sqlx::PgPool;
     use std::{collections::HashMap, time::Duration};
@@ -4206,13 +4253,23 @@ mod label_updates {
             .collect()
     }
 
+    // Following latest, so the automatic `pinned` tag stays out of the way.
     async fn insert_device(pool: &PgPool, serial: &str) -> anyhow::Result<i32> {
-        Ok(
-            sqlx::query_scalar("INSERT INTO device (serial_number) VALUES ($1) RETURNING id")
-                .bind(serial)
-                .fetch_one(pool)
-                .await?,
+        Ok(sqlx::query_scalar(
+            "INSERT INTO device (serial_number, follow_latest) VALUES ($1, TRUE) RETURNING id",
         )
+        .bind(serial)
+        .fetch_one(pool)
+        .await?)
+    }
+
+    async fn set_follow_latest(pool: &PgPool, id: i32, follow_latest: bool) -> anyhow::Result<()> {
+        sqlx::query("UPDATE device SET follow_latest = $1 WHERE id = $2")
+            .bind(follow_latest)
+            .bind(id)
+            .execute(pool)
+            .await?;
+        Ok(())
     }
 
     async fn labels_of(pool: &PgPool, id: i32) -> anyhow::Result<HashMap<String, String>> {
@@ -4234,6 +4291,139 @@ mod label_updates {
         replace_device_labels(tx, device, labels)
             .await
             .map_err(|status| anyhow::anyhow!("unexpected status: {status}"))
+    }
+
+    #[test]
+    fn tag_selectors_match_an_empty_value() {
+        assert_eq!(
+            normalize_label_selectors(["pinned", "env=prod", "env=", "a=b=c"]),
+            ["pinned=", "env=prod", "env=", "a=b=c"]
+        );
+    }
+
+    #[sqlx::test]
+    #[ignore = "needs Postgres with pg_partman; run with --test-threads=1"]
+    async fn pinned_tag_follows_pin_state(pool: PgPool) -> anyhow::Result<()> {
+        // New devices are pinned by the column default, with no explicit write.
+        let id: i32 = sqlx::query_scalar(
+            "INSERT INTO device (serial_number) VALUES ('new-device') RETURNING id",
+        )
+        .fetch_one(&pool)
+        .await?;
+        assert_eq!(labels_of(&pool, id).await?, labels(&[("pinned", "")]));
+
+        let mut tx = pool.begin().await?;
+        change_device_labels(
+            &mut tx,
+            &id.to_string(),
+            HashMap::from([("env".into(), Some("prod".into()))]),
+        )
+        .await
+        .map_err(|s| anyhow::anyhow!("{s}"))?;
+        tx.commit().await?;
+
+        // Each state is written twice: repeating a pin or unpin must not fail.
+        for _ in 0..2 {
+            set_follow_latest(&pool, id, true).await?;
+            assert_eq!(labels_of(&pool, id).await?, labels(&[("env", "prod")]));
+        }
+        for _ in 0..2 {
+            set_follow_latest(&pool, id, false).await?;
+            assert_eq!(
+                labels_of(&pool, id).await?,
+                labels(&[("env", "prod"), ("pinned", "")])
+            );
+        }
+
+        // A bare selector finds the tag through the `name=value` comparison.
+        let matched: Vec<i32> = sqlx::query_scalar(
+            "SELECT dl.device_id FROM device_label dl
+             JOIN label l ON l.id = dl.label_id
+             WHERE l.name || '=' || dl.value = ANY($1)",
+        )
+        .bind(normalize_label_selectors(["pinned"]))
+        .fetch_all(&pool)
+        .await?;
+        assert_eq!(matched, [id]);
+        Ok(())
+    }
+
+    #[sqlx::test]
+    #[ignore = "needs Postgres with pg_partman; run with --test-threads=1"]
+    async fn pinned_tag_cannot_be_changed_directly(pool: PgPool) -> anyhow::Result<()> {
+        let pinned = insert_device(&pool, "pinned").await?;
+        set_follow_latest(&pool, pinned, false).await?;
+        let unpinned = insert_device(&pool, "unpinned").await?;
+        let (pinned_id, unpinned_id) = (pinned.to_string(), unpinned.to_string());
+
+        let refused_changes = [
+            (&pinned_id, None),
+            (&pinned_id, Some("true")),
+            (&unpinned_id, Some("")),
+            (&unpinned_id, Some("true")),
+        ];
+        for (device, value) in refused_changes {
+            let mut tx = pool.begin().await?;
+            assert_eq!(
+                change_device_labels(
+                    &mut tx,
+                    device,
+                    HashMap::from([("pinned".into(), value.map(Into::into))]),
+                )
+                .await,
+                Err(StatusCode::CONFLICT),
+            );
+            tx.rollback().await?;
+        }
+
+        let refused_replacements = [
+            (&pinned_id, labels(&[])),
+            (&pinned_id, labels(&[("env", "prod")])),
+            (&pinned_id, labels(&[("pinned", "true")])),
+            (&unpinned_id, labels(&[("pinned", "")])),
+        ];
+        for (device, replacement) in refused_replacements {
+            let mut tx = pool.begin().await?;
+            assert_eq!(
+                replace_device_labels(&mut tx, device, replacement).await,
+                Err(StatusCode::CONFLICT),
+            );
+            tx.rollback().await?;
+        }
+
+        assert_eq!(
+            delete_label_globally(&pool, "pinned").await,
+            Err(StatusCode::CONFLICT),
+        );
+        assert_eq!(labels_of(&pool, pinned).await?, labels(&[("pinned", "")]));
+        assert!(labels_of(&pool, unpinned).await?.is_empty());
+
+        // Restating the current state is allowed, so a client can send back the
+        // labels it read, and other keys stay writable.
+        let kept = labels(&[("pinned", ""), ("env", "prod")]);
+        let mut tx = pool.begin().await?;
+        replace(&mut tx, &pinned_id, kept.clone()).await?;
+        change_device_labels(
+            &mut tx,
+            &pinned_id,
+            HashMap::from([("pinned".into(), Some(String::new()))]),
+        )
+        .await
+        .map_err(|s| anyhow::anyhow!("{s}"))?;
+        change_device_labels(
+            &mut tx,
+            &unpinned_id,
+            HashMap::from([("pinned".into(), None)]),
+        )
+        .await
+        .map_err(|s| anyhow::anyhow!("{s}"))?;
+        tx.commit().await?;
+        assert_eq!(labels_of(&pool, pinned).await?, kept);
+
+        // Unpinning is the way to remove it.
+        set_follow_latest(&pool, pinned, true).await?;
+        assert_eq!(labels_of(&pool, pinned).await?, labels(&[("env", "prod")]));
+        Ok(())
     }
 
     #[sqlx::test]

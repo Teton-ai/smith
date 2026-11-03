@@ -362,12 +362,8 @@ pub async fn new_deployment(
         .execute(&mut *tx)
         .await?
     } else if has_labels {
-        let canary_device_labels = request
-            .as_ref()
-            .unwrap()
-            .canary_device_labels
-            .as_ref()
-            .unwrap();
+        let canary_device_labels =
+            crate::device::normalize_label_selectors(labels_opt.into_iter().flatten());
         sqlx::query!(
             r#"
             WITH selected_devices AS (

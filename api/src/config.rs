@@ -299,7 +299,7 @@ impl Config {
             cloudfront: CloudFrontConfig::new()?,
             dashboard_excluded_labels: env::var("DASHBOARD_EXCLUDED_LABELS")
                 .ok()
-                .map(|s| s.split(',').map(|l| l.trim().to_string()).collect())
+                .map(|s| crate::device::normalize_label_selectors(s.split(',').map(str::trim)))
                 .unwrap_or_default(),
             device_jwt_private_key_pem: env::var("DEVICE_JWT_PRIVATE_KEY_PEM")
                 .context("DEVICE_JWT_PRIVATE_KEY_PEM is required.")?,
