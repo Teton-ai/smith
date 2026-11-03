@@ -8,6 +8,7 @@ use crate::shutdown::ShutdownSignals;
 use crate::utils::files::{
     SettingsState, StoredSettings, load_settings_state, load_wanted_settings,
 };
+use crate::utils::net_guard::{NetGuard, NetGuardHold};
 use crate::utils::schema::{
     DeviceSetting, RoamTuning, SafeCommandResponse, SafeCommandRx, SettingApplyState,
     SettingStatus, SettingsReport, WantedSettings,
@@ -21,6 +22,10 @@ use tracing::{error, info, warn};
 
 /// Synthetic command id for reports smithd sends without being asked.
 const CMD_ID_REPORT_SETTINGS: i32 = -7;
+
+/// NM keeps moving for a while after link health's nmcli calls return; a
+/// driver reload or re-activation in that window would fight the recovery.
+const RECOVERY_SETTLE: Duration = Duration::from_secs(30);
 
 /// Fixed for now; clamped to the bounds below once it becomes configurable.
 const CHECK_INTERVAL_S: u64 = 60;
@@ -156,6 +161,7 @@ pub struct Actor<S> {
     shutdown: ShutdownSignals,
     receiver: mpsc::Receiver<ActorMessage>,
     system: S,
+    net_guard: NetGuard,
     last_sent: Option<SettingsReport>,
     last_sent_at: Instant,
     previous_vendor_present: Option<bool>,
@@ -173,10 +179,11 @@ impl Actor<DeviceSystem> {
         shutdown: ShutdownSignals,
         receiver: mpsc::Receiver<ActorMessage>,
         system: DeviceSystem,
+        net_guard: NetGuard,
     ) -> Self {
         let wanted = load_wanted_settings().await;
         let state = initial_state(wanted.as_ref(), load_settings_state().await);
-        Self::new(shutdown, receiver, system, wanted, state)
+        Self::new(shutdown, receiver, system, net_guard, wanted, state)
     }
 }
 
@@ -185,6 +192,7 @@ impl<S: System> Actor<S> {
         shutdown: ShutdownSignals,
         receiver: mpsc::Receiver<ActorMessage>,
         system: S,
+        net_guard: NetGuard,
         wanted: Option<StoredSettings>,
         state: Option<SettingsState>,
     ) -> Self {
@@ -192,6 +200,7 @@ impl<S: System> Actor<S> {
             shutdown,
             receiver,
             system,
+            net_guard,
             last_sent: None,
             last_sent_at: Instant::now(),
             previous_vendor_present: None,
@@ -502,8 +511,14 @@ impl<S: System> Actor<S> {
         }
 
         let mut errors = Vec::new();
+        // Taken before the first reload or re-activation and kept to the end,
+        // so link health neither runs during it nor right after.
+        let mut network_busy: Option<NetGuardHold> = None;
         for step in steps {
             let disruptive = matches!(step, Step::ReloadDriver | Step::ReactivateWifi);
+            if disruptive && network_busy.is_none() {
+                network_busy = Some(self.net_guard.hold_after_recovery(RECOVERY_SETTLE).await);
+            }
             // Checked before spending the version's one disruption on a step
             // that cannot run.
             let result = if disruptive && reading.wifi.is_none() {
@@ -707,6 +722,13 @@ mod tests {
         StoredSettings { version, settings }
     }
 
+    fn wireless_mode(mode: i16) -> WantedSettings {
+        WantedSettings {
+            wireless_mode: Some(Managed::Set(mode)),
+            ..Default::default()
+        }
+    }
+
     fn hostname(name: &str) -> WantedSettings {
         WantedSettings {
             hostname: Some(Managed::Set(name.to_owned())),
@@ -724,6 +746,7 @@ mod tests {
             ShutdownHandler::new().signals(),
             receiver,
             system,
+            NetGuard::new(),
             wanted,
             state,
         )
@@ -777,6 +800,24 @@ mod tests {
             .filter(|s| s.starts_with("Hostname"))
             .count();
         assert_eq!(tries, 2, "not retried once failed");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_reload_waits_for_a_link_recovery_to_finish() {
+        let system = FakeSystem::default();
+        system.device().report.wireless_mode = Some(95);
+        let mut actor = actor(system.clone(), None);
+        let guard = NetGuard::new();
+        actor.net_guard = guard.clone();
+        let recovery = guard.try_recovery(Duration::ZERO);
+        let apply = tokio::spawn(async move { actor.apply(4, wireless_mode(11)).await });
+        let reloaded = || system.device().steps.iter().any(|s| s == "ReloadDriver");
+
+        time::sleep(Duration::from_secs(120)).await;
+        assert!(!reloaded(), "recovery still running");
+        drop(recovery);
+        apply.await.unwrap();
+        assert!(reloaded());
     }
 
     #[tokio::test]
