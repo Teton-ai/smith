@@ -10,6 +10,7 @@ import { GitBranch, Globe, MapPin, Tag, Tags } from "lucide-react";
 import { lazy, Suspense } from "react";
 import { Link, useParams } from "react-router";
 import { useGetDeviceInfo } from "@/app/api-client";
+import { labelEntries, labelName } from "@/app/utils/format";
 import { DeviceDetailLayout } from "../DeviceDetailLayout";
 
 const LocationMap = lazy(() => import("../LocationMap"));
@@ -52,8 +53,8 @@ const SystemPage = () => {
 									</span>
 								</div>
 								<div className="flex flex-wrap gap-1.5">
-									{Object.entries(device.labels).map(([key, value]) => (
-										<LabelChip key={key} name={key} value={value} />
+									{labelEntries(device.labels).map(([key, value]) => (
+										<LabelChip key={key} name={labelName(key)} value={value} />
 									))}
 								</div>
 							</div>

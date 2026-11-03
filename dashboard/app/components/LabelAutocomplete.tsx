@@ -2,6 +2,11 @@
 
 import { useEffect, useRef, useState } from "react";
 import { type LabelWithValues, useGetLabels } from "../api-client";
+import { formatLabel, labelName } from "../utils/format";
+
+// A tag has no value to choose, so selecting its key is enough.
+const isTag = (label?: LabelWithValues) =>
+	label?.values.length === 1 && label.values[0] === "";
 
 interface LabelAutocompleteProps {
 	onSelect: (label: string) => void;
@@ -102,7 +107,22 @@ export default function LabelAutocomplete({
 		setIsOpen(true);
 	};
 
+	const commitFilter = (filter: string) => {
+		if (!existingFilters.includes(filter)) {
+			onSelect(filter);
+		}
+		setState({ mode: "key", search: "" });
+		if (inputRef.current) {
+			inputRef.current.value = "";
+		}
+		setIsOpen(false);
+	};
+
 	const handleKeySelect = (key: string) => {
+		if (isTag(labels?.find((l) => l.key === key))) {
+			commitFilter(key);
+			return;
+		}
 		setState({ mode: "value", key, search: "" });
 		if (inputRef.current) {
 			inputRef.current.value = `${key}=`;
@@ -112,15 +132,7 @@ export default function LabelAutocomplete({
 
 	const handleValueSelect = (value: string) => {
 		if (state.mode === "value") {
-			const filter = `${state.key}=${value}`;
-			if (!existingFilters.includes(filter)) {
-				onSelect(filter);
-			}
-			setState({ mode: "key", search: "" });
-			if (inputRef.current) {
-				inputRef.current.value = "";
-			}
-			setIsOpen(false);
+			commitFilter(formatLabel(state.key, value));
 		}
 	};
 
@@ -154,7 +166,7 @@ export default function LabelAutocomplete({
 					const value = list[highlightedIndex] as string;
 					// Mirror the disabled button: an already-selected value can't be
 					// activated by mouse, so Enter shouldn't activate it either.
-					if (!existingFilters.includes(`${state.key}=${value}`)) {
+					if (!existingFilters.includes(formatLabel(state.key, value))) {
 						handleValueSelect(value);
 					}
 				}
@@ -165,14 +177,12 @@ export default function LabelAutocomplete({
 			if (value.includes("=")) {
 				const [key, val] = value.split("=");
 				if (key && val) {
-					const filter = `${key.trim()}=${val.trim()}`;
-					if (!existingFilters.includes(filter)) {
-						onSelect(filter);
-					}
-					setState({ mode: "key", search: "" });
-					e.currentTarget.value = "";
-					setIsOpen(false);
+					commitFilter(`${key.trim()}=${val.trim()}`);
 				}
+			} else {
+				// Match clicking a key: mixed tag/value keys need a value choice.
+				const label = labels?.find((l) => l.key === value.trim());
+				if (label) handleKeySelect(label.key);
 			}
 		} else if (e.key === "Escape") {
 			setIsOpen(false);
@@ -232,10 +242,12 @@ export default function LabelAutocomplete({
 										onMouseEnter={() => setHighlightedIndex(i)}
 										onClick={() => handleKeySelect(label.key)}
 									>
-										<span className="font-medium">{label.key}</span>
-										<span className="text-gray-400 ml-2">
-											({label.values.length} values)
-										</span>
+										<span className="font-medium">{labelName(label.key)}</span>
+										{!isTag(label) && (
+											<span className="text-gray-400 ml-2">
+												({label.values.length} values)
+											</span>
+										)}
 									</button>
 								))}
 							</>
@@ -267,7 +279,7 @@ export default function LabelAutocomplete({
 							{filteredValues.length > 0 ? (
 								filteredValues.map((value, i) => {
 									const isAlreadySelected = existingFilters.includes(
-										`${state.key}=${value}`,
+										formatLabel(state.key, value),
 									);
 									return (
 										<button
@@ -287,7 +299,7 @@ export default function LabelAutocomplete({
 											onMouseEnter={() => setHighlightedIndex(i)}
 											onClick={() => handleValueSelect(value)}
 										>
-											{value}
+											{value === "" ? "(tag)" : value}
 											{isAlreadySelected && (
 												<span className="ml-2 text-xs">(already added)</span>
 											)}

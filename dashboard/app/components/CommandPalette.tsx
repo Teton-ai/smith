@@ -38,6 +38,7 @@ import {
 } from "@/app/api-client";
 import { Button } from "@/app/components/button";
 import { useConfig } from "@/app/hooks/config";
+import { displayLabel, labelEntries } from "@/app/utils/format";
 
 type ActionId = "reboot" | "run" | "grafana" | "services" | "logs";
 
@@ -740,9 +741,9 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
 									}
 									title={d.serial_number}
 									subtitle={
-										Object.entries(d.labels || {})
+										labelEntries(d.labels)
 											.slice(0, 3)
-											.map(([k, v]) => `${k}=${v}`)
+											.map(([k, v]) => displayLabel(k, v))
 											.join("  ") || `id ${d.id}`
 									}
 									kind="device"
@@ -915,9 +916,9 @@ function RootRow({
 				}
 				title={d.serial_number}
 				subtitle={
-					Object.entries(d.labels || {})
+					labelEntries(d.labels)
 						.slice(0, 3)
-						.map(([k, v]) => `${k}=${v}`)
+						.map(([k, v]) => displayLabel(k, v))
 						.join("  ") || `id ${d.id}`
 				}
 				kind="device"
