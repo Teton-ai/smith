@@ -84,13 +84,12 @@ pub(super) async fn run_for(
     args: &[&str],
 ) -> Result<String> {
     let name = program.as_ref().to_string_lossy().into_owned();
-    let output = tokio::time::timeout(
-        timeout,
-        tokio::process::Command::new(program).args(args).output(),
-    )
-    .await
-    .with_context(|| format!("{name} timed out"))?
-    .with_context(|| format!("running {name}"))?;
+    let mut command = tokio::process::Command::new(program);
+    command.args(args).kill_on_drop(true);
+    let output = tokio::time::timeout(timeout, command.output())
+        .await
+        .with_context(|| format!("{name} timed out"))?
+        .with_context(|| format!("running {name}"))?;
     if !output.status.success() {
         bail!("{name} exited with {}", output.status);
     }
