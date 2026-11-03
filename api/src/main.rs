@@ -17,6 +17,7 @@ use std::fs::File;
 use std::future::ready;
 use std::io::Read;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::net::TcpListener;
 use tokio::sync::broadcast::Sender;
 use tokio::sync::{Mutex, Semaphore, broadcast};
@@ -172,9 +173,12 @@ async fn start_main_server(
     info!("Starting Smith API v{}", env!("CARGO_PKG_VERSION"));
 
     // set up connection pool
+    // A short acquire timeout fails a request fast when the pool is exhausted,
+    // well before smithd's 10 s client timeout on /home.
     let pool = PgPoolOptions::new()
         .max_connections(100)
         .min_connections(10)
+        .acquire_timeout(Duration::from_secs(3))
         .connect(&config.database_url)
         .await
         .expect("can't connect to database.");
