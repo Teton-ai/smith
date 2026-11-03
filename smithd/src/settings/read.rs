@@ -148,6 +148,10 @@ async fn read_bgscan(conn: &Connection) -> Result<(bool, Option<String>)> {
     Ok((true, bgscan))
 }
 
+pub(super) async fn wifi_connected(conn: &Connection) -> Result<bool> {
+    Ok(current_network(conn).await?.is_some())
+}
+
 /// Sets bgscan on the current network. NM sets its own on every activation,
 /// so local enforcement sets it again after one.
 pub(super) async fn set_bgscan(conn: &Connection, bgscan: &str) -> Result<()> {

@@ -4,19 +4,21 @@
 //! steps, the reads and the saves on the real device.
 
 use super::actor::{OwnedFile, Step, System, check_interval_s};
-use super::driver::{DriverPaths, VENDOR_MODULE};
+use super::driver::{DriverPaths, VENDOR_MODULE, wifi_interface};
 use super::ntp::{CHRONY_CONF, CHRONY_SOURCES_DIR, timesyncd_running};
 use super::plan::{FileChange, NtpDaemon, OwnedFiles};
-use super::read::{Reading, SettingsReader, run, run_for, set_bgscan};
+use super::read::{Reading, SettingsReader, run, run_for, set_bgscan, wifi_connected};
 use crate::commander::CommanderHandle;
+use crate::postman::LastPoll;
 use crate::utils::files::{
     SettingsState, StoredSettings, save_settings_state, save_wanted_settings, write_file_atomic,
 };
 use crate::utils::schema::{RoamTuning, SafeCommandResponse};
 use anyhow::{Context, Result, anyhow, bail};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
-use tracing::warn;
+use tracing::{debug, warn};
 use zbus::Connection;
 
 const DRIVER_CONF: &str = "/etc/modprobe.d/zz-smith-rtl8822ce.conf";
@@ -35,6 +37,14 @@ const MODPROBE_RETRY_DELAY: Duration = Duration::from_secs(2);
 /// `modprobe`; callers can't use it before then.
 const DRIVER_BACK_TIMEOUT: Duration = Duration::from_secs(30);
 const DRIVER_POLL: Duration = Duration::from_millis(500);
+/// A loaded module has a directory here.
+const SYS_MODULE: &str = "/sys/module";
+/// NM reconnects a few seconds after the interface comes back. Waited for so
+/// the bgscan write and the read after a reload find Wi-Fi up.
+const ASSOCIATION_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Checks run every minute; the chrony config only changes by hand.
+static CHRONY_WARNED: AtomicBool = AtomicBool::new(false);
 /// How long `nmcli` waits for the activation, and the cap on the process.
 const NM_ACTIVATION_WAIT_S: &str = "30";
 const NM_ACTIVATION_TIMEOUT: Duration = Duration::from_secs(40);
@@ -113,10 +123,22 @@ fn driver_reload_steps(module: &str) -> [(&'static str, [&str; 1]); 2] {
 
 /// Reloads `module` so it reads its modprobe.d options, then waits for the
 /// interface to come back. `modprobe` is retried: the device has no Wi-Fi
-/// until it succeeds.
-pub async fn reload_driver(paths: &DriverPaths, module: &str, interface: &str) -> Result<()> {
+/// until it succeeds. Without a known `interface` (options that kept it from
+/// coming up, found at boot), the interface of `module` is looked up instead.
+pub async fn reload_driver(
+    paths: &DriverPaths,
+    module: &str,
+    interface: Option<&str>,
+) -> Result<()> {
     let [(rmmod, rmmod_args), (modprobe, modprobe_args)] = driver_reload_steps(module);
-    run_for(DRIVER_TIMEOUT, rmmod, &rmmod_args).await?;
+    // A reload cut short (smithd killed between the two) leaves the module
+    // unloaded, and `rmmod` would then fail before the `modprobe` that brings
+    // Wi-Fi back.
+    if module_loaded(module).await {
+        run_for(DRIVER_TIMEOUT, rmmod, &rmmod_args).await?;
+    } else {
+        warn!("settings: {module} is not loaded; loading it");
+    }
     let mut tries = 0;
     loop {
         tries += 1;
@@ -129,15 +151,37 @@ pub async fn reload_driver(paths: &DriverPaths, module: &str, interface: &str) -
             Err(err) => return Err(err),
         }
     }
-    let iface_dir = paths.net.join(interface);
     let deadline = tokio::time::Instant::now() + DRIVER_BACK_TIMEOUT;
-    while !tokio::fs::try_exists(&iface_dir).await.unwrap_or(false) {
+    while !interface_back(paths, module, interface).await {
         if tokio::time::Instant::now() >= deadline {
-            bail!("{} did not come back after the reload", iface_dir.display());
+            bail!("the {module} interface did not come back after the reload");
         }
         tokio::time::sleep(DRIVER_POLL).await;
     }
     Ok(())
+}
+
+async fn module_loaded(module: &str) -> bool {
+    tokio::fs::try_exists(Path::new(SYS_MODULE).join(module))
+        .await
+        .unwrap_or(true)
+}
+
+/// The vendor driver's roam values can only be written once its proc dir exists too.
+async fn interface_back(paths: &DriverPaths, module: &str, interface: Option<&str>) -> bool {
+    let name = match interface {
+        Some(name) => Some(name.to_owned()),
+        None => wifi_interface(&paths.net)
+            .await
+            .filter(|i| i.module == module)
+            .map(|i| i.name),
+    };
+    let Some(name) = name else {
+        return false;
+    };
+    let exists = |dir: PathBuf| async move { tokio::fs::try_exists(dir).await.unwrap_or(false) };
+    exists(paths.net.join(&name)).await
+        && (module != VENDOR_MODULE || exists(paths.proc.join(&name)).await)
 }
 
 /// Values in the driver's `roam_param` order; drivers without the busy fields
@@ -237,7 +281,11 @@ fn ntp_daemon(timesyncd_running: bool, chrony_conf: Option<&str>) -> Option<NtpD
         words.next() == Some("sourcedir") && words.next() == Some(CHRONY_SOURCES_DIR)
     });
     if !reads_sources {
-        warn!("settings: {CHRONY_CONF} has no sourcedir {CHRONY_SOURCES_DIR}");
+        if CHRONY_WARNED.swap(true, Ordering::Relaxed) {
+            debug!("settings: {CHRONY_CONF} has no sourcedir {CHRONY_SOURCES_DIR}");
+        } else {
+            warn!("settings: {CHRONY_CONF} has no sourcedir {CHRONY_SOURCES_DIR}");
+        }
         return None;
     }
     Some(NtpDaemon::Chrony)
@@ -305,15 +353,17 @@ pub struct DeviceSystem {
     paths: OwnedPaths,
     wifi: Option<String>,
     commander: CommanderHandle,
+    last_poll: LastPoll,
 }
 
 impl DeviceSystem {
-    pub fn new(commander: CommanderHandle) -> Self {
+    pub fn new(commander: CommanderHandle, last_poll: LastPoll) -> Self {
         Self {
             reader: SettingsReader::default(),
             paths: OwnedPaths::default(),
             wifi: None,
             commander,
+            last_poll,
         }
     }
 
@@ -321,6 +371,29 @@ impl DeviceSystem {
         self.wifi
             .as_deref()
             .ok_or_else(|| anyhow!("no Wi-Fi interface"))
+    }
+
+    /// Not an error when it times out: the options may keep Wi-Fi from
+    /// associating, which the revert is there for.
+    async fn wait_for_association(&mut self) {
+        let deadline = tokio::time::Instant::now() + ASSOCIATION_TIMEOUT;
+        loop {
+            match self.reader.connection().await {
+                Ok(conn) => match wifi_connected(&conn).await {
+                    Ok(true) => return,
+                    Ok(false) => {}
+                    Err(err) => debug!("settings: reading the Wi-Fi association: {err:#}"),
+                },
+                Err(err) => debug!("settings: connecting to D-Bus: {err:#}"),
+            }
+            if tokio::time::Instant::now() >= deadline {
+                warn!(
+                    "settings: Wi-Fi not associated {ASSOCIATION_TIMEOUT:?} after the driver reload"
+                );
+                return;
+            }
+            tokio::time::sleep(DRIVER_POLL).await;
+        }
     }
 }
 
@@ -352,7 +425,14 @@ impl System for DeviceSystem {
             }
             Step::ReloadNm => reload_nm().await,
             Step::ReloadDriver => {
-                reload_driver(self.reader.driver_paths(), VENDOR_MODULE, self.wifi()?).await
+                reload_driver(
+                    self.reader.driver_paths(),
+                    VENDOR_MODULE,
+                    self.wifi.as_deref(),
+                )
+                .await?;
+                self.wait_for_association().await;
+                Ok(())
             }
             Step::RoamFlags(flags) => {
                 write_roam_flags(self.reader.driver_paths(), self.wifi()?, flags).await
@@ -381,11 +461,42 @@ impl System for DeviceSystem {
     async fn queue_report(&mut self, response: SafeCommandResponse) {
         self.commander.insert_result(vec![response]).await;
     }
+
+    fn last_poll(&self) -> LastPoll {
+        self.last_poll.clone()
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::settings::driver::tests::fake_iface;
+
+    fn driver_paths(root: &Path) -> DriverPaths {
+        DriverPaths {
+            net: root.join("net"),
+            params: root.join("params"),
+            proc: root.join("proc"),
+        }
+    }
+
+    #[tokio::test]
+    async fn a_reload_without_a_known_interface_waits_for_the_vendor_one() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        fake_iface(root, "wlP1p1s0", "rtl88x2ce", VENDOR_MODULE);
+        std::fs::create_dir_all(root.join("proc/wlP1p1s0")).unwrap();
+        assert!(interface_back(&driver_paths(root), VENDOR_MODULE, None).await);
+    }
+
+    #[tokio::test]
+    async fn another_wifi_interface_is_not_the_vendor_one_back() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        fake_iface(root, "wlan0", "rtw88_8822ce", "rtw88_8822ce");
+        std::fs::create_dir_all(root.join("proc/wlan0")).unwrap();
+        assert!(!interface_back(&driver_paths(root), VENDOR_MODULE, None).await);
+    }
 
     fn tuning() -> RoamTuning {
         RoamTuning {

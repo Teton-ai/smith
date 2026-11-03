@@ -59,9 +59,12 @@ pub async fn run() {
     let filebrowser =
         FileBrowserHandle::new(shutdown.signals(), configuration.clone(), session.clone());
 
-    // Shared by the commander's network commands and link health, which stays
-    // out of NetworkManager while they run.
+    // Shared by the writers that change networks (the commander, the settings
+    // actor) and link health's recoveries, so neither runs during the other.
     let net_guard = NetGuard::new();
+
+    // The actor queues its reports on the commander, so it starts after it.
+    let (settings, settings_inbox) = SettingsHandle::new();
 
     let commander = CommanderHandle::new(
         shutdown.signals(),
@@ -74,6 +77,7 @@ pub async fn run() {
             logstream: logstream.clone(),
             filebrowser: filebrowser.clone(),
             net_guard: net_guard.clone(),
+            settings: settings.clone(),
         },
     );
 
@@ -82,7 +86,7 @@ pub async fn run() {
     let auditor = AuditorHandle::new(shutdown.signals(), commander.clone());
     auditor.run_audit().await;
 
-    let _postman = PostmanHandle::new(
+    let postman = PostmanHandle::new(
         shutdown.signals(),
         police.clone(),
         commander.clone(),
@@ -90,8 +94,13 @@ pub async fn run() {
         session.clone(),
     );
 
-    // Queues its reports on the commander, so it must be created after it.
-    let settings = SettingsHandle::new(shutdown.signals(), commander.clone());
+    // Follows the postman's polls to revert an apply that lost the api.
+    settings_inbox.spawn(
+        shutdown.signals(),
+        commander.clone(),
+        net_guard.clone(),
+        postman.last_poll(),
+    );
 
     let link_health = LinkHealthHandle::new(shutdown.signals(), net_guard.clone(), police.clone());
 
