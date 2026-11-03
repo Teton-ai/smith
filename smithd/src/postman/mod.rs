@@ -38,6 +38,14 @@ async fn refresh_system_info(system_info: &mut SystemInfo) -> Option<SafeCommand
     Some(update)
 }
 
+/// Adds `update` in place of any result with its id. Results put back after a
+/// failed post can hold an older snapshot under the same synthetic id, and
+/// another failure would keep only the first one, the stale one.
+fn push_latest(responses: &mut Vec<SafeCommandResponse>, update: SafeCommandResponse) {
+    responses.retain(|response| response.id != update.id);
+    responses.push(update);
+}
+
 enum PollMode {
     Active { ticks_without_commands: u32 },
     Idle,
@@ -159,7 +167,7 @@ impl Postman {
                     if responses.iter().any(|response| response.id > 0)
                         && let Some(update) = refresh_system_info(&mut system_info).await
                     {
-                        responses.push(update);
+                        push_latest(&mut responses, update);
                     }
 
                     let release_id = self.magic.get_release_id().await.ok();
@@ -419,5 +427,27 @@ impl PostmanHandle {
         tokio::spawn(async move { actor.run().await });
 
         Self { _sender }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::utils::schema::SafeCommandRx;
+
+    fn pong(id: i32, status: i32) -> SafeCommandResponse {
+        SafeCommandResponse {
+            id,
+            command: SafeCommandRx::Pong,
+            status,
+        }
+    }
+
+    #[test]
+    fn a_fresh_snapshot_replaces_the_one_put_back_after_a_failed_post() {
+        let mut responses = vec![pong(CMD_ID_UPDATE_SYSTEM_INFO, 1), pong(7, 0)];
+        push_latest(&mut responses, pong(CMD_ID_UPDATE_SYSTEM_INFO, 0));
+        let ids: Vec<_> = responses.iter().map(|r| (r.id, r.status)).collect();
+        assert_eq!(ids, [(7, 0), (CMD_ID_UPDATE_SYSTEM_INFO, 0)]);
     }
 }
