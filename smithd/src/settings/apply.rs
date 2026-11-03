@@ -32,10 +32,10 @@ const HOSTS_SELF_ADDRESS: &str = "127.0.1.1";
 const DRIVER_TIMEOUT: Duration = Duration::from_secs(30);
 const MODPROBE_TRIES: u32 = 3;
 const MODPROBE_RETRY_DELAY: Duration = Duration::from_secs(2);
-/// The interface's proc dir comes back a few seconds after `modprobe`; the
-/// roam values can only be written once it is there.
-const VENDOR_BACK_TIMEOUT: Duration = Duration::from_secs(30);
-const VENDOR_POLL: Duration = Duration::from_millis(500);
+/// The interface comes back under `/sys/class/net` a few seconds after
+/// `modprobe`; callers can't use it before then.
+const DRIVER_BACK_TIMEOUT: Duration = Duration::from_secs(30);
+const DRIVER_POLL: Duration = Duration::from_millis(500);
 /// How long `nmcli` waits for the activation, and the cap on the process.
 const NM_ACTIVATION_WAIT_S: &str = "30";
 const NM_ACTIVATION_TIMEOUT: Duration = Duration::from_secs(40);
@@ -108,16 +108,20 @@ pub async fn change_file(path: &Path, change: &FileChange) -> Result<()> {
 
 /// `rmmod` then `modprobe`: `modprobe -r` would also unload the modules the
 /// driver depends on.
-fn driver_reload_steps() -> [(&'static str, [&'static str; 1]); 2] {
-    [("rmmod", [VENDOR_MODULE]), ("modprobe", [VENDOR_MODULE])]
+fn driver_reload_steps(module: &str) -> [(&'static str, [&str; 1]); 2] {
+    [("rmmod", [module]), ("modprobe", [module])]
 }
 
-/// Reloads the vendor driver so it reads its modprobe.d options, then waits
-/// for the interface to come back. `modprobe` is retried: the device has no
-/// Wi-Fi until it succeeds. Without a known `interface` (options that kept it
-/// from coming up, found at boot), the vendor interface is looked up instead.
-pub async fn reload_driver(paths: &DriverPaths, interface: Option<&str>) -> Result<()> {
-    let [(rmmod, rmmod_args), (modprobe, modprobe_args)] = driver_reload_steps();
+/// Reloads `module` so it reads its modprobe.d options, then waits for the
+/// interface to come back. `modprobe` is retried: the device has no Wi-Fi
+/// until it succeeds. Without a known `interface` (options that kept it from
+/// coming up, found at boot), the interface of `module` is looked up instead.
+pub async fn reload_driver(
+    paths: &DriverPaths,
+    module: &str,
+    interface: Option<&str>,
+) -> Result<()> {
+    let [(rmmod, rmmod_args), (modprobe, modprobe_args)] = driver_reload_steps(module);
     run_for(DRIVER_TIMEOUT, rmmod, &rmmod_args).await?;
     let mut tries = 0;
     loop {
@@ -125,37 +129,37 @@ pub async fn reload_driver(paths: &DriverPaths, interface: Option<&str>) -> Resu
         match run_for(DRIVER_TIMEOUT, modprobe, &modprobe_args).await {
             Ok(_) => break,
             Err(err) if tries < MODPROBE_TRIES => {
-                warn!("settings: modprobe {VENDOR_MODULE} failed, retrying: {err:#}");
+                warn!("settings: modprobe {module} failed, retrying: {err:#}");
                 tokio::time::sleep(MODPROBE_RETRY_DELAY).await;
             }
             Err(err) => return Err(err),
         }
     }
-    let deadline = tokio::time::Instant::now() + VENDOR_BACK_TIMEOUT;
-    while !vendor_interface_back(paths, interface).await {
+    let deadline = tokio::time::Instant::now() + DRIVER_BACK_TIMEOUT;
+    while !interface_back(paths, module, interface).await {
         if tokio::time::Instant::now() >= deadline {
-            bail!("the {VENDOR_MODULE} interface did not come back after the reload");
+            bail!("the {module} interface did not come back after the reload");
         }
-        tokio::time::sleep(VENDOR_POLL).await;
+        tokio::time::sleep(DRIVER_POLL).await;
     }
     Ok(())
 }
 
-/// The roam values can only be written once the interface's proc dir exists.
-async fn vendor_interface_back(paths: &DriverPaths, interface: Option<&str>) -> bool {
+/// The vendor driver's roam values can only be written once its proc dir exists too.
+async fn interface_back(paths: &DriverPaths, module: &str, interface: Option<&str>) -> bool {
     let name = match interface {
         Some(name) => Some(name.to_owned()),
         None => wifi_interface(&paths.net)
             .await
-            .filter(|i| i.module == VENDOR_MODULE)
+            .filter(|i| i.module == module)
             .map(|i| i.name),
     };
-    match name {
-        Some(name) => tokio::fs::try_exists(paths.proc.join(name))
-            .await
-            .unwrap_or(false),
-        None => false,
-    }
+    let Some(name) = name else {
+        return false;
+    };
+    let exists = |dir: PathBuf| async move { tokio::fs::try_exists(dir).await.unwrap_or(false) };
+    exists(paths.net.join(&name)).await
+        && (module != VENDOR_MODULE || exists(paths.proc.join(&name)).await)
 }
 
 /// Values in the driver's `roam_param` order; drivers without the busy fields
@@ -372,7 +376,12 @@ impl System for DeviceSystem {
             }
             Step::ReloadNm => reload_nm().await,
             Step::ReloadDriver => {
-                reload_driver(self.reader.driver_paths(), self.wifi.as_deref()).await
+                reload_driver(
+                    self.reader.driver_paths(),
+                    VENDOR_MODULE,
+                    self.wifi.as_deref(),
+                )
+                .await
             }
             Step::RoamFlags(flags) => {
                 write_roam_flags(self.reader.driver_paths(), self.wifi()?, flags).await
@@ -426,7 +435,7 @@ mod tests {
         let root = tmp.path();
         fake_iface(root, "wlP1p1s0", "rtl88x2ce", VENDOR_MODULE);
         std::fs::create_dir_all(root.join("proc/wlP1p1s0")).unwrap();
-        assert!(vendor_interface_back(&driver_paths(root), None).await);
+        assert!(interface_back(&driver_paths(root), VENDOR_MODULE, None).await);
     }
 
     #[tokio::test]
@@ -435,7 +444,7 @@ mod tests {
         let root = tmp.path();
         fake_iface(root, "wlan0", "rtw88_8822ce", "rtw88_8822ce");
         std::fs::create_dir_all(root.join("proc/wlan0")).unwrap();
-        assert!(!vendor_interface_back(&driver_paths(root), None).await);
+        assert!(!interface_back(&driver_paths(root), VENDOR_MODULE, None).await);
     }
 
     fn tuning() -> RoamTuning {
@@ -452,8 +461,8 @@ mod tests {
     #[test]
     fn driver_reload_is_rmmod_then_modprobe_never_modprobe_r() {
         assert_eq!(
-            driver_reload_steps(),
-            [("rmmod", ["rtl8822ce"]), ("modprobe", ["rtl8822ce"])]
+            driver_reload_steps("rtw88_8822ce"),
+            [("rmmod", ["rtw88_8822ce"]), ("modprobe", ["rtw88_8822ce"])]
         );
     }
 

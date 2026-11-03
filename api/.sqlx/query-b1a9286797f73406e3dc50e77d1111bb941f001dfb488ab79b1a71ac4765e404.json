@@ -1,0 +1,30 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT d.id,\n               CASE WHEN d.last_ping IS NULL OR d.last_ping < m.installed_on THEN NULL\n                    ELSE GREATEST(d.created_on, m.installed_on)\n               END AS observed_from\n        FROM device d\n        CROSS JOIN (\n            SELECT installed_on FROM _sqlx_migrations WHERE version = $2\n        ) m\n        WHERE\n            CASE\n                WHEN $3::int4 IS NOT NULL THEN\n                    d.id = $3\n                ELSE\n                    d.serial_number = $1\n            END\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "observed_from",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Int8",
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false,
+      null
+    ]
+  },
+  "hash": "b1a9286797f73406e3dc50e77d1111bb941f001dfb488ab79b1a71ac4765e404"
+}

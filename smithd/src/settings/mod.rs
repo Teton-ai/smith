@@ -10,6 +10,8 @@ mod ntp;
 mod plan;
 mod read;
 
+pub(crate) use apply::reload_driver;
+
 use crate::commander::CommanderHandle;
 use crate::postman::LastPoll;
 use crate::shutdown::ShutdownSignals;

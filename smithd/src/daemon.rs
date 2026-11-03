@@ -102,7 +102,7 @@ pub async fn run() {
         postman.last_poll(),
     );
 
-    let link_health = LinkHealthHandle::new(shutdown.signals(), net_guard.clone());
+    let link_health = LinkHealthHandle::new(shutdown.signals(), net_guard.clone(), police.clone());
 
     let _nm_watcher = NMWatcherHandle::new(
         shutdown.signals(),
