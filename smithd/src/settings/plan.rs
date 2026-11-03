@@ -1,8 +1,6 @@
 //! Decides what one apply does, from the wanted settings, what the device
 //! runs, and the files smithd wrote earlier. Pure, so every rule is unit
 //! tested; the executors in `apply` carry the plan out.
-// Unused until the settings actor applies settings.
-#![allow(dead_code)]
 
 use super::driver::VENDOR_MODULE;
 use super::nm::parse_nm_sections;
@@ -131,8 +129,19 @@ pub struct ApplyPlan {
 }
 
 impl ApplyPlan {
-    pub fn disrupts(&self) -> bool {
-        self.driver_reload || self.nm_reactivate
+    /// Whether the plan changes anything on the device.
+    pub fn has_steps(&self) -> bool {
+        self.driver_file != FileChange::Keep
+            || self.nm_file != FileChange::Keep
+            || self.ntp_file != FileChange::Keep
+            || self.driver_reload
+            || self.roam_flags.is_some()
+            || self.roam_tuning.is_some()
+            || self.nm_reload
+            || self.nm_reactivate
+            || self.ntp_reload
+            || self.hostname.is_some()
+            || self.bgscan.is_some()
     }
 }
 
@@ -331,14 +340,18 @@ impl Planner<'_> {
             self.plan.attempted.push(group);
             return true;
         };
+        self.fail(group, &reason);
+        false
+    }
+
+    fn fail(&mut self, group: Group, reason: &str) {
         self.plan
             .failed
             .extend(group.settings().iter().map(|setting| SettingStatus {
                 setting: *setting,
                 state: SettingApplyState::Failed,
-                reason: reason.clone(),
+                reason: reason.to_owned(),
             }));
-        false
     }
 
     fn driver(&mut self) {
@@ -471,9 +484,12 @@ impl Planner<'_> {
             return;
         };
         let current = self.input.files.ntp.as_deref();
+        // Nothing is tried without a daemon, so no attempt is spent: a daemon
+        // that appears later (chrony config fixed, package installed) is
+        // applied on the next check.
         let Some(daemon) = self.input.ntp_daemon else {
             if let Managed::Set(_) = wanted {
-                self.act(Group::NtpServers, true, &"no NTP daemon", false);
+                self.fail(Group::NtpServers, "no NTP daemon");
             }
             return;
         };
@@ -645,7 +661,6 @@ mod tests {
         );
         assert!(plan.driver_reload);
         assert_eq!(plan.attempted, vec![Group::WirelessMode, Group::PowerMgnt]);
-        assert!(plan.disrupts());
     }
 
     #[test]
@@ -828,7 +843,7 @@ mod tests {
             format!("{HEADER}\n[main]\nautoconnect-retries-default=0\n")
         );
         assert!(plan.nm_reload);
-        assert!(!plan.disrupts());
+        assert!(!plan.nm_reactivate && !plan.driver_reload);
     }
 
     fn power_save_in_file() -> Case {
@@ -972,13 +987,21 @@ mod tests {
     }
 
     #[test]
-    fn ntp_without_a_daemon_counts_as_an_attempt() {
+    fn ntp_without_a_daemon_fails_without_an_attempt() {
         let mut case = ntp_case();
         case.ntp_daemon = None;
         let plan = case.plan();
         assert_eq!(plan.ntp_file, FileChange::Keep);
         assert!(!plan.ntp_reload);
-        assert_eq!(plan.attempted, vec![Group::NtpServers]);
+        assert!(plan.attempted.is_empty());
+        assert_eq!(
+            plan.failed,
+            [SettingStatus {
+                setting: DeviceSetting::NtpServers,
+                state: SettingApplyState::Failed,
+                reason: "no NTP daemon".to_owned(),
+            }]
+        );
     }
 
     #[test]
