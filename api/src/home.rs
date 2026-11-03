@@ -50,6 +50,25 @@ fn map_key_mgmt(km: &str) -> Option<&'static str> {
     }
 }
 
+/// First key of the two key advisory locks on a device's command results; the
+/// network ledger's single `bigint` locks are a separate key space.
+const DEVICE_RESULTS_LOCK: i32 = 1;
+
+/// Serializes the posts of one device until commit. A device that timed out
+/// posts again while the first post can still be running; without this both
+/// would pass the stored check and run the side effects. One lock per device
+/// cannot deadlock, unlike one per command taken in a batch's order.
+async fn lock_device_results(conn: &mut PgConnection, device_id: i32) -> Result<()> {
+    sqlx::query!(
+        "SELECT pg_advisory_xact_lock($1, $2)",
+        DEVICE_RESULTS_LOCK,
+        device_id
+    )
+    .execute(conn)
+    .await?;
+    Ok(())
+}
+
 pub async fn save_responses(
     device_id: i32,
     device_serial_number: &str,
@@ -57,8 +76,29 @@ pub async fn save_responses(
     pool: &PgPool,
 ) -> Result<()> {
     let mut tx = pool.begin().await?;
+    if payload.responses.iter().any(|response| response.id > 0) {
+        lock_device_results(&mut tx, device_id).await?;
+    }
 
     for response in payload.responses {
+        // smithd sends a result again when its post failed, including one this
+        // api stored while the device only saw a timeout. Skipped before the
+        // side effects below so none runs twice. Synthetic results (negative
+        // ids) are snapshots stored without a command id. Scoped to the device
+        // so a result posted under another device's command id cannot hide it.
+        if response.id > 0
+            && sqlx::query_scalar!(
+                r#"SELECT EXISTS (
+                       SELECT 1 FROM command_response WHERE command_id = $1 AND device_id = $2
+                   ) AS "stored!""#,
+                response.id,
+                device_id
+            )
+            .fetch_one(&mut *tx)
+            .await?
+        {
+            continue;
+        }
         match response.command {
             SafeCommandRx::GetVariables => {
                 let variables = sqlx::query_as!(
@@ -824,7 +864,8 @@ pub async fn save_settings_report(
 
 #[cfg(test)]
 mod tests {
-    use super::{map_key_mgmt, save_responses, save_settings_report, schema};
+    use super::{lock_device_results, map_key_mgmt, save_responses, save_settings_report, schema};
+    use schema::{HomePost, SafeCommandRx};
     use sqlx::PgPool;
 
     #[test]
@@ -994,6 +1035,111 @@ mod tests {
             Some((Some(2), Some("a".to_owned())))
         );
 
+        Ok(())
+    }
+
+    async fn insert_device(pool: &PgPool, serial: &str) -> anyhow::Result<i32> {
+        Ok(
+            sqlx::query_scalar("INSERT INTO device (serial_number) VALUES ($1) RETURNING id")
+                .bind(serial)
+                .fetch_one(pool)
+                .await?,
+        )
+    }
+
+    async fn insert_get_variables(pool: &PgPool, device_id: i32) -> anyhow::Result<i32> {
+        Ok(sqlx::query_scalar(
+            "WITH bundle AS (INSERT INTO command_bundles DEFAULT VALUES RETURNING uuid)
+             INSERT INTO command_queue (device_id, cmd, continue_on_error, canceled, bundle)
+             SELECT $1, '\"GetVariables\"'::jsonb, false, false, uuid FROM bundle RETURNING id",
+        )
+        .bind(device_id)
+        .fetch_one(pool)
+        .await?)
+    }
+
+    // GetVariables queues an UpdateVariables: the side effect a resend must not repeat.
+    fn get_variables_result(command_id: i32) -> HomePost {
+        HomePost::new(
+            vec![schema::SafeCommandResponse {
+                id: command_id,
+                command: SafeCommandRx::GetVariables,
+                status: 0,
+            }],
+            None,
+            vec![],
+        )
+    }
+
+    /// Response rows of `device_id` for the command, and its queued UpdateVariables.
+    async fn stored(pool: &PgPool, device_id: i32, command_id: i32) -> anyhow::Result<(i64, i64)> {
+        Ok(sqlx::query_as(
+            "SELECT
+                 (SELECT count(*) FROM command_response WHERE command_id = $2 AND device_id = $1),
+                 (SELECT count(*) FROM command_queue WHERE device_id = $1 AND cmd::jsonb ? 'UpdateVariables')",
+        )
+        .bind(device_id)
+        .bind(command_id)
+        .fetch_one(pool)
+        .await?)
+    }
+
+    #[sqlx::test]
+    #[ignore = "needs the compose Postgres; run with --test-threads=1"]
+    async fn a_result_sent_again_is_stored_once_and_its_side_effects_run_once(
+        pool: PgPool,
+    ) -> anyhow::Result<()> {
+        let device_id = insert_device(&pool, "d").await?;
+        let command_id = insert_get_variables(&pool, device_id).await?;
+        save_responses(device_id, "d", get_variables_result(command_id), &pool).await?;
+        save_responses(device_id, "d", get_variables_result(command_id), &pool).await?;
+        assert_eq!(stored(&pool, device_id, command_id).await?, (1, 1));
+        Ok(())
+    }
+
+    #[sqlx::test]
+    #[ignore = "needs the compose Postgres; run with --test-threads=1"]
+    async fn a_resend_waits_for_the_post_still_running_and_then_skips(
+        pool: PgPool,
+    ) -> anyhow::Result<()> {
+        let device_id = insert_device(&pool, "d").await?;
+        let command_id = insert_get_variables(&pool, device_id).await?;
+        // The first post, still running: it holds the lock and has not committed its row.
+        let mut first = pool.begin().await?;
+        lock_device_results(&mut first, device_id).await?;
+        sqlx::query(
+            "INSERT INTO command_response (device_id, command_id, response, status)
+             VALUES ($1, $2, '\"GetVariables\"'::jsonb, 0)",
+        )
+        .bind(device_id)
+        .bind(command_id)
+        .execute(&mut *first)
+        .await?;
+
+        let resend = tokio::spawn({
+            let pool = pool.clone();
+            async move { save_responses(device_id, "d", get_variables_result(command_id), &pool).await }
+        });
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        assert!(!resend.is_finished(), "the resend waits for the first post");
+        first.commit().await?;
+        resend.await??;
+
+        assert_eq!(stored(&pool, device_id, command_id).await?, (1, 0));
+        Ok(())
+    }
+
+    #[sqlx::test]
+    #[ignore = "needs the compose Postgres; run with --test-threads=1"]
+    async fn a_result_under_another_devices_command_does_not_hide_the_real_one(
+        pool: PgPool,
+    ) -> anyhow::Result<()> {
+        let device_id = insert_device(&pool, "d").await?;
+        let other = insert_device(&pool, "o").await?;
+        let command_id = insert_get_variables(&pool, device_id).await?;
+        save_responses(other, "o", get_variables_result(command_id), &pool).await?;
+        save_responses(device_id, "d", get_variables_result(command_id), &pool).await?;
+        assert_eq!(stored(&pool, device_id, command_id).await?, (1, 1));
         Ok(())
     }
 
