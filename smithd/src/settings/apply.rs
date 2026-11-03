@@ -7,7 +7,7 @@ use super::actor::{OwnedFile, Step, System, check_interval_s};
 use super::driver::{DriverPaths, VENDOR_MODULE, wifi_interface};
 use super::ntp::{CHRONY_CONF, CHRONY_SOURCES_DIR, timesyncd_running};
 use super::plan::{FileChange, NtpDaemon, OwnedFiles};
-use super::read::{Reading, SettingsReader, run, run_for, set_bgscan};
+use super::read::{Reading, SettingsReader, run, run_for, set_bgscan, wifi_connected};
 use crate::commander::CommanderHandle;
 use crate::postman::LastPoll;
 use crate::utils::files::{
@@ -16,8 +16,9 @@ use crate::utils::files::{
 use crate::utils::schema::{RoamTuning, SafeCommandResponse};
 use anyhow::{Context, Result, anyhow, bail};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
-use tracing::warn;
+use tracing::{debug, warn};
 use zbus::Connection;
 
 const DRIVER_CONF: &str = "/etc/modprobe.d/zz-smith-rtl8822ce.conf";
@@ -36,6 +37,14 @@ const MODPROBE_RETRY_DELAY: Duration = Duration::from_secs(2);
 /// `modprobe`; callers can't use it before then.
 const DRIVER_BACK_TIMEOUT: Duration = Duration::from_secs(30);
 const DRIVER_POLL: Duration = Duration::from_millis(500);
+/// A loaded module has a directory here.
+const SYS_MODULE: &str = "/sys/module";
+/// NM reconnects a few seconds after the interface comes back. Waited for so
+/// the bgscan write and the read after a reload find Wi-Fi up.
+const ASSOCIATION_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Checks run every minute; the chrony config only changes by hand.
+static CHRONY_WARNED: AtomicBool = AtomicBool::new(false);
 /// How long `nmcli` waits for the activation, and the cap on the process.
 const NM_ACTIVATION_WAIT_S: &str = "30";
 const NM_ACTIVATION_TIMEOUT: Duration = Duration::from_secs(40);
@@ -122,7 +131,14 @@ pub async fn reload_driver(
     interface: Option<&str>,
 ) -> Result<()> {
     let [(rmmod, rmmod_args), (modprobe, modprobe_args)] = driver_reload_steps(module);
-    run_for(DRIVER_TIMEOUT, rmmod, &rmmod_args).await?;
+    // A reload cut short (smithd killed between the two) leaves the module
+    // unloaded, and `rmmod` would then fail before the `modprobe` that brings
+    // Wi-Fi back.
+    if module_loaded(module).await {
+        run_for(DRIVER_TIMEOUT, rmmod, &rmmod_args).await?;
+    } else {
+        warn!("settings: {module} is not loaded; loading it");
+    }
     let mut tries = 0;
     loop {
         tries += 1;
@@ -143,6 +159,12 @@ pub async fn reload_driver(
         tokio::time::sleep(DRIVER_POLL).await;
     }
     Ok(())
+}
+
+async fn module_loaded(module: &str) -> bool {
+    tokio::fs::try_exists(Path::new(SYS_MODULE).join(module))
+        .await
+        .unwrap_or(true)
 }
 
 /// The vendor driver's roam values can only be written once its proc dir exists too.
@@ -259,7 +281,11 @@ fn ntp_daemon(timesyncd_running: bool, chrony_conf: Option<&str>) -> Option<NtpD
         words.next() == Some("sourcedir") && words.next() == Some(CHRONY_SOURCES_DIR)
     });
     if !reads_sources {
-        warn!("settings: {CHRONY_CONF} has no sourcedir {CHRONY_SOURCES_DIR}");
+        if CHRONY_WARNED.swap(true, Ordering::Relaxed) {
+            debug!("settings: {CHRONY_CONF} has no sourcedir {CHRONY_SOURCES_DIR}");
+        } else {
+            warn!("settings: {CHRONY_CONF} has no sourcedir {CHRONY_SOURCES_DIR}");
+        }
         return None;
     }
     Some(NtpDaemon::Chrony)
@@ -346,6 +372,29 @@ impl DeviceSystem {
             .as_deref()
             .ok_or_else(|| anyhow!("no Wi-Fi interface"))
     }
+
+    /// Not an error when it times out: the options may keep Wi-Fi from
+    /// associating, which the revert is there for.
+    async fn wait_for_association(&mut self) {
+        let deadline = tokio::time::Instant::now() + ASSOCIATION_TIMEOUT;
+        loop {
+            match self.reader.connection().await {
+                Ok(conn) => match wifi_connected(&conn).await {
+                    Ok(true) => return,
+                    Ok(false) => {}
+                    Err(err) => debug!("settings: reading the Wi-Fi association: {err:#}"),
+                },
+                Err(err) => debug!("settings: connecting to D-Bus: {err:#}"),
+            }
+            if tokio::time::Instant::now() >= deadline {
+                warn!(
+                    "settings: Wi-Fi not associated {ASSOCIATION_TIMEOUT:?} after the driver reload"
+                );
+                return;
+            }
+            tokio::time::sleep(DRIVER_POLL).await;
+        }
+    }
 }
 
 impl System for DeviceSystem {
@@ -381,7 +430,9 @@ impl System for DeviceSystem {
                     VENDOR_MODULE,
                     self.wifi.as_deref(),
                 )
-                .await
+                .await?;
+                self.wait_for_association().await;
+                Ok(())
             }
             Step::RoamFlags(flags) => {
                 write_roam_flags(self.reader.driver_paths(), self.wifi()?, flags).await
