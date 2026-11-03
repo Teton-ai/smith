@@ -344,7 +344,10 @@ impl Postman {
                         self.problems = None;
                     };
                     // The api stored the results even if its answer does not parse.
-                    Some(response.json().await.unwrap_or_default())
+                    Some(response.json().await.unwrap_or_else(|err| {
+                        warn!("Could not parse the /home answer, running no commands: {err}");
+                        HomePostResponse::default()
+                    }))
                 }
                 StatusCode::UNAUTHORIZED => {
                     // Standard access/refresh-token flow: the bearer (probably
