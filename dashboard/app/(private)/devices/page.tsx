@@ -33,6 +33,7 @@ import LabelAutocomplete from "@/app/components/LabelAutocomplete";
 import { EmergencyConfirmModal, Modal } from "@/app/components/modal";
 import NetworkQualityIndicator from "@/app/components/NetworkQualityIndicator";
 import { RelativeTime } from "@/app/components/RelativeTime";
+import { formatLabel, labelEntries, labelName } from "@/app/utils/format";
 import {
 	type Device,
 	type DistributionRolloutStats,
@@ -960,9 +961,12 @@ const DevicesPage = () => {
 
 	const addLabelFilter = (labelInput: string) => {
 		const parts = labelInput.split("=");
-		if (parts.length === 2) {
-			const [key, value] = parts;
-			const newFilters = [...labelFilters, `${key.trim()}=${value.trim()}`];
+		if (parts.length <= 2) {
+			const [key, value = ""] = parts;
+			const newFilters = [
+				...labelFilters,
+				formatLabel(key.trim(), value.trim()),
+			];
 			setLabelFilters(newFilters);
 
 			// Update URL
@@ -1322,7 +1326,7 @@ const DevicesPage = () => {
 									return (
 										<LabelChip
 											key={filter}
-											name={name}
+											name={labelName(name)}
 											value={value}
 											active
 											title={`Remove filter: ${filter}`}
@@ -1531,13 +1535,13 @@ const DevicesPage = () => {
 											{device.labels &&
 											Object.keys(device.labels).length > 0 ? (
 												<div className="flex flex-wrap gap-1.5">
-													{Object.entries(device.labels).map(([key, value]) => {
-														const filter = `${key}=${value}`;
+													{labelEntries(device.labels).map(([key, value]) => {
+														const filter = formatLabel(key, value);
 														const isFiltered = labelFilters.includes(filter);
 														return (
 															<LabelChip
 																key={key}
-																name={key}
+																name={labelName(key)}
 																value={value}
 																active={isFiltered}
 																title={

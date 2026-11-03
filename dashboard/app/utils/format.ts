@@ -1,5 +1,30 @@
 const UNITS = ["B", "KB", "MB", "GB", "TB"];
 
+/** A tag is a label stored with an empty value and written as just its key. */
+export function formatLabel(key: string, value: string): string {
+	return value === "" ? key : `${key}=${value}`;
+}
+
+/** For display only: filters must keep using the plain key. */
+export function labelName(key: string): string {
+	return key === "pinned" ? "📍 pinned" : key;
+}
+
+export function displayLabel(key: string, value: string): string {
+	return formatLabel(labelName(key), value);
+}
+
+/** Pinned first, then keys in a deterministic, case-sensitive order. */
+export function labelEntries(
+	labels: Record<string, string> | null | undefined,
+): [string, string][] {
+	return Object.entries(labels ?? {}).sort(
+		([a], [b]) =>
+			Number(b === "pinned") - Number(a === "pinned") ||
+			(a < b ? -1 : a > b ? 1 : 0),
+	);
+}
+
 /** Sizes are shown at three significant figures — enough to compare two files
  *  at a glance without implying byte-level precision. */
 export function humanBytes(bytes: number): string {
