@@ -12,7 +12,7 @@ use crate::utils::net_guard::NetGuard;
 use crate::utils::schema::{SafeCommandRequest, SafeCommandResponse, SafeCommandRx, SafeCommandTx};
 use std::collections::HashMap;
 use tokio::sync::{mpsc, oneshot};
-use tracing::{info, warn};
+use tracing::{error, info, warn};
 
 mod files;
 mod free;
@@ -228,6 +228,26 @@ struct SafeCommandState {
     response: Option<SafeCommandResponse>,
 }
 
+impl SafeCommandState {
+    fn queued() -> Self {
+        Self {
+            state: State::Queued,
+            response: None,
+        }
+    }
+
+    fn completed(response: SafeCommandResponse) -> Self {
+        Self {
+            state: State::Completed,
+            response: Some(response),
+        }
+    }
+}
+
+/// Bounds results kept while posts fail. No commands arrive during such an outage,
+/// so only a burst followed by a long outage reaches the bound.
+const MAX_KEPT_RESULTS: usize = 100;
+
 struct Commander {
     shutdown: ShutdownSignals,
     receiver: mpsc::Receiver<CommanderMessage>,
@@ -246,6 +266,42 @@ enum CommanderMessage {
     GetResults {
         tx: oneshot::Sender<Vec<SafeCommandResponse>>,
     },
+    RequeueResults {
+        actions: Vec<SafeCommandResponse>,
+    },
+}
+
+/// Puts back results whose post failed. An entry already under the same id is
+/// newer (a fresh report, or a re-sent command still running) and wins.
+fn requeue_results(
+    results: &mut HashMap<i32, SafeCommandState>,
+    actions: Vec<SafeCommandResponse>,
+) {
+    for action in actions {
+        results
+            .entry(action.id)
+            .or_insert_with(|| SafeCommandState::completed(action));
+    }
+    // Command ids come from a sequence, so the lowest is the oldest command.
+    // The synthetic ids (negative) are a few reports replaced by their next
+    // version; they go last.
+    let mut completed: Vec<i32> = results
+        .iter()
+        .filter(|(_, state)| state.state == State::Completed)
+        .map(|(id, _)| *id)
+        .collect();
+    let excess = completed.len().saturating_sub(MAX_KEPT_RESULTS);
+    if excess == 0 {
+        return;
+    }
+    completed.sort_unstable_by_key(|id| (*id < 0, *id));
+    for id in completed.into_iter().take(excess) {
+        results.remove(&id);
+        error!(
+            command_id = id,
+            "More than {MAX_KEPT_RESULTS} results waiting for the api; dropped the oldest"
+        );
+    }
 }
 
 impl Commander {
@@ -273,10 +329,7 @@ impl Commander {
                     match msg {
                         CommanderMessage::QueueCommand { action } => {
                             info!("Received command {:?}", action);
-                            self.results.insert(action.id, SafeCommandState {
-                                state: State::Queued,
-                                response: None,
-                            });
+                            self.results.insert(action.id, SafeCommandState::queued());
                             _ = self.queue.send(action).await;
                         }
                         CommanderMessage::GetResults { tx } => {
@@ -294,17 +347,17 @@ impl Commander {
                             });
                         }
                         CommanderMessage::QueueResponse { action } => {
-                            self.results.insert(action.id, SafeCommandState {
-                                state: State::Completed,
-                                response: Some(action),
-                            });
+                            self.results.insert(action.id, SafeCommandState::completed(action));
+                        }
+                        CommanderMessage::RequeueResults { actions } => {
+                            requeue_results(&mut self.results, actions);
                         }
                     }
                 }
                 Some(response) = self.responses.recv() => {
-                    let state = self.results.get_mut(&response.id).unwrap();
-                    state.state = State::Completed;
-                    state.response = Some(response);
+                    // Inserted rather than looked up: the entry is always there
+                    // today, and a missing one must not panic the commander.
+                    self.results.insert(response.id, SafeCommandState::completed(response));
                 }
                 _ = self.shutdown.token.cancelled() => {
                     break;
@@ -358,6 +411,17 @@ impl CommanderHandle {
         }
     }
 
+    /// Results taken by `get_results` whose post failed, sent on the next poll.
+    pub async fn requeue_results(&self, actions: Vec<SafeCommandResponse>) {
+        if actions.is_empty() {
+            return;
+        }
+        _ = self
+            .sender
+            .send(CommanderMessage::RequeueResults { actions })
+            .await;
+    }
+
     pub async fn get_results(&self) -> Vec<SafeCommandResponse> {
         let (tx, rx) = oneshot::channel();
         _ = self.sender.send(CommanderMessage::GetResults { tx }).await;
@@ -379,5 +443,62 @@ mod tests {
         assert!(!changes_network(&SafeCommandTx::Ping));
         assert!(!changes_network(&SafeCommandTx::ReportNMProfiles));
         assert!(!changes_network(&SafeCommandTx::TestNetwork));
+    }
+
+    fn pong(id: i32, status: i32) -> SafeCommandResponse {
+        SafeCommandResponse {
+            id,
+            command: SafeCommandRx::Pong,
+            status,
+        }
+    }
+
+    fn responses(results: &HashMap<i32, SafeCommandState>) -> Vec<(i32, i32)> {
+        let mut responses: Vec<_> = results
+            .values()
+            .filter_map(|state| state.response.as_ref().map(|r| (r.id, r.status)))
+            .collect();
+        responses.sort_unstable();
+        responses
+    }
+
+    #[test]
+    fn a_requeued_result_is_sent_again() {
+        let mut results = HashMap::new();
+        requeue_results(&mut results, vec![pong(7, 0)]);
+        assert_eq!(responses(&results), [(7, 0)]);
+        assert_eq!(results.get(&7).map(|s| &s.state), Some(&State::Completed));
+    }
+
+    #[test]
+    fn a_newer_result_under_the_same_id_wins_over_the_requeued_one() {
+        let mut results = HashMap::from([(-3, SafeCommandState::completed(pong(-3, 0)))]);
+        requeue_results(&mut results, vec![pong(-3, 1)]);
+        assert_eq!(responses(&results), [(-3, 0)]);
+    }
+
+    #[test]
+    fn a_running_command_is_not_marked_done_by_a_requeued_result() {
+        let mut results = HashMap::from([(7, SafeCommandState::queued())]);
+        requeue_results(&mut results, vec![pong(7, 0)]);
+        assert_eq!(results.get(&7).map(|s| &s.state), Some(&State::Queued));
+        assert!(responses(&results).is_empty());
+    }
+
+    #[test]
+    fn past_the_bound_the_oldest_commands_are_dropped_before_reports_and_running_commands() {
+        let mut results = HashMap::from([(0, SafeCommandState::queued())]);
+        // One over the bound once the report is counted, in no particular order.
+        let max = i32::try_from(MAX_KEPT_RESULTS).unwrap();
+        let mut actions: Vec<_> = (1..=max).rev().map(|id| pong(id, 0)).collect();
+        actions.insert(max as usize / 2, pong(-6, 0));
+        requeue_results(&mut results, actions);
+        assert!(
+            !results.contains_key(&1),
+            "the lowest command id is dropped"
+        );
+        assert!(results.contains_key(&-6), "the report is kept");
+        assert_eq!(results.get(&0).map(|s| &s.state), Some(&State::Queued));
+        assert_eq!(results.len(), MAX_KEPT_RESULTS + 1);
     }
 }

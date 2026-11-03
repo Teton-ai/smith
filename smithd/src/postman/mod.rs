@@ -137,6 +137,13 @@ impl Postman {
 
         loop {
             tokio::select! {
+                // Biased so shutdown wins: while posts fail, the next tick is
+                // ready after each one, and an unbiased pick kept polling for
+                // several posts after SIGTERM.
+                biased;
+                _ = self.shutdown.token.cancelled() => {
+                    break;
+                }
                 Some(msg) = self.receiver.recv() => {
                     _ = self.handle_message(msg).await;
                 }
@@ -160,7 +167,15 @@ impl Postman {
 
                     let ping_home_body = HomePost::new(responses, release_id, service_statuses);
 
-                    let response = self.ping_home(ping_home_body).await;
+                    let response = match self.ping_home(&ping_home_body).await {
+                        Some(response) => response,
+                        None => {
+                            // get_results already drained these, including commands
+                            // that finished during the outage; requeue or they are lost.
+                            self.commander.requeue_results(ping_home_body.responses).await;
+                            HomePostResponse::default()
+                        }
+                    };
 
                     let target_release_id = response.target_release_id;
                     self.services_to_check = response.services;
@@ -193,9 +208,6 @@ impl Postman {
                     if let Some(update) = refresh_system_info(&mut system_info).await {
                         self.commander.insert_result(vec![update]).await;
                     }
-                }
-                _ = self.shutdown.token.cancelled() => {
-                    break;
                 }
             }
         }
@@ -299,7 +311,8 @@ impl Postman {
         Ok(())
     }
 
-    async fn ping_home(&mut self, message: HomePost) -> HomePostResponse {
+    /// `None` when the post was not delivered, so its results still need sending.
+    async fn ping_home(&mut self, message: &HomePost) -> Option<HomePostResponse> {
         // Prefer the short-lived JWT from session; fall back to the opaque
         // token (which is also what session returns when no JWT is cached).
         let token = self
@@ -311,7 +324,7 @@ impl Postman {
 
         let result = self
             .network
-            .send_compressed_post(&token, "/home", &message)
+            .send_compressed_post(&token, "/home", message)
             .await;
 
         match result {
@@ -322,7 +335,8 @@ impl Postman {
                         self.police.report_problem_solved(problem).await;
                         self.problems = None;
                     };
-                    response.json().await.unwrap_or_default()
+                    // The api stored the results even if its answer does not parse.
+                    Some(response.json().await.unwrap_or_default())
                 }
                 StatusCode::UNAUTHORIZED => {
                     // Standard access/refresh-token flow: the bearer (probably
@@ -342,14 +356,14 @@ impl Postman {
                             warn!("JWT refresh failed transiently; keeping token");
                         }
                     }
-                    HomePostResponse::default()
+                    None
                 }
                 _ => {
                     error!(
                         "Posting failed with status: {:?} {:?}",
                         status_code, response
                     );
-                    HomePostResponse::default()
+                    None
                 }
             },
             Err(err) => {
@@ -363,7 +377,7 @@ impl Postman {
                 if self.problems.is_none() {
                     self.problems = self.police.report_problem_starting().await;
                 }
-                HomePostResponse::default()
+                None
             }
         }
     }
