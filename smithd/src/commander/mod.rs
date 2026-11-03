@@ -416,10 +416,15 @@ impl CommanderHandle {
         if actions.is_empty() {
             return;
         }
-        _ = self
+        let count = actions.len();
+        if self
             .sender
             .send(CommanderMessage::RequeueResults { actions })
-            .await;
+            .await
+            .is_err()
+        {
+            error!("Commander stopped; {count} results whose post failed are lost");
+        }
     }
 
     pub async fn get_results(&self) -> Vec<SafeCommandResponse> {
@@ -489,9 +494,11 @@ mod tests {
     fn past_the_bound_the_oldest_commands_are_dropped_before_reports_and_running_commands() {
         let mut results = HashMap::from([(0, SafeCommandState::queued())]);
         // One over the bound once the report is counted, in no particular order.
-        let max = i32::try_from(MAX_KEPT_RESULTS).unwrap();
-        let mut actions: Vec<_> = (1..=max).rev().map(|id| pong(id, 0)).collect();
-        actions.insert(max as usize / 2, pong(-6, 0));
+        let mut actions: Vec<_> = (1..=MAX_KEPT_RESULTS)
+            .rev()
+            .map(|id| pong(id as i32, 0))
+            .collect();
+        actions.insert(MAX_KEPT_RESULTS / 2, pong(-6, 0));
         requeue_results(&mut results, actions);
         assert!(
             !results.contains_key(&1),
