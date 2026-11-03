@@ -10,6 +10,8 @@ mod ntp;
 mod plan;
 mod read;
 
+pub(crate) use apply::reload_driver;
+
 use crate::commander::CommanderHandle;
 use crate::shutdown::ShutdownSignals;
 use crate::utils::schema::{SafeCommandRx, SettingsReport, WantedSettings};

@@ -28,7 +28,7 @@ const RESTART_DELAY: Duration = Duration::from_secs(30 * 60);
 
 /// Restarts are only armed once the daemon has been up this long, so a device
 /// that boots without connectivity does not reboot-loop.
-const ARM_AFTER: Duration = Duration::from_secs(15 * 60);
+pub(crate) const ARM_AFTER: Duration = Duration::from_secs(15 * 60);
 
 /// Hold lease granted when the caller does not ask for a specific TTL.
 const DEFAULT_HOLD_TTL: Duration = Duration::from_secs(10 * 60);
