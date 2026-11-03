@@ -59,6 +59,20 @@ pub async fn save_responses(
     let mut tx = pool.begin().await?;
 
     for response in payload.responses {
+        // smithd sends a result again when its post failed, including one this
+        // api stored while the device only saw a timeout. Skipped before the
+        // side effects below so none runs twice. Synthetic results (negative
+        // ids) are snapshots stored without a command id.
+        if response.id > 0
+            && sqlx::query_scalar!(
+                r#"SELECT EXISTS (SELECT 1 FROM command_response WHERE command_id = $1) AS "stored!""#,
+                response.id
+            )
+            .fetch_one(&mut *tx)
+            .await?
+        {
+            continue;
+        }
         match response.command {
             SafeCommandRx::GetVariables => {
                 let variables = sqlx::query_as!(
@@ -994,6 +1008,53 @@ mod tests {
             Some((Some(2), Some("a".to_owned())))
         );
 
+        Ok(())
+    }
+
+    #[sqlx::test]
+    #[ignore = "needs the compose Postgres; run with --test-threads=1"]
+    async fn a_result_sent_again_is_stored_once_and_its_side_effects_run_once(
+        pool: PgPool,
+    ) -> anyhow::Result<()> {
+        use schema::{HomePost, SafeCommandResponse, SafeCommandRx};
+
+        let device_id: i32 =
+            sqlx::query_scalar("INSERT INTO device (serial_number) VALUES ('d') RETURNING id")
+                .fetch_one(&pool)
+                .await?;
+        let command_id: i32 = sqlx::query_scalar(
+            "WITH bundle AS (INSERT INTO command_bundles DEFAULT VALUES RETURNING uuid)
+             INSERT INTO command_queue (device_id, cmd, continue_on_error, canceled, bundle)
+             SELECT $1, '\"GetVariables\"'::jsonb, false, false, uuid FROM bundle RETURNING id",
+        )
+        .bind(device_id)
+        .fetch_one(&pool)
+        .await?;
+        // GetVariables queues an UpdateVariables: the side effect a resend must not repeat.
+        let post = || {
+            HomePost::new(
+                vec![SafeCommandResponse {
+                    id: command_id,
+                    command: SafeCommandRx::GetVariables,
+                    status: 0,
+                }],
+                None,
+                vec![],
+            )
+        };
+        save_responses(device_id, "d", post(), &pool).await?;
+        save_responses(device_id, "d", post(), &pool).await?;
+
+        let counts: (i64, i64) = sqlx::query_as(
+            "SELECT
+                 (SELECT count(*) FROM command_response WHERE command_id = $2),
+                 (SELECT count(*) FROM command_queue WHERE device_id = $1 AND cmd::jsonb ? 'UpdateVariables')",
+        )
+        .bind(device_id)
+        .bind(command_id)
+        .fetch_one(&pool)
+        .await?;
+        assert_eq!(counts, (1, 1));
         Ok(())
     }
 
