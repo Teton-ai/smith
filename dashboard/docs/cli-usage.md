@@ -72,7 +72,7 @@ where `command`, `TYPE`, `NAME`, and `flags` are:
 Most commands support flexible device selection through a common set of flags:
 
 - **Positional IDs**: Specify one or more device serial numbers or IDs
-- `--label KEY=VALUE` (`-l`): Filter by labels (can be used multiple times)
+- `--label KEY[=VALUE]` (`-l`): Filter by labels, using just the key for a tag (can be used multiple times)
 - `--online`: Show only online devices (last seen < 5 minutes)
 - `--offline`: Show only offline devices (last seen >= 5 minutes)
 - `--search` (`-s`): Enable partial matching for device IDs (matches serial number, hostname, or model)
@@ -161,19 +161,42 @@ sm run ABC123 -w -- dmesg | tail -n 50
 
 ### Managing labels
 
+Labels have a key and a value, such as `env=production`. A tag is a label with
+an empty value, displayed as just its key, such as `maintenance`.
+
+With `sm label`, use `key=value` to set a label, a bare `key` to set a tag,
+and `key=` to remove either one. Only the named keys change; other labels are
+preserved. Setting a key again replaces its previous value.
+
 ```sh
 # Add environment label
 sm label -d ABC123 env=production
 
+# Add a tag, which is a label with only a key
+sm label -d ABC123 maintenance
+
 # Remove the environment label without changing other labels
 sm label -d ABC123 env=
 
+# Remove a tag
+sm label -d ABC123 maintenance=
+
 # Query by label
 sm get d -l env=production
+sm get d -l maintenance
 
 # Update multiple devices
 sm label -d rpi -s region=warehouse-1
 ```
+
+The dashboard and CLI text output display `pinned` first, then the remaining
+labels and tags sorted by key in case-sensitive order. JSON object key order
+is not guaranteed.
+
+When calling the API directly, use `PATCH /devices/{device_id}/labels` with
+`{"changes":{"env":"production","maintenance":"","old-label":null}}`.
+A string sets a value, an empty string sets a tag, and `null` removes the key.
+This differs from the CLI's `key=` removal syntax.
 
 ### Pinning devices
 
@@ -194,6 +217,8 @@ sm unpin -l experiment=build-b
 ```
 
 Both commands list the devices and their target release, then ask for confirmation. `--yes` skips the prompt. Unpinning sets the target to the latest release of the device's distribution, if one is available. Future full rollouts also update the device.
+
+Pinned devices carry the `pinned` tag, so `-l pinned` selects them like any other label. The tag follows the pin state: `sm label` refuses to set or remove it. Use `sm pin ABC123` to pin a device and `sm unpin ABC123` to unpin it and remove the tag.
 
 ## Tips
 

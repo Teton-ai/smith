@@ -15,8 +15,8 @@ pub struct Cli {
 pub struct DeviceSelector {
     /// Device serial numbers or IDs. If omitted, shows all devices.
     pub ids: Vec<String>,
-    /// Filter by labels (format: key=value). Can be used multiple times.
-    #[arg(short, long = "label", value_name = "KEY=VALUE")]
+    /// Filter by labels (format: key=value, or key for a tag). Can be used multiple times.
+    #[arg(short, long = "label", value_name = "KEY[=VALUE]")]
     pub labels: Vec<String>,
     /// Show only online devices (last seen < 5 minutes)
     #[arg(long, conflicts_with = "offline")]
@@ -197,8 +197,8 @@ Examples:
   sm test-network extended -l env=staging -d 5 -w
 ")]
     Extended {
-        /// Filter by labels (format: key=value). Can be used multiple times.
-        #[arg(short, long = "label", value_name = "KEY=VALUE", required = true)]
+        /// Filter by labels (format: key=value, or key for a tag). Can be used multiple times.
+        #[arg(short, long = "label", value_name = "KEY[=VALUE]", required = true)]
         labels: Vec<String>,
         /// Duration in minutes (3-8)
         #[arg(short, long, default_value = "3", value_parser = clap::value_parser!(u32).range(3..=8))]
@@ -439,20 +439,26 @@ Examples:
 
     /// Set labels on devices with filters
     ///
-    /// Setting a label overwrites any existing value for that key. Filter on
-    /// labels in other commands with `-l`, e.g. `sm get d -l env=production`.
+    /// Setting a label overwrites any existing value for that key. A label with
+    /// only a key is a tag. Filter on labels in other commands with `-l`, e.g.
+    /// `sm get d -l env=production` or `sm get d -l maintenance`.
+    ///
+    /// The `pinned` tag cannot be set or removed here: it follows the pin
+    /// state, so use `sm pin` and `sm unpin`.
     #[command(after_long_help = "\
 Examples:
   sm label -d ABC123 env=production
   sm label -d ABC123 env=production region=us-west
+  sm label -d ABC123 maintenance
+  sm label -d ABC123 env=
   sm label -l region=us-east env=production
   sm label -d rpi -s location=warehouse-1
 ")]
     Label {
         // Not `DeviceSelector`: its variadic positional IDs would swallow the
         // labels below, so devices are named with `--device` instead.
-        /// Filter by labels (format: key=value). Can be used multiple times.
-        #[arg(short, long = "label", value_name = "KEY=VALUE")]
+        /// Filter by labels (format: key=value, or key for a tag). Can be used multiple times.
+        #[arg(short, long = "label", value_name = "KEY[=VALUE]")]
         labels: Vec<String>,
         /// Only online devices (last seen < 5 minutes)
         #[arg(long, conflicts_with = "offline")]
@@ -466,9 +472,9 @@ Examples:
         /// Specific device serial numbers or IDs to target
         #[arg(short, long = "device")]
         devices: Vec<String>,
-        /// Labels to set on the devices (format: key=value). Can be used multiple times.
+        /// Labels to set on the devices (format: key=value, or key for a tag). Can be used multiple times.
         /// Use `key=` with an empty value to remove the label.
-        #[arg(required = true, value_name = "KEY=VALUE")]
+        #[arg(required = true, value_name = "KEY[=VALUE]")]
         set_labels: Vec<String>,
     },
 
@@ -496,12 +502,15 @@ Examples:
     /// selection. It still moves when a canary targets it by label or ID, when
     /// its release is rolled back, or when its target release is set directly.
     /// Use `--release` to put the devices on a release and keep them there.
+    ///
+    /// Pinned devices carry the `pinned` tag until they are unpinned.
     #[command(after_long_help = "\
 Examples:
   sm pin ABC123
   sm pin ABC123 DEF456 --release 812
   sm pin -l experiment=build-b --release 812 -y
   sm get d --pinned
+  sm get d -l pinned
 ")]
     Pin {
         #[command(flatten)]
