@@ -26,6 +26,11 @@ pub struct Device {
     pub online: bool,
     pub created_on: DateTime<Utc>,
     pub approved: bool,
+    pub approved_by_user_id: Option<i32>,
+    /// Approving account's email, or its subject if it has none. Only returned by
+    /// the single-device endpoint, to callers with the `users:read` permission.
+    pub approved_by_email: Option<String>,
+    pub approved_at: Option<DateTime<Utc>>,
     pub has_token: Option<bool>,
     pub release_id: Option<i32>,
     pub target_release_id: Option<i32>,

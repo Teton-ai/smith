@@ -160,6 +160,8 @@ pub async fn get_devices(
             CASE WHEN d.last_ping > NOW() - INTERVAL '3 minutes' THEN true ELSE false END as "online!",
             d.created_on,
             d.approved,
+            d.approved_by_user_id,
+            d.approved_at,
             d.token IS NOT NULL as has_token,
             d.release_id,
             d.target_release_id,
@@ -457,6 +459,10 @@ pub async fn get_devices(
                 online: row.online,
                 created_on: row.created_on,
                 approved: row.approved,
+                approved_by_user_id: row.approved_by_user_id,
+                // Resolving an email here would expose it to every fleet reader.
+                approved_by_email: None,
+                approved_at: row.approved_at,
                 has_token: row.has_token,
                 release_id: row.release_id,
                 target_release_id: row.target_release_id,
@@ -2082,6 +2088,26 @@ pub async fn issue_commands_to_device(
     tag = DEVICES_TAG
 )]
 pub async fn get_device_info(
+    Extension(current_user): Extension<CurrentUser>,
+    Path(device_id): Path<String>,
+    Extension(state): Extension<State>,
+) -> axum::response::Result<Json<Device>, StatusCode> {
+    let Json(mut device) = load_device_info(Path(device_id), Extension(state.clone())).await?;
+    device.approved_by_email = visible_approver_email(
+        &state.pg_pool,
+        current_user.has_permission("users", "read"),
+        device.approved_by_user_id,
+    )
+    .await
+    .map_err(|err| {
+        error!("Failed to look up device approver: {err}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+    Ok(Json(device))
+}
+
+/// Loads a device without resolving permission-gated fields.
+pub async fn load_device_info(
     Path(device_id): Path<String>,
     Extension(state): Extension<State>,
 ) -> axum::response::Result<Json<Device>, StatusCode> {
@@ -2095,6 +2121,8 @@ pub async fn get_device_info(
         CASE WHEN d.last_ping > NOW() - INTERVAL '3 minutes' THEN true ELSE false END as "online!",
         d.created_on,
         d.approved,
+        d.approved_by_user_id,
+        d.approved_at,
         d.token IS NOT NULL as has_token,
         d.release_id,
         d.target_release_id,
@@ -2301,6 +2329,9 @@ pub async fn get_device_info(
         online: device_row.online,
         created_on: device_row.created_on,
         approved: device_row.approved,
+        approved_by_user_id: device_row.approved_by_user_id,
+        approved_by_email: None,
+        approved_at: device_row.approved_at,
         has_token: device_row.has_token,
         release_id: device_row.release_id,
         target_release_id: device_row.target_release_id,
@@ -2645,6 +2676,72 @@ pub async fn delete_label(
     Ok(StatusCode::NO_CONTENT)
 }
 
+struct DeviceApproval {
+    serial_number: String,
+    newly_approved: bool,
+}
+
+/// Attribution belongs to whoever actually approved the device, so repeat calls
+/// leave it untouched. The row lock makes that decision safe against a concurrent
+/// approval or revocation.
+async fn record_device_approval(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    device_id: i32,
+    user_id: i32,
+) -> Result<DeviceApproval, sqlx::Error> {
+    let device = sqlx::query!(
+        "SELECT serial_number, approved FROM device WHERE id = $1 FOR UPDATE",
+        device_id
+    )
+    .fetch_one(&mut **tx)
+    .await?;
+
+    if !device.approved {
+        sqlx::query!(
+            "UPDATE device SET approved = true, approved_by_user_id = $1, approved_at = NOW() WHERE id = $2",
+            user_id,
+            device_id
+        )
+        .execute(&mut **tx)
+        .await?;
+    }
+
+    Ok(DeviceApproval {
+        serial_number: device.serial_number,
+        newly_approved: !device.approved,
+    })
+}
+
+/// The ledger entry for an approval request, or None when it changed nothing.
+fn approval_ledger_entry(
+    newly_approved: bool,
+    release_assigned: bool,
+) -> Option<(&'static str, &'static str)> {
+    match (newly_approved, release_assigned) {
+        (true, true) => Some(("approved", "Device approved and release assigned.")),
+        (true, false) => Some(("approved", "Device approved.")),
+        (false, true) => Some(("release", "Release assigned.")),
+        (false, false) => None,
+    }
+}
+
+/// Emails sit behind users:read, so other callers only get the opaque account id.
+async fn visible_approver_email(
+    pool: &sqlx::PgPool,
+    can_read_users: bool,
+    approver_id: Option<i32>,
+) -> Result<Option<String>, sqlx::Error> {
+    let Some(approver_id) = approver_id.filter(|_| can_read_users) else {
+        return Ok(None);
+    };
+    sqlx::query_scalar!(
+        r#"SELECT COALESCE(email, auth0_user_id) AS "identity!" FROM auth.users WHERE id = $1"#,
+        approver_id
+    )
+    .fetch_optional(pool)
+    .await
+}
+
 #[utoipa::path(
     post,
     path = "/devices/{device_id}/approval",
@@ -2654,7 +2751,7 @@ pub async fn delete_label(
     request_body(content = Option<ApproveDeviceBody>, content_type = "application/json"),
     responses(
         (status = 200, description = "Device approved successfully", body = bool),
-        (status = 404, description = "Release not found"),
+        (status = 404, description = "Device or release not found"),
         (status = 500, description = "Failed to approve device", body = String),
     ),
     security(
@@ -2663,6 +2760,7 @@ pub async fn delete_label(
     tag = DEVICES_TAG
 )]
 pub async fn approve_device(
+    Extension(current_user): Extension<CurrentUser>,
     Path(device_id): Path<i32>,
     Extension(state): Extension<State>,
     body: Option<Json<ApproveDeviceBody>>,
@@ -2689,18 +2787,15 @@ pub async fn approve_device(
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
 
-    let response = sqlx::query!(
-        r#"UPDATE device SET approved = true WHERE id = $1 RETURNING serial_number"#,
-        device_id
-    )
-    .fetch_one(&mut *tx)
-    .await
-    .map_err(|err| {
-        error!("Failed to approve device {err}");
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
-
-    let approved_serial_number = response.serial_number;
+    let approval = record_device_approval(&mut tx, device_id, current_user.user_id)
+        .await
+        .map_err(|err| {
+            error!("Failed to approve device {err}");
+            match err {
+                sqlx::Error::RowNotFound => StatusCode::NOT_FOUND,
+                _ => StatusCode::INTERNAL_SERVER_ERROR,
+            }
+        })?;
 
     if let Some(release_id) = target_release_id {
         sqlx::query!(
@@ -2716,24 +2811,23 @@ pub async fn approve_device(
         })?;
     }
 
-    let ledger_text = if target_release_id.is_some() {
-        "Device approved and release assigned.".to_string()
-    } else {
-        "Device approved.".to_string()
-    };
-
-    sqlx::query!(
-        r#"INSERT INTO ledger (device_id, "class", "text") VALUES ($1, $2, $3)"#,
-        device_id,
-        "approved",
-        ledger_text
-    )
-    .execute(&mut *tx)
-    .await
-    .map_err(|err| {
-        error!("Failed to insert ledger entry for device {err}");
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
+    if let Some((class, text)) =
+        approval_ledger_entry(approval.newly_approved, target_release_id.is_some())
+    {
+        sqlx::query!(
+            r#"INSERT INTO ledger (device_id, "class", "text", user_id) VALUES ($1, $2, $3, $4)"#,
+            device_id,
+            class,
+            text,
+            current_user.user_id
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(|err| {
+            error!("Failed to insert ledger entry for device {err}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+    }
 
     tx.commit().await.map_err(|err| {
         error!("Failed to commit transaction {err}");
@@ -2741,7 +2835,7 @@ pub async fn approve_device(
     })?;
 
     let msg = PublicEvent::ApprovedDevice {
-        serial_number: approved_serial_number,
+        serial_number: approval.serial_number,
     };
     let tx_message = state.public_events;
     let guard = tx_message.lock().await;
@@ -2766,6 +2860,7 @@ pub async fn approve_device(
     tag = DEVICES_TAG
 )]
 pub async fn revoke_device(
+    Extension(current_user): Extension<CurrentUser>,
     Path(device_id): Path<i32>,
     Extension(state): Extension<State>,
 ) -> axum::response::Result<Json<bool>, StatusCode> {
@@ -2777,6 +2872,8 @@ pub async fn revoke_device(
     sqlx::query!(
         r#"UPDATE device 
         SET approved = false,
+            approved_by_user_id = NULL,
+            approved_at = NULL,
             release_id = NULL,
             target_release_id = NULL,
             target_release_eligible_at = NULL
@@ -2791,10 +2888,11 @@ pub async fn revoke_device(
     })?;
 
     sqlx::query!(
-        r#"INSERT INTO ledger (device_id, "class", "text") VALUES ($1, $2, $3)"#,
+        r#"INSERT INTO ledger (device_id, "class", "text", user_id) VALUES ($1, $2, $3, $4)"#,
         device_id,
         "revoked",
-        format!("Device approval revoked.")
+        "Device approval revoked.",
+        current_user.user_id
     )
     .execute(&mut *tx)
     .await
@@ -4860,6 +4958,160 @@ mod follow_latest_updates {
                 .fetch_one(&pool)
                 .await?;
         assert_eq!(state, (false, Some(old)));
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod approval_attribution {
+    use super::{approval_ledger_entry, record_device_approval, visible_approver_email};
+    use chrono::{DateTime, Utc};
+    use sqlx::PgPool;
+
+    async fn attribution(
+        pool: &PgPool,
+        id: i32,
+    ) -> anyhow::Result<(Option<i32>, Option<DateTime<Utc>>)> {
+        Ok(
+            sqlx::query_as("SELECT approved_by_user_id, approved_at FROM device WHERE id = $1")
+                .bind(id)
+                .fetch_one(pool)
+                .await?,
+        )
+    }
+
+    async fn insert_device(pool: &PgPool, serial: &str) -> anyhow::Result<i32> {
+        Ok(
+            sqlx::query_scalar("INSERT INTO device (serial_number) VALUES ($1) RETURNING id")
+                .bind(serial)
+                .fetch_one(pool)
+                .await?,
+        )
+    }
+
+    async fn insert_user(pool: &PgPool, sub: &str, email: Option<&str>) -> anyhow::Result<i32> {
+        Ok(sqlx::query_scalar(
+            "INSERT INTO auth.users (auth0_user_id, email) VALUES ($1, $2) RETURNING id",
+        )
+        .bind(sub)
+        .bind(email)
+        .fetch_one(pool)
+        .await?)
+    }
+
+    async fn approve(pool: &PgPool, device: i32, user: i32) -> anyhow::Result<bool> {
+        let mut tx = pool.begin().await?;
+        let approval = record_device_approval(&mut tx, device, user).await?;
+        tx.commit().await?;
+        Ok(approval.newly_approved)
+    }
+
+    #[test]
+    fn ledger_only_records_what_the_request_changed() {
+        assert_eq!(
+            approval_ledger_entry(true, true),
+            Some(("approved", "Device approved and release assigned."))
+        );
+        assert_eq!(
+            approval_ledger_entry(true, false),
+            Some(("approved", "Device approved."))
+        );
+        assert_eq!(
+            approval_ledger_entry(false, true),
+            Some(("release", "Release assigned."))
+        );
+        assert_eq!(approval_ledger_entry(false, false), None);
+    }
+
+    #[sqlx::test]
+    #[ignore = "needs Postgres with pg_partman; run with --test-threads=1"]
+    async fn keeps_first_approver_until_revoked(pool: PgPool) -> anyhow::Result<()> {
+        let device = insert_device(&pool, "approval-attribution").await?;
+        let alice = insert_user(&pool, "alice", Some("alice@example.com")).await?;
+        let bob = insert_user(&pool, "bob", Some("bob@example.com")).await?;
+
+        assert!(approve(&pool, device, alice).await?);
+        let first = attribution(&pool, device).await?;
+        assert_eq!(first.0, Some(alice));
+        assert!(first.1.is_some());
+
+        assert!(!approve(&pool, device, bob).await?);
+        assert_eq!(attribution(&pool, device).await?, first);
+
+        sqlx::query("UPDATE device SET approved = false, approved_by_user_id = NULL, approved_at = NULL WHERE id = $1")
+            .bind(device).execute(&pool).await?;
+        assert!(approve(&pool, device, bob).await?);
+        let second = attribution(&pool, device).await?;
+        assert_eq!(second.0, Some(bob));
+        assert!(second.1 > first.1);
+
+        // Legacy approvals must not acquire a made-up approver or date on retry.
+        sqlx::query(
+            "UPDATE device SET approved_by_user_id = NULL, approved_at = NULL WHERE id = $1",
+        )
+        .bind(device)
+        .execute(&pool)
+        .await?;
+        assert!(!approve(&pool, device, alice).await?);
+        assert_eq!(attribution(&pool, device).await?, (None, None));
+        Ok(())
+    }
+
+    #[sqlx::test]
+    #[ignore = "needs Postgres with pg_partman; run with --test-threads=1"]
+    async fn approval_rolls_back_with_transaction(pool: PgPool) -> anyhow::Result<()> {
+        let device = insert_device(&pool, "approval-rollback").await?;
+        let user = insert_user(&pool, "approver", None).await?;
+        let mut tx = pool.begin().await?;
+        assert!(
+            record_device_approval(&mut tx, device, user)
+                .await?
+                .newly_approved
+        );
+        tx.rollback().await?;
+        assert_eq!(attribution(&pool, device).await?, (None, None));
+        Ok(())
+    }
+
+    #[sqlx::test]
+    #[ignore = "needs Postgres with pg_partman; run with --test-threads=1"]
+    async fn email_requires_users_read(pool: PgPool) -> anyhow::Result<()> {
+        let person = insert_user(&pool, "person", Some("person@example.com")).await?;
+        let client = insert_user(&pool, "machine@clients", None).await?;
+
+        assert_eq!(
+            visible_approver_email(&pool, false, Some(person)).await?,
+            None
+        );
+        assert_eq!(
+            visible_approver_email(&pool, true, Some(person))
+                .await?
+                .as_deref(),
+            Some("person@example.com")
+        );
+        assert_eq!(
+            visible_approver_email(&pool, true, Some(client))
+                .await?
+                .as_deref(),
+            Some("machine@clients")
+        );
+        assert_eq!(visible_approver_email(&pool, true, None).await?, None);
+        Ok(())
+    }
+
+    #[sqlx::test]
+    #[ignore = "needs Postgres with pg_partman; run with --test-threads=1"]
+    async fn deleting_a_user_erases_attribution(pool: PgPool) -> anyhow::Result<()> {
+        let device = insert_device(&pool, "approval-erasure").await?;
+        let user = insert_user(&pool, "leaver", Some("leaver@example.com")).await?;
+        approve(&pool, device, user).await?;
+        sqlx::query("DELETE FROM auth.users WHERE id = $1")
+            .bind(user)
+            .execute(&pool)
+            .await?;
+        let (approver, approved_at) = attribution(&pool, device).await?;
+        assert_eq!(approver, None);
+        assert!(approved_at.is_some());
         Ok(())
     }
 }
