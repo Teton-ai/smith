@@ -2,6 +2,7 @@ use crate::device::{
     RegistrationError, get_target_release, save_last_ping_with_ip, save_release_id,
 };
 use crate::handlers::AuthedDevice;
+use crate::home::Saved;
 use crate::ip_address::extract_client_ip;
 use crate::storage::{Storage, UploadMetrics};
 use crate::{State, storage};
@@ -59,7 +60,8 @@ pub async fn register_device(
   post,
   path = "/smith/home",
   responses(
-        (status = 200, description = "Device home response")
+        (status = 200, description = "Device home response"),
+        (status = 503, description = "Results not stored now; send them again later")
   ),
   security(
         ("device_token" = [])
@@ -93,11 +95,28 @@ pub async fn home(
     };
     let release_id = payload.release_id;
     let service_statuses = std::mem::take(&mut payload.service_statuses);
-    let _ = crate::home::save_responses(device.id, &device.serial_number, payload, &state.pg_pool)
+    // Not 200, so smithd keeps the results and sends them again on a later poll.
+    match crate::home::save_responses(device.id, &device.serial_number, payload, &state.pg_pool)
         .await
-        .inspect_err(|err| {
-            error!("Error saving responses: {:?}", err);
-        });
+    {
+        Ok(Saved::All) => {}
+        Ok(Saved::Partly) => {
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(HomePostResponse::default()),
+            );
+        }
+        Err(err) => {
+            warn!(
+                device_id = device.id,
+                "Database overloaded, results not stored: {err:?}"
+            );
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(HomePostResponse::default()),
+            );
+        }
+    }
     // Before fetching commands, so an automatic settings apply leaves with this
     // poll. Its errors are logged where they happen and never fail the poll.
     if crate::device::settings::auto_apply_settings(&state.pg_pool, device.id)

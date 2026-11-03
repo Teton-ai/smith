@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT EXISTS (\n                       SELECT 1 FROM command_response WHERE command_id = $1 AND device_id = $2\n                   ) AS \"stored!\"",
+  "query": "SELECT EXISTS (\n                   SELECT 1 FROM command_response WHERE command_id = $1 AND device_id = $2\n               ) AS \"stored!\"",
   "describe": {
     "columns": [
       {
@@ -19,5 +19,5 @@
       null
     ]
   },
-  "hash": "8ff444a77f001ff8a5f76fab49a814a7367fe41aad05e14072cacf3d3a7a0fa4"
+  "hash": "2cd2d597ceb8bb8c033c6137c9114d57e75f407b6ba349e5fa348869f84c9cf4"
 }

@@ -3,14 +3,15 @@ pub mod route;
 use anyhow::Result;
 use models::system::Network;
 use serde_json::Value;
-use sqlx::PgPool;
 use sqlx::types::ipnetwork::IpNetwork;
+use sqlx::{Acquire, PgConnection};
 use std::net::IpAddr;
 
 /// Replaces the device's interface addresses with the ones in its latest `system_info`.
 /// Devices on older smithd versions report no prefixes, so they simply end up with no rows.
+/// Inside an open transaction this is a savepoint, so a failure rolls back only these rows.
 pub async fn record_interface_addresses(
-    pool: &PgPool,
+    conn: &mut PgConnection,
     device_id: i32,
     system_info: &Value,
 ) -> Result<()> {
@@ -55,7 +56,7 @@ pub async fn record_interface_addresses(
         }
     }
 
-    let mut tx = pool.begin().await?;
+    let mut tx = conn.begin().await?;
     sqlx::query!(
         "DELETE FROM device_interface_address WHERE device_id = $1",
         device_id
