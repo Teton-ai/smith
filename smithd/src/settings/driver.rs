@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 
 pub(crate) const SYS_CLASS_NET: &str = "/sys/class/net";
 pub(crate) const VENDOR_MODULE: &str = "rtl8822ce";
-/// Vendor and upstream `rtw88` modules for the Realtek 8822ce on platforms A, B and C.
+/// Vendor and upstream `rtw88` modules for the Realtek 8822ce on v1 and v2 hardware.
 /// Only these are safe to reload from link health; other hardware (Overview PCs, GPU
 /// servers) uses modules that are not listed here.
 pub(crate) const RELOADABLE_WIFI_MODULES: [&str; 2] = [VENDOR_MODULE, "rtw88_8822ce"];
