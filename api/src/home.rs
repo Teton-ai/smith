@@ -118,7 +118,8 @@ pub async fn save_responses(
     Ok(saved)
 }
 
-/// `Ok(false)` when another post of the device holds this result now.
+/// `Ok(false)` when the result must be sent again: another post of the device
+/// holds it now, or a network lock it needs is busy.
 async fn save_response(
     conn: &mut PgConnection,
     device_id: i32,
@@ -259,16 +260,28 @@ async fn save_response(
             lock_inputs.sort_unstable();
             lock_inputs.dedup();
 
+            // All devices on a site share these locks, so a post does not wait
+            // on them. A busy lock skips a periodic snapshot (negative id): a
+            // newer one follows and replaces it. A user command's result is
+            // sent again.
             for (ssid, hidden, password) in &lock_inputs {
                 let credentials = content_credentials(*password);
-                sqlx::query!(
-                    "SELECT pg_advisory_xact_lock(network_content_lock_key($1, $2, $3))",
+                let locked = sqlx::query_scalar!(
+                    r#"SELECT pg_try_advisory_xact_lock(network_content_lock_key($1, $2, $3)) AS "locked!""#,
                     ssid,
                     hidden,
                     credentials,
                 )
-                .execute(&mut *tx)
+                .fetch_one(&mut *tx)
                 .await?;
+                if !locked {
+                    tx.rollback().await?;
+                    if response.id > 0 {
+                        return Ok(false);
+                    }
+                    debug!(device_id, "Network lock busy; NM profile snapshot skipped");
+                    return Ok(true);
+                }
             }
 
             for profile in profiles {
@@ -1344,6 +1357,122 @@ mod tests {
         save_responses(other, "o", get_variables_result(command_id), &pool).await?;
         save_responses(device_id, "d", get_variables_result(command_id), &pool).await?;
         assert_eq!(stored(&pool, device_id, command_id).await?, (1, 1));
+        Ok(())
+    }
+
+    fn nm_profiles_post(device: usize, id: i32) -> HomePost {
+        let mut ssids = vec!["site-a", "site-b", "site-c"];
+        ssids.rotate_left(device % 3);
+        HomePost::new(
+            vec![schema::SafeCommandResponse {
+                id,
+                command: SafeCommandRx::ReportNMProfiles {
+                    profiles: ssids.into_iter().map(profile).collect(),
+                },
+                status: 0,
+            }],
+            None,
+            vec![],
+        )
+    }
+
+    async fn configured_networks(pool: &PgPool, device_id: i32) -> anyhow::Result<i64> {
+        Ok(sqlx::query_scalar(
+            "SELECT count(*) FROM device_configured_network WHERE device_id = $1",
+        )
+        .bind(device_id)
+        .fetch_one(pool)
+        .await?)
+    }
+
+    // Shorter than lock_timeout, so a post that waits on a lock fails.
+    const NO_LOCK_WAIT: Duration = Duration::from_millis(900);
+
+    #[sqlx::test]
+    #[ignore = "needs the compose Postgres; run with --test-threads=1"]
+    async fn a_busy_network_lock_skips_a_snapshot_and_resends_a_command_result(
+        pool: PgPool,
+    ) -> anyhow::Result<()> {
+        let device_id = insert_device(&pool, "d").await?;
+        // Another device of the site stores the same network now.
+        let mut other = pool.begin().await?;
+        sqlx::query(
+            r#"SELECT pg_advisory_xact_lock(
+                   network_content_lock_key('site-b', false, '{"psk": "secret"}'::jsonb))"#,
+        )
+        .execute(&mut *other)
+        .await?;
+
+        let snapshot = tokio::time::timeout(
+            NO_LOCK_WAIT,
+            save_responses(device_id, "d", nm_profiles_post(0, -6), &pool),
+        )
+        .await??;
+        assert_eq!(snapshot, Saved::All, "a skipped snapshot is not sent again");
+        assert_eq!(configured_networks(&pool, device_id).await?, 0);
+
+        let answer = tokio::time::timeout(
+            NO_LOCK_WAIT,
+            save_responses(device_id, "d", nm_profiles_post(0, 7), &pool),
+        )
+        .await??;
+        assert_eq!(answer, Saved::Partly, "a command result is sent again");
+
+        other.commit().await?;
+        let again = save_responses(device_id, "d", nm_profiles_post(0, -6), &pool).await?;
+        assert_eq!(again, Saved::All);
+        assert_eq!(configured_networks(&pool, device_id).await?, 3);
+        Ok(())
+    }
+
+    // Many devices of one site report the same SSIDs at once on a small pool:
+    // no post waits on another device's network lock or is told to retry.
+    #[sqlx::test]
+    #[ignore = "needs the compose Postgres; run with --test-threads=1"]
+    async fn concurrent_nm_profile_snapshots_of_a_site_do_not_wait_and_converge(
+        pool_options: PgPoolOptions,
+        connect_options: PgConnectOptions,
+    ) -> anyhow::Result<()> {
+        const DEVICES: usize = 40;
+        let pool = pool_options
+            .max_connections(4)
+            .acquire_timeout(Duration::from_secs(3))
+            .connect_with(connect_options)
+            .await?;
+        let mut device_ids = Vec::new();
+        for device in 0..DEVICES {
+            device_ids.push(insert_device(&pool, &format!("d{device}")).await?);
+        }
+
+        let mut posts = Vec::new();
+        for (device, &device_id) in device_ids.iter().enumerate() {
+            let pool = pool.clone();
+            posts.push(tokio::spawn(async move {
+                let started = tokio::time::Instant::now();
+                let saved =
+                    save_responses(device_id, "d", nm_profiles_post(device, -6), &pool).await;
+                (saved, started.elapsed())
+            }));
+        }
+        for post in posts {
+            let (saved, elapsed) = post.await?;
+            assert_eq!(saved?, Saved::All);
+            assert!(elapsed < Duration::from_secs(3), "a post took {elapsed:?}");
+        }
+
+        let networks: i64 =
+            sqlx::query_scalar("SELECT count(*) FROM network WHERE ssid LIKE 'site-%'")
+                .fetch_one(&pool)
+                .await?;
+        assert_eq!(
+            networks, 3,
+            "devices that share SSIDs converge to one row each"
+        );
+        let reporting: i64 =
+            sqlx::query_scalar("SELECT count(DISTINCT device_id) FROM device_configured_network")
+                .fetch_one(&pool)
+                .await?;
+        assert!(reporting >= 1, "at least one snapshot is stored");
         Ok(())
     }
 
