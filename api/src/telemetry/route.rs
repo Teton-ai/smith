@@ -1,4 +1,5 @@
 use crate::State;
+use crate::device::as_device_id;
 use crate::handlers::AuthedDevice;
 use crate::modem::{clear_modem, save_modem};
 use axum::body::{Body, to_bytes};
@@ -325,13 +326,14 @@ pub async fn get_telemetry_for_device(
         SELECT serial_number FROM device
         WHERE
             CASE
-                WHEN $1 ~ '^[0-9]+$' AND length($1) <= 10 THEN
-                    id = $1::int4
+                WHEN $2::int4 IS NOT NULL THEN
+                    id = $2
                 ELSE
                     serial_number = $1
             END
         "#,
-        device_id
+        device_id,
+        as_device_id(&device_id),
     )
     .fetch_optional(&state.pg_pool)
     .await

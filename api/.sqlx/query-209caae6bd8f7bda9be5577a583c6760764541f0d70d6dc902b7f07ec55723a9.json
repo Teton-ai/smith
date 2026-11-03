@@ -1,0 +1,41 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT\n            da.disk_encrypted,\n            da.password_access_disabled,\n            da.checked_at as \"checked_at?\",\n            COALESCE(d.target_release_id IS NULL OR d.release_id = d.target_release_id, false) as \"running_latest_release!\"\n        FROM device d\n        LEFT JOIN device_audit da ON da.device_id = d.id\n        WHERE\n            CASE\n                WHEN $2::int4 IS NOT NULL THEN\n                    d.id = $2\n                ELSE\n                    d.serial_number = $1\n            END\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "disk_encrypted",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 1,
+        "name": "password_access_disabled",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 2,
+        "name": "checked_at?",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 3,
+        "name": "running_latest_release!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Int4"
+      ]
+    },
+    "nullable": [
+      true,
+      true,
+      false,
+      null
+    ]
+  },
+  "hash": "209caae6bd8f7bda9be5577a583c6760764541f0d70d6dc902b7f07ec55723a9"
+}
