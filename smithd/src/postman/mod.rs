@@ -38,6 +38,14 @@ async fn refresh_system_info(system_info: &mut SystemInfo) -> Option<SafeCommand
     Some(update)
 }
 
+/// Adds `update` in place of any result with its id. Results put back after a
+/// failed post can hold an older snapshot under the same synthetic id, and
+/// another failure would keep only the first one, the stale one.
+fn push_latest(responses: &mut Vec<SafeCommandResponse>, update: SafeCommandResponse) {
+    responses.retain(|response| response.id != update.id);
+    responses.push(update);
+}
+
 enum PollMode {
     Active { ticks_without_commands: u32 },
     Idle,
@@ -137,6 +145,13 @@ impl Postman {
 
         loop {
             tokio::select! {
+                // Biased so shutdown wins: while posts fail, the next tick is
+                // ready after each one, and an unbiased pick kept polling for
+                // several posts after SIGTERM.
+                biased;
+                _ = self.shutdown.token.cancelled() => {
+                    break;
+                }
                 Some(msg) = self.receiver.recv() => {
                     _ = self.handle_message(msg).await;
                 }
@@ -152,7 +167,7 @@ impl Postman {
                     if responses.iter().any(|response| response.id > 0)
                         && let Some(update) = refresh_system_info(&mut system_info).await
                     {
-                        responses.push(update);
+                        push_latest(&mut responses, update);
                     }
 
                     let release_id = self.magic.get_release_id().await.ok();
@@ -160,7 +175,15 @@ impl Postman {
 
                     let ping_home_body = HomePost::new(responses, release_id, service_statuses);
 
-                    let response = self.ping_home(ping_home_body).await;
+                    let response = match self.ping_home(&ping_home_body).await {
+                        Some(response) => response,
+                        None => {
+                            // get_results already drained these, including commands
+                            // that finished during the outage; requeue or they are lost.
+                            self.commander.requeue_results(ping_home_body.responses).await;
+                            HomePostResponse::default()
+                        }
+                    };
 
                     let target_release_id = response.target_release_id;
                     self.services_to_check = response.services;
@@ -193,9 +216,6 @@ impl Postman {
                     if let Some(update) = refresh_system_info(&mut system_info).await {
                         self.commander.insert_result(vec![update]).await;
                     }
-                }
-                _ = self.shutdown.token.cancelled() => {
-                    break;
                 }
             }
         }
@@ -299,7 +319,8 @@ impl Postman {
         Ok(())
     }
 
-    async fn ping_home(&mut self, message: HomePost) -> HomePostResponse {
+    /// `None` when the post was not delivered, so its results still need sending.
+    async fn ping_home(&mut self, message: &HomePost) -> Option<HomePostResponse> {
         // Prefer the short-lived JWT from session; fall back to the opaque
         // token (which is also what session returns when no JWT is cached).
         let token = self
@@ -311,7 +332,7 @@ impl Postman {
 
         let result = self
             .network
-            .send_compressed_post(&token, "/home", &message)
+            .send_compressed_post(&token, "/home", message)
             .await;
 
         match result {
@@ -322,7 +343,11 @@ impl Postman {
                         self.police.report_problem_solved(problem).await;
                         self.problems = None;
                     };
-                    response.json().await.unwrap_or_default()
+                    // The api stored the results even if its answer does not parse.
+                    Some(response.json().await.unwrap_or_else(|err| {
+                        warn!("Could not parse the /home answer, running no commands: {err}");
+                        HomePostResponse::default()
+                    }))
                 }
                 StatusCode::UNAUTHORIZED => {
                     // Standard access/refresh-token flow: the bearer (probably
@@ -342,14 +367,14 @@ impl Postman {
                             warn!("JWT refresh failed transiently; keeping token");
                         }
                     }
-                    HomePostResponse::default()
+                    None
                 }
                 _ => {
                     error!(
                         "Posting failed with status: {:?} {:?}",
                         status_code, response
                     );
-                    HomePostResponse::default()
+                    None
                 }
             },
             Err(err) => {
@@ -363,7 +388,7 @@ impl Postman {
                 if self.problems.is_none() {
                     self.problems = self.police.report_problem_starting().await;
                 }
-                HomePostResponse::default()
+                None
             }
         }
     }
@@ -405,5 +430,27 @@ impl PostmanHandle {
         tokio::spawn(async move { actor.run().await });
 
         Self { _sender }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::utils::schema::SafeCommandRx;
+
+    fn pong(id: i32, status: i32) -> SafeCommandResponse {
+        SafeCommandResponse {
+            id,
+            command: SafeCommandRx::Pong,
+            status,
+        }
+    }
+
+    #[test]
+    fn a_fresh_snapshot_replaces_the_one_put_back_after_a_failed_post() {
+        let mut responses = vec![pong(CMD_ID_UPDATE_SYSTEM_INFO, 1), pong(7, 0)];
+        push_latest(&mut responses, pong(CMD_ID_UPDATE_SYSTEM_INFO, 0));
+        let ids: Vec<_> = responses.iter().map(|r| (r.id, r.status)).collect();
+        assert_eq!(ids, [(7, 0), (CMD_ID_UPDATE_SYSTEM_INFO, 0)]);
     }
 }
