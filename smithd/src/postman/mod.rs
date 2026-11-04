@@ -38,6 +38,31 @@ async fn refresh_system_info(system_info: &mut SystemInfo) -> Option<SafeCommand
     Some(update)
 }
 
+/// Tells systemd the poll loop is alive. The unit's `WatchdogSec` restarts
+/// smithd when the loop stops, since the rest of the daemon keeps running and
+/// the police never sees a problem. No-op outside systemd.
+fn feed_watchdog() {
+    if let Some(socket) = std::env::var_os("NOTIFY_SOCKET")
+        && let Err(err) = notify_systemd(&socket, "WATCHDOG=1")
+    {
+        warn!("Could not feed the systemd watchdog: {err}");
+    }
+}
+
+/// `socket` is a path, or an abstract name when it starts with `@`.
+fn notify_systemd(socket: &std::ffi::OsStr, state: &str) -> std::io::Result<()> {
+    use std::os::linux::net::SocketAddrExt;
+    use std::os::unix::ffi::OsStrExt;
+    use std::os::unix::net::{SocketAddr, UnixDatagram};
+
+    let addr = match socket.as_bytes().strip_prefix(b"@") {
+        Some(name) => SocketAddr::from_abstract_name(name)?,
+        None => SocketAddr::from_pathname(socket)?,
+    };
+    UnixDatagram::unbound()?.send_to_addr(state.as_bytes(), &addr)?;
+    Ok(())
+}
+
 /// Adds `update` in place of any result with its id. Results put back after a
 /// failed post can hold an older snapshot under the same synthetic id, and
 /// another failure would keep only the first one, the stale one.
@@ -156,6 +181,7 @@ impl Postman {
                     _ = self.handle_message(msg).await;
                 }
                 _ = keep_alive_interval.tick() => {
+                    feed_watchdog();
                     if let Err(e) = self.ensure_token().await {
                         error!("Failed to register device: {}", e);
                         continue;
@@ -452,5 +478,29 @@ mod tests {
         push_latest(&mut responses, pong(CMD_ID_UPDATE_SYSTEM_INFO, 0));
         let ids: Vec<_> = responses.iter().map(|r| (r.id, r.status)).collect();
         assert_eq!(ids, [(7, 0), (CMD_ID_UPDATE_SYSTEM_INFO, 0)]);
+    }
+
+    fn received(socket: &std::os::unix::net::UnixDatagram) -> String {
+        let mut buf = [0; 64];
+        let len = socket.recv(&mut buf).unwrap_or_default();
+        String::from_utf8_lossy(&buf[..len]).into_owned()
+    }
+
+    #[test]
+    fn the_watchdog_is_fed_on_a_path_and_an_abstract_socket() {
+        use std::os::linux::net::SocketAddrExt;
+        use std::os::unix::net::{SocketAddr, UnixDatagram};
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("notify");
+        let socket = UnixDatagram::bind(&path).unwrap();
+        notify_systemd(path.as_os_str(), "WATCHDOG=1").unwrap();
+        assert_eq!(received(&socket), "WATCHDOG=1");
+
+        let name = format!("smithd-test-{}", std::process::id());
+        let addr = SocketAddr::from_abstract_name(name.as_bytes()).unwrap();
+        let socket = UnixDatagram::bind_addr(&addr).unwrap();
+        notify_systemd(format!("@{name}").as_ref(), "WATCHDOG=1").unwrap();
+        assert_eq!(received(&socket), "WATCHDOG=1");
     }
 }
