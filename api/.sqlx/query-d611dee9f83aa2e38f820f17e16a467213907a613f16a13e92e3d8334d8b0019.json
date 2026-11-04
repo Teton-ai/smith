@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE command_queue SET cmd = $2::jsonb\n         WHERE device_id = $1 AND fetched = false AND canceled = false\n           AND cmd::jsonb ? (SELECT jsonb_object_keys($2::jsonb))\n           AND available_at <= now()\n           AND bundle IN (SELECT uuid FROM command_bundles WHERE user_id IS NULL)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Jsonb"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "d611dee9f83aa2e38f820f17e16a467213907a613f16a13e92e3d8334d8b0019"
+}

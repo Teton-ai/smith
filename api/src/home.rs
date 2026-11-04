@@ -55,6 +55,7 @@ fn map_key_mgmt(km: &str) -> Option<&'static str> {
 /// First key of the two key advisory locks on one command result; the network
 /// ledger's single `bigint` locks are a separate key space.
 const COMMAND_RESULT_LOCK: i32 = 2;
+const SYSTEM_COMMAND_LOCK: i32 = 3;
 
 /// Time a /home post may spend storing results. smithd gives up after 10 s and
 /// sends the results again, so work after that only adds load.
@@ -192,7 +193,6 @@ async fn save_response(
                 &mut tx,
                 device_id,
                 device_serial_number,
-                "UpdateVariables",
                 SafeCommandRequest {
                     id: -1,
                     command: update_variables,
@@ -228,7 +228,6 @@ async fn save_response(
                     &mut tx,
                     device_id,
                     device_serial_number,
-                    "UpdateNetwork",
                     SafeCommandRequest {
                         id: -4,
                         command: UpdateNetwork { network },
@@ -864,21 +863,26 @@ pub async fn add_commands(
     Ok(command_ids)
 }
 
-/// Refreshes the pending system-queued `kind` command instead of adding one; user rows stay.
+/// Refreshes a pending automatic command in the caller's transaction; user commands stay.
 async fn queue_latest(
     conn: &mut PgConnection,
     device_id: i32,
     serial_number: &str,
-    kind: &str,
     request: SafeCommandRequest,
 ) -> Result<()> {
+    // The pending row may not exist yet, so serialize refresh-or-insert by device.
+    sqlx::query("SELECT pg_advisory_xact_lock($1, $2)")
+        .bind(SYSTEM_COMMAND_LOCK)
+        .bind(device_id)
+        .execute(&mut *conn)
+        .await?;
     let refreshed = sqlx::query!(
-        "UPDATE command_queue SET cmd = $3::jsonb
-         WHERE device_id = $1 AND fetched = false AND canceled = false AND cmd::jsonb ? $2
+        "UPDATE command_queue SET cmd = $2::jsonb
+         WHERE device_id = $1 AND fetched = false AND canceled = false
+           AND cmd::jsonb ? (SELECT jsonb_object_keys($2::jsonb))
            AND available_at <= now()
            AND bundle IN (SELECT uuid FROM command_bundles WHERE user_id IS NULL)",
         device_id,
-        kind,
         json!(request.command)
     )
     .execute(&mut *conn)
@@ -985,9 +989,11 @@ pub async fn save_settings_report(
 #[cfg(test)]
 mod tests {
     use super::{
-        COMMAND_RESULT_LOCK, Saved, map_key_mgmt, save_responses, save_settings_report, schema,
+        COMMAND_RESULT_LOCK, Saved, map_key_mgmt, queue_latest, save_responses,
+        save_settings_report, schema,
     };
-    use schema::{HomePost, SafeCommandRx};
+    use schema::{HomePost, SafeCommandRequest, SafeCommandRx, SafeCommandTx};
+    use serde_json::{Value, json};
     use sqlx::PgPool;
     use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
     use std::time::Duration;
@@ -1242,6 +1248,46 @@ mod tests {
         assert_eq!(
             queued,
             vec![serde_json::json!({"UpdateVariables": {"variables": {"k": "v"}}})]
+        );
+        Ok(())
+    }
+
+    #[sqlx::test]
+    #[ignore = "needs the compose Postgres; run with --test-threads=1"]
+    async fn overlapping_system_updates_refresh_one_pending_command(
+        pool: PgPool,
+    ) -> anyhow::Result<()> {
+        let device_id = insert_device(&pool, "d").await?;
+        let request = |value: &str| SafeCommandRequest {
+            id: -1,
+            command: SafeCommandTx::UpdateVariables {
+                variables: [("mode".to_owned(), value.to_owned())].into(),
+            },
+            continue_on_error: false,
+        };
+        let mut first = pool.begin().await?;
+        queue_latest(&mut first, device_id, "d", request("first")).await?;
+        let mut second = pool.begin().await?;
+        {
+            let refresh = queue_latest(&mut second, device_id, "d", request("latest"));
+            tokio::pin!(refresh);
+            assert!(
+                tokio::time::timeout(Duration::from_millis(50), &mut refresh)
+                    .await
+                    .is_err()
+            );
+            first.commit().await?;
+            refresh.await?;
+        }
+        second.commit().await?;
+        let queued: Vec<Value> =
+            sqlx::query_scalar("SELECT cmd::jsonb FROM command_queue WHERE device_id = $1")
+                .bind(device_id)
+                .fetch_all(&pool)
+                .await?;
+        assert_eq!(
+            queued,
+            vec![json!({"UpdateVariables": {"variables": {"mode": "latest"}}})]
         );
         Ok(())
     }
