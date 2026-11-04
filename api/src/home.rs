@@ -65,6 +65,9 @@ const SAVE_BUDGET: Duration = Duration::from_secs(5);
 const RESULT_TX_TIMEOUTS: &str =
     "SELECT set_config('lock_timeout', '1s', true), set_config('statement_timeout', '3s', true)";
 
+/// Commands per /home answer; older smithd deadlocks on more than about 20, the rest leave with later posts.
+const COMMANDS_PER_ANSWER: i64 = 20;
+
 /// The database is too busy now: the device should send its results again later.
 pub fn is_overload(err: &anyhow::Error) -> bool {
     match err.downcast_ref::<sqlx::Error>() {
@@ -185,15 +188,16 @@ async fn save_response(
                     .map(|variable| (variable.name, variable.value))
                     .collect(),
             };
-            insert_commands(
+            queue_latest(
                 &mut tx,
+                device_id,
                 device_serial_number,
-                vec![SafeCommandRequest {
+                "UpdateVariables",
+                SafeCommandRequest {
                     id: -1,
                     command: update_variables,
                     continue_on_error: false,
-                }],
-                None,
+                },
             )
             .await?;
         }
@@ -220,15 +224,16 @@ async fn save_response(
             if let Some(network) = network
                 && network.network_type == NetworkType::Wifi
             {
-                insert_commands(
+                queue_latest(
                     &mut tx,
+                    device_id,
                     device_serial_number,
-                    vec![SafeCommandRequest {
+                    "UpdateNetwork",
+                    SafeCommandRequest {
                         id: -4,
                         command: UpdateNetwork { network },
                         continue_on_error: false,
-                    }],
-                    None,
+                    },
                 )
                 .await?;
             }
@@ -712,8 +717,11 @@ pub async fn get_commands(
                 cmd,
                 continue_on_error
             FROM command_queue
-            WHERE device_id = $1 AND fetched = false AND canceled = false AND available_at <= now()"#,
-        device_id
+            WHERE device_id = $1 AND fetched = false AND canceled = false AND available_at <= now()
+            ORDER BY id
+            LIMIT $2"#,
+        device_id,
+        COMMANDS_PER_ANSWER
     )
     .fetch_all(&mut *tx)
     .await?;
@@ -852,6 +860,30 @@ pub async fn add_commands(
     let command_ids = insert_commands(&mut tx, serial_number, commands, user_id).await?;
     tx.commit().await?;
     Ok(command_ids)
+}
+
+/// Refreshes the device's unfetched `kind` command instead of queueing another, so resent results do not pile up copies.
+async fn queue_latest(
+    conn: &mut PgConnection,
+    device_id: i32,
+    serial_number: &str,
+    kind: &str,
+    request: SafeCommandRequest,
+) -> Result<()> {
+    let refreshed = sqlx::query!(
+        "UPDATE command_queue SET cmd = $3::jsonb
+         WHERE device_id = $1 AND fetched = false AND canceled = false AND cmd::jsonb ? $2",
+        device_id,
+        kind,
+        json!(request.command)
+    )
+    .execute(&mut *conn)
+    .await?
+    .rows_affected();
+    if refreshed == 0 {
+        insert_commands(conn, serial_number, vec![request], None).await?;
+    }
+    Ok(())
 }
 
 /// Queues commands in the caller's transaction.
@@ -1182,6 +1214,31 @@ mod tests {
         save_responses(device_id, "d", get_variables_result(command_id), &pool).await?;
         save_responses(device_id, "d", get_variables_result(command_id), &pool).await?;
         assert_eq!(stored(&pool, device_id, command_id).await?, (1, 1));
+        Ok(())
+    }
+
+    #[sqlx::test]
+    #[ignore = "needs the compose Postgres; run with --test-threads=1"]
+    async fn get_variables_sent_again_refreshes_the_unfetched_update(
+        pool: PgPool,
+    ) -> anyhow::Result<()> {
+        let device_id = insert_device(&pool, "d").await?;
+        save_responses(device_id, "d", get_variables_result(-1), &pool).await?;
+        sqlx::query("INSERT INTO variable (device, name, value) VALUES ($1, 'k', 'v')")
+            .bind(device_id)
+            .execute(&pool)
+            .await?;
+        save_responses(device_id, "d", get_variables_result(-1), &pool).await?;
+        let queued: Vec<serde_json::Value> = sqlx::query_scalar(
+            "SELECT cmd::jsonb FROM command_queue WHERE device_id = $1 AND cmd::jsonb ? 'UpdateVariables'",
+        )
+        .bind(device_id)
+        .fetch_all(&pool)
+        .await?;
+        assert_eq!(
+            queued,
+            vec![serde_json::json!({"UpdateVariables": {"variables": {"k": "v"}}})]
+        );
         Ok(())
     }
 

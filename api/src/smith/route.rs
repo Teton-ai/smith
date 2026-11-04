@@ -73,7 +73,15 @@ pub async fn home(
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
     Extension(state): Extension<State>,
     body: Bytes,
-) -> (StatusCode, Json<HomePostResponse>) {
+) -> Response {
+    // Fails fast before any database work, so an overloaded api answers well within smithd's 10 s timeout.
+    let Ok(_permit) = state.home_permits.try_acquire() else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            [(header::RETRY_AFTER, "20")],
+        )
+            .into_response();
+    };
     // Temporary diagnostic: axum's `Json<HomePost>` extractor rejects with 422
     // before the handler runs, and the raw body/error aren't logged anywhere,
     // making a payload mismatch invisible. Parse manually here so we can see
@@ -90,7 +98,8 @@ pub async fn home(
             return (
                 StatusCode::UNPROCESSABLE_ENTITY,
                 Json(HomePostResponse::default()),
-            );
+            )
+                .into_response();
         }
     };
     let release_id = payload.release_id;
@@ -104,7 +113,8 @@ pub async fn home(
             return (
                 StatusCode::SERVICE_UNAVAILABLE,
                 Json(HomePostResponse::default()),
-            );
+            )
+                .into_response();
         }
         Err(err) => {
             warn!(
@@ -114,7 +124,8 @@ pub async fn home(
             return (
                 StatusCode::SERVICE_UNAVAILABLE,
                 Json(HomePostResponse::default()),
-            );
+            )
+                .into_response();
         }
     }
     // Before fetching commands, so an automatic settings apply leaves with this
@@ -175,7 +186,7 @@ pub async fn home(
         }
     });
 
-    (StatusCode::OK, Json(response))
+    (StatusCode::OK, Json(response)).into_response()
 }
 
 #[derive(Deserialize, Debug, IntoParams)]

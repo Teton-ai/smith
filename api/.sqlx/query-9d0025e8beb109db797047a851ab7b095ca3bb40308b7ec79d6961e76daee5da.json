@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE command_queue SET cmd = $3::jsonb\n         WHERE device_id = $1 AND fetched = false AND canceled = false AND cmd::jsonb ? $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Text",
+        "Jsonb"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "9d0025e8beb109db797047a851ab7b095ca3bb40308b7ec79d6961e76daee5da"
+}
