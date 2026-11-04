@@ -15,11 +15,21 @@ echo "== CommandDelivery (current code; must pass)"
 tlc CommandDelivery
 
 [ "${1:-}" = findings ] || exit 0
-for finding in AnswerLost Restart HangingHandler; do
+# Each finding must fail on its own property, not on a parse or config error.
+for check in \
+  "AnswerLost:Invariant NoCommandLost is violated" \
+  "Restart:Invariant NoCommandLost is violated" \
+  "HangingHandler:Temporal property EveryCommandAnswered was violated"; do
+  finding=${check%%:*}
+  expected=${check#*:}
   echo "== $finding (known finding; must fail)"
-  if tlc "$finding" > "${TMPDIR:-/tmp}/smith-tlc-$finding.out" 2>&1; then
+  out="${TMPDIR:-/tmp}/smith-tlc-$finding.out"
+  if tlc "$finding" > "$out" 2>&1; then
     echo "UNEXPECTED PASS: $finding no longer fails; update the skill" >&2
     exit 1
   fi
-  grep -E "violated|Deadlock reached" "${TMPDIR:-/tmp}/smith-tlc-$finding.out" | head -2
+  if ! grep -F "$expected" "$out"; then
+    echo "UNEXPECTED FAILURE: $finding did not report '$expected'; see $out" >&2
+    exit 1
+  fi
 done
