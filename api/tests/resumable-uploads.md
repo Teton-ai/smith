@@ -16,6 +16,7 @@ Use isolated Postgres and S3-compatible storage. Do not use a production databas
 
    ```sh
    SQLX_OFFLINE=true cargo test -p api stateless_routes_verify_tokens_parts_and_completion -- --ignored
+   SQLX_OFFLINE=true cargo test -p api full_transfer_capacity_rejects_only_data_transfers -- --ignored
    SQLX_OFFLINE=true cargo test -p api upload_token::tests
    SQLX_OFFLINE=true cargo test -p api storage::tests
    ```
@@ -53,6 +54,6 @@ Send the token in `x-upload-token` with device authentication for each subsequen
 - `PUT /smith/upload-sessions/parts/{number}` streams one part to storage. Set `Content-Length` to 5 MiB, except for the final smaller part. The response contains the part number, ETag, and size.
 - `POST /smith/upload-sessions/complete` requires a full ordered, size-correct S3 part set. It checks the completion HTTP status and embedded XML errors, then reads the final object to verify its size and SHA-256. Repeated completion succeeds when the finished object matches.
 
-S3 is the only upload progress store. There are no upload session tables or cleanup workers. `410` with `NoSuchUpload` or `UploadTokenExpired` requires a fresh upload and retransmission. An invalid token or a different device receives `403`. Capacity rejection returns `503` with `Retry-After: 5`.
+S3 is the only upload progress store. There are no upload session tables or cleanup workers. `410` with `NoSuchUpload` or `UploadTokenExpired` requires a fresh upload and retransmission. An invalid token or a different device receives `403`. A part upload that finds no free transfer slot returns `503` with `Retry-After: 30`. Open, status, and completion do not use transfer slots.
 
 Merge `device-upload-lifecycle.json` into both upload buckets' existing lifecycle configuration. Keep existing rules. The one-day rule aborts incomplete multipart uploads, including uploads whose creation reply was lost. It does not delete complete objects. The infrastructure owner must apply the rule to deployed buckets.

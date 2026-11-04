@@ -500,6 +500,9 @@ impl Storage {
         if head.content_length != Some(size) {
             return Ok(false);
         }
+        // Each check reads and hashes the whole object, up to 512 MB, so few run at once.
+        static OBJECT_CHECKS: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(16);
+        let _permit = OBJECT_CHECKS.acquire().await?;
         let mut response = match bucket.get_object_stream(object_key).await {
             Ok(response) => response,
             Err(s3::error::S3Error::HttpFailWithBody(404, _)) => return Ok(false),

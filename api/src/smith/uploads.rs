@@ -7,7 +7,7 @@ use crate::{
 use axum::{
     Extension, Json,
     extract::Path,
-    http::{HeaderMap, StatusCode},
+    http::{HeaderMap, HeaderValue, StatusCode, header},
     response::{IntoResponse, Response},
 };
 use serde::{Deserialize, Serialize};
@@ -16,6 +16,8 @@ use utoipa::ToSchema;
 pub const PART_SIZE: i64 = 5 * 1024 * 1024;
 const MAX_SIZE: i64 = 512_000_000;
 const TOKEN_TTL_SECONDS: i64 = 24 * 60 * 60;
+/// Retry-After value, in seconds, for every upload capacity 503.
+pub const RETRY_AFTER_SECONDS: &str = "30";
 
 pub struct UploadError(StatusCode, &'static str);
 
@@ -29,9 +31,10 @@ impl IntoResponse for UploadError {
     fn into_response(self) -> Response {
         let mut response = (self.0, Json(serde_json::json!({"code":self.1}))).into_response();
         if self.0 == StatusCode::SERVICE_UNAVAILABLE {
-            response
-                .headers_mut()
-                .insert("retry-after", axum::http::HeaderValue::from_static("5"));
+            response.headers_mut().insert(
+                header::RETRY_AFTER,
+                HeaderValue::from_static(RETRY_AFTER_SECONDS),
+            );
         }
         response
     }
@@ -43,14 +46,6 @@ fn storage_error(error: anyhow::Error) -> UploadError {
     }
     tracing::error!("Multipart storage operation failed");
     UploadError(StatusCode::BAD_GATEWAY, "StorageUnavailable")
-}
-
-fn capacity(state: &State) -> Result<tokio::sync::OwnedSemaphorePermit, UploadError> {
-    state
-        .upload_permits
-        .clone()
-        .try_acquire_owned()
-        .map_err(|_| UploadError(StatusCode::SERVICE_UNAVAILABLE, "UploadCapacity"))
 }
 
 #[derive(Deserialize, ToSchema)]
@@ -180,14 +175,13 @@ async fn plan(claims: &UploadClaims) -> Result<UploadPlan, UploadError> {
 }
 
 #[utoipa::path(post,path="/smith/upload-sessions",request_body=OpenUpload,
-    responses((status=200,body=OpenedUpload),(status=400,description="Invalid upload"),(status=503,description="Upload capacity reached")),security(("device_token"=[])))]
+    responses((status=200,body=OpenedUpload),(status=400,description="Invalid upload")),security(("device_token"=[])))]
 pub async fn open(
     device: AuthedDevice,
     Extension(state): Extension<State>,
     Json(request): Json<OpenUpload>,
 ) -> Result<Json<OpenedUpload>, UploadError> {
     validate(&request)?;
-    let _permit = capacity(&state)?;
     let bucket = if request.sensitive {
         &state.config.data_engine_bucket_name
     } else {
@@ -230,12 +224,11 @@ pub async fn status(
     headers: HeaderMap,
 ) -> Result<Json<UploadPlan>, UploadError> {
     let claims = claims(&device, &state, &headers)?;
-    let _permit = capacity(&state)?;
     Ok(Json(plan(&claims).await?))
 }
 
 #[utoipa::path(put,path="/smith/upload-sessions/parts/{number}",params(("number"=i32,Path),("x-upload-token"=String,Header)),
-    request_body(content=Vec<u8>,content_type="application/octet-stream"),responses((status=200,body=UploadPart),(status=400,description="Invalid part length"),(status=410,description="Upload no longer exists")),security(("device_token"=[])))]
+    request_body(content=Vec<u8>,content_type="application/octet-stream"),responses((status=200,body=UploadPart),(status=400,description="Invalid part length"),(status=410,description="Upload no longer exists"),(status=503,description="Upload capacity reached, retry after the Retry-After delay")),security(("device_token"=[])))]
 pub async fn put_part(
     device: AuthedDevice,
     Extension(state): Extension<State>,
@@ -253,7 +246,13 @@ pub async fn put_part(
     {
         return Err(UploadError(StatusCode::BAD_REQUEST, "InvalidPartLength"));
     }
-    let _permit = capacity(&state)?;
+    // Only part transfers hold a permit, because they last as long as the device link needs.
+    let Ok(_permit) = state.upload_permits.try_acquire() else {
+        return Err(UploadError(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "UploadCapacity",
+        ));
+    };
     let body = reqwest::Body::wrap_stream(request.into_body().into_data_stream());
     let etag = Storage::upload_session_part(
         &claims.bucket,
@@ -280,7 +279,6 @@ pub async fn complete(
     headers: HeaderMap,
 ) -> Result<Json<super::route::UploadResult>, UploadError> {
     let claims = claims(&device, &state, &headers)?;
-    let _permit = capacity(&state)?;
     let plan = plan(&claims).await?;
     if plan.url.is_none() {
         if !plan.missing_parts.is_empty() {
