@@ -7,6 +7,10 @@ Type=simple
 TimeoutSec=60
 Restart=always
 RestartSec=2
+# The postman loop feeds the watchdog on each /home poll (every 1-20 s). A
+# loop stuck for 10 minutes restarts smithd.
+WatchdogSec=10min
+NotifyAccess=main
 User=root
 # Creates /run/smithd for the local control socket and cleans it up on stop.
 RuntimeDirectory=smithd

@@ -46,30 +46,18 @@ fn changes_network(command: &SafeCommandTx) -> bool {
     )
 }
 
-struct CommandQueueExecutor {
-    shutdown: ShutdownSignals,
-    queue: mpsc::Receiver<SafeCommandRequest>,
-    responses: mpsc::Sender<SafeCommandResponse>,
-    handles: Handles,
+/// Runs one command. The seam between the executor loop and the device, so
+/// the tests can run the commander without real handles.
+trait Execute {
+    fn execute(
+        &mut self,
+        action: SafeCommandRequest,
+    ) -> impl Future<Output = SafeCommandResponse> + Send;
 }
 
-impl CommandQueueExecutor {
-    fn new(
-        shutdown: ShutdownSignals,
-        queue: mpsc::Receiver<SafeCommandRequest>,
-        responses: mpsc::Sender<SafeCommandResponse>,
-        handles: Handles,
-    ) -> Self {
-        Self {
-            shutdown,
-            queue,
-            responses,
-            handles,
-        }
-    }
-
-    async fn execute_command(&mut self, action: SafeCommandRequest) -> SafeCommandResponse {
-        let _network_busy = changes_network(&action.command).then(|| self.handles.net_guard.hold());
+impl Execute for Handles {
+    async fn execute(&mut self, action: SafeCommandRequest) -> SafeCommandResponse {
+        let _network_busy = changes_network(&action.command).then(|| self.net_guard.hold());
         match action.command {
             SafeCommandTx::Ping => SafeCommandResponse {
                 id: action.id,
@@ -85,9 +73,9 @@ impl CommandQueueExecutor {
                 port,
                 user,
                 pub_key,
-            } => tunnel::open_port(action.id, &self.handles.tunnel, port, user, pub_key).await,
-            SafeCommandTx::CloseTunnel => tunnel::close_ssh(action.id, &self.handles.tunnel).await,
-            SafeCommandTx::Upgrade => upgrade::upgrade(action.id, &self.handles.updater).await,
+            } => tunnel::open_port(action.id, &self.tunnel, port, user, pub_key).await,
+            SafeCommandTx::CloseTunnel => tunnel::close_ssh(action.id, &self.tunnel).await,
+            SafeCommandTx::Upgrade => upgrade::upgrade(action.id, &self.updater).await,
             SafeCommandTx::UpdateNetwork { network } => network::execute(action.id, network).await,
             SafeCommandTx::DownloadOTA {
                 tools,
@@ -96,35 +84,30 @@ impl CommandQueueExecutor {
             } => {
                 ota::download_ota(
                     action.id,
-                    &self.handles.downloader,
-                    &self.handles.filemanager,
+                    &self.downloader,
+                    &self.filemanager,
                     &tools,
                     &payload,
                     rate,
                 )
                 .await
             }
-            SafeCommandTx::CheckOTAStatus => {
-                ota::check_ota(action.id, &self.handles.downloader).await
-            }
-            SafeCommandTx::StartOTA => ota::start_ota(action.id, &self.handles.filemanager).await,
+            SafeCommandTx::CheckOTAStatus => ota::check_ota(action.id, &self.downloader).await,
+            SafeCommandTx::StartOTA => ota::start_ota(action.id, &self.filemanager).await,
             SafeCommandTx::TestNetwork => {
-                let server = self.handles.magic.get_server().await;
+                let server = self.magic.get_server().await;
                 network::test_network(action.id, &server).await
             }
             SafeCommandTx::ExtendedNetworkTest { duration_minutes } => {
-                let server = self.handles.magic.get_server().await;
+                let server = self.magic.get_server().await;
                 network::extended_network_test(action.id, duration_minutes, &server).await
             }
             SafeCommandTx::StreamLogs {
                 session_id,
                 service_name,
-            } => {
-                logs::start_stream(action.id, &self.handles.logstream, session_id, service_name)
-                    .await
-            }
+            } => logs::start_stream(action.id, &self.logstream, session_id, service_name).await,
             SafeCommandTx::StopLogStream { session_id } => {
-                logs::stop_stream(action.id, &self.handles.logstream, session_id).await
+                logs::stop_stream(action.id, &self.logstream, session_id).await
             }
             SafeCommandTx::GetLogs {
                 unit,
@@ -149,10 +132,10 @@ impl CommandQueueExecutor {
                 network::execute_apply_networks(action.id, version, networks).await
             }
             SafeCommandTx::OpenFileSession { session_id } => {
-                files::open_session(action.id, &self.handles.filebrowser, session_id).await
+                files::open_session(action.id, &self.filebrowser, session_id).await
             }
             SafeCommandTx::CloseFileSession { session_id } => {
-                files::close_session(action.id, &self.handles.filebrowser, session_id).await
+                files::close_session(action.id, &self.filebrowser, session_id).await
             }
             SafeCommandTx::ReportSettings => match settings::read_now().await {
                 Some(report) => SafeCommandResponse {
@@ -199,13 +182,27 @@ impl CommandQueueExecutor {
             }
         }
     }
+}
 
+/// Runs the queued commands one at a time. The channels to and from the
+/// commander are unbounded, so neither actor ever waits on the other. Bounded
+/// in both directions, a large batch fills both and blocks the two for ever.
+struct CommandQueueExecutor<E> {
+    shutdown: ShutdownSignals,
+    queue: mpsc::UnboundedReceiver<SafeCommandRequest>,
+    responses: mpsc::UnboundedSender<SafeCommandResponse>,
+    executor: E,
+}
+
+impl<E: Execute> CommandQueueExecutor<E> {
     async fn run(&mut self) {
         loop {
             tokio::select! {
                 Some(command) = self.queue.recv() => {
-                    let response = self.execute_command(command).await;
-                    _ = self.responses.send(response).await;
+                    let response = self.executor.execute(command).await;
+                    if let Err(err) = self.responses.send(response) {
+                        warn!(command_id = err.0.id, "Commander stopped; result dropped");
+                    }
                 }
                 _ = self.shutdown.token.cancelled() => {
                     break;
@@ -248,11 +245,13 @@ impl SafeCommandState {
 /// so only a burst followed by a long outage reaches the bound.
 const MAX_KEPT_RESULTS: usize = 100;
 
+/// Never awaits inside its loop, so every sender to its bounded inbox
+/// (postman, settings, auditor, nm_watcher) always gets through.
 struct Commander {
     shutdown: ShutdownSignals,
     receiver: mpsc::Receiver<CommanderMessage>,
-    queue: mpsc::Sender<SafeCommandRequest>,
-    responses: mpsc::Receiver<SafeCommandResponse>,
+    queue: mpsc::UnboundedSender<SafeCommandRequest>,
+    responses: mpsc::UnboundedReceiver<SafeCommandResponse>,
     results: HashMap<i32, SafeCommandState>,
 }
 
@@ -308,8 +307,8 @@ impl Commander {
     fn new(
         shutdown: ShutdownSignals,
         receiver: mpsc::Receiver<CommanderMessage>,
-        queue: mpsc::Sender<SafeCommandRequest>,
-        responses: mpsc::Receiver<SafeCommandResponse>,
+        queue: mpsc::UnboundedSender<SafeCommandRequest>,
+        responses: mpsc::UnboundedReceiver<SafeCommandResponse>,
     ) -> Self {
         Self {
             shutdown,
@@ -330,7 +329,9 @@ impl Commander {
                         CommanderMessage::QueueCommand { action } => {
                             info!("Received command {:?}", action);
                             self.results.insert(action.id, SafeCommandState::queued());
-                            _ = self.queue.send(action).await;
+                            if let Err(err) = self.queue.send(action) {
+                                error!(command_id = err.0.id, "Command executor stopped; command not run");
+                            }
                         }
                         CommanderMessage::GetResults { tx } => {
                             info!("Results size: {}", self.results.len());
@@ -376,19 +377,22 @@ pub struct CommanderHandle {
 
 impl CommanderHandle {
     pub fn new(shutdown: ShutdownSignals, handles: Handles) -> Self {
+        Self::spawn(shutdown, handles)
+    }
+
+    fn spawn<E: Execute + Send + 'static>(shutdown: ShutdownSignals, executor: E) -> Self {
         let (sender, receiver) = mpsc::channel(10);
-        let (command_queue_tx, command_queue_rx) = mpsc::channel(10);
-        let (response_queue_tx, response_queue_rx) = mpsc::channel(10);
-        let mut actor = Commander::new(
-            shutdown.clone(),
-            receiver,
-            command_queue_tx,
-            response_queue_rx,
-        );
-        let mut actor2 =
-            CommandQueueExecutor::new(shutdown, command_queue_rx, response_queue_tx, handles);
-        tokio::spawn(async move { actor.run().await });
-        tokio::spawn(async move { actor2.run().await });
+        let (queue_tx, queue_rx) = mpsc::unbounded_channel();
+        let (responses_tx, responses_rx) = mpsc::unbounded_channel();
+        let mut commander = Commander::new(shutdown.clone(), receiver, queue_tx, responses_rx);
+        let mut executor = CommandQueueExecutor {
+            shutdown,
+            queue: queue_rx,
+            responses: responses_tx,
+            executor,
+        };
+        tokio::spawn(async move { commander.run().await });
+        tokio::spawn(async move { executor.run().await });
 
         Self { sender }
     }
@@ -437,6 +441,7 @@ impl CommanderHandle {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Duration;
 
     #[test]
     fn network_commands_hold_the_guard() {
@@ -507,5 +512,46 @@ mod tests {
         assert!(results.contains_key(&-6), "the report is kept");
         assert_eq!(results.get(&0).map(|s| &s.state), Some(&State::Queued));
         assert_eq!(results.len(), MAX_KEPT_RESULTS + 1);
+    }
+
+    /// Answers every command with a pong, yielding first so the queue and
+    /// the results pile up the way slow device commands make them.
+    struct Pong;
+
+    impl Execute for Pong {
+        async fn execute(&mut self, action: SafeCommandRequest) -> SafeCommandResponse {
+            tokio::task::yield_now().await;
+            pong(action.id, 0)
+        }
+    }
+
+    #[tokio::test]
+    async fn a_large_batch_runs_to_the_end_and_its_results_are_collected() {
+        const COMMANDS: i32 = 100;
+        let shutdown = crate::shutdown::ShutdownHandler::new();
+        let commander = CommanderHandle::spawn(shutdown.signals(), Pong);
+        let batch = (1..=COMMANDS)
+            .map(|id| SafeCommandRequest {
+                id,
+                command: SafeCommandTx::Ping,
+                continue_on_error: false,
+            })
+            .collect();
+
+        let collect = async {
+            commander.execute_api_batch(batch).await;
+            let mut ids = Vec::new();
+            while ids.len() < COMMANDS as usize {
+                ids.extend(commander.get_results().await.into_iter().map(|r| r.id));
+                tokio::task::yield_now().await;
+            }
+            ids
+        };
+        let mut ids = tokio::time::timeout(Duration::from_secs(10), collect)
+            .await
+            .unwrap_or_else(|_| panic!("commander deadlocked"));
+
+        ids.sort_unstable();
+        assert_eq!(ids, (1..=COMMANDS).collect::<Vec<_>>());
     }
 }
