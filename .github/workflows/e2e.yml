@@ -93,6 +93,8 @@ jobs:
     timeout-minutes: 20
     env:
       E2E_COMPOSE_FLAGS: -f compose.yaml -f compose.e2e.yaml
+      # Both images come from this tree, so the restart test must not skip.
+      E2E_REQUIRE_RESTART_CHANNEL: "1"
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4

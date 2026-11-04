@@ -21,6 +21,7 @@ const POLL_INTERVAL: Duration = Duration::from_secs(60);
 const HTTP_TIMEOUT: Duration = Duration::from_secs(10);
 /// Shorter than the unit's `WatchdogSec`.
 const WATCHDOG_EVERY: Duration = Duration::from_secs(30);
+const SYNC_TIMEOUT: Duration = Duration::from_secs(30);
 
 #[derive(Deserialize)]
 struct Magic {
@@ -202,8 +203,25 @@ impl reboot::Device for RealDevice {
         }
     }
 
+    /// A stuck disk can block `sync` for ever. It runs on its own thread, and
+    /// the reboot goes on after `SYNC_TIMEOUT` even when it has not returned.
     fn sync(&mut self) {
-        nix::unistd::sync();
+        let (done, finished) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            nix::unistd::sync();
+            // After the timeout nobody waits for this; a failed send is expected.
+            if done.send(()).is_err() {
+                info!("sync returned after the reboot went on");
+            }
+        });
+        let deadline = Instant::now() + SYNC_TIMEOUT;
+        while Instant::now() < deadline {
+            feed_watchdog();
+            if finished.recv_timeout(Duration::from_secs(1)).is_ok() {
+                return;
+            }
+        }
+        warn!("sync did not return in {SYNC_TIMEOUT:?}; going on with the reboot");
     }
 
     fn force_reboot(&mut self) {

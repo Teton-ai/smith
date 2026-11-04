@@ -3,7 +3,7 @@
 //!
 //!     cargo test -p smith-e2e -- --ignored --test-threads=1
 
-use anyhow::{Context as _, Result, ensure};
+use anyhow::{Context as _, Result, bail, ensure};
 use smith_e2e::{
     Ctx, enqueue, ensure_device_online, seed_minimum, wait_for_api, wait_for_response, wait_until,
 };
@@ -15,6 +15,20 @@ use std::time::Duration;
 const REBOOT_TIMEOUT: Duration = Duration::from_secs(300);
 /// smithd polls /home at least every 20 s, so a stale last_ping means it is frozen.
 const FROZEN_AFTER: Duration = Duration::from_secs(45);
+
+/// Set in the job that runs the head api against the head device: there both
+/// have the restart channel, so a missing one is a failure, not a skip.
+const REQUIRE_RESTART_CHANNEL: &str = "E2E_REQUIRE_RESTART_CHANNEL";
+
+/// A skip when a version-skew job runs a released image without the restart
+/// channel; a failure when the job requires it.
+fn skip(reason: &str) -> Result<()> {
+    if std::env::var_os(REQUIRE_RESTART_CHANNEL).is_some() {
+        bail!("{reason}, but {REQUIRE_RESTART_CHANNEL} is set");
+    }
+    println!("skipping: {reason}");
+    Ok(())
+}
 
 /// The restart channel tables do not exist in a released api image.
 async fn has_restart_channel(ctx: &Ctx) -> Result<bool> {
@@ -65,12 +79,10 @@ async fn a_restart_reboots_a_device_whose_smithd_is_frozen() -> Result<()> {
     let device_id = ensure_device_online(&ctx).await?;
 
     if !has_restart_channel(&ctx).await? {
-        println!("skipping: the api under test has no restart channel");
-        return Ok(());
+        return skip("the api under test has no restart channel");
     }
     if !has_smith_rescue(&ctx, device_id).await? {
-        println!("skipping: the device under test has no smith-rescue");
-        return Ok(());
+        return skip("the device under test has no smith-rescue");
     }
     let boot_before = polled_boot(&ctx, device_id).await?;
 
