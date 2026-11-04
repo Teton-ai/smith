@@ -75,7 +75,7 @@ pub async fn home(
     body: Bytes,
 ) -> Response {
     // Fails fast before any database work, so an overloaded api answers well within smithd's 10 s timeout.
-    let Ok(_permit) = state.home_permits.try_acquire() else {
+    let Ok(permit) = state.home_permits.clone().try_acquire_owned() else {
         return (
             StatusCode::SERVICE_UNAVAILABLE,
             [(header::RETRY_AFTER, "20")],
@@ -166,6 +166,8 @@ pub async fn home(
 
     let client_ip = Some(extract_client_ip(&headers, addr));
     tokio::spawn(async move {
+        // Held until the background writes finish so they count against the cap.
+        let _permit = permit;
         let _ = save_release_id(device.id, release_id, &state.pg_pool)
             .await
             .inspect_err(|err| {
