@@ -74,7 +74,7 @@ pub async fn home(
     Extension(state): Extension<State>,
     body: Bytes,
 ) -> Response {
-    // Fails fast before any database work, so an overloaded api answers well within smithd's 10 s timeout.
+    // Shed before any database work, so an overloaded api answers inside smithd's 10 s timeout.
     let Ok(permit) = state.home_permits.clone().try_acquire_owned() else {
         return (
             StatusCode::SERVICE_UNAVAILABLE,

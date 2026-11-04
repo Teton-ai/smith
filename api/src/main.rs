@@ -196,10 +196,11 @@ async fn start_main_server(
         .max_connections(100)
         .min_connections(10)
         .acquire_timeout(Duration::from_secs(3))
-        // 60 s matches the ALB request cut; 10 s lock_timeout matches smithd's client timeout, so a longer lock wait is already abandoned.
         .after_connect(|conn, _meta| {
             Box::pin(async move {
+                // Below the ALB's 60 s request cut, so no statement outlives its request.
                 conn.execute("SET statement_timeout = '60s'").await?;
+                // smithd gives up at 10 s, so a longer lock wait serves an abandoned request.
                 conn.execute("SET lock_timeout = '10s'").await?;
                 Ok(())
             })

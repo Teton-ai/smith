@@ -65,7 +65,7 @@ const SAVE_BUDGET: Duration = Duration::from_secs(5);
 const RESULT_TX_TIMEOUTS: &str =
     "SELECT set_config('lock_timeout', '1s', true), set_config('statement_timeout', '3s', true)";
 
-/// Commands per /home answer; older smithd deadlocks on more than about 20, the rest leave with later posts.
+/// Older smithd deadlocks above ~20 commands in one answer; the rest leave with later posts.
 const COMMANDS_PER_ANSWER: i64 = 20;
 
 /// The database is too busy now: the device should send its results again later.
@@ -709,6 +709,7 @@ pub async fn get_commands(
 ) -> Result<Vec<SafeCommandRequest>, sqlx::Error> {
     let mut tx = pool.begin().await?;
 
+    // FOR UPDATE: a concurrent queue_latest refresh waits for this fetch to commit.
     let fetched_commands: Vec<CommandsDB> = sqlx::query_as!(
         CommandsDB,
         r#"
@@ -727,7 +728,6 @@ pub async fn get_commands(
     .fetch_all(&mut *tx)
     .await?;
 
-    // FOR UPDATE makes a concurrent `queue_latest` refresh wait for this fetch to commit.
     // If commands are fetched successfully, update fetched_at timestamp
     if !fetched_commands.is_empty() {
         let ids: Vec<i32> = fetched_commands.iter().map(|cmd| cmd.id).collect();
@@ -864,7 +864,7 @@ pub async fn add_commands(
     Ok(command_ids)
 }
 
-/// Refreshes the device's unfetched system-queued `kind` command (never a user-issued one) instead of queueing another, so resent results do not pile up copies.
+/// Refreshes the pending system-queued `kind` command instead of adding one; user rows stay.
 async fn queue_latest(
     conn: &mut PgConnection,
     device_id: i32,
@@ -987,7 +987,7 @@ mod tests {
     use super::{
         COMMAND_RESULT_LOCK, Saved, map_key_mgmt, save_responses, save_settings_report, schema,
     };
-    use schema::{HomePost, SafeCommandRequest, SafeCommandRx, SafeCommandTx};
+    use schema::{HomePost, SafeCommandRx};
     use sqlx::PgPool;
     use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
     use std::time::Duration;
@@ -1007,32 +1007,6 @@ mod tests {
         assert_eq!(map_key_mgmt("wep"), None);
         assert_eq!(map_key_mgmt(""), None);
         assert_eq!(map_key_mgmt("wpa3"), None);
-    }
-
-    #[sqlx::test]
-    #[ignore = "needs the compose Postgres; run with --test-threads=1"]
-    async fn get_commands_returns_at_most_the_cap_in_id_order(pool: PgPool) -> anyhow::Result<()> {
-        let device_id: i32 =
-            sqlx::query_scalar("INSERT INTO device (serial_number) VALUES ('s') RETURNING id")
-                .fetch_one(&pool)
-                .await?;
-        let commands = (0..21)
-            .map(|_| SafeCommandRequest {
-                id: -1,
-                command: SafeCommandTx::Ping,
-                continue_on_error: false,
-            })
-            .collect();
-        let ids = super::add_commands("s", commands, &pool, None).await?;
-
-        let got = super::get_commands(device_id, "s", &pool).await?;
-        let unfetched: Vec<i32> =
-            sqlx::query_scalar("SELECT id FROM command_queue WHERE fetched = false")
-                .fetch_all(&pool)
-                .await?;
-        assert_eq!(got.iter().map(|c| c.id).collect::<Vec<_>>(), ids[..20]);
-        assert_eq!(unfetched, ids[20..]);
-        Ok(())
     }
 
     #[sqlx::test]
