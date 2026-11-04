@@ -270,20 +270,32 @@ enum CommanderMessage {
     },
 }
 
-/// Puts back results whose post failed. An entry already under the same id is
-/// newer (a fresh report, or a re-sent command still running) and wins.
+/// Puts back command results whose post failed. An entry already under the
+/// same id is newer (a re-sent command still running) and wins.
+///
+/// Only command results (positive ids) are kept: nothing else produces them
+/// again. Reports (negative ids) are dropped; the api has often stored them
+/// already, and resending them on each failed post multiplied the load.
 fn requeue_results(
     results: &mut HashMap<i32, SafeCommandState>,
     actions: Vec<SafeCommandResponse>,
 ) {
+    let mut dropped = Vec::new();
     for action in actions {
+        if action.id <= 0 {
+            dropped.push(action.id);
+            continue;
+        }
         results
             .entry(action.id)
             .or_insert_with(|| SafeCommandState::completed(action));
     }
+    if !dropped.is_empty() {
+        warn!(ids = ?dropped, "Post failed; reports not sent again");
+    }
     // Command ids come from a sequence, so the lowest is the oldest command.
-    // The synthetic ids (negative) are a few reports replaced by their next
-    // version; they go last.
+    // Reports queued since the failed post (negative ids) are replaced by
+    // their next version; they go last.
     let mut completed: Vec<i32> = results
         .iter()
         .filter(|(_, state)| state.state == State::Completed)
@@ -482,9 +494,16 @@ mod tests {
 
     #[test]
     fn a_newer_result_under_the_same_id_wins_over_the_requeued_one() {
-        let mut results = HashMap::from([(-3, SafeCommandState::completed(pong(-3, 0)))]);
-        requeue_results(&mut results, vec![pong(-3, 1)]);
-        assert_eq!(responses(&results), [(-3, 0)]);
+        let mut results = HashMap::from([(7, SafeCommandState::completed(pong(7, 0)))]);
+        requeue_results(&mut results, vec![pong(7, 1)]);
+        assert_eq!(responses(&results), [(7, 0)]);
+    }
+
+    #[test]
+    fn a_report_whose_post_failed_is_dropped_and_a_fresh_one_kept() {
+        let mut results = HashMap::from([(-6, SafeCommandState::completed(pong(-6, 0)))]);
+        requeue_results(&mut results, vec![pong(-1, 0), pong(-6, 1), pong(7, 0)]);
+        assert_eq!(responses(&results), [(-6, 0), (7, 0)]);
     }
 
     #[test]
@@ -497,13 +516,16 @@ mod tests {
 
     #[test]
     fn past_the_bound_the_oldest_commands_are_dropped_before_reports_and_running_commands() {
-        let mut results = HashMap::from([(0, SafeCommandState::queued())]);
+        // A running command and a report queued since the failed post.
+        let mut results = HashMap::from([
+            (0, SafeCommandState::queued()),
+            (-6, SafeCommandState::completed(pong(-6, 0))),
+        ]);
         // One over the bound once the report is counted, in no particular order.
-        let mut actions: Vec<_> = (1..=MAX_KEPT_RESULTS)
+        let actions: Vec<_> = (1..=MAX_KEPT_RESULTS)
             .rev()
             .map(|id| pong(id as i32, 0))
             .collect();
-        actions.insert(MAX_KEPT_RESULTS / 2, pong(-6, 0));
         requeue_results(&mut results, actions);
         assert!(
             !results.contains_key(&1),
