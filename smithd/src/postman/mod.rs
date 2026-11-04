@@ -11,7 +11,6 @@ use crate::utils::schema::{
 use crate::utils::system::SystemInfo;
 use anyhow::{Result, anyhow};
 use reqwest::{Response, StatusCode};
-use std::fmt::Write;
 use std::time::{Duration, Instant};
 use tokio::{sync::mpsc, time};
 use tracing::{error, info, warn};
@@ -20,6 +19,11 @@ const CMD_ID_GET_VARIABLES: i32 = -1;
 const CMD_ID_UPDATE_SYSTEM_INFO: i32 = -2;
 const CMD_ID_GET_NETWORK: i32 = -4;
 const CMD_ID_REPORT_NM_PROFILES: i32 = -6;
+const BACKOFF_BASE: Duration = Duration::from_secs(20);
+// The retry wait stays below the unit's 10 min WatchdogSec.
+const BACKOFF_CAP: Duration = Duration::from_secs(5 * 60);
+// A reachable API gets time to recover before reboot escalation starts.
+const TCP_WORKS_GRACE: Duration = Duration::from_secs(60 * 60);
 
 /// Returns an update for the API when the system info changed since the last report.
 async fn refresh_system_info(system_info: &mut SystemInfo) -> Option<SafeCommandResponse> {
@@ -71,21 +75,29 @@ fn push_latest(responses: &mut Vec<SafeCommandResponse>, update: SafeCommandResp
     responses.push(update);
 }
 
-const BACKOFF_BASE: Duration = Duration::from_secs(20);
-// Stays under the unit's 10 min WatchdogSec, which is fed once per post.
-const BACKOFF_CAP: Duration = Duration::from_secs(5 * 60);
-
-/// Full-jitter wait after N straight failures: ceiling 20 s doubling to 5 min, never below Retry-After.
+/// Full jitter with an exponential ceiling; Retry-After shares the five-minute cap.
 fn backoff(failed_posts: u32, retry_after: Option<Duration>, jitter: f64) -> Duration {
     let ceiling = BACKOFF_BASE
         .saturating_mul(1 << failed_posts.saturating_sub(1).min(8))
         .min(BACKOFF_CAP);
-    let wait = Duration::from_millis((ceiling.as_millis() as f64 * jitter) as u64);
+    let wait = ceiling.mul_f64(jitter);
     wait.max(retry_after.unwrap_or_default().min(BACKOFF_CAP))
 }
 
-// A reboot is the last resort for a wedged client, never the answer to a slow server.
-const TCP_WORKS_GRACE: Duration = Duration::from_secs(60 * 60);
+async fn can_connect_to_api(hostname: &str) -> bool {
+    let Ok(url) = url::Url::parse(hostname) else {
+        return false;
+    };
+    let (Some(host), Some(port)) = (url.host_str(), url.port_or_known_default()) else {
+        return false;
+    };
+    time::timeout(
+        Duration::from_secs(3),
+        tokio::net::TcpStream::connect((host, port)),
+    )
+    .await
+    .is_ok_and(|connection| connection.is_ok())
+}
 
 enum PollMode {
     Active { ticks_without_commands: u32 },
@@ -204,6 +216,7 @@ impl Postman {
                     feed_watchdog();
                     if let Err(e) = self.ensure_token().await {
                         error!("Failed to register device: {}", e);
+                        feed_watchdog();
                         failed_posts = failed_posts.saturating_add(1);
                         keep_alive.as_mut().reset(time::Instant::now() + backoff(failed_posts, None, rand::random()));
                         continue;
@@ -229,6 +242,8 @@ impl Postman {
                             // get_results already drained these, including commands
                             // that finished during the outage; requeue or they are lost.
                             self.commander.requeue_results(ping_home_body.responses).await;
+                            // Polling work and the retry wait must not share one watchdog interval.
+                            feed_watchdog();
                             failed_posts = failed_posts.saturating_add(1);
                             self.poll_mode = PollMode::Idle;
                             keep_alive.as_mut().reset(time::Instant::now() + backoff(failed_posts, retry_after, rand::random()));
@@ -372,8 +387,7 @@ impl Postman {
         Ok(())
     }
 
-    /// `Err` when the post was not delivered, so its results still need sending;
-    /// it carries the server's `Retry-After`, if any.
+    /// Failed delivery returns Retry-After when available; command results still need sending.
     async fn ping_home(
         &mut self,
         message: &HomePost,
@@ -445,28 +459,11 @@ impl Postman {
                 }
             },
             Err(err) => {
-                let mut s = format!("{}", err);
-                for src in err.chain().skip(1) {
-                    let _ = write!(s, "\n\nCaused by: {}", src);
-                }
-                error!("POST FAILURE: {}", s);
+                error!("POST FAILURE: {err:#}");
                 let now = Instant::now();
                 let failing_for = now.duration_since(*self.failing_since.get_or_insert(now));
                 if self.problems.is_none() {
-                    // A slow api times out too; only a failed TCP connect means the link is down.
-                    let addr = url::Url::parse(&self.hostname).ok().and_then(|url| {
-                        Some((url.host_str()?.to_owned(), url.port_or_known_default()?))
-                    });
-                    let tcp_works = match addr {
-                        Some(addr) => time::timeout(
-                            Duration::from_secs(3),
-                            tokio::net::TcpStream::connect(addr),
-                        )
-                        .await
-                        .is_ok_and(|conn| conn.is_ok()),
-                        None => false,
-                    };
-                    if tcp_works && failing_for <= TCP_WORKS_GRACE {
+                    if can_connect_to_api(&self.hostname).await && failing_for <= TCP_WORKS_GRACE {
                         warn!("api unreachable over HTTP but TCP connect works, not arming Police");
                     } else {
                         self.problems = self.police.report_problem_starting().await;
@@ -542,7 +539,7 @@ mod tests {
     fn backoff_doubles_to_the_cap_and_honours_retry_after() {
         let secs = Duration::from_secs;
         let cases = [
-            ("first, top jitter", 1, None, 0.999, secs(19)),
+            ("first", 1, None, 0.999, Duration::from_millis(19980)),
             ("third, half jitter", 3, None, 0.5, secs(40)),
             ("capped", 50, None, 0.5, secs(150)),
             ("retry-after floor", 1, Some(secs(60)), 0.0, secs(60)),
@@ -557,7 +554,7 @@ mod tests {
         ];
         for (name, failed_posts, retry_after, jitter, want) in cases {
             let got = backoff(failed_posts, retry_after, jitter);
-            assert_eq!(got.as_secs(), want.as_secs(), "{name}");
+            assert_eq!(got, want, "{name}");
         }
     }
 
