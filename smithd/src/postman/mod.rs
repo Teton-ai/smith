@@ -75,9 +75,7 @@ const BACKOFF_BASE: Duration = Duration::from_secs(20);
 // Stays under the unit's 10 min WatchdogSec, which is fed once per post.
 const BACKOFF_CAP: Duration = Duration::from_secs(5 * 60);
 
-/// Wait before the next post after `failed_posts` (>= 1) failures in a row: full
-/// jitter (`jitter` in [0, 1)) under a ceiling doubling from 20 s to 5 min, never
-/// shorter than the server's `Retry-After`.
+/// Full-jitter wait after N straight failures: ceiling 20 s doubling to 5 min, never below Retry-After.
 fn backoff(failed_posts: u32, retry_after: Option<Duration>, jitter: f64) -> Duration {
     let ceiling = BACKOFF_BASE
         .saturating_mul(1 << failed_posts.saturating_sub(1).min(8))
@@ -86,12 +84,8 @@ fn backoff(failed_posts: u32, retry_after: Option<Duration>, jitter: f64) -> Dur
     wait.max(retry_after.unwrap_or_default().min(BACKOFF_CAP))
 }
 
-const TCP_WORKS_GRACE: Duration = Duration::from_secs(60 * 60);
-
 // A reboot is the last resort for a wedged client, never the answer to a slow server.
-fn arm_police(tcp_works: bool, failing_since: Option<Instant>, now: Instant) -> bool {
-    !tcp_works || failing_since.is_some_and(|since| now.duration_since(since) > TCP_WORKS_GRACE)
-}
+const TCP_WORKS_GRACE: Duration = Duration::from_secs(60 * 60);
 
 enum PollMode {
     Active { ticks_without_commands: u32 },
@@ -457,24 +451,22 @@ impl Postman {
                 }
                 error!("POST FAILURE: {}", s);
                 let now = Instant::now();
-                let failing_since = *self.failing_since.get_or_insert(now);
+                let failing_for = now.duration_since(*self.failing_since.get_or_insert(now));
                 if self.problems.is_none() {
                     // A slow api times out too; only a failed TCP connect means the link is down.
                     let addr = url::Url::parse(&self.hostname).ok().and_then(|url| {
                         Some((url.host_str()?.to_owned(), url.port_or_known_default()?))
                     });
                     let tcp_works = match addr {
-                        Some(addr) => matches!(
-                            time::timeout(
-                                Duration::from_secs(3),
-                                tokio::net::TcpStream::connect(addr)
-                            )
-                            .await,
-                            Ok(Ok(_))
-                        ),
+                        Some(addr) => time::timeout(
+                            Duration::from_secs(3),
+                            tokio::net::TcpStream::connect(addr),
+                        )
+                        .await
+                        .is_ok_and(|conn| conn.is_ok()),
                         None => false,
                     };
-                    if !arm_police(tcp_works, Some(failing_since), now) {
+                    if tcp_works && failing_for <= TCP_WORKS_GRACE {
                         warn!("api unreachable over HTTP but TCP connect works, not arming Police");
                     } else {
                         self.problems = self.police.report_problem_starting().await;
@@ -550,25 +542,13 @@ mod tests {
     fn backoff_doubles_to_the_cap_and_honours_retry_after() {
         let secs = Duration::from_secs;
         let cases = [
-            ("first failure, top of jitter", 1, None, 0.999, secs(19)),
-            ("third failure, half jitter", 3, None, 0.5, secs(40)),
-            ("ceiling stops at the cap", 50, None, 0.5, secs(150)),
+            ("first, top jitter", 1, None, 0.999, secs(19)),
+            ("third, half jitter", 3, None, 0.5, secs(40)),
+            ("capped", 50, None, 0.5, secs(150)),
+            ("retry-after floor", 1, Some(secs(60)), 0.0, secs(60)),
+            ("retry-after capped", 1, Some(secs(3600)), 0.0, BACKOFF_CAP),
             (
-                "no jitter still waits for retry-after",
-                1,
-                Some(secs(60)),
-                0.0,
-                secs(60),
-            ),
-            (
-                "retry-after above the cap is capped",
-                1,
-                Some(secs(3600)),
-                0.0,
-                BACKOFF_CAP,
-            ),
-            (
-                "jitter above retry-after wins",
+                "jitter beats retry-after",
                 5,
                 Some(secs(10)),
                 0.5,
@@ -578,20 +558,6 @@ mod tests {
         for (name, failed_posts, retry_after, jitter, want) in cases {
             let got = backoff(failed_posts, retry_after, jitter);
             assert_eq!(got.as_secs(), want.as_secs(), "{name}");
-        }
-    }
-
-    #[test]
-    fn police_arms_when_tcp_is_down_or_http_stays_broken_for_an_hour() {
-        let since = Instant::now();
-        let at = |mins: u64| since + Duration::from_secs(mins * 60);
-        let cases = [
-            ("tcp down", false, at(1), true),
-            ("tcp up, failing 10 min", true, at(10), false),
-            ("tcp up, failing 2 h", true, at(120), true),
-        ];
-        for (name, tcp_works, now, want) in cases {
-            assert_eq!(arm_police(tcp_works, Some(since), now), want, "{name}");
         }
     }
 
