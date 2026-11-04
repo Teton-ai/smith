@@ -1,0 +1,23 @@
+[Unit]
+Description=Smith rescue: reboots the device on a Restart command, apart from smithd
+After=network.target
+# Never give up restarting: this is the last way to reach a stuck device.
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+Restart=always
+RestartSec=5
+# The poll loop feeds the watchdog each minute, also while it reboots.
+WatchdogSec=5min
+NotifyAccess=main
+# Keep it alive when smithd or another service eats the memory.
+OOMScoreAdjust=-1000
+User=root
+ExecStart=/usr/bin/smith-rescue
+WorkingDirectory=/etc/smith
+Environment="RUST_LOG=INFO"
+EnvironmentFile=-/etc/smith/environment
+
+[Install]
+WantedBy=multi-user.target

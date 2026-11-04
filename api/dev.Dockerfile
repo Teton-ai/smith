@@ -28,6 +28,7 @@ COPY api ./api
 COPY smithd ./smithd
 COPY models ./models
 COPY updater ./updater
+COPY rescue ./rescue
 COPY cli ./cli
 COPY e2e ./e2e
 

@@ -712,8 +712,16 @@ pub async fn get_commands(
                 cmd,
                 continue_on_error
             FROM command_queue
-            WHERE device_id = $1 AND fetched = false AND canceled = false AND available_at <= now()"#,
-        device_id
+            WHERE device_id = $1 AND fetched = false AND canceled = false AND available_at <= now()
+              AND NOT (
+                  cmd::jsonb = '"Restart"'::jsonb
+                  AND EXISTS (
+                      SELECT 1 FROM device_restart_channel c
+                      WHERE c.device_id = $1 AND c.last_poll_at > now() - $2::text::interval
+                  )
+              )"#,
+        device_id,
+        crate::restart::LIVE_CHANNEL
     )
     .fetch_all(&mut *tx)
     .await?;

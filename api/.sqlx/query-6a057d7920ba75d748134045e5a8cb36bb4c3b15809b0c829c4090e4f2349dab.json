@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT EXISTS (\n               SELECT 1 FROM restart_delivery d\n               WHERE d.device_id = $1 AND d.target_boot = $2\n                 AND NOT EXISTS (SELECT 1 FROM command_response r WHERE r.command_id = d.command_id)\n           ) AS \"open!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "open!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "6a057d7920ba75d748134045e5a8cb36bb4c3b15809b0c829c4090e4f2349dab"
+}
