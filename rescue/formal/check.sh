@@ -15,11 +15,18 @@ echo "== RestartChannel (the design in the code; must pass)"
 tlc RestartChannel
 
 [ "${1:-}" = broken ] || exit 0
+# Each broken design must fail on DoneMeansRebooted, not on a parse or
+# config error.
+expected="Invariant DoneMeansRebooted is violated"
 for variant in DoneOnDelivery CompleteOnNextPoll; do
   echo "== $variant (broken design; must fail)"
-  if tlc "$variant" > "${TMPDIR:-/tmp}/smith-tlc-$variant.out" 2>&1; then
+  out="${TMPDIR:-/tmp}/smith-tlc-$variant.out"
+  if tlc "$variant" > "$out" 2>&1; then
     echo "UNEXPECTED PASS: $variant; the check cannot see this break" >&2
     exit 1
   fi
-  grep -E "violated|Deadlock reached" "${TMPDIR:-/tmp}/smith-tlc-$variant.out" | head -2
+  if ! grep -F "$expected" "$out"; then
+    echo "UNEXPECTED FAILURE: $variant did not report '$expected'; see $out" >&2
+    exit 1
+  fi
 done

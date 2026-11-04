@@ -177,9 +177,14 @@ impl reboot::Device for RealDevice {
                     if let Err(err) = child.kill() {
                         warn!("Could not kill {program}: {err}");
                     }
-                    if let Err(err) = child.wait() {
-                        warn!("Could not reap {program}: {err}");
-                    }
+                    // A child stuck in disk I/O ignores SIGKILL, so it is
+                    // reaped on another thread and the reboot goes on.
+                    let program = program.to_owned();
+                    std::thread::spawn(move || {
+                        if let Err(err) = child.wait() {
+                            warn!("Could not reap {program}: {err}");
+                        }
+                    });
                     return false;
                 }
                 Ok(None) => std::thread::sleep(Duration::from_millis(200)),
