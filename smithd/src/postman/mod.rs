@@ -12,7 +12,7 @@ use crate::utils::system::SystemInfo;
 use anyhow::{Result, anyhow};
 use reqwest::{Response, StatusCode};
 use std::fmt::Write;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::{sync::mpsc, time};
 use tracing::{error, info, warn};
 
@@ -86,6 +86,13 @@ fn backoff(failed_posts: u32, retry_after: Option<Duration>, jitter: f64) -> Dur
     wait.max(retry_after.unwrap_or_default().min(BACKOFF_CAP))
 }
 
+const TCP_WORKS_GRACE: Duration = Duration::from_secs(60 * 60);
+
+// A reboot is the last resort for a wedged client, never the answer to a slow server.
+fn arm_police(tcp_works: bool, failing_since: Option<Instant>, now: Instant) -> bool {
+    !tcp_works || failing_since.is_some_and(|since| now.duration_since(since) > TCP_WORKS_GRACE)
+}
+
 enum PollMode {
     Active { ticks_without_commands: u32 },
     Idle,
@@ -102,6 +109,7 @@ struct Postman {
     hostname: String,
     token: Option<String>,
     problems: Option<u32>,
+    failing_since: Option<Instant>,
     poll_mode: PollMode,
     services_to_check: Vec<ServiceCheck>,
 }
@@ -131,6 +139,7 @@ impl Postman {
             token: None,
             hostname: "".to_owned(),
             problems: None,
+            failing_since: None,
             poll_mode: PollMode::Idle,
             services_to_check: Vec::new(),
         }
@@ -227,6 +236,7 @@ impl Postman {
                             // that finished during the outage; requeue or they are lost.
                             self.commander.requeue_results(ping_home_body.responses).await;
                             failed_posts = failed_posts.saturating_add(1);
+                            self.poll_mode = PollMode::Idle;
                             keep_alive.as_mut().reset(time::Instant::now() + backoff(failed_posts, retry_after, rand::random()));
                             continue;
                         }
@@ -389,10 +399,11 @@ impl Postman {
             .await;
 
         // Any HTTP answer, even an error status, proves the link works.
-        if result.is_ok()
-            && let Some(problem) = self.problems.take()
-        {
-            self.police.report_problem_solved(problem).await;
+        if result.is_ok() {
+            self.failing_since = None;
+            if let Some(problem) = self.problems.take() {
+                self.police.report_problem_solved(problem).await;
+            }
         }
 
         match result {
@@ -441,12 +452,12 @@ impl Postman {
             },
             Err(err) => {
                 let mut s = format!("{}", err);
-                let mut e = err.source().unwrap();
-                while let Some(src) = e.source() {
+                for src in err.chain().skip(1) {
                     let _ = write!(s, "\n\nCaused by: {}", src);
-                    e = src;
                 }
                 error!("POST FAILURE: {}", s);
+                let now = Instant::now();
+                let failing_since = *self.failing_since.get_or_insert(now);
                 if self.problems.is_none() {
                     // A slow api times out too; only a failed TCP connect means the link is down.
                     let addr = url::Url::parse(&self.hostname).ok().and_then(|url| {
@@ -463,7 +474,7 @@ impl Postman {
                         ),
                         None => false,
                     };
-                    if tcp_works {
+                    if !arm_police(tcp_works, Some(failing_since), now) {
                         warn!("api unreachable over HTTP but TCP connect works, not arming Police");
                     } else {
                         self.problems = self.police.report_problem_starting().await;
@@ -567,6 +578,20 @@ mod tests {
         for (name, failed_posts, retry_after, jitter, want) in cases {
             let got = backoff(failed_posts, retry_after, jitter);
             assert_eq!(got.as_secs(), want.as_secs(), "{name}");
+        }
+    }
+
+    #[test]
+    fn police_arms_when_tcp_is_down_or_http_stays_broken_for_an_hour() {
+        let since = Instant::now();
+        let at = |mins: u64| since + Duration::from_secs(mins * 60);
+        let cases = [
+            ("tcp down", false, at(1), true),
+            ("tcp up, failing 10 min", true, at(10), false),
+            ("tcp up, failing 2 h", true, at(120), true),
+        ];
+        for (name, tcp_works, now, want) in cases {
+            assert_eq!(arm_police(tcp_works, Some(since), now), want, "{name}");
         }
     }
 
