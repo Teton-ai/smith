@@ -726,21 +726,27 @@ pub async fn get_commands(
     .fetch_all(&mut *tx)
     .await?;
 
-    // If commands are fetched successfully, update fetched_at timestamp
-    if !fetched_commands.is_empty() {
-        let ids: Vec<i32> = fetched_commands.iter().map(|cmd| cmd.id).collect();
-        let _ = sqlx::query!(
-                    "UPDATE command_queue SET fetched_at = CURRENT_TIMESTAMP, fetched = true WHERE id = ANY($1)",
-                    &ids
-                )
-                .execute(&mut *tx)
-                .await;
-    }
+    // The restart channel can claim a Restart after the SELECT; return only
+    // the rows that this request claims, so a command goes out once.
+    let ids: Vec<i32> = fetched_commands.iter().map(|cmd| cmd.id).collect();
+    let claimed: Vec<i32> = if ids.is_empty() {
+        Vec::new()
+    } else {
+        sqlx::query_scalar!(
+            "UPDATE command_queue SET fetched_at = CURRENT_TIMESTAMP, fetched = true
+             WHERE id = ANY($1) AND fetched = false
+             RETURNING id",
+            &ids
+        )
+        .fetch_all(&mut *tx)
+        .await?
+    };
 
     tx.commit().await?;
 
     Ok(fetched_commands
         .into_iter()
+        .filter(|cmd| claimed.contains(&cmd.id))
         .filter_map(|cmd| match serde_json::from_value(cmd.cmd) {
             Ok(command) => Some(SafeCommandRequest {
                 id: cmd.id,
