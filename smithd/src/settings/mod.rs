@@ -14,6 +14,7 @@ pub(crate) use apply::reload_driver;
 
 use crate::commander::CommanderHandle;
 use crate::shutdown::ShutdownSignals;
+use crate::utils::net_guard::NetGuard;
 use crate::utils::schema::{SafeCommandRx, SettingsReport, WantedSettings};
 use actor::{Actor, ActorMessage};
 use apply::DeviceSystem;
@@ -33,11 +34,11 @@ pub struct SettingsHandle {
 }
 
 impl SettingsHandle {
-    pub fn new(shutdown: ShutdownSignals, commander: CommanderHandle) -> Self {
+    pub fn new(shutdown: ShutdownSignals, commander: CommanderHandle, net_guard: NetGuard) -> Self {
         let (sender, receiver) = mpsc::channel(8);
         let system = DeviceSystem::new(commander);
         tokio::spawn(async move {
-            let mut actor = Actor::load(shutdown, receiver, system).await;
+            let mut actor = Actor::load(shutdown, receiver, system, net_guard).await;
             actor.run().await
         });
 
