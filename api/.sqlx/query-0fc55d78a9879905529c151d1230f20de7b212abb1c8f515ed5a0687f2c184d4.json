@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE command_queue SET fetched = true, fetched_at = now(), target_boot = $2\n           WHERE device_id = $1 AND fetched = false AND canceled = false\n             AND cmd::jsonb = '\"Restart\"'::jsonb AND available_at <= now()",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "0fc55d78a9879905529c151d1230f20de7b212abb1c8f515ed5a0687f2c184d4"
+}

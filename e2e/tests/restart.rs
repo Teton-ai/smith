@@ -30,12 +30,15 @@ fn skip(reason: &str) -> Result<()> {
     Ok(())
 }
 
-/// The restart channel tables do not exist in a released api image.
+/// `command_queue.target_boot` does not exist in a released api image.
 async fn has_restart_channel(ctx: &Ctx) -> Result<bool> {
-    sqlx::query_scalar("SELECT to_regclass('public.device_restart_channel') IS NOT NULL")
-        .fetch_one(&ctx.db)
-        .await
-        .context("checking for device_restart_channel")
+    sqlx::query_scalar(
+        "SELECT EXISTS (SELECT 1 FROM information_schema.columns
+                        WHERE table_name = 'command_queue' AND column_name = 'target_boot')",
+    )
+    .fetch_one(&ctx.db)
+    .await
+    .context("checking for command_queue.target_boot")
 }
 
 /// A device image built from a release before smith-rescue does not have it.
@@ -50,24 +53,23 @@ async fn has_smith_rescue(ctx: &Ctx, device_id: i32) -> Result<bool> {
     Ok(status == 0)
 }
 
-/// The boot id of smith-rescue's last poll, once it polled in the last minutes.
-async fn polled_boot(ctx: &Ctx, device_id: i32) -> Result<String> {
-    wait_until(
-        "smith-rescue to poll the restart channel",
-        REBOOT_TIMEOUT,
-        || async {
-            let row = sqlx::query(
-                "SELECT boot_id::text AS boot_id FROM device_restart_channel
-                 WHERE device_id = $1 AND last_poll_at > now() - interval '2 minutes'",
-            )
-            .bind(device_id)
-            .fetch_optional(&ctx.db)
-            .await
-            .context("reading the restart channel")?;
-            Ok(row.map(|row| row.get::<String, _>("boot_id")))
-        },
+/// The device's boot id, read through smithd.
+async fn device_boot(ctx: &Ctx, device_id: i32) -> Result<String> {
+    let id = enqueue(
+        ctx,
+        device_id,
+        r#"{"FreeForm":{"cmd":"cat /proc/sys/kernel/random/boot_id"}}"#,
     )
-    .await
+    .await?;
+    let (response, status) = wait_for_response(ctx, id).await?;
+    ensure!(status == 0, "reading the boot id failed: {response}");
+    let boot = response["FreeForm"]["stdout"]
+        .as_str()
+        .context("no stdout in the boot id response")?
+        .trim()
+        .to_string();
+    ensure!(!boot.is_empty(), "empty boot id");
+    Ok(boot)
 }
 
 #[tokio::test]
@@ -84,7 +86,7 @@ async fn a_restart_reboots_a_device_whose_smithd_is_frozen() -> Result<()> {
     if !has_smith_rescue(&ctx, device_id).await? {
         return skip("the device under test has no smith-rescue");
     }
-    let boot_before = polled_boot(&ctx, device_id).await?;
+    let boot_before = device_boot(&ctx, device_id).await?;
 
     // SIGSTOP leaves smithd running but stuck: no poll loop, no executor.
     enqueue(
@@ -131,13 +133,13 @@ async fn a_restart_reboots_a_device_whose_smithd_is_frozen() -> Result<()> {
         "the result does not name the boot that ended: {message}"
     );
 
-    let boot_after = polled_boot(&ctx, device_id).await?;
-    ensure!(
-        boot_after != boot_before,
-        "the device polls from the same boot"
-    );
-
     // The new boot runs a fresh smithd that answers commands again.
     ensure_device_online(&ctx).await?;
+    let boot_after = device_boot(&ctx, device_id).await?;
+    ensure!(boot_after != boot_before, "the device did not reboot");
+    ensure!(
+        message.contains(&boot_after),
+        "the result does not name the new boot: {message}"
+    );
     Ok(())
 }

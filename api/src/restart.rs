@@ -1,7 +1,8 @@
 //! The restart channel. smith-rescue, a process apart from smithd, polls
-//! `/smith/restart` with the device's boot id. A Restart command goes to it
-//! bound to that boot, and is done when a poll comes from another boot. So a
-//! lost answer only delays the reboot, and no Restart reboots a device twice.
+//! `/smith/restart` with the device's boot id. It takes all Restart commands:
+//! each one is bound to the boot of the poll that takes it, and is done when a
+//! poll comes from another boot. So a lost answer only delays the reboot, and
+//! no Restart reboots a device twice.
 
 use anyhow::Result;
 use sqlx::PgPool;
@@ -11,16 +12,12 @@ use uuid::Uuid;
 /// Shares the key space of `home::COMMAND_RESULT_LOCK` (2).
 const RESTART_POLL_LOCK: i32 = 3;
 
-/// smith-rescue polls each minute. While its last poll is newer than this,
-/// `/home` leaves Restart commands to it; after that smithd gets them again.
-pub const LIVE_CHANNEL: &str = "3 minutes";
-
 /// Bounds each wait of a poll's transaction, so an overload fails fast.
 const POLL_TX_TIMEOUTS: &str =
     "SELECT set_config('lock_timeout', '1s', true), set_config('statement_timeout', '3s', true)";
 
-/// Records the poll, finishes the Restarts that a reboot ended, and hands out
-/// the waiting ones. Returns the boot that the device must end, if any.
+/// Finishes the Restarts that a reboot ended and hands out the waiting ones.
+/// Returns the boot that the device must end, if any.
 pub async fn poll(pool: &PgPool, device_id: i32, boot_id: Uuid) -> Result<Option<Uuid>> {
     let mut tx = pool.begin().await?;
     sqlx::query(POLL_TX_TIMEOUTS).execute(&mut *tx).await?;
@@ -32,26 +29,16 @@ pub async fn poll(pool: &PgPool, device_id: i32, boot_id: Uuid) -> Result<Option
     .execute(&mut *tx)
     .await?;
 
-    sqlx::query!(
-        "INSERT INTO device_restart_channel (device_id, last_poll_at, boot_id)
-         VALUES ($1, now(), $2)
-         ON CONFLICT (device_id) DO UPDATE SET last_poll_at = now(), boot_id = $2",
-        device_id,
-        boot_id
-    )
-    .execute(&mut *tx)
-    .await?;
-
     // A poll from another boot proves that the reboot happened.
     sqlx::query!(
         r#"INSERT INTO command_response (device_id, command_id, response, status)
-           SELECT d.device_id, d.command_id,
+           SELECT q.device_id, q.id,
                   json_build_object('Restart', json_build_object(
-                      'message', 'Rebooted: boot ' || d.target_boot || ' ended, now ' || $2::uuid)),
+                      'message', 'Rebooted: boot ' || q.target_boot || ' ended, now ' || $2::uuid)),
                   0
-           FROM restart_delivery d
-           WHERE d.device_id = $1 AND d.target_boot <> $2
-             AND NOT EXISTS (SELECT 1 FROM command_response r WHERE r.command_id = d.command_id)"#,
+           FROM command_queue q
+           WHERE q.device_id = $1 AND q.target_boot IS NOT NULL AND q.target_boot <> $2
+             AND NOT EXISTS (SELECT 1 FROM command_response r WHERE r.command_id = q.id)"#,
         device_id,
         boot_id
     )
@@ -60,14 +47,9 @@ pub async fn poll(pool: &PgPool, device_id: i32, boot_id: Uuid) -> Result<Option
 
     // All waiting Restarts end the same boot, so two clicks give one reboot.
     sqlx::query!(
-        r#"WITH handed AS (
-               UPDATE command_queue SET fetched = true, fetched_at = now()
-               WHERE device_id = $1 AND fetched = false AND canceled = false
-                 AND cmd::jsonb = '"Restart"'::jsonb AND available_at <= now()
-               RETURNING id
-           )
-           INSERT INTO restart_delivery (command_id, device_id, target_boot)
-           SELECT id, $1, $2 FROM handed"#,
+        r#"UPDATE command_queue SET fetched = true, fetched_at = now(), target_boot = $2
+           WHERE device_id = $1 AND fetched = false AND canceled = false
+             AND cmd::jsonb = '"Restart"'::jsonb AND available_at <= now()"#,
         device_id,
         boot_id
     )
@@ -76,9 +58,9 @@ pub async fn poll(pool: &PgPool, device_id: i32, boot_id: Uuid) -> Result<Option
 
     let open = sqlx::query_scalar!(
         r#"SELECT EXISTS (
-               SELECT 1 FROM restart_delivery d
-               WHERE d.device_id = $1 AND d.target_boot = $2
-                 AND NOT EXISTS (SELECT 1 FROM command_response r WHERE r.command_id = d.command_id)
+               SELECT 1 FROM command_queue q
+               WHERE q.device_id = $1 AND q.target_boot = $2
+                 AND NOT EXISTS (SELECT 1 FROM command_response r WHERE r.command_id = q.id)
            ) AS "open!""#,
         device_id,
         boot_id
@@ -204,27 +186,18 @@ mod tests {
 
     #[sqlx::test]
     #[ignore = "needs the compose Postgres; run with --test-threads=1"]
-    async fn home_leaves_restarts_to_a_live_restart_channel(pool: PgPool) -> Result<()> {
+    async fn home_never_gives_a_restart_to_smithd(pool: PgPool) -> Result<()> {
         let device = insert_device(&pool).await?;
-        let early = queue(&pool, device, r#""Restart""#).await?;
-        let fetched = crate::home::get_commands(device, "d", &pool).await?;
-        assert_eq!(fetched.iter().map(|c| c.id).collect::<Vec<_>>(), [early]);
-
-        poll(&pool, device, Uuid::new_v4()).await?;
-        queue(&pool, device, r#""Restart""#).await?;
+        let restart = queue(&pool, device, r#""Restart""#).await?;
         let ping = queue(&pool, device, r#""Ping""#).await?;
-        let fetched = crate::home::get_commands(device, "d", &pool).await?;
-        assert_eq!(fetched.iter().map(|c| c.id).collect::<Vec<_>>(), [ping]);
 
-        // A channel that stopped polling gives Restarts back to smithd.
-        sqlx::query(
-            "UPDATE device_restart_channel SET last_poll_at = now() - interval '10 minutes'",
-        )
-        .execute(&pool)
-        .await?;
-        let late = queue(&pool, device, r#""Restart""#).await?;
-        let fetched = crate::home::get_commands(device, "d", &pool).await?;
-        assert!(fetched.iter().any(|c| c.id == late), "{fetched:?}");
+        let fetched_ids: Vec<i32> = crate::home::get_commands(device, "d", &pool)
+            .await?
+            .iter()
+            .map(|c| c.id)
+            .collect();
+        assert_eq!(fetched_ids, [ping]);
+        assert!(!fetched(&pool, restart).await?);
         Ok(())
     }
 }

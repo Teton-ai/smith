@@ -713,21 +713,15 @@ pub async fn get_commands(
                 continue_on_error
             FROM command_queue
             WHERE device_id = $1 AND fetched = false AND canceled = false AND available_at <= now()
-              AND NOT (
-                  cmd::jsonb = '"Restart"'::jsonb
-                  AND EXISTS (
-                      SELECT 1 FROM device_restart_channel c
-                      WHERE c.device_id = $1 AND c.last_poll_at > now() - $2::text::interval
-                  )
-              )"#,
-        device_id,
-        crate::restart::LIVE_CHANNEL
+              -- smith-rescue takes Restarts through /smith/restart.
+              AND cmd::jsonb <> '"Restart"'::jsonb"#,
+        device_id
     )
     .fetch_all(&mut *tx)
     .await?;
 
-    // The restart channel can claim a Restart after the SELECT; return only
-    // the rows that this request claims, so a command goes out once.
+    // Return only the rows that this request claims, so a command that an
+    // overlapping request took goes out once.
     let ids: Vec<i32> = fetched_commands.iter().map(|cmd| cmd.id).collect();
     let claimed: Vec<i32> = if ids.is_empty() {
         Vec::new()
