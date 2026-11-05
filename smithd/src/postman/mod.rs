@@ -245,7 +245,6 @@ impl Postman {
                             // Polling work and the retry wait must not share one watchdog interval.
                             feed_watchdog();
                             failed_posts = failed_posts.saturating_add(1);
-                            self.poll_mode = PollMode::Idle;
                             keep_alive.as_mut().reset(time::Instant::now() + backoff(failed_posts, retry_after, rand::random()));
                             continue;
                         }
