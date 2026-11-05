@@ -318,7 +318,7 @@ checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 
 [[package]]
 name = "api"
-version = "0.2.235"
+version = "0.2.236"
 dependencies = [
  "anyhow",
  "axum 0.7.9",
@@ -1192,7 +1192,7 @@ checksum = "1c133bc6a41be0d194c306b5506d15e6feeea7b1d6604bd3f8310dfb2ca96486"
 
 [[package]]
 name = "cli"
-version = "0.2.235"
+version = "0.2.236"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3630,9 +3630,9 @@ dependencies = [
 
 [[package]]
 name = "mime"
-version = "0.3.17"
+version = "0.3.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6877bb514081ee2a7ff5ef9de3281f14a4dd4bceac4c09388074a6b5df8a139a"
+checksum = "d5848f5a9e8117cf94f2f90faac24a87ff81600ff8628c1e3deaab572e76bfa1"
 
 [[package]]
 name = "mime_guess"
@@ -3692,7 +3692,7 @@ dependencies = [
 
 [[package]]
 name = "models"
-version = "0.2.235"
+version = "0.2.236"
 dependencies = [
  "axum 0.7.9",
  "chrono",
@@ -5162,9 +5162,9 @@ dependencies = [
 
 [[package]]
 name = "rmcp"
-version = "3.8.0"
+version = "3.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f8be15815186873ea063bf005011d16c356804973489e40c39116ae3a2878d1f"
+checksum = "d24a7e92f4bcaa36b97fa93c4fa7ca8f3e669eced949345b3462dba333c7f909"
 dependencies = [
  "async-trait",
  "base64 0.23.1",
@@ -5183,6 +5183,7 @@ dependencies = [
  "schemars",
  "serde",
  "serde_json",
+ "sha2 0.11.1",
  "sse-stream",
  "thiserror 2.0.21",
  "tokio",
@@ -5195,9 +5196,9 @@ dependencies = [
 
 [[package]]
 name = "rmcp-macros"
-version = "3.8.0"
+version = "3.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8b0748e054a5f5598b3213cf72099ae6b2745ba4d996c59ccf455150a7dbb839"
+checksum = "b3140f24a766f80f9ec1607bde85680959a69b83d46fa9ce87dadab7e67ab029"
 dependencies = [
  "darling 0.24.1",
  "proc-macro2",
@@ -6128,7 +6129,7 @@ checksum = "e8e2fb0f499abb4d162f2bedad68f5ef91a1682b5a03596ddb67efd37768d100"
 
 [[package]]
 name = "smith"
-version = "0.2.235"
+version = "0.2.236"
 dependencies = [
  "anyhow",
  "axum 0.8.9",
@@ -6168,7 +6169,7 @@ dependencies = [
 
 [[package]]
 name = "smith-e2e"
-version = "0.2.235"
+version = "0.2.236"
 dependencies = [
  "anyhow",
  "reqwest",
@@ -6180,7 +6181,7 @@ dependencies = [
 
 [[package]]
 name = "smith-updater"
-version = "0.2.235"
+version = "0.2.236"
 dependencies = [
  "anyhow",
  "clap",
