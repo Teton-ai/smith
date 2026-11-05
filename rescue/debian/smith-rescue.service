@@ -1,6 +1,9 @@
 [Unit]
 Description=Smith rescue: reboots the device on a Restart command, apart from smithd
-After=network.target
+# No Conflicts=shutdown.target: systemd does not stop it when a shutdown
+# starts, so it can force the reboot when the shutdown hangs.
+DefaultDependencies=no
+After=basic.target network.target
 # Never give up restarting: this is the last way to reach a stuck device.
 StartLimitIntervalSec=0
 
