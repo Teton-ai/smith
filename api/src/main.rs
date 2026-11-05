@@ -272,6 +272,10 @@ async fn start_main_server(
     network::gc::spawn_sweeper(state.pg_pool.clone(), config.network_gc_interval_seconds);
 
     let recorder_handle = metric::setup_metrics_recorder();
+    metric::spawn_upload_permits_reporter(
+        state.upload_permits.clone(),
+        config.max_concurrent_uploads,
+    );
 
     let mut api_doc = ApiDoc::openapi();
 
