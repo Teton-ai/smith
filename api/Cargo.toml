@@ -52,6 +52,8 @@ tower-http = { version = "0.6.1", features = [
 tracing = "0.1.40"
 tracing-subscriber = { version = "0.3.18", features = ["env-filter", "json", "time"] }
 metrics = "0.18"
+# The `http` version that rust-s3 uses for presigned request headers.
+http02 = { package = "http", version = "0.2.12" }
 metrics-exporter-prometheus = "0.8"
 utoipa = { workspace = true }
 utoipa-axum = "0.1"

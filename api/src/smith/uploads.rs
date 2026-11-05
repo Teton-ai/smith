@@ -216,11 +216,20 @@ async fn part_urls(state: &State, claims: &UploadClaims, parts: &[i32]) -> Vec<P
     } else {
         "assets"
     };
-    let urls = Storage::presign_regional_upload_parts(
+    let parts: Result<Vec<(i32, u64)>, _> = parts
+        .iter()
+        .map(|number| {
+            part_length(claims.size_bytes, *number).map(|length| (*number, length as u64))
+        })
+        .collect();
+    let Ok(parts) = parts else {
+        return vec![];
+    };
+    let urls: anyhow::Result<Vec<PartUrl>> = Storage::presign_regional_upload_parts(
         &claims.bucket,
         &claims.key,
         &claims.upload_id,
-        parts,
+        &parts,
         PART_URL_TTL_SECONDS,
     )
     .await
@@ -235,7 +244,10 @@ async fn part_urls(state: &State, claims: &UploadClaims, parts: &[i32]) -> Vec<P
             .collect()
     });
     match urls {
-        Ok(urls) => urls,
+        Ok(urls) => {
+            metrics::counter!("smith_upload_part_urls_total", urls.len() as u64);
+            urls
+        }
         Err(error) => {
             tracing::error!("Failed to presign CDN upload parts: {error}");
             vec![]
@@ -343,6 +355,7 @@ pub async fn put_part(
     )
     .await
     .map_err(storage_error)?;
+    metrics::increment_counter!("smith_upload_proxied_parts_total");
     Ok(Json(UploadPart {
         part_number: number,
         etag,
@@ -363,6 +376,7 @@ pub async fn complete(
         if !plan.missing_parts.is_empty() {
             return Err(UploadError(StatusCode::CONFLICT, "MissingParts"));
         }
+        let parts = plan.confirmed_parts.len() as u64;
         let result = Storage::complete_multipart(
             &claims.bucket,
             &claims.key,
@@ -388,6 +402,7 @@ pub async fn complete(
                 "ChecksumMismatch",
             ));
         }
+        metrics::counter!("smith_upload_completed_parts_total", parts);
     }
     Ok(Json(super::route::UploadResult {
         url: object_url(&claims),
