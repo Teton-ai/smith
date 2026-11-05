@@ -59,6 +59,7 @@ fn test_state(pool: PgPool) -> anyhow::Result<State> {
             .map_err(|e| anyhow::anyhow!(e.to_string()))?,
         device_jwt_signer: signer,
         upload_permits: Arc::new(Semaphore::new(4)),
+        home_permits: Arc::new(Semaphore::new(4)),
     })
 }
 

@@ -11,7 +11,8 @@ use axum::response::Redirect;
 use axum::{Extension, Router, middleware, routing::get};
 use config::Config;
 use middlewares::authorization::{AccountsConfig, AuthorizationConfig};
-use sqlx::postgres::{PgPool, PgPoolOptions};
+use sqlx::postgres::{PgConnection, PgPool, PgPoolOptions};
+use sqlx::{Connection, Executor};
 use std::env;
 use std::fs::File;
 use std::future::ready;
@@ -80,7 +81,11 @@ pub struct State {
     jwks_client: DebugJwksClient,
     device_jwt_signer: DeviceJwtSigner,
     upload_permits: Arc<Semaphore>,
+    home_permits: Arc<Semaphore>,
 }
+
+// Below the pool's max_connections, so /home posts alone cannot exhaust the pool.
+const HOME_PERMITS: usize = 80;
 
 fn main() {
     logging::init_logging();
@@ -172,6 +177,18 @@ async fn start_main_server(
 ) {
     info!("Starting Smith API v{}", env!("CARGO_PKG_VERSION"));
 
+    // Its own connection, so migrations are not cut by the pool's statement_timeout.
+    let mut migration_conn = PgConnection::connect(&config.database_url)
+        .await
+        .expect("can't connect to database.");
+    sqlx::migrate!()
+        .run(&mut migration_conn)
+        .await
+        .expect("sqlx migration failed");
+    if let Err(err) = migration_conn.close().await {
+        tracing::error!("Failed to close the migration connection: {err:?}");
+    }
+
     // set up connection pool
     // A short acquire timeout fails a request fast when the pool is exhausted,
     // well before smithd's 10 s client timeout on /home.
@@ -179,14 +196,17 @@ async fn start_main_server(
         .max_connections(100)
         .min_connections(10)
         .acquire_timeout(Duration::from_secs(3))
+        .after_connect(|conn, _meta| {
+            Box::pin(async move {
+                // Bound each statement and lock wait on pooled connections.
+                conn.execute("SET statement_timeout = '60s'; SET lock_timeout = '10s'")
+                    .await?;
+                Ok(())
+            })
+        })
         .connect(&config.database_url)
         .await
         .expect("can't connect to database.");
-
-    sqlx::migrate!()
-        .run(&pool)
-        .await
-        .expect("sqlx migration failed");
 
     // When ACCOUNTS_CONFIG is provided, make the database match it before serving
     // any request; otherwise the feature is off and roles are left untouched. An
@@ -235,6 +255,7 @@ async fn start_main_server(
         jwks_client,
         device_jwt_signer,
         upload_permits: Arc::new(Semaphore::new(config.max_concurrent_uploads)),
+        home_permits: Arc::new(Semaphore::new(HOME_PERMITS)),
     };
 
     // An unreachable device cannot report its own absence, so downtime has to be

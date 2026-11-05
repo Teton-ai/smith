@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT\n                id,\n                cmd,\n                continue_on_error\n            FROM command_queue\n            WHERE device_id = $1 AND fetched = false AND canceled = false AND available_at <= now()",
+  "query": "\n            SELECT\n                id,\n                cmd,\n                continue_on_error\n            FROM command_queue\n            WHERE device_id = $1 AND fetched = false AND canceled = false AND available_at <= now()\n            ORDER BY id\n            LIMIT $2\n            FOR UPDATE",
   "describe": {
     "columns": [
       {
@@ -21,7 +21,8 @@
     ],
     "parameters": {
       "Left": [
-        "Int4"
+        "Int4",
+        "Int8"
       ]
     },
     "nullable": [
@@ -30,5 +31,5 @@
       false
     ]
   },
-  "hash": "eb65751fe5b463a64c8a0c26550fc9e33ed2394af04ac7d6ef82721e1d7ed8b6"
+  "hash": "eec062ca9d902476582f75f95a94d26b19dc495bb6ba7aa96bbd5a9f4d9762b3"
 }
