@@ -332,7 +332,7 @@ pub struct UploadParams {
 fn uploads_busy() -> Response {
     (
         StatusCode::SERVICE_UNAVAILABLE,
-        [(header::RETRY_AFTER, "30")],
+        [(header::RETRY_AFTER, super::uploads::RETRY_AFTER_SECONDS)],
     )
         .into_response()
 }

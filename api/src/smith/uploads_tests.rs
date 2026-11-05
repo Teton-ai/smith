@@ -164,23 +164,8 @@ async fn stateless_routes_verify_tokens_parts_and_completion() -> anyhow::Result
     let foreign = state.device_jwt_signer.mint(2, "two")?;
     let app = router(state.clone());
     let base = "/smith/upload-sessions";
-    let capacity = state.upload_permits.acquire_many(4).await?;
     let response = call(&app, "POST", base, &credential, None, b"{}".to_vec()).await?;
     assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
-    let identity =
-        serde_json::json!({"key":"capacity/test", "size_bytes":3,"checksum":"a".repeat(64)});
-    let response = call(
-        &app,
-        "POST",
-        base,
-        &credential,
-        None,
-        serde_json::to_vec(&identity)?,
-    )
-    .await?;
-    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
-    assert_eq!(response.headers()["retry-after"], "5");
-    drop(capacity);
     let bytes: Vec<u8> = (0..PART_SIZE + 29).map(|n| (n % 251) as u8).collect();
     let checksum = format!("{:x}", Sha256::digest(&bytes));
     for sensitive in [false, true] {
@@ -456,6 +441,83 @@ async fn stateless_routes_verify_tokens_parts_and_completion() -> anyhow::Result
         .status(),
         StatusCode::GONE
     );
+    Ok(())
+}
+
+#[tokio::test]
+#[ignore = "Requires isolated Postgres and S3; see api/tests/resumable-uploads.md"]
+async fn full_transfer_capacity_rejects_only_data_transfers() -> anyhow::Result<()> {
+    let pool = PgPool::connect(&std::env::var("UPLOAD_TEST_DATABASE_URL")?).await?;
+    let state = test_state(pool)?;
+    let credential = state.device_jwt_signer.mint(1, "one")?;
+    let app = router(state.clone())
+        .route("/smith/upload", post(crate::smith::route::upload_file))
+        .layer(Extension(state.clone()));
+    let base = "/smith/upload-sessions";
+    let body = b"abc";
+    let key = format!("capacity/{}", uuid::Uuid::new_v4());
+    let identity = serde_json::json!({"key":key,"size_bytes":3,"checksum":format!("{:x}",Sha256::digest(body))});
+    let opened = open_upload(&app, &credential, &identity).await?;
+    let part = format!("{base}/parts/1");
+    let response = call(
+        &app,
+        "PUT",
+        &part,
+        &credential,
+        Some(&opened.token),
+        body.to_vec(),
+    )
+    .await?;
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let _full = state.upload_permits.acquire_many(4).await?;
+    let response = call(
+        &app,
+        "PUT",
+        &part,
+        &credential,
+        Some(&opened.token),
+        body.to_vec(),
+    )
+    .await?;
+    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(response.headers()["retry-after"], "30");
+    let error: serde_json::Value =
+        serde_json::from_slice(&axum::body::to_bytes(response.into_body(), 1024).await?)?;
+    assert_eq!(error["code"], "UploadCapacity");
+
+    let listed = upload_plan(&app, &credential, &opened.token).await?;
+    assert_eq!(listed.missing_parts, Vec::<i32>::new());
+    assert_eq!(listed.confirmed_parts.len(), 1);
+    let completed: serde_json::Value = response_json(
+        call(
+            &app,
+            "POST",
+            &format!("{base}/complete"),
+            &credential,
+            Some(&opened.token),
+            vec![],
+        )
+        .await?,
+    )
+    .await?;
+    assert_eq!(completed["url"], format!("s3://upload-assets/{key}"));
+    let other = serde_json::json!({"key":format!("capacity/{}", uuid::Uuid::new_v4()),"size_bytes":3,"checksum":"a".repeat(64)});
+    assert_eq!(
+        open_upload(&app, &credential, &other).await?.part_size,
+        PART_SIZE
+    );
+
+    use tower::ServiceExt;
+    let legacy = axum::http::Request::post("/smith/upload")
+        .header("authorization", format!("Bearer {credential}"))
+        .header("content-type", "multipart/form-data; boundary=x")
+        .body(axum::body::Body::from(
+            "--x\r\nContent-Disposition: form-data; name=\"file\"; filename=\"a\"\r\n\r\nabc\r\n--x--\r\n",
+        ))?;
+    let response = app.clone().oneshot(legacy).await?;
+    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(response.headers()["retry-after"], "30");
     Ok(())
 }
 
