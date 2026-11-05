@@ -16,7 +16,8 @@ use tokio::sync::{mpsc, watch};
 use tokio::time;
 use tracing::{error, info, warn};
 
-/// When the last home poll succeeded; `None` until the first one does.
+/// When the api last answered a home poll, with any status; `None` until it
+/// first does.
 pub type LastPoll = watch::Receiver<Option<time::Instant>>;
 
 const CMD_ID_GET_VARIABLES: i32 = -1;
@@ -413,8 +414,11 @@ impl Postman {
             .await;
 
         // Any HTTP answer, even an error status, proves the link works.
+        // Also what a settings apply waits for: an overloaded api answering
+        // 503 must not revert settings that kept the link up.
         if result.is_ok() {
             self.failing_since = None;
+            self.last_poll.send_replace(Some(time::Instant::now()));
             if let Some(problem) = self.problems.take() {
                 self.police.report_problem_solved(problem).await;
             }
@@ -424,7 +428,6 @@ impl Postman {
             Ok((status_code, response)) => match status_code {
                 StatusCode::OK => {
                     info!("Posting successful");
-                    self.last_poll.send_replace(Some(time::Instant::now()));
                     // The api stored the results even if its answer does not parse.
                     Ok(response.json().await.unwrap_or_else(|err| {
                         warn!("Could not parse the /home answer, running no commands: {err}");
@@ -533,7 +536,7 @@ impl PostmanHandle {
         Self { _sender, last_poll }
     }
 
-    /// Follows the time of the last successful home poll.
+    /// Follows the time the api last answered a home poll.
     pub fn last_poll(&self) -> LastPoll {
         self.last_poll.clone()
     }
