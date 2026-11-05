@@ -271,7 +271,11 @@ mod upload_limit_tests {
             (Some("https://cdn.teton.ai/device-uploads?x=1"), None),
         ];
         for (value, expected) in cases {
-            assert_eq!(parse_device_upload_cdn_url(value).ok(), expected, "{value:?}");
+            assert_eq!(
+                parse_device_upload_cdn_url(value).ok(),
+                expected,
+                "{value:?}"
+            );
         }
     }
 
