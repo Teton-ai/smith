@@ -18,6 +18,8 @@ const MAX_SIZE: i64 = 512_000_000;
 const TOKEN_TTL_SECONDS: i64 = 24 * 60 * 60;
 /// Retry-After value, in seconds, for every upload capacity 503.
 pub const RETRY_AFTER_SECONDS: &str = "30";
+/// Devices ask for fresh part URLs before this runs out.
+const PART_URL_TTL_SECONDS: u32 = 60 * 60;
 
 pub struct UploadError(StatusCode, &'static str);
 
@@ -69,6 +71,16 @@ pub struct UploadPlan {
     confirmed_parts: Vec<UploadPart>,
     missing_parts: Vec<i32>,
     url: Option<String>,
+    /// A CDN URL per missing part. The device PUTs the part bytes there and
+    /// uses `PUT parts/{number}` on this API when the CDN URL fails.
+    #[serde(default)]
+    part_urls: Vec<PartUrl>,
+}
+
+#[derive(Serialize, Deserialize, ToSchema)]
+pub struct PartUrl {
+    part_number: i32,
+    url: String,
 }
 
 fn validate(request: &OpenUpload) -> Result<(), StatusCode> {
@@ -144,6 +156,7 @@ async fn plan(claims: &UploadClaims) -> Result<UploadPlan, UploadError> {
             confirmed_parts: vec![],
             missing_parts: vec![],
             url: Some(object_url(claims)),
+            part_urls: vec![],
         });
     }
     let mut confirmed_parts =
@@ -171,7 +184,59 @@ async fn plan(claims: &UploadClaims) -> Result<UploadPlan, UploadError> {
         confirmed_parts,
         missing_parts,
         url: None,
+        part_urls: vec![],
     })
+}
+
+/// Presigned S3 `UploadPart` URLs moved onto the CDN. The CDN path forwards
+/// the query string to the bucket's regional host, so S3 checks the
+/// signature, the upload id and the part number. An error gives no URLs and
+/// the device uses the API route.
+async fn part_urls(state: &State, claims: &UploadClaims, parts: &[i32]) -> Vec<PartUrl> {
+    let Some(cdn) = &state.config.device_upload_cdn_url else {
+        return vec![];
+    };
+    if parts.is_empty() {
+        return vec![];
+    }
+    let prefix = if claims.bucket == state.config.data_engine_bucket_name {
+        "sensitive"
+    } else {
+        "assets"
+    };
+    let urls = Storage::presign_regional_upload_parts(
+        &claims.bucket,
+        &claims.key,
+        &claims.upload_id,
+        parts,
+        PART_URL_TTL_SECONDS,
+    )
+    .await
+    .and_then(|urls| {
+        urls.into_iter()
+            .map(|(part_number, url)| {
+                Ok(PartUrl {
+                    part_number,
+                    url: cdn_url(cdn, prefix, &url)?,
+                })
+            })
+            .collect()
+    });
+    match urls {
+        Ok(urls) => urls,
+        Err(error) => {
+            tracing::error!("Failed to presign CDN upload parts: {error}");
+            vec![]
+        }
+    }
+}
+
+fn cdn_url(cdn: &str, prefix: &str, presigned: &str) -> anyhow::Result<String> {
+    let url = reqwest::Url::parse(presigned)?;
+    let query = url
+        .query()
+        .ok_or_else(|| anyhow::anyhow!("Presigned URL has no query"))?;
+    Ok(format!("{cdn}/{prefix}{}?{query}", url.path()))
 }
 
 #[utoipa::path(post,path="/smith/upload-sessions",request_body=OpenUpload,
@@ -224,7 +289,9 @@ pub async fn status(
     headers: HeaderMap,
 ) -> Result<Json<UploadPlan>, UploadError> {
     let claims = claims(&device, &state, &headers)?;
-    Ok(Json(plan(&claims).await?))
+    let mut plan = plan(&claims).await?;
+    plan.part_urls = part_urls(&state, &claims, &plan.missing_parts).await;
+    Ok(Json(plan))
 }
 
 #[utoipa::path(put,path="/smith/upload-sessions/parts/{number}",params(("number"=i32,Path),("x-upload-token"=String,Header)),
@@ -338,6 +405,15 @@ mod tests {
         request.key = "clips/one.mp4".into();
         request.checksum = "G".repeat(64);
         assert_eq!(validate(&request), Err(StatusCode::BAD_REQUEST));
+    }
+
+    #[test]
+    fn cdn_url_keeps_signed_path_and_query() {
+        let presigned = "https://b.s3.eu-north-1.amazonaws.com/clips/a%20b.mp4?partNumber=2&uploadId=u%2B1&X-Amz-Signature=s";
+        assert_eq!(
+            cdn_url("https://cdn.teton.ai/device-uploads", "sensitive", presigned).ok(),
+            Some("https://cdn.teton.ai/device-uploads/sensitive/clips/a%20b.mp4?partNumber=2&uploadId=u%2B1&X-Amz-Signature=s".into())
+        );
     }
 }
 

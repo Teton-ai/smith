@@ -45,6 +45,7 @@ fn test_state(pool: PgPool) -> anyhow::Result<State> {
         network_gc_interval_seconds: 3600,
         mcp: None,
         max_concurrent_uploads: 4,
+        device_upload_cdn_url: None,
         upload_token_key: crate::upload_token::UploadTokenKey::new(&"test-key".repeat(8))?,
     }));
     Ok(State {

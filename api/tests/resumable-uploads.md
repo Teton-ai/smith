@@ -50,9 +50,11 @@ Deploy the upload endpoints before enabling resumable transfers in clients. Keep
 
 Send the token in `x-upload-token` with device authentication for each subsequent request. Keep tokens and signed storage URLs out of logs.
 
-- `GET /smith/upload-sessions/status` lists confirmed S3 parts and missing part numbers. A verified finished object returns its `url`.
-- `PUT /smith/upload-sessions/parts/{number}` streams one part to storage. Set `Content-Length` to 5 MiB, except for the final smaller part. The response contains the part number, ETag, and size.
+- `GET /smith/upload-sessions/status` lists confirmed S3 parts and missing part numbers. A verified finished object returns its `url`. When `DEVICE_UPLOAD_CDN_URL` is set, `part_urls` has a URL for each missing part. Each URL is a presigned S3 `UploadPart` request for one upload ID and part number, valid for 1 hour, moved onto `DEVICE_UPLOAD_CDN_URL/assets` or `DEVICE_UPLOAD_CDN_URL/sensitive`. The device PUTs the part bytes there with `Content-Length`, and reads the ETag from the response. The API does not see the part bytes.
+- `PUT /smith/upload-sessions/parts/{number}` streams one part to storage. Devices use it when the CDN URL fails, for example at a site that blocks the CDN host. Set `Content-Length` to 5 MiB, except for the final smaller part. The response contains the part number, ETag, and size.
 - `POST /smith/upload-sessions/complete` requires a full ordered, size-correct S3 part set. It checks the completion HTTP status and embedded XML errors, then reads the final object to verify its size and SHA-256. Repeated completion succeeds when the finished object matches.
+
+The CDN paths forward the query string unchanged and send the bucket's regional host, `<bucket>.s3.<region>.amazonaws.com`, so S3 checks the presigned signature. The API signs for that host. A CloudFront function on the paths lets through only `PUT` requests with `partNumber` and `uploadId`.
 
 S3 is the only upload progress store. There are no upload session tables or cleanup workers. `410` with `NoSuchUpload` or `UploadTokenExpired` requires a fresh upload and retransmission. An invalid token or a different device receives `403`. A part upload that finds no free transfer slot returns `503` with `Retry-After: 30`. Open, status, and completion do not use transfer slots.
 

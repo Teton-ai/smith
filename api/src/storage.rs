@@ -345,7 +345,34 @@ impl Storage {
         expiry_secs: u32,
     ) -> anyhow::Result<Vec<(i32, String)>> {
         let bucket = Self::bucket(bucket_name)?;
+        Self::presign_parts(&bucket, object_key, upload_id, part_numbers, expiry_secs).await
+    }
 
+    /// Presigns `UploadPart` requests for the host a CloudFront S3 origin
+    /// sends, `<bucket>.s3.<region>.amazonaws.com`. SigV4 signs the host, and
+    /// rust-s3 uses the legacy `s3-<region>` host for some regions.
+    pub async fn presign_regional_upload_parts(
+        bucket_name: &str,
+        object_key: &str,
+        upload_id: &str,
+        part_numbers: &[i32],
+        expiry_secs: u32,
+    ) -> anyhow::Result<Vec<(i32, String)>> {
+        let region = match std::env::var("AWS_ENDPOINT") {
+            Ok(_) => Region::from_default_env()?,
+            Err(_) => regional(std::env::var("AWS_REGION")?),
+        };
+        let bucket = Bucket::new(bucket_name, region, Credentials::default()?)?;
+        Self::presign_parts(&bucket, object_key, upload_id, part_numbers, expiry_secs).await
+    }
+
+    async fn presign_parts(
+        bucket: &Bucket,
+        object_key: &str,
+        upload_id: &str,
+        part_numbers: &[i32],
+        expiry_secs: u32,
+    ) -> anyhow::Result<Vec<(i32, String)>> {
         let mut urls = Vec::with_capacity(part_numbers.len());
         for part_number in part_numbers {
             let mut queries = HashMap::new();
@@ -547,6 +574,13 @@ impl Storage {
     }
 }
 
+fn regional(region: String) -> Region {
+    Region::Custom {
+        endpoint: format!("https://s3.{region}.amazonaws.com"),
+        region,
+    }
+}
+
 pub fn is_missing_upload(error: &anyhow::Error) -> bool {
     error.downcast_ref::<s3::error::S3Error>().is_some_and(|error| {
         matches!(error, s3::error::S3Error::HttpFailWithBody(_, body) if missing_upload_body(body))
@@ -594,7 +628,9 @@ fn validate_completion(status: u16, body: &str) -> anyhow::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{UploadMetrics, validate_completion};
+    use super::{
+        Bucket, Credentials, HashMap, Storage, UploadMetrics, regional, validate_completion,
+    };
 
     #[tokio::test]
     async fn object_verification_checks_metadata_before_reading_bytes() -> anyhow::Result<()> {
@@ -665,6 +701,32 @@ mod tests {
             };
             assert_eq!(*calls.lock().unwrap(), expected_calls);
         }
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn regional_presign_signs_the_cloudfront_origin_host() -> anyhow::Result<()> {
+        let credentials = Credentials::new(Some("AKIDEXAMPLE"), Some("secret"), None, None, None)?;
+        let bucket = Bucket::new("assets-55c9d7e", regional("eu-north-1".into()), credentials)?;
+        let urls = Storage::presign_parts(&bucket, "clips/one.mp4", "upload", &[3], 60).await?;
+        let url = reqwest::Url::parse(&urls[0].1)?;
+        assert_eq!(
+            url.host_str(),
+            Some("assets-55c9d7e.s3.eu-north-1.amazonaws.com")
+        );
+        assert_eq!(url.path(), "/clips/one.mp4");
+        let query: HashMap<_, _> = url.query_pairs().into_owned().collect();
+        assert_eq!(query.get("partNumber").map(String::as_str), Some("3"));
+        assert_eq!(query.get("uploadId").map(String::as_str), Some("upload"));
+        assert_eq!(
+            query.get("X-Amz-SignedHeaders").map(String::as_str),
+            Some("host")
+        );
+        assert!(
+            query
+                .get("X-Amz-Credential")
+                .is_some_and(|c| c.contains("/eu-north-1/s3/"))
+        );
         Ok(())
     }
 

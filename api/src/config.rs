@@ -215,6 +215,10 @@ pub struct Config {
     pub network_gc_interval_seconds: u64,
     pub mcp: Option<McpConfig>,
     pub max_concurrent_uploads: usize,
+    /// Base URL of the CDN path that forwards device part uploads to S3, for
+    /// example `https://cdn.teton.ai/device-uploads`. Without it, devices
+    /// send parts through the API.
+    pub device_upload_cdn_url: Option<String>,
     pub upload_token_key: crate::upload_token::UploadTokenKey,
 }
 
@@ -327,6 +331,10 @@ impl Config {
             max_concurrent_uploads: parse_max_concurrent_uploads(
                 env::var("MAX_CONCURRENT_UPLOADS").ok().as_deref(),
             )?,
+            device_upload_cdn_url: env::var("DEVICE_UPLOAD_CDN_URL")
+                .ok()
+                .map(|url| url.trim_end_matches('/').to_string())
+                .filter(|url| !url.is_empty()),
         })
     }
 }
