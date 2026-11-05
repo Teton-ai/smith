@@ -97,6 +97,7 @@ pub async fn run() {
         commander.clone(),
         net_guard.clone(),
         postman.last_poll(),
+        configuration.clone(),
     );
 
     let link_health = LinkHealthHandle::new(shutdown.signals(), net_guard.clone(), police.clone());

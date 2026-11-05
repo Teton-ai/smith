@@ -33,6 +33,7 @@ const RECOVERY_SETTLE: Duration = Duration::from_secs(30);
 /// How long the api may stay unreachable after a driver reload or Wi-Fi
 /// re-activation before the replaced files are put back.
 const REVERT_DEADLINE: Duration = Duration::from_secs(90);
+const API_PROBE_EVERY: Duration = Duration::from_secs(10);
 const REVERT_REASON: &str = "reverted: no connectivity after apply";
 
 /// Fixed for now; clamped to the bounds below once it becomes configurable.
@@ -194,33 +195,51 @@ pub trait System: Send {
     fn save_state(&mut self, state: &SettingsState) -> impl Future<Output = Result<()>> + Send;
     fn queue_report(&mut self, response: SafeCommandResponse) -> impl Future<Output = ()> + Send;
     fn last_poll(&self) -> LastPoll;
+    /// A TCP connect to the api host: no request, so it adds no api load.
+    fn api_connects(&self) -> impl Future<Output = bool> + Send + 'static;
 }
 
 #[derive(Debug, PartialEq, Eq)]
 enum PollWait {
-    Polled,
+    Reached,
     TimedOut,
     /// smithd is stopping (the postman's channel closes when it exits).
     Stopping,
 }
 
-/// Waits up to `deadline` for a home poll that succeeds later than `after`:
-/// one from before proves nothing about the link since.
-async fn polled_after(
+/// Waits up to `deadline` for the api to be reached later than `after` (one
+/// from before proves nothing about the link since): a home poll the api
+/// answered, or a TCP connect to it. The probe is there because the postman's
+/// backoff after the posts that failed during the disruption can outlast the
+/// deadline, and polling it sooner would defeat that backoff fleet wide.
+async fn reached_after<Fut: Future<Output = bool>>(
     mut last_poll: LastPoll,
     after: Instant,
     deadline: Duration,
     stopping: &CancellationToken,
+    probe: impl Fn() -> Fut,
 ) -> PollWait {
-    let polled = last_poll.wait_for(|at| at.is_some_and(|at| at > after));
+    let reached = async {
+        let mut probes = time::interval(API_PROBE_EVERY);
+        probes.set_missed_tick_behavior(time::MissedTickBehavior::Delay);
+        loop {
+            tokio::select! {
+                // Mapped inside: the guard `wait_for` returns is not `Send`.
+                open = async { last_poll.wait_for(|at| at.is_some_and(|at| at > after)).await.is_ok() } => {
+                    return if open { PollWait::Reached } else { PollWait::Stopping };
+                }
+                _ = probes.tick() => {
+                    if probe().await {
+                        return PollWait::Reached;
+                    }
+                }
+            }
+        }
+    };
     tokio::select! {
         biased;
         _ = stopping.cancelled() => PollWait::Stopping,
-        waited = time::timeout(deadline, polled) => match waited {
-            Ok(Ok(_)) => PollWait::Polled,
-            Ok(Err(_)) => PollWait::Stopping,
-            Err(_) => PollWait::TimedOut,
-        },
+        waited = time::timeout(deadline, reached) => waited.unwrap_or(PollWait::TimedOut),
     }
 }
 
@@ -705,15 +724,17 @@ impl<S: System> Actor<S> {
     /// a revert cut short by systemd's kill could leave the driver unloaded.
     async fn await_api(&mut self, disrupted: Disrupted) {
         let stopping = self.shutdown.token.clone();
-        match polled_after(
-            self.system.last_poll(),
+        let system = &self.system;
+        let reached = reached_after(
+            system.last_poll(),
             disrupted.at,
             REVERT_DEADLINE,
             &stopping,
+            || system.api_connects(),
         )
-        .await
-        {
-            PollWait::Polled => {
+        .await;
+        match reached {
+            PollWait::Reached => {
                 info!(
                     "settings: api reached {:?} after the apply; keeping it",
                     disrupted.at.elapsed()
@@ -919,6 +940,8 @@ mod tests {
         /// A home poll succeeds this long after a reload or re-activation;
         /// `None` means the api stays unreachable.
         api_back_after: Option<Duration>,
+        /// A TCP connect to the api succeeds.
+        api_connects: bool,
     }
 
     #[derive(Clone)]
@@ -1025,6 +1048,11 @@ mod tests {
 
         fn last_poll(&self) -> LastPoll {
             self.polls.subscribe()
+        }
+
+        fn api_connects(&self) -> impl Future<Output = bool> + Send + 'static {
+            let connects = self.device().api_connects;
+            async move { connects }
         }
     }
 
@@ -1186,26 +1214,57 @@ mod tests {
             time::sleep(REVERT_DEADLINE).await;
         });
         assert_eq!(
-            polled_after(
+            reached_after(
                 last_poll,
                 applied_at,
                 REVERT_DEADLINE,
-                &CancellationToken::new()
+                &CancellationToken::new(),
+                || async { false },
             )
             .await,
-            PollWait::Polled
+            PollWait::Reached
         );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_tcp_connect_to_the_api_within_the_deadline_is_connectivity() {
+        let (_polls, last_poll) = watch::channel(None);
+        let applied_at = Instant::now();
+        let back = applied_at + Duration::from_secs(25);
+        let waited = reached_after(
+            last_poll,
+            applied_at,
+            REVERT_DEADLINE,
+            &CancellationToken::new(),
+            || async move { Instant::now() >= back },
+        )
+        .await;
+        assert_eq!(waited, PollWait::Reached);
+        assert_eq!(applied_at.elapsed(), Duration::from_secs(30), "next probe");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn an_apply_whose_api_host_connects_is_kept_without_a_poll() {
+        let system = FakeSystem::default();
+        system.device().report.wireless_mode = Some(95);
+        system.device().api_connects = true;
+        let mut actor = actor(system.clone(), None);
+        actor.apply(4, wireless_mode(11)).await;
+        let state = actor.state.as_ref().unwrap();
+        assert!(!state.reverted);
+        assert!(state.backup.is_none());
     }
 
     #[tokio::test(start_paused = true)]
     async fn no_poll_within_the_deadline_is_no_connectivity() {
         let (_polls, last_poll) = watch::channel(None);
         assert_eq!(
-            polled_after(
+            reached_after(
                 last_poll,
                 Instant::now(),
                 REVERT_DEADLINE,
-                &CancellationToken::new()
+                &CancellationToken::new(),
+                || async { false },
             )
             .await,
             PollWait::TimedOut
@@ -1217,11 +1276,12 @@ mod tests {
         let (_polls, last_poll) = watch::channel(Some(Instant::now()));
         time::advance(Duration::from_secs(1)).await;
         assert_eq!(
-            polled_after(
+            reached_after(
                 last_poll,
                 Instant::now(),
                 REVERT_DEADLINE,
-                &CancellationToken::new()
+                &CancellationToken::new(),
+                || async { false },
             )
             .await,
             PollWait::TimedOut
@@ -1233,11 +1293,12 @@ mod tests {
         let (polls, last_poll) = watch::channel(None);
         drop(polls);
         assert_eq!(
-            polled_after(
+            reached_after(
                 last_poll,
                 Instant::now(),
                 REVERT_DEADLINE,
-                &CancellationToken::new()
+                &CancellationToken::new(),
+                || async { false },
             )
             .await,
             PollWait::Stopping

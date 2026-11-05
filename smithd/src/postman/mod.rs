@@ -89,7 +89,7 @@ fn backoff(failed_posts: u32, retry_after: Option<Duration>, jitter: f64) -> Dur
     wait.max(retry_after.unwrap_or_default().min(BACKOFF_CAP))
 }
 
-async fn can_connect_to_api(hostname: &str) -> bool {
+pub(crate) async fn can_connect_to_api(hostname: &str) -> bool {
     let Ok(url) = url::Url::parse(hostname) else {
         return false;
     };

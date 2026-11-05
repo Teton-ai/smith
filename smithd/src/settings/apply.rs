@@ -9,6 +9,7 @@ use super::ntp::{CHRONY_CONF, CHRONY_SOURCES_DIR, timesyncd_running};
 use super::plan::{FileChange, NtpDaemon, OwnedFiles};
 use super::read::{Reading, SettingsReader, run, run_for, set_bgscan, wifi_connected};
 use crate::commander::CommanderHandle;
+use crate::magic::MagicHandle;
 use crate::postman::LastPoll;
 use crate::utils::files::{
     SettingsState, StoredSettings, save_settings_state, save_wanted_settings, write_file_atomic,
@@ -354,16 +355,18 @@ pub struct DeviceSystem {
     wifi: Option<String>,
     commander: CommanderHandle,
     last_poll: LastPoll,
+    magic: MagicHandle,
 }
 
 impl DeviceSystem {
-    pub fn new(commander: CommanderHandle, last_poll: LastPoll) -> Self {
+    pub fn new(commander: CommanderHandle, last_poll: LastPoll, magic: MagicHandle) -> Self {
         Self {
             reader: SettingsReader::default(),
             paths: OwnedPaths::default(),
             wifi: None,
             commander,
             last_poll,
+            magic,
         }
     }
 
@@ -464,6 +467,11 @@ impl System for DeviceSystem {
 
     fn last_poll(&self) -> LastPoll {
         self.last_poll.clone()
+    }
+
+    fn api_connects(&self) -> impl std::future::Future<Output = bool> + Send + 'static {
+        let magic = self.magic.clone();
+        async move { crate::postman::can_connect_to_api(&magic.get_server().await).await }
     }
 }
 
