@@ -75,12 +75,12 @@ fn push_latest(responses: &mut Vec<SafeCommandResponse>, update: SafeCommandResp
     responses.push(update);
 }
 
-/// Full jitter with an exponential ceiling; Retry-After shares the five-minute cap.
+/// Equal jitter under an exponential ceiling; Retry-After shares the five-minute cap.
 fn backoff(failed_posts: u32, retry_after: Option<Duration>, jitter: f64) -> Duration {
     let ceiling = BACKOFF_BASE
         .saturating_mul(1 << failed_posts.saturating_sub(1).min(8))
         .min(BACKOFF_CAP);
-    let wait = ceiling.mul_f64(jitter);
+    let wait = ceiling / 2 + (ceiling / 2).mul_f64(jitter);
     wait.max(retry_after.unwrap_or_default().min(BACKOFF_CAP))
 }
 
@@ -539,9 +539,9 @@ mod tests {
     fn backoff_doubles_to_the_cap_and_honours_retry_after() {
         let secs = Duration::from_secs;
         let cases = [
-            ("first", 1, None, 0.999, Duration::from_millis(19980)),
-            ("third, half jitter", 3, None, 0.5, secs(40)),
-            ("capped", 50, None, 0.5, secs(150)),
+            ("first", 1, None, 0.999, Duration::from_millis(19990)),
+            ("third, mid jitter", 3, None, 0.5, secs(60)),
+            ("capped", 50, None, 0.5, secs(225)),
             ("retry-after floor", 1, Some(secs(60)), 0.0, secs(60)),
             ("retry-after capped", 1, Some(secs(3600)), 0.0, BACKOFF_CAP),
             (
@@ -549,7 +549,7 @@ mod tests {
                 5,
                 Some(secs(10)),
                 0.5,
-                secs(150),
+                secs(225),
             ),
         ];
         for (name, failed_posts, retry_after, jitter, want) in cases {
