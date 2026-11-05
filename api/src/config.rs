@@ -269,6 +269,7 @@ mod upload_limit_tests {
             (Some("cdn.teton.ai/device-uploads"), None),
             (Some("ftp://cdn.teton.ai/device-uploads"), None),
             (Some("https://cdn.teton.ai/device-uploads?x=1"), None),
+            (Some("https://cdn.teton.ai/device-uploads#x"), None),
         ];
         for (value, expected) in cases {
             assert_eq!(
@@ -310,8 +311,9 @@ fn parse_device_upload_cdn_url(value: Option<&str>) -> anyhow::Result<Option<Str
     anyhow::ensure!(
         matches!(parsed.scheme(), "http" | "https")
             && parsed.host_str().is_some()
-            && parsed.query().is_none(),
-        "DEVICE_UPLOAD_CDN_URL must be an http(s) URL without a query."
+            && parsed.query().is_none()
+            && parsed.fragment().is_none(),
+        "DEVICE_UPLOAD_CDN_URL must be an http(s) URL without a query or fragment."
     );
     Ok(Some(url.to_string()))
 }
