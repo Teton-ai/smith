@@ -3,6 +3,7 @@ use axum::middleware::Next;
 use axum::response::IntoResponse;
 use metrics_exporter_prometheus::{Matcher, PrometheusBuilder, PrometheusHandle};
 use serde_json::{Value, json};
+use std::io::Write;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::Semaphore;
@@ -76,12 +77,15 @@ pub fn spawn_upload_permits_reporter(permits: Arc<Semaphore>, max: usize) {
                 tick.tick().await;
                 peak = peak.max(max.saturating_sub(permits.available_permits()));
             }
-            metrics::gauge!("smith_upload_permits_in_use", peak as f64);
+            metrics::gauge!("smith_upload_permits_in_use_peak_1m", peak as f64);
             // Raw stdout, not a tracing event: CloudWatch only extracts EMF from a top-level JSON line.
-            println!(
+            if let Err(error) = writeln!(
+                std::io::stdout().lock(),
                 "{}",
                 upload_permits_emf(peak, chrono::Utc::now().timestamp_millis())
-            );
+            ) {
+                tracing::error!(%error, "Failed to write upload permits metric");
+            }
         }
     });
 }
