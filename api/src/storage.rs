@@ -709,7 +709,10 @@ mod tests {
         let credentials = Credentials::new(Some("AKIDEXAMPLE"), Some("secret"), None, None, None)?;
         let bucket = Bucket::new("assets-55c9d7e", regional("eu-north-1".into()), credentials)?;
         let urls = Storage::presign_parts(&bucket, "clips/one.mp4", "upload", &[3], 60).await?;
-        let url = reqwest::Url::parse(&urls[0].1)?;
+        let (_, url) = urls
+            .first()
+            .ok_or_else(|| anyhow::anyhow!("No presigned URL"))?;
+        let url = reqwest::Url::parse(url)?;
         assert_eq!(
             url.host_str(),
             Some("assets-55c9d7e.s3.eu-north-1.amazonaws.com")

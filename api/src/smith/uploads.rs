@@ -159,33 +159,45 @@ async fn plan(claims: &UploadClaims) -> Result<UploadPlan, UploadError> {
             part_urls: vec![],
         });
     }
-    let mut confirmed_parts =
-        Storage::list_upload_parts(&claims.bucket, &claims.key, &claims.upload_id)
-            .await
-            .map_err(storage_error)?;
-    confirmed_parts.sort_by_key(|p| p.part_number);
-    if confirmed_parts
-        .windows(2)
-        .any(|pair| pair[0].part_number == pair[1].part_number)
-    {
-        return Err(UploadError(StatusCode::CONFLICT, "InvalidParts"));
-    }
-    for part in &confirmed_parts {
-        if part.etag.is_empty()
-            || part.size_bytes != part_length(claims.size_bytes, part.part_number)?
-        {
-            return Err(UploadError(StatusCode::CONFLICT, "InvalidParts"));
-        }
-    }
-    let missing_parts = (1..=part_count(claims.size_bytes))
-        .filter(|n| !confirmed_parts.iter().any(|part| part.part_number == *n))
-        .collect();
+    let listed = Storage::list_upload_parts(&claims.bucket, &claims.key, &claims.upload_id)
+        .await
+        .map_err(storage_error)?;
+    let (confirmed_parts, missing_parts) = sort_parts(claims.size_bytes, listed)?;
     Ok(UploadPlan {
         confirmed_parts,
         missing_parts,
         url: None,
         part_urls: vec![],
     })
+}
+
+/// Splits the parts S3 lists into confirmed parts and missing part numbers.
+/// A CDN part PUT has no length check, so a part with the wrong size counts
+/// as missing and the device sends it again.
+fn sort_parts(
+    size: i64,
+    mut parts: Vec<UploadPart>,
+) -> Result<(Vec<UploadPart>, Vec<i32>), UploadError> {
+    parts.sort_by_key(|p| p.part_number);
+    if parts
+        .windows(2)
+        .any(|pair| pair[0].part_number == pair[1].part_number)
+    {
+        return Err(UploadError(StatusCode::CONFLICT, "InvalidParts"));
+    }
+    let mut confirmed = Vec::with_capacity(parts.len());
+    for part in parts {
+        if part.etag.is_empty() {
+            return Err(UploadError(StatusCode::CONFLICT, "InvalidParts"));
+        }
+        if part.size_bytes == part_length(size, part.part_number)? {
+            confirmed.push(part);
+        }
+    }
+    let missing = (1..=part_count(size))
+        .filter(|n| !confirmed.iter().any(|part| part.part_number == *n))
+        .collect();
+    Ok((confirmed, missing))
 }
 
 /// Presigned S3 `UploadPart` URLs moved onto the CDN. The CDN path forwards
@@ -405,6 +417,26 @@ mod tests {
         request.key = "clips/one.mp4".into();
         request.checksum = "G".repeat(64);
         assert_eq!(validate(&request), Err(StatusCode::BAD_REQUEST));
+    }
+
+    #[test]
+    fn wrong_size_part_is_missing_again() -> anyhow::Result<()> {
+        let part = |part_number, size_bytes| UploadPart {
+            part_number,
+            etag: "\"e\"".into(),
+            size_bytes,
+        };
+        let sorted = sort_parts(PART_SIZE + 1, vec![part(2, 1), part(1, 7)]);
+        let Ok((confirmed, missing)) = sorted else {
+            anyhow::bail!("valid parts were rejected");
+        };
+        assert_eq!(
+            confirmed.iter().map(|p| p.part_number).collect::<Vec<_>>(),
+            [2]
+        );
+        assert_eq!(missing, [1]);
+        assert!(sort_parts(PART_SIZE + 1, vec![part(1, PART_SIZE), part(1, PART_SIZE)]).is_err());
+        Ok(())
     }
 
     #[test]
