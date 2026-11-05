@@ -230,7 +230,6 @@ pub async fn status(
     headers: HeaderMap,
 ) -> Result<Json<UploadPlan>, UploadError> {
     let claims = claims(&device, &state, &headers)?;
-    let _permit = capacity(&state)?;
     Ok(Json(plan(&claims).await?))
 }
 
