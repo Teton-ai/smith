@@ -11,8 +11,7 @@ use crate::utils::schema::{
 use crate::utils::system::SystemInfo;
 use anyhow::{Result, anyhow};
 use reqwest::{Response, StatusCode};
-use std::fmt::Write;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::{sync::mpsc, time};
 use tracing::{error, info, warn};
 
@@ -20,6 +19,11 @@ const CMD_ID_GET_VARIABLES: i32 = -1;
 const CMD_ID_UPDATE_SYSTEM_INFO: i32 = -2;
 const CMD_ID_GET_NETWORK: i32 = -4;
 const CMD_ID_REPORT_NM_PROFILES: i32 = -6;
+const BACKOFF_BASE: Duration = Duration::from_secs(20);
+// The retry wait stays below the unit's 10 min WatchdogSec.
+const BACKOFF_CAP: Duration = Duration::from_secs(5 * 60);
+// A reachable API gets time to recover before reboot escalation starts.
+const TCP_WORKS_GRACE: Duration = Duration::from_secs(60 * 60);
 
 /// Returns an update for the API when the system info changed since the last report.
 async fn refresh_system_info(system_info: &mut SystemInfo) -> Option<SafeCommandResponse> {
@@ -71,6 +75,30 @@ fn push_latest(responses: &mut Vec<SafeCommandResponse>, update: SafeCommandResp
     responses.push(update);
 }
 
+/// Equal jitter under an exponential ceiling; Retry-After shares the five-minute cap.
+fn backoff(failed_posts: u32, retry_after: Option<Duration>, jitter: f64) -> Duration {
+    let ceiling = BACKOFF_BASE
+        .saturating_mul(1 << failed_posts.saturating_sub(1).min(8))
+        .min(BACKOFF_CAP);
+    let wait = ceiling / 2 + (ceiling / 2).mul_f64(jitter);
+    wait.max(retry_after.unwrap_or_default().min(BACKOFF_CAP))
+}
+
+async fn can_connect_to_api(hostname: &str) -> bool {
+    let Ok(url) = url::Url::parse(hostname) else {
+        return false;
+    };
+    let (Some(host), Some(port)) = (url.host_str(), url.port_or_known_default()) else {
+        return false;
+    };
+    time::timeout(
+        Duration::from_secs(3),
+        tokio::net::TcpStream::connect((host, port)),
+    )
+    .await
+    .is_ok_and(|connection| connection.is_ok())
+}
+
 enum PollMode {
     Active { ticks_without_commands: u32 },
     Idle,
@@ -87,6 +115,7 @@ struct Postman {
     hostname: String,
     token: Option<String>,
     problems: Option<u32>,
+    failing_since: Option<Instant>,
     poll_mode: PollMode,
     services_to_check: Vec<ServiceCheck>,
 }
@@ -116,6 +145,7 @@ impl Postman {
             token: None,
             hostname: "".to_owned(),
             problems: None,
+            failing_since: None,
             poll_mode: PollMode::Idle,
             services_to_check: Vec::new(),
         }
@@ -164,8 +194,10 @@ impl Postman {
         const ACTIVE_INTERVAL_SECS: u64 = 1;
         const IDLE_THRESHOLD_TICKS: u32 = 60;
 
-        let mut keep_alive_interval = time::interval(Duration::from_secs(IDLE_INTERVAL_SECS));
-        keep_alive_interval.set_missed_tick_behavior(time::MissedTickBehavior::Skip); // or ::Delay
+        // Jittered so a fleet-wide restart does not post in lockstep.
+        let keep_alive = time::sleep(BACKOFF_BASE.mul_f64(rand::random::<f64>()));
+        tokio::pin!(keep_alive);
+        let mut failed_posts: u32 = 0;
         let mut update_interval = time::interval(Duration::from_secs(300));
 
         loop {
@@ -180,10 +212,13 @@ impl Postman {
                 Some(msg) = self.receiver.recv() => {
                     _ = self.handle_message(msg).await;
                 }
-                _ = keep_alive_interval.tick() => {
+                () = &mut keep_alive => {
                     feed_watchdog();
                     if let Err(e) = self.ensure_token().await {
                         error!("Failed to register device: {}", e);
+                        feed_watchdog();
+                        failed_posts = failed_posts.saturating_add(1);
+                        keep_alive.as_mut().reset(time::Instant::now() + backoff(failed_posts, None, rand::random()));
                         continue;
                     }
 
@@ -202,14 +237,19 @@ impl Postman {
                     let ping_home_body = HomePost::new(responses, release_id, service_statuses);
 
                     let response = match self.ping_home(&ping_home_body).await {
-                        Some(response) => response,
-                        None => {
+                        Ok(response) => response,
+                        Err(retry_after) => {
                             // get_results already drained these, including commands
                             // that finished during the outage; requeue or they are lost.
                             self.commander.requeue_results(ping_home_body.responses).await;
-                            HomePostResponse::default()
+                            // Polling work and the retry wait must not share one watchdog interval.
+                            feed_watchdog();
+                            failed_posts = failed_posts.saturating_add(1);
+                            keep_alive.as_mut().reset(time::Instant::now() + backoff(failed_posts, retry_after, rand::random()));
+                            continue;
                         }
                     };
+                    failed_posts = 0;
 
                     let target_release_id = response.target_release_id;
                     self.services_to_check = response.services;
@@ -224,19 +264,20 @@ impl Postman {
                     if has_commands {
                         if matches!(self.poll_mode, PollMode::Idle) {
                             info!("Switching to active polling mode (1 second interval)");
-                            keep_alive_interval = time::interval(Duration::from_secs(ACTIVE_INTERVAL_SECS));
-                            keep_alive_interval.reset();
                         }
                         self.poll_mode = PollMode::Active { ticks_without_commands: 0 };
                     } else if let PollMode::Active { ticks_without_commands } = &mut self.poll_mode {
                         *ticks_without_commands += 1;
                         if *ticks_without_commands >= IDLE_THRESHOLD_TICKS {
                             info!("Switching to idle polling mode (20 second interval)");
-                            keep_alive_interval = time::interval(Duration::from_secs(IDLE_INTERVAL_SECS));
-                            keep_alive_interval.reset();
                             self.poll_mode = PollMode::Idle;
                         }
                     }
+                    let wait = match self.poll_mode {
+                        PollMode::Active { .. } => ACTIVE_INTERVAL_SECS,
+                        PollMode::Idle => IDLE_INTERVAL_SECS,
+                    };
+                    keep_alive.as_mut().reset(time::Instant::now() + Duration::from_secs(wait));
                 }
                 _ = update_interval.tick() => {
                     if let Some(update) = refresh_system_info(&mut system_info).await {
@@ -345,8 +386,11 @@ impl Postman {
         Ok(())
     }
 
-    /// `None` when the post was not delivered, so its results still need sending.
-    async fn ping_home(&mut self, message: &HomePost) -> Option<HomePostResponse> {
+    /// Failed delivery returns Retry-After when available; command results still need sending.
+    async fn ping_home(
+        &mut self,
+        message: &HomePost,
+    ) -> Result<HomePostResponse, Option<Duration>> {
         // Prefer the short-lived JWT from session; fall back to the opaque
         // token (which is also what session returns when no JWT is cached).
         let token = self
@@ -361,16 +405,20 @@ impl Postman {
             .send_compressed_post(&token, "/home", message)
             .await;
 
+        // Any HTTP answer, even an error status, proves the link works.
+        if result.is_ok() {
+            self.failing_since = None;
+            if let Some(problem) = self.problems.take() {
+                self.police.report_problem_solved(problem).await;
+            }
+        }
+
         match result {
             Ok((status_code, response)) => match status_code {
                 StatusCode::OK => {
                     info!("Posting successful");
-                    if let Some(problem) = self.problems {
-                        self.police.report_problem_solved(problem).await;
-                        self.problems = None;
-                    };
                     // The api stored the results even if its answer does not parse.
-                    Some(response.json().await.unwrap_or_else(|err| {
+                    Ok(response.json().await.unwrap_or_else(|err| {
                         warn!("Could not parse the /home answer, running no commands: {err}");
                         HomePostResponse::default()
                     }))
@@ -393,28 +441,37 @@ impl Postman {
                             warn!("JWT refresh failed transiently; keeping token");
                         }
                     }
-                    None
+                    Err(None)
                 }
                 _ => {
                     error!(
                         "Posting failed with status: {:?} {:?}",
                         status_code, response
                     );
-                    None
+                    // Absent on older api builds, which fall back to plain backoff.
+                    let retry_after = (status_code == StatusCode::SERVICE_UNAVAILABLE)
+                        .then(|| response.headers().get(reqwest::header::RETRY_AFTER))
+                        .flatten()
+                        .and_then(|value| value.to_str().ok()?.trim().parse().ok())
+                        .map(Duration::from_secs);
+                    Err(retry_after)
                 }
             },
             Err(err) => {
-                let mut s = format!("{}", err);
-                let mut e = err.source().unwrap();
-                while let Some(src) = e.source() {
-                    let _ = write!(s, "\n\nCaused by: {}", src);
-                    e = src;
-                }
-                error!("POST FAILURE: {}", s);
-                if self.problems.is_none() {
+                error!("POST FAILURE: {err:#}");
+                let now = Instant::now();
+                let failing_for = now.duration_since(*self.failing_since.get_or_insert(now));
+                let link_works =
+                    failing_for <= TCP_WORKS_GRACE && can_connect_to_api(&self.hostname).await;
+                if link_works {
+                    if let Some(problem) = self.problems.take() {
+                        warn!("api unreachable over HTTP but TCP connect works, disarming Police");
+                        self.police.report_problem_solved(problem).await;
+                    }
+                } else if self.problems.is_none() {
                     self.problems = self.police.report_problem_starting().await;
                 }
-                None
+                Err(None)
             }
         }
     }
@@ -478,6 +535,29 @@ mod tests {
         push_latest(&mut responses, pong(CMD_ID_UPDATE_SYSTEM_INFO, 0));
         let ids: Vec<_> = responses.iter().map(|r| (r.id, r.status)).collect();
         assert_eq!(ids, [(7, 0), (CMD_ID_UPDATE_SYSTEM_INFO, 0)]);
+    }
+
+    #[test]
+    fn backoff_doubles_to_the_cap_and_honours_retry_after() {
+        let secs = Duration::from_secs;
+        let cases = [
+            ("first", 1, None, 0.999, Duration::from_millis(19990)),
+            ("third, mid jitter", 3, None, 0.5, secs(60)),
+            ("capped", 50, None, 0.5, secs(225)),
+            ("retry-after floor", 1, Some(secs(60)), 0.0, secs(60)),
+            ("retry-after capped", 1, Some(secs(3600)), 0.0, BACKOFF_CAP),
+            (
+                "jitter beats retry-after",
+                5,
+                Some(secs(10)),
+                0.5,
+                secs(225),
+            ),
+        ];
+        for (name, failed_posts, retry_after, jitter, want) in cases {
+            let got = backoff(failed_posts, retry_after, jitter);
+            assert_eq!(got, want, "{name}");
+        }
     }
 
     fn received(socket: &std::os::unix::net::UnixDatagram) -> String {
