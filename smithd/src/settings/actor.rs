@@ -347,7 +347,7 @@ impl<S: System> Actor<S> {
         if self.state.as_ref().is_none_or(|s| s.backup.is_none()) {
             return;
         }
-        warn!("settings: smithd stopped before the api was reached after the last apply");
+        warn!("settings: the last apply was neither confirmed nor fully reverted; reverting it");
         // Learns the Wi-Fi interface the redone step needs.
         self.read().await;
         let _network_busy = self.net_guard.hold_after_recovery(RECOVERY_SETTLE).await;
@@ -782,6 +782,7 @@ impl<S: System> Actor<S> {
         );
         let driver = restore(&backup.driver);
         let nm = restore(&backup.nm);
+        let mut files_restored = true;
         for step in [
             Step::File(OwnedFile::Driver, &driver),
             Step::File(OwnedFile::Nm, &nm),
@@ -790,6 +791,7 @@ impl<S: System> Actor<S> {
         ] {
             if let Err(err) = self.system.run(step).await {
                 error!("settings: reverting, {step:?} failed: {err:#}");
+                files_restored &= !matches!(step, Step::File(..));
             }
         }
         // Learns the interface again, which a boot without it did not know.
@@ -812,6 +814,14 @@ impl<S: System> Actor<S> {
         let Some(state) = self.state.as_mut() else {
             return;
         };
+        // A file left as applied is loaded again on every boot, so the next
+        // start retries the revert. Failed reloads and live values are not
+        // kept for it: a boot reloads the restored files anyway, and a value
+        // that never takes would reload the driver on every start.
+        if !files_restored {
+            warn!("settings: a file was not restored; the next start retries the revert");
+            state.backup = Some(backup);
+        }
         state.reverted = true;
         info!("settings: version {} reverted", state.version);
         if let Err(err) = self.system.save_state(state).await {
@@ -942,6 +952,8 @@ mod tests {
         api_back_after: Option<Duration>,
         /// A TCP connect to the api succeeds.
         api_connects: bool,
+        /// Steps whose `Debug` starts with one of these fail.
+        failing: Vec<&'static str>,
     }
 
     #[derive(Clone)]
@@ -1002,7 +1014,11 @@ mod tests {
 
         async fn run(&mut self, step: Step<'_>) -> Result<()> {
             let mut device = self.device();
-            device.steps.push(format!("{step:?}"));
+            let name = format!("{step:?}");
+            device.steps.push(name.clone());
+            if device.failing.iter().any(|prefix| name.starts_with(prefix)) {
+                return Err(anyhow!("{name} failed"));
+            }
             if matches!(step, Step::ReloadDriver | Step::ReactivateWifi)
                 && let Some(after) = device.api_back_after
             {
@@ -1455,6 +1471,45 @@ mod tests {
             ]
         );
         assert!(actor.state.is_some_and(|s| s.reverted));
+    }
+
+    async fn revert_at_start_failing(failing: &'static str) -> SettingsState {
+        let system = FakeSystem::default();
+        system.device().failing = vec![failing];
+        let wanted = stored(4, wireless_mode(11));
+        let unconfirmed = SettingsState {
+            version: 4,
+            reverted: false,
+            disruptions: 1,
+            backup: Some(SettingsBackup {
+                driver: Some("options rtl8822ce rtw_wireless_mode=95\n".to_owned()),
+                nm: None,
+                disruption: Disruption::ReloadDriver,
+                roam_flags: None,
+                roam_tuning: None,
+                bgscan: Some("simple:30:-70:86400".to_owned()),
+            }),
+        };
+        let state = initial_state(Some(&wanted), Ok(Some(unconfirmed)));
+        let mut actor = actor_with(system.clone(), Some(wanted), state, mpsc::channel(8).1);
+        actor.revert_unconfirmed().await;
+        let steps = system.device().steps.clone();
+        assert!(steps.iter().any(|s| s.starts_with(failing)), "{steps:?}");
+        actor.state.unwrap()
+    }
+
+    #[tokio::test]
+    async fn a_file_that_is_not_restored_keeps_the_backup_for_the_next_start() {
+        let state = revert_at_start_failing("File(Driver").await;
+        assert!(state.reverted);
+        assert!(state.backup.is_some());
+    }
+
+    #[tokio::test]
+    async fn a_live_value_that_is_not_restored_does_not_keep_the_backup() {
+        let state = revert_at_start_failing("Bgscan").await;
+        assert!(state.reverted);
+        assert!(state.backup.is_none());
     }
 
     #[tokio::test]
