@@ -211,11 +211,7 @@ async fn part_urls(state: &State, claims: &UploadClaims, parts: &[i32]) -> Vec<P
     if parts.is_empty() {
         return vec![];
     }
-    let prefix = if claims.bucket == state.config.data_engine_bucket_name {
-        "sensitive"
-    } else {
-        "assets"
-    };
+    let prefix = bucket_label(state, claims);
     let parts: Result<Vec<(i32, u64)>, _> = parts
         .iter()
         .map(|number| {
@@ -245,13 +241,23 @@ async fn part_urls(state: &State, claims: &UploadClaims, parts: &[i32]) -> Vec<P
     });
     match urls {
         Ok(urls) => {
-            metrics::counter!("smith_upload_part_urls_total", urls.len() as u64);
+            metrics::counter!("smith_upload_part_urls_total", urls.len() as u64, "bucket" => prefix);
             urls
         }
         Err(error) => {
             tracing::error!("Failed to presign CDN upload parts: {error}");
             vec![]
         }
+    }
+}
+
+/// `sensitive` for the data engine bucket, `assets` for the other bucket. It is
+/// the CDN path prefix and the counter label.
+fn bucket_label(state: &State, claims: &UploadClaims) -> &'static str {
+    if claims.bucket == state.config.data_engine_bucket_name {
+        "sensitive"
+    } else {
+        "assets"
     }
 }
 
@@ -355,7 +361,7 @@ pub async fn put_part(
     )
     .await
     .map_err(storage_error)?;
-    metrics::increment_counter!("smith_upload_proxied_parts_total");
+    metrics::increment_counter!("smith_upload_proxied_parts_total", "bucket" => bucket_label(&state, &claims));
     Ok(Json(UploadPart {
         part_number: number,
         etag,
@@ -402,7 +408,7 @@ pub async fn complete(
                 "ChecksumMismatch",
             ));
         }
-        metrics::counter!("smith_upload_completed_parts_total", parts);
+        metrics::counter!("smith_upload_completed_parts_total", parts, "bucket" => bucket_label(&state, &claims));
     }
     Ok(Json(super::route::UploadResult {
         url: object_url(&claims),

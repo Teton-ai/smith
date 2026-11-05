@@ -54,7 +54,7 @@ Send the token in `x-upload-token` with device authentication for each subsequen
 - `PUT /smith/upload-sessions/parts/{number}` streams one part to storage. Devices use it when the CDN URL fails, for example at a site that blocks the CDN host. Set `Content-Length` to 5 MiB, except for the final smaller part. The response contains the part number, ETag, and size.
 - `POST /smith/upload-sessions/complete` requires a full ordered, size-correct S3 part set. It checks the completion HTTP status and embedded XML errors, then reads the final object to verify its size and SHA-256. Repeated completion succeeds when the finished object matches.
 
-Counters: `smith_upload_part_urls_total` (part URLs in `status` responses), `smith_upload_proxied_parts_total` (parts sent through `PUT parts/{n}`) and `smith_upload_completed_parts_total` (parts in completed uploads). Completed parts less proxied parts is about the number of parts sent through the CDN.
+Counters: `smith_upload_part_urls_total` (part URLs in `status` responses), `smith_upload_proxied_parts_total` (parts sent through `PUT parts/{n}`) and `smith_upload_completed_parts_total` (parts in completed uploads). Each counter has a `bucket` label, `assets` or `sensitive`.
 
 The CDN paths forward the query string unchanged and send the bucket's regional host, `<bucket>.s3.<region>.amazonaws.com`, so S3 checks the presigned signature. The API signs for that host. A CloudFront function on the paths lets through only `PUT` requests with `partNumber` and `uploadId`, and removes the `/assets` or `/sensitive` prefix, because the presigned path does not have it. A part PUT through the CDN has no length check, so `status` reports a part with the wrong size as missing, and the device sends it again.
 
