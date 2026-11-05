@@ -143,8 +143,21 @@ async fn matches_object(claims: &UploadClaims) -> Result<bool, UploadError> {
     .map_err(storage_error)
 }
 
-async fn plan(claims: &UploadClaims) -> Result<UploadPlan, UploadError> {
-    if matches_object(claims).await? {
+// None when the caller already holds an upload permit; Some takes one only for the full-object hash.
+async fn plan(claims: &UploadClaims, state: Option<&State>) -> Result<UploadPlan, UploadError> {
+    let matched = match state {
+        Some(state) => {
+            Storage::has_object_size(&claims.bucket, &claims.key, claims.size_bytes)
+                .await
+                .map_err(storage_error)?
+                && {
+                    let _permit = capacity(state)?;
+                    matches_object(claims).await?
+                }
+        }
+        None => matches_object(claims).await?,
+    };
+    if matched {
         return Ok(UploadPlan {
             confirmed_parts: vec![],
             missing_parts: vec![],
@@ -230,7 +243,7 @@ pub async fn status(
     headers: HeaderMap,
 ) -> Result<Json<UploadPlan>, UploadError> {
     let claims = claims(&device, &state, &headers)?;
-    Ok(Json(plan(&claims).await?))
+    Ok(Json(plan(&claims, Some(&state)).await?))
 }
 
 #[utoipa::path(put,path="/smith/upload-sessions/parts/{number}",params(("number"=i32,Path),("x-upload-token"=String,Header)),
@@ -280,7 +293,7 @@ pub async fn complete(
 ) -> Result<Json<super::route::UploadResult>, UploadError> {
     let claims = claims(&device, &state, &headers)?;
     let _permit = capacity(&state)?;
-    let plan = plan(&claims).await?;
+    let plan = plan(&claims, None).await?;
     if plan.url.is_none() {
         if !plan.missing_parts.is_empty() {
             return Err(UploadError(StatusCode::CONFLICT, "MissingParts"));

@@ -480,14 +480,21 @@ impl Storage {
         Self::matches_bucket_object(&bucket, object_key, size, checksum).await
     }
 
-    async fn matches_bucket_object(
+    /// Whether an object of this size exists, without reading its bytes.
+    pub async fn has_object_size(
+        bucket_name: &str,
+        object_key: &str,
+        size: i64,
+    ) -> anyhow::Result<bool> {
+        let bucket = Self::bucket(bucket_name)?;
+        Self::bucket_has_object_size(&bucket, object_key, size).await
+    }
+
+    async fn bucket_has_object_size(
         bucket: &Bucket,
         object_key: &str,
         size: i64,
-        checksum: &str,
     ) -> anyhow::Result<bool> {
-        use futures::StreamExt;
-        use sha2::{Digest, Sha256};
         let (head, status) = match bucket.head_object(object_key).await {
             Ok(response) => response,
             Err(s3::error::S3Error::HttpFailWithBody(404, _)) => return Ok(false),
@@ -497,7 +504,18 @@ impl Storage {
             return Ok(false);
         }
         anyhow::ensure!(status == 200, "S3 object metadata read failed");
-        if head.content_length != Some(size) {
+        Ok(head.content_length == Some(size))
+    }
+
+    async fn matches_bucket_object(
+        bucket: &Bucket,
+        object_key: &str,
+        size: i64,
+        checksum: &str,
+    ) -> anyhow::Result<bool> {
+        use futures::StreamExt;
+        use sha2::{Digest, Sha256};
+        if !Self::bucket_has_object_size(bucket, object_key, size).await? {
             return Ok(false);
         }
         let mut response = match bucket.get_object_stream(object_key).await {

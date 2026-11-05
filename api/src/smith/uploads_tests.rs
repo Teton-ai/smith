@@ -195,7 +195,9 @@ async fn stateless_routes_verify_tokens_parts_and_completion() -> anyhow::Result
         let opened = open_upload(&app, &credential, &identity).await?;
         assert!(!opened.upload_id.is_empty());
         assert_eq!(opened.part_size, PART_SIZE);
+        let held = state.upload_permits.acquire_many(4).await?;
         let listed = upload_plan(&app, &credential, &opened.token).await?;
+        drop(held);
         assert_eq!(listed.missing_parts, vec![1, 2]);
         assert!(listed.confirmed_parts.is_empty());
         for (method, suffix) in [
