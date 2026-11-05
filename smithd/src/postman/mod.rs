@@ -461,12 +461,15 @@ impl Postman {
                 error!("POST FAILURE: {err:#}");
                 let now = Instant::now();
                 let failing_for = now.duration_since(*self.failing_since.get_or_insert(now));
-                if self.problems.is_none() {
-                    if can_connect_to_api(&self.hostname).await && failing_for <= TCP_WORKS_GRACE {
-                        warn!("api unreachable over HTTP but TCP connect works, not arming Police");
-                    } else {
-                        self.problems = self.police.report_problem_starting().await;
+                let link_works =
+                    failing_for <= TCP_WORKS_GRACE && can_connect_to_api(&self.hostname).await;
+                if link_works {
+                    if let Some(problem) = self.problems.take() {
+                        warn!("api unreachable over HTTP but TCP connect works, disarming Police");
+                        self.police.report_problem_solved(problem).await;
                     }
+                } else if self.problems.is_none() {
+                    self.problems = self.police.report_problem_starting().await;
                 }
                 Err(None)
             }
