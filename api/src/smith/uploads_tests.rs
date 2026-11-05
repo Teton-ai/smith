@@ -16,6 +16,10 @@ use tokio::sync::{Mutex, Semaphore, broadcast};
 use uuid::Uuid;
 
 fn test_state(pool: PgPool) -> anyhow::Result<State> {
+    test_state_with_cdn(pool, None)
+}
+
+fn test_state_with_cdn(pool: PgPool, cdn: Option<&str>) -> anyhow::Result<State> {
     let pem = ed25519_dalek::SigningKey::from_bytes(&[7; 32]).to_pkcs8_pem(Default::default())?;
     let signer = DeviceJwtSigner::new(pem.as_str(), "upload-test".into(), 3600)?;
     let config = Box::leak(Box::new(Config {
@@ -45,7 +49,7 @@ fn test_state(pool: PgPool) -> anyhow::Result<State> {
         network_gc_interval_seconds: 3600,
         mcp: None,
         max_concurrent_uploads: 4,
-        device_upload_cdn_url: None,
+        device_upload_cdn_url: cdn.map(str::to_string),
         upload_token_key: crate::upload_token::UploadTokenKey::new(&"test-key".repeat(8))?,
     }));
     Ok(State {
@@ -519,6 +523,118 @@ async fn full_transfer_capacity_rejects_only_data_transfers() -> anyhow::Result<
     let response = app.clone().oneshot(legacy).await?;
     assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
     assert_eq!(response.headers()["retry-after"], "30");
+    Ok(())
+}
+
+/// Sends a CDN part URL to storage the way the CloudFront behavior does:
+/// the prefix maps to a bucket, the bucket goes into the host, and the
+/// signed path and query stay the same.
+async fn put_through_cdn(cdn: &str, url: &str, bytes: Vec<u8>) -> anyhow::Result<String> {
+    let rest = url
+        .strip_prefix(cdn)
+        .ok_or_else(|| anyhow::anyhow!("Part URL is not on the CDN"))?;
+    let (bucket, signed) = if let Some(signed) = rest.strip_prefix("/assets/") {
+        ("upload-assets", signed)
+    } else if let Some(signed) = rest.strip_prefix("/sensitive/") {
+        ("upload-sensitive", signed)
+    } else {
+        anyhow::bail!("Part URL has no CDN prefix");
+    };
+    let endpoint = reqwest::Url::parse(&std::env::var("AWS_ENDPOINT")?)?;
+    let host = endpoint
+        .host_str()
+        .ok_or_else(|| anyhow::anyhow!("AWS_ENDPOINT has no host"))?;
+    let port = endpoint
+        .port_or_known_default()
+        .ok_or_else(|| anyhow::anyhow!("AWS_ENDPOINT has no port"))?;
+    let origin = format!("{bucket}.{host}");
+    let address = tokio::net::lookup_host((host, port))
+        .await?
+        .next()
+        .ok_or_else(|| anyhow::anyhow!("AWS_ENDPOINT does not resolve"))?;
+    let response = reqwest::Client::builder()
+        .resolve(&origin, address)
+        .build()?
+        .put(format!("{}://{origin}:{port}/{signed}", endpoint.scheme()))
+        .body(bytes)
+        .send()
+        .await?;
+    anyhow::ensure!(
+        response.status().is_success(),
+        "Storage refused the CDN part: {}",
+        response.status()
+    );
+    Ok(response
+        .headers()
+        .get("etag")
+        .and_then(|etag| etag.to_str().ok())
+        .unwrap_or_default()
+        .to_string())
+}
+
+#[tokio::test]
+#[ignore = "Requires isolated Postgres and S3; see api/tests/resumable-uploads.md"]
+async fn status_gives_signed_cdn_part_urls_without_transfer_permits() -> anyhow::Result<()> {
+    let cdn = "https://cdn.test/device-uploads";
+    let pool = PgPool::connect(&std::env::var("UPLOAD_TEST_DATABASE_URL")?).await?;
+    let state = test_state_with_cdn(pool, Some(cdn))?;
+    let credential = state.device_jwt_signer.mint(1, "one")?;
+    let app = router(state.clone());
+    let _full = state.upload_permits.acquire_many(4).await?;
+    let bytes: Vec<u8> = (0..PART_SIZE + 29).map(|n| (n % 251) as u8).collect();
+    let checksum = format!("{:x}", Sha256::digest(&bytes));
+    for (sensitive, prefix, bucket) in [
+        (false, "assets", "upload-assets"),
+        (true, "sensitive", "upload-sensitive"),
+    ] {
+        let key = format!("cdn/{}.mp4", uuid::Uuid::new_v4());
+        let identity = serde_json::json!({"key":key,"size_bytes":bytes.len(),"checksum":checksum,"sensitive":sensitive});
+        let opened = open_upload(&app, &credential, &identity).await?;
+        let listed = upload_plan(&app, &credential, &opened.token).await?;
+        assert_eq!(listed.missing_parts, vec![1, 2]);
+        let numbers: Vec<i32> = listed
+            .part_urls
+            .iter()
+            .map(|part| part.part_number)
+            .collect();
+        assert_eq!(numbers, vec![1, 2]);
+        for (part, chunk) in listed
+            .part_urls
+            .iter()
+            .zip(bytes.chunks(PART_SIZE as usize))
+        {
+            assert!(
+                part.url.starts_with(&format!("{cdn}/{prefix}/")),
+                "{prefix} part URL"
+            );
+            assert!(
+                part.url
+                    .contains(&format!("partNumber={}", part.part_number))
+            );
+            assert!(part.url.contains("uploadId="));
+            assert!(
+                !put_through_cdn(cdn, &part.url, chunk.to_vec())
+                    .await?
+                    .is_empty()
+            );
+        }
+        let listed = upload_plan(&app, &credential, &opened.token).await?;
+        assert!(listed.missing_parts.is_empty());
+        assert!(listed.part_urls.is_empty());
+        let completed: serde_json::Value = response_json(
+            call(
+                &app,
+                "POST",
+                "/smith/upload-sessions/complete",
+                &credential,
+                Some(&opened.token),
+                vec![],
+            )
+            .await?,
+        )
+        .await?;
+        assert_eq!(completed["url"], format!("s3://{bucket}/{key}"));
+    }
     Ok(())
 }
 
