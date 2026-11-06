@@ -465,8 +465,8 @@
     },
     {
       "path": "sm logs",
-      "about": "Get logs for a device (runs 'journalctl -r' on the device)",
-      "description": "Entries come from the systemd journal, newest first.",
+      "about": "Get logs for devices (runs 'journalctl -r' on each device)",
+      "description": "Entries come from the systemd journal, newest first. Every selected device gets the command at once; the output comes per device.",
       "usage": "sm logs [OPTIONS] [IDS]...",
       "arguments": [
         {
@@ -531,11 +531,12 @@
         {
           "name": "--nowait",
           "required": false,
-          "help": "Don't wait for result, just queue the command and return immediately (faster, recommended for agents - use 'sm command <id>' to check results later)"
+          "help": "Don't wait for results, just queue the commands and return immediately (use 'sm command <id>' to check results later)"
         }
       ],
       "examples": [
         "sm logs ABC123",
+        "sm logs ABC123 DEF456 --unit smithd --since \"10 min ago\"",
         "sm logs ABC123 --unit smithd --since \"1h ago\"",
         "sm logs ABC123 --grep \"error|panic\"",
         "sm logs -l env=production --nowait"
@@ -711,9 +712,106 @@
     },
     {
       "path": "sm releases draft",
-      "about": "Draft a new release",
-      "usage": "sm releases draft",
+      "about": "Draft a new release from the deployed release of a distribution",
+      "description": "The draft copies the packages of the deployed release (or of `--from`) and swaps in each `--package`. Choices left out are asked interactively.",
+      "usage": "sm releases draft [OPTIONS]",
       "arguments": [],
+      "options": [
+        {
+          "name": "--distribution-id",
+          "value": "<DISTRIBUTION_ID>",
+          "required": false,
+          "help": "Distribution of the release"
+        },
+        {
+          "name": "--from",
+          "value": "<RELEASE_ID>",
+          "required": false,
+          "help": "Release to copy the packages from. Defaults to the deployed release"
+        },
+        {
+          "name": "--package",
+          "value": "<PACKAGE_ID>",
+          "required": false,
+          "help": "Package to put in the release. It replaces the package with the same name, or is added when there is none. Can be used multiple times"
+        },
+        {
+          "name": "--version",
+          "value": "<VERSION>",
+          "required": false,
+          "help": "Version of the release"
+        },
+        {
+          "name": "--rc",
+          "required": false,
+          "help": "Make the release a release candidate. Asked when `--version` is left out"
+        }
+      ],
+      "examples": [
+        "sm releases draft",
+        "sm releases draft --distro 6 --version 1.4.0 --package 812 --package 815",
+        "sm releases draft --distro 6 --from 140 --version 1.4.0-rc --rc"
+      ]
+    },
+    {
+      "path": "sm releases packages",
+      "about": "List the packages of a release",
+      "usage": "sm releases packages [OPTIONS] <RELEASE_NUMBER>",
+      "arguments": [
+        {
+          "name": "<RELEASE_NUMBER>",
+          "required": true,
+          "help": ""
+        }
+      ],
+      "options": [
+        {
+          "name": "--json",
+          "required": false,
+          "help": ""
+        }
+      ],
+      "examples": []
+    },
+    {
+      "path": "sm releases set-package",
+      "about": "Put packages in a release that is in draft",
+      "description": "Each package replaces the package with the same name, or is added when there is none.",
+      "usage": "sm releases set-package <RELEASE_NUMBER> <PACKAGE_IDS>...",
+      "arguments": [
+        {
+          "name": "<RELEASE_NUMBER>",
+          "required": true,
+          "help": ""
+        },
+        {
+          "name": "<PACKAGE_IDS>",
+          "required": true,
+          "help": ""
+        }
+      ],
+      "options": [],
+      "examples": [
+        "sm releases set-package 141 812",
+        "sm releases set-package 141 812 815"
+      ]
+    },
+    {
+      "path": "sm releases remove-package",
+      "about": "Remove a package from a release that is in draft",
+      "usage": "sm releases remove-package <RELEASE_NUMBER> <PACKAGE_ID>",
+      "arguments": [
+        {
+          "name": "<RELEASE_NUMBER>",
+          "required": true,
+          "help": ""
+        },
+        {
+          "name": "<PACKAGE_ID>",
+          "required": true,
+          "help": ""
+        }
+      ],
       "options": [],
       "examples": []
     },
@@ -835,7 +933,8 @@
     },
     {
       "path": "sm releases deploy",
-      "about": "Deploy a release",
+      "about": "Deploy a release to its canary devices",
+      "description": "Waits until every canary device runs the release, then shows the deployment. Roll it out to the fleet with `sm releases confirm`.",
       "usage": "sm releases deploy [OPTIONS] <RELEASE_NUMBER>",
       "arguments": [
         {
@@ -850,8 +949,42 @@
           "value": "<CANARY_DEVICE_LABELS>",
           "required": false,
           "help": "Customize which devices are canary released, by filtering devices by labels. e.g. --labels label1=a --labels label2=b"
+        },
+        {
+          "name": "--nowait",
+          "required": false,
+          "help": "Return after the deployment starts, without waiting for the canary devices"
         }
       ],
+      "examples": []
+    },
+    {
+      "path": "sm releases deployment",
+      "about": "Show the deployment of a release: its status, canary devices and their service health",
+      "usage": "sm releases deployment <RELEASE_NUMBER>",
+      "arguments": [
+        {
+          "name": "<RELEASE_NUMBER>",
+          "required": true,
+          "help": ""
+        }
+      ],
+      "options": [],
+      "examples": []
+    },
+    {
+      "path": "sm releases confirm",
+      "about": "Roll a release out to the whole fleet after its canary",
+      "description": "Fails while a canary device does not run the release yet.",
+      "usage": "sm releases confirm <RELEASE_NUMBER>",
+      "arguments": [
+        {
+          "name": "<RELEASE_NUMBER>",
+          "required": true,
+          "help": ""
+        }
+      ],
+      "options": [],
       "examples": []
     },
     {
