@@ -18,6 +18,8 @@ const MAX_SIZE: i64 = 512_000_000;
 const TOKEN_TTL_SECONDS: i64 = 24 * 60 * 60;
 /// Retry-After value, in seconds, for every upload capacity 503.
 pub const RETRY_AFTER_SECONDS: &str = "30";
+/// Devices ask for fresh part URLs before this runs out.
+const PART_URL_TTL_SECONDS: u32 = 60 * 60;
 
 pub struct UploadError(StatusCode, &'static str);
 
@@ -69,6 +71,16 @@ pub struct UploadPlan {
     confirmed_parts: Vec<UploadPart>,
     missing_parts: Vec<i32>,
     url: Option<String>,
+    /// A CDN URL per missing part. The device PUTs the part bytes there and
+    /// uses `PUT parts/{number}` on this API when the CDN URL fails.
+    #[serde(default)]
+    part_urls: Vec<PartUrl>,
+}
+
+#[derive(Serialize, Deserialize, ToSchema)]
+pub struct PartUrl {
+    part_number: i32,
+    url: String,
 }
 
 fn validate(request: &OpenUpload) -> Result<(), StatusCode> {
@@ -144,34 +156,117 @@ async fn plan(claims: &UploadClaims) -> Result<UploadPlan, UploadError> {
             confirmed_parts: vec![],
             missing_parts: vec![],
             url: Some(object_url(claims)),
+            part_urls: vec![],
         });
     }
-    let mut confirmed_parts =
-        Storage::list_upload_parts(&claims.bucket, &claims.key, &claims.upload_id)
-            .await
-            .map_err(storage_error)?;
-    confirmed_parts.sort_by_key(|p| p.part_number);
-    if confirmed_parts
+    let listed = Storage::list_upload_parts(&claims.bucket, &claims.key, &claims.upload_id)
+        .await
+        .map_err(storage_error)?;
+    let (confirmed_parts, missing_parts) = sort_parts(claims.size_bytes, listed)?;
+    Ok(UploadPlan {
+        confirmed_parts,
+        missing_parts,
+        url: None,
+        part_urls: vec![],
+    })
+}
+
+/// Splits the parts S3 lists into confirmed parts and missing part numbers.
+/// A CDN part PUT has no length check, so a part with the wrong size counts
+/// as missing and the device sends it again.
+fn sort_parts(
+    size: i64,
+    mut parts: Vec<UploadPart>,
+) -> Result<(Vec<UploadPart>, Vec<i32>), UploadError> {
+    parts.sort_by_key(|p| p.part_number);
+    if parts
         .windows(2)
         .any(|pair| pair[0].part_number == pair[1].part_number)
     {
         return Err(UploadError(StatusCode::CONFLICT, "InvalidParts"));
     }
-    for part in &confirmed_parts {
-        if part.etag.is_empty()
-            || part.size_bytes != part_length(claims.size_bytes, part.part_number)?
-        {
+    let mut confirmed = Vec::with_capacity(parts.len());
+    for part in parts {
+        if part.etag.is_empty() {
             return Err(UploadError(StatusCode::CONFLICT, "InvalidParts"));
         }
+        if part.size_bytes == part_length(size, part.part_number)? {
+            confirmed.push(part);
+        }
     }
-    let missing_parts = (1..=part_count(claims.size_bytes))
-        .filter(|n| !confirmed_parts.iter().any(|part| part.part_number == *n))
+    let missing = (1..=part_count(size))
+        .filter(|n| !confirmed.iter().any(|part| part.part_number == *n))
         .collect();
-    Ok(UploadPlan {
-        confirmed_parts,
-        missing_parts,
-        url: None,
-    })
+    Ok((confirmed, missing))
+}
+
+/// Presigned S3 `UploadPart` URLs moved onto the CDN. The CDN path forwards
+/// the query string to the bucket's regional host, so S3 checks the
+/// signature, the upload id and the part number. An error gives no URLs and
+/// the device uses the API route.
+async fn part_urls(state: &State, claims: &UploadClaims, parts: &[i32]) -> Vec<PartUrl> {
+    let Some(cdn) = &state.config.device_upload_cdn_url else {
+        return vec![];
+    };
+    if parts.is_empty() {
+        return vec![];
+    }
+    let prefix = bucket_label(state, claims);
+    let parts: Result<Vec<(i32, u64)>, _> = parts
+        .iter()
+        .map(|number| {
+            part_length(claims.size_bytes, *number).map(|length| (*number, length as u64))
+        })
+        .collect();
+    let Ok(parts) = parts else {
+        return vec![];
+    };
+    let urls: anyhow::Result<Vec<PartUrl>> = Storage::presign_regional_upload_parts(
+        &claims.bucket,
+        &claims.key,
+        &claims.upload_id,
+        &parts,
+        PART_URL_TTL_SECONDS,
+    )
+    .await
+    .and_then(|urls| {
+        urls.into_iter()
+            .map(|(part_number, url)| {
+                Ok(PartUrl {
+                    part_number,
+                    url: cdn_url(cdn, prefix, &url)?,
+                })
+            })
+            .collect()
+    });
+    match urls {
+        Ok(urls) => {
+            metrics::counter!("smith_upload_part_urls_total", urls.len() as u64, "bucket" => prefix);
+            urls
+        }
+        Err(error) => {
+            tracing::error!("Failed to presign CDN upload parts: {error}");
+            vec![]
+        }
+    }
+}
+
+/// `sensitive` for the data engine bucket, `assets` for the other bucket. It is
+/// the CDN path prefix and the counter label.
+fn bucket_label(state: &State, claims: &UploadClaims) -> &'static str {
+    if claims.bucket == state.config.data_engine_bucket_name {
+        "sensitive"
+    } else {
+        "assets"
+    }
+}
+
+fn cdn_url(cdn: &str, prefix: &str, presigned: &str) -> anyhow::Result<String> {
+    let url = reqwest::Url::parse(presigned)?;
+    let query = url
+        .query()
+        .ok_or_else(|| anyhow::anyhow!("Presigned URL has no query"))?;
+    Ok(format!("{cdn}/{prefix}{}?{query}", url.path()))
 }
 
 #[utoipa::path(post,path="/smith/upload-sessions",request_body=OpenUpload,
@@ -224,7 +319,9 @@ pub async fn status(
     headers: HeaderMap,
 ) -> Result<Json<UploadPlan>, UploadError> {
     let claims = claims(&device, &state, &headers)?;
-    Ok(Json(plan(&claims).await?))
+    let mut plan = plan(&claims).await?;
+    plan.part_urls = part_urls(&state, &claims, &plan.missing_parts).await;
+    Ok(Json(plan))
 }
 
 #[utoipa::path(put,path="/smith/upload-sessions/parts/{number}",params(("number"=i32,Path),("x-upload-token"=String,Header)),
@@ -264,6 +361,7 @@ pub async fn put_part(
     )
     .await
     .map_err(storage_error)?;
+    metrics::increment_counter!("smith_upload_proxied_parts_total", "bucket" => bucket_label(&state, &claims));
     Ok(Json(UploadPart {
         part_number: number,
         etag,
@@ -284,6 +382,7 @@ pub async fn complete(
         if !plan.missing_parts.is_empty() {
             return Err(UploadError(StatusCode::CONFLICT, "MissingParts"));
         }
+        let parts = plan.confirmed_parts.len() as u64;
         let result = Storage::complete_multipart(
             &claims.bucket,
             &claims.key,
@@ -309,6 +408,7 @@ pub async fn complete(
                 "ChecksumMismatch",
             ));
         }
+        metrics::counter!("smith_upload_completed_parts_total", parts, "bucket" => bucket_label(&state, &claims));
     }
     Ok(Json(super::route::UploadResult {
         url: object_url(&claims),
@@ -338,6 +438,35 @@ mod tests {
         request.key = "clips/one.mp4".into();
         request.checksum = "G".repeat(64);
         assert_eq!(validate(&request), Err(StatusCode::BAD_REQUEST));
+    }
+
+    #[test]
+    fn wrong_size_part_is_missing_again() -> anyhow::Result<()> {
+        let part = |part_number, size_bytes| UploadPart {
+            part_number,
+            etag: "\"e\"".into(),
+            size_bytes,
+        };
+        let sorted = sort_parts(PART_SIZE + 1, vec![part(2, 1), part(1, 7)]);
+        let Ok((confirmed, missing)) = sorted else {
+            anyhow::bail!("valid parts were rejected");
+        };
+        assert_eq!(
+            confirmed.iter().map(|p| p.part_number).collect::<Vec<_>>(),
+            [2]
+        );
+        assert_eq!(missing, [1]);
+        assert!(sort_parts(PART_SIZE + 1, vec![part(1, PART_SIZE), part(1, PART_SIZE)]).is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn cdn_url_keeps_signed_path_and_query() {
+        let presigned = "https://b.s3.eu-north-1.amazonaws.com/clips/a%20b.mp4?partNumber=2&uploadId=u%2B1&X-Amz-Signature=s";
+        assert_eq!(
+            cdn_url("https://cdn.teton.ai/device-uploads", "sensitive", presigned).ok(),
+            Some("https://cdn.teton.ai/device-uploads/sensitive/clips/a%20b.mp4?partNumber=2&uploadId=u%2B1&X-Amz-Signature=s".into())
+        );
     }
 }
 

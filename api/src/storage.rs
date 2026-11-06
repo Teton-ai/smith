@@ -345,15 +345,67 @@ impl Storage {
         expiry_secs: u32,
     ) -> anyhow::Result<Vec<(i32, String)>> {
         let bucket = Self::bucket(bucket_name)?;
+        let parts: Vec<(i32, Option<u64>)> = part_numbers.iter().map(|n| (*n, None)).collect();
+        Self::presign_parts(&bucket, object_key, upload_id, &parts, expiry_secs).await
+    }
 
-        let mut urls = Vec::with_capacity(part_numbers.len());
-        for part_number in part_numbers {
+    /// Presigns `UploadPart` requests for the host a CloudFront S3 origin
+    /// sends, `<bucket>.s3.<region>.amazonaws.com`. SigV4 signs the host, and
+    /// rust-s3 uses the legacy `s3-<region>` host for some regions. Each URL
+    /// also signs the part length, so S3 refuses a body of another length.
+    /// A URL stops working when the signing credentials expire, so the
+    /// lifetime is at most the time the credentials have left.
+    pub async fn presign_regional_upload_parts(
+        bucket_name: &str,
+        object_key: &str,
+        upload_id: &str,
+        parts: &[(i32, u64)],
+        expiry_secs: u32,
+    ) -> anyhow::Result<Vec<(i32, String)>> {
+        let region = match std::env::var("AWS_ENDPOINT") {
+            Ok(_) => Region::from_default_env()?,
+            Err(_) => regional(std::env::var("AWS_REGION")?),
+        };
+        let credentials = Credentials::default()?;
+        let now = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs() as i64;
+        let expiry_secs = url_lifetime(
+            expiry_secs,
+            credentials
+                .expiration
+                .as_ref()
+                .map(|at| at.unix_timestamp() - now),
+        )?;
+        let bucket = Bucket::new(bucket_name, region, credentials)?;
+        let parts: Vec<(i32, Option<u64>)> = parts
+            .iter()
+            .map(|(number, length)| (*number, Some(*length)))
+            .collect();
+        Self::presign_parts(&bucket, object_key, upload_id, &parts, expiry_secs).await
+    }
+
+    async fn presign_parts(
+        bucket: &Bucket,
+        object_key: &str,
+        upload_id: &str,
+        parts: &[(i32, Option<u64>)],
+        expiry_secs: u32,
+    ) -> anyhow::Result<Vec<(i32, String)>> {
+        let mut urls = Vec::with_capacity(parts.len());
+        for (part_number, length) in parts {
             let mut queries = HashMap::new();
             queries.insert("partNumber".to_string(), part_number.to_string());
             queries.insert("uploadId".to_string(), upload_id.to_string());
+            let headers = match length {
+                Some(length) => {
+                    let mut headers = http02::HeaderMap::new();
+                    headers.insert(http02::header::CONTENT_LENGTH, (*length).into());
+                    Some(headers)
+                }
+                None => None,
+            };
 
             let url = bucket
-                .presign_put(object_key, expiry_secs, None, Some(queries))
+                .presign_put(object_key, expiry_secs, headers, Some(queries))
                 .await?;
             urls.push((*part_number, url));
         }
@@ -547,6 +599,27 @@ impl Storage {
     }
 }
 
+/// Seconds a presigned URL can live: `wanted`, but at most the time the
+/// signing credentials have left, less one minute.
+fn url_lifetime(wanted: u32, credentials_left: Option<i64>) -> anyhow::Result<u32> {
+    let Some(left) = credentials_left else {
+        return Ok(wanted);
+    };
+    let left = left - 60;
+    anyhow::ensure!(
+        left >= 60,
+        "Signing credentials expire in less than two minutes"
+    );
+    Ok(wanted.min(u32::try_from(left).unwrap_or(u32::MAX)))
+}
+
+fn regional(region: String) -> Region {
+    Region::Custom {
+        endpoint: format!("https://s3.{region}.amazonaws.com"),
+        region,
+    }
+}
+
 pub fn is_missing_upload(error: &anyhow::Error) -> bool {
     error.downcast_ref::<s3::error::S3Error>().is_some_and(|error| {
         matches!(error, s3::error::S3Error::HttpFailWithBody(_, body) if missing_upload_body(body))
@@ -594,7 +667,10 @@ fn validate_completion(status: u16, body: &str) -> anyhow::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{UploadMetrics, validate_completion};
+    use super::{
+        Bucket, Credentials, HashMap, Storage, UploadMetrics, regional, url_lifetime,
+        validate_completion,
+    };
 
     #[tokio::test]
     async fn object_verification_checks_metadata_before_reading_bytes() -> anyhow::Result<()> {
@@ -665,6 +741,46 @@ mod tests {
             };
             assert_eq!(*calls.lock().unwrap(), expected_calls);
         }
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn regional_presign_signs_the_cloudfront_origin_host() -> anyhow::Result<()> {
+        let credentials = Credentials::new(Some("AKIDEXAMPLE"), Some("secret"), None, None, None)?;
+        let bucket = Bucket::new("assets-55c9d7e", regional("eu-north-1".into()), credentials)?;
+        let urls =
+            Storage::presign_parts(&bucket, "clips/one.mp4", "upload", &[(3, Some(1234))], 60)
+                .await?;
+        let (_, url) = urls
+            .first()
+            .ok_or_else(|| anyhow::anyhow!("No presigned URL"))?;
+        let url = reqwest::Url::parse(url)?;
+        assert_eq!(
+            url.host_str(),
+            Some("assets-55c9d7e.s3.eu-north-1.amazonaws.com")
+        );
+        assert_eq!(url.path(), "/clips/one.mp4");
+        let query: HashMap<_, _> = url.query_pairs().into_owned().collect();
+        assert_eq!(query.get("partNumber").map(String::as_str), Some("3"));
+        assert_eq!(query.get("uploadId").map(String::as_str), Some("upload"));
+        assert_eq!(
+            query.get("X-Amz-SignedHeaders").map(String::as_str),
+            Some("content-length;host")
+        );
+        assert!(
+            query
+                .get("X-Amz-Credential")
+                .is_some_and(|c| c.contains("/eu-north-1/s3/"))
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn url_lifetime_ends_before_the_credentials() -> anyhow::Result<()> {
+        assert_eq!(url_lifetime(3600, None)?, 3600);
+        assert_eq!(url_lifetime(3600, Some(6 * 3600))?, 3600);
+        assert_eq!(url_lifetime(3600, Some(1000))?, 940);
+        assert!(url_lifetime(3600, Some(100)).is_err());
         Ok(())
     }
 
