@@ -6180,6 +6180,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "smith-rescue"
+version = "0.2.232"
+dependencies = [
+ "anyhow",
+ "nix 0.30.1",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "toml",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "smith-updater"
 version = "0.2.236"
 dependencies = [

@@ -1,0 +1,35 @@
+[package]
+name = "smith-rescue"
+version.workspace = true
+description = "Reboots the device on a Restart command, apart from smithd"
+edition.workspace = true
+repository.workspace = true
+authors.workspace = true
+license.workspace = true
+
+# No dependency on the smith crate: this process must keep working when smithd
+# is stuck, so it shares no code, actors or runtime with it.
+[dependencies]
+anyhow.workspace = true
+serde = { workspace = true }
+serde_json = { workspace = true }
+toml = "0.8"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+reqwest = { version = "0.12", default-features = false, features = [
+    "blocking",
+    "json",
+    "native-tls-vendored",
+] }
+nix = { version = "0.30.1", features = ["fs", "reboot"] }
+
+[package.metadata.deb]
+maintainer-scripts = "debian/"
+assets = [["target/release/smith-rescue", "/usr/bin/smith-rescue", "755"]]
+
+[package.metadata.deb.systemd-units]
+unit-name = "smith-rescue"
+enable = true
+start = true
+restart-after-upgrade = true
+stop-on-upgrade = false

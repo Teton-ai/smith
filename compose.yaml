@@ -21,6 +21,7 @@ services:
       - ./models:/app/models
       - ./smithd:/app/smithd
       - ./updater:/app/updater
+      - ./rescue:/app/rescue
       # Cache cargo registry and build artifacts for faster rebuilds
       - cargo-registry:/usr/local/cargo/registry
       - cargo-git:/usr/local/cargo/git
@@ -79,7 +80,12 @@ services:
     environment:
       - RUST_LOG=${RUST_LOG:-INFO}
       - NETWORK_THROTTLE=${NETWORK_THROTTLE:-random}
-    entrypoint: ["/bin/bash", "-c", "printenv > /etc/smith/environment && /app/network-throttle.sh && exec /lib/systemd/systemd"]
+    # A container shares the host kernel's boot id, so each container start
+    # gets its own: smith-rescue knows a reboot ended a boot by its boot id.
+    entrypoint: ["/bin/bash", "-c", "cat /proc/sys/kernel/random/uuid > /etc/boot_id && mount --bind /etc/boot_id /proc/sys/kernel/random/boot_id && printenv > /etc/smith/environment && /app/network-throttle.sh && exec /lib/systemd/systemd"]
+    # A reboot ends the container's systemd; this starts it again, as a
+    # device boots again.
+    restart: unless-stopped
     tmpfs:
       - /run
       - /run/lock
