@@ -66,7 +66,7 @@ pub struct DeviceSessionResponse {
 }
 
 #[utoipa::path(
-    get,
+    post,
     path = "/auth/session",
     responses(
         (status = StatusCode::OK, description = "Mint a short-lived device JWT", body = DeviceSessionResponse),
@@ -81,7 +81,7 @@ pub struct DeviceSessionResponse {
 pub async fn session(
     Extension(state): Extension<State>,
     device: AuthedDevice,
-) -> Result<Json<DeviceSessionResponse>, StatusCode> {
+) -> Result<impl IntoResponse, StatusCode> {
     let token = state
         .device_jwt_signer
         .mint(device.id, &device.serial_number)
@@ -93,11 +93,36 @@ pub async fn session(
             StatusCode::INTERNAL_SERVER_ERROR
         })?;
 
-    Ok(Json(DeviceSessionResponse {
-        token,
-        expires_in: state.device_jwt_signer.ttl_seconds(),
-        token_type: "Bearer",
-    }))
+    Ok((
+        [(CACHE_CONTROL, "no-store")],
+        Json(DeviceSessionResponse {
+            token,
+            expires_in: state.device_jwt_signer.ttl_seconds(),
+            token_type: "Bearer",
+        }),
+    ))
+}
+
+/// Legacy device session issuance. Use POST /auth/session instead.
+#[utoipa::path(
+    get,
+    path = "/auth/session",
+    responses(
+        (status = StatusCode::OK, description = "Mint a short-lived device JWT", body = DeviceSessionResponse),
+        (status = StatusCode::UNAUTHORIZED, description = "Caller is not an authenticated device"),
+        (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to mint JWT"),
+    ),
+    security(
+        ("device_token" = [])
+    ),
+    tag = AUTH_TAG
+)]
+#[deprecated(note = "Use POST /auth/session instead")]
+pub async fn session_legacy(
+    state: Extension<State>,
+    device: AuthedDevice,
+) -> Result<impl IntoResponse, StatusCode> {
+    session(state, device).await
 }
 
 /// `/.well-known/jwks.json` — public Ed25519 verification key for device JWTs.

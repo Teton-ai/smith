@@ -480,6 +480,8 @@ async fn start_main_server(
         .split_for_parts();
     api_doc.merge(protected_api);
 
+    // Keep deprecated endpoints registered for existing devices.
+    #[allow(deprecated)]
     let (smith_router, smith_api) = OpenApiRouter::with_openapi(SmithApiDoc::openapi())
         .routes(routes!(smith::route::register_device))
         .routes(routes!(smith::route::home))
@@ -496,7 +498,7 @@ async fn start_main_server(
         .routes(routes!(smith::route::test_file))
         .routes(routes!(smith::route::test_upload))
         .routes(routes!(files::route::upload_file))
-        .routes(routes!(auth::route::session))
+        .routes(routes!(auth::route::session, auth::route::session_legacy))
         .split_for_parts();
 
     let smith_router = smith_router
