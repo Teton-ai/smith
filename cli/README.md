@@ -64,6 +64,31 @@ sm devices ls
 
 Add `--json` flag for JSON output.
 
+### Labels and tags
+
+A label has a key and value (`env=production`). A tag has only a key
+(`maintenance`). Set and remove them with:
+
+```bash
+sm label -d ABC123 env=production  # Set or replace a label
+sm label -d ABC123 maintenance     # Set a tag
+sm label -d ABC123 env=            # Remove a label
+sm label -d ABC123 maintenance=    # Remove a tag
+sm get d -l maintenance            # Filter by tag
+```
+
+Only the named keys change; other labels are preserved. A bare key sets a tag,
+while `key=` removes the key.
+
+The built-in `pinned` tag follows the device's pin state and cannot be changed
+with `sm label`. Use `sm pin ABC123` and `sm unpin ABC123`. Unpinning sets the
+target to the latest release of the device's distribution, if one is available,
+and lets the device follow future fleet-wide rollouts again.
+
+The CLI text output and dashboard display `pinned` first, then other labels
+and tags sorted by key in case-sensitive order. JSON object key order is not
+guaranteed.
+
 ### Distributions
 
 List available distributions:

@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { type Device, useGetDevices } from "@/app/api-client";
 import { Button } from "@/app/components/button";
 import LabelAutocomplete from "@/app/components/LabelAutocomplete";
+import { displayLabel, labelEntries } from "@/app/utils/format";
 
 export type SelectionMode = "labels" | "devices";
 
@@ -210,14 +211,14 @@ export default function DeviceSelector({
 												{device.labels &&
 													Object.keys(device.labels).length > 0 && (
 														<div className="flex gap-1">
-															{Object.entries(device.labels)
+															{labelEntries(device.labels)
 																.slice(0, 2)
 																.map(([key, value]) => (
 																	<span
 																		key={`${key}=${value}`}
 																		className="px-1.5 py-0.5 text-xs bg-gray-100 text-gray-600 rounded"
 																	>
-																		{key}={value}
+																		{displayLabel(key, value)}
 																	</span>
 																))}
 															{Object.keys(device.labels).length > 2 && (

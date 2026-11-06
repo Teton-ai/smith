@@ -676,12 +676,13 @@ pub async fn start_extended_network_test(
         return Err(StatusCode::CONFLICT);
     }
 
-    let label_filters: Vec<String> = request
-        .label_filter
-        .split(',')
-        .filter(|s| !s.is_empty())
-        .map(|s| s.trim().to_string())
-        .collect();
+    let label_filters = crate::device::normalize_label_selectors(
+        request
+            .label_filter
+            .split(',')
+            .filter(|s| !s.is_empty())
+            .map(str::trim),
+    );
 
     let mut tx = state.pg_pool.begin().await.map_err(|err| {
         error!(error = %err, "Failed to start transaction");

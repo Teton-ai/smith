@@ -34,6 +34,7 @@ import {
 } from "@/app/api-client";
 import { Modal } from "@/app/components/modal";
 import { useConfig } from "@/app/hooks/config";
+import { displayLabel, labelEntries, labelName } from "@/app/utils/format";
 import { architectureIcon } from "@/app/utils/release";
 
 const Tooltip = ({
@@ -366,7 +367,7 @@ const DeviceHeader: React.FC<DeviceHeaderProps> = ({ device, serial }) => {
 
 	const status = getDeviceStatus();
 	const update = getDeviceUpdateStatus(device);
-	const labels = Object.entries(device.labels ?? {});
+	const labels = labelEntries(device.labels);
 	const grafanaUrl = getGrafanaUrl();
 	// The device runs its distribution's build, so that's what its hardware is.
 	const architecture = device.release?.distribution_architecture;
@@ -404,7 +405,7 @@ const DeviceHeader: React.FC<DeviceHeaderProps> = ({ device, serial }) => {
 								{getDeviceName()}
 							</h1>
 						</div>
-						<div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-sm text-gray-600">
+						<div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-sm text-gray-600">
 							{device.release && (
 								<div className="flex items-center space-x-2">
 									<Link
@@ -443,13 +444,13 @@ const DeviceHeader: React.FC<DeviceHeaderProps> = ({ device, serial }) => {
 								<div className="flex flex-wrap items-center gap-1.5">
 									<Tags className="w-4 h-4 text-gray-400 flex-shrink-0" />
 									{labels.slice(0, VISIBLE_LABELS).map(([key, value]) => (
-										<LabelChip key={key} name={key} value={value} />
+										<LabelChip key={key} name={labelName(key)} value={value} />
 									))}
 									{labels.length > VISIBLE_LABELS && (
 										<Tooltip
 											content={labels
 												.slice(VISIBLE_LABELS)
-												.map(([key, value]) => `${key}: ${value}`)
+												.map(([key, value]) => displayLabel(key, value))
 												.join(", ")}
 										>
 											<span className="text-xs text-gray-500 cursor-help">

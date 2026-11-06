@@ -29,6 +29,7 @@ import {
 import { Button } from "@/app/components/button";
 import { EmergencyConfirmModal } from "@/app/components/modal";
 import { RelativeTime } from "@/app/components/RelativeTime";
+import { displayLabel, labelEntries } from "@/app/utils/format";
 import { requestErrorMessage } from "@/app/utils/release";
 import {
 	type DeviceServiceHealth,
@@ -668,13 +669,13 @@ const DeploymentStatusPage = () => {
 															{device.labels &&
 															Object.keys(device.labels).length > 0 ? (
 																<div className="flex flex-wrap gap-1">
-																	{Object.entries(device.labels).map(
+																	{labelEntries(device.labels).map(
 																		([key, value]) => (
 																			<code
 																				key={key}
 																				className="px-1.5 py-0.5 text-xs font-mono rounded border bg-gray-100 text-gray-700 border-gray-200"
 																			>
-																				{key}={value}
+																				{displayLabel(key, value)}
 																			</code>
 																		),
 																	)}

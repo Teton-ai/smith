@@ -209,32 +209,51 @@ async fn check_for_updates_in_background() {
     }
 }
 
+/// `key=value` sets a value, `key` sets a tag, and `key=`
+/// (`None` in the result) removes the label.
 fn parse_label_filters(
     labels: Vec<String>,
-) -> anyhow::Result<Option<std::collections::HashMap<String, String>>> {
+) -> anyhow::Result<Option<HashMap<String, Option<String>>>> {
     if labels.is_empty() {
         return Ok(None);
     }
 
-    let mut map = std::collections::HashMap::new();
+    let mut map = HashMap::new();
     for label_str in labels {
-        let parts: Vec<&str> = label_str.splitn(2, '=').collect();
-        if parts.len() == 2 {
-            map.insert(parts[0].to_string(), parts[1].to_string());
-        } else {
-            return Err(anyhow::anyhow!(
-                "Invalid label format: '{}'. Expected 'key=value'",
-                label_str
-            ));
+        if label_str.is_empty() {
+            bail!("Invalid label format: empty label. Expected 'key' or 'key=value'");
         }
+        match label_str.split_once('=') {
+            Some((key, "")) => map.insert(key.to_string(), None),
+            Some((key, value)) => map.insert(key.to_string(), Some(value.to_string())),
+            None => map.insert(label_str, Some(String::new())),
+        };
     }
     Ok(Some(map))
+}
+
+fn format_label(key: &str, value: &str) -> String {
+    if value.is_empty() {
+        key.to_string()
+    } else {
+        format!("{key}={value}")
+    }
+}
+
+fn format_labels(labels: &HashMap<String, String>) -> String {
+    let mut entries: Vec<_> = labels.iter().collect();
+    entries.sort_by(|(a, _), (b, _)| (a.as_str() != "pinned", a).cmp(&(b.as_str() != "pinned", b)));
+    entries
+        .into_iter()
+        .map(|(key, value)| format_label(key, value))
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 async fn apply_labels_to_devices(
     api: &SmithAPI,
     devices: &[Device],
-    new_labels_map: &HashMap<String, String>,
+    new_labels_map: &HashMap<String, Option<String>>,
 ) -> anyhow::Result<()> {
     let mut failures = 0;
     for device in devices {
@@ -910,12 +929,7 @@ async fn main() -> anyhow::Result<()> {
 
                         // Labels
                         if !device.labels.is_empty() {
-                            let labels_str = device
-                                .labels
-                                .iter()
-                                .map(|(k, v)| format!("{}={}", k, v))
-                                .collect::<Vec<String>>()
-                                .join(", ");
+                            let labels_str = format_labels(&device.labels);
                             println!("  {} {}", "labels:".dimmed(), labels_str.cyan());
                         }
                     } else {
@@ -969,11 +983,7 @@ async fn main() -> anyhow::Result<()> {
                             let labels_str = if d.labels.is_empty() {
                                 "-".to_string()
                             } else {
-                                d.labels
-                                    .iter()
-                                    .map(|(k, v)| format!("{}={}", k, v))
-                                    .collect::<Vec<String>>()
-                                    .join(", ")
+                                format_labels(&d.labels)
                             };
 
                             table.add_row(vec![
@@ -2111,10 +2121,9 @@ async fn main() -> anyhow::Result<()> {
                 }
                 println!("\nLabel changes:");
                 for (key, value) in &new_labels_map {
-                    if value.is_empty() {
-                        println!("  {} (remove)", key);
-                    } else {
-                        println!("  {}={}", key, value);
+                    match value {
+                        Some(value) => println!("  {}", format_label(key, value)),
+                        None => println!("  {} (remove)", key),
                     }
                 }
 

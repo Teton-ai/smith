@@ -77,9 +77,9 @@
         {
           "name": "--label",
           "short": "-l",
-          "value": "<KEY=VALUE>",
+          "value": "<KEY[=VALUE]>",
           "required": false,
-          "help": "Filter by labels (format: key=value). Can be used multiple times"
+          "help": "Filter by labels (format: key=value, or key for a tag). Can be used multiple times"
         },
         {
           "name": "--online",
@@ -146,9 +146,9 @@
         {
           "name": "--label",
           "short": "-l",
-          "value": "<KEY=VALUE>",
+          "value": "<KEY[=VALUE]>",
           "required": false,
-          "help": "Filter by labels (format: key=value). Can be used multiple times"
+          "help": "Filter by labels (format: key=value, or key for a tag). Can be used multiple times"
         },
         {
           "name": "--online",
@@ -235,9 +235,9 @@
         {
           "name": "--label",
           "short": "-l",
-          "value": "<KEY=VALUE>",
+          "value": "<KEY[=VALUE]>",
           "required": false,
-          "help": "Filter by labels (format: key=value). Can be used multiple times"
+          "help": "Filter by labels (format: key=value, or key for a tag). Can be used multiple times"
         },
         {
           "name": "--online",
@@ -302,9 +302,9 @@
         {
           "name": "--label",
           "short": "-l",
-          "value": "<KEY=VALUE>",
+          "value": "<KEY[=VALUE]>",
           "required": false,
-          "help": "Filter by labels (format: key=value). Can be used multiple times"
+          "help": "Filter by labels (format: key=value, or key for a tag). Can be used multiple times"
         },
         {
           "name": "--online",
@@ -364,9 +364,9 @@
         {
           "name": "--label",
           "short": "-l",
-          "value": "<KEY=VALUE>",
+          "value": "<KEY[=VALUE]>",
           "required": false,
-          "help": "Filter by labels (format: key=value). Can be used multiple times"
+          "help": "Filter by labels (format: key=value, or key for a tag). Can be used multiple times"
         },
         {
           "name": "--online",
@@ -426,9 +426,9 @@
         {
           "name": "--label",
           "short": "-l",
-          "value": "<KEY=VALUE>",
+          "value": "<KEY[=VALUE]>",
           "required": false,
-          "help": "Filter by labels (format: key=value). Can be used multiple times"
+          "help": "Filter by labels (format: key=value, or key for a tag). Can be used multiple times"
         },
         {
           "name": "--online",
@@ -479,9 +479,9 @@
         {
           "name": "--label",
           "short": "-l",
-          "value": "<KEY=VALUE>",
+          "value": "<KEY[=VALUE]>",
           "required": false,
-          "help": "Filter by labels (format: key=value). Can be used multiple times"
+          "help": "Filter by labels (format: key=value, or key for a tag). Can be used multiple times"
         },
         {
           "name": "--online",
@@ -556,9 +556,9 @@
         {
           "name": "--label",
           "short": "-l",
-          "value": "<KEY=VALUE>",
+          "value": "<KEY[=VALUE]>",
           "required": false,
-          "help": "Filter by labels (format: key=value). Can be used multiple times"
+          "help": "Filter by labels (format: key=value, or key for a tag). Can be used multiple times"
         },
         {
           "name": "--online",
@@ -590,15 +590,15 @@
     {
       "path": "sm test-network extended",
       "about": "Run an extended network test on devices matching labels",
-      "usage": "sm test-network extended [OPTIONS] --label <KEY=VALUE>",
+      "usage": "sm test-network extended [OPTIONS] --label <KEY[=VALUE]>",
       "arguments": [],
       "options": [
         {
           "name": "--label",
           "short": "-l",
-          "value": "<KEY=VALUE>",
+          "value": "<KEY[=VALUE]>",
           "required": true,
-          "help": "Filter by labels (format: key=value). Can be used multiple times"
+          "help": "Filter by labels (format: key=value, or key for a tag). Can be used multiple times"
         },
         {
           "name": "--duration",
@@ -941,9 +941,9 @@
         {
           "name": "--label",
           "short": "-l",
-          "value": "<KEY=VALUE>",
+          "value": "<KEY[=VALUE]>",
           "required": false,
-          "help": "Filter by labels (format: key=value). Can be used multiple times"
+          "help": "Filter by labels (format: key=value, or key for a tag). Can be used multiple times"
         },
         {
           "name": "--online",
@@ -998,22 +998,22 @@
     {
       "path": "sm label",
       "about": "Set labels on devices with filters",
-      "description": "Setting a label overwrites any existing value for that key. Filter on labels in other commands with `-l`, e.g. `sm get d -l env=production`.",
-      "usage": "sm label [OPTIONS] <KEY=VALUE>...",
+      "description": "Setting a label overwrites any existing value for that key. A label with only a key is a tag. Filter on labels in other commands with `-l`, e.g. `sm get d -l env=production` or `sm get d -l maintenance`.\n\nThe `pinned` tag cannot be set or removed here: it follows the pin state, so use `sm pin` and `sm unpin`.",
+      "usage": "sm label [OPTIONS] <KEY[=VALUE]>...",
       "arguments": [
         {
-          "name": "<KEY=VALUE>",
+          "name": "<KEY[=VALUE]>",
           "required": true,
-          "help": "Labels to set on the devices (format: key=value). Can be used multiple times. Use `key=` with an empty value to remove the label"
+          "help": "Labels to set on the devices (format: key=value, or key for a tag). Can be used multiple times. Use `key=` with an empty value to remove the label"
         }
       ],
       "options": [
         {
           "name": "--label",
           "short": "-l",
-          "value": "<KEY=VALUE>",
+          "value": "<KEY[=VALUE]>",
           "required": false,
-          "help": "Filter by labels (format: key=value). Can be used multiple times"
+          "help": "Filter by labels (format: key=value, or key for a tag). Can be used multiple times"
         },
         {
           "name": "--online",
@@ -1042,6 +1042,8 @@
       "examples": [
         "sm label -d ABC123 env=production",
         "sm label -d ABC123 env=production region=us-west",
+        "sm label -d ABC123 maintenance",
+        "sm label -d ABC123 env=",
         "sm label -l region=us-east env=production",
         "sm label -d rpi -s location=warehouse-1"
       ]
@@ -1061,9 +1063,9 @@
         {
           "name": "--label",
           "short": "-l",
-          "value": "<KEY=VALUE>",
+          "value": "<KEY[=VALUE]>",
           "required": false,
-          "help": "Filter by labels (format: key=value). Can be used multiple times"
+          "help": "Filter by labels (format: key=value, or key for a tag). Can be used multiple times"
         },
         {
           "name": "--online",
@@ -1110,9 +1112,9 @@
         {
           "name": "--label",
           "short": "-l",
-          "value": "<KEY=VALUE>",
+          "value": "<KEY[=VALUE]>",
           "required": false,
-          "help": "Filter by labels (format: key=value). Can be used multiple times"
+          "help": "Filter by labels (format: key=value, or key for a tag). Can be used multiple times"
         },
         {
           "name": "--online",
@@ -1147,7 +1149,7 @@
     {
       "path": "sm pin",
       "about": "Pin devices so fleet-wide rollouts do not update them",
-      "description": "A pinned device is skipped by full rollouts and by automatic canary selection. It still moves when a canary targets it by label or ID, when its release is rolled back, or when its target release is set directly. Use `--release` to put the devices on a release and keep them there.",
+      "description": "A pinned device is skipped by full rollouts and by automatic canary selection. It still moves when a canary targets it by label or ID, when its release is rolled back, or when its target release is set directly. Use `--release` to put the devices on a release and keep them there.\n\nPinned devices carry the `pinned` tag until they are unpinned.",
       "usage": "sm pin [OPTIONS] [IDS]...",
       "arguments": [
         {
@@ -1160,9 +1162,9 @@
         {
           "name": "--label",
           "short": "-l",
-          "value": "<KEY=VALUE>",
+          "value": "<KEY[=VALUE]>",
           "required": false,
-          "help": "Filter by labels (format: key=value). Can be used multiple times"
+          "help": "Filter by labels (format: key=value, or key for a tag). Can be used multiple times"
         },
         {
           "name": "--online",
@@ -1203,7 +1205,8 @@
         "sm pin ABC123",
         "sm pin ABC123 DEF456 --release 812",
         "sm pin -l experiment=build-b --release 812 -y",
-        "sm get d --pinned"
+        "sm get d --pinned",
+        "sm get d -l pinned"
       ]
     },
     {
@@ -1222,9 +1225,9 @@
         {
           "name": "--label",
           "short": "-l",
-          "value": "<KEY=VALUE>",
+          "value": "<KEY[=VALUE]>",
           "required": false,
-          "help": "Filter by labels (format: key=value). Can be used multiple times"
+          "help": "Filter by labels (format: key=value, or key for a tag). Can be used multiple times"
         },
         {
           "name": "--online",

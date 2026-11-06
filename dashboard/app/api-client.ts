@@ -909,8 +909,8 @@ export interface FollowLatestRequest {
 	devices?: number[];
 	follow_latest: boolean;
 	/**
-	 * Label selectors as `key=value`. A device must carry *every* label listed
-	 * to match. Mutually exclusive with `devices`.
+	 * Label selectors as `key=value`, or `key` for a tag. A device must carry
+	 * *every* label listed to match. Mutually exclusive with `devices`.
 	 */
 	labels?: string[];
 }
@@ -1258,7 +1258,7 @@ export interface UnhealthyServiceDevice {
 }
 
 /**
- * Only these keys are changed. Null removes a key; an empty string is stored as a value.
+ * Only these keys are changed. Null removes a key; an empty string sets a tag.
  */
 export type UpdateDeviceLabelsRequestChanges = { [key: string]: string | null };
 
@@ -1266,7 +1266,7 @@ export type UpdateDeviceLabelsRequestChanges = { [key: string]: string | null };
  * Incremental changes: null removes a key; a string sets its value.
  */
 export interface UpdateDeviceLabelsRequest {
-	/** Only these keys are changed. Null removes a key; an empty string is stored as a value. */
+	/** Only these keys are changed. Null removes a key; an empty string sets a tag. */
 	changes: UpdateDeviceLabelsRequestChanges;
 }
 
@@ -1355,7 +1355,7 @@ export type GetDevicesParams = {
 	 */
 	archived?: boolean;
 	/**
-	 * Filter by labels. Format: key=value. Multiple labels can be provided.
+	 * Filter by labels. Format: key=value, or key for a tag. Multiple labels can be provided.
 	 */
 	labels?: string[];
 	/**
@@ -1371,7 +1371,7 @@ export type GetDevicesParams = {
 	 */
 	outdated_minutes?: number;
 	/**
-	 * Exclude devices with these labels. Format: key=value. Used by dashboard.
+	 * Exclude devices with these labels. Format: key=value, or key for a tag. Used by dashboard.
 	 */
 	exclude_labels?: string[];
 	/**
