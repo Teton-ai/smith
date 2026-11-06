@@ -21,9 +21,9 @@ dependencies = [
 
 [[package]]
 name = "actix-http"
-version = "3.20.0"
+version = "3.20.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d20a22850ea7fecad12c5f8cd97d246c3af1f04ef400033977c2f13425c45816"
+checksum = "17ec567e57777b4bd0a55ed918b16ebde5d63f658d32b517fb5a1903b2699477"
 dependencies = [
  "actix-codec",
  "actix-service",
@@ -111,9 +111,9 @@ dependencies = [
 
 [[package]]
 name = "actix-web"
-version = "4.18.1"
+version = "4.18.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "81f8da0d2ae4200dde8773d72ba47a65c220b251ba7b9248db5bd263c247e959"
+checksum = "697d10a06f7a550791dcb963e3090aa5c65c4d94c029114814a4bd652f30f0b4"
 dependencies = [
  "actix-codec",
  "actix-http",
@@ -318,7 +318,7 @@ checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 
 [[package]]
 name = "api"
-version = "0.2.236"
+version = "0.2.237"
 dependencies = [
  "anyhow",
  "axum 0.7.9",
@@ -1193,7 +1193,7 @@ checksum = "1c133bc6a41be0d194c306b5506d15e6feeea7b1d6604bd3f8310dfb2ca96486"
 
 [[package]]
 name = "cli"
-version = "0.2.236"
+version = "0.2.237"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3693,7 +3693,7 @@ dependencies = [
 
 [[package]]
 name = "models"
-version = "0.2.236"
+version = "0.2.237"
 dependencies = [
  "axum 0.7.9",
  "chrono",
@@ -6130,7 +6130,7 @@ checksum = "e8e2fb0f499abb4d162f2bedad68f5ef91a1682b5a03596ddb67efd37768d100"
 
 [[package]]
 name = "smith"
-version = "0.2.236"
+version = "0.2.237"
 dependencies = [
  "anyhow",
  "axum 0.8.9",
@@ -6170,7 +6170,7 @@ dependencies = [
 
 [[package]]
 name = "smith-e2e"
-version = "0.2.236"
+version = "0.2.237"
 dependencies = [
  "anyhow",
  "reqwest",
@@ -6182,7 +6182,7 @@ dependencies = [
 
 [[package]]
 name = "smith-updater"
-version = "0.2.236"
+version = "0.2.237"
 dependencies = [
  "anyhow",
  "clap",
