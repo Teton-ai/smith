@@ -40,6 +40,8 @@ pub struct Proc {
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub struct NetworkItem {
     pub ips: Vec<String>,
+    /// Permanent hardware address for Wi-Fi; active address for other interfaces.
+    /// `Unknown` when unavailable.
     pub mac_address: String,
     /// Same addresses as `ips` but with their prefix (e.g. `192.168.1.23/24`); `ips` is kept
     /// as-is for older api versions.
@@ -347,9 +349,23 @@ async fn get_network_info() -> Network {
             .iter()
             .map(|ip_network| ip_network.to_string())
             .collect();
-        let mac_address = interface
-            .mac
-            .map_or_else(|| "Unknown".to_string(), |mac| mac.to_string());
+        let mac_address = if std::path::Path::new("/sys/class/net")
+            .join(&interface.name)
+            .join("phy80211")
+            .exists()
+        {
+            match super::network::permanent_wifi_mac(&interface.name).await {
+                Ok(mac) => mac,
+                Err(e) => {
+                    warn!(interface = %interface.name, "Failed to read permanent Wi-Fi MAC: {e:#}");
+                    "Unknown".to_owned()
+                }
+            }
+        } else {
+            interface
+                .mac
+                .map_or_else(|| "Unknown".to_owned(), |mac| mac.to_string())
+        };
         let gateway = gateways.remove(&interface.name).map(|ip| Gateway {
             ip: ip.to_string(),
             mac_address: find_arp_mac(&arp, ip, &interface.name),
