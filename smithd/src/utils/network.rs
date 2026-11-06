@@ -1,8 +1,9 @@
 use crate::{downloader::DownloaderHandle, magic::structure::ConfigPackage};
 use anyhow::{Context, Result};
 use flate2::{Compression, write::GzEncoder};
+use futures::{StreamExt, stream::FuturesUnordered};
 use reqwest::{Response, StatusCode};
-use std::{env, io::Write, time::Duration};
+use std::{collections::HashMap, env, future::Future, io::Write, time::Duration};
 use tracing::{error, info, warn};
 
 #[zbus::proxy(
@@ -32,14 +33,51 @@ fn validate_permanent_mac(value: &str) -> Result<String> {
     Ok(mac.to_string())
 }
 
-/// Never fall back to the active address: while disconnected it can be a scan MAC.
-pub(crate) async fn permanent_wifi_mac(interface: &str) -> Result<String> {
-    tokio::time::timeout(Duration::from_secs(5), async {
-        let connection = zbus::Connection::system().await?;
-        permanent_wifi_mac_on(&connection, interface).await
+const WIFI_MAC_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// One connection and deadline per snapshot. Never fall back to active scan MACs.
+pub(crate) async fn permanent_wifi_macs(interfaces: &[String]) -> HashMap<String, String> {
+    permanent_wifi_macs_with(interfaces, zbus::Connection::system(), WIFI_MAC_TIMEOUT).await
+}
+
+async fn permanent_wifi_macs_with(
+    interfaces: &[String],
+    connect: impl Future<Output = zbus::Result<zbus::Connection>>,
+    timeout: Duration,
+) -> HashMap<String, String> {
+    let mut addresses = HashMap::new();
+    if interfaces.is_empty() {
+        return addresses;
+    }
+    let result = tokio::time::timeout(timeout, async {
+        let connection = connect.await?;
+        let connection = &connection;
+        let mut lookups = interfaces
+            .iter()
+            .map(|interface| async move {
+                (
+                    interface,
+                    permanent_wifi_mac_on(connection, interface).await,
+                )
+            })
+            .collect::<FuturesUnordered<_>>();
+        while let Some((interface, result)) = lookups.next().await {
+            match result {
+                Ok(mac) => {
+                    addresses.insert(interface.clone(), mac);
+                }
+                Err(e) => warn!(%interface, "Failed to read permanent Wi-Fi MAC: {e:#}"),
+            }
+        }
+        Ok::<(), zbus::Error>(())
     })
-    .await
-    .context("Timed out reading permanent Wi-Fi MAC")?
+    .await;
+    match result {
+        Ok(Ok(())) => {}
+        Ok(Err(e)) => warn!("Failed to connect for permanent Wi-Fi MAC lookups: {e:#}"),
+        Err(e) => warn!("Timed out reading permanent Wi-Fi MACs: {e}"),
+    }
+    addresses
 }
 
 async fn permanent_wifi_mac_on(connection: &zbus::Connection, interface: &str) -> Result<String> {
@@ -97,13 +135,11 @@ impl NetworkClient {
             warn!("No physical Wi-Fi interface found for registration");
             return "DE:MO:00:00:00:00".to_owned();
         };
-        match permanent_wifi_mac(&interface.name).await {
-            Ok(mac) => mac,
-            Err(e) => {
-                warn!("Failed to read permanent Wi-Fi MAC: {e:#}");
-                "DE:MO:00:00:00:00".to_owned()
-            }
-        }
+        let name = interface.name;
+        permanent_wifi_macs(std::slice::from_ref(&name))
+            .await
+            .remove(&name)
+            .unwrap_or_else(|| "DE:MO:00:00:00:00".to_owned())
     }
 
     pub fn set_hostname(&mut self, hostname: String) {
@@ -219,16 +255,20 @@ impl NetworkClient {
 #[cfg(test)]
 mod mac_tests {
     use super::validate_permanent_mac;
+    use std::time::Duration;
 
     struct MockManager;
 
     #[zbus::interface(name = "org.freedesktop.NetworkManager")]
     impl MockManager {
-        fn get_device_by_ip_iface(
+        async fn get_device_by_ip_iface(
             &self,
             iface: &str,
         ) -> zbus::fdo::Result<zbus::zvariant::OwnedObjectPath> {
-            if iface != "wlan0" {
+            if iface.starts_with("hung") {
+                return std::future::pending().await;
+            }
+            if iface != "wlan0" && iface != "wlan1" {
                 return Err(zbus::fdo::Error::Failed("Unknown device".to_owned()));
             }
             zbus::zvariant::OwnedObjectPath::try_from("/org/freedesktop/NetworkManager/Devices/1")
@@ -253,7 +293,7 @@ mod mac_tests {
     }
 
     #[tokio::test]
-    async fn reports_permanent_address_when_active_address_is_randomized()
+    async fn snapshot_shares_connection_and_keeps_completed_macs_at_deadline()
     -> Result<(), anyhow::Error> {
         let (server_socket, client_socket) = std::os::unix::net::UnixStream::pair()?;
         let server = zbus::connection::Builder::async_io_unix_stream(server_socket)
@@ -275,7 +315,51 @@ mod mac_tests {
                 .await
                 .is_err()
         );
+        let attempts = std::cell::Cell::new(0);
+        let names = ["wlan0", "wlan1", "hung0", "hung1", "missing"].map(str::to_owned);
+        let started = tokio::time::Instant::now();
+        let addresses = super::permanent_wifi_macs_with(
+            &names,
+            async {
+                attempts.set(attempts.get() + 1);
+                Ok(client)
+            },
+            Duration::from_millis(250),
+        )
+        .await;
+        assert_eq!(attempts.get(), 1);
+        assert_eq!(addresses.len(), 2);
+        assert_eq!(
+            addresses.get("wlan0").map(String::as_str),
+            Some("00:11:22:33:44:55")
+        );
+        assert_eq!(
+            addresses.get("wlan1").map(String::as_str),
+            Some("00:11:22:33:44:55")
+        );
+        assert!(started.elapsed() < Duration::from_secs(1));
         Ok(())
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn snapshot_deadline_includes_connection_setup() {
+        let started = tokio::time::Instant::now();
+        let names = ["wlan0".to_owned(), "wlan1".to_owned()];
+        let addresses = super::permanent_wifi_macs_with(
+            &names,
+            std::future::pending(),
+            super::WIFI_MAC_TIMEOUT,
+        )
+        .await;
+        assert!(addresses.is_empty());
+        assert_eq!(started.elapsed(), super::WIFI_MAC_TIMEOUT);
+    }
+
+    #[tokio::test]
+    async fn no_wifi_skips_connection_setup() {
+        let addresses =
+            super::permanent_wifi_macs_with(&[], std::future::pending(), Duration::ZERO).await;
+        assert!(addresses.is_empty());
     }
 
     #[test]

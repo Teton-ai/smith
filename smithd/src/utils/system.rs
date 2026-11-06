@@ -333,6 +333,18 @@ async fn get_network_info() -> Network {
     let mut interfaces = HashMap::new();
     let network_interfaces = datalink::interfaces();
 
+    let wifi_interfaces: Vec<String> = network_interfaces
+        .iter()
+        .filter(|interface| {
+            std::path::Path::new("/sys/class/net")
+                .join(&interface.name)
+                .join("phy80211")
+                .exists()
+        })
+        .map(|interface| interface.name.clone())
+        .collect();
+    let mut wifi_macs = super::network::permanent_wifi_macs(&wifi_interfaces).await;
+
     // Missing on non-Linux dev machines; the gateway is then simply not reported.
     let routes = tokio::fs::read_to_string("/proc/net/route")
         .await
@@ -349,18 +361,10 @@ async fn get_network_info() -> Network {
             .iter()
             .map(|ip_network| ip_network.to_string())
             .collect();
-        let mac_address = if std::path::Path::new("/sys/class/net")
-            .join(&interface.name)
-            .join("phy80211")
-            .exists()
-        {
-            match super::network::permanent_wifi_mac(&interface.name).await {
-                Ok(mac) => mac,
-                Err(e) => {
-                    warn!(interface = %interface.name, "Failed to read permanent Wi-Fi MAC: {e:#}");
-                    "Unknown".to_owned()
-                }
-            }
+        let mac_address = if wifi_interfaces.contains(&interface.name) {
+            wifi_macs
+                .remove(&interface.name)
+                .unwrap_or_else(|| "Unknown".to_owned())
         } else {
             interface
                 .mac
