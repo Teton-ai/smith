@@ -54,6 +54,7 @@ fn feed_watchdog() {
 }
 
 /// `socket` is a path, or an abstract name when it starts with `@`.
+#[cfg(target_os = "linux")]
 fn notify_systemd(socket: &std::ffi::OsStr, state: &str) -> std::io::Result<()> {
     use std::os::linux::net::SocketAddrExt;
     use std::os::unix::ffi::OsStrExt;
@@ -64,6 +65,12 @@ fn notify_systemd(socket: &std::ffi::OsStr, state: &str) -> std::io::Result<()> 
         None => SocketAddr::from_pathname(socket)?,
     };
     UnixDatagram::unbound()?.send_to_addr(state.as_bytes(), &addr)?;
+    Ok(())
+}
+
+// Abstract sockets are Linux-only, and the CLI builds this crate for macOS.
+#[cfg(not(target_os = "linux"))]
+fn notify_systemd(_socket: &std::ffi::OsStr, _state: &str) -> std::io::Result<()> {
     Ok(())
 }
 
@@ -560,12 +567,14 @@ mod tests {
         }
     }
 
+    #[cfg(target_os = "linux")]
     fn received(socket: &std::os::unix::net::UnixDatagram) -> String {
         let mut buf = [0; 64];
         let len = socket.recv(&mut buf).unwrap_or_default();
         String::from_utf8_lossy(&buf[..len]).into_owned()
     }
 
+    #[cfg(target_os = "linux")]
     #[test]
     fn the_watchdog_is_fed_on_a_path_and_an_abstract_socket() {
         use std::os::linux::net::SocketAddrExt;

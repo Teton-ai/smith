@@ -91,6 +91,33 @@ jobs:
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SMITH_TEAM_SLACK_NOTIFICATIONS }}
 
+  macos:
+    if: ${{ !startsWith(github.head_ref, 'chore/release-v') && github.event.pull_request.draft == false }}
+    runs-on: macos-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Install Rust Toolchain
+        uses: dsherret/rust-toolchain-file@v1
+
+      - name: Set up cargo cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          cache-all-crates: true
+
+      - name: Check the CLI and smithd build on macOS
+        run: cargo check --package cli --package smith --all-targets
+
+      - name: Report Status
+        if: always()
+        uses: ravsamhq/notify-slack-action@v2
+        with:
+          status: ${{ job.status }}
+          notify_when: 'failure'
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SMITH_TEAM_SLACK_NOTIFICATIONS }}
+
   sqlx:
     if: ${{ !startsWith(github.head_ref, 'chore/release-v') && github.event.pull_request.draft == false }}
     runs-on: ubuntu-latest
