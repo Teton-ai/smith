@@ -12,8 +12,13 @@ use crate::utils::system::SystemInfo;
 use anyhow::{Result, anyhow};
 use reqwest::{Response, StatusCode};
 use std::time::{Duration, Instant};
-use tokio::{sync::mpsc, time};
+use tokio::sync::{mpsc, watch};
+use tokio::time;
 use tracing::{error, info, warn};
+
+/// When the api last answered a home poll, with any status; `None` until it
+/// first does.
+pub type LastPoll = watch::Receiver<Option<time::Instant>>;
 
 const CMD_ID_GET_VARIABLES: i32 = -1;
 const CMD_ID_UPDATE_SYSTEM_INFO: i32 = -2;
@@ -91,7 +96,7 @@ fn backoff(failed_posts: u32, retry_after: Option<Duration>, jitter: f64) -> Dur
     wait.max(retry_after.unwrap_or_default().min(BACKOFF_CAP))
 }
 
-async fn can_connect_to_api(hostname: &str) -> bool {
+pub(crate) async fn can_connect_to_api(hostname: &str) -> bool {
     let Ok(url) = url::Url::parse(hostname) else {
         return false;
     };
@@ -125,6 +130,7 @@ struct Postman {
     failing_since: Option<Instant>,
     poll_mode: PollMode,
     services_to_check: Vec<ServiceCheck>,
+    last_poll: watch::Sender<Option<time::Instant>>,
 }
 
 #[derive(Debug)]
@@ -138,6 +144,7 @@ impl Postman {
         commander: CommanderHandle,
         magic: MagicHandle,
         session: SessionHandle,
+        last_poll: watch::Sender<Option<time::Instant>>,
     ) -> Self {
         let network = NetworkClient::default();
 
@@ -155,6 +162,7 @@ impl Postman {
             failing_since: None,
             poll_mode: PollMode::Idle,
             services_to_check: Vec::new(),
+            last_poll,
         }
     }
 
@@ -413,8 +421,11 @@ impl Postman {
             .await;
 
         // Any HTTP answer, even an error status, proves the link works.
+        // Also what a settings apply waits for: an overloaded api answering
+        // 503 must not revert settings that kept the link up.
         if result.is_ok() {
             self.failing_since = None;
+            self.last_poll.send_replace(Some(time::Instant::now()));
             if let Some(problem) = self.problems.take() {
                 self.police.report_problem_solved(problem).await;
             }
@@ -505,6 +516,7 @@ impl Postman {
 #[derive(Clone)]
 pub struct PostmanHandle {
     _sender: mpsc::Sender<PostmanMessage>,
+    last_poll: LastPoll,
 }
 
 impl PostmanHandle {
@@ -516,10 +528,24 @@ impl PostmanHandle {
         session: SessionHandle,
     ) -> Self {
         let (_sender, receiver) = mpsc::channel(8);
-        let mut actor = Postman::new(shutdown, police, receiver, commander, magic, session);
+        let (poll_sender, last_poll) = watch::channel(None);
+        let mut actor = Postman::new(
+            shutdown,
+            police,
+            receiver,
+            commander,
+            magic,
+            session,
+            poll_sender,
+        );
         tokio::spawn(async move { actor.run().await });
 
-        Self { _sender }
+        Self { _sender, last_poll }
+    }
+
+    /// Follows the time the api last answered a home poll.
+    pub fn last_poll(&self) -> LastPoll {
+        self.last_poll.clone()
     }
 }
 
