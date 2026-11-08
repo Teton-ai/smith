@@ -53,7 +53,7 @@ fn storage_error(error: anyhow::Error) -> UploadError {
         return UploadError(StatusCode::GONE, "NoSuchUpload");
     }
     tracing::error!(
-        error = format!("{error:#}"),
+        error = crate::storage::redacted(&error),
         "Multipart storage operation failed"
     );
     UploadError(StatusCode::BAD_GATEWAY, "StorageUnavailable")
@@ -334,7 +334,7 @@ pub async fn status(
 }
 
 #[utoipa::path(put,path="/smith/upload-sessions/parts/{number}",params(("number"=i32,Path),("x-upload-token"=String,Header)),
-    request_body(content=Vec<u8>,content_type="application/octet-stream"),responses((status=200,body=UploadPart),(status=400,description="Invalid part length"),(status=410,description="Upload no longer exists"),(status=503,description="Upload capacity reached, retry after the Retry-After delay")),security(("device_token"=[])))]
+    request_body(content=Vec<u8>,content_type="application/octet-stream"),responses((status=200,body=UploadPart),(status=400,description="Invalid part length or ClientAborted"),(status=410,description="Upload no longer exists"),(status=503,description="Upload capacity reached, retry after the Retry-After delay")),security(("device_token"=[])))]
 pub async fn put_part(
     device: AuthedDevice,
     Extension(state): Extension<State>,
@@ -359,7 +359,7 @@ pub async fn put_part(
             "UploadCapacity",
         ));
     };
-    // A request body read failure is the device going away, not a storage failure.
+    // Body read error means the device disconnected.
     let client_error = Arc::new(AtomicBool::new(false));
     let body = reqwest::Body::wrap_stream(request.into_body().into_data_stream().inspect({
         let client_error = client_error.clone();
@@ -386,7 +386,7 @@ pub async fn put_part(
                 serial = %device.serial_number,
                 part = number,
                 elapsed_ms,
-                error = format!("{error:#}"),
+                error = crate::storage::redacted(&error),
                 "Device upload aborted by client"
             );
             return UploadError(StatusCode::BAD_REQUEST, "ClientAborted");

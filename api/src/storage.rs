@@ -627,18 +627,38 @@ pub fn is_missing_upload(error: &anyhow::Error) -> bool {
 }
 
 fn missing_upload_body(body: &str) -> bool {
+    s3_error_code(body).as_deref() == Some("NoSuchUpload")
+}
+
+fn s3_error_code(body: &str) -> Option<String> {
     let mut reader = quick_xml::Reader::from_str(body);
     loop {
         match reader.read_event() {
             Ok(quick_xml::events::Event::Start(e)) if e.local_name().as_ref() == b"Code" => {
                 return reader
                     .read_text(e.name())
-                    .is_ok_and(|code| code == "NoSuchUpload");
+                    .ok()
+                    .map(|code| code.chars().filter(char::is_ascii_alphanumeric).collect());
             }
-            Ok(quick_xml::events::Event::Eof) | Err(_) => return false,
+            Ok(quick_xml::events::Event::Eof) | Err(_) => return None,
             _ => {}
         }
     }
+}
+
+// S3 error bodies can echo signed request details.
+pub fn redacted(error: &anyhow::Error) -> String {
+    error
+        .chain()
+        .map(|cause| match cause.downcast_ref::<s3::error::S3Error>() {
+            Some(s3::error::S3Error::HttpFailWithBody(status, body)) => format!(
+                "S3 HTTP {status} {}",
+                s3_error_code(body).unwrap_or_default()
+            ),
+            _ => cause.to_string(),
+        })
+        .collect::<Vec<_>>()
+        .join(": ")
 }
 
 fn validate_completion(status: u16, body: &str) -> anyhow::Result<()> {
@@ -668,9 +688,21 @@ fn validate_completion(status: u16, body: &str) -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::{
-        Bucket, Credentials, HashMap, Storage, UploadMetrics, regional, url_lifetime,
+        Bucket, Credentials, HashMap, Storage, UploadMetrics, redacted, regional, url_lifetime,
         validate_completion,
     };
+
+    #[test]
+    fn redacted_drops_s3_error_body() {
+        let body =
+            "<Error><Code>SignatureDoesNotMatch</Code><StringToSign>secret</StringToSign></Error>";
+        let error = anyhow::Error::from(s3::error::S3Error::HttpFailWithBody(403, body.into()))
+            .context("part 1");
+        assert_eq!(
+            redacted(&error),
+            "part 1: S3 HTTP 403 SignatureDoesNotMatch"
+        );
+    }
 
     #[tokio::test]
     async fn object_verification_checks_metadata_before_reading_bytes() -> anyhow::Result<()> {
