@@ -10,7 +10,13 @@ use axum::{
     http::{HeaderMap, HeaderValue, StatusCode, header},
     response::{IntoResponse, Response},
 };
+use futures::StreamExt;
 use serde::{Deserialize, Serialize};
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
+use std::time::Instant;
 use utoipa::ToSchema;
 
 pub const PART_SIZE: i64 = 5 * 1024 * 1024;
@@ -46,7 +52,10 @@ fn storage_error(error: anyhow::Error) -> UploadError {
     if crate::storage::is_missing_upload(&error) {
         return UploadError(StatusCode::GONE, "NoSuchUpload");
     }
-    tracing::error!("Multipart storage operation failed");
+    tracing::error!(
+        error = format!("{error:#}"),
+        "Multipart storage operation failed"
+    );
     UploadError(StatusCode::BAD_GATEWAY, "StorageUnavailable")
 }
 
@@ -350,7 +359,17 @@ pub async fn put_part(
             "UploadCapacity",
         ));
     };
-    let body = reqwest::Body::wrap_stream(request.into_body().into_data_stream());
+    // A request body read failure is the device going away, not a storage failure.
+    let client_error = Arc::new(AtomicBool::new(false));
+    let body = reqwest::Body::wrap_stream(request.into_body().into_data_stream().inspect({
+        let client_error = client_error.clone();
+        move |chunk| {
+            if chunk.is_err() {
+                client_error.store(true, Ordering::Relaxed);
+            }
+        }
+    }));
+    let started = Instant::now();
     let etag = Storage::upload_session_part(
         &claims.bucket,
         &claims.key,
@@ -360,7 +379,23 @@ pub async fn put_part(
         size as u64,
     )
     .await
-    .map_err(storage_error)?;
+    .map_err(|error| {
+        let elapsed_ms = started.elapsed().as_millis() as u64;
+        if client_error.load(Ordering::Relaxed) {
+            tracing::warn!(
+                serial = %device.serial_number,
+                part = number,
+                elapsed_ms,
+                error = format!("{error:#}"),
+                "Device upload aborted by client"
+            );
+            return UploadError(StatusCode::BAD_REQUEST, "ClientAborted");
+        }
+        storage_error(error.context(format!(
+            "part {number} of {} after {elapsed_ms} ms",
+            device.serial_number
+        )))
+    })?;
     metrics::increment_counter!("smith_upload_proxied_parts_total", "bucket" => bucket_label(&state, &claims));
     Ok(Json(UploadPart {
         part_number: number,
