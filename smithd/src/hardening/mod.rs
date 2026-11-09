@@ -12,4 +12,9 @@ pub async fn run() {
     if let Err(err) = ssh::disable_ssh_password_auth().await {
         error!("Failed to disable SSH password auth: {err:#}");
     }
+
+    // TODO(step 4): v2 only, gate before this ships
+    if let Err(err) = console::close_console_logins().await {
+        error!("Failed to close console logins: {err:#}");
+    }
 }
