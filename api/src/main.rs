@@ -451,6 +451,7 @@ async fn start_main_server(
             device::route::update_device_target_release
         ))
         .routes(routes!(device::route::get_ledger_for_device))
+        .routes(routes!(device::route::get_device_version_history))
         .routes(routes!(
             device::route::approve_device,
             device::route::revoke_device

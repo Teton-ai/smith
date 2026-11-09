@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT release.*,\n        distribution.name AS distribution_name,\n        distribution.architecture AS distribution_architecture,\n        auth.users.email AS user_email\n        FROM device_release_upgrades\n        JOIN release ON release.id = device_release_upgrades.previous_release_id\n        JOIN distribution ON release.distribution_id = distribution.id\n        LEFT JOIN auth.users ON release.user_id = auth.users.id\n        WHERE device_release_upgrades.device_id = $1\n        AND device_release_upgrades.upgraded_release_id = $2\n        ",
+  "query": "\n        SELECT release.*,\n        distribution.name AS distribution_name,\n        distribution.architecture AS distribution_architecture,\n        auth.users.email AS user_email\n        FROM device_release_upgrades\n        JOIN release ON release.id = device_release_upgrades.previous_release_id\n        JOIN distribution ON release.distribution_id = distribution.id\n        LEFT JOIN auth.users ON release.user_id = auth.users.id\n        WHERE device_release_upgrades.device_id = $1\n        AND device_release_upgrades.upgraded_release_id = $2\n        ORDER BY device_release_upgrades.id DESC\n        LIMIT 1\n        ",
   "describe": {
     "columns": [
       {
@@ -103,5 +103,5 @@
       true
     ]
   },
-  "hash": "6fda6080ae91ca9ea4313636da19616e9339386388e727bd86e09db16b0ecaaf"
+  "hash": "3d28d1c754494757a59c3c98267cd3b5e53658302d84cf3bdb5121e5c66a281c"
 }

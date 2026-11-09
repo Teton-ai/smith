@@ -1531,6 +1531,116 @@ pub async fn get_all_commands_for_device(
     Ok(Json(commands_paginated))
 }
 
+#[derive(Debug, serde::Serialize, sqlx::FromRow, utoipa::ToSchema)]
+pub struct DeviceVersionChange {
+    pub id: i32,
+    /// When the server observed the changed release, not the installation time.
+    pub observed_at: DateTime<Utc>,
+    pub previous_release_id: i32,
+    pub previous_version: String,
+    pub previous_distribution: String,
+    pub release_id: i32,
+    pub version: String,
+    pub distribution: String,
+}
+
+#[derive(serde::Serialize, utoipa::ToSchema)]
+pub struct DeviceVersionHistory {
+    pub changes: Vec<DeviceVersionChange>,
+    pub next_cursor: Option<i32>,
+}
+
+#[derive(Deserialize, IntoParams)]
+pub struct VersionHistoryParams {
+    /// Return entries older than this ID.
+    pub before: Option<i32>,
+    /// Defaults to 10; must be between 1 and 100.
+    pub limit: Option<i64>,
+}
+
+#[utoipa::path(
+    get,
+    path = "/devices/{device_id}/version-history",
+    params(("device_id" = i32, Path), VersionHistoryParams),
+    responses(
+        (status = 200, description = "Observed release transitions, newest ID first. Includes rollbacks; initial reports and unobserved intermediate releases are not included.", body = DeviceVersionHistory),
+        (status = 400, description = "Invalid cursor or limit"),
+        (status = 403, description = "Missing devices:read permission"),
+        (status = 404, description = "Device not found"),
+        (status = 500, description = "Failed to load version history"),
+    ),
+    security(("auth_token" = [])),
+    tag = DEVICES_TAG
+)]
+pub async fn get_device_version_history(
+    Extension(current_user): Extension<CurrentUser>,
+    Path(device_id): Path<i32>,
+    Extension(state): Extension<State>,
+    Query(params): Query<VersionHistoryParams>,
+) -> Result<Json<DeviceVersionHistory>, StatusCode> {
+    if !current_user.has_permission("devices", "read") {
+        return Err(StatusCode::FORBIDDEN);
+    }
+    load_version_history(&state.pg_pool, device_id, &params)
+        .await
+        .map(Json)
+}
+
+async fn load_version_history(
+    pool: &sqlx::PgPool,
+    device_id: i32,
+    params: &VersionHistoryParams,
+) -> Result<DeviceVersionHistory, StatusCode> {
+    let limit = params.limit.unwrap_or(10);
+    if !(1..=100).contains(&limit) || params.before.is_some_and(|id| id <= 0) {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    let exists: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM device WHERE id = $1)")
+        .bind(device_id)
+        .fetch_one(pool)
+        .await
+        .map_err(|err| {
+            error!("Failed to find device for version history: {err}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+    if !exists {
+        return Err(StatusCode::NOT_FOUND);
+    }
+    let mut changes = sqlx::query_as::<_, DeviceVersionChange>(
+        "SELECT h.id, h.created_at AS observed_at,
+                p.id AS previous_release_id, p.version AS previous_version,
+                pd.name AS previous_distribution,
+                r.id AS release_id, r.version, d.name AS distribution
+         FROM device_release_upgrades h
+         JOIN release p ON p.id = h.previous_release_id
+         JOIN distribution pd ON pd.id = p.distribution_id
+         JOIN release r ON r.id = h.upgraded_release_id
+         JOIN distribution d ON d.id = r.distribution_id
+         WHERE h.device_id = $1 AND ($2::int IS NULL OR h.id < $2)
+         ORDER BY h.id DESC LIMIT $3",
+    )
+    .bind(device_id)
+    .bind(params.before)
+    .bind(limit + 1)
+    .fetch_all(pool)
+    .await
+    .map_err(|err| {
+        error!("Failed to load device version history: {err}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+    let has_more = changes.len() > limit as usize;
+    changes.truncate(limit as usize);
+    let next_cursor = if has_more {
+        changes.last().map(|entry| entry.id)
+    } else {
+        None
+    };
+    Ok(DeviceVersionHistory {
+        changes,
+        next_cursor,
+    })
+}
+
 #[utoipa::path(
     get,
     path = "/devices/{device_id}/release",
@@ -1586,6 +1696,8 @@ pub async fn get_device_release(
         LEFT JOIN auth.users ON release.user_id = auth.users.id
         WHERE device_release_upgrades.device_id = $1
         AND device_release_upgrades.upgraded_release_id = $2
+        ORDER BY device_release_upgrades.id DESC
+        LIMIT 1
         ",
             device_id,
             current_release.id
@@ -5181,6 +5293,119 @@ mod approval_attribution {
         let (approver, approved_at) = attribution(&pool, device).await?;
         assert_eq!(approver, None);
         assert!(approved_at.is_some());
+        Ok(())
+    }
+}
+#[cfg(test)]
+mod version_history_tests {
+    use super::{VersionHistoryParams, load_version_history};
+    use crate::deployment::tests::{insert_devices, insert_releases};
+    use crate::device::save_release_id;
+    use axum::http::StatusCode;
+    use sqlx::PgPool;
+
+    #[sqlx::test]
+    #[ignore = "needs Postgres with pg_partman; run with --test-threads=1"]
+    async fn paginates_observed_changes_and_preserves_rollbacks(
+        pool: PgPool,
+    ) -> anyhow::Result<()> {
+        let [first, second] = insert_releases(&pool).await?;
+        let [device, other]: [i32; 2] = insert_devices(&pool, 2, None)
+            .await?
+            .try_into()
+            .map_err(|_| anyhow::anyhow!("expected two devices"))?;
+        let params = |before, limit| VersionHistoryParams {
+            before,
+            limit: Some(limit),
+        };
+        let empty = load_version_history(&pool, device, &params(None, 1))
+            .await
+            .map_err(|status| anyhow::anyhow!("history: {status}"))?;
+        assert!(empty.changes.is_empty());
+        assert_eq!(empty.next_cursor, None);
+        save_release_id(device, Some(first), &pool).await?;
+        save_release_id(device, Some(second), &pool).await?;
+        save_release_id(other, Some(first), &pool).await?;
+        save_release_id(other, Some(second), &pool).await?;
+        save_release_id(device, Some(first), &pool).await?;
+
+        let page = load_version_history(&pool, device, &params(None, 1))
+            .await
+            .map_err(|status| anyhow::anyhow!("history: {status}"))?;
+        assert_eq!(page.changes.len(), 1);
+        let latest = page
+            .changes
+            .first()
+            .ok_or_else(|| anyhow::anyhow!("missing latest change"))?;
+        assert_eq!(latest.previous_release_id, second);
+        assert_eq!(latest.release_id, first);
+        assert_eq!(latest.version, "1.0.0");
+        assert_eq!(page.next_cursor, Some(latest.id));
+        let older = load_version_history(&pool, device, &params(page.next_cursor, 1))
+            .await
+            .map_err(|status| anyhow::anyhow!("history: {status}"))?;
+        assert_eq!(older.changes.len(), 1);
+        let previous = older
+            .changes
+            .first()
+            .ok_or_else(|| anyhow::anyhow!("missing older change"))?;
+        assert_eq!(previous.release_id, second);
+        assert_eq!(
+            older.next_cursor, None,
+            "exactly one remaining entry is the last page"
+        );
+        let end = load_version_history(&pool, device, &params(Some(previous.id), 1))
+            .await
+            .map_err(|status| anyhow::anyhow!("history: {status}"))?;
+        assert!(end.changes.is_empty());
+
+        // Names on either side must come from their own distribution.
+        let dist: i32 = sqlx::query_scalar(
+            "INSERT INTO distribution (name) VALUES ('other-distro') RETURNING id",
+        )
+        .fetch_one(&pool)
+        .await?;
+        let cross: i32 = sqlx::query_scalar(
+            "INSERT INTO release (distribution_id, version) VALUES ($1, '1.0.0') RETURNING id",
+        )
+        .bind(dist)
+        .fetch_one(&pool)
+        .await?;
+        save_release_id(device, Some(cross), &pool).await?;
+        let page = load_version_history(&pool, device, &params(None, 5))
+            .await
+            .map_err(|status| anyhow::anyhow!("history: {status}"))?;
+        assert_eq!(
+            page.changes.len(),
+            3,
+            "exclude initial report and other device"
+        );
+        let latest = page
+            .changes
+            .first()
+            .ok_or_else(|| anyhow::anyhow!("missing cross-distribution change"))?;
+        assert_eq!(latest.previous_distribution, "stagger-test");
+        assert_eq!(latest.distribution, "other-distro");
+        assert!(
+            load_version_history(&pool, device, &params(None, 0))
+                .await
+                .is_err_and(|s| s == StatusCode::BAD_REQUEST)
+        );
+        assert!(
+            load_version_history(&pool, device, &params(None, 101))
+                .await
+                .is_err_and(|s| s == StatusCode::BAD_REQUEST)
+        );
+        assert!(
+            load_version_history(&pool, device, &params(Some(-1), 10))
+                .await
+                .is_err_and(|s| s == StatusCode::BAD_REQUEST)
+        );
+        assert!(
+            load_version_history(&pool, i32::MAX, &params(None, 10))
+                .await
+                .is_err_and(|s| s == StatusCode::NOT_FOUND)
+        );
         Ok(())
     }
 }

@@ -29,6 +29,7 @@ import {
 	useOpenServiceOutages,
 	useReachabilityProblem,
 } from "./uptime";
+import { VersionHistory } from "./VersionHistory";
 
 const COMMAND_PAGE_SIZE = 50;
 
@@ -201,7 +202,7 @@ const NeedsAttention = ({
 	device: Device;
 }) => {
 	const update = getDeviceUpdateStatus(device);
-	const failing = update?.status === "outdated";
+	const overdue = update?.status === "outdated";
 	const { problem: unreachable, isLoading: checkingUptime } =
 		useReachabilityProblem(serial);
 	const { down: downServices, isLoading: checkingServices } =
@@ -212,7 +213,7 @@ const NeedsAttention = ({
 	const { data: commands } = useGetAllCommandsForDevice(
 		String(device.id),
 		{ limit: COMMAND_PAGE_SIZE },
-		{ query: { enabled: failing } },
+		{ query: { enabled: overdue } },
 	);
 
 	// Only comparable within one distribution; a cross-distribution move has no
@@ -225,7 +226,7 @@ const NeedsAttention = ({
 	const { data: releases } = useGetDistributionReleases(
 		device.release?.distribution_id as number,
 		undefined,
-		{ query: { enabled: failing && sameDistribution } },
+		{ query: { enabled: overdue && sameDistribution } },
 	);
 
 	const targetSetAt = device.target_release_id_set_at
@@ -237,7 +238,7 @@ const NeedsAttention = ({
 	const attempts = (commands?.commands ?? [])
 		.filter(
 			(cmd) =>
-				!cmd.cancelled &&
+				getCommandStatus(cmd) === "failed" &&
 				parseTx(cmd.cmd_data)?.variant === "Upgrade" &&
 				(targetSetAt == null ||
 					new Date(cmd.issued_at).getTime() >= targetSetAt),
@@ -272,7 +273,7 @@ const NeedsAttention = ({
 		? Date.now() - new Date(device.release.created_at).getTime()
 		: 0;
 	// How far the running build has drifted, not just how long the update has
-	// been failing — 62 releases back is serious even if it only just stalled.
+	// been overdue — 62 releases back is serious even if it only just stalled.
 	const staleBuild =
 		behind >= CRITICAL_BEHIND || runningAge > CRITICAL_RELEASE_AGE_MS;
 	const critical =
@@ -282,7 +283,7 @@ const NeedsAttention = ({
 	const last = attempts[0];
 	const reason = last ? failureReason(last) : null;
 
-	if (!failing && !unreachable && downServices.length === 0) {
+	if (!overdue && !unreachable && downServices.length === 0) {
 		return (
 			<div>
 				<h3 className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-2">
@@ -311,19 +312,19 @@ const NeedsAttention = ({
 			    flapping link is usually the site's. Dead services sit between the
 			    two — a fault on this device, but only on this device. */}
 			<div className="space-y-3">
-				{failing && (
+				{overdue && (
 					<AlertBanner
 						tone={critical ? "red" : "amber"}
 						title={
 							attempts.length > 0
-								? `Update failed ${attempts.length} time${attempts.length === 1 ? "" : "s"}`
+								? `Upgrade command failed ${attempts.length} time${attempts.length === 1 ? "" : "s"}`
 								: update?.duration
-									? `Update stuck for ${update.duration}`
-									: "Update stuck"
+									? `Target not reported for ${update.duration}`
+									: "Target release not reported"
 						}
 					>
 						<div className="flex flex-wrap items-center gap-x-1.5 gap-y-1">
-							<span>Stuck on</span>
+							<span>Last reported</span>
 							<ReleaseLink
 								release={device.release}
 								releaseId={device.release_id}
@@ -523,6 +524,7 @@ const DeviceDetailPage = () => {
 			<div className="grid grid-cols-1 lg:grid-cols-3 gap-4 items-start">
 				<div className="lg:col-span-2 space-y-4">
 					<NeedsAttention serial={serial} device={device} />
+					<VersionHistory device={device} />
 				</div>
 				<RecentActivity serial={serial} device={device} />
 			</div>

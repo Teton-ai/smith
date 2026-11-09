@@ -101,14 +101,13 @@ const Tooltip = ({
  *  "+N" tooltip and the full set stays on the System tab. */
 const VISIBLE_LABELS = 3;
 
-/** A device still off its target release after this long has stopped updating
- *  and started failing. */
-const UPDATING_GRACE_MINUTES = 30;
+/** A device still off its target release after this long needs attention; this does not prove an update failed. */
+const UPDATE_ATTENTION_GRACE_MINUTES = 30;
 
 /**
  * Where a device stands against its target release: `scheduled` while a
- * staggered rollout hasn't reached its bucket yet, `updating` while the
- * upgrade is plausibly in flight, `outdated` once it has clearly failed, and
+ * staggered rollout hasn't reached its bucket yet, `pending` while the
+ * target was recently assigned, `outdated` after the grace period, and
  * `null` when the device is already on target.
  *
  * Lives here with the grace period rather than in the Overview, which is its
@@ -118,12 +117,10 @@ export const getDeviceUpdateStatus = (
 	device: Device | undefined,
 ):
 	| { status: "scheduled"; eligibleAt: Date }
-	| { status: "updating" | "outdated"; duration: string }
+	| { status: "pending" | "outdated"; duration: string }
 	| null => {
 	const pending =
-		device?.release_id &&
-		device.target_release_id &&
-		device.release_id !== device.target_release_id;
+		device?.target_release_id && device.release_id !== device.target_release_id;
 	if (!pending) return null;
 
 	if (device.target_release_eligible_at) {
@@ -156,7 +153,8 @@ export const getDeviceUpdateStatus = (
 	}
 
 	return {
-		status: diffMinutes < UPDATING_GRACE_MINUTES ? "updating" : "outdated",
+		status:
+			diffMinutes < UPDATE_ATTENTION_GRACE_MINUTES ? "pending" : "outdated",
 		duration,
 	};
 };
