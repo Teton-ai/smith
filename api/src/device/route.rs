@@ -1920,10 +1920,30 @@ pub async fn update_devices_target_release(
         error!("Failed to update target release id for devices; {err}");
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
+    let needs_deployment = sqlx::query_scalar!(
+        r#"SELECT EXISTS (
+            SELECT 1 FROM device
+            WHERE id = ANY($1) AND release_id IS DISTINCT FROM $2
+        ) AS "needs_deployment!""#,
+        &devices_release.devices,
+        target_release_id
+    )
+    .fetch_one(&mut *tx)
+    .await
+    .map_err(|err| {
+        error!("Failed to check whether devices need deployment: {err}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
     tx.commit().await.map_err(|err| {
         error!("Failed to commit target release update for devices; {err}");
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
+
+    // Assigning the installed release does not deploy anything. This also
+    // covers clients acting on stale state after approval filled in the target.
+    if !needs_deployment {
+        return Ok(StatusCode::OK);
+    }
 
     // Send Slack alert for direct bulk device deployment
     if let Some(deployment_slack_hook_url) = &state.config.deployment_slack_hook_url {
@@ -2673,6 +2693,7 @@ pub async fn delete_label(
 struct DeviceApproval {
     serial_number: String,
     newly_approved: bool,
+    release_assigned: bool,
 }
 
 /// Attribution belongs to whoever actually approved the device, so repeat calls
@@ -2700,9 +2721,12 @@ async fn record_device_approval(
         .await?;
     }
 
+    let release_assigned = super::initialize_approved_target(tx, device_id).await?;
+
     Ok(DeviceApproval {
         serial_number: device.serial_number,
         newly_approved: !device.approved,
+        release_assigned,
     })
 }
 
@@ -2805,9 +2829,10 @@ pub async fn approve_device(
         })?;
     }
 
-    if let Some((class, text)) =
-        approval_ledger_entry(approval.newly_approved, target_release_id.is_some())
-    {
+    if let Some((class, text)) = approval_ledger_entry(
+        approval.newly_approved,
+        target_release_id.is_some() || approval.release_assigned,
+    ) {
         sqlx::query!(
             r#"INSERT INTO ledger (device_id, "class", "text", user_id) VALUES ($1, $2, $3, $4)"#,
             device_id,
@@ -4959,6 +4984,8 @@ mod follow_latest_updates {
 #[cfg(test)]
 mod approval_attribution {
     use super::{approval_ledger_entry, record_device_approval, visible_approver_email};
+    use crate::deployment::tests::insert_releases;
+    use crate::device::{get_target_release, save_release_id};
     use chrono::{DateTime, Utc};
     use sqlx::PgPool;
 
@@ -5015,6 +5042,54 @@ mod approval_attribution {
             Some(("release", "Release assigned."))
         );
         assert_eq!(approval_ledger_entry(false, false), None);
+    }
+
+    #[sqlx::test]
+    #[ignore = "needs Postgres with pg_partman; run with --test-threads=1"]
+    async fn approval_defaults_to_installed_release_without_replacing_targets(
+        pool: PgPool,
+    ) -> anyhow::Result<()> {
+        let [current, explicit] = insert_releases(&pool).await?;
+        let user = insert_user(&pool, "approver", None).await?;
+        for (serial, follows, target, expected) in [
+            ("new-pinned", false, None, Some(current)),
+            ("explicit-target", false, Some(explicit), Some(explicit)),
+            ("follows-latest", true, None, None),
+        ] {
+            let device = insert_device(&pool, serial).await?;
+            sqlx::query("UPDATE device SET release_id = $2, follow_latest = $3, target_release_id = $4 WHERE id = $1")
+                .bind(device).bind(current).bind(follows).bind(target).execute(&pool).await?;
+            approve(&pool, device, user).await?;
+            assert_eq!(get_target_release(device, &pool).await, expected);
+            let actual_follows: bool =
+                sqlx::query_scalar("SELECT follow_latest FROM device WHERE id = $1")
+                    .bind(device)
+                    .fetch_one(&pool)
+                    .await?;
+            assert_eq!(actual_follows, follows);
+        }
+        Ok(())
+    }
+
+    #[sqlx::test]
+    #[ignore = "needs Postgres with pg_partman; run with --test-threads=1"]
+    async fn first_release_report_completes_approval_target(pool: PgPool) -> anyhow::Result<()> {
+        let [current, next] = insert_releases(&pool).await?;
+        let user = insert_user(&pool, "approver", None).await?;
+        let device = insert_device(&pool, "approved-before-report").await?;
+        approve(&pool, device, user).await?;
+        assert_eq!(get_target_release(device, &pool).await, None);
+        save_release_id(device, Some(current), &pool).await?;
+        assert_eq!(get_target_release(device, &pool).await, Some(current));
+        save_release_id(device, Some(next), &pool).await?;
+        assert_eq!(get_target_release(device, &pool).await, Some(current));
+
+        let unapproved = insert_device(&pool, "report-before-approval").await?;
+        save_release_id(unapproved, Some(current), &pool).await?;
+        assert_eq!(get_target_release(unapproved, &pool).await, None);
+        approve(&pool, unapproved, user).await?;
+        assert_eq!(get_target_release(unapproved, &pool).await, Some(current));
+        Ok(())
     }
 
     #[sqlx::test]

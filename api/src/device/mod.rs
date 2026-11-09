@@ -113,6 +113,9 @@ pub struct UpdateDeviceRelease {
 
 #[derive(Debug, Deserialize, Serialize, utoipa::ToSchema)]
 pub struct ApproveDeviceBody {
+    /// Assign this release on approval. If omitted, a device that does not
+    /// follow latest and has no target defaults to its reported release,
+    /// as soon as that release is known.
     pub target_release_id: Option<i32>,
 }
 
@@ -1016,6 +1019,24 @@ where
     None
 }
 
+/// Complete approval's default target once the installed release is known.
+/// Never replace an explicit target or opt a device out of fleet rollouts.
+pub(super) async fn initialize_approved_target(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    device_id: i32,
+) -> sqlx::Result<bool> {
+    let result = sqlx::query!(
+        "UPDATE device SET target_release_id = release_id,
+            target_release_id_set_at = NOW(), target_release_eligible_at = NULL
+         WHERE id = $1 AND approved AND NOT follow_latest
+           AND target_release_id IS NULL AND release_id IS NOT NULL",
+        device_id
+    )
+    .execute(&mut **tx)
+    .await?;
+    Ok(result.rows_affected() > 0)
+}
+
 pub async fn save_release_id(
     device_id: i32,
     release_id: Option<i32>,
@@ -1051,6 +1072,8 @@ pub async fn save_release_id(
                 .execute(&mut *tx)
                 .await?;
             }
+
+            initialize_approved_target(&mut tx, device_id).await?;
         }
 
         tx.commit().await?;
