@@ -377,7 +377,7 @@ impl Postman {
             let response = self
                 .register_device(DeviceRegistration {
                     serial_number: self.network.get_serial(),
-                    wifi_mac: self.network.get_mac_wlan0(),
+                    wifi_mac: self.network.get_wifi_mac().await,
                 })
                 .await?;
 
