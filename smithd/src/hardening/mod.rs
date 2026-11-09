@@ -2,6 +2,7 @@
 //! setting: nothing remote can turn these off. Each rule is idempotent and
 //! a failure only logs, so a broken rule never stops the daemon from starting.
 
+mod console;
 mod ssh;
 
 use tracing::error;
