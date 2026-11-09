@@ -1531,9 +1531,362 @@ pub async fn get_all_commands_for_device(
     Ok(Json(commands_paginated))
 }
 
+#[derive(serde::Serialize, utoipa::ToSchema)]
+#[serde(tag = "kind", content = "data", rename_all = "snake_case")]
+pub enum DeviceHistoryEvent {
+    Version(DeviceVersionChange),
+    Pin(DevicePinEvent),
+}
+
+#[derive(serde::Serialize, utoipa::ToSchema)]
+pub struct DeviceHistory {
+    pub events: Vec<DeviceHistoryEvent>,
+    pub next_cursor: Option<String>,
+}
+
+#[derive(Deserialize, IntoParams)]
+pub struct DeviceHistoryParams {
+    /// Cursor returned by the preceding page.
+    pub before: Option<String>,
+    /// Defaults to 10; must be between 1 and 100.
+    pub limit: Option<i64>,
+}
+
+#[derive(sqlx::FromRow)]
+struct HistoryPointer {
+    at: DateTime<Utc>,
+    kind: String,
+    id: i32,
+}
+
+impl HistoryPointer {
+    fn cursor(&self) -> String {
+        format!(
+            "{}|{}|{}",
+            self.at.to_rfc3339_opts(chrono::SecondsFormat::AutoSi, true),
+            self.kind,
+            self.id
+        )
+    }
+
+    fn parse(cursor: &str) -> Result<Self, StatusCode> {
+        let parts: Vec<_> = cursor.split('|').collect();
+        let [at, kind, id] = parts.as_slice() else {
+            return Err(StatusCode::BAD_REQUEST);
+        };
+        let at = at
+            .parse::<DateTime<Utc>>()
+            .map_err(|_| StatusCode::BAD_REQUEST)?;
+        let id = id.parse::<i32>().map_err(|_| StatusCode::BAD_REQUEST)?;
+        if !matches!(*kind, "pin" | "version") || id <= 0 {
+            return Err(StatusCode::BAD_REQUEST);
+        }
+        Ok(Self {
+            at,
+            kind: (*kind).into(),
+            id,
+        })
+    }
+}
+
+#[utoipa::path(
+    get,
+    path = "/devices/{device_id}/history",
+    params(("device_id" = i32, Path), DeviceHistoryParams),
+    responses(
+        (status = 200, description = "Release and pin changes, newest timestamp first. Cursor includes event kind and ID to disambiguate ties. Pin tracking begins when enabled; initial pin states are excluded. Package differences compare current release manifests.", body = DeviceHistory),
+        (status = 400, description = "Invalid cursor or limit"),
+        (status = 403, description = "Missing devices:read permission"),
+        (status = 404, description = "Device not found"),
+        (status = 500, description = "Failed to load device history"),
+    ),
+    security(("auth_token" = [])),
+    tag = DEVICES_TAG
+)]
+pub async fn get_device_history(
+    Extension(current_user): Extension<CurrentUser>,
+    Path(device_id): Path<i32>,
+    Extension(state): Extension<State>,
+    Query(params): Query<DeviceHistoryParams>,
+) -> Result<Json<DeviceHistory>, StatusCode> {
+    if !current_user.has_permission("devices", "read") {
+        return Err(StatusCode::FORBIDDEN);
+    }
+    load_device_history(&state.pg_pool, device_id, &params)
+        .await
+        .map(Json)
+}
+
+async fn load_device_history(
+    pool: &sqlx::PgPool,
+    device_id: i32,
+    params: &DeviceHistoryParams,
+) -> Result<DeviceHistory, StatusCode> {
+    let limit = params.limit.unwrap_or(10);
+    if !(1..=100).contains(&limit) {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    let before = params
+        .before
+        .as_deref()
+        .map(HistoryPointer::parse)
+        .transpose()?;
+    let exists: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM device WHERE id = $1)")
+        .bind(device_id)
+        .fetch_one(pool)
+        .await
+        .map_err(history_error)?;
+    if !exists {
+        return Err(StatusCode::NOT_FOUND);
+    }
+    // Both sources have independent IDs; the timestamp/kind/ID tuple is the common order.
+    let mut pointers = sqlx::query_as::<_, HistoryPointer>(
+        "WITH events AS (
+             (SELECT created_at AS at, 'version'::text AS kind, id
+              FROM device_release_upgrades
+              WHERE device_id = $1
+                AND ($2::timestamptz IS NULL OR created_at <= $2)
+                AND ($2::timestamptz IS NULL OR (created_at, 'version'::text COLLATE \"C\", id) < ($2, $3::text COLLATE \"C\", $4::int))
+              ORDER BY created_at DESC, id DESC LIMIT $5)
+             UNION ALL
+             (SELECT changed_at AS at, 'pin'::text AS kind, id
+              FROM device_pin_history
+              WHERE device_id = $1
+                AND ($2::timestamptz IS NULL OR changed_at <= $2)
+                AND ($2::timestamptz IS NULL OR (changed_at, 'pin'::text COLLATE \"C\", id) < ($2, $3::text COLLATE \"C\", $4::int))
+              ORDER BY changed_at DESC, id DESC LIMIT $5)
+         )
+         SELECT at, kind, id FROM events
+         ORDER BY at DESC, kind COLLATE \"C\" DESC, id DESC LIMIT $5",
+    ).bind(device_id).bind(before.as_ref().map(|c| c.at))
+        .bind(before.as_ref().map(|c| &c.kind)).bind(before.as_ref().map(|c| c.id))
+        .bind(limit + 1).fetch_all(pool).await.map_err(history_error)?;
+    let has_more = pointers.len() > limit as usize;
+    pointers.truncate(limit as usize);
+    let next_cursor = if has_more {
+        pointers.last().map(HistoryPointer::cursor)
+    } else {
+        None
+    };
+    let version_ids: Vec<_> = pointers
+        .iter()
+        .filter(|p| p.kind == "version")
+        .map(|p| p.id)
+        .collect();
+    let pin_ids: Vec<_> = pointers
+        .iter()
+        .filter(|p| p.kind == "pin")
+        .map(|p| p.id)
+        .collect();
+    let mut versions = if version_ids.is_empty() {
+        Vec::new()
+    } else {
+        sqlx::query_as::<_, DeviceVersionChange>(
+            "SELECT h.id, h.created_at AS observed_at,
+                    p.id AS previous_release_id, p.version AS previous_version,
+                    pd.name AS previous_distribution, r.id AS release_id, r.version, d.name AS distribution
+             FROM device_release_upgrades h
+             JOIN release p ON p.id = h.previous_release_id JOIN distribution pd ON pd.id = p.distribution_id
+             JOIN release r ON r.id = h.upgraded_release_id JOIN distribution d ON d.id = r.distribution_id
+             WHERE h.device_id = $1 AND h.id = ANY($2)",
+        ).bind(device_id).bind(&version_ids).fetch_all(pool).await.map_err(history_error)?
+    };
+    attach_version_packages(pool, &mut versions).await?;
+    let mut versions: HashMap<_, _> = versions
+        .into_iter()
+        .map(|event| (event.id, event))
+        .collect();
+    let pins = if pin_ids.is_empty() {
+        Vec::new()
+    } else {
+        sqlx::query_as::<_, DevicePinEvent>("SELECT id, follow_latest, changed_at FROM device_pin_history WHERE device_id = $1 AND id = ANY($2)")
+            .bind(device_id).bind(&pin_ids).fetch_all(pool).await.map_err(history_error)?
+    };
+    let mut pins: HashMap<_, _> = pins.into_iter().map(|event| (event.id, event)).collect();
+    let mut events = Vec::with_capacity(pointers.len());
+    for pointer in pointers {
+        let event = if pointer.kind == "version" {
+            DeviceHistoryEvent::Version(
+                versions
+                    .remove(&pointer.id)
+                    .ok_or(StatusCode::INTERNAL_SERVER_ERROR)?,
+            )
+        } else {
+            DeviceHistoryEvent::Pin(
+                pins.remove(&pointer.id)
+                    .ok_or(StatusCode::INTERNAL_SERVER_ERROR)?,
+            )
+        };
+        events.push(event);
+    }
+    Ok(DeviceHistory {
+        events,
+        next_cursor,
+    })
+}
+
+fn history_error(err: sqlx::Error) -> StatusCode {
+    error!("Failed to load device history: {err}");
+    StatusCode::INTERNAL_SERVER_ERROR
+}
+
+#[derive(Debug, serde::Serialize, sqlx::FromRow, utoipa::ToSchema)]
+pub struct DevicePinEvent {
+    pub id: i32,
+    pub follow_latest: bool,
+    pub changed_at: DateTime<Utc>,
+}
+
+#[derive(serde::Serialize, utoipa::ToSchema)]
+pub struct DevicePinHistory {
+    pub events: Vec<DevicePinEvent>,
+    pub next_cursor: Option<i32>,
+}
+
+#[utoipa::path(
+    get,
+    path = "/devices/{device_id}/pin-history",
+    params(("device_id" = i32, Path), VersionHistoryParams),
+    responses(
+        (status = 200, description = "Pin/unpin transitions, newest ID first. Recorded from the pin-history migration onward; initial defaults are excluded.", body = DevicePinHistory),
+        (status = 400, description = "Invalid cursor or limit"),
+        (status = 403, description = "Missing devices:read permission"),
+        (status = 404, description = "Device not found"),
+        (status = 500, description = "Failed to load pin history"),
+    ),
+    security(("auth_token" = [])),
+    tag = DEVICES_TAG
+)]
+pub async fn get_device_pin_history(
+    Extension(current_user): Extension<CurrentUser>,
+    Path(device_id): Path<i32>,
+    Extension(state): Extension<State>,
+    Query(params): Query<VersionHistoryParams>,
+) -> Result<Json<DevicePinHistory>, StatusCode> {
+    if !current_user.has_permission("devices", "read") {
+        return Err(StatusCode::FORBIDDEN);
+    }
+    load_pin_history(&state.pg_pool, device_id, &params)
+        .await
+        .map(Json)
+}
+
+async fn load_pin_history(
+    pool: &sqlx::PgPool,
+    device_id: i32,
+    params: &VersionHistoryParams,
+) -> Result<DevicePinHistory, StatusCode> {
+    let limit = params.limit.unwrap_or(10);
+    if !(1..=100).contains(&limit) || params.before.is_some_and(|id| id <= 0) {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    let exists: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM device WHERE id = $1)")
+        .bind(device_id)
+        .fetch_one(pool)
+        .await
+        .map_err(|err| {
+            error!("Failed to find device for pin history: {err}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+    if !exists {
+        return Err(StatusCode::NOT_FOUND);
+    }
+    let mut events = sqlx::query_as::<_, DevicePinEvent>(
+        "SELECT id, follow_latest, changed_at FROM device_pin_history
+         WHERE device_id = $1 AND ($2::int IS NULL OR id < $2)
+         ORDER BY id DESC LIMIT $3",
+    )
+    .bind(device_id)
+    .bind(params.before)
+    .bind(limit + 1)
+    .fetch_all(pool)
+    .await
+    .map_err(|err| {
+        error!("Failed to load pin history: {err}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+    let has_more = events.len() > limit as usize;
+    events.truncate(limit as usize);
+    let next_cursor = if has_more {
+        events.last().map(|event| event.id)
+    } else {
+        None
+    };
+    Ok(DevicePinHistory {
+        events,
+        next_cursor,
+    })
+}
+
+#[derive(Debug, serde::Serialize, utoipa::ToSchema)]
+pub struct VersionPackageChange {
+    pub name: String,
+    pub architecture: String,
+    pub previous_package_id: Option<i32>,
+    pub previous_version: Option<String>,
+    pub package_id: Option<i32>,
+    pub version: Option<String>,
+}
+
+#[derive(sqlx::FromRow)]
+struct VersionManifestPackage {
+    release_id: i32,
+    id: i32,
+    name: String,
+    architecture: String,
+    version: String,
+}
+
+// Match identical artifacts first, so duplicate package names don't hide replacements.
+fn version_package_changes(
+    previous: &[VersionManifestPackage],
+    next: &[VersionManifestPackage],
+) -> Vec<VersionPackageChange> {
+    let mut groups = std::collections::BTreeMap::<_, (Vec<_>, Vec<_>)>::new();
+    for package in previous {
+        if !next.iter().any(|other| other.id == package.id) {
+            groups
+                .entry((&package.name, &package.architecture))
+                .or_default()
+                .0
+                .push(package);
+        }
+    }
+    for package in next {
+        if !previous.iter().any(|other| other.id == package.id) {
+            groups
+                .entry((&package.name, &package.architecture))
+                .or_default()
+                .1
+                .push(package);
+        }
+    }
+    let mut changes = Vec::new();
+    for ((name, architecture), (mut before, mut after)) in groups {
+        before.sort_by_key(|package| package.id);
+        after.sort_by_key(|package| package.id);
+        for index in 0..before.len().max(after.len()) {
+            let previous = before.get(index);
+            let next = after.get(index);
+            changes.push(VersionPackageChange {
+                name: name.clone(),
+                architecture: architecture.clone(),
+                previous_package_id: previous.map(|package| package.id),
+                previous_version: previous.map(|package| package.version.clone()),
+                package_id: next.map(|package| package.id),
+                version: next.map(|package| package.version.clone()),
+            });
+        }
+    }
+    changes
+}
+
 #[derive(Debug, serde::Serialize, sqlx::FromRow, utoipa::ToSchema)]
 pub struct DeviceVersionChange {
     pub id: i32,
+    /// Differences between release manifests, not device-reported package telemetry.
+    #[sqlx(skip)]
+    pub package_changes: Vec<VersionPackageChange>,
     /// When the server observed the changed release, not the installation time.
     pub observed_at: DateTime<Utc>,
     pub previous_release_id: i32,
@@ -1635,10 +1988,55 @@ async fn load_version_history(
     } else {
         None
     };
+    attach_version_packages(pool, &mut changes).await?;
     Ok(DeviceVersionHistory {
         changes,
         next_cursor,
     })
+}
+
+async fn attach_version_packages(
+    pool: &sqlx::PgPool,
+    changes: &mut [DeviceVersionChange],
+) -> Result<(), StatusCode> {
+    if !changes.is_empty() {
+        let release_ids: Vec<i32> = changes
+            .iter()
+            .flat_map(|entry| [entry.previous_release_id, entry.release_id])
+            .collect();
+        let packages = sqlx::query_as::<_, VersionManifestPackage>(
+            "SELECT DISTINCT rp.release_id, p.id, p.name, p.architecture, p.version
+             FROM release_packages rp JOIN package p ON p.id = rp.package_id
+             WHERE rp.release_id = ANY($1) ORDER BY rp.release_id, p.id",
+        )
+        .bind(&release_ids)
+        .fetch_all(pool)
+        .await
+        .map_err(|err| {
+            error!("Failed to load version history package manifests: {err}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+        let mut manifests = HashMap::<i32, Vec<VersionManifestPackage>>::new();
+        for package in packages {
+            manifests
+                .entry(package.release_id)
+                .or_default()
+                .push(package);
+        }
+        for entry in changes.iter_mut() {
+            entry.package_changes = version_package_changes(
+                manifests
+                    .get(&entry.previous_release_id)
+                    .map(Vec::as_slice)
+                    .unwrap_or_default(),
+                manifests
+                    .get(&entry.release_id)
+                    .map(Vec::as_slice)
+                    .unwrap_or_default(),
+            );
+        }
+    }
+    Ok(())
 }
 
 #[utoipa::path(
@@ -4949,7 +5347,9 @@ mod command_links {
 
 #[cfg(test)]
 mod follow_latest_updates {
-    use super::{FollowLatestRequest, set_devices_follow_latest};
+    use super::{
+        FollowLatestRequest, VersionHistoryParams, load_pin_history, set_devices_follow_latest,
+    };
     use crate::deployment::tests::insert_releases;
     use chrono::{DateTime, Utc};
     use sqlx::PgPool;
@@ -5001,6 +5401,12 @@ mod follow_latest_updates {
         .await
         .map_err(|status| anyhow::anyhow!("unexpected status: {status}"))?;
         assert_eq!(updated, 1);
+        let event_count: i64 =
+            sqlx::query_scalar("SELECT count(*) FROM device_pin_history WHERE device_id = $1")
+                .bind(id)
+                .fetch_one(pool)
+                .await?;
+        assert_eq!(event_count, if following { 0 } else { 1 });
         let (actual_following, actual_target, assigned, eligible): (bool, Option<i32>, Option<DateTime<Utc>>, Option<DateTime<Utc>>) =
             sqlx::query_as("SELECT follow_latest, target_release_id, target_release_id_set_at, target_release_eligible_at FROM device WHERE id = $1")
             .bind(id).fetch_one(pool).await?;
@@ -5089,6 +5495,89 @@ mod follow_latest_updates {
                 .fetch_one(&pool)
                 .await?;
         assert_eq!(state, (false, Some(old)));
+        let events: i64 =
+            sqlx::query_scalar("SELECT count(*) FROM device_pin_history WHERE device_id = $1")
+                .bind(id)
+                .fetch_one(&pool)
+                .await?;
+        assert_eq!(events, 0, "failed unpin must not leave a history event");
+        Ok(())
+    }
+    #[sqlx::test]
+    #[ignore = "needs Postgres with pg_partman; run with --test-threads=1"]
+    async fn pin_history_records_only_changes_and_paginates_per_device(
+        pool: PgPool,
+    ) -> anyhow::Result<()> {
+        let id: i32 = sqlx::query_scalar(
+            "INSERT INTO device (serial_number) VALUES ('pin-history') RETURNING id",
+        )
+        .fetch_one(&pool)
+        .await?;
+        let params = |before, limit| VersionHistoryParams {
+            before,
+            limit: Some(limit),
+        };
+        let initial = load_pin_history(&pool, id, &params(None, 10))
+            .await
+            .map_err(|s| anyhow::anyhow!(s))?;
+        assert!(
+            initial.events.is_empty(),
+            "initial default pin state has no historical timestamp"
+        );
+        for following in [true, false, false, true] {
+            set_devices_follow_latest(
+                &pool,
+                FollowLatestRequest {
+                    devices: Some(vec![id]),
+                    labels: None,
+                    follow_latest: following,
+                },
+            )
+            .await
+            .map_err(|s| anyhow::anyhow!(s))?;
+        }
+        let other: i32 = sqlx::query_scalar(
+            "INSERT INTO device (serial_number) VALUES ('other-pin-history') RETURNING id",
+        )
+        .fetch_one(&pool)
+        .await?;
+        sqlx::query("UPDATE device SET follow_latest = true WHERE id = $1")
+            .bind(other)
+            .execute(&pool)
+            .await?;
+        let page = load_pin_history(&pool, id, &params(None, 2))
+            .await
+            .map_err(|s| anyhow::anyhow!(s))?;
+        assert_eq!(
+            page.events
+                .iter()
+                .map(|e| e.follow_latest)
+                .collect::<Vec<_>>(),
+            vec![true, false]
+        );
+        assert!(page.next_cursor.is_some());
+        let older = load_pin_history(&pool, id, &params(page.next_cursor, 2))
+            .await
+            .map_err(|s| anyhow::anyhow!(s))?;
+        assert_eq!(
+            older
+                .events
+                .iter()
+                .map(|e| e.follow_latest)
+                .collect::<Vec<_>>(),
+            vec![true]
+        );
+        assert!(older.next_cursor.is_none());
+        assert!(
+            load_pin_history(&pool, id, &params(None, 0))
+                .await
+                .is_err_and(|s| s == axum::http::StatusCode::BAD_REQUEST)
+        );
+        assert!(
+            load_pin_history(&pool, i32::MAX, &params(None, 10))
+                .await
+                .is_err_and(|s| s == axum::http::StatusCode::NOT_FOUND)
+        );
         Ok(())
     }
 }
@@ -5298,11 +5787,109 @@ mod approval_attribution {
 }
 #[cfg(test)]
 mod version_history_tests {
-    use super::{VersionHistoryParams, load_version_history};
+    use super::{
+        VersionHistoryParams, VersionManifestPackage, load_version_history, version_package_changes,
+    };
     use crate::deployment::tests::{insert_devices, insert_releases};
     use crate::device::save_release_id;
     use axum::http::StatusCode;
     use sqlx::PgPool;
+
+    fn package(id: i32, name: &str, version: &str, architecture: &str) -> VersionManifestPackage {
+        VersionManifestPackage {
+            release_id: 0,
+            id,
+            name: name.into(),
+            version: version.into(),
+            architecture: architecture.into(),
+        }
+    }
+
+    #[test]
+    fn diffs_artifacts_including_same_version_replacements_and_duplicate_names() {
+        let before = vec![
+            package(1, "app", "1", "arm64"),
+            package(2, "app", "2", "arm64"),
+            package(3, "removed", "1", "arm64"),
+            package(4, "rebuilt", "1", "arm64"),
+        ];
+        let after = vec![
+            package(2, "app", "2", "arm64"),
+            package(5, "app", "3", "arm64"),
+            package(6, "added", "1", "arm64"),
+            package(7, "rebuilt", "1", "arm64"),
+        ];
+        let changes = version_package_changes(&before, &after);
+        assert_eq!(
+            changes
+                .iter()
+                .map(|p| (p.name.as_str(), p.previous_package_id, p.package_id))
+                .collect::<Vec<_>>(),
+            vec![
+                ("added", None, Some(6)),
+                ("app", Some(1), Some(5)),
+                ("rebuilt", Some(4), Some(7)),
+                ("removed", Some(3), None)
+            ]
+        );
+        assert!(version_package_changes(&before, &before).is_empty());
+        let architecture_change = version_package_changes(
+            &[package(1, "app", "1", "arm64")],
+            &[package(2, "app", "1", "amd64")],
+        );
+        assert_eq!(architecture_change.len(), 2);
+        assert!(
+            architecture_change
+                .iter()
+                .all(|p| p.package_id.is_none() || p.previous_package_id.is_none())
+        );
+    }
+
+    #[sqlx::test]
+    #[ignore = "needs Postgres with pg_partman; run with --test-threads=1"]
+    async fn history_includes_release_package_differences_in_each_direction(
+        pool: PgPool,
+    ) -> anyhow::Result<()> {
+        let [first, second] = insert_releases(&pool).await?;
+        for (release, version) in [(first, "1.0"), (second, "2.0")] {
+            let package_id: i32 = sqlx::query_scalar("INSERT INTO package (name, version, architecture, file) VALUES ('app', $1, 'arm64', $1 || '.deb') RETURNING id")
+                .bind(version).fetch_one(&pool).await?;
+            sqlx::query("INSERT INTO release_packages (release_id, package_id) VALUES ($1, $2)")
+                .bind(release)
+                .bind(package_id)
+                .execute(&pool)
+                .await?;
+        }
+        let device: i32 = sqlx::query_scalar(
+            "INSERT INTO device (serial_number) VALUES ('package-history') RETURNING id",
+        )
+        .fetch_one(&pool)
+        .await?;
+        for release in [first, second, first] {
+            save_release_id(device, Some(release), &pool).await?;
+        }
+        let history = load_version_history(
+            &pool,
+            device,
+            &VersionHistoryParams {
+                before: None,
+                limit: Some(10),
+            },
+        )
+        .await
+        .map_err(|status| anyhow::anyhow!("history: {status}"))?;
+        let directions: Vec<_> = history
+            .changes
+            .iter()
+            .flat_map(|entry| entry.package_changes.iter())
+            .map(|p| (p.previous_version.as_deref(), p.version.as_deref()))
+            .collect();
+        assert_eq!(
+            directions,
+            vec![(Some("2.0"), Some("1.0")), (Some("1.0"), Some("2.0"))]
+        );
+        Ok(())
+    }
 
     #[sqlx::test]
     #[ignore = "needs Postgres with pg_partman; run with --test-threads=1"]
@@ -5405,6 +5992,163 @@ mod version_history_tests {
             load_version_history(&pool, i32::MAX, &params(None, 10))
                 .await
                 .is_err_and(|s| s == StatusCode::NOT_FOUND)
+        );
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod combined_history_tests {
+    use super::{DeviceHistoryEvent, DeviceHistoryParams, HistoryPointer, load_device_history};
+    use crate::deployment::tests::insert_releases;
+    use crate::device::save_release_id;
+    use axum::http::StatusCode;
+    use sqlx::PgPool;
+
+    #[test]
+    fn cursor_round_trips_timestamp_precision_and_rejects_invalid_input() -> anyhow::Result<()> {
+        let pointer = HistoryPointer {
+            at: "2026-11-09T12:30:00.123456Z".parse()?,
+            kind: "version".into(),
+            id: 42,
+        };
+        let parsed = HistoryPointer::parse(&pointer.cursor()).map_err(|s| anyhow::anyhow!(s))?;
+        assert_eq!(parsed.at, pointer.at);
+        assert_eq!(parsed.kind, pointer.kind);
+        assert_eq!(parsed.id, pointer.id);
+        for invalid in [
+            "garbage",
+            "2026-11-09T12:30:00Z|version|0",
+            "2026-11-09T12:30:00Z|unknown|1",
+            "not-a-date|pin|1",
+            "2026-11-09T12:30:00Z|pin|1|extra",
+        ] {
+            assert!(HistoryPointer::parse(invalid).is_err_and(|s| s == StatusCode::BAD_REQUEST));
+        }
+        Ok(())
+    }
+
+    #[sqlx::test]
+    #[ignore = "needs Postgres with pg_partman; run with --test-threads=1"]
+    async fn merged_pages_keep_timestamp_ties_and_overlapping_ids(
+        pool: PgPool,
+    ) -> anyhow::Result<()> {
+        let [first, second] = insert_releases(&pool).await?;
+        let device: i32 = sqlx::query_scalar(
+            "INSERT INTO device (serial_number) VALUES ('combined-history') RETURNING id",
+        )
+        .fetch_one(&pool)
+        .await?;
+        let empty = load_device_history(
+            &pool,
+            device,
+            &DeviceHistoryParams {
+                before: None,
+                limit: None,
+            },
+        )
+        .await
+        .map_err(|s| anyhow::anyhow!(s))?;
+        assert!(empty.events.is_empty());
+        for release in [first, second, first] {
+            save_release_id(device, Some(release), &pool).await?;
+        }
+        for following in [true, false, true] {
+            sqlx::query("UPDATE device SET follow_latest = $1 WHERE id = $2")
+                .bind(following)
+                .bind(device)
+                .execute(&pool)
+                .await?;
+        }
+        sqlx::query("UPDATE device_release_upgrades SET created_at = '2026-01-01T00:00:00.123456Z' WHERE device_id = $1").bind(device).execute(&pool).await?;
+        sqlx::query("UPDATE device_pin_history SET changed_at = '2026-01-01T00:00:00.123456Z' WHERE device_id = $1").bind(device).execute(&pool).await?;
+        sqlx::query("UPDATE device_pin_history SET changed_at = '2026-02-01' WHERE id = 3 AND device_id = $1").bind(device).execute(&pool).await?;
+        let other: i32 = sqlx::query_scalar(
+            "INSERT INTO device (serial_number) VALUES ('combined-other') RETURNING id",
+        )
+        .fetch_one(&pool)
+        .await?;
+        sqlx::query("UPDATE device SET follow_latest = true WHERE id = $1")
+            .bind(other)
+            .execute(&pool)
+            .await?;
+        let mut before = None;
+        let mut seen = Vec::new();
+        for _ in 0..10 {
+            let page = load_device_history(
+                &pool,
+                device,
+                &DeviceHistoryParams {
+                    before,
+                    limit: Some(1),
+                },
+            )
+            .await
+            .map_err(|s| anyhow::anyhow!(s))?;
+            assert_eq!(page.events.len(), 1);
+            for event in page.events {
+                seen.push(match event {
+                    DeviceHistoryEvent::Version(event) => ("version", event.id),
+                    DeviceHistoryEvent::Pin(event) => ("pin", event.id),
+                });
+            }
+            before = page.next_cursor;
+            if before.is_none() {
+                break;
+            }
+        }
+        assert_eq!(
+            seen,
+            vec![
+                ("pin", 3),
+                ("version", 2),
+                ("version", 1),
+                ("pin", 2),
+                ("pin", 1)
+            ]
+        );
+        let whole = load_device_history(
+            &pool,
+            device,
+            &DeviceHistoryParams {
+                before: None,
+                limit: Some(5),
+            },
+        )
+        .await
+        .map_err(|s| anyhow::anyhow!(s))?;
+        assert_eq!(whole.events.len(), 5);
+        assert!(
+            whole.next_cursor.is_none(),
+            "exactly a full final page has no cursor"
+        );
+        for params in [
+            DeviceHistoryParams {
+                before: None,
+                limit: Some(101),
+            },
+            DeviceHistoryParams {
+                before: Some("invalid".into()),
+                limit: Some(5),
+            },
+        ] {
+            assert!(
+                load_device_history(&pool, device, &params)
+                    .await
+                    .is_err_and(|s| s == StatusCode::BAD_REQUEST)
+            );
+        }
+        assert!(
+            load_device_history(
+                &pool,
+                i32::MAX,
+                &DeviceHistoryParams {
+                    before: None,
+                    limit: None
+                }
+            )
+            .await
+            .is_err_and(|s| s == StatusCode::NOT_FOUND)
         );
         Ok(())
     }

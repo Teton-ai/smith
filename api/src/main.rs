@@ -452,6 +452,8 @@ async fn start_main_server(
         ))
         .routes(routes!(device::route::get_ledger_for_device))
         .routes(routes!(device::route::get_device_version_history))
+        .routes(routes!(device::route::get_device_pin_history))
+        .routes(routes!(device::route::get_device_history))
         .routes(routes!(
             device::route::approve_device,
             device::route::revoke_device
