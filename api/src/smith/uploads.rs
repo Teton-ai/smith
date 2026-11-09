@@ -14,7 +14,7 @@ use futures::StreamExt;
 use serde::{Deserialize, Serialize};
 use std::sync::{
     Arc,
-    atomic::{AtomicBool, Ordering},
+    atomic::{AtomicBool, AtomicU64, Ordering},
 };
 use std::time::Instant;
 use utoipa::ToSchema;
@@ -361,12 +361,15 @@ pub async fn put_part(
     };
     // Body read error means the device disconnected.
     let client_error = Arc::new(AtomicBool::new(false));
+    let bytes = Arc::new(AtomicU64::new(0));
     let body = reqwest::Body::wrap_stream(request.into_body().into_data_stream().inspect({
         let client_error = client_error.clone();
-        move |chunk| {
-            if chunk.is_err() {
-                client_error.store(true, Ordering::Relaxed);
+        let bytes = bytes.clone();
+        move |chunk| match chunk {
+            Ok(chunk) => {
+                bytes.fetch_add(chunk.len() as u64, Ordering::Relaxed);
             }
+            Err(_) => client_error.store(true, Ordering::Relaxed),
         }
     }));
     let started = Instant::now();
@@ -385,7 +388,9 @@ pub async fn put_part(
             tracing::warn!(
                 serial = %device.serial_number,
                 part = number,
+                bytes = bytes.load(Ordering::Relaxed),
                 elapsed_ms,
+                key = claims.key,
                 error = crate::storage::redacted(&error),
                 "Device upload aborted by client"
             );

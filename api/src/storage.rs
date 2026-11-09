@@ -466,7 +466,10 @@ impl Storage {
                 )
                 .into());
             }
-            anyhow::bail!("S3 rejected upload part ({status})");
+            anyhow::bail!(
+                "S3 rejected upload part ({status} {})",
+                s3_error_code(&body).unwrap_or_default()
+            );
         }
         Ok(response
             .headers()
@@ -635,6 +638,7 @@ fn s3_error_code(body: &str) -> Option<String> {
     loop {
         match reader.read_event() {
             Ok(quick_xml::events::Event::Start(e)) if e.local_name().as_ref() == b"Code" => {
+                // Keeps the code safe to log.
                 return reader
                     .read_text(e.name())
                     .ok()
