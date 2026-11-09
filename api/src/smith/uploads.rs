@@ -10,7 +10,13 @@ use axum::{
     http::{HeaderMap, HeaderValue, StatusCode, header},
     response::{IntoResponse, Response},
 };
+use futures::StreamExt;
 use serde::{Deserialize, Serialize};
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, AtomicU64, Ordering},
+};
+use std::time::Instant;
 use utoipa::ToSchema;
 
 pub const PART_SIZE: i64 = 5 * 1024 * 1024;
@@ -46,7 +52,10 @@ fn storage_error(error: anyhow::Error) -> UploadError {
     if crate::storage::is_missing_upload(&error) {
         return UploadError(StatusCode::GONE, "NoSuchUpload");
     }
-    tracing::error!("Multipart storage operation failed");
+    tracing::error!(
+        error = crate::storage::redacted(&error),
+        "Multipart storage operation failed"
+    );
     UploadError(StatusCode::BAD_GATEWAY, "StorageUnavailable")
 }
 
@@ -325,7 +334,7 @@ pub async fn status(
 }
 
 #[utoipa::path(put,path="/smith/upload-sessions/parts/{number}",params(("number"=i32,Path),("x-upload-token"=String,Header)),
-    request_body(content=Vec<u8>,content_type="application/octet-stream"),responses((status=200,body=UploadPart),(status=400,description="Invalid part length"),(status=410,description="Upload no longer exists"),(status=503,description="Upload capacity reached, retry after the Retry-After delay")),security(("device_token"=[])))]
+    request_body(content=Vec<u8>,content_type="application/octet-stream"),responses((status=200,body=UploadPart),(status=400,description="Invalid part length or ClientAborted"),(status=410,description="Upload no longer exists"),(status=503,description="Upload capacity reached, retry after the Retry-After delay")),security(("device_token"=[])))]
 pub async fn put_part(
     device: AuthedDevice,
     Extension(state): Extension<State>,
@@ -350,7 +359,20 @@ pub async fn put_part(
             "UploadCapacity",
         ));
     };
-    let body = reqwest::Body::wrap_stream(request.into_body().into_data_stream());
+    // Body read error means the device disconnected.
+    let client_error = Arc::new(AtomicBool::new(false));
+    let bytes = Arc::new(AtomicU64::new(0));
+    let body = reqwest::Body::wrap_stream(request.into_body().into_data_stream().inspect({
+        let client_error = client_error.clone();
+        let bytes = bytes.clone();
+        move |chunk| match chunk {
+            Ok(chunk) => {
+                bytes.fetch_add(chunk.len() as u64, Ordering::Relaxed);
+            }
+            Err(_) => client_error.store(true, Ordering::Relaxed),
+        }
+    }));
+    let started = Instant::now();
     let etag = Storage::upload_session_part(
         &claims.bucket,
         &claims.key,
@@ -360,7 +382,25 @@ pub async fn put_part(
         size as u64,
     )
     .await
-    .map_err(storage_error)?;
+    .map_err(|error| {
+        let elapsed_ms = started.elapsed().as_millis() as u64;
+        if client_error.load(Ordering::Relaxed) {
+            tracing::warn!(
+                serial = %device.serial_number,
+                part = number,
+                bytes = bytes.load(Ordering::Relaxed),
+                elapsed_ms,
+                key = claims.key,
+                error = crate::storage::redacted(&error),
+                "Device upload aborted by client"
+            );
+            return UploadError(StatusCode::BAD_REQUEST, "ClientAborted");
+        }
+        storage_error(error.context(format!(
+            "part {number} of {} after {elapsed_ms} ms",
+            device.serial_number
+        )))
+    })?;
     metrics::increment_counter!("smith_upload_proxied_parts_total", "bucket" => bucket_label(&state, &claims));
     Ok(Json(UploadPart {
         part_number: number,
