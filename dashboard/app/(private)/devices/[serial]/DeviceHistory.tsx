@@ -47,6 +47,9 @@ interface PinEvent {
 	id: number;
 	follow_latest: boolean;
 	changed_at: string;
+	release_id: number | null;
+	version: string | null;
+	distribution: string | null;
 }
 
 type HistoryEvent =
@@ -212,11 +215,19 @@ function PinHistoryEvent({ event }: { event: PinEvent }) {
 					>
 						{event.follow_latest ? "Unpinned" : "Pinned"}
 					</p>
-					<p className="text-xs text-gray-500">
-						{event.follow_latest
-							? "Resumed following latest"
-							: "Stopped following latest"}
-					</p>
+					<div className="text-xs text-gray-500">
+						{event.follow_latest ? (
+							"Resumed following latest"
+						) : event.release_id != null && event.version != null ? (
+							<VersionLink
+								id={event.release_id}
+								version={event.version}
+								distribution={event.distribution ?? ""}
+							/>
+						) : (
+							"Version not recorded"
+						)}
+					</div>
 				</div>
 				<time
 					dateTime={event.changed_at}

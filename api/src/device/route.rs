@@ -1594,7 +1594,7 @@ impl HistoryPointer {
     path = "/devices/{device_id}/history",
     params(("device_id" = i32, Path), DeviceHistoryParams),
     responses(
-        (status = 200, description = "Release and pin changes, newest timestamp first. Cursor includes event kind and ID to disambiguate ties. Pin tracking begins when enabled; initial pin states are excluded. Package differences compare current release manifests.", body = DeviceHistory),
+        (status = 200, description = "Release and pin changes, newest timestamp first. Cursor includes event kind and ID to disambiguate ties. Pin tracking begins when enabled; approval records the initial pinned state. Package differences compare current release manifests.", body = DeviceHistory),
         (status = 400, description = "Invalid cursor or limit"),
         (status = 403, description = "Missing devices:read permission"),
         (status = 404, description = "Device not found"),
@@ -1699,7 +1699,7 @@ async fn load_device_history(
     let pins = if pin_ids.is_empty() {
         Vec::new()
     } else {
-        sqlx::query_as::<_, DevicePinEvent>("SELECT id, follow_latest, changed_at FROM device_pin_history WHERE device_id = $1 AND id = ANY($2)")
+        sqlx::query_as::<_, DevicePinEvent>("SELECT h.id, h.follow_latest, h.changed_at, h.release_id, r.version, d.name AS distribution FROM device_pin_history h LEFT JOIN release r ON r.id = h.release_id LEFT JOIN distribution d ON d.id = r.distribution_id WHERE h.device_id = $1 AND h.id = ANY($2)")
             .bind(device_id).bind(&pin_ids).fetch_all(pool).await.map_err(history_error)?
     };
     let mut pins: HashMap<_, _> = pins.into_iter().map(|event| (event.id, event)).collect();
@@ -1735,6 +1735,10 @@ pub struct DevicePinEvent {
     pub id: i32,
     pub follow_latest: bool,
     pub changed_at: DateTime<Utc>,
+    /// The release targeted when pinned, not the device's current target.
+    pub release_id: Option<i32>,
+    pub version: Option<String>,
+    pub distribution: Option<String>,
 }
 
 #[derive(serde::Serialize, utoipa::ToSchema)]
@@ -1748,7 +1752,7 @@ pub struct DevicePinHistory {
     path = "/devices/{device_id}/pin-history",
     params(("device_id" = i32, Path), VersionHistoryParams),
     responses(
-        (status = 200, description = "Pin/unpin transitions, newest ID first. Recorded from the pin-history migration onward; initial defaults are excluded.", body = DevicePinHistory),
+        (status = 200, description = "Pin/unpin transitions, newest ID first. Recorded from the pin-history migration onward; approval records the initial pinned state.", body = DevicePinHistory),
         (status = 400, description = "Invalid cursor or limit"),
         (status = 403, description = "Missing devices:read permission"),
         (status = 404, description = "Device not found"),
@@ -1792,9 +1796,11 @@ async fn load_pin_history(
         return Err(StatusCode::NOT_FOUND);
     }
     let mut events = sqlx::query_as::<_, DevicePinEvent>(
-        "SELECT id, follow_latest, changed_at FROM device_pin_history
-         WHERE device_id = $1 AND ($2::int IS NULL OR id < $2)
-         ORDER BY id DESC LIMIT $3",
+        "SELECT h.id, h.follow_latest, h.changed_at, h.release_id, r.version, d.name AS distribution
+         FROM device_pin_history h LEFT JOIN release r ON r.id = h.release_id
+         LEFT JOIN distribution d ON d.id = r.distribution_id
+         WHERE h.device_id = $1 AND ($2::int IS NULL OR h.id < $2)
+         ORDER BY h.id DESC LIMIT $3",
     )
     .bind(device_id)
     .bind(params.before)
@@ -3240,6 +3246,19 @@ async fn record_device_approval(
     })
 }
 
+/// Called after approval has resolved its explicit or default target, inside the same transaction.
+async fn record_initial_pin(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    device_id: i32,
+) -> sqlx::Result<()> {
+    sqlx::query(
+        "INSERT INTO device_pin_history (device_id, follow_latest, changed_at, release_id, initial_approval)
+         SELECT id, false, approved_at, COALESCE(target_release_id, release_id), true
+         FROM device WHERE id = $1 AND approved AND NOT follow_latest",
+    ).bind(device_id).execute(&mut **tx).await?;
+    Ok(())
+}
+
 /// The ledger entry for an approval request, or None when it changed nothing.
 fn approval_ledger_entry(
     newly_approved: bool,
@@ -3337,6 +3356,15 @@ pub async fn approve_device(
             error!("Failed to set target release for device {device_id}: {err}");
             StatusCode::INTERNAL_SERVER_ERROR
         })?;
+    }
+
+    if approval.newly_approved {
+        record_initial_pin(&mut tx, device_id)
+            .await
+            .map_err(|err| {
+                error!("Failed to record initial pin for device {device_id}: {err}");
+                StatusCode::INTERNAL_SERVER_ERROR
+            })?;
     }
 
     if let Some((class, text)) = approval_ledger_entry(
@@ -5584,7 +5612,9 @@ mod follow_latest_updates {
 
 #[cfg(test)]
 mod approval_attribution {
-    use super::{approval_ledger_entry, record_device_approval, visible_approver_email};
+    use super::{
+        approval_ledger_entry, record_device_approval, record_initial_pin, visible_approver_email,
+    };
     use crate::deployment::tests::insert_releases;
     use crate::device::{get_target_release, save_release_id};
     use chrono::{DateTime, Utc};
@@ -5624,8 +5654,159 @@ mod approval_attribution {
     async fn approve(pool: &PgPool, device: i32, user: i32) -> anyhow::Result<bool> {
         let mut tx = pool.begin().await?;
         let approval = record_device_approval(&mut tx, device, user).await?;
+        if approval.newly_approved {
+            record_initial_pin(&mut tx, device).await?;
+        }
         tx.commit().await?;
         Ok(approval.newly_approved)
+    }
+
+    async fn pin_snapshots(
+        pool: &PgPool,
+        device: i32,
+    ) -> anyhow::Result<Vec<(Option<i32>, DateTime<Utc>)>> {
+        Ok(sqlx::query_as("SELECT release_id, changed_at FROM device_pin_history WHERE device_id = $1 ORDER BY id")
+            .bind(device).fetch_all(pool).await?)
+    }
+
+    #[sqlx::test]
+    #[ignore = "needs Postgres with pg_partman; run with --test-threads=1"]
+    async fn approved_pin_snapshots_version_once_and_preserves_approval_time(
+        pool: PgPool,
+    ) -> anyhow::Result<()> {
+        let [first, second] = insert_releases(&pool).await?;
+        let device = insert_device(&pool, "initial-pin-known").await?;
+        let user = insert_user(&pool, "initial-pin-approver", None).await?;
+        save_release_id(device, Some(first), &pool).await?;
+        assert!(approve(&pool, device, user).await?);
+        let approved_at = attribution(&pool, device)
+            .await?
+            .1
+            .ok_or_else(|| anyhow::anyhow!("missing approval time"))?;
+        assert_eq!(
+            pin_snapshots(&pool, device).await?,
+            vec![(Some(first), approved_at)]
+        );
+        assert!(!approve(&pool, device, user).await?);
+        save_release_id(device, Some(second), &pool).await?;
+        assert_eq!(
+            pin_snapshots(&pool, device).await?,
+            vec![(Some(first), approved_at)],
+            "later releases must not rewrite the pin"
+        );
+        let history = super::load_pin_history(
+            &pool,
+            device,
+            &super::VersionHistoryParams {
+                before: None,
+                limit: None,
+            },
+        )
+        .await
+        .map_err(|s| anyhow::anyhow!(s))?;
+        let event = history
+            .events
+            .first()
+            .ok_or_else(|| anyhow::anyhow!("missing pin"))?;
+        assert_eq!(event.version.as_deref(), Some("1.0.0"));
+        assert_eq!(event.release_id, Some(first));
+        assert!(!event.follow_latest);
+        Ok(())
+    }
+
+    #[sqlx::test]
+    #[ignore = "needs Postgres with pg_partman; run with --test-threads=1"]
+    async fn initial_pin_uses_explicit_target_after_approval(pool: PgPool) -> anyhow::Result<()> {
+        let [first, target] = insert_releases(&pool).await?;
+        let device = insert_device(&pool, "initial-pin-explicit").await?;
+        let user = insert_user(&pool, "explicit-pin-approver", None).await?;
+        save_release_id(device, Some(first), &pool).await?;
+        let mut tx = pool.begin().await?;
+        let approval = record_device_approval(&mut tx, device, user).await?;
+        assert!(approval.newly_approved);
+        sqlx::query("UPDATE device SET target_release_id = $1 WHERE id = $2")
+            .bind(target)
+            .bind(device)
+            .execute(&mut *tx)
+            .await?;
+        record_initial_pin(&mut tx, device).await?;
+        tx.commit().await?;
+        let snapshots = pin_snapshots(&pool, device).await?;
+        assert_eq!(
+            snapshots.iter().map(|s| s.0).collect::<Vec<_>>(),
+            vec![Some(target)]
+        );
+        Ok(())
+    }
+
+    #[sqlx::test]
+    #[ignore = "needs Postgres with pg_partman; run with --test-threads=1"]
+    async fn first_report_completes_initial_pin_without_moving_timestamp(
+        pool: PgPool,
+    ) -> anyhow::Result<()> {
+        let [release] = insert_releases(&pool).await?;
+        let device = insert_device(&pool, "initial-pin-unknown").await?;
+        let user = insert_user(&pool, "unknown-pin-approver", None).await?;
+        approve(&pool, device, user).await?;
+        let approved_at = attribution(&pool, device)
+            .await?
+            .1
+            .ok_or_else(|| anyhow::anyhow!("missing approval time"))?;
+        assert_eq!(
+            pin_snapshots(&pool, device).await?,
+            vec![(None, approved_at)]
+        );
+        save_release_id(device, Some(release), &pool).await?;
+        assert_eq!(
+            pin_snapshots(&pool, device).await?,
+            vec![(Some(release), approved_at)]
+        );
+        Ok(())
+    }
+
+    #[sqlx::test]
+    #[ignore = "needs Postgres with pg_partman; run with --test-threads=1"]
+    async fn unpin_before_first_report_leaves_unknown_initial_version(
+        pool: PgPool,
+    ) -> anyhow::Result<()> {
+        let [release] = insert_releases(&pool).await?;
+        let device = insert_device(&pool, "initial-pin-interrupted").await?;
+        let user = insert_user(&pool, "interrupted-pin-approver", None).await?;
+        approve(&pool, device, user).await?;
+        sqlx::query("UPDATE device SET follow_latest = true WHERE id = $1")
+            .bind(device)
+            .execute(&pool)
+            .await?;
+        sqlx::query("UPDATE device SET follow_latest = false WHERE id = $1")
+            .bind(device)
+            .execute(&pool)
+            .await?;
+        save_release_id(device, Some(release), &pool).await?;
+        assert!(
+            pin_snapshots(&pool, device)
+                .await?
+                .iter()
+                .all(|snapshot| snapshot.0.is_none()),
+            "a later pin cycle must not fill an earlier unknown version"
+        );
+        Ok(())
+    }
+
+    #[sqlx::test]
+    #[ignore = "needs Postgres with pg_partman; run with --test-threads=1"]
+    async fn approval_while_following_latest_does_not_record_a_pin(
+        pool: PgPool,
+    ) -> anyhow::Result<()> {
+        let device = insert_device(&pool, "initial-pin-following").await?;
+        let user = insert_user(&pool, "following-pin-approver", None).await?;
+        sqlx::query("UPDATE device SET follow_latest = true WHERE id = $1")
+            .bind(device)
+            .execute(&pool)
+            .await?;
+        let count = pin_snapshots(&pool, device).await?.len();
+        approve(&pool, device, user).await?;
+        assert_eq!(pin_snapshots(&pool, device).await?.len(), count);
+        Ok(())
     }
 
     #[test]
@@ -5738,8 +5919,10 @@ mod approval_attribution {
                 .await?
                 .newly_approved
         );
+        record_initial_pin(&mut tx, device).await?;
         tx.rollback().await?;
         assert_eq!(attribution(&pool, device).await?, (None, None));
+        assert!(pin_snapshots(&pool, device).await?.is_empty());
         Ok(())
     }
 
