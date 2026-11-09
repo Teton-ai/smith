@@ -19,6 +19,7 @@ import { RelativeTime } from "@/app/components/RelativeTime";
 import { isStableRelease } from "@/app/utils/release";
 import { DeviceDetailLayout } from "./DeviceDetailLayout";
 import { getDeviceUpdateStatus } from "./DeviceHeader";
+import { DeviceHistory } from "./DeviceHistory";
 import {
 	type DeviceService,
 	useDownServices,
@@ -29,7 +30,6 @@ import {
 	useOpenServiceOutages,
 	useReachabilityProblem,
 } from "./uptime";
-import { VersionHistory } from "./VersionHistory";
 
 const COMMAND_PAGE_SIZE = 50;
 
@@ -524,7 +524,7 @@ const DeviceDetailPage = () => {
 			<div className="grid grid-cols-1 lg:grid-cols-3 gap-4 items-start">
 				<div className="lg:col-span-2 space-y-4">
 					<NeedsAttention serial={serial} device={device} />
-					<VersionHistory device={device} />
+					<DeviceHistory device={device} />
 				</div>
 				<RecentActivity serial={serial} device={device} />
 			</div>
