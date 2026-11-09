@@ -2200,13 +2200,7 @@ pub async fn load_device_info(
         LEFT JOIN device_network dn ON d.id = dn.device_id
         LEFT JOIN device_label dl ON dl.device_id = d.id
         LEFT JOIN label l ON l.id = dl.label_id
-        WHERE
-            CASE
-                WHEN $2::int4 IS NOT NULL THEN
-                    d.id = $2
-                ELSE
-                    d.serial_number = $1
-            END
+        WHERE d.id = COALESCE($2::int4, (SELECT id FROM device WHERE serial_number = $1))
         GROUP BY d.id, ip.id, m.id, r.id, rd.id, tr.id, trd.id, dn.device_id
         "#,
         device_id,
