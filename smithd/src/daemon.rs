@@ -30,12 +30,7 @@ pub async fn run() {
 
     let session = SessionHandle::new(shutdown.signals(), configuration.clone());
 
-    // Kill shared-password SSH logins on every boot (self-heals if the config
-    // gets reset by an OS update or someone flips it back). A failure here must
-    // not stop the daemon from starting.
-    if let Err(err) = crate::utils::files::disable_ssh_password_auth().await {
-        tracing::error!("Failed to disable SSH password auth: {err:#}");
-    }
+    crate::hardening::run().await;
 
     let tunnel = TunnelHandle::new(shutdown.signals(), configuration.clone());
 
