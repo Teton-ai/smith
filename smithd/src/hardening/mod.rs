@@ -5,7 +5,7 @@
 mod console;
 mod ssh;
 
-use tracing::error;
+use tracing::{error, info};
 
 pub async fn run() {
     // self-heals if an os update or someone flips it back
@@ -13,8 +13,9 @@ pub async fn run() {
         error!("Failed to disable SSH password auth: {err:#}");
     }
 
-    // TODO(step 4): v2 only, gate before this ships
-    if let Err(err) = console::close_console_logins().await {
+    if !crate::utils::system::is_v2() {
+        info!("Not v2 hardware, leaving console logins open");
+    } else if let Err(err) = console::close_console_logins().await {
         error!("Failed to close console logins: {err:#}");
     }
 }
