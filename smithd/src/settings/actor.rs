@@ -373,8 +373,13 @@ impl<S: System> Actor<S> {
 
     /// A step that never returns would hold the net guard and every later
     /// command, and skip the revert; failing it instead takes the usual path
-    /// (a disruption still waits for the api, then reverts).
+    /// (a disruption still waits for the api, then reverts). File steps are
+    /// left unbounded: their write runs on a blocking thread that a timeout
+    /// does not stop, so a late rename could undo a later restore.
     async fn run_step(&mut self, step: Step<'_>) -> Result<()> {
+        if matches!(step, Step::File(..)) {
+            return self.system.run(step).await;
+        }
         time::timeout(STEP_TIMEOUT, self.system.run(step))
             .await
             .unwrap_or_else(|_| Err(anyhow!("timed out after {STEP_TIMEOUT:?}")))
@@ -1028,6 +1033,8 @@ mod tests {
         failing: Vec<&'static str>,
         /// Steps whose `Debug` starts with one of these never return.
         hanging: Vec<&'static str>,
+        /// Steps whose `Debug` starts with one of these outlast `STEP_TIMEOUT`.
+        slow: Vec<&'static str>,
         read_hangs: bool,
         ntp_detection_hangs: bool,
     }
@@ -1100,8 +1107,12 @@ mod tests {
             let name = format!("{step:?}");
             let hangs = self.device().hanging.iter().any(|p| name.starts_with(p));
             if hangs {
-                self.device().steps.push(name);
+                self.device().steps.push(name.clone());
                 std::future::pending::<()>().await;
+            }
+            let slow = self.device().slow.iter().any(|p| name.starts_with(p));
+            if slow {
+                time::sleep(STEP_TIMEOUT * 2).await;
             }
             let mut device = self.device();
             let name = format!("{step:?}");
@@ -1440,6 +1451,21 @@ mod tests {
         let reloads = steps.iter().filter(|s| *s == "ReloadDriver").count();
         assert_eq!(reloads, 2, "{steps:?}");
         assert!(actor.state.is_some_and(|s| s.backup.is_none()));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_slow_file_write_is_not_cut_by_the_step_timeout() {
+        let system = FakeSystem::default();
+        system.device().report.wireless_mode = Some(95);
+        system.device().api_back_after = Some(Duration::from_secs(5));
+        system.device().slow = vec!["File(Driver"];
+        let mut actor = actor(system.clone(), None);
+        let answer = actor.apply(1, 4, wireless_mode(11)).await;
+        let SafeCommandRx::ApplySettingsResult { reverted, .. } = answer.command else {
+            panic!("expected ApplySettingsResult");
+        };
+        assert!(!reverted);
+        assert!(system.device().files.driver.is_some());
     }
 
     #[tokio::test(start_paused = true)]
