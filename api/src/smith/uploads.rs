@@ -384,7 +384,7 @@ pub async fn put_part(
     .await
     .map_err(|error| {
         let elapsed_ms = started.elapsed().as_millis() as u64;
-        if client_error.load(Ordering::Relaxed) {
+        if client_error.load(Ordering::Relaxed) || crate::storage::is_request_timeout(&error) {
             tracing::warn!(
                 serial = %device.serial_number,
                 part = number,

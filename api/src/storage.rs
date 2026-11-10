@@ -466,6 +466,13 @@ impl Storage {
                 )
                 .into());
             }
+            if s3_error_code(&body).as_deref() == Some("RequestTimeout") {
+                return Err(s3::error::S3Error::HttpFailWithBody(
+                    status,
+                    "<Error><Code>RequestTimeout</Code></Error>".into(),
+                )
+                .into());
+            }
             anyhow::bail!(
                 "S3 rejected upload part ({status} {})",
                 s3_error_code(&body).unwrap_or_default()
@@ -626,6 +633,12 @@ fn regional(region: String) -> Region {
 pub fn is_missing_upload(error: &anyhow::Error) -> bool {
     error.downcast_ref::<s3::error::S3Error>().is_some_and(|error| {
         matches!(error, s3::error::S3Error::HttpFailWithBody(_, body) if missing_upload_body(body))
+    })
+}
+
+pub fn is_request_timeout(error: &anyhow::Error) -> bool {
+    error.downcast_ref::<s3::error::S3Error>().is_some_and(|error| {
+        matches!(error, s3::error::S3Error::HttpFailWithBody(_, body) if s3_error_code(body).as_deref() == Some("RequestTimeout"))
     })
 }
 
