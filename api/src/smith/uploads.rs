@@ -384,8 +384,10 @@ pub async fn put_part(
     .await
     .map_err(|error| {
         let elapsed_ms = started.elapsed().as_millis() as u64;
-        if client_error.load(Ordering::Relaxed) || crate::storage::is_request_timeout(&error) {
+        let body_error = client_error.load(Ordering::Relaxed);
+        if body_error || crate::storage::is_request_timeout(&error) {
             tracing::warn!(
+                reason = if body_error { "body_error" } else { "s3_timeout" },
                 serial = %device.serial_number,
                 part = number,
                 bytes = bytes.load(Ordering::Relaxed),
