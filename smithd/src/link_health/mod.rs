@@ -161,7 +161,7 @@ impl Recovery for Nmcli {
     }
 
     async fn reload_driver(&self, paths: &DriverPaths, module: &str, iface: &str) -> Result<()> {
-        crate::settings::reload_driver(paths, module, iface).await
+        crate::settings::reload_driver(paths, module, Some(iface)).await
     }
 }
 
