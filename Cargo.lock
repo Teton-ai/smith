@@ -318,7 +318,7 @@ checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 
 [[package]]
 name = "api"
-version = "0.2.238"
+version = "0.2.239"
 dependencies = [
  "anyhow",
  "axum 0.7.9",
@@ -1023,9 +1023,9 @@ checksum = "fc652a48c352aef3ea3aed32080501cf3ef6ed5da78602a020c991775b0aff04"
 
 [[package]]
 name = "bytestring"
-version = "1.5.1"
+version = "1.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "86566c496f2f47d9b8147a4c8b02ffdb69c919fe0c2b2e7195d22cbba0e635c9"
+checksum = "ca79160522b4aed4a69bab673bee78d3884d44240c78c96cb04b7557d532b4dc"
 dependencies = [
  "bytes",
 ]
@@ -1193,7 +1193,7 @@ checksum = "1c133bc6a41be0d194c306b5506d15e6feeea7b1d6604bd3f8310dfb2ca96486"
 
 [[package]]
 name = "cli"
-version = "0.2.238"
+version = "0.2.239"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1455,9 +1455,9 @@ checksum = "217698eaf96b4a3f0bc4f3662aaa55bdf913cd54d7204591faa790070c6d0853"
 
 [[package]]
 name = "crc32fast"
-version = "1.5.4"
+version = "1.5.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5f97d3416d5337d15c4b0d78c8c91df922ca143f57ec20e2d1c188333047ef04"
+checksum = "2b929dd2a135771f40afabd1073f85eed59c800b7c61901e5c254270497dad64"
 dependencies = [
  "cfg-if",
 ]
@@ -3693,7 +3693,7 @@ dependencies = [
 
 [[package]]
 name = "models"
-version = "0.2.238"
+version = "0.2.239"
 dependencies = [
  "axum 0.7.9",
  "chrono",
@@ -6130,7 +6130,7 @@ checksum = "e8e2fb0f499abb4d162f2bedad68f5ef91a1682b5a03596ddb67efd37768d100"
 
 [[package]]
 name = "smith"
-version = "0.2.238"
+version = "0.2.239"
 dependencies = [
  "anyhow",
  "axum 0.8.9",
@@ -6170,7 +6170,7 @@ dependencies = [
 
 [[package]]
 name = "smith-e2e"
-version = "0.2.238"
+version = "0.2.239"
 dependencies = [
  "anyhow",
  "reqwest",
@@ -6182,7 +6182,7 @@ dependencies = [
 
 [[package]]
 name = "smith-updater"
-version = "0.2.238"
+version = "0.2.239"
 dependencies = [
  "anyhow",
  "clap",
