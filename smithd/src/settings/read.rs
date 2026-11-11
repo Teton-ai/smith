@@ -252,10 +252,13 @@ impl SettingsReader {
         if let Some(conn) = &self.conn {
             return Ok(conn.clone());
         }
-        let conn = zbus::connection::Builder::system()?
+        // method_timeout does not cover the connect and auth handshake.
+        let build = zbus::connection::Builder::system()?
             .method_timeout(DBUS_METHOD_TIMEOUT)
-            .build()
-            .await?;
+            .build();
+        let conn = tokio::time::timeout(DBUS_METHOD_TIMEOUT, build)
+            .await
+            .context("settings: D-Bus connect timed out")??;
         self.conn = Some(conn.clone());
         Ok(conn)
     }
