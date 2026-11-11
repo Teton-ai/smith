@@ -31,10 +31,6 @@ const RECOVERY_SETTLE: Duration = Duration::from_secs(30);
 /// re-activation before the replaced files are put back.
 const REVERT_DEADLINE: Duration = Duration::from_secs(90);
 const API_PROBE_EVERY: Duration = Duration::from_secs(10);
-/// Above the slowest step, a driver reload (184 s at worst: `rmmod`, three
-/// `modprobe` tries, the interface coming back and Wi-Fi associating), so it
-/// only cuts a step stuck on a D-Bus call or a process that never returns.
-const STEP_TIMEOUT: Duration = Duration::from_secs(200);
 const REVERT_REASON: &str = "reverted: no connectivity after apply";
 
 /// Synthetic command id for reports smithd sends without being asked.
@@ -371,20 +367,6 @@ impl<S: System> Actor<S> {
         self.revert().await;
     }
 
-    /// A step that never returns would hold the net guard and every later
-    /// command, and skip the revert; failing it instead takes the usual path
-    /// (a disruption still waits for the api, then reverts). File steps are
-    /// left unbounded: their write runs on a blocking thread that a timeout
-    /// does not stop, so a late rename could undo a later restore.
-    async fn run_step(&mut self, step: Step<'_>) -> Result<()> {
-        if matches!(step, Step::File(..)) {
-            return self.system.run(step).await;
-        }
-        time::timeout(STEP_TIMEOUT, self.system.run(step))
-            .await
-            .unwrap_or_else(|_| Err(anyhow!("timed out after {STEP_TIMEOUT:?}")))
-    }
-
     async fn read(&mut self) -> Option<Reading> {
         match time::timeout(READ_TIMEOUT, self.system.read()).await {
             Ok(reading) => Some(reading),
@@ -553,10 +535,7 @@ impl<S: System> Actor<S> {
         }
         // A detection error says nothing about the daemon, so NTP is left out
         // of this check rather than reported failed for "no NTP daemon".
-        let detected = time::timeout(READ_TIMEOUT, self.system.ntp_daemon())
-            .await
-            .unwrap_or_else(|_| Err(anyhow!("timed out after {READ_TIMEOUT:?}")));
-        let (ntp, wanted) = match detected {
+        let (ntp, wanted) = match self.system.ntp_daemon().await {
             Ok(ntp) => (ntp, wanted),
             Err(err) => {
                 warn!("settings: NTP daemon: {err:#}; NTP left for the next check");
@@ -761,7 +740,7 @@ impl<S: System> Actor<S> {
                         info!(
                             "settings: {step:?}; reverting unless the api is reached within {REVERT_DEADLINE:?}"
                         );
-                        let result = self.run_step(step).await;
+                        let result = self.system.run(step).await;
                         // A failed reload can leave the link down too.
                         disrupted_at = Some(Instant::now());
                         result
@@ -769,7 +748,7 @@ impl<S: System> Actor<S> {
                         Err(anyhow!("could not record the disruption"))
                     }
                 }
-                None => self.run_step(step).await,
+                None => self.system.run(step).await,
             };
             if let Err(err) = result {
                 error!("settings: {step:?} failed: {err:#}");
@@ -866,7 +845,7 @@ impl<S: System> Actor<S> {
             Step::ReloadNm,
             backup.disruption.into(),
         ] {
-            if let Err(err) = self.run_step(step).await {
+            if let Err(err) = self.system.run(step).await {
                 error!("settings: reverting, {step:?} failed: {err:#}");
                 files_restored &= !matches!(step, Step::File(..));
             }
@@ -884,7 +863,7 @@ impl<S: System> Actor<S> {
             live.push(Step::Bgscan(bgscan));
         }
         for step in live {
-            if let Err(err) = self.run_step(step).await {
+            if let Err(err) = self.system.run(step).await {
                 error!("settings: reverting, {step:?} failed: {err:#}");
             }
         }
@@ -1031,12 +1010,7 @@ mod tests {
         api_connects: bool,
         /// Steps whose `Debug` starts with one of these fail.
         failing: Vec<&'static str>,
-        /// Steps whose `Debug` starts with one of these never return.
-        hanging: Vec<&'static str>,
-        /// Steps whose `Debug` starts with one of these outlast `STEP_TIMEOUT`.
-        slow: Vec<&'static str>,
         read_hangs: bool,
-        ntp_detection_hangs: bool,
     }
 
     #[derive(Clone)]
@@ -1085,10 +1059,6 @@ mod tests {
         }
 
         async fn ntp_daemon(&mut self) -> Result<Option<NtpDaemon>> {
-            let hangs = self.device().ntp_detection_hangs;
-            if hangs {
-                std::future::pending::<()>().await;
-            }
             if self.device().ntp_detection_fails {
                 return Err(anyhow!("D-Bus timeout"));
             }
@@ -1104,16 +1074,6 @@ mod tests {
         }
 
         async fn run(&mut self, step: Step<'_>) -> Result<()> {
-            let name = format!("{step:?}");
-            let hangs = self.device().hanging.iter().any(|p| name.starts_with(p));
-            if hangs {
-                self.device().steps.push(name.clone());
-                std::future::pending::<()>().await;
-            }
-            let slow = self.device().slow.iter().any(|p| name.starts_with(p));
-            if slow {
-                time::sleep(STEP_TIMEOUT * 2).await;
-            }
             let mut device = self.device();
             let name = format!("{step:?}");
             device.steps.push(name.clone());
@@ -1434,48 +1394,6 @@ mod tests {
             state.backup.as_ref().map(|b| b.disruption),
             Some(Disruption::ReloadDriver)
         );
-    }
-
-    #[tokio::test(start_paused = true)]
-    async fn a_step_that_never_returns_fails_and_the_apply_still_reverts() {
-        let system = FakeSystem::default();
-        system.device().report.wireless_mode = Some(95);
-        system.device().hanging = vec!["ReloadDriver"];
-        let mut actor = actor(system.clone(), None);
-        let answer = actor.apply(1, 4, wireless_mode(11)).await;
-        let SafeCommandRx::ApplySettingsResult { reverted, .. } = answer.command else {
-            panic!("expected ApplySettingsResult");
-        };
-        assert!(reverted);
-        let steps = system.device().steps.clone();
-        let reloads = steps.iter().filter(|s| *s == "ReloadDriver").count();
-        assert_eq!(reloads, 2, "{steps:?}");
-        assert!(actor.state.is_some_and(|s| s.backup.is_none()));
-    }
-
-    #[tokio::test(start_paused = true)]
-    async fn a_slow_file_write_is_not_cut_by_the_step_timeout() {
-        let system = FakeSystem::default();
-        system.device().report.wireless_mode = Some(95);
-        system.device().api_back_after = Some(Duration::from_secs(5));
-        system.device().slow = vec!["File(Driver"];
-        let mut actor = actor(system.clone(), None);
-        let answer = actor.apply(1, 4, wireless_mode(11)).await;
-        let SafeCommandRx::ApplySettingsResult { reverted, .. } = answer.command else {
-            panic!("expected ApplySettingsResult");
-        };
-        assert!(!reverted);
-        assert!(system.device().files.driver.is_some());
-    }
-
-    #[tokio::test(start_paused = true)]
-    async fn an_ntp_detection_that_never_returns_leaves_ntp_out_and_applies_the_rest() {
-        let system = FakeSystem::default();
-        system.device().ntp_detection_hangs = true;
-        let mut actor = actor(system.clone(), None);
-        let answer = actor.apply(1, 4, hostname("byag-12")).await;
-        assert_eq!(answer.status, 0);
-        assert_eq!(system.device().report.hostname.as_deref(), Some("byag-12"));
     }
 
     #[tokio::test(start_paused = true)]
