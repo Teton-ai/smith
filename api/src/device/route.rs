@@ -19,7 +19,7 @@ use axum::{Extension, Json};
 use axum_extra::extract::Query;
 use chrono::Duration;
 use models::device::{
-    CommandsPaginated, Device, DeviceCommandResponse, DeviceFilter, DeviceNetwork,
+    CommandsPaginated, Device, DeviceCommandResponse, DeviceFilter, DeviceLinkDelay, DeviceNetwork,
     DeviceSortDirection, DeviceSortField,
 };
 use models::modem::Modem;
@@ -225,6 +225,9 @@ pub async fn get_devices(
             dn.upload_speed_mbps as "network_upload_speed_mbps?",
             dn.source as "network_source?",
             dn.updated_at as "network_updated_at?",
+            d.link_baseline_ms,
+            d.link_current_ms,
+            d.link_delay_at,
             d.intent_version,
             d.observed_intent_version,
             d.network_conditions,
@@ -451,6 +454,9 @@ pub async fn get_devices(
                 None
             };
 
+            let link_delay =
+                link_delay(row.link_baseline_ms, row.link_current_ms, row.link_delay_at);
+
             Device {
                 id: row.id,
                 serial_number: row.serial_number,
@@ -477,6 +483,7 @@ pub async fn get_devices(
                 release,
                 target_release,
                 network,
+                link_delay,
                 intent_version: row.intent_version,
                 observed_intent_version: row.observed_intent_version,
                 network_conditions: row.network_conditions,
@@ -2126,6 +2133,18 @@ pub async fn get_device_info(
     Ok(Json(device))
 }
 
+fn link_delay(
+    baseline_ms: Option<i32>,
+    current_ms: Option<i32>,
+    measured_at: Option<DateTime<Utc>>,
+) -> Option<DeviceLinkDelay> {
+    Some(DeviceLinkDelay {
+        baseline_ms: baseline_ms?,
+        current_ms: current_ms?,
+        measured_at: measured_at?,
+    })
+}
+
 /// Loads a device without resolving permission-gated fields.
 pub async fn load_device_info(
     Path(device_id): Path<String>,
@@ -2206,6 +2225,9 @@ pub async fn load_device_info(
         dn.upload_speed_mbps as "network_upload_speed_mbps?",
         dn.source as "network_source?",
         dn.updated_at as "network_updated_at?",
+        d.link_baseline_ms,
+        d.link_current_ms,
+        d.link_delay_at,
         d.intent_version,
         d.observed_intent_version,
         d.network_conditions,
@@ -2335,6 +2357,12 @@ pub async fn load_device_info(
         None
     };
 
+    let link_delay = link_delay(
+        device_row.link_baseline_ms,
+        device_row.link_current_ms,
+        device_row.link_delay_at,
+    );
+
     let device = Device {
         id: device_row.id,
         serial_number: device_row.serial_number,
@@ -2360,6 +2388,7 @@ pub async fn load_device_info(
         release,
         target_release,
         network,
+        link_delay,
         intent_version: device_row.intent_version,
         observed_intent_version: device_row.observed_intent_version,
         network_conditions: device_row.network_conditions,

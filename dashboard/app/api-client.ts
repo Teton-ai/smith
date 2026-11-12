@@ -258,6 +258,17 @@ export interface Modem {
 	updated_at: string;
 }
 
+/**
+ * Round trip to the API as measured by the device.
+ */
+export interface DeviceLinkDelay {
+	/** Lowest round trip over the last hours. */
+	baseline_ms: number;
+	/** Lowest of the latest few round trips. */
+	current_ms: number;
+	measured_at: string;
+}
+
 export interface DeviceNetwork {
 	download_speed_mbps?: number;
 	network_score?: number;
@@ -358,6 +369,7 @@ export interface Device {
 	ip_address_id?: number;
 	labels: DeviceLabels;
 	last_seen?: string;
+	link_delay?: DeviceLinkDelay;
 	modem?: Modem;
 	modem_id?: number;
 	network?: DeviceNetwork;

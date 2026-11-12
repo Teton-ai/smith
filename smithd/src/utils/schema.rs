@@ -20,6 +20,15 @@ pub struct ServiceStatus {
     pub n_restarts: u32,
 }
 
+/// Round trip to the API as the device measures it.
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LinkDelay {
+    /// Lowest round trip over the last hours.
+    pub baseline_ms: u32,
+    /// Lowest of the latest few round trips.
+    pub current_ms: u32,
+}
+
 // POST That the device does
 #[derive(Serialize, Deserialize, Default, Debug)]
 pub struct HomePost {
@@ -28,6 +37,8 @@ pub struct HomePost {
     pub release_id: Option<i32>,
     #[serde(default)]
     pub service_statuses: Vec<ServiceStatus>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub link_delay: Option<LinkDelay>,
 }
 
 impl HomePost {
@@ -42,6 +53,7 @@ impl HomePost {
             responses,
             release_id,
             service_statuses,
+            link_delay: None,
         }
     }
 }
@@ -840,6 +852,7 @@ mod tests {
                 active_state: "active".to_string(),
                 n_restarts: 2,
             }],
+            link_delay: None,
         };
 
         let fixture: Value = serde_json::from_str(include_str!("fixtures/home_post.json")).unwrap();
@@ -947,6 +960,34 @@ mod tests {
         let json = r#"{"timestamp":{"secs":1,"nanos":0},"responses":[],"release_id":null}"#;
         let post: HomePost = serde_json::from_str(json).unwrap();
         assert!(post.service_statuses.is_empty());
+    }
+
+    #[test]
+    fn home_post_carries_link_delay_and_omits_it_when_absent() {
+        let json = r#"{"timestamp":{"secs":1,"nanos":0},"responses":[],"release_id":null,"link_delay":{"baseline_ms":18,"current_ms":25}}"#;
+        let post: HomePost = serde_json::from_str(json).unwrap();
+        assert_eq!(
+            post.link_delay,
+            Some(LinkDelay {
+                baseline_ms: 18,
+                current_ms: 25
+            })
+        );
+        let sent = serde_json::to_value(&post).unwrap();
+        assert_eq!(
+            sent["link_delay"],
+            serde_json::json!({"baseline_ms": 18, "current_ms": 25})
+        );
+
+        let old = r#"{"timestamp":{"secs":1,"nanos":0},"responses":[],"release_id":null}"#;
+        let post: HomePost = serde_json::from_str(old).unwrap();
+        assert_eq!(post.link_delay, None);
+        assert!(
+            serde_json::to_value(&post)
+                .unwrap()
+                .get("link_delay")
+                .is_none()
+        );
     }
 
     #[test]
