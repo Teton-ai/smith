@@ -37,6 +37,10 @@ const ReleaseDetail = lazy(() => import("@/app/(private)/releases/[id]/page"));
 const ReleaseDeployment = lazy(
 	() => import("@/app/(private)/releases/[id]/deployment/page"),
 );
+const Deployments = lazy(() => import("@/app/(private)/deployments/page"));
+const DeploymentDetail = lazy(
+	() => import("@/app/(private)/deployments/[id]/page"),
+);
 const Commands = lazy(() => import("@/app/(private)/commands/page"));
 const Recipes = lazy(() => import("@/app/(private)/recipes/page"));
 const IpAddresses = lazy(() => import("@/app/(private)/ip-addresses/page"));
@@ -114,6 +118,8 @@ export const router = createBrowserRouter([
 				path: "/distributions/:id",
 				element: withSuspense(<DistributionDetail />),
 			},
+			{ path: "/deployments", element: withSuspense(<Deployments />) },
+			{ path: "/deployments/:id", element: withSuspense(<DeploymentDetail />) },
 			{ path: "/releases/:id", element: withSuspense(<ReleaseDetail />) },
 			{
 				path: "/releases/:id/deployment",

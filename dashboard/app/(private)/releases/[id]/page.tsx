@@ -7,6 +7,7 @@ import {
 	Card,
 	ListRow,
 	PageContainer,
+	Panel,
 	SECTION_THEMES,
 	SectionCard,
 	Toast,
@@ -16,6 +17,7 @@ import {
 	AlertTriangle,
 	ArrowLeft,
 	ArrowUp,
+	ArrowUpDown,
 	Box,
 	Calendar,
 	ChevronsUpDown,
@@ -35,10 +37,18 @@ import {
 	Tag,
 	Trash2,
 	X,
-	Zap,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate, useParams } from "react-router";
+import { Link, useNavigate, useParams } from "react-router";
+import {
+	isActive,
+	PackageChanges,
+	PreflightNotice,
+	ProgressBar,
+	preflightQueryKey,
+	StateBadge,
+	usePreflight,
+} from "@/app/(private)/deployments/shared";
 import {
 	type DeploymentRequest,
 	type Device,
@@ -46,7 +56,7 @@ import {
 	type Package,
 	type Release,
 	useAddPackageToRelease,
-	useApiGetReleaseDeployment,
+	useApiListDeployments,
 	useApiReleaseDeployment,
 	useApiRollbackRelease,
 	useDeleteOs,
@@ -89,6 +99,14 @@ const getArchVariant = (architecture: string): BadgeVariant => {
 	}
 };
 
+/** How a pilot group of `count` devices will be deployed to. */
+const pilotGroupHeading = (count: number) =>
+	`${count} device${count !== 1 ? "s" : ""} in the pilot group: ${
+		count < 10
+			? "they update directly, without a canary"
+			: "up to 10 of them are the canary"
+	}`;
+
 const ReleaseDetailPage = () => {
 	const navigate = useNavigate();
 	const params = useParams();
@@ -105,17 +123,18 @@ const ReleaseDetailPage = () => {
 	const [packageSearchQuery, setPackageSearchQuery] = useState("");
 	const [showDeployModal, setShowDeployModal] = useState(false);
 	const [deploying, setDeploying] = useState(false);
-	const [canaryMode, setCanaryMode] = useState<
-		"automatic" | "labels" | "devices"
-	>("automatic");
-	const [canaryLabels, setCanaryLabels] = useState<string[]>([]);
-	const [canaryDeviceIds, setCanaryDeviceIds] = useState<Map<number, Device>>(
+	// A release candidate's pilot group; a stable release's canary is always automatic.
+	const [pilotMode, setPilotMode] = useState<"labels" | "devices">("labels");
+	const [pilotLabels, setPilotLabels] = useState<string[]>([]);
+	const [pilotDeviceIds, setPilotDeviceIds] = useState<Map<number, Device>>(
 		new Map(),
 	);
 	const [deviceSearchQuery, setDeviceSearchQuery] = useState("");
 	const [debouncedDeviceSearchQuery, setDebouncedDeviceSearchQuery] =
 		useState("");
 	const [deployStep, setDeployStep] = useState<1 | 2>(1);
+	const [deployError, setDeployError] = useState<string | null>(null);
+	const [publishError, setPublishError] = useState<string | null>(null);
 	const [showYankModal, setShowYankModal] = useState(false);
 	const [yanking, setYanking] = useState(false);
 	const [yankReason, setYankReason] = useState("");
@@ -159,12 +178,42 @@ const ReleaseDetailPage = () => {
 			},
 		});
 
-	const { data: existingDeployment } = useApiGetReleaseDeployment(releaseId, {
-		query: {
-			enabled: !!releaseId && !!release && !release.draft && !release.yanked,
-			retry: false,
-		},
-	});
+	// One request feeds both the header badge and the history list; the API
+	// returns newest first, so [0] is the latest.
+	const {
+		data: releaseDeployments = [],
+		isLoading: deploymentsLoading,
+		isError: deploymentsError,
+		queryKey: deploymentsQueryKey,
+	} = useApiListDeployments(
+		{ release_id: releaseId, limit: 200 },
+		{ query: { enabled: !!release && !release.draft, refetchInterval: 10000 } },
+	);
+	// The rollback that moved devices off this release, if it was yanked.
+	const { data: rollbacks = [], queryKey: rollbacksQueryKey } =
+		useApiListDeployments(
+			{ rolled_back_from: releaseId, limit: 1 },
+			{ query: { enabled: !!release?.yanked } },
+		);
+	const rollback = rollbacks[0];
+	const lastDeployment = releaseDeployments[0];
+	const activeDeployment =
+		lastDeployment && isActive(lastDeployment.state)
+			? lastDeployment
+			: undefined;
+
+	// On a draft this says what publishing would change; in the deploy dialog,
+	// what a fleet rollout would.
+	const publishCheck = usePreflight(
+		releaseId,
+		{ publish: true },
+		!!release?.draft,
+	);
+	const deployCheck = usePreflight(
+		releaseId,
+		{ publish: false },
+		showDeployModal,
+	);
 
 	const rollbackPickerOpen = showYankModal || showRollbackModal;
 	const { data: distributionReleases = [] } = useGetDistributionReleases(
@@ -198,8 +247,6 @@ const ReleaseDetailPage = () => {
 		useGetDevices(
 			{
 				distribution_id: release?.distribution_id,
-				online: true,
-				outdated: false,
 				search: debouncedDeviceSearchQuery.trim() || undefined,
 				limit: 1000,
 			},
@@ -207,7 +254,7 @@ const ReleaseDetailPage = () => {
 				query: {
 					enabled:
 						showDeployModal &&
-						canaryMode === "devices" &&
+						pilotMode === "devices" &&
 						!!release?.distribution_id,
 				},
 			},
@@ -218,15 +265,14 @@ const ReleaseDetailPage = () => {
 		useGetDevices(
 			{
 				distribution_id: release?.distribution_id,
-				outdated: false,
-				labels: canaryLabels,
+				labels: pilotLabels,
 			},
 			{
 				query: {
 					enabled:
 						showDeployModal &&
-						canaryMode === "labels" &&
-						canaryLabels.length > 0 &&
+						pilotMode === "labels" &&
+						pilotLabels.length > 0 &&
 						!!release?.distribution_id,
 				},
 			},
@@ -299,16 +345,27 @@ const ReleaseDetailPage = () => {
 		},
 	});
 	const handlePublishRelease = async () => {
-		updateReleaseHook.mutate({ releaseId, data: { draft: false } });
+		setPublishError(null);
+		updateReleaseHook.mutate(
+			{ releaseId, data: { draft: false } },
+			{ onError: (error) => setPublishError(requestErrorMessage(error)) },
+		);
 	};
 	const handleToggleLts = async () => {
 		updateReleaseHook.mutate({ releaseId, data: { lts: !release?.lts } });
 	};
 
+	// The publish and deploy previews compare this release's packages, so they
+	// go stale with the list.
+	const refreshPackages = () => {
+		queryClient.invalidateQueries({ queryKey: packagesQueryKey });
+		queryClient.invalidateQueries({ queryKey: preflightQueryKey(releaseId) });
+	};
+
 	const addPackageToReleaseHook = useAddPackageToRelease({
 		mutation: {
 			onSuccess: () => {
-				queryClient.invalidateQueries({ queryKey: packagesQueryKey });
+				refreshPackages();
 				setSelectedAvailablePackage(null);
 				setShowAddPackageModal(false);
 			},
@@ -325,9 +382,7 @@ const ReleaseDetailPage = () => {
 	const deletePackageForReleaseHook = useDeletePackageForRelease({
 		mutation: {
 			onSuccess: () => {
-				queryClient.invalidateQueries({
-					queryKey: packagesQueryKey,
-				});
+				refreshPackages();
 			},
 		},
 	});
@@ -414,9 +469,7 @@ const ReleaseDetailPage = () => {
 				data: { id: selectedAvailablePackage },
 			});
 
-			queryClient.invalidateQueries({
-				queryKey: packagesQueryKey,
-			});
+			refreshPackages();
 			setSelectedAvailablePackage(null);
 			setPackageToReplace(null);
 			setShowReplacePackageModal(false);
@@ -486,9 +539,7 @@ const ReleaseDetailPage = () => {
 				data: { id: latestVersion.id },
 			});
 
-			queryClient.invalidateQueries({
-				queryKey: packagesQueryKey,
-			});
+			refreshPackages();
 
 			setToast({
 				message: `Upgraded ${pkg.name} to v${latestVersion.version}`,
@@ -510,34 +561,43 @@ const ReleaseDetailPage = () => {
 	};
 
 	const handleOpenDeployModal = () => {
-		setCanaryMode("automatic");
-		setCanaryLabels([]);
-		setCanaryDeviceIds(new Map());
+		setPilotMode("labels");
+		setPilotLabels([]);
+		setPilotDeviceIds(new Map());
 		setDeviceSearchQuery("");
 		setDeployStep(1);
+		setDeployError(null);
 		setShowDeployModal(true);
 	};
 
 	const releaseDeploymentHook = useApiReleaseDeployment();
+	const deployBlocked =
+		deployCheck.isLoading ||
+		deployCheck.data?.allowed === false ||
+		!!deployCheck.data?.active;
 
 	const handleDeployRelease = async () => {
 		if (!release || deploying) return;
 
 		let data: DeploymentRequest = {};
-		if (canaryMode === "labels" && canaryLabels.length > 0) {
-			data = { canary_device_labels: canaryLabels };
-		} else if (canaryMode === "devices" && canaryDeviceIds.size > 0) {
-			data = { canary_device_ids: Array.from(canaryDeviceIds.keys()) };
+		if (release.release_candidate && pilotMode === "labels") {
+			data = { pilot_device_labels: pilotLabels };
+		} else if (release.release_candidate && pilotMode === "devices") {
+			data = { pilot_device_ids: Array.from(pilotDeviceIds.keys()) };
 		}
 
 		setDeploying(true);
 		try {
-			await releaseDeploymentHook.mutateAsync({ releaseId, data });
+			const deployment = await releaseDeploymentHook.mutateAsync({
+				releaseId,
+				data,
+			});
+			queryClient.invalidateQueries({ queryKey: deploymentsQueryKey });
 			setShowDeployModal(false);
-			navigate(`/releases/${releaseId}/deployment`);
-		} catch (error: any) {
+			navigate(`/deployments/${deployment.id}`);
+		} catch (error: unknown) {
 			console.error("Failed to deploy release:", error);
-			alert(`Failed to deploy release: ${error?.message || "Unknown error"}`);
+			setDeployError(requestErrorMessage(error));
 		} finally {
 			setDeploying(false);
 		}
@@ -551,11 +611,12 @@ const ReleaseDetailPage = () => {
 		},
 	});
 
-	const rollBackDevices = async (target: Release) => {
+	const rollBackDevices = async (target: Release, yankReason?: string) => {
 		const result = await rollbackReleaseHook.mutateAsync({
 			releaseId,
-			data: { target_release_id: target.id },
+			data: { target_release_id: target.id, yank_reason: yankReason },
 		});
+		queryClient.invalidateQueries({ queryKey: rollbacksQueryKey });
 		return `${result.devices_retargeted} device(s) rolled back to v${target.version}`;
 	};
 
@@ -578,38 +639,29 @@ const ReleaseDetailPage = () => {
 		}
 
 		const target = rollbackAfterYank ? rollbackTarget : undefined;
+		const reason = yankReason.trim();
 		setYanking(true);
 		try {
-			await updateReleaseHook.mutateAsync({
-				releaseId,
-				data: { yanked: true, yanked_reason: yankReason.trim() },
-			});
+			// One request when rolling back: the rollback yanks the release in the same
+			// transaction, so devices still heading to it go to the target too.
+			if (target) {
+				const summary = await rollBackDevices(target, reason);
+				setToast({ message: `Release yanked, ${summary}`, type: "success" });
+			} else {
+				await updateReleaseHook.mutateAsync({
+					releaseId,
+					data: { yanked: true, yanked_reason: reason },
+				});
+				setToast({ message: "Release has been yanked", type: "success" });
+			}
+			closeYankModal();
 		} catch (error) {
-			console.error("Failed to yank release:", error);
 			setToast({
 				message: `Failed to yank release: ${requestErrorMessage(error)}`,
 				type: "error",
 			});
-			setYanking(false);
-			return;
-		}
-
-		try {
-			if (target) {
-				const summary = await rollBackDevices(target);
-				setToast({ message: `Release yanked, ${summary}`, type: "success" });
-			} else {
-				setToast({ message: "Release has been yanked", type: "success" });
-			}
-		} catch (error) {
-			console.error("Failed to roll back release:", error);
-			setToast({
-				message: `Release yanked, but rollback failed: ${requestErrorMessage(error)}`,
-				type: "error",
-			});
 		} finally {
 			setYanking(false);
-			closeYankModal();
 		}
 	};
 
@@ -723,15 +775,10 @@ const ReleaseDetailPage = () => {
 										Yanked
 									</Badge>
 								)}
-								{existingDeployment?.status === "InProgress" && (
-									<Badge
-										variant="blue"
-										pill
-										className="inline-flex items-center"
-									>
-										<Loader2 className="w-3 h-3 mr-1 animate-spin" />
-										Deploying
-									</Badge>
+								{lastDeployment && (
+									<Link to={`/deployments/${lastDeployment.id}`}>
+										<StateBadge state={lastDeployment.state} />
+									</Link>
 								)}
 							</div>
 							<div className="flex items-center space-x-4 mt-1 text-sm text-gray-600">
@@ -770,6 +817,12 @@ const ReleaseDetailPage = () => {
 								tone="green"
 								loading={updateReleaseHook.isPending}
 								icon={<Eye className="w-4 h-4" />}
+								disabled={publishCheck.data?.allowed === false}
+								title={
+									publishCheck.data?.allowed === false
+										? "Your role does not allow publishing this draft"
+										: undefined
+								}
 								onClick={handlePublishRelease}
 							>
 								{updateReleaseHook.isPending ? "Publishing..." : "Publish"}
@@ -804,11 +857,11 @@ const ReleaseDetailPage = () => {
 								>
 									Yank
 								</Button>
-								{existingDeployment?.status === "InProgress" ? (
+								{activeDeployment ? (
 									<Button
 										variant="solid"
 										tone="blue"
-										to={`/releases/${releaseId}/deployment`}
+										to={`/deployments/${activeDeployment.id}`}
 										icon={<Loader2 className="w-4 h-4 animate-spin" />}
 									>
 										View Deployment
@@ -830,9 +883,9 @@ const ReleaseDetailPage = () => {
 			</Card>
 
 			{release.yanked && (
-				<div className="bg-red-50 border border-red-200 rounded-lg p-4 flex items-start space-x-3">
-					<AlertTriangle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
-					<div className="min-w-0">
+				<div className="bg-red-50 border border-red-200 rounded-lg p-4 flex items-center gap-3">
+					<AlertTriangle className="w-5 h-5 text-red-600 flex-shrink-0" />
+					<div className="min-w-0 flex-1">
 						<h4 className="font-medium text-red-900 text-sm">
 							Yanked
 							{release.yanked_at && (
@@ -846,7 +899,40 @@ const ReleaseDetailPage = () => {
 							{release.yanked_reason || "No reason was recorded."}
 						</p>
 					</div>
+					{rollback && (
+						<Button
+							tone="red"
+							size="sm"
+							icon={<RotateCcw className="w-4 h-4" />}
+							to={`/deployments/${rollback.id}`}
+							className="shrink-0"
+						>
+							View rollback
+						</Button>
+					)}
 				</div>
+			)}
+
+			{release.draft && publishCheck.data && (
+				<Panel
+					icon={ArrowUpDown}
+					title={
+						publishCheck.data.latest_version
+							? `Changes against latest (v${publishCheck.data.latest_version})`
+							: "Changes"
+					}
+					theme={SECTION_THEMES.gray}
+					bodyClassName="px-4 py-2 space-y-2"
+				>
+					<PackageChanges
+						changes={publishCheck.data.changes}
+						emptyText="Same packages as latest so far."
+					/>
+					<PreflightNotice blockedReason={publishCheck.data.blocked_reason} />
+					{publishError && (
+						<p className="text-sm text-red-700">{publishError}</p>
+					)}
+				</Panel>
 			)}
 
 			{/* Deploy Confirmation Modal */}
@@ -856,7 +942,11 @@ const ReleaseDetailPage = () => {
 				title={`Deploy Release v${release.version}`}
 				subtitle={
 					deployStep === 2
-						? `Step 2 of 2 — ${canaryMode === "labels" ? "Select labels for canary devices" : "Select canary devices"}`
+						? `Step 2 of 2 — ${
+								pilotMode === "labels"
+									? "Select labels for the pilot group"
+									: "Select the pilot group's devices"
+							}`
 						: undefined
 				}
 				width={deployStep === 1 ? "w-[520px]" : "w-[900px]"}
@@ -871,12 +961,13 @@ const ReleaseDetailPage = () => {
 							>
 								Cancel
 							</Button>
-							{canaryMode === "automatic" ? (
+							{!release.release_candidate ? (
 								<Button
 									variant="solid"
 									tone="blue"
 									loading={deploying}
 									icon={<Rocket className="w-4 h-4" />}
+									disabled={deployBlocked}
 									onClick={handleDeployRelease}
 								>
 									{deploying ? "Starting..." : "Start Deployment"}
@@ -885,9 +976,10 @@ const ReleaseDetailPage = () => {
 								<Button
 									variant="solid"
 									tone="blue"
+									disabled={deployBlocked}
 									onClick={() => setDeployStep(2)}
 								>
-									Next: Select Devices
+									Next: Choose Pilot Group
 								</Button>
 							)}
 						</>
@@ -909,8 +1001,8 @@ const ReleaseDetailPage = () => {
 								icon={<Rocket className="w-4 h-4" />}
 								disabled={
 									deploying ||
-									(canaryMode === "labels" && canaryLabels.length === 0) ||
-									(canaryMode === "devices" && canaryDeviceIds.size === 0)
+									(pilotMode === "labels" && pilotLabels.length === 0) ||
+									(pilotMode === "devices" && pilotDeviceIds.size === 0)
 								}
 								onClick={handleDeployRelease}
 							>
@@ -923,61 +1015,100 @@ const ReleaseDetailPage = () => {
 				{/* Step 1: Choose canary strategy */}
 				{deployStep === 1 && (
 					<div className="space-y-4">
-						<p className="text-sm text-gray-600">
-							First, a small group of canary devices will receive the update.
-							After verifying they update successfully, you can roll out to all
-							remaining devices.
-						</p>
+						{deployCheck.data?.active && (
+							<div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-sm text-amber-800">
+								<p className="font-medium">
+									v{deployCheck.data.active.release_version} is still deploying
+								</p>
+								<p className="mt-1">
+									Fleet deployments run one at a time in a distribution.{" "}
+									<Link
+										to={`/deployments/${deployCheck.data.active.id}`}
+										className="underline font-medium"
+									>
+										See that deployment
+									</Link>
+								</p>
+							</div>
+						)}
+						{deployCheck.data && (
+							<div>
+								<h4 className="text-sm font-medium text-gray-900">
+									What changes
+								</h4>
+								<PackageChanges changes={deployCheck.data.changes} />
+							</div>
+						)}
+						{deployCheck.data && (
+							<PreflightNotice
+								blockedReason={deployCheck.data.blocked_reason}
+							/>
+						)}
+						{deployError && (
+							<p className="text-sm text-red-700">{deployError}</p>
+						)}
+						{!deployBlocked && (
+							<>
+								<p className="text-sm text-gray-600">
+									{release.release_candidate
+										? "Choose the pilot group by labels or by hand. Up to 10 of its online devices are picked as the canary; once they are healthy, you confirm and the rest of the group updates in waves. A group under 10 devices updates directly. What the fleet follows doesn't change."
+										: `Up to 10 canary devices are picked automatically by health and network quality, and update first. Once they are healthy, you confirm the rollout${
+												deployCheck.data
+													? `: ${deployCheck.data.devices_to_move} devices in ${deployCheck.data.waves} waves, ${deployCheck.data.interval_minutes} minutes apart`
+													: ""
+											}.`}
+									{deployCheck.data && deployCheck.data.pinned_devices > 0
+										? ` ${deployCheck.data.pinned_devices} pinned devices stay where they are.`
+										: ""}
+								</p>
 
-						<div className="space-y-3">
-							{(
-								[
-									{
-										mode: "automatic" as const,
-										title: "Automatic",
-										icon: <Zap className="w-5 h-5 text-amber-500" />,
-										description:
-											"~10 online devices are automatically selected by network quality. Best for routine deployments.",
-									},
-									{
-										mode: "labels" as const,
-										title: "By Labels",
-										icon: <Tag className="w-5 h-5 text-blue-500" />,
-										description:
-											"Target devices matching specific labels (e.g. env=staging). All matching up-to-date devices will be included.",
-									},
-									{
-										mode: "devices" as const,
-										title: "Select Devices",
-										icon: <Cpu className="w-5 h-5 text-purple-500" />,
-										description:
-											"Hand-pick specific devices for the canary. Use this when you need precise control.",
-									},
-								] as const
-							).map((option) => (
-								<button
-									key={option.mode}
-									onClick={() => setCanaryMode(option.mode)}
-									className={`w-full text-left p-4 rounded-lg border-2 transition-all cursor-pointer ${
-										canaryMode === option.mode
-											? "border-blue-500 bg-blue-50"
-											: "border-gray-200 hover:border-gray-300 hover:bg-gray-50"
-									}`}
-								>
-									<div className="flex items-start gap-3">
-										<div className="flex-shrink-0 mt-0.5">{option.icon}</div>
-										<div>
-											<div className="font-medium text-gray-900 text-sm">
-												{option.title}
-											</div>
-											<p className="text-xs text-gray-500 mt-1">
-												{option.description}
-											</p>
-										</div>
+								{release.release_candidate && (
+									<div className="space-y-3">
+										{(
+											[
+												{
+													mode: "labels" as const,
+													title: "By Labels",
+													icon: <Tag className="w-5 h-5 text-blue-500" />,
+													description:
+														"The pilot group is every device with any of the labels (e.g. env=staging).",
+												},
+												{
+													mode: "devices" as const,
+													title: "Select Devices",
+													icon: <Cpu className="w-5 h-5 text-purple-500" />,
+													description: "Hand-pick the pilot group's devices.",
+												},
+											] as const
+										).map((option) => (
+											<button
+												key={option.mode}
+												onClick={() => setPilotMode(option.mode)}
+												className={`w-full text-left p-4 rounded-lg border-2 transition-all cursor-pointer ${
+													pilotMode === option.mode
+														? "border-blue-500 bg-blue-50"
+														: "border-gray-200 hover:border-gray-300 hover:bg-gray-50"
+												}`}
+											>
+												<div className="flex items-start gap-3">
+													<div className="flex-shrink-0 mt-0.5">
+														{option.icon}
+													</div>
+													<div>
+														<div className="font-medium text-gray-900 text-sm">
+															{option.title}
+														</div>
+														<p className="text-xs text-gray-500 mt-1">
+															{option.description}
+														</p>
+													</div>
+												</div>
+											</button>
+										))}
 									</div>
-								</button>
-							))}
-						</div>
+								)}
+							</>
+						)}
 					</div>
 				)}
 
@@ -986,17 +1117,17 @@ const ReleaseDetailPage = () => {
 					<div className="-m-6 flex-1 overflow-hidden grid grid-cols-2 divide-x divide-gray-200 min-h-[400px]">
 						{/* Left column: selection controls */}
 						<div className="p-6 overflow-y-auto space-y-3">
-							{canaryMode === "labels" && (
+							{pilotMode === "labels" && (
 								<div className="space-y-3">
 									<LabelAutocomplete
 										onSelect={(label) =>
-											setCanaryLabels((prev) => [...prev, label])
+											setPilotLabels((prev) => [...prev, label])
 										}
-										existingFilters={canaryLabels}
+										existingFilters={pilotLabels}
 									/>
-									{canaryLabels.length > 0 && (
+									{pilotLabels.length > 0 && (
 										<div className="flex flex-wrap gap-1">
-											{canaryLabels.map((label) => (
+											{pilotLabels.map((label) => (
 												<span
 													key={label}
 													className="inline-flex items-center px-2 py-0.5 text-xs font-medium bg-blue-100 text-blue-800 rounded-full"
@@ -1004,7 +1135,7 @@ const ReleaseDetailPage = () => {
 													{label}
 													<button
 														onClick={() =>
-															setCanaryLabels((prev) =>
+															setPilotLabels((prev) =>
 																prev.filter((l) => l !== label),
 															)
 														}
@@ -1023,7 +1154,7 @@ const ReleaseDetailPage = () => {
 								</div>
 							)}
 
-							{canaryMode === "devices" && (
+							{pilotMode === "devices" && (
 								<div className="space-y-2">
 									<div className="relative">
 										<Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
@@ -1046,12 +1177,12 @@ const ReleaseDetailPage = () => {
 											</div>
 										) : (
 											eligibleDevices.map((device: Device) => {
-												const isSelected = canaryDeviceIds.has(device.id);
+												const isSelected = pilotDeviceIds.has(device.id);
 												return (
 													<div
 														key={device.id}
 														onClick={() =>
-															setCanaryDeviceIds((prev) => {
+															setPilotDeviceIds((prev) => {
 																const next = new Map(prev);
 																if (next.has(device.id)) {
 																	next.delete(device.id);
@@ -1118,11 +1249,11 @@ const ReleaseDetailPage = () => {
 
 						{/* Right column: live preview */}
 						<div className="p-6 overflow-y-auto bg-gray-50 flex flex-col">
-							{canaryMode === "labels" &&
-								(canaryLabels.length === 0 ? (
+							{pilotMode === "labels" &&
+								(pilotLabels.length === 0 ? (
 									<>
 										<h4 className="font-medium text-gray-900 text-sm mb-1">
-											Canary Preview
+											Pilot group
 										</h4>
 										<div className="flex-1 flex items-center justify-center text-sm text-gray-400">
 											Select labels to see matching devices
@@ -1131,7 +1262,7 @@ const ReleaseDetailPage = () => {
 								) : labelDevicesLoading ? (
 									<>
 										<h4 className="font-medium text-gray-900 text-sm mb-3">
-											Canary Preview
+											Pilot group
 										</h4>
 										<div className="flex-1 flex items-center justify-center text-sm text-gray-400">
 											Loading...
@@ -1140,7 +1271,7 @@ const ReleaseDetailPage = () => {
 								) : labelMatchDevices.length === 0 ? (
 									<>
 										<h4 className="font-medium text-gray-900 text-sm mb-1">
-											0 devices will receive the canary update
+											No devices in the pilot group
 										</h4>
 										<div className="flex-1 flex items-center justify-center text-sm text-gray-400">
 											No matching devices
@@ -1149,9 +1280,7 @@ const ReleaseDetailPage = () => {
 								) : (
 									<>
 										<h4 className="font-medium text-gray-900 text-sm mb-3">
-											{labelMatchDevices.length} device
-											{labelMatchDevices.length !== 1 ? "s" : ""} will receive
-											the canary update
+											{pilotGroupHeading(labelMatchDevices.length)}
 										</h4>
 										<div className="border border-gray-200 rounded-md bg-white overflow-y-auto flex-1">
 											{labelMatchDevices.map((device: Device) => (
@@ -1183,11 +1312,11 @@ const ReleaseDetailPage = () => {
 									</>
 								))}
 
-							{canaryMode === "devices" &&
-								(canaryDeviceIds.size === 0 ? (
+							{pilotMode === "devices" &&
+								(pilotDeviceIds.size === 0 ? (
 									<>
 										<h4 className="font-medium text-gray-900 text-sm mb-1">
-											Canary Preview
+											Pilot group
 										</h4>
 										<div className="flex-1 flex items-center justify-center text-sm text-gray-400">
 											Select devices from the list
@@ -1196,12 +1325,10 @@ const ReleaseDetailPage = () => {
 								) : (
 									<>
 										<h4 className="font-medium text-gray-900 text-sm mb-3">
-											{canaryDeviceIds.size} device
-											{canaryDeviceIds.size !== 1 ? "s" : ""} will receive the
-											canary update
+											{pilotGroupHeading(pilotDeviceIds.size)}
 										</h4>
 										<div className="border border-gray-200 rounded-md bg-white overflow-y-auto flex-1">
-											{Array.from(canaryDeviceIds.values()).map(
+											{Array.from(pilotDeviceIds.values()).map(
 												(device: Device) => (
 													<div
 														key={device.id}
@@ -1228,7 +1355,7 @@ const ReleaseDetailPage = () => {
 															)}
 														<button
 															onClick={() =>
-																setCanaryDeviceIds((prev) => {
+																setPilotDeviceIds((prev) => {
 																	const next = new Map(prev);
 																	next.delete(device.id);
 																	return next;
@@ -1848,7 +1975,7 @@ const ReleaseDetailPage = () => {
 											</div>
 										</div>
 									</div>
-									{release?.draft && (
+									{release?.draft ? (
 										<div className="flex items-center space-x-1 flex-shrink-0">
 											<Button
 												variant="ghost"
@@ -1865,7 +1992,7 @@ const ReleaseDetailPage = () => {
 												title="Remove package"
 											/>
 										</div>
-									)}
+									) : null}
 								</ListRow>
 							);
 						})
@@ -1925,6 +2052,78 @@ const ReleaseDetailPage = () => {
 					)}
 				</SectionCard>
 			</div>
+
+			{!release.draft && (
+				<SectionCard
+					icon={Rocket}
+					title="Deployments"
+					count={releaseDeployments.length}
+					theme={SECTION_THEMES.blue}
+				>
+					{deploymentsLoading ? (
+						<p className="p-6 text-center text-sm text-gray-500">
+							Loading deployments...
+						</p>
+					) : deploymentsError ? (
+						<p role="alert" className="p-6 text-center text-sm text-red-600">
+							Could not load deployments.
+						</p>
+					) : releaseDeployments.length === 0 ? (
+						<div className="p-6 text-center">
+							<Rocket className="w-8 h-8 text-gray-400 mx-auto mb-2" />
+							<p className="text-sm text-gray-500">
+								This release has not been deployed yet
+							</p>
+						</div>
+					) : (
+						releaseDeployments.map((deployment) => (
+							<ListRow
+								key={deployment.id}
+								to={`/deployments/${deployment.id}`}
+								className="gap-4"
+							>
+								{/* flex-1: Firefox otherwise sizes this to almost nothing and truncates it. */}
+								<div className="min-w-0 flex-1">
+									<div className="flex flex-wrap items-center gap-2">
+										<span className="text-xs text-gray-400">
+											#{deployment.id}
+										</span>
+										<span className="font-medium text-gray-900">
+											{deployment.kind === "rollback"
+												? `Rollback from v${deployment.rolled_back_from_version ?? "?"}`
+												: deployment.kind === "direct"
+													? "Selected devices"
+													: deployment.release_candidate
+														? "Pilot group"
+														: "Fleet"}
+										</span>
+										<StateBadge state={deployment.state} />
+									</div>
+									<div className="text-xs text-gray-500 mt-1 truncate">
+										{deployment.created_by ?? "Unknown"} ·{" "}
+										<RelativeTime date={deployment.created_at} />
+										{deployment.base_version &&
+											` · from v${deployment.base_version}`}
+									</div>
+								</div>
+								<div className="w-40 flex-shrink-0 space-y-1 text-right">
+									{deployment.counts.total > 0 ? (
+										<>
+											<ProgressBar counts={deployment.counts} />
+											<div className="text-xs text-gray-500 tabular-nums">
+												{deployment.counts.updated}/{deployment.counts.total}{" "}
+												updated
+											</div>
+										</>
+									) : (
+										<span className="text-xs text-gray-400">Not tracked</span>
+									)}
+								</div>
+							</ListRow>
+						))
+					)}
+				</SectionCard>
+			)}
 		</PageContainer>
 	);
 };

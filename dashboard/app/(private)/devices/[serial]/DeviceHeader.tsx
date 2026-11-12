@@ -425,7 +425,15 @@ const DeviceHeader: React.FC<DeviceHeaderProps> = ({ device, serial }) => {
 									</Link>
 								</div>
 							)}
-							{update?.status === "scheduled" && (
+							{update?.status === "scheduled" &&
+							update.eligibleAt.getFullYear() >= 9999 ? (
+								<Tooltip content="Its deployment is paused, so it stays where it is">
+									<span className="flex items-center space-x-1 cursor-help">
+										<Clock className="w-4 h-4" />
+										<span>Held, deployment paused</span>
+									</span>
+								</Tooltip>
+							) : update?.status === "scheduled" ? (
 								<Tooltip content="Waiting for its turn in a staggered rollout">
 									<span className="flex items-center space-x-1 cursor-help">
 										<Clock className="w-4 h-4" />
@@ -438,7 +446,7 @@ const DeviceHeader: React.FC<DeviceHeaderProps> = ({ device, serial }) => {
 										</span>
 									</span>
 								</Tooltip>
-							)}
+							) : null}
 							{labels.length > 0 && (
 								<div className="flex flex-wrap items-center gap-1.5">
 									<Tags className="w-4 h-4 text-gray-400 flex-shrink-0" />

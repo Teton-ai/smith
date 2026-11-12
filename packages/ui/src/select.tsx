@@ -11,6 +11,7 @@ export function Select({
 	id,
 	className = "w-auto",
 	disabled = false,
+	"aria-label": ariaLabel,
 }: {
 	value: string;
 	onChange: (value: string) => void;
@@ -18,9 +19,11 @@ export function Select({
 	id?: string;
 	className?: string;
 	disabled?: boolean;
+	"aria-label"?: string;
 }) {
 	return (
 		<select
+			aria-label={ariaLabel}
 			id={id}
 			value={value}
 			onChange={(e) => onChange(e.target.value)}
@@ -44,6 +47,7 @@ export interface SelectMenuOption {
  * where a native `<select>`'s platform styling sits next to design-system
  * buttons and inputs; the trigger shows the selected option's label. Closes on
  * outside click, Escape, or selection; Arrow keys move the highlight.
+ * `searchable` adds a filter box for long lists, matching labels.
  */
 export function SelectMenu({
 	value,
@@ -53,6 +57,8 @@ export function SelectMenu({
 	align = "left",
 	className = "",
 	menuClassName = "w-56",
+	searchable = false,
+	searchPlaceholder = "Search…",
 }: {
 	value: string;
 	onChange: (value: string) => void;
@@ -62,13 +68,24 @@ export function SelectMenu({
 	align?: "left" | "right";
 	className?: string;
 	menuClassName?: string;
+	searchable?: boolean;
+	searchPlaceholder?: string;
 }) {
 	const [open, setOpen] = useState(false);
 	const [highlighted, setHighlighted] = useState<number | null>(null);
+	const [query, setQuery] = useState("");
 	const containerRef = useRef<HTMLDivElement>(null);
 
-	const selectedIndex = options.findIndex((o) => o.value === value);
-	const selected = selectedIndex >= 0 ? options[selectedIndex] : undefined;
+	const selected = options.find((o) => o.value === value);
+	const needle = query.trim().toLowerCase();
+	const visible = needle
+		? options.filter((o) => o.label.toLowerCase().includes(needle))
+		: options;
+	const selectedIndex = visible.findIndex((o) => o.value === value);
+
+	useEffect(() => {
+		if (!open) setQuery("");
+	}, [open]);
 
 	useEffect(() => {
 		if (!open) return;
@@ -80,7 +97,7 @@ export function SelectMenu({
 	}, [open]);
 
 	function commit(index: number) {
-		const option = options[index];
+		const option = visible[index];
 		if (!option) return;
 		onChange(option.value);
 		setOpen(false);
@@ -101,7 +118,7 @@ export function SelectMenu({
 			setHighlighted((prev) => {
 				const from = prev ?? selectedIndex;
 				const next = from + (event.key === "ArrowDown" ? 1 : -1);
-				return Math.max(0, Math.min(next, options.length - 1));
+				return Math.max(0, Math.min(next, visible.length - 1));
 			});
 			return;
 		}
@@ -143,7 +160,27 @@ export function SelectMenu({
 					tabIndex={-1}
 					className={`absolute ${align === "right" ? "right-0" : "left-0"} mt-2 ${menuClassName} max-h-72 overflow-y-auto py-1 bg-white rounded-lg shadow-lg border border-gray-200 z-50 animate-dropdown-in`}
 				>
-					{options.map((option, index) => {
+					{searchable && (
+						<div className="sticky top-0 bg-white px-2 pt-1 pb-2 border-b border-gray-100">
+							<input
+								type="search"
+								// biome-ignore lint/a11y/noAutofocus: the menu opened to search it
+								autoFocus
+								value={query}
+								onChange={(e) => {
+									setQuery(e.target.value);
+									setHighlighted(0);
+								}}
+								placeholder={searchPlaceholder}
+								aria-label={searchPlaceholder}
+								className="w-full px-2.5 py-1.5 text-sm text-gray-900 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+							/>
+						</div>
+					)}
+					{visible.length === 0 && (
+						<p className="px-3 py-2 text-sm text-gray-500">No matches</p>
+					)}
+					{visible.map((option, index) => {
 						const isSelected = option.value === value;
 						return (
 							<button

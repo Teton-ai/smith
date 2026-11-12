@@ -105,7 +105,7 @@ export function Modal({
 }
 
 /**
- * Confirmation before skipping a staggered rollout. Shared by Finish now and
+ * Confirmation before skipping a staggered rollout. Shared by Rush rollout and
  * the Deploy to Selected opt-out so both warn the same way.
  */
 export function EmergencyConfirmModal({

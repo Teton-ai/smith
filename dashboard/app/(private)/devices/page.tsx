@@ -29,6 +29,11 @@ import {
 	getCommandErrorMessage,
 	useCommandForm,
 } from "@/app/(private)/commands/shared";
+import {
+	PackageChanges,
+	PreflightNotice,
+	usePreflight,
+} from "@/app/(private)/deployments/shared";
 import LabelAutocomplete from "@/app/components/LabelAutocomplete";
 import { EmergencyConfirmModal, Modal } from "@/app/components/modal";
 import NetworkQualityIndicator from "@/app/components/NetworkQualityIndicator";
@@ -569,11 +574,12 @@ const DevicesPage = () => {
 	const { mutate: updateDevicesRelease, isPending: isDeploying } =
 		useUpdateDevicesTargetRelease({
 			mutation: {
-				onSuccess: () => {
+				onSuccess: ({ deployment_id }) => {
 					setShowBulkDeployModal(false);
 					setShowAllAtOnceConfirm(false);
 					setSelectedDeviceIds(new Set());
 					setSelectedReleaseId(undefined);
+					if (deployment_id) navigate(`/deployments/${deployment_id}`);
 				},
 				onError: (error) => {
 					console.error("Failed to deploy:", error);
@@ -602,11 +608,18 @@ const DevicesPage = () => {
 	const bulkDeployStaggered = staggerPolicy?.staggered ?? false;
 	const deployingStaggered = isDeploying && bulkDeployMode === "staggered";
 	// Wait for the policy so the stagger notice is on screen before anyone submits.
+	const bulkDeployCheck = usePreflight(
+		selectedReleaseId,
+		{ device_ids: Array.from(selectedDeviceIds), publish: false },
+		showBulkDeployModal,
+	);
 	const bulkDeployDisabled =
 		!selectedReleaseId ||
 		hasMixedDistributions ||
 		distributionIds.size === 0 ||
-		staggerPolicyLoading;
+		staggerPolicyLoading ||
+		bulkDeployCheck.isLoading ||
+		bulkDeployCheck.data?.allowed === false;
 
 	// The variant actually dispatched, captured at submit time: `onError` fires
 	// after the form may have been edited (or reset by closing the modal), so
@@ -1822,6 +1835,16 @@ const DevicesPage = () => {
 								? ` All ${selectedDeviceIds.size} devices will be allowed to update within ${staggerPolicy.window_minutes} minutes.`
 								: ` These ${selectedDeviceIds.size} devices will update right away.`}
 						</p>
+					</div>
+				)}
+
+				{selectedReleaseId && bulkDeployCheck.data && (
+					<div className="mb-4 space-y-2">
+						<h4 className="text-sm font-medium text-gray-900">What changes</h4>
+						<PackageChanges changes={bulkDeployCheck.data.changes} />
+						<PreflightNotice
+							blockedReason={bulkDeployCheck.data.blocked_reason}
+						/>
 					</div>
 				)}
 
