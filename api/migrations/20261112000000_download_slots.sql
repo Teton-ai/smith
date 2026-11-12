@@ -12,10 +12,3 @@ ALTER TABLE ip_address
 CREATE INDEX device_download_slot_ip_idx
     ON device (ip_address_id)
     WHERE download_slot_release_id IS NOT NULL;
-
--- Devices already told to download keep their target through the deploy.
-UPDATE device
-SET download_slot_release_id = target_release_id, download_slot_at = NOW()
-WHERE release_id IS DISTINCT FROM target_release_id
-  AND target_release_id IS NOT NULL
-  AND (target_release_eligible_at IS NULL OR target_release_eligible_at <= NOW());
