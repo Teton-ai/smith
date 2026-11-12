@@ -35,15 +35,22 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn responses_carry_the_header() {
+    async fn responses_carry_the_header() -> anyhow::Result<()> {
         let app = Router::new()
             .route("/", get(|| async { "ok" }))
             .layer(middleware::from_fn(record));
         let response = app
-            .oneshot(Request::builder().uri("/").body(Body::empty()).unwrap())
-            .await
-            .unwrap();
-        let header = response.headers()["server-timing"].to_str().unwrap();
-        assert!(header.starts_with("app;dur="), "{header}");
+            .oneshot(Request::builder().uri("/").body(Body::empty())?)
+            .await?;
+        let header = response
+            .headers()
+            .get("server-timing")
+            .map(|value| value.to_str())
+            .transpose()?;
+        assert!(
+            header.is_some_and(|header| header.starts_with("app;dur=")),
+            "{header:?}"
+        );
+        Ok(())
     }
 }
