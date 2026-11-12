@@ -1,0 +1,40 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT\n            COUNT(*) AS \"total!\",\n            COUNT(*) FILTER (WHERE d.release_id = dep.release_id) AS \"running!\",\n            COUNT(*) FILTER (\n                WHERE d.target_release_id = dep.release_id\n                  AND d.release_id IS DISTINCT FROM dep.release_id\n            ) AS \"waiting!\",\n            COUNT(*) FILTER (WHERE s.unhealthy) AS \"unhealthy!\"\n           FROM deployment_device_state s\n           JOIN deployment dep ON dep.id = s.deployment_id\n           JOIN device d ON d.id = s.device_id\n           WHERE s.deployment_id = $1 AND s.wave = 0",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "total!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "running!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 2,
+        "name": "waiting!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 3,
+        "name": "unhealthy!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4"
+      ]
+    },
+    "nullable": [
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "0340c6495c91fa46fd1e9619905e4a8d271e56833d12c48b8ed4d073d252e289"
+}

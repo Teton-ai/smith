@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id FROM deployment WHERE release_id = $1 AND status NOT IN ('canceled', 'failed')",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "7d8aa1a6749feb4be47eb009ea9c25429d47b09d8682c1d6cac17e271246258f"
+}

@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE deployment SET pilot_device_labels = $2, pilot_device_ids = $3 WHERE id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "TextArray",
+        "Int4Array"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "1bf5547b28a02aebd8dcea21206b4e5bee8d9a93661ef21fd83806d10cbbe189"
+}

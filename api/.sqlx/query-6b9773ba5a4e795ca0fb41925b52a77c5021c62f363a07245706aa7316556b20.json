@@ -1,0 +1,40 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT d.release_id, d.kind, d.base_release_id, r.yanked\n         FROM deployment d JOIN release r ON r.id = d.release_id\n         WHERE d.id = $1 FOR UPDATE OF d",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "release_id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "kind",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "base_release_id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 3,
+        "name": "yanked",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      false
+    ]
+  },
+  "hash": "6b9773ba5a4e795ca0fb41925b52a77c5021c62f363a07245706aa7316556b20"
+}

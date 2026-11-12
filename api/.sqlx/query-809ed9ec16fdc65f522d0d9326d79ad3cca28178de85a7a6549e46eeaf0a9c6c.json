@@ -1,0 +1,86 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT\n            s.device_id AS \"device_id!\",\n            d.serial_number,\n            (SELECT COALESCE(JSONB_OBJECT_AGG(l.name, dl.value), '{}'::jsonb)\n             FROM device_label dl JOIN label l ON l.id = dl.label_id\n             WHERE dl.device_id = d.id) AS \"labels!: SqlxJson<HashMap<String, String>>\",\n\n            s.wave AS \"wave!\",\n            s.state AS \"state!\",\n            ARRAY(\n                SELECT rs.service_name FROM release_services rs\n                WHERE s.unhealthy\n                  AND rs.release_id = dep.release_id\n                  AND rs.watchdog_sec IS NOT NULL\n                  AND NOT EXISTS (\n                      SELECT 1 FROM device_service_status dss\n                      WHERE dss.device_id = d.id\n                        AND dss.release_service_id = rs.id\n                        AND dss.active_state = 'active'\n                  )\n                ORDER BY rs.service_name\n            ) AS \"unhealthy_services!\",\n            from_release.version AS \"from_version?\",\n            current_release.version AS \"current_version?\",\n            s.opens_at AS \"opens_at!\",\n            s.reached_at,\n            d.last_ping\n        FROM deployment_device_state s\n        JOIN deployment dep ON dep.id = s.deployment_id\n        JOIN device d ON d.id = s.device_id\n        LEFT JOIN release from_release ON from_release.id = s.from_release_id\n        LEFT JOIN release current_release ON current_release.id = d.release_id\n        WHERE s.deployment_id = $1\n          AND ($2::text IS NULL OR s.state = $2 OR ($2 = 'unhealthy' AND s.unhealthy))\n          AND ($3::int IS NULL OR s.wave = $3)\n          AND ($4::text IS NULL OR d.serial_number ILIKE '%' || $4 || '%')\n        ORDER BY s.wave, d.serial_number\n        LIMIT $5",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "device_id!",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "serial_number",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "labels!: SqlxJson<HashMap<String, String>>",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 3,
+        "name": "wave!",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 4,
+        "name": "state!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "unhealthy_services!",
+        "type_info": "TextArray"
+      },
+      {
+        "ordinal": 6,
+        "name": "from_version?",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "current_version?",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "opens_at!",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 9,
+        "name": "reached_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 10,
+        "name": "last_ping",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Text",
+        "Int4",
+        "Text",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      true,
+      false,
+      null,
+      true,
+      true,
+      null,
+      false,
+      false,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "809ed9ec16fdc65f522d0d9326d79ad3cca28178de85a7a6549e46eeaf0a9c6c"
+}

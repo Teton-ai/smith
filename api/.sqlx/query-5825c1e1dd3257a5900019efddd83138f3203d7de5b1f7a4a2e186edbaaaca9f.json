@@ -1,0 +1,70 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id, release_id, status AS \"status!: DeploymentStatus\", kind,\n                  base_release_id, promoted_at, paused_at\n           FROM deployment WHERE id = $1 FOR UPDATE",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "release_id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 2,
+        "name": "status!: DeploymentStatus",
+        "type_info": {
+          "Custom": {
+            "name": "deployment_status",
+            "kind": {
+              "Enum": [
+                "in_progress",
+                "failed",
+                "canceled",
+                "done"
+              ]
+            }
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "kind",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "base_release_id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 5,
+        "name": "promoted_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 6,
+        "name": "paused_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "5825c1e1dd3257a5900019efddd83138f3203d7de5b1f7a4a2e186edbaaaca9f"
+}

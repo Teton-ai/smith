@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "WITH next AS (\n             SELECT COALESCE(MAX(wave) FILTER (WHERE opens_at <= NOW()), 0) + 1 AS wave\n             FROM deployment_devices WHERE deployment_id = $1 AND wave > 0\n         )\n         UPDATE deployment_devices dd SET wave = next.wave, opens_at = NOW()\n         FROM next, deployment_device_state s\n         WHERE dd.deployment_id = $1 AND s.deployment_id = dd.deployment_id\n           AND s.device_id = dd.device_id AND s.state = 'scheduled'\n         RETURNING dd.wave",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "wave",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "3640e2e2fa31eff40f7f038f7a5d4800401ef75a2e5be976db7d919c5af4bce7"
+}

@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE device d SET target_release_eligible_at = GREATEST(dd.opens_at, NOW())\n         FROM deployment_devices dd\n         WHERE dd.deployment_id = $1 AND dd.device_id = d.id\n           AND d.target_release_id = $2\n           AND d.release_id IS DISTINCT FROM $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "e7133f62063b3d623f12f5d8678fad39cfe1d640cdeda25b0b73a7a6faec4d03"
+}

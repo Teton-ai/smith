@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT d.release_id, COUNT(*) AS \"count!\" FROM device d\n                   JOIN release r ON r.id = d.release_id\n                   WHERE r.distribution_id = $1 AND d.follow_latest AND NOT d.archived\n                     AND NOT (d.release_id = ANY($2)\n                              OR COALESCE(d.target_release_id = ANY($2), false))\n                   GROUP BY d.release_id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "release_id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "count!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Int4Array"
+      ]
+    },
+    "nullable": [
+      true,
+      null
+    ]
+  },
+  "hash": "95e0814fe543b5604234f7e4d58259e2a042430e86a1803598a1c62efcdee12a"
+}

@@ -1,0 +1,60 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        INSERT INTO deployment (release_id, status, base_release_id, created_by)\n        VALUES ($1, 'in_progress', $2, $3)\n        ON CONFLICT (release_id) WHERE status = 'in_progress' DO NOTHING\n        RETURNING id, release_id, status AS \"status!: DeploymentStatus\", updated_at, created_at\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "release_id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 2,
+        "name": "status!: DeploymentStatus",
+        "type_info": {
+          "Custom": {
+            "name": "deployment_status",
+            "kind": {
+              "Enum": [
+                "in_progress",
+                "failed",
+                "canceled",
+                "done"
+              ]
+            }
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 4,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Int4",
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "f107b8930dac0fdff7641af8a1b2664666b386932c4f6d4784e6c5e3b8871ad1"
+}

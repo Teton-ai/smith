@@ -1,0 +1,40 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT r.distribution_id, r.release_candidate, d.pilot_device_labels, d.pilot_device_ids\n         FROM deployment d JOIN release r ON r.id = d.release_id\n         WHERE d.id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "distribution_id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "release_candidate",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 2,
+        "name": "pilot_device_labels",
+        "type_info": "TextArray"
+      },
+      {
+        "ordinal": 3,
+        "name": "pilot_device_ids",
+        "type_info": "Int4Array"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "c1024cfc00220efa09173a88f213427e6fb25da544ea930b9b51e24139a00094"
+}

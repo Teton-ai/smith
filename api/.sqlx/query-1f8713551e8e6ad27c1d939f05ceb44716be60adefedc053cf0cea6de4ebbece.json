@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id FROM device\n                     WHERE device.release_id IN (\n                        SELECT id FROM release WHERE distribution_id = $1\n                     )\n                     AND device.follow_latest\n                     AND NOT device.archived\n                     AND NOT (device.release_id = ANY($2)\n                              OR COALESCE(device.target_release_id = ANY($2), false))\n                     FOR UPDATE",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Int4Array"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "1f8713551e8e6ad27c1d939f05ceb44716be60adefedc053cf0cea6de4ebbece"
+}

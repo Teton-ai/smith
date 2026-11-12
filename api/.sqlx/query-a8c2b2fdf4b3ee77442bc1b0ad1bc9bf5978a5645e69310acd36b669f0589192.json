@@ -1,0 +1,26 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO deployment\n            (release_id, status, kind, base_release_id, created_by, promoted_at, promoted_by,\n             rolled_back_from, times_out_at)\n         SELECT $1, 'done', 'rollback', d.latest_release_id, $2, NOW(), $2, $3,\n             NOW() + make_interval(mins => $5)\n         FROM distribution d WHERE d.id = $4\n         RETURNING id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Int4",
+        "Int4",
+        "Int4",
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "a8c2b2fdf4b3ee77442bc1b0ad1bc9bf5978a5645e69310acd36b669f0589192"
+}

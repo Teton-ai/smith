@@ -30,12 +30,15 @@ pub struct Deployment {
     pub created_at: chrono::DateTime<chrono::Utc>,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, ToSchema)]
+/// Canaries are always picked automatically. A stable release rolls out to the
+/// fleet and takes no pilot group; a release candidate needs one, by labels or
+/// by devices. A pilot group under 10 devices is deployed to directly.
+#[derive(Serialize, Deserialize, Debug, Clone, Default, ToSchema)]
 pub struct DeploymentRequest {
-    /// Optionally decide which devices go into the canary release with this filter.
-    /// e.g. `canary_device_labels=["label1=a", "label2=b"]`
-    pub canary_device_labels: Option<Vec<String>>,
-    /// Optionally specify exact device IDs for the canary release.
-    /// Cannot be used together with `canary_device_labels`.
-    pub canary_device_ids: Option<Vec<i32>>,
+    /// A release candidate's pilot group: devices with any of these labels,
+    /// e.g. `["env=staging"]`.
+    pub pilot_device_labels: Option<Vec<String>>,
+    /// A release candidate's pilot group: these device IDs. Cannot be used
+    /// together with `pilot_device_labels`.
+    pub pilot_device_ids: Option<Vec<i32>>,
 }

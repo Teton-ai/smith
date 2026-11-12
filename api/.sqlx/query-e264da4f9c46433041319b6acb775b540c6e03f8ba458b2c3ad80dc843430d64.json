@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT release_id, COUNT(*) AS \"count!\" FROM device\n               WHERE id = ANY($1) AND release_id IS NOT NULL\n               GROUP BY release_id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "release_id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "count!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4Array"
+      ]
+    },
+    "nullable": [
+      true,
+      null
+    ]
+  },
+  "hash": "e264da4f9c46433041319b6acb775b540c6e03f8ba458b2c3ad80dc843430d64"
+}

@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE device d SET target_release_eligible_at = NOW()\n         FROM deployment_devices dd\n         WHERE dd.deployment_id = $1 AND dd.device_id = d.id\n           AND d.target_release_id = $2\n           AND d.target_release_eligible_at > NOW()\n           AND d.release_id IS DISTINCT FROM d.target_release_id\n           AND d.archived = false",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "97c1ce340ca6490a7e9cd6ca012da562c6c24ce9bd98d99b36f7c0a667ca9f38"
+}

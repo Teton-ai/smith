@@ -260,6 +260,7 @@ async fn start_main_server(
 
     // An unreachable device cannot report its own absence, so downtime has to be
     // inferred by polling for silence. Runs on its own task, off the request path.
+    deployment::spawn_completion_recorder(state.pg_pool.clone());
     device::spawn_downtime_sweeper(state.pg_pool.clone());
 
     // Staged device files are removed within the hour; S3 lifecycle rules only
@@ -425,8 +426,17 @@ async fn start_main_server(
         .routes(routes!(deployment::route::api_confirm_full_rollout))
         .routes(routes!(deployment::route::api_rollback_release))
         .routes(routes!(deployment::route::api_get_stagger_policy))
-        .routes(routes!(deployment::route::api_finish_now))
-        .routes(routes!(deployment::route::api_get_rollout_progress))
+        .routes(routes!(deployment::route::api_list_deployments))
+        .routes(routes!(deployment::route::api_get_deployment))
+        .routes(routes!(deployment::route::api_list_deployment_devices))
+        .routes(routes!(deployment::route::api_promote_deployment))
+        .routes(routes!(deployment::route::api_pause_deployment))
+        .routes(routes!(deployment::route::api_resume_deployment))
+        .routes(routes!(deployment::route::api_yank_deployment))
+        .routes(routes!(deployment::route::api_rush_rollout))
+        .routes(routes!(deployment::route::api_finalize_deployment))
+        .routes(routes!(deployment::route::api_list_deployment_creators))
+        .routes(routes!(deployment::route::api_deployment_preflight))
         .routes(routes!(
             deployment::route::api_get_deployment_service_health
         ))

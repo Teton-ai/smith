@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT COUNT(*) AS \"count!\"\n               FROM device d\n               JOIN release r ON r.id = d.release_id\n               WHERE r.distribution_id = $1\n                 AND d.last_ping > NOW() - INTERVAL '3 minutes'\n                 AND d.release_id = d.target_release_id\n                 AND d.release_id <> $2\n                 AND d.follow_latest AND NOT d.release_id = ANY($3)",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Int4",
+        "Int4Array"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "5c9b132d771923c93418391f86920424e1a8fb4edcd7730b2191b55a593b1dbe"
+}

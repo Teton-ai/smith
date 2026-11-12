@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE deployment\n         SET times_out_at = times_out_at + GREATEST(NOW() - paused_at, INTERVAL '0'),\n             paused_at = NULL, updated_at = NOW()\n         WHERE id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "92809e40d7c03548f4cab3263664603e8a4e13043135b8388ff86a678d84910e"
+}

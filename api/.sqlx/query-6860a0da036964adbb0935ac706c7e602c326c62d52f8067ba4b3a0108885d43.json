@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT from_release_id, COUNT(*) AS \"count!\" FROM deployment_devices\n                   WHERE deployment_id = $1 AND from_release_id IS NOT NULL\n                   GROUP BY from_release_id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "from_release_id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "count!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4"
+      ]
+    },
+    "nullable": [
+      true,
+      null
+    ]
+  },
+  "hash": "6860a0da036964adbb0935ac706c7e602c326c62d52f8067ba4b3a0108885d43"
+}

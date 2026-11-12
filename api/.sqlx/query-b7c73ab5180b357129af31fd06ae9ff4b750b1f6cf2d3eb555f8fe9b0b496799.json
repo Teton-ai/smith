@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id FROM device WHERE id IN (\n                    SELECT d.id FROM device d\n                    JOIN release r ON r.id = d.release_id\n                    JOIN device_label dl ON dl.device_id = d.id\n                    JOIN label l ON l.id = dl.label_id\n                    WHERE r.distribution_id = $1 AND NOT d.archived\n                      AND l.name || '=' || dl.value = ANY($2)\n                 ) FOR UPDATE",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "TextArray"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "b7c73ab5180b357129af31fd06ae9ff4b750b1f6cf2d3eb555f8fe9b0b496799"
+}

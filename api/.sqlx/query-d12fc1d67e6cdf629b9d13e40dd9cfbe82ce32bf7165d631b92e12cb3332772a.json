@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "WITH frozen AS (\n            UPDATE deployment_devices dd SET\n                outcome = CASE WHEN s.state IN ('updated', 'superseded', 'canceled') THEN s.state ELSE 'timed_out' END,\n                reached_at = CASE WHEN s.state = 'updated' THEN COALESCE(dd.reached_at, now()) ELSE dd.reached_at END\n            FROM deployment_device_state s\n            WHERE dd.deployment_id = $1 AND s.deployment_id = dd.deployment_id\n              AND s.device_id = dd.device_id\n            RETURNING dd.outcome\n        )\n        SELECT COUNT(*) FILTER (WHERE outcome = 'timed_out') AS \"count!\" FROM frozen",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "d12fc1d67e6cdf629b9d13e40dd9cfbe82ce32bf7165d631b92e12cb3332772a"
+}

@@ -1,4 +1,5 @@
 use crate::State;
+use crate::deployment::policy::ensure_can_ship;
 use crate::device::{
     ApplyIntentResponse, ApproveDeviceBody, ConfiguredNetwork, CreateIntentRequest, DeviceHealth,
     DeviceLedgerItem, DeviceLedgerItemPaginated, DeviceNetworkIntent, DeviceRelease, DeviceUptime,
@@ -6,6 +7,7 @@ use crate::device::{
     PatchIntentRequest, RawDevice, SMITHD_SERVICE_NAME, ServiceOutage, UpdateDeviceRelease,
     UpdateDevicesRelease, Variable, WifiScanResult, as_device_id,
 };
+use crate::error::ApiError;
 use crate::event::PublicEvent;
 use crate::handlers::AuthedDevice;
 use crate::middlewares::authorization;
@@ -32,7 +34,7 @@ use sqlx::types::Json as SqlxJson;
 use sqlx::types::chrono::{DateTime, Utc};
 use std::collections::HashMap;
 use tracing::{error, warn};
-use utoipa::IntoParams;
+use utoipa::{IntoParams, ToSchema};
 
 const DEVICE_TAG: &str = "device";
 pub(crate) const DEVICES_TAG: &str = "devices";
@@ -1640,6 +1642,7 @@ pub async fn get_device_release(
     request_body = UpdateDeviceRelease,
     responses(
         (status = 200, description = "Device target release updated successfully"),
+        (status = 403, description = "Your role does not allow this deployment"),
         (status = 404, description = "Release not found"),
         (status = 500, description = "Failed to update device target release", body = String),
     ),
@@ -1653,7 +1656,7 @@ pub async fn update_device_target_release(
     Extension(state): Extension<State>,
     Extension(current_user): Extension<CurrentUser>,
     Json(device_release): Json<UpdateDeviceRelease>,
-) -> axum::response::Result<StatusCode, StatusCode> {
+) -> Result<StatusCode, ApiError> {
     let target_release_id = device_release.target_release_id;
     let releases = sqlx::query!(
         "SELECT COUNT(*) FROM release WHERE id = $1",
@@ -1668,8 +1671,10 @@ pub async fn update_device_target_release(
 
     if releases.count == Some(0) {
         error!("Release {target_release_id} not found");
-        return Err(StatusCode::NOT_FOUND);
+        return Err(StatusCode::NOT_FOUND.into());
     }
+
+    ensure_can_ship(&current_user)?;
 
     sqlx::query!(
         "UPDATE device SET target_release_id = $1, target_release_id_set_at = NOW(), target_release_eligible_at = NULL WHERE id = $2",
@@ -1752,9 +1757,9 @@ pub async fn update_devices_follow_latest(
     Extension(state): Extension<State>,
     Extension(current_user): Extension<CurrentUser>,
     Json(body): Json<FollowLatestRequest>,
-) -> axum::response::Result<Json<FollowLatestUpdated>, StatusCode> {
-    if !authorization::check(current_user, "devices", "write") {
-        return Err(StatusCode::FORBIDDEN);
+) -> Result<Json<FollowLatestUpdated>, ApiError> {
+    if !authorization::check(current_user.clone(), "devices", "write") {
+        return Err(StatusCode::FORBIDDEN.into());
     }
 
     let devices_updated = set_devices_follow_latest(&state.pg_pool, body).await?;
@@ -1766,7 +1771,7 @@ pub async fn update_devices_follow_latest(
 async fn set_devices_follow_latest(
     pool: &sqlx::PgPool,
     body: FollowLatestRequest,
-) -> Result<u64, StatusCode> {
+) -> Result<u64, ApiError> {
     let ids = body.devices.filter(|d| !d.is_empty());
     let labels = body.labels.filter(|l| !l.is_empty());
 
@@ -1813,7 +1818,7 @@ async fn set_devices_follow_latest(
         .await,
         _ => {
             error!("follow-latest requires exactly one of `devices` or `labels`");
-            return Err(StatusCode::BAD_REQUEST);
+            return Err(StatusCode::BAD_REQUEST.into());
         }
     }
     .map_err(|err| {
@@ -1863,7 +1868,14 @@ async fn set_devices_follow_latest(
     Ok(devices_updated)
 }
 
-/// Set the target release of the given devices, bypassing the canary.
+#[derive(serde::Serialize, ToSchema)]
+pub struct SelectedDeployment {
+    /// The deployment to follow, or none if every device was already there.
+    pub deployment_id: Option<i32>,
+}
+
+/// Set the target release of the given devices, bypassing the canary. Recorded as
+/// a deployment, so it can be followed, paused and canceled like any other.
 ///
 /// More than 15 devices are staggered like a full rollout: split into up to 20
 /// buckets opening 5 minutes apart, so a site's devices don't all download at
@@ -1873,7 +1885,8 @@ async fn set_devices_follow_latest(
     path = "/devices/release",
     request_body = UpdateDevicesRelease,
     responses(
-        (status = 200, description = "Devices target release updated successfully"),
+        (status = 200, description = "Devices target release updated successfully", body = SelectedDeployment),
+        (status = 403, description = "Your role does not allow this deployment"),
         (status = 404, description = "Release not found"),
         (status = 500, description = "Failed to update devices target release", body = String),
     ),
@@ -1886,7 +1899,7 @@ pub async fn update_devices_target_release(
     Extension(state): Extension<State>,
     Extension(current_user): Extension<CurrentUser>,
     Json(devices_release): Json<UpdateDevicesRelease>,
-) -> axum::response::Result<StatusCode, StatusCode> {
+) -> Result<Json<SelectedDeployment>, ApiError> {
     let target_release_id = devices_release.target_release_id;
     let release = get_release_by_id(target_release_id, &state.pg_pool)
         .await
@@ -1895,20 +1908,19 @@ pub async fn update_devices_target_release(
             StatusCode::INTERNAL_SERVER_ERROR
         })?;
 
-    if release.is_none() {
+    let Some(target_release) = release else {
         error!("Release {target_release_id} not found");
-        return Err(StatusCode::NOT_FOUND);
-    }
-
-    let target_release = release.unwrap();
+        return Err(StatusCode::NOT_FOUND.into());
+    };
     if target_release.yanked || target_release.draft {
-        return Err(StatusCode::CONFLICT);
+        return Err(StatusCode::CONFLICT.into());
     }
 
     let mut tx = state.pg_pool.begin().await.map_err(|err| {
         error!("Failed to start transaction {err}");
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
+    ensure_can_ship(&current_user)?;
     let retarget = crate::deployment::retarget_selected(
         &mut tx,
         target_release_id,
@@ -1920,18 +1932,15 @@ pub async fn update_devices_target_release(
         error!("Failed to update target release id for devices; {err}");
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
-    let needs_deployment = sqlx::query_scalar!(
-        r#"SELECT EXISTS (
-            SELECT 1 FROM device
-            WHERE id = ANY($1) AND release_id IS DISTINCT FROM $2
-        ) AS "needs_deployment!""#,
-        &devices_release.devices,
-        target_release_id
+    let deployment_id = crate::deployment::record_selected_deployment(
+        &mut tx,
+        target_release_id,
+        &retarget,
+        current_user.user_id,
     )
-    .fetch_one(&mut *tx)
     .await
     .map_err(|err| {
-        error!("Failed to check whether devices need deployment: {err}");
+        error!("Failed to record selected deployment; {err}");
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
     tx.commit().await.map_err(|err| {
@@ -1941,8 +1950,8 @@ pub async fn update_devices_target_release(
 
     // Assigning the installed release does not deploy anything. This also
     // covers clients acting on stale state after approval filled in the target.
-    if !needs_deployment {
-        return Ok(StatusCode::OK);
+    if retarget.plan.device_ids.is_empty() {
+        return Ok(Json(SelectedDeployment { deployment_id }));
     }
 
     // Send Slack alert for direct bulk device deployment
@@ -1987,7 +1996,7 @@ pub async fn update_devices_target_release(
         send_slack_notification(deployment_slack_hook_url, message).await;
     }
 
-    Ok(StatusCode::OK)
+    Ok(Json(SelectedDeployment { deployment_id }))
 }
 
 #[utoipa::path(
@@ -2769,6 +2778,7 @@ async fn visible_approver_email(
     request_body(content = Option<ApproveDeviceBody>, content_type = "application/json"),
     responses(
         (status = 200, description = "Device approved successfully", body = bool),
+        (status = 403, description = "Your role does not allow this deployment"),
         (status = 404, description = "Device or release not found"),
         (status = 500, description = "Failed to approve device", body = String),
     ),
@@ -2782,7 +2792,7 @@ pub async fn approve_device(
     Path(device_id): Path<i32>,
     Extension(state): Extension<State>,
     body: Option<Json<ApproveDeviceBody>>,
-) -> axum::response::Result<Json<bool>, StatusCode> {
+) -> Result<Json<bool>, ApiError> {
     let target_release_id = body.and_then(|b| b.target_release_id);
 
     if let Some(release_id) = target_release_id {
@@ -2796,8 +2806,10 @@ pub async fn approve_device(
 
         if releases.count == Some(0) {
             error!("Release {release_id} not found");
-            return Err(StatusCode::NOT_FOUND);
+            return Err(StatusCode::NOT_FOUND.into());
         }
+
+        ensure_can_ship(&current_user)?;
     }
 
     let mut tx = state.pg_pool.begin().await.map_err(|err| {
@@ -4839,6 +4851,7 @@ mod command_links {
 mod follow_latest_updates {
     use super::{FollowLatestRequest, set_devices_follow_latest};
     use crate::deployment::tests::insert_releases;
+    use crate::error::ApiError;
     use chrono::{DateTime, Utc};
     use sqlx::PgPool;
 
@@ -4886,8 +4899,7 @@ mod follow_latest_updates {
                 follow_latest: true,
             },
         )
-        .await
-        .map_err(|status| anyhow::anyhow!("unexpected status: {status}"))?;
+        .await?;
         assert_eq!(updated, 1);
         let (actual_following, actual_target, assigned, eligible): (bool, Option<i32>, Option<DateTime<Utc>>, Option<DateTime<Utc>>) =
             sqlx::query_as("SELECT follow_latest, target_release_id, target_release_id_set_at, target_release_eligible_at FROM device WHERE id = $1")
@@ -4970,7 +4982,12 @@ mod follow_latest_updates {
             },
         )
         .await;
-        assert_eq!(result, Err(axum::http::StatusCode::INTERNAL_SERVER_ERROR));
+        assert!(matches!(
+            result,
+            Err(ApiError::Status(
+                axum::http::StatusCode::INTERNAL_SERVER_ERROR
+            ))
+        ));
         let state: (bool, Option<i32>) =
             sqlx::query_as("SELECT follow_latest, target_release_id FROM device WHERE id = $1")
                 .bind(id)

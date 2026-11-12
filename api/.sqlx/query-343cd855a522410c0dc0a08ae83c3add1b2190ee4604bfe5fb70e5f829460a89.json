@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE deployment_devices dd\n         SET opens_at = dd.opens_at + (NOW() - dep.paused_at)\n         FROM deployment dep\n         WHERE dep.id = dd.deployment_id AND dep.id = $1 AND dd.opens_at > dep.paused_at",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "343cd855a522410c0dc0a08ae83c3add1b2190ee4604bfe5fb70e5f829460a89"
+}

@@ -1,4 +1,7 @@
 use crate::State;
+use crate::deployment::policy::ensure_can_ship;
+use crate::deployment::{cancel_active_for_release, record_yanked};
+use crate::error::ApiError;
 use crate::package::{Package, extract_services_from_deb};
 use crate::release::{Release, get_release_by_id};
 use crate::storage::Storage;
@@ -99,6 +102,7 @@ pub async fn get_release(
     responses(
         (status = StatusCode::NO_CONTENT, description = "Release updated successfully"),
         (status = StatusCode::NOT_FOUND, description = "Release not found"),
+        (status = StatusCode::FORBIDDEN, description = "Your role does not allow this deployment"),
         (status = StatusCode::CONFLICT, description = "Cannot mark a draft, yanked or release candidate as LTS"),
         (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to update release"),
     ),
@@ -110,13 +114,17 @@ pub async fn get_release(
 pub async fn update_release(
     Path(release_id): Path<i32>,
     Extension(state): Extension<State>,
+    Extension(current_user): Extension<CurrentUser>,
     Json(update_release): Json<UpdateRelease>,
-) -> axum::response::Result<StatusCode, StatusCode> {
+) -> Result<StatusCode, ApiError> {
     let mut tx = state.pg_pool.begin().await.map_err(|err| {
         error!("Failed to start transaction {err}");
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
     if let Some(draft) = update_release.draft {
+        if !draft {
+            ensure_can_ship(&current_user)?;
+        }
         sqlx::query!(
             "UPDATE release SET draft = $1 WHERE id = $2",
             draft,
@@ -130,11 +138,24 @@ pub async fn update_release(
         })?;
     }
     if let Some(yanked) = update_release.yanked {
+        // Yanking cancels the release's deployments, so it takes the same right
+        // as the deployment controls.
+        ensure_can_ship(&current_user)?;
         let reason = update_release
             .yanked_reason
             .as_deref()
             .map(str::trim)
             .filter(|r| !r.is_empty());
+        let was_yanked = sqlx::query_scalar!(
+            "SELECT yanked FROM release WHERE id = $1 FOR UPDATE",
+            release_id
+        )
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(|err| {
+            error!("Failed to read release: {err}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
         // Re-yanking keeps the original timestamp, and un-yanking clears both
         // so a stale reason never sits next to a live release.
         sqlx::query!(
@@ -153,6 +174,27 @@ pub async fn update_release(
             error!("Failed to update release: {err}");
             StatusCode::INTERNAL_SERVER_ERROR
         })?;
+        if yanked && !was_yanked {
+            record_yanked(&mut tx, release_id, current_user.user_id, reason)
+                .await
+                .map_err(|err| {
+                    error!("Failed to record the yank: {err}");
+                    StatusCode::INTERNAL_SERVER_ERROR
+                })?;
+        }
+        if yanked {
+            cancel_active_for_release(
+                &mut tx,
+                release_id,
+                current_user.user_id,
+                "The release was yanked",
+            )
+            .await
+            .map_err(|err| {
+                error!("Failed to cancel deployments of yanked release: {err}");
+                StatusCode::INTERNAL_SERVER_ERROR
+            })?;
+        }
     }
     if let Some(lts) = update_release.lts {
         // Read back inside the transaction so the check sees any draft/yanked
@@ -170,7 +212,7 @@ pub async fn update_release(
 
         let Some(current) = current else {
             error!("Release {release_id} not found");
-            return Err(StatusCode::NOT_FOUND);
+            return Err(StatusCode::NOT_FOUND.into());
         };
 
         // A draft was never published, an RC is by definition not fleet-wide
@@ -180,7 +222,7 @@ pub async fn update_release(
             error!(
                 "Release {release_id} cannot be marked LTS while draft, yanked or a release candidate"
             );
-            return Err(StatusCode::CONFLICT);
+            return Err(StatusCode::CONFLICT.into());
         }
 
         // COALESCE keeps the original decision timestamp when a release that is
@@ -674,6 +716,7 @@ pub struct PromoteReleaseRequest {
     responses(
         (status = StatusCode::CREATED, description = "New release created from RC", body = i32),
         (status = StatusCode::BAD_REQUEST, description = "Release is not a release candidate"),
+        (status = StatusCode::FORBIDDEN, description = "Your role does not allow this deployment"),
         (status = StatusCode::NOT_FOUND, description = "Release not found"),
         (status = StatusCode::CONFLICT, description = "Release is yanked"),
         (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to promote release"),
@@ -688,7 +731,7 @@ pub async fn promote_release(
     Extension(state): Extension<State>,
     Extension(current_user): Extension<CurrentUser>,
     Json(req): Json<PromoteReleaseRequest>,
-) -> axum::response::Result<(StatusCode, Json<i32>), StatusCode> {
+) -> Result<(StatusCode, Json<i32>), ApiError> {
     let source = get_release_by_id(release_id, &state.pg_pool)
         .await
         .map_err(|err| {
@@ -702,17 +745,19 @@ pub async fn promote_release(
 
     if !source.release_candidate {
         error!("Release {release_id} is not a release candidate");
-        return Err(StatusCode::BAD_REQUEST);
+        return Err(StatusCode::BAD_REQUEST.into());
     }
     if source.yanked {
         error!("Release {release_id} is yanked");
-        return Err(StatusCode::CONFLICT);
+        return Err(StatusCode::CONFLICT.into());
     }
 
     let mut tx = state.pg_pool.begin().await.map_err(|err| {
         error!("Failed to start transaction: {err}");
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
+
+    ensure_can_ship(&current_user)?;
 
     // Create a new non-RC release with the same distribution
     let new_release = sqlx::query!(
@@ -762,4 +807,52 @@ pub async fn promote_release(
     })?;
 
     Ok((StatusCode::CREATED, Json(new_release.id)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::update_release;
+    use crate::error::ApiError;
+    use crate::user::CurrentUser;
+    use axum::extract::Path;
+    use axum::{Extension, Json};
+    use models::release::UpdateRelease;
+    use sqlx::PgPool;
+
+    #[sqlx::test]
+    #[ignore = "needs the compose Postgres; run with --test-threads=1"]
+    async fn yanking_needs_the_right_to_ship(pool: PgPool) -> anyhow::Result<()> {
+        let state = crate::smith::uploads::integration_tests::test_state(pool.clone())?;
+        let [release] = crate::deployment::tests::insert_releases(&pool).await?;
+        let user_id: i32 = sqlx::query_scalar(
+            "INSERT INTO auth.users (auth0_user_id) VALUES (gen_random_uuid()::text) RETURNING id",
+        )
+        .fetch_one(&pool)
+        .await?;
+        let yank = || {
+            Json(UpdateRelease {
+                draft: None,
+                yanked: Some(true),
+                yanked_reason: None,
+                lts: None,
+            })
+        };
+
+        let reader = CurrentUser::for_tests(user_id, &[("devices", "read")]);
+        let refused = update_release(
+            Path(release),
+            Extension(state.clone()),
+            Extension(reader),
+            yank(),
+        )
+        .await;
+        assert!(
+            matches!(refused, Err(ApiError::Forbidden(_))),
+            "{refused:?}"
+        );
+
+        let writer = CurrentUser::for_tests(user_id, &[("devices", "write")]);
+        update_release(Path(release), Extension(state), Extension(writer), yank()).await?;
+        Ok(())
+    }
 }

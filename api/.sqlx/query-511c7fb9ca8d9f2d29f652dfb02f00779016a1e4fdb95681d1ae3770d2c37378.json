@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT COUNT(*) AS \"count!\" FROM deployment_device_state\n           WHERE deployment_id = $1 AND state IN ('scheduled', 'updating')",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "511c7fb9ca8d9f2d29f652dfb02f00779016a1e4fdb95681d1ae3770d2c37378"
+}

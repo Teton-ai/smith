@@ -127,8 +127,8 @@ async fn deploy_release(
     api.deploy_release(
         release_number.clone(),
         canary_device_labels.map(|l| DeploymentRequest {
-            canary_device_labels: Some(l),
-            canary_device_ids: None,
+            pilot_device_labels: Some(l),
+            pilot_device_ids: None,
         }),
     )
     .await?;

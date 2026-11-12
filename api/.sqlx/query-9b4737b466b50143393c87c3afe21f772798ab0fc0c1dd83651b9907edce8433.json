@@ -1,0 +1,37 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT\n            COUNT(*) FILTER (\n                WHERE d.release_id IS DISTINCT FROM $1\n                AND ($3::int[] IS NOT NULL OR (d.follow_latest AND NOT (\n                    d.release_id = ANY($4) OR COALESCE(d.target_release_id = ANY($4), false)\n                )))\n            ) AS \"devices_to_move!\",\n            COUNT(*) FILTER (WHERE $3::int[] IS NULL AND NOT d.follow_latest) AS \"pinned_devices!\",\n            COUNT(*) FILTER (\n                WHERE $3::int[] IS NULL AND d.follow_latest\n                AND (d.release_id = ANY($4) OR COALESCE(d.target_release_id = ANY($4), false))\n            ) AS \"on_newer_candidate!\"\n           FROM device d\n           JOIN release r ON r.id = d.release_id\n           WHERE NOT d.archived\n             AND (\n                ($3::int[] IS NULL AND r.distribution_id = $2)\n                OR d.id = ANY($3::int[])\n             )",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "devices_to_move!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "pinned_devices!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 2,
+        "name": "on_newer_candidate!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Int4",
+        "Int4Array",
+        "Int4Array"
+      ]
+    },
+    "nullable": [
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "9b4737b466b50143393c87c3afe21f772798ab0fc0c1dd83651b9907edce8433"
+}

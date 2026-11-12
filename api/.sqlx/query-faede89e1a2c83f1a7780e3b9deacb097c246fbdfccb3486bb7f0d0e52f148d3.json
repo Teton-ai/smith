@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT pilot_device_labels, pilot_device_ids FROM deployment\n                 WHERE id = $1 AND release_id = $2",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "pilot_device_labels",
+        "type_info": "TextArray"
+      },
+      {
+        "ordinal": 1,
+        "name": "pilot_device_ids",
+        "type_info": "Int4Array"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Int4"
+      ]
+    },
+    "nullable": [
+      true,
+      true
+    ]
+  },
+  "hash": "faede89e1a2c83f1a7780e3b9deacb097c246fbdfccb3486bb7f0d0e52f148d3"
+}

@@ -35,8 +35,10 @@ use tracing::error;
 
 const INSTRUCTIONS: &str = "Smith manages a fleet of Linux devices. Devices can be referred to by \
 numeric id or serial number. Releases belong to a distribution; the usual flow is draft_release, \
-publish_release, deploy_release (canary devices first), get_deployment to watch it, then \
-confirm_full_rollout, which lets devices update in staggered groups over up to 95 minutes. Device commands are queued and run when the device next checks in: tools \
+publish_release, deploy_release (automatically picked canary devices first), get_deployment to \
+watch it, then confirm_full_rollout, which lets devices update in staggered groups over up to 95 \
+minutes. A release candidate goes to a pilot group given by labels or device ids instead of the \
+fleet. Publishing and deploying require the devices:write role permission. Device commands are queued and run when the device next checks in: tools \
 that queue commands return a bundle UUID, and get_command_results fetches the output later.";
 
 /// Long polls hold an HTTP request open; stay under typical load balancer idle timeouts.
@@ -160,10 +162,10 @@ pub struct PromoteParams {
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct DeployParams {
     pub release_id: i32,
-    /// Pick canary devices by label (`key=value`). Cannot be combined with canary_device_ids.
-    pub canary_device_labels: Option<Vec<String>>,
-    /// Pick exact canary devices by id. Cannot be combined with canary_device_labels.
-    pub canary_device_ids: Option<Vec<i32>>,
+    /// A release candidate's pilot group: devices with any of these labels (`key=value`). A release candidate needs this or pilot_device_ids; a stable release takes neither.
+    pub pilot_device_labels: Option<Vec<String>>,
+    /// A release candidate's pilot group: these device IDs. Cannot be combined with pilot_device_labels.
+    pub pilot_device_ids: Option<Vec<i32>>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -406,8 +408,13 @@ impl SmithMcp {
         idempotent_hint = true,
         open_world_hint = false
     ))]
-    async fn publish_release(&self, Parameters(params): Parameters<ReleaseParams>) -> ToolResult {
+    async fn publish_release(
+        &self,
+        Parameters(params): Parameters<ReleaseParams>,
+        Extension(parts): Extension<Parts>,
+    ) -> ToolResult {
         self.update_release(
+            &parts,
             params.release_id,
             UpdateRelease {
                 draft: Some(false),
@@ -426,8 +433,13 @@ impl SmithMcp {
         idempotent_hint = true,
         open_world_hint = false
     ))]
-    async fn set_release_lts(&self, Parameters(params): Parameters<SetLtsParams>) -> ToolResult {
+    async fn set_release_lts(
+        &self,
+        Parameters(params): Parameters<SetLtsParams>,
+        Extension(parts): Extension<Parts>,
+    ) -> ToolResult {
         self.update_release(
+            &parts,
             params.release_id,
             UpdateRelease {
                 draft: None,
@@ -446,8 +458,13 @@ impl SmithMcp {
         idempotent_hint = true,
         open_world_hint = false
     ))]
-    async fn yank_release(&self, Parameters(params): Parameters<YankParams>) -> ToolResult {
+    async fn yank_release(
+        &self,
+        Parameters(params): Parameters<YankParams>,
+        Extension(parts): Extension<Parts>,
+    ) -> ToolResult {
         self.update_release(
+            &parts,
             params.release_id,
             UpdateRelease {
                 draft: None,
@@ -485,7 +502,7 @@ impl SmithMcp {
         json_result(&release)
     }
 
-    /// Start deploying a release to its canary devices. Devices update on their next check-in; follow up with get_deployment and confirm_full_rollout.
+    /// Start deploying a release. Canaries are picked automatically: for a stable release from the fleet, for a release candidate from its pilot group (required). A pilot group under 10 devices is deployed to directly, with no canary. Devices update on their next check-in; follow up with get_deployment and confirm_full_rollout.
     #[tool(annotations(
         read_only_hint = false,
         destructive_hint = true,
@@ -498,10 +515,10 @@ impl SmithMcp {
         Extension(parts): Extension<Parts>,
     ) -> ToolResult {
         let user = current_user(&parts)?;
-        let request = (params.canary_device_labels.is_some() || params.canary_device_ids.is_some())
+        let request = (params.pilot_device_labels.is_some() || params.pilot_device_ids.is_some())
             .then_some(AxumJson(DeploymentRequest {
-                canary_device_labels: params.canary_device_labels,
-                canary_device_ids: params.canary_device_ids,
+                pilot_device_labels: params.pilot_device_labels,
+                pilot_device_ids: params.pilot_device_ids,
             }));
         let AxumJson(deployment) = call(deployment_route::api_release_deployment(
             Path(params.release_id),
@@ -521,8 +538,9 @@ impl SmithMcp {
             AxumExtension(self.state.clone()),
         ))
         .await?;
-        let (_, AxumJson(devices)) = call(deployment_route::api_get_deployment_devices(
-            Path(params.release_id),
+        let AxumJson(devices) = call(deployment_route::api_list_deployment_devices(
+            Path(deployment.id),
+            Query(deployment_route::DeploymentDeviceParams::default()),
             AxumExtension(self.state.clone()),
         ))
         .await?;
@@ -538,8 +556,9 @@ impl SmithMcp {
                 json!({
                     "device_id": device.device_id,
                     "serial_number": device.serial_number,
-                    "updated": device.release_id == Some(params.release_id),
-                    "release_id": device.release_id,
+                    "wave": device.wave,
+                    "state": device.state,
+                    "current_version": device.current_version,
                     "last_ping": device.last_ping,
                 })
             })
@@ -557,7 +576,7 @@ impl SmithMcp {
         }))
     }
 
-    /// Roll a release out to the whole fleet once its canary devices are healthy. Devices are released in staggered groups over up to 95 minutes, so they don't all update at once.
+    /// Roll a release out once its canary devices are healthy: a stable release to the whole fleet, a release candidate to the pilot group (the labels or devices it was deployed with). Devices are released in staggered groups over up to 95 minutes, so they don't all update at once.
     #[tool(annotations(
         read_only_hint = false,
         destructive_hint = true,
@@ -570,8 +589,13 @@ impl SmithMcp {
         Extension(parts): Extension<Parts>,
     ) -> ToolResult {
         let user = current_user(&parts)?;
-        let (_, AxumJson(deployment)) = call(deployment_route::api_confirm_full_rollout(
+        let (_, AxumJson(latest)) = call(deployment_route::api_get_release_deployment(
             Path(params.release_id),
+            AxumExtension(self.state.clone()),
+        ))
+        .await?;
+        let AxumJson(deployment) = call(deployment_route::api_promote_deployment(
+            Path(latest.id),
             AxumExtension(self.state.clone()),
             AxumExtension(user),
         ))
@@ -707,10 +731,17 @@ impl SmithMcp {
         Ok(release)
     }
 
-    async fn update_release(&self, release_id: i32, update: UpdateRelease) -> ToolResult {
+    async fn update_release(
+        &self,
+        parts: &Parts,
+        release_id: i32,
+        update: UpdateRelease,
+    ) -> ToolResult {
+        let user = current_user(parts)?;
         call(release_route::update_release(
             Path(release_id),
             AxumExtension(self.state.clone()),
+            AxumExtension(user),
             AxumJson(update),
         ))
         .await?;

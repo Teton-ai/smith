@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT d.id, r.version AS release_version\n           FROM deployment d\n           JOIN release r ON r.id = d.release_id\n           WHERE r.distribution_id = $1\n             AND d.id IS DISTINCT FROM $2\n             AND d.kind = 'staged'\n             AND NOT r.release_candidate\n             AND d.status NOT IN ('canceled', 'failed')\n             AND (\n                d.promoted_at IS NULL\n                OR d.paused_at IS NOT NULL\n                OR EXISTS (\n                    SELECT 1 FROM deployment_device_state s\n                    WHERE s.deployment_id = d.id AND s.state IN ('scheduled', 'updating')\n                )\n             )\n           ORDER BY d.id DESC LIMIT 1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "release_version",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "5fd8c61e6dcbfd00ad73fbf1878e7c69c774fdada66409a3e81ab3a61e5d0ef3"
+}

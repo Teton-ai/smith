@@ -1,0 +1,299 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT\n            d.id, d.kind, d.release_id, d.status AS \"status!: DeploymentStatus\",\n            r.version AS release_version, r.release_candidate, r.yanked AS release_yanked,\n            rolled_back_from.version AS \"rolled_back_from_version?\",\n            COALESCE(d.id = (\n                SELECT MAX(brought.id) FROM deployment brought\n                WHERE brought.release_id = dist.latest_release_id\n                  AND brought.kind IN ('staged', 'rollback')\n                  AND brought.promoted_at IS NOT NULL\n                  AND brought.status <> 'canceled'\n            ), false) AS \"is_latest!\",\n            r.distribution_id, dist.name AS distribution_name,\n            dist.architecture AS distribution_architecture,\n            d.base_release_id, base.version AS \"base_version?\",\n            d.created_at, creator.email AS \"created_by?\", d.created_by AS created_by_id,\n            d.promoted_at, promoter.email AS \"promoted_by?\",\n            d.paused_at, d.times_out_at, d.completed_at, d.updated_at,\n            COALESCE(c.total, 0) AS \"total!\",\n            COALESCE(c.updated, 0) AS \"updated!\",\n            COALESCE(c.updating, 0) AS \"updating!\",\n            COALESCE(c.scheduled, 0) AS \"scheduled!\",\n            COALESCE(c.held, 0) AS \"held!\",\n            COALESCE(c.offline, 0) AS \"offline!\",\n            COALESCE(c.timed_out, 0) AS \"timed_out!\",\n            COALESCE(c.superseded, 0) AS \"superseded!\",\n            COALESCE(c.canceled, 0) AS \"canceled!\",\n            COALESCE(c.unhealthy, 0) AS \"unhealthy!\",\n            COALESCE(c.canary_total, 0) AS \"canary_total!\",\n            COALESCE(c.canary_updated, 0) AS \"canary_updated!\",\n            COALESCE(c.canary_updating, 0) AS \"canary_updating!\",\n            COALESCE(c.canary_held, 0) AS \"canary_held!\",\n            COALESCE(c.canary_offline, 0) AS \"canary_offline!\",\n            COALESCE(c.canary_timed_out, 0) AS \"canary_timed_out!\",\n            COALESCE(c.canary_superseded, 0) AS \"canary_superseded!\",\n            COALESCE(c.canary_canceled, 0) AS \"canary_canceled!\",\n            COALESCE(c.canary_unhealthy, 0) AS \"canary_unhealthy!\",\n            c.next_wave_at, c.last_wave_at\n        FROM deployment d\n        JOIN release r ON r.id = d.release_id\n        JOIN distribution dist ON dist.id = r.distribution_id\n        LEFT JOIN release base ON base.id = d.base_release_id\n        LEFT JOIN release rolled_back_from ON rolled_back_from.id = d.rolled_back_from\n        LEFT JOIN auth.users creator ON creator.id = d.created_by\n        LEFT JOIN auth.users promoter ON promoter.id = d.promoted_by\n        LEFT JOIN LATERAL (\n            SELECT\n                COUNT(*) AS total,\n                COUNT(*) FILTER (WHERE s.state = 'updated') AS updated,\n                COUNT(*) FILTER (WHERE s.state = 'updating') AS updating,\n                COUNT(*) FILTER (WHERE s.state = 'scheduled') AS scheduled,\n                COUNT(*) FILTER (WHERE s.state = 'held') AS held,\n                COUNT(*) FILTER (WHERE s.state = 'offline') AS offline,\n                COUNT(*) FILTER (WHERE s.state = 'timed_out') AS timed_out,\n                COUNT(*) FILTER (WHERE s.state = 'superseded') AS superseded,\n                COUNT(*) FILTER (WHERE s.state = 'canceled') AS canceled,\n                COUNT(*) FILTER (WHERE s.unhealthy) AS unhealthy,\n                COUNT(*) FILTER (WHERE s.wave = 0) AS canary_total,\n                COUNT(*) FILTER (WHERE s.wave = 0 AND s.state = 'updated') AS canary_updated,\n                COUNT(*) FILTER (WHERE s.wave = 0 AND s.state = 'updating') AS canary_updating,\n                COUNT(*) FILTER (WHERE s.wave = 0 AND s.state = 'held') AS canary_held,\n                COUNT(*) FILTER (WHERE s.wave = 0 AND s.state = 'offline') AS canary_offline,\n                COUNT(*) FILTER (WHERE s.wave = 0 AND s.state = 'timed_out') AS canary_timed_out,\n                COUNT(*) FILTER (WHERE s.wave = 0 AND s.state = 'superseded') AS canary_superseded,\n                COUNT(*) FILTER (WHERE s.wave = 0 AND s.state = 'canceled') AS canary_canceled,\n                COUNT(*) FILTER (WHERE s.wave = 0 AND s.unhealthy) AS canary_unhealthy,\n                MIN(s.opens_at) FILTER (WHERE s.wave > 0 AND s.opens_at > NOW()) AS next_wave_at,\n                MAX(s.opens_at) FILTER (WHERE s.wave > 0) AS last_wave_at\n            FROM deployment_device_state s\n            WHERE s.deployment_id = d.id\n        ) c ON true\n        WHERE ($1::int IS NULL OR d.id = $1)\n          AND ($2::int IS NULL OR r.distribution_id = $2)\n          AND ($3::int IS NULL OR d.release_id = $3)\n          AND ($5::int IS NULL OR d.rolled_back_from = $5)\n          AND ($6::int IS NULL OR d.created_by = $6)\n          AND ($7::text IS NULL OR d.kind = $7)\n          -- Recorded outcomes are written first, so an unfinished run is one with none.\n          AND ($8::bool IS NULL\n               OR $8 = (d.status NOT IN ('canceled', 'failed') AND d.completed_at IS NULL))\n        ORDER BY d.id DESC\n        LIMIT $4",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "kind",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "release_id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 3,
+        "name": "status!: DeploymentStatus",
+        "type_info": {
+          "Custom": {
+            "name": "deployment_status",
+            "kind": {
+              "Enum": [
+                "in_progress",
+                "failed",
+                "canceled",
+                "done"
+              ]
+            }
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "release_version",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "release_candidate",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 6,
+        "name": "release_yanked",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 7,
+        "name": "rolled_back_from_version?",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "is_latest!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 9,
+        "name": "distribution_id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 10,
+        "name": "distribution_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 11,
+        "name": "distribution_architecture",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 12,
+        "name": "base_release_id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 13,
+        "name": "base_version?",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 14,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 15,
+        "name": "created_by?",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 16,
+        "name": "created_by_id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 17,
+        "name": "promoted_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 18,
+        "name": "promoted_by?",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 19,
+        "name": "paused_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 20,
+        "name": "times_out_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 21,
+        "name": "completed_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 22,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 23,
+        "name": "total!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 24,
+        "name": "updated!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 25,
+        "name": "updating!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 26,
+        "name": "scheduled!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 27,
+        "name": "held!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 28,
+        "name": "offline!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 29,
+        "name": "timed_out!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 30,
+        "name": "superseded!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 31,
+        "name": "canceled!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 32,
+        "name": "unhealthy!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 33,
+        "name": "canary_total!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 34,
+        "name": "canary_updated!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 35,
+        "name": "canary_updating!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 36,
+        "name": "canary_held!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 37,
+        "name": "canary_offline!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 38,
+        "name": "canary_timed_out!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 39,
+        "name": "canary_superseded!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 40,
+        "name": "canary_canceled!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 41,
+        "name": "canary_unhealthy!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 42,
+        "name": "next_wave_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 43,
+        "name": "last_wave_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Int4",
+        "Int4",
+        "Int8",
+        "Int4",
+        "Int4",
+        "Text",
+        "Bool"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      null,
+      false,
+      false,
+      false,
+      true,
+      true,
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      false,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "90d6d20529f4259a9795a62868a9828d3ff5749adbf846a1064e79e1ce3e9853"
+}

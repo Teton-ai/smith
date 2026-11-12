@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE deployment_devices dd SET reached_at = NOW()\n                 FROM deployment dep\n                 WHERE dep.id = dd.deployment_id\n                   AND dep.release_id = $1\n                   AND dd.device_id = $2\n                   AND dd.reached_at IS NULL AND dd.outcome IS NULL",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "a52433b65a51bd79de027825ebb86d088f58dd33c89fa3a0aec579704b021cd6"
+}
