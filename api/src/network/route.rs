@@ -676,12 +676,13 @@ pub async fn start_extended_network_test(
         return Err(StatusCode::CONFLICT);
     }
 
-    let label_filters: Vec<String> = request
-        .label_filter
-        .split(',')
-        .filter(|s| !s.is_empty())
-        .map(|s| s.trim().to_string())
-        .collect();
+    let label_filters = crate::device::normalize_label_selectors(
+        request
+            .label_filter
+            .split(',')
+            .filter(|s| !s.is_empty())
+            .map(str::trim),
+    );
 
     let mut tx = state.pg_pool.begin().await.map_err(|err| {
         error!(error = %err, "Failed to start transaction");
@@ -717,11 +718,10 @@ pub async fn start_extended_network_test(
             r#"
             SELECT DISTINCT d.id, d.serial_number
             FROM device d
-            JOIN device_label dl ON dl.device_id = d.id
-            JOIN label l ON l.id = dl.label_id
+            JOIN effective_device_label dl ON dl.device_id = d.id
             WHERE d.archived = false
               AND d.last_ping > NOW() - INTERVAL '5 minutes'
-              AND l.name || '=' || dl.value = ANY($1)
+              AND dl.name || '=' || dl.value = ANY($1)
             "#,
         )
         .bind(&label_filters)

@@ -81,7 +81,7 @@ pub struct DeviceFilter {
     pub approved: Option<bool>,
     /// Filter by archived status. If None, archived devices are excluded by default.
     pub archived: Option<bool>,
-    /// Filter by labels. Format: key=value. Multiple labels can be provided.
+    /// Filter by labels. Format: key=value, or key for a tag. Multiple labels can be provided.
     #[serde(default)]
     pub labels: Vec<String>,
     /// Filter by online status. If true, only devices online in the last 3 minutes.
@@ -90,7 +90,7 @@ pub struct DeviceFilter {
     pub outdated: Option<bool>,
     /// Filter by minimum minutes since target_release_id was set. Only applies when outdated=true.
     pub outdated_minutes: Option<i64>,
-    /// Exclude devices with these labels. Format: key=value. Used by dashboard.
+    /// Exclude devices with these labels. Format: key=value, or key for a tag. Used by dashboard.
     #[serde(default)]
     pub exclude_labels: Vec<String>,
     /// Maximum number of devices to return. Defaults to 100, max 1000.

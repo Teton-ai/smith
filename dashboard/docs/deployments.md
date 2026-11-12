@@ -165,6 +165,8 @@ Exactly one of `devices` or `labels` must be given. A device must carry **every*
 
 The device listing accepts `follow_latest` as a filter, so you can see what is pinned before and after a bulk move.
 
+Pinned devices also carry the `pinned` tag, a label with only a key, so `pinned` works anywhere a label selector does. It is computed from `follow_latest = false` rather than stored, so it only changes with the pin state. Label updates may restate it or leave it out, but setting or removing it, or calling `DELETE /labels/pinned`, returns `409 Conflict`.
+
 The CLI wraps this by device id: `sm pin` / `sm unpin` take the usual device selection (ids, `-l`, `-s`), and `sm pin --release <id>` sets the target release before pinning. `sm get d --pinned` lists pinned devices.
 
 ## Best practices

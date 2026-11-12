@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT DATE_TRUNC('month', created_on)::date as \"date!\", COUNT(*) as \"count!\"\n        FROM device d\n        WHERE NOT EXISTS (\n            SELECT 1 FROM effective_device_label dl\n            WHERE dl.device_id = d.id\n            AND dl.name || '=' || dl.value = ANY($1)\n        )\n        GROUP BY DATE_TRUNC('month', created_on)\n        ORDER BY DATE_TRUNC('month', created_on)\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "date!",
+        "type_info": "Date"
+      },
+      {
+        "ordinal": 1,
+        "name": "count!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "TextArray"
+      ]
+    },
+    "nullable": [
+      null,
+      null
+    ]
+  },
+  "hash": "b52a9559205657900496edb95110a63c8bd25a176cb6a0c313ff4a0057265eae"
+}

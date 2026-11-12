@@ -362,21 +362,16 @@ pub async fn new_deployment(
         .execute(&mut *tx)
         .await?
     } else if has_labels {
-        let canary_device_labels = request
-            .as_ref()
-            .unwrap()
-            .canary_device_labels
-            .as_ref()
-            .unwrap();
+        let canary_device_labels =
+            crate::device::normalize_label_selectors(labels_opt.into_iter().flatten());
         sqlx::query!(
             r#"
             WITH selected_devices AS (
                 SELECT DISTINCT d.id FROM device d
                 JOIN release r ON d.release_id = r.id
-                LEFT JOIN device_label dl ON dl.device_id = d.id
-                LEFT JOIN label l ON l.id = dl.label_id
+                LEFT JOIN effective_device_label dl ON dl.device_id = d.id
                 WHERE
-                    l.name || '=' || dl.value = ANY($3)
+                    dl.name || '=' || dl.value = ANY($3)
                     AND d.last_ping > NOW() - INTERVAL '3 minutes'
                     AND d.release_id = d.target_release_id
                     AND d.release_id <> $4
@@ -995,11 +990,10 @@ pub async fn get_devices_in_deployment(
                 d.target_release_id,
                 d.last_ping,
                 dd.created_at AS added_at,
-                COALESCE(JSONB_OBJECT_AGG(l.name, dl.value) FILTER (WHERE l.name IS NOT NULL), '{}') as "labels!: SqlxJson<HashMap<String, String>>"
+                COALESCE(JSONB_OBJECT_AGG(dl.name, dl.value) FILTER (WHERE dl.name IS NOT NULL), '{}') as "labels!: SqlxJson<HashMap<String, String>>"
             FROM deployment_devices dd
             JOIN device d ON dd.device_id = d.id
-            LEFT JOIN device_label dl ON dl.device_id = d.id
-            LEFT JOIN label l ON l.id = dl.label_id
+            LEFT JOIN effective_device_label dl ON dl.device_id = d.id
             WHERE dd.deployment_id = $1
             GROUP BY d.id, d.serial_number, d.release_id, d.target_release_id, d.last_ping, dd.created_at
             ORDER BY dd.created_at ASC
