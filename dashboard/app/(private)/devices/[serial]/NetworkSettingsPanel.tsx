@@ -29,9 +29,14 @@ const MS_PER_S = 1_000;
 const S_PER_MIN = 60;
 const S_PER_HOUR = 3_600;
 
-const useDeviceSettings = (serial: string) =>
-	useGetSettingsForDevice(serial, {
-		query: { refetchInterval: POLL_INTERVAL_MS },
+/** Called by device id, not serial: a numeric serial can match another
+ *  device's id (ADR 0006). Waits for the device to resolve. */
+const useDeviceSettings = (device: Device | undefined) =>
+	useGetSettingsForDevice(String(device?.id), {
+		query: {
+			enabled: device?.id !== undefined,
+			refetchInterval: POLL_INTERVAL_MS,
+		},
 	});
 
 const useRefreshDeviceSettings = (
@@ -273,19 +278,13 @@ const describeBgscan = (bgscan: string) => {
 /** Settings the device reports it runs: Realtek driver, roaming,
  *  NetworkManager defaults, time sync and hostname. Read only; editing comes
  *  later. */
-const NetworkSettingsPanel = ({
-	serial,
-	device,
-}: {
-	serial: string;
-	device: Device | undefined;
-}) => {
+const NetworkSettingsPanel = ({ device }: { device: Device | undefined }) => {
 	const {
 		data: settings,
 		isLoading,
 		isError,
 		refetch,
-	} = useDeviceSettings(serial);
+	} = useDeviceSettings(device);
 	const { refresh, isPending, canRefresh } = useRefreshDeviceSettings(
 		device,
 		refetch,
