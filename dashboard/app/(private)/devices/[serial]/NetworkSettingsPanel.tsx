@@ -1,17 +1,11 @@
-import {
-	Badge,
-	type BadgeVariant,
-	Button,
-	InfoRow,
-	Panel,
-	SECTION_THEMES,
-} from "@teton/smith-ui";
+import { Badge, Button, InfoRow, Panel, SECTION_THEMES } from "@teton/smith-ui";
 import { Info, RefreshCw, SlidersHorizontal } from "lucide-react";
 import { type ReactNode, useEffect, useRef } from "react";
 import {
 	type Device,
 	type DeviceSetting,
 	type DeviceSettings,
+	type ReportedSettings,
 	type SettingValues,
 	useGetSettingsForDevice,
 	useIssueCommandsToDevices,
@@ -23,11 +17,13 @@ import {
 	hasUnappliedEdits,
 	hasWantedSettings,
 	isL4t36,
+	isSet,
 	type ManagedField,
 	runningDiffers,
-	type SettingState,
-	SOURCE_LABEL,
-	STATE_LABEL,
+	runningValue,
+	SETTING_LABEL,
+	SOURCE_BADGE,
+	STATE_BADGE,
 	settingSource,
 	settingState,
 	wantedValue,
@@ -98,9 +94,9 @@ const useRefreshDeviceSettings = (
 	return { refresh, isPending, canRefresh: device?.id !== undefined };
 };
 
-/** Renders one setting: "not used" when the distribution doesn't have it
- *  (wins over a read error, e.g. devices without the Realtek driver), "couldn't
- *  read" when the device failed to read it, otherwise the formatted value. */
+/** Renders one setting's value, or why there is none: "not used" when the
+ *  distribution doesn't have it (wins over a read error, e.g. devices without
+ *  the Realtek driver), "not reported", "couldn't read", or "none". */
 const SettingValue = ({
 	settings,
 	field,
@@ -111,13 +107,15 @@ const SettingValue = ({
 	children: ReactNode;
 }) => {
 	if (settings.unsupported.includes(field)) {
-		return <span className="text-gray-400">Not used on this device</span>;
+		return <span className="text-gray-400">{STATE_BADGE.notUsed.label}</span>;
 	}
 	if (!settings.reported) {
 		return <span className="text-gray-400">Not reported</span>;
 	}
 	if (settings.reported.read_errors?.includes(field)) {
-		return <span className="text-amber-600">Couldn't read</span>;
+		return (
+			<span className="text-amber-600">{STATE_BADGE.unreadable.label}</span>
+		);
 	}
 	if (
 		children === undefined ||
@@ -130,86 +128,70 @@ const SettingValue = ({
 	return <>{children}</>;
 };
 
-const STATE_VARIANT: Record<SettingState, BadgeVariant> = {
-	notUsed: "gray",
-	unreadable: "yellow",
-	failed: "red",
-	reverted: "red",
-	pending: "yellow",
-	differs: "orange",
-	inSync: "green",
-};
-
 /** A managed setting: the wanted value with its Default or Pinned badge and
  *  state; a "Running:" line only when the device runs something else. Not
  *  managed settings show what the device runs. `render` formats a value,
  *  wanted or running. */
-const ManagedRow = <K extends ManagedField & DeviceSetting>({
+const ManagedRow = <K extends ManagedField>({
 	settings,
 	field,
-	label,
-	render,
+	info,
+	render = (value) => value as ReactNode,
 	note,
 }: {
 	settings: DeviceSettings;
 	field: K;
-	label: ReactNode;
-	render: (value: NonNullable<SettingValues[K]>) => ReactNode;
+	info: string;
+	render?: (value: NonNullable<SettingValues[K]>) => ReactNode;
 	note?: string;
 }) => {
 	const wanted = wantedValue(settings, field);
-	const running = settings.reported?.[field];
+	const running = runningValue(settings, field);
 	const source = settingSource(settings, field);
 	const status = settingState(settings, field);
-	const shown = wanted ?? running;
-	const unusable = status?.state === "notUsed";
+	const label = <SettingLabel text={SETTING_LABEL[field]} info={info} />;
+	if (status?.state === "notUsed") {
+		return (
+			<InfoRow label={label}>
+				<SettingValue settings={settings} field={field}>
+					{null}
+				</SettingValue>
+			</InfoRow>
+		);
+	}
+	const sourceBadge = source
+		? SOURCE_BADGE[source]
+		: { variant: "gray" as const, label: "Not managed" };
 	return (
 		<InfoRow label={label}>
-			{unusable ? (
-				<span className="text-gray-400">{STATE_LABEL.notUsed}</span>
-			) : (
-				<span className="flex flex-col items-end gap-1">
-					{status?.state === "unreadable" && wanted === undefined ? (
-						<span className="text-amber-600">{STATE_LABEL.unreadable}</span>
-					) : shown === undefined ? (
-						<span className="text-gray-400">
-							{settings.reported ? "None" : "Not reported"}
-						</span>
-					) : (
-						render(shown as NonNullable<SettingValues[K]>)
+			<span className="flex flex-col items-end gap-1">
+				{wanted !== undefined ? (
+					render(wanted)
+				) : (
+					<SettingValue settings={settings} field={field}>
+						{running !== undefined && render(running)}
+					</SettingValue>
+				)}
+				<span className="flex flex-wrap items-center justify-end gap-1">
+					<Badge variant={sourceBadge.variant}>{sourceBadge.label}</Badge>
+					{status && (
+						<Badge variant={STATE_BADGE[status.state].variant}>
+							{STATE_BADGE[status.state].label}
+						</Badge>
 					)}
-					<span className="flex flex-wrap items-center justify-end gap-1">
-						{source ? (
-							<Badge variant={source === "default" ? "gray" : "purple"}>
-								{SOURCE_LABEL[source]}
-							</Badge>
-						) : (
-							<Badge variant="gray">Not managed</Badge>
-						)}
-						{status &&
-							!(status.state === "unreadable" && wanted === undefined) && (
-								<Badge variant={STATE_VARIANT[status.state]}>
-									{STATE_LABEL[status.state]}
-								</Badge>
-							)}
-					</span>
-					{status?.reason && (
-						<span className="text-xs text-red-600">{status.reason}</span>
-					)}
-					{wanted !== undefined &&
-						settings.reported &&
-						status?.state !== "unreadable" &&
-						runningDiffers(settings, field) && (
-							<span className="flex flex-col items-end text-xs text-gray-500">
-								Running:{" "}
-								{running === undefined
-									? "None"
-									: render(running as NonNullable<SettingValues[K]>)}
-							</span>
-						)}
-					{note && <span className="text-xs text-gray-500">{note}</span>}
 				</span>
-			)}
+				{status?.reason && (
+					<span className="text-xs text-red-600">{status.reason}</span>
+				)}
+				{settings.reported &&
+					status?.state !== "unreadable" &&
+					runningDiffers(settings, field) && (
+						<span className="flex flex-col items-end text-xs text-gray-500">
+							Running: {running === undefined ? "None" : render(running)}
+						</span>
+					)}
+				{note && <span className="text-xs text-gray-500">{note}</span>}
+			</span>
 		</InfoRow>
 	);
 };
@@ -398,7 +380,10 @@ const NetworkSettingsPanel = ({ device }: { device: Device | undefined }) => {
 		device,
 		refetch,
 	);
-	const r = settings?.reported;
+	const reported = settings?.reported;
+	// Read only rows go through `SettingValue`, which shows "Not reported" for a
+	// missing report, so they can read an empty one.
+	const r: Partial<ReportedSettings> = reported ?? {};
 
 	return (
 		<Panel
@@ -407,9 +392,9 @@ const NetworkSettingsPanel = ({ device }: { device: Device | undefined }) => {
 			theme={SECTION_THEMES.purple}
 			actions={
 				<div className="flex items-center gap-2">
-					{r && (
+					{reported && (
 						<span className="text-xs text-gray-500">
-							Reported <RelativeTime date={r.reported_at} />
+							Reported <RelativeTime date={reported.reported_at} />
 						</span>
 					)}
 					<Button
@@ -430,14 +415,14 @@ const NetworkSettingsPanel = ({ device }: { device: Device | undefined }) => {
 				<p className="text-sm text-amber-600">Couldn't load settings.</p>
 			) : isLoading || !settings ? (
 				<div className="h-4 animate-pulse rounded bg-gray-100" />
-			) : !r && !hasWantedSettings(settings) ? (
+			) : !reported && !hasWantedSettings(settings) ? (
 				<p className="text-sm text-gray-500">
 					Not reported. The device needs a smithd version that reports its
 					settings.
 				</p>
 			) : (
 				<div className="space-y-5">
-					{!r && (
+					{!reported && (
 						<p className="text-xs text-gray-500">
 							Not reported yet: showing the wanted values only.
 						</p>
@@ -446,7 +431,7 @@ const NetworkSettingsPanel = ({ device }: { device: Device | undefined }) => {
 						<p className="rounded bg-yellow-50 px-3 py-2 text-xs text-yellow-800">
 							Edits not applied yet: settings version{" "}
 							{settings.settings_version}, the device applied{" "}
-							{r?.applied_version ?? "none"}.
+							{r.applied_version ?? "none"}.
 						</p>
 					)}
 					<section className="space-y-2">
@@ -456,12 +441,7 @@ const NetworkSettingsPanel = ({ device }: { device: Device | undefined }) => {
 						<ManagedRow
 							settings={settings}
 							field="wireless_mode"
-							label={
-								<SettingLabel
-									text="Mode"
-									info="802.11 standards the Wi-Fi driver allows"
-								/>
-							}
+							info="802.11 standards the Wi-Fi driver allows"
 							render={(v) => (
 								<DriverFlags
 									value={v}
@@ -473,12 +453,7 @@ const NetworkSettingsPanel = ({ device }: { device: Device | undefined }) => {
 						<ManagedRow
 							settings={settings}
 							field="power_mgnt"
-							label={
-								<SettingLabel
-									text="Power management"
-									info="Realtek driver power saving level"
-								/>
-							}
+							info="Realtek driver power saving level"
 							render={(v) => <NamedSetting value={v} names={POWER_MGNT} />}
 						/>
 						<InfoRow
@@ -490,13 +465,13 @@ const NetworkSettingsPanel = ({ device }: { device: Device | undefined }) => {
 							}
 						>
 							<SettingValue settings={settings} field="country_code">
-								{r?.country_code === NO_COUNTRY ? (
+								{r.country_code === NO_COUNTRY ? (
 									<Described
 										value="Unset"
 										note="World domain: the most restrictive channel set"
 									/>
 								) : (
-									r?.country_code
+									r.country_code
 								)}
 							</SettingValue>
 						</InfoRow>
@@ -509,16 +484,16 @@ const NetworkSettingsPanel = ({ device }: { device: Device | undefined }) => {
 							}
 						>
 							<SettingValue settings={settings} field="ap_country_code">
-								{r?.ap_country_code !== undefined &&
-									(countryDiffersFromAp(r?.country_code, r?.ap_country_code) ? (
+								{isSet(r.ap_country_code) &&
+									(countryDiffersFromAp(r.country_code, r.ap_country_code) ? (
 										<span className="flex flex-col items-end">
-											<span>{r?.ap_country_code}</span>
+											<span>{r.ap_country_code}</span>
 											<span className="text-xs text-amber-600">
 												Differs from the device's country
 											</span>
 										</span>
 									) : (
-										r?.ap_country_code
+										r.ap_country_code
 									))}
 							</SettingValue>
 						</InfoRow>
@@ -531,89 +506,47 @@ const NetworkSettingsPanel = ({ device }: { device: Device | undefined }) => {
 						<ManagedRow
 							settings={settings}
 							field="roam_flags"
-							label={
-								<SettingLabel
-									text="Driver roaming"
-									info="When the Wi-Fi driver itself moves to another AP"
-								/>
-							}
+							info="When the Wi-Fi driver itself moves to another AP"
 							render={(v) => <DriverFlags value={v} flags={ROAM_BITS} />}
 						/>
 						<ManagedRow
 							settings={settings}
 							field="idle_diff"
-							label={
-								<SettingLabel
-									text="Idle RSSI diff"
-									info="How much stronger another AP must be to roam (idle)"
-								/>
-							}
-							render={(v) => v}
+							info="How much stronger another AP must be to roam (idle)"
 						/>
 						<ManagedRow
 							settings={settings}
 							field="busy_diff"
-							label={
-								<SettingLabel
-									text="Busy RSSI diff"
-									info="How much stronger another AP must be to roam (busy)"
-								/>
-							}
-							render={(v) => v}
+							info="How much stronger another AP must be to roam (busy)"
 						/>
 						<ManagedRow
 							settings={settings}
 							field="scanr_exp_ms"
-							label={
-								<SettingLabel
-									text="Scan result expiry"
-									info="How old a scan result can be and still be a roam target"
-								/>
-							}
+							info="How old a scan result can be and still be a roam target"
 							render={(v) => `${v / MS_PER_S} s`}
 						/>
 						<ManagedRow
 							settings={settings}
 							field="scan_int"
-							label={
-								<SettingLabel
-									text="Scan interval"
-									info="Time between driver roaming scans while signal is weak"
-								/>
-							}
+							info="Time between driver roaming scans while signal is weak"
 							render={(v) => `${v} (${duration(v * SCAN_INTERVAL_UNIT_S)})`}
 						/>
 						<ManagedRow
 							settings={settings}
 							field="idle_th"
-							label={
-								<SettingLabel
-									text="Idle RSSI threshold"
-									info="Signal below which the driver looks for a better AP (idle)"
-								/>
-							}
+							info="Signal below which the driver looks for a better AP (idle)"
 							render={threshold}
 						/>
 						<ManagedRow
 							settings={settings}
 							field="busy_th"
-							label={
-								<SettingLabel
-									text="Busy RSSI threshold"
-									info="Signal below which the driver looks for a better AP (busy)"
-								/>
-							}
+							info="Signal below which the driver looks for a better AP (busy)"
 							render={threshold}
 						/>
 						<ManagedRow
 							settings={settings}
 							field="bgscan"
-							label={
-								<SettingLabel
-									text="Background scan (bgscan)"
-									info="wpa_supplicant scans that can switch APs, apart from the driver"
-								/>
-							}
+							info="wpa_supplicant scans that can switch APs, apart from the driver"
 							render={(v) => (
 								<Described
 									value={<span className="font-mono text-xs">{v}</span>}
@@ -635,23 +568,13 @@ const NetworkSettingsPanel = ({ device }: { device: Device | undefined }) => {
 						<ManagedRow
 							settings={settings}
 							field="nm_wifi_powersave"
-							label={
-								<SettingLabel
-									text="Wi-Fi power save"
-									info="NetworkManager Wi-Fi power saving default"
-								/>
-							}
+							info="NetworkManager Wi-Fi power saving default"
 							render={(v) => <NamedSetting value={v} names={NM_POWERSAVE} />}
 						/>
 						<ManagedRow
 							settings={settings}
 							field="nm_autoconnect_retries"
-							label={
-								<SettingLabel
-									text="Autoconnect retries"
-									info="Tries before NetworkManager pauses reconnecting"
-								/>
-							}
+							info="Tries before NetworkManager pauses reconnecting"
 							render={(v) =>
 								v === RETRY_FOREVER ? (
 									<Described value="Forever" note="Never stops retrying" />
@@ -666,12 +589,7 @@ const NetworkSettingsPanel = ({ device }: { device: Device | undefined }) => {
 						<ManagedRow
 							settings={settings}
 							field="nm_cloned_mac"
-							label={
-								<SettingLabel
-									text="Connection MAC"
-									info="MAC address the device uses to connect"
-								/>
-							}
+							info="MAC address the device uses to connect"
 							render={(v) => (
 								<Described
 									value={<span className="font-mono text-xs">{v}</span>}
@@ -682,12 +600,7 @@ const NetworkSettingsPanel = ({ device }: { device: Device | undefined }) => {
 						<ManagedRow
 							settings={settings}
 							field="nm_scan_rand_mac"
-							label={
-								<SettingLabel
-									text="Scan MAC randomization"
-									info="Random MAC in Wi-Fi scans (probe requests only)"
-								/>
-							}
+							info="Random MAC in Wi-Fi scans (probe requests only)"
 							render={(v) => <Described value={v ? "On" : "Off"} />}
 						/>
 					</section>
@@ -699,12 +612,7 @@ const NetworkSettingsPanel = ({ device }: { device: Device | undefined }) => {
 						<ManagedRow
 							settings={settings}
 							field="ntp_servers"
-							label={
-								<SettingLabel
-									text="NTP servers"
-									info="Time servers configured on the device"
-								/>
-							}
+							info="Time servers configured on the device"
 							render={(v) => <ServerList servers={v} />}
 						/>
 						<InfoRow
@@ -716,7 +624,7 @@ const NetworkSettingsPanel = ({ device }: { device: Device | undefined }) => {
 							}
 						>
 							<SettingValue settings={settings} field="ntp_link_servers">
-								<ServerList servers={r?.ntp_link_servers} />
+								<ServerList servers={r.ntp_link_servers} />
 							</SettingValue>
 						</InfoRow>
 						<InfoRow
@@ -728,7 +636,7 @@ const NetworkSettingsPanel = ({ device }: { device: Device | undefined }) => {
 							}
 						>
 							<SettingValue settings={settings} field="ntp_fallback_servers">
-								<ServerList servers={r?.ntp_fallback_servers} />
+								<ServerList servers={r.ntp_fallback_servers} />
 							</SettingValue>
 						</InfoRow>
 						<InfoRow
@@ -740,9 +648,9 @@ const NetworkSettingsPanel = ({ device }: { device: Device | undefined }) => {
 							}
 						>
 							<SettingValue settings={settings} field="ntp_server_in_use">
-								{r?.ntp_server_in_use && (
+								{r.ntp_server_in_use && (
 									<span className="font-mono text-xs">
-										{r?.ntp_server_in_use}
+										{r.ntp_server_in_use}
 									</span>
 								)}
 							</SettingValue>
@@ -756,8 +664,8 @@ const NetworkSettingsPanel = ({ device }: { device: Device | undefined }) => {
 							}
 						>
 							<SettingValue settings={settings} field="ntp_synchronized">
-								{r?.ntp_synchronized !== undefined &&
-									(r?.ntp_synchronized ? "Yes" : "No")}
+								{isSet(r.ntp_synchronized) &&
+									(r.ntp_synchronized ? "Yes" : "No")}
 							</SettingValue>
 						</InfoRow>
 					</section>
@@ -769,12 +677,7 @@ const NetworkSettingsPanel = ({ device }: { device: Device | undefined }) => {
 						<ManagedRow
 							settings={settings}
 							field="hostname"
-							label={
-								<SettingLabel
-									text="Hostname"
-									info="Device name, also sent to the network's DHCP server"
-								/>
-							}
+							info="Device name, also sent to the network's DHCP server"
 							render={(v) => <span className="font-mono">{v}</span>}
 						/>
 					</section>

@@ -10,15 +10,12 @@ import {
 	useMemo,
 	useState,
 } from "react";
-import type {
-	DeviceCommandResponse,
-	SettingsReport,
-	WantedSettings,
-} from "@/app/api-client";
+import type { DeviceCommandResponse, WantedSettings } from "@/app/api-client";
 import { RelativeTime } from "@/app/components/RelativeTime";
 import { Tooltip } from "@/app/components/tooltip";
 import {
-	type ApplyOutcome,
+	APPLY_OUTCOME_BADGE,
+	type ApplySettingsResult,
 	applyResultSummary,
 	applyStatusLines,
 	wantedRows,
@@ -170,19 +167,7 @@ export type CmdRxExtendedNetworkTest = {
 	};
 };
 export type CmdRxApplySettingsResult = {
-	ApplySettingsResult: {
-		applied_version: number;
-		reverted: boolean;
-		report: SettingsReport;
-	};
-};
-const APPLY_OUTCOME_BADGE: Record<
-	ApplyOutcome,
-	{ variant: BadgeVariant; label: string }
-> = {
-	applied: { variant: "green", label: "Applied" },
-	failed: { variant: "red", label: "Failed" },
-	reverted: { variant: "red", label: "Reverted" },
+	ApplySettingsResult: ApplySettingsResult;
 };
 export type CmdRxLogStreamStarted = {
 	LogStreamStarted: { session_id: string };
@@ -1252,7 +1237,7 @@ export const renderRxDetail = (response: unknown) => {
 		case "ApplySettingsResult": {
 			const p =
 				parsed.payload as CmdRxApplySettingsResult["ApplySettingsResult"];
-			const lines = applyStatusLines(p.report?.apply_status);
+			const lines = applyStatusLines(p.report.apply_status);
 			const summary = applyResultSummary(p);
 			return (
 				<div className="space-y-3">

@@ -11,8 +11,9 @@ import {
 	wantedRows,
 } from "../app/utils/deviceSettings.ts";
 
-const fixture = (over = {}) => ({
-	wanted: {},
+// Unset values are `null`, as the API serializes them.
+const fixture = (over = {}, reportedOver = {}) => ({
+	wanted: { power_mgnt: null },
 	defaults: { power_mgnt: 2 },
 	resolved: {},
 	unsupported: [],
@@ -21,127 +22,147 @@ const fixture = (over = {}) => ({
 		reported_at: "2026-11-12T10:00:00Z",
 		applied_version: 3,
 		power_mgnt: 2,
+		...reportedOver,
 	},
 	...over,
 });
 
-const reported = (over) => ({ ...fixture().reported, ...over });
-
-for (const [name, wanted, defaults, expected] of [
-	["inherits the default", {}, { power_mgnt: 2 }, "default"],
+for (const [name, field, wanted, defaults, expected] of [
+	[
+		"inherits the default",
+		"power_mgnt",
+		{ power_mgnt: null },
+		{ power_mgnt: 2 },
+		"default",
+	],
 	[
 		"pin differing from the default",
+		"power_mgnt",
 		{ power_mgnt: 0 },
 		{ power_mgnt: 2 },
 		"pinned",
 	],
 	[
 		"pin equal to the default",
+		"power_mgnt",
 		{ power_mgnt: 2 },
 		{ power_mgnt: 2 },
 		"pinnedSameAsDefault",
 	],
 	[
 		"list pin equal to the default",
+		"ntp_servers",
 		{ ntp_servers: ["a", "b"] },
 		{ ntp_servers: ["a", "b"] },
 		"pinnedSameAsDefault",
 	],
-	["no pin and no default", {}, {}, undefined],
+	[
+		"no pin and no default",
+		"power_mgnt",
+		{ power_mgnt: null },
+		{ power_mgnt: null },
+		undefined,
+	],
 ]) {
 	test(`source: ${name}`, () => {
-		const field = wanted.ntp_servers ? "ntp_servers" : "power_mgnt";
 		assert.equal(settingSource({ wanted, defaults }, field), expected);
 	});
 }
 
-for (const [name, over, expected] of [
+for (const [name, over, reportedOver, expected] of [
 	[
 		"unsupported wins over a read error",
-		{
-			unsupported: ["power_mgnt"],
-			reported: reported({ read_errors: ["power_mgnt"] }),
-		},
+		{ unsupported: ["power_mgnt"] },
+		{ read_errors: ["power_mgnt"] },
 		{ state: "notUsed" },
 	],
 	[
 		"failed carries its reason",
+		{},
 		{
-			reported: reported({
-				apply_status: [
-					{
-						setting: "power_mgnt",
-						state: "failed",
-						reason: "still 0 after 2 tries",
-					},
-				],
-			}),
+			apply_status: [
+				{
+					setting: "power_mgnt",
+					state: "failed",
+					reason: "still 0 after 2 tries",
+				},
+			],
 		},
 		{ state: "failed", reason: "still 0 after 2 tries" },
 	],
 	[
-		"reverted carries its reason",
+		"reverted carries its reason, though behind on the version",
+		{},
 		{
-			reported: reported({
-				apply_status: [
-					{
-						setting: "power_mgnt",
-						state: "reverted",
-						reason: "no connectivity after apply",
-					},
-				],
-			}),
+			applied_version: 2,
+			apply_status: [
+				{
+					setting: "power_mgnt",
+					state: "reverted",
+					reason: "no connectivity after apply",
+				},
+			],
 		},
 		{ state: "reverted", reason: "no connectivity after apply" },
 	],
+	["read error", {}, { read_errors: ["power_mgnt"] }, { state: "unreadable" }],
 	[
-		"read error",
-		{ reported: reported({ read_errors: ["power_mgnt"] }) },
-		{ state: "unreadable" },
+		"not managed, even with a read error",
+		{ defaults: { power_mgnt: null } },
+		{ read_errors: ["power_mgnt"] },
+		undefined,
 	],
 	[
 		"device behind on the version",
-		{ reported: reported({ applied_version: 2, power_mgnt: 0 }) },
+		{},
+		{ applied_version: 2, power_mgnt: 0 },
 		{ state: "pending" },
 	],
 	[
-		"never applied",
-		{ reported: reported({ applied_version: undefined }) },
+		"reported but never applied, at version 0",
+		{ settings_version: 0 },
+		{ applied_version: null },
 		{ state: "pending" },
 	],
-	[
-		"current version and running differs",
-		{ reported: reported({ power_mgnt: 0 }) },
-		{ state: "differs" },
-	],
-	["current version and running matches", {}, { state: "inSync" }],
-	[
-		"pin wins over the default",
-		{ wanted: { power_mgnt: 0 } },
-		{ state: "differs" },
-	],
-	["not managed", { defaults: {} }, undefined],
 	[
 		"no report yet, even at version 0",
 		{ settings_version: 0, reported: undefined },
+		{},
 		{ state: "pending" },
 	],
 	[
 		"no report and not managed",
-		{ defaults: {}, reported: undefined },
+		{ defaults: { power_mgnt: null }, reported: undefined },
+		{},
 		undefined,
+	],
+	[
+		"current version and running differs",
+		{},
+		{ power_mgnt: 0 },
+		{ state: "differs" },
+	],
+	["current version and running matches", {}, {}, { state: "inSync" }],
+	[
+		"pin wins over the default",
+		{ wanted: { power_mgnt: 0 } },
+		{},
+		{ state: "differs" },
 	],
 ]) {
 	test(`state: ${name}`, () => {
-		assert.deepEqual(settingState(fixture(over), "power_mgnt"), expected);
+		assert.deepEqual(
+			settingState(fixture(over, reportedOver), "power_mgnt"),
+			expected,
+		);
 	});
 }
 
 for (const [name, version, applied, expected] of [
 	["version ahead of applied", 4, 3, true],
-	["never applied", 1, undefined, true],
+	["never applied", 1, null, true],
 	["versions equal", 3, 3, false],
-	["fresh device at version 0", 0, undefined, false],
+	["fresh device at version 0", 0, null, false],
 ]) {
 	test(`unapplied edits: ${name}`, () => {
 		assert.equal(
@@ -165,9 +186,9 @@ for (const [name, dist, expected] of [
 }
 
 for (const [name, wanted, defaults, expected] of [
-	["a pin only", { power_mgnt: 0 }, {}, true],
-	["a default only", {}, { power_mgnt: 2 }, true],
-	["neither", {}, {}, false],
+	["a pin only", { power_mgnt: 0 }, { power_mgnt: null }, true],
+	["a default only", { power_mgnt: null }, { power_mgnt: 2 }, true],
+	["only null values", { power_mgnt: null }, { power_mgnt: null }, false],
 ]) {
 	test(`wanted settings: ${name}`, () => {
 		assert.equal(hasWantedSettings({ wanted, defaults }), expected);
@@ -175,7 +196,7 @@ for (const [name, wanted, defaults, expected] of [
 }
 
 for (const [name, settings, expected] of [
-	["omits absent groups", {}, []],
+	["omits null groups", { hostname: null, bgscan: null }, []],
 	[
 		"shows Unmanaged groups as such",
 		{ hostname: "Unmanaged" },
@@ -208,12 +229,12 @@ for (const [name, settings, expected] of [
 for (const [name, result, expected] of [
 	[
 		"applied",
-		{ applied_version: 5, reverted: false },
+		{ applied_version: 5, reverted: false, report: { apply_status: [] } },
 		{ outcome: "applied", text: "Version 5 applied" },
 	],
 	[
 		"reverted",
-		{ applied_version: 5, reverted: true },
+		{ applied_version: 5, reverted: true, report: { apply_status: [] } },
 		{ outcome: "reverted", text: "Version 5 reverted" },
 	],
 	[
