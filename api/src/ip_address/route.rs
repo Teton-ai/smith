@@ -60,6 +60,7 @@ pub async fn get_ip_address_info(
             ip.hosting,
             ip.created_at,
             ip.updated_at,
+            ip.max_concurrent_downloads,
             COUNT(d.id) as device_count
         FROM ip_address ip
         LEFT JOIN device d ON d.ip_address_id = ip.id
@@ -97,6 +98,7 @@ pub async fn get_ip_address_info(
         proxy: ip_info.proxy,
         hosting: ip_info.hosting,
         device_count: ip_info.device_count,
+        max_concurrent_downloads: ip_info.max_concurrent_downloads,
         created_at: ip_info.created_at,
         updated_at: ip_info.updated_at,
     };
@@ -112,6 +114,12 @@ pub struct IpAddressListResponse {
 #[derive(Serialize, Deserialize, ToSchema, Debug)]
 pub struct UpdateIpAddressRequest {
     pub name: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, ToSchema, Debug)]
+pub struct UpdateDownloadLimitRequest {
+    /// Null restores the default.
+    pub max_concurrent_downloads: Option<i32>,
 }
 
 #[utoipa::path(
@@ -158,6 +166,7 @@ pub async fn get_ip_addresses(
             ip.hosting,
             ip.created_at,
             ip.updated_at,
+            ip.max_concurrent_downloads,
             COUNT(d.id) as device_count
         FROM ip_address ip
         LEFT JOIN device d ON d.ip_address_id = ip.id
@@ -196,6 +205,7 @@ pub async fn get_ip_addresses(
                 proxy: ip_info.proxy,
                 hosting: ip_info.hosting,
                 device_count: ip_info.device_count,
+                max_concurrent_downloads: ip_info.max_concurrent_downloads,
                 created_at: ip_info.created_at,
                 updated_at: ip_info.updated_at,
             }
@@ -264,7 +274,8 @@ pub async fn update_ip_address(
             proxy,
             hosting,
             created_at,
-            updated_at
+            updated_at,
+            max_concurrent_downloads
         "#,
         request.name,
         ip_address_id
@@ -310,9 +321,155 @@ pub async fn update_ip_address(
         proxy: updated_ip.proxy,
         hosting: updated_ip.hosting,
         device_count: device_count.count,
+        max_concurrent_downloads: updated_ip.max_concurrent_downloads,
         created_at: updated_ip.created_at,
         updated_at: updated_ip.updated_at,
     };
 
     Ok(Json(response))
+}
+
+/// Sets how many devices behind this public IP may download a release at the
+/// same time. During a rollout, a device whose turn has come only learns its
+/// new target once fewer than this many other devices on the IP are
+/// downloading; the others keep their current release and retry on their next
+/// poll. Devices that are offline, archived or stuck for over two hours do not
+/// count. Null restores the default of 2.
+#[utoipa::path(
+    put,
+    path = "/ip_address/{ip_address_id}/download-limit",
+    params(
+        ("ip_address_id" = i64, Path),
+    ),
+    request_body = UpdateDownloadLimitRequest,
+    responses(
+        (status = 200, description = "Download limit updated successfully", body = IpAddressInfo),
+        (status = 400, description = "The limit must be at least 1", body = String),
+        (status = 403, description = "Forbidden"),
+        (status = 404, description = "IP address not found"),
+        (status = 500, description = "Failed to update the download limit", body = String),
+    ),
+    security(
+        ("auth_token" = [])
+    ),
+    tag = IP_ADDRESS_TAG
+)]
+pub async fn update_download_limit(
+    Extension(state): Extension<State>,
+    Extension(current_user): Extension<CurrentUser>,
+    Path(ip_address_id): Path<i64>,
+    Json(request): Json<UpdateDownloadLimitRequest>,
+) -> Result<Json<IpAddressInfo>, (StatusCode, String)> {
+    if !authorization::check(current_user, "devices", "write") {
+        return Err((StatusCode::FORBIDDEN, String::new()));
+    }
+    if request
+        .max_concurrent_downloads
+        .is_some_and(|limit| limit < 1)
+    {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "max_concurrent_downloads must be at least 1".to_string(),
+        ));
+    }
+
+    set_download_limit(
+        &state.pg_pool,
+        ip_address_id,
+        request.max_concurrent_downloads,
+    )
+    .await
+    .map_err(|err| {
+        error!("Failed to update download limit: {}", err);
+        (StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
+    })?
+    .map(Json)
+    .ok_or((StatusCode::NOT_FOUND, String::new()))
+}
+
+async fn set_download_limit(
+    pool: &sqlx::PgPool,
+    ip_address_id: i64,
+    limit: Option<i32>,
+) -> sqlx::Result<Option<IpAddressInfo>> {
+    let row = sqlx::query!(
+        r#"
+        UPDATE ip_address ip
+        SET max_concurrent_downloads = $1, updated_at = NOW()
+        WHERE ip.id = $2
+        RETURNING
+            ip.id,
+            ip.ip_address,
+            ip.name,
+            ip.continent,
+            ip.continent_code,
+            ip.country_code,
+            ip.country,
+            ip.region,
+            ip.city,
+            ip.isp,
+            ip.coordinates[0] as longitude,
+            ip.coordinates[1] as latitude,
+            ip.proxy,
+            ip.hosting,
+            ip.created_at,
+            ip.updated_at,
+            ip.max_concurrent_downloads,
+            (SELECT COUNT(*) FROM device d WHERE d.ip_address_id = ip.id) AS device_count
+        "#,
+        limit,
+        ip_address_id
+    )
+    .fetch_optional(pool)
+    .await?;
+
+    Ok(row.map(|row| IpAddressInfo {
+        id: row.id,
+        ip_address: row.ip_address,
+        name: row.name,
+        continent: row.continent,
+        continent_code: row.continent_code,
+        country_code: row.country_code,
+        country: row.country,
+        region: row.region,
+        city: row.city,
+        isp: row.isp,
+        coordinates: match (row.longitude, row.latitude) {
+            (Some(lon), Some(lat)) => Some((lon, lat)),
+            _ => None,
+        },
+        proxy: row.proxy,
+        hosting: row.hosting,
+        device_count: row.device_count,
+        max_concurrent_downloads: row.max_concurrent_downloads,
+        created_at: row.created_at,
+        updated_at: row.updated_at,
+    }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sqlx::PgPool;
+
+    #[sqlx::test]
+    #[ignore = "needs the compose Postgres; run with --test-threads=1"]
+    async fn download_limit_can_be_set_and_cleared(pool: PgPool) -> anyhow::Result<()> {
+        let ip: i64 = sqlx::query_scalar(
+            "INSERT INTO ip_address (ip_address) VALUES ('203.0.113.9') RETURNING id",
+        )
+        .fetch_one(&pool)
+        .await?;
+
+        let info = set_download_limit(&pool, ip, Some(5)).await?;
+        assert_eq!(info.map(|i| i.max_concurrent_downloads), Some(Some(5)));
+        let info = set_download_limit(&pool, ip, None).await?;
+        assert_eq!(info.map(|i| i.max_concurrent_downloads), Some(None));
+        assert!(set_download_limit(&pool, ip + 1, Some(1)).await?.is_none());
+        assert!(
+            set_download_limit(&pool, ip, Some(0)).await.is_err(),
+            "the CHECK constraint rejects zero"
+        );
+        Ok(())
+    }
 }
