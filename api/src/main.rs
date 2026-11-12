@@ -507,7 +507,8 @@ async fn start_main_server(
                 }))
                 .layer(RequestDecompressionLayer::new()),
         )
-        .layer(DefaultBodyLimit::max(512000000));
+        .layer(DefaultBodyLimit::max(512000000))
+        .layer(middleware::from_fn(middlewares::server_timing::record));
 
     let (ws_router, _ws_api) = OpenApiRouter::with_openapi(ApiDoc::openapi())
         .routes(routes!(logstream::dashboard_logs_ws))
