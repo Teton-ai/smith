@@ -2,7 +2,7 @@ import { Badge, Button, type ButtonTone, Card } from "@teton/smith-ui";
 import { Search, Shield, User } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
-import { useGetUsers } from "../api";
+import { useGetUsers } from "@/app/api-client";
 import { roleVariant, SettingsLayout } from "../SettingsLayout";
 
 // Role → button tone, for the filter toggles (matches the badge colors).
