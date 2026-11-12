@@ -1000,10 +1000,25 @@ pub const DEFAULT_MAX_CONCURRENT_DOWNLOADS: i64 = 2;
 struct TargetRow {
     release_id: Option<i32>,
     target_release_id: Option<i32>,
+    target_release_id_set_at: Option<DateTime<Utc>>,
     target_release_eligible_at: Option<DateTime<Utc>>,
     download_slot_release_id: Option<i32>,
+    download_slot_at: Option<DateTime<Utc>>,
     ip_address_id: Option<i64>,
     now: DateTime<Utc>,
+}
+
+impl TargetRow {
+    /// A slot from an earlier assignment of the same release (retargeted away
+    /// and back) was never checked against the IP's current holders.
+    fn holds_slot_for(&self, target: i32) -> bool {
+        self.download_slot_release_id == Some(target)
+            && match (self.download_slot_at, self.target_release_id_set_at) {
+                (Some(slot_at), Some(set_at)) => slot_at >= set_at,
+                (Some(_), None) => true,
+                (None, _) => false,
+            }
+    }
 }
 
 #[derive(Debug, PartialEq)]
@@ -1033,7 +1048,7 @@ fn decide_target(row: &TargetRow) -> TargetDecision {
     {
         return TargetDecision::Answer(Some(current));
     }
-    if row.download_slot_release_id == Some(target) {
+    if row.holds_slot_for(target) {
         return TargetDecision::Answer(Some(target));
     }
     match row.ip_address_id {
@@ -1065,14 +1080,17 @@ async fn try_take_download_slot(
         .max_concurrent_downloads
         .map_or(DEFAULT_MAX_CONCURRENT_DOWNLOADS, i64::from);
 
-    // Offline and long-stuck holders stop blocking the site.
+    // Offline and long-stuck holders stop blocking the site. A fresh grant
+    // counts before its ping is saved: /home saves last_ping after answering.
     let holders = sqlx::query_scalar!(
         r#"SELECT COUNT(*) AS "count!" FROM device
         WHERE ip_address_id = $1 AND id <> $2
           AND download_slot_release_id = target_release_id
+          AND download_slot_at >= COALESCE(target_release_id_set_at, '-infinity')
           AND release_id IS DISTINCT FROM target_release_id
           AND archived = false
-          AND last_ping > NOW() - INTERVAL '5 minutes'
+          AND (last_ping > NOW() - INTERVAL '5 minutes'
+               OR download_slot_at > NOW() - INTERVAL '5 minutes')
           AND download_slot_at > NOW() - INTERVAL '2 hours'"#,
         ip_address_id,
         device_id
@@ -1100,8 +1118,9 @@ async fn try_take_download_slot(
 pub async fn get_target_release(device_id: i32, pool: &PgPool) -> Option<i32> {
     let row = match sqlx::query_as!(
         TargetRow,
-        r#"SELECT release_id, target_release_id, target_release_eligible_at,
-            download_slot_release_id, ip_address_id, NOW() AS "now!"
+        r#"SELECT release_id, target_release_id, target_release_id_set_at,
+            target_release_eligible_at, download_slot_release_id, download_slot_at,
+            ip_address_id, NOW() AS "now!"
         FROM device WHERE id = $1"#,
         device_id
     )
@@ -1509,6 +1528,10 @@ mod target_release_tests {
         answers
     }
 
+    fn three(devices: &[i32]) -> anyhow::Result<[i32; 3]> {
+        Ok(devices.try_into()?)
+    }
+
     #[sqlx::test]
     #[ignore = "needs the compose Postgres; run with --test-threads=1"]
     async fn only_two_devices_per_ip_get_the_target(pool: PgPool) -> anyhow::Result<()> {
@@ -1540,15 +1563,16 @@ mod target_release_tests {
             devices,
             ..
         } = site(&pool, 3).await?;
+        let [first, _, third] = three(&devices)?;
         poll_all(&pool, &devices).await;
-        assert_eq!(get_target_release(devices[2], &pool).await, Some(current));
+        assert_eq!(get_target_release(third, &pool).await, Some(current));
 
         sqlx::query("UPDATE device SET release_id = $1 WHERE id = $2")
             .bind(target)
-            .bind(devices[0])
+            .bind(first)
             .execute(&pool)
             .await?;
-        assert_eq!(get_target_release(devices[2], &pool).await, Some(target));
+        assert_eq!(get_target_release(third, &pool).await, Some(target));
         Ok(())
     }
 
@@ -1582,14 +1606,15 @@ mod target_release_tests {
             devices,
             ..
         } = site(&pool, 3).await?;
+        let [first, second, _] = three(&devices)?;
         poll_all(&pool, &devices).await;
         sqlx::query("UPDATE ip_address SET max_concurrent_downloads = 1 WHERE id = $1")
             .bind(ip)
             .execute(&pool)
             .await?;
         for _ in 0..3 {
-            assert_eq!(get_target_release(devices[0], &pool).await, Some(target));
-            assert_eq!(get_target_release(devices[1], &pool).await, Some(target));
+            assert_eq!(get_target_release(first, &pool).await, Some(target));
+            assert_eq!(get_target_release(second, &pool).await, Some(target));
         }
         Ok(())
     }
@@ -1603,16 +1628,29 @@ mod target_release_tests {
             devices,
             ..
         } = site(&pool, 3).await?;
+        let [first, _, third] = three(&devices)?;
         poll_all(&pool, &devices).await;
-        assert_eq!(get_target_release(devices[2], &pool).await, Some(current));
+        assert_eq!(get_target_release(third, &pool).await, Some(current));
 
         sqlx::query("UPDATE device SET last_ping = NOW() - INTERVAL '10 minutes' WHERE id = $1")
-            .bind(devices[0])
+            .bind(first)
             .execute(&pool)
             .await?;
-        assert_eq!(get_target_release(devices[2], &pool).await, Some(target));
         assert_eq!(
-            get_target_release(devices[0], &pool).await,
+            get_target_release(third, &pool).await,
+            Some(current),
+            "a fresh grant counts before its ping is saved"
+        );
+
+        sqlx::query(
+            "UPDATE device SET download_slot_at = NOW() - INTERVAL '10 minutes' WHERE id = $1",
+        )
+        .bind(first)
+        .execute(&pool)
+        .await?;
+        assert_eq!(get_target_release(third, &pool).await, Some(target));
+        assert_eq!(
+            get_target_release(first, &pool).await,
             Some(target),
             "the offline holder keeps its target"
         );
@@ -1628,14 +1666,51 @@ mod target_release_tests {
             devices,
             ..
         } = site(&pool, 3).await?;
+        let [first, second, third] = three(&devices)?;
         poll_all(&pool, &devices).await;
         sqlx::query("UPDATE device SET target_release_id = $1 WHERE id = ANY($2)")
             .bind(current)
-            .bind(&devices[..2])
+            .bind(vec![first, second])
             .execute(&pool)
             .await?;
         // Targets are back on the current release, so those slots count for nothing.
-        assert_eq!(get_target_release(devices[2], &pool).await, Some(target));
+        assert_eq!(get_target_release(third, &pool).await, Some(target));
+        Ok(())
+    }
+
+    #[sqlx::test]
+    #[ignore = "needs the compose Postgres; run with --test-threads=1"]
+    async fn a_slot_from_an_earlier_assignment_does_not_count(pool: PgPool) -> anyhow::Result<()> {
+        let Site {
+            current,
+            target,
+            devices,
+            ..
+        } = site(&pool, 3).await?;
+        let [first, _, third] = three(&devices)?;
+        poll_all(&pool, &devices).await;
+
+        // Away and back, as the retarget queries write it: the old slot still
+        // names `target`, and the third device takes the freed capacity.
+        let retarget = "UPDATE device SET target_release_id = $1, target_release_id_set_at = NOW(),
+            target_release_eligible_at = NULL WHERE id = $2";
+        sqlx::query(retarget)
+            .bind(current)
+            .bind(first)
+            .execute(&pool)
+            .await?;
+        assert_eq!(get_target_release(third, &pool).await, Some(target));
+        sqlx::query(retarget)
+            .bind(target)
+            .bind(first)
+            .execute(&pool)
+            .await?;
+
+        assert_eq!(
+            get_target_release(first, &pool).await,
+            Some(current),
+            "the IP is full, so the old slot must not let it through"
+        );
         Ok(())
     }
 

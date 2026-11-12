@@ -963,6 +963,7 @@ where
             COUNT(*) FILTER (
                 WHERE release_id IS DISTINCT FROM target_release_id
                 AND (target_release_eligible_at IS NULL OR target_release_eligible_at <= NOW())
+                AND ip_address_id IS NOT NULL
                 AND download_slot_release_id IS DISTINCT FROM target_release_id
             ) AS "waiting_for_slot!",
             MIN(target_release_eligible_at) FILTER (
@@ -1296,6 +1297,14 @@ pub(crate) mod tests {
         let mut tx = pool.begin().await?;
         stagger_retarget(&mut tx, target, &ids).await?;
         tx.commit().await?;
+        // Only devices with an IP can be held back for a slot.
+        sqlx::query(
+            "WITH ip AS (INSERT INTO ip_address (ip_address) VALUES ('203.0.113.7') RETURNING id)
+             UPDATE device SET ip_address_id = (SELECT id FROM ip) WHERE id = ANY($1)",
+        )
+        .bind(&ids)
+        .execute(&pool)
+        .await?;
         // Updated before its bucket opened: counted as updated, and finish now
         // must leave it alone.
         sqlx::query("UPDATE device SET release_id = target_release_id WHERE id = $1")
@@ -1331,6 +1340,16 @@ pub(crate) mod tests {
             .execute(&pool)
             .await?;
         assert_eq!(rollout_progress(target, &pool).await?.waiting_for_slot, 18);
+
+        sqlx::query("UPDATE device SET ip_address_id = NULL WHERE id = $1")
+            .bind(ids[2])
+            .execute(&pool)
+            .await?;
+        assert_eq!(
+            rollout_progress(target, &pool).await?.waiting_for_slot,
+            17,
+            "a device without an IP is never held back"
+        );
         Ok(())
     }
 }
