@@ -174,8 +174,10 @@ const DistributionDetailPage = () => {
 	const { data: deployedRelease } =
 		useGetDistributionLatestRelease(distributionId);
 
-	// Use the most recent stable release as the base for new drafts
-	const baseRelease = allReleases.find(isStableRelease) || allReleases[0];
+	// Draft from what the fleet follows, so a new release only differs by what you
+	// change: start from the published package versions.
+	const baseRelease =
+		deployedRelease ?? (allReleases.find(isStableRelease) || allReleases[0]);
 	const getDistributionReleasePackages = useGetDistributionReleasePackages(
 		baseRelease?.id as number,
 		{ query: { enabled: baseRelease?.id != null } },
