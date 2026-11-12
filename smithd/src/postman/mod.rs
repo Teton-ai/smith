@@ -26,6 +26,19 @@ pub type LastPoll = watch::Receiver<Option<time::Instant>>;
 /// The round trip to the api as the latest home poll reported it.
 pub type LinkDelayWatch = watch::Receiver<Option<LinkDelay>>;
 
+const IDLE_INTERVAL_SECS: u64 = 20;
+const ACTIVE_INTERVAL_SECS: u64 = 1;
+// A download paces itself on the round trip of these posts.
+const DOWNLOAD_POLL_INTERVAL_SECS: u64 = 5;
+
+fn idle_interval_secs(downloading: bool) -> u64 {
+    if downloading {
+        DOWNLOAD_POLL_INTERVAL_SECS
+    } else {
+        IDLE_INTERVAL_SECS
+    }
+}
+
 const CMD_ID_GET_VARIABLES: i32 = -1;
 const CMD_ID_UPDATE_SYSTEM_INFO: i32 = -2;
 const CMD_ID_GET_NETWORK: i32 = -4;
@@ -139,6 +152,14 @@ struct Postman {
     last_poll: watch::Sender<Option<time::Instant>>,
     link: LinkMonitor,
     link_delay: watch::Sender<Option<LinkDelay>>,
+    downloading: watch::Receiver<bool>,
+}
+
+/// The watch ends the postman shares with the rest of the daemon.
+struct Watches {
+    last_poll: watch::Sender<Option<time::Instant>>,
+    link_delay: watch::Sender<Option<LinkDelay>>,
+    downloading: watch::Receiver<bool>,
 }
 
 #[derive(Debug)]
@@ -152,12 +173,11 @@ impl Postman {
         commander: CommanderHandle,
         magic: MagicHandle,
         session: SessionHandle,
-        last_poll: watch::Sender<Option<time::Instant>>,
-    ) -> (Self, LinkDelayWatch) {
+        watches: Watches,
+    ) -> Self {
         let network = NetworkClient::default();
-        let (link_delay, link_delay_rx) = watch::channel(None);
 
-        let postman = Self {
+        Self {
             shutdown,
             police,
             receiver,
@@ -171,11 +191,11 @@ impl Postman {
             failing_since: None,
             poll_mode: PollMode::Idle,
             services_to_check: Vec::new(),
-            last_poll,
+            last_poll: watches.last_poll,
             link: LinkMonitor::default(),
-            link_delay,
-        };
-        (postman, link_delay_rx)
+            link_delay: watches.link_delay,
+            downloading: watches.downloading,
+        }
     }
 
     async fn handle_message(&mut self, _msg: PostmanMessage) {}
@@ -217,8 +237,6 @@ impl Postman {
             commander.insert_result(vec![nm_profiles]).await;
         });
 
-        const IDLE_INTERVAL_SECS: u64 = 20;
-        const ACTIVE_INTERVAL_SECS: u64 = 1;
         const IDLE_THRESHOLD_TICKS: u32 = 60;
 
         // Jittered so a fleet-wide restart does not post in lockstep.
@@ -303,9 +321,19 @@ impl Postman {
                     }
                     let wait = match self.poll_mode {
                         PollMode::Active { .. } => ACTIVE_INTERVAL_SECS,
-                        PollMode::Idle => IDLE_INTERVAL_SECS,
+                        PollMode::Idle => idle_interval_secs(*self.downloading.borrow()),
                     };
                     keep_alive.as_mut().reset(time::Instant::now() + Duration::from_secs(wait));
+                }
+                Ok(()) = self.downloading.changed() => {
+                    // Without this the first faster poll waits out an idle interval.
+                    let soon = time::Instant::now() + Duration::from_secs(DOWNLOAD_POLL_INTERVAL_SECS);
+                    if *self.downloading.borrow_and_update()
+                        && failed_posts == 0
+                        && soon < keep_alive.deadline()
+                    {
+                        keep_alive.as_mut().reset(soon);
+                    }
                 }
                 _ = update_interval.tick() => {
                     if let Some(update) = refresh_system_info(&mut system_info).await {
@@ -543,7 +571,6 @@ impl Postman {
 pub struct PostmanHandle {
     _sender: mpsc::Sender<PostmanMessage>,
     last_poll: LastPoll,
-    link_delay: LinkDelayWatch,
 }
 
 impl PostmanHandle {
@@ -553,35 +580,32 @@ impl PostmanHandle {
         commander: CommanderHandle,
         magic: MagicHandle,
         session: SessionHandle,
+        link_delay: watch::Sender<Option<LinkDelay>>,
+        downloading: watch::Receiver<bool>,
     ) -> Self {
         let (_sender, receiver) = mpsc::channel(8);
         let (poll_sender, last_poll) = watch::channel(None);
-        let (mut actor, link_delay) = Postman::new(
+        let mut actor = Postman::new(
             shutdown,
             police,
             receiver,
             commander,
             magic,
             session,
-            poll_sender,
+            Watches {
+                last_poll: poll_sender,
+                link_delay,
+                downloading,
+            },
         );
         tokio::spawn(async move { actor.run().await });
 
-        Self {
-            _sender,
-            last_poll,
-            link_delay,
-        }
+        Self { _sender, last_poll }
     }
 
     /// Follows the time the api last answered a home poll.
     pub fn last_poll(&self) -> LastPoll {
         self.last_poll.clone()
-    }
-
-    /// Follows the round trip to the api, so downloads can back off on a slow link.
-    pub fn link_delay(&self) -> LinkDelayWatch {
-        self.link_delay.clone()
     }
 }
 
@@ -604,6 +628,12 @@ mod tests {
         push_latest(&mut responses, pong(CMD_ID_UPDATE_SYSTEM_INFO, 0));
         let ids: Vec<_> = responses.iter().map(|r| (r.id, r.status)).collect();
         assert_eq!(ids, [(7, 0), (CMD_ID_UPDATE_SYSTEM_INFO, 0)]);
+    }
+
+    #[test]
+    fn idle_polls_every_5_s_while_downloading_and_every_20_s_otherwise() {
+        assert_eq!(idle_interval_secs(false), 20);
+        assert_eq!(idle_interval_secs(true), 5);
     }
 
     #[test]
