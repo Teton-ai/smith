@@ -1467,7 +1467,14 @@ mod target_release_tests {
 
     /// Devices on `current` targeting `target` with open buckets, all behind
     /// one IP and pinging now.
-    async fn site(pool: &PgPool, count: usize) -> anyhow::Result<(i32, i32, i64, Vec<i32>)> {
+    struct Site {
+        current: i32,
+        target: i32,
+        ip: i64,
+        devices: Vec<i32>,
+    }
+
+    async fn site(pool: &PgPool, count: usize) -> anyhow::Result<Site> {
         let [current, target] = insert_releases(pool).await?;
         let devices = insert_devices(pool, count, Some(current)).await?;
         let ip: i64 = sqlx::query_scalar(
@@ -1486,7 +1493,12 @@ mod target_release_tests {
         .bind(&devices)
         .execute(pool)
         .await?;
-        Ok((current, target, ip, devices))
+        Ok(Site {
+            current,
+            target,
+            ip,
+            devices,
+        })
     }
 
     async fn poll_all(pool: &PgPool, devices: &[i32]) -> Vec<Option<i32>> {
@@ -1500,7 +1512,12 @@ mod target_release_tests {
     #[sqlx::test]
     #[ignore = "needs the compose Postgres; run with --test-threads=1"]
     async fn only_two_devices_per_ip_get_the_target(pool: PgPool) -> anyhow::Result<()> {
-        let (current, target, _, devices) = site(&pool, 5).await?;
+        let Site {
+            current,
+            target,
+            devices,
+            ..
+        } = site(&pool, 5).await?;
         assert_eq!(
             poll_all(&pool, &devices).await,
             vec![
@@ -1517,7 +1534,12 @@ mod target_release_tests {
     #[sqlx::test]
     #[ignore = "needs the compose Postgres; run with --test-threads=1"]
     async fn finishing_a_download_frees_a_slot(pool: PgPool) -> anyhow::Result<()> {
-        let (current, target, _, devices) = site(&pool, 3).await?;
+        let Site {
+            current,
+            target,
+            devices,
+            ..
+        } = site(&pool, 3).await?;
         poll_all(&pool, &devices).await;
         assert_eq!(get_target_release(devices[2], &pool).await, Some(current));
 
@@ -1533,7 +1555,13 @@ mod target_release_tests {
     #[sqlx::test]
     #[ignore = "needs the compose Postgres; run with --test-threads=1"]
     async fn ip_override_changes_the_limit(pool: PgPool) -> anyhow::Result<()> {
-        let (current, target, ip, devices) = site(&pool, 3).await?;
+        let Site {
+            current,
+            target,
+            ip,
+            devices,
+            ..
+        } = site(&pool, 3).await?;
         sqlx::query("UPDATE ip_address SET max_concurrent_downloads = 1 WHERE id = $1")
             .bind(ip)
             .execute(&pool)
@@ -1548,7 +1576,12 @@ mod target_release_tests {
     #[sqlx::test]
     #[ignore = "needs the compose Postgres; run with --test-threads=1"]
     async fn a_holder_keeps_its_target_when_the_ip_is_full(pool: PgPool) -> anyhow::Result<()> {
-        let (_, target, ip, devices) = site(&pool, 3).await?;
+        let Site {
+            target,
+            ip,
+            devices,
+            ..
+        } = site(&pool, 3).await?;
         poll_all(&pool, &devices).await;
         sqlx::query("UPDATE ip_address SET max_concurrent_downloads = 1 WHERE id = $1")
             .bind(ip)
@@ -1564,7 +1597,12 @@ mod target_release_tests {
     #[sqlx::test]
     #[ignore = "needs the compose Postgres; run with --test-threads=1"]
     async fn an_offline_holder_does_not_block_the_site(pool: PgPool) -> anyhow::Result<()> {
-        let (current, target, _, devices) = site(&pool, 3).await?;
+        let Site {
+            current,
+            target,
+            devices,
+            ..
+        } = site(&pool, 3).await?;
         poll_all(&pool, &devices).await;
         assert_eq!(get_target_release(devices[2], &pool).await, Some(current));
 
@@ -1584,7 +1622,12 @@ mod target_release_tests {
     #[sqlx::test]
     #[ignore = "needs the compose Postgres; run with --test-threads=1"]
     async fn a_retarget_invalidates_the_slot(pool: PgPool) -> anyhow::Result<()> {
-        let (current, target, _, devices) = site(&pool, 3).await?;
+        let Site {
+            current,
+            target,
+            devices,
+            ..
+        } = site(&pool, 3).await?;
         poll_all(&pool, &devices).await;
         sqlx::query("UPDATE device SET target_release_id = $1 WHERE id = ANY($2)")
             .bind(current)
@@ -1599,7 +1642,9 @@ mod target_release_tests {
     #[sqlx::test]
     #[ignore = "needs the compose Postgres; run with --test-threads=1"]
     async fn devices_without_an_ip_are_not_limited(pool: PgPool) -> anyhow::Result<()> {
-        let (_, target, _, devices) = site(&pool, 4).await?;
+        let Site {
+            target, devices, ..
+        } = site(&pool, 4).await?;
         sqlx::query("UPDATE device SET ip_address_id = NULL")
             .execute(&pool)
             .await?;
@@ -1610,7 +1655,9 @@ mod target_release_tests {
     #[sqlx::test]
     #[ignore = "needs the compose Postgres; run with --test-threads=1"]
     async fn concurrent_polls_never_exceed_the_limit(pool: PgPool) -> anyhow::Result<()> {
-        let (_, target, _, devices) = site(&pool, 10).await?;
+        let Site {
+            target, devices, ..
+        } = site(&pool, 10).await?;
         let answers = futures::future::join_all(
             devices
                 .iter()
