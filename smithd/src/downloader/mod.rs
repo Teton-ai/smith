@@ -1,6 +1,7 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 mod download;
+mod pace;
 use crate::downloader::download::DownloadStats;
 use crate::magic::MagicHandle;
 use crate::session::SessionHandle;
