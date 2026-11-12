@@ -1101,7 +1101,9 @@ async fn try_take_download_slot(
     let granted = holders < limit;
     if granted {
         sqlx::query!(
-            "UPDATE device SET download_slot_release_id = $2, download_slot_at = NOW()
+            // Stamped after the IP lock wait, not at transaction start, so a
+            // retarget that commits during the wait cannot make this slot stale.
+            "UPDATE device SET download_slot_release_id = $2, download_slot_at = clock_timestamp()
              WHERE id = $1",
             device_id,
             target
@@ -1710,6 +1712,13 @@ mod target_release_tests {
             get_target_release(first, &pool).await,
             Some(current),
             "the IP is full, so the old slot must not let it through"
+        );
+        assert_eq!(
+            crate::deployment::rollout_progress(target, &pool)
+                .await?
+                .waiting_for_slot,
+            1,
+            "progress counts it as waiting"
         );
         Ok(())
     }
