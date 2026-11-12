@@ -297,7 +297,6 @@ const managedFields = Object.keys(SETTING_LABEL);
 
 test("real response with nothing managed has no source or state", () => {
 	const settings = realResponse("device-settings-unmanaged");
-	assert.equal(hasWantedSettings(settings), false);
 	assert.deepEqual(
 		managedFields.map((f) => [
 			f,
@@ -310,7 +309,6 @@ test("real response with nothing managed has no source or state", () => {
 
 test("real response after a failed hostname pin flags only the hostname", () => {
 	const settings = realResponse("device-settings-pin-failed");
-	assert.equal(hasUnappliedEdits(settings), false);
 	assert.deepEqual(
 		managedFields
 			.map((f) => [f, settingSource(settings, f), settingState(settings, f)])

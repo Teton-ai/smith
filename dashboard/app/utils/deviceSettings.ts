@@ -101,7 +101,7 @@ export const wantedValue = <K extends ManagedField>(
 	return isSet(value) ? (value as NonNullable<SettingValues[K]>) : undefined;
 };
 
-/** What the device reports it runs; `undefined` when not reported. */
+/** What the device reports it runs; `undefined` when unreported or unset. */
 export const runningValue = <K extends ManagedField>(
 	settings: Pick<DeviceSettings, "reported">,
 	field: K,
@@ -124,7 +124,6 @@ export const settingSource = (
 	return isSet(settings.defaults[field]) ? "default" : undefined;
 };
 
-/** Whether any setting has a pin or a distribution default. */
 export const hasWantedSettings = (
 	settings: Pick<DeviceSettings, "wanted" | "defaults">,
 ): boolean =>
@@ -137,7 +136,8 @@ export const hasUnappliedEdits = (
 ): boolean =>
 	settings.settings_version > (settings.reported?.applied_version ?? 0);
 
-/** Whether the device runs something other than the wanted value. */
+/** Whether the device runs something other than the wanted value; false
+ *  when unmanaged. */
 export const runningDiffers = (
 	settings: DeviceSettings,
 	field: ManagedField,
@@ -148,10 +148,10 @@ export const runningDiffers = (
 	);
 };
 
-/** State of one setting, `undefined` for a setting that is not managed and
- *  has nothing to flag. Order matters: an unsupported setting is never an
- *  apply failure or a read error, an apply status wins over the version
- *  check because a revert reports the version it went back to. */
+/** State of one setting, `undefined` when unmanaged with nothing to flag. Check
+ *  order matters: an unsupported setting is never a failure or read error, and
+ *  an apply status wins over the version check since a revert reports the
+ *  version it went back to. */
 export const settingState = (
 	settings: DeviceSettings,
 	field: ManagedField,
@@ -165,8 +165,8 @@ export const settingState = (
 	// A setting nobody manages has no state; its read error shows as the value.
 	if (!managed) return undefined;
 	if (reported.read_errors?.includes(field)) return { state: "unreadable" };
-	// A device at version 0 is applied automatically once it has defaults
-	// (FR10a), so never applied is Pending, not In sync.
+	// A device at version 0 is applied automatically once it has defaults, so
+	// never applied is Pending, not In sync.
 	if (!isSet(reported.applied_version) || hasUnappliedEdits(settings)) {
 		return { state: "pending" };
 	}
@@ -203,8 +203,7 @@ const formatManagedValue = (value: unknown): string => {
 	return String(value);
 };
 
-/** One row per group present in an `ApplySettings`, `Set` groups with their
- *  value and `Unmanaged` ones as such; absent groups are left out. */
+/** One row per group present in an `ApplySettings`; `Unmanaged` groups show as such. */
 export const wantedRows = (
 	settings: WantedSettings,
 ): { key: string; value: string }[] =>
@@ -222,9 +221,8 @@ export const wantedRows = (
 		];
 	});
 
-/** Headline of an `ApplySettingsResult`. A refused apply is not reverted but
- *  fails every setting and carries the previous version, so failures must be
- *  checked before calling it applied. */
+/** A refused apply is not reverted: it fails every setting and reports the
+ *  previous version, so failures are checked before calling it applied. */
 export const applyResultSummary = (
 	result: ApplySettingsResult,
 ): { outcome: ApplyOutcome; text: string } => {
@@ -249,7 +247,6 @@ export const applyResultSummary = (
 	};
 };
 
-/** Apply statuses as `setting: State (reason)` lines. */
 export const applyStatusLines = (
 	statuses: SettingStatus[] | undefined,
 ): string[] =>

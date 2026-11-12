@@ -47,8 +47,8 @@ const MS_PER_S = 1_000;
 const S_PER_MIN = 60;
 const S_PER_HOUR = 3_600;
 
-/** Called by device id, not serial: a numeric serial can match another
- *  device's id (ADR 0006). Waits for the device to resolve. */
+/** Fetched by device id, not serial: a numeric serial can match another
+ *  device's id. Disabled until the device resolves. */
 const useDeviceSettings = (device: Device | undefined) =>
 	useGetSettingsForDevice(String(device?.id), {
 		query: {
@@ -94,9 +94,9 @@ const useRefreshDeviceSettings = (
 	return { refresh, isPending, canRefresh: device?.id !== undefined };
 };
 
-/** Renders one setting's value, or why there is none: "not used" when the
- *  distribution doesn't have it (wins over a read error, e.g. devices without
- *  the Realtek driver), "not reported", "couldn't read", or "none". */
+/** Renders a setting's value, or in its place why there is none: "not used"
+ *  when the distribution doesn't have it (wins over a read error, e.g. devices
+ *  without the Realtek driver), "not reported", "couldn't read", or "none". */
 const SettingValue = ({
 	settings,
 	field,
@@ -128,10 +128,9 @@ const SettingValue = ({
 	return <>{children}</>;
 };
 
-/** A managed setting: the wanted value with its Default or Pinned badge and
- *  state; a "Running:" line only when the device runs something else. Not
- *  managed settings show what the device runs. `render` formats a value,
- *  wanted or running. */
+/** A setting row: the wanted value (or, when unmanaged, what the device runs)
+ *  with its source and state badges, plus a "Running:" line only when the
+ *  device runs something else. `render` formats a value. */
 const ManagedRow = <K extends ManagedField>({
 	settings,
 	field,
@@ -367,8 +366,7 @@ const describeBgscan = (bgscan: string) => {
 };
 
 /** Wanted settings next to what the device runs: Realtek driver, roaming,
- *  NetworkManager defaults, time sync and hostname. Read only; editing comes
- *  later. */
+ *  NetworkManager defaults, time sync and hostname. Read only. */
 const NetworkSettingsPanel = ({ device }: { device: Device | undefined }) => {
 	const {
 		data: settings,
@@ -381,8 +379,8 @@ const NetworkSettingsPanel = ({ device }: { device: Device | undefined }) => {
 		refetch,
 	);
 	const reported = settings?.reported;
-	// Read only rows go through `SettingValue`, which shows "Not reported" for a
-	// missing report, so they can read an empty one.
+	// Without a report `r` is empty, which is safe: `SettingValue` shows "Not
+	// reported" before rendering any of it.
 	const r: Partial<ReportedSettings> = reported ?? {};
 
 	return (
