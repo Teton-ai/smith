@@ -1,7 +1,9 @@
 import type {
 	DeviceSetting,
 	DeviceSettings,
+	SettingStatus,
 	SettingValues,
+	WantedSettings,
 } from "../api-client.ts";
 
 /** Fields the API lets users set; the others in a report are read only. */
@@ -112,3 +114,87 @@ export const settingState = (
  *  carries the L4T release, e.g. `orin-nano-rcmptr-mini-revc-up-l4t-36.4.3`. */
 export const isL4t36 = (distributionName: string | undefined): boolean =>
 	/l4t-36\./.test(distributionName ?? "");
+
+/** Groups of an `ApplySettings`, in display order. */
+const WANTED_GROUPS: [keyof WantedSettings, string][] = [
+	["wireless_mode", "Driver mode"],
+	["power_mgnt", "Power management"],
+	["roam_flags", "Roam flags"],
+	["roam_tuning", "Roam tuning"],
+	["nm_wifi_powersave", "NM Wi-Fi power save"],
+	["nm_autoconnect_retries", "NM autoconnect retries"],
+	["mac", "MAC randomization"],
+	["hostname", "Hostname"],
+	["ntp_servers", "NTP servers"],
+	["bgscan", "Background scan"],
+];
+
+const formatManagedValue = (value: unknown): string => {
+	if (Array.isArray(value)) return value.length ? value.join(", ") : "(none)";
+	if (value !== null && typeof value === "object") {
+		return Object.entries(value)
+			.filter(([, v]) => v != null)
+			.map(([k, v]) => `${k} ${v}`)
+			.join(", ");
+	}
+	return String(value);
+};
+
+/** One row per group present in an `ApplySettings`, `Set` groups with their
+ *  value and `Unmanaged` ones as such; absent groups are left out. */
+export const wantedRows = (
+	settings: WantedSettings,
+): { key: string; value: string }[] =>
+	WANTED_GROUPS.flatMap(([group, label]) => {
+		const managed = settings[group];
+		if (managed === undefined) return [];
+		return [
+			{
+				key: label,
+				value:
+					managed === "Unmanaged"
+						? "Unmanaged"
+						: formatManagedValue(managed.Set),
+			},
+		];
+	});
+
+export type ApplyOutcome = "applied" | "failed" | "reverted";
+
+/** Headline of an `ApplySettingsResult`. A refused apply is not reverted but
+ *  fails every setting and carries the previous version, so failures must be
+ *  checked before calling it applied. */
+export const applyResultSummary = (result: {
+	applied_version: number;
+	reverted: boolean;
+	report?: { apply_status?: SettingStatus[] };
+}): { outcome: ApplyOutcome; text: string } => {
+	if (result.reverted) {
+		return {
+			outcome: "reverted",
+			text: `Version ${result.applied_version} reverted`,
+		};
+	}
+	const failed = (result.report?.apply_status ?? []).filter(
+		(s) => s.state === "failed",
+	).length;
+	if (failed > 0) {
+		return {
+			outcome: "failed",
+			text: `${failed} ${failed === 1 ? "setting" : "settings"} failed, the device runs version ${result.applied_version}`,
+		};
+	}
+	return {
+		outcome: "applied",
+		text: `Version ${result.applied_version} applied`,
+	};
+};
+
+/** Apply statuses as `setting: State (reason)` lines. */
+export const applyStatusLines = (
+	statuses: SettingStatus[] | undefined,
+): string[] =>
+	(statuses ?? []).map(
+		(s) =>
+			`${s.setting}: ${STATE_LABEL[s.state]}${s.reason ? ` (${s.reason})` : ""}`,
+	);

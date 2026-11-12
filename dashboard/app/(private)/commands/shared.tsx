@@ -10,9 +10,19 @@ import {
 	useMemo,
 	useState,
 } from "react";
-import type { DeviceCommandResponse } from "@/app/api-client";
+import type {
+	DeviceCommandResponse,
+	SettingsReport,
+	WantedSettings,
+} from "@/app/api-client";
 import { RelativeTime } from "@/app/components/RelativeTime";
 import { Tooltip } from "@/app/components/tooltip";
+import {
+	type ApplyOutcome,
+	applyResultSummary,
+	applyStatusLines,
+	wantedRows,
+} from "@/app/utils/deviceSettings";
 import { deriveBand, groupScanResults, SignalBar } from "@/app/utils/wifiScan";
 
 // ---------------------------------------------------------------------------
@@ -61,6 +71,9 @@ export type CmdTxGetLogs = {
 		grep?: string | null;
 	};
 };
+export type CmdTxApplySettings = {
+	ApplySettings: { version: number; settings: WantedSettings };
+};
 
 export type SafeCommandTx =
 	| CmdTxPing
@@ -78,7 +91,8 @@ export type SafeCommandTx =
 	| CmdTxExtendedNetworkTest
 	| CmdTxStreamLogs
 	| CmdTxStopLogStream
-	| CmdTxGetLogs;
+	| CmdTxGetLogs
+	| CmdTxApplySettings;
 
 // TX command variants that carry no parameters (unit variants).
 export const SIMPLE_COMMANDS = [
@@ -154,6 +168,21 @@ export type CmdRxExtendedNetworkTest = {
 		samples: unknown[];
 		network_info?: unknown;
 	};
+};
+export type CmdRxApplySettingsResult = {
+	ApplySettingsResult: {
+		applied_version: number;
+		reverted: boolean;
+		report: SettingsReport;
+	};
+};
+const APPLY_OUTCOME_BADGE: Record<
+	ApplyOutcome,
+	{ variant: BadgeVariant; label: string }
+> = {
+	applied: { variant: "green", label: "Applied" },
+	failed: { variant: "red", label: "Failed" },
+	reverted: { variant: "red", label: "Reverted" },
 };
 export type CmdRxLogStreamStarted = {
 	LogStreamStarted: { session_id: string };
@@ -643,6 +672,10 @@ export const getTxLabel = (
 			const p = (parsed.tx as CmdTxGetLogs).GetLogs;
 			return { label: `Get Logs${p.unit ? `: ${p.unit}` : ""}`, mono: false };
 		}
+		case "ApplySettings": {
+			const p = (parsed.tx as CmdTxApplySettings).ApplySettings;
+			return { label: `Apply Settings (v${p.version})`, mono: false };
+		}
 		default:
 			return { label: parsed.variant, mono: false };
 	}
@@ -1048,6 +1081,14 @@ export const renderTxDetail = (cmd_data: unknown) => {
 				<p className="text-sm text-gray-400 italic">No filters</p>
 			);
 		}
+		case "ApplySettings": {
+			const p = (parsed.tx as CmdTxApplySettings).ApplySettings;
+			const rows = [
+				{ key: "Version", value: String(p.version) },
+				...wantedRows(p.settings ?? {}),
+			];
+			return <KVTable rows={rows} />;
+		}
 		default:
 			return (
 				<CodeBlock
@@ -1204,6 +1245,25 @@ export const renderRxDetail = (response: unknown) => {
 							label="network info"
 							content={JSON.stringify(p.network_info, null, 2)}
 						/>
+					)}
+				</div>
+			);
+		}
+		case "ApplySettingsResult": {
+			const p =
+				parsed.payload as CmdRxApplySettingsResult["ApplySettingsResult"];
+			const lines = applyStatusLines(p.report?.apply_status);
+			const summary = applyResultSummary(p);
+			return (
+				<div className="space-y-3">
+					<div className="flex items-center gap-2">
+						<Badge variant={APPLY_OUTCOME_BADGE[summary.outcome].variant}>
+							{APPLY_OUTCOME_BADGE[summary.outcome].label}
+						</Badge>
+						<span className="text-sm text-gray-900">{summary.text}</span>
+					</div>
+					{lines.length > 0 && (
+						<CodeBlock label="apply status" content={lines.join("\n")} />
 					)}
 				</div>
 			);

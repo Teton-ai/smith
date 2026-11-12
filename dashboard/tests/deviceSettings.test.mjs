@@ -1,11 +1,14 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+	applyResultSummary,
+	applyStatusLines,
 	hasUnappliedEdits,
 	hasWantedSettings,
 	isL4t36,
 	settingSource,
 	settingState,
+	wantedRows,
 } from "../app/utils/deviceSettings.ts";
 
 const fixture = (over = {}) => ({
@@ -168,5 +171,95 @@ for (const [name, wanted, defaults, expected] of [
 ]) {
 	test(`wanted settings: ${name}`, () => {
 		assert.equal(hasWantedSettings({ wanted, defaults }), expected);
+	});
+}
+
+for (const [name, settings, expected] of [
+	["omits absent groups", {}, []],
+	[
+		"shows Unmanaged groups as such",
+		{ hostname: "Unmanaged" },
+		[{ key: "Hostname", value: "Unmanaged" }],
+	],
+	[
+		"formats scalar, list and struct values in display order",
+		{
+			ntp_servers: { Set: ["a.example", "b.example"] },
+			roam_tuning: { Set: { idle_diff: 15, busy_diff: null, scan_int: 5 } },
+			power_mgnt: { Set: 2 },
+		},
+		[
+			{ key: "Power management", value: "2" },
+			{ key: "Roam tuning", value: "idle_diff 15, scan_int 5" },
+			{ key: "NTP servers", value: "a.example, b.example" },
+		],
+	],
+	[
+		"shows an empty NTP list explicitly",
+		{ ntp_servers: { Set: [] } },
+		[{ key: "NTP servers", value: "(none)" }],
+	],
+]) {
+	test(`wantedRows ${name}`, () => {
+		assert.deepEqual(wantedRows(settings), expected);
+	});
+}
+
+for (const [name, result, expected] of [
+	[
+		"applied",
+		{ applied_version: 5, reverted: false },
+		{ outcome: "applied", text: "Version 5 applied" },
+	],
+	[
+		"reverted",
+		{ applied_version: 5, reverted: true },
+		{ outcome: "reverted", text: "Version 5 reverted" },
+	],
+	[
+		"failed settings, as in a refused apply",
+		{
+			applied_version: 4,
+			reverted: false,
+			report: {
+				apply_status: [
+					{ setting: "hostname", state: "failed", reason: "no space" },
+					{ setting: "bgscan", state: "failed", reason: "no space" },
+				],
+			},
+		},
+		{
+			outcome: "failed",
+			text: "2 settings failed, the device runs version 4",
+		},
+	],
+]) {
+	test(`applyResultSummary reports ${name}`, () => {
+		assert.deepEqual(applyResultSummary(result), expected);
+	});
+}
+
+for (const [name, statuses, expected] of [
+	["no statuses", undefined, []],
+	[
+		"failed with and without a reason, and reverted",
+		[
+			{ setting: "hostname", state: "failed", reason: "hostnamectl exited 1" },
+			{ setting: "bgscan", state: "failed", reason: "" },
+			{
+				setting: "power_mgnt",
+				state: "reverted",
+				reason: "reverted: no connectivity after apply",
+			},
+		],
+		[
+			"hostname: Failed (hostnamectl exited 1)",
+			"bgscan: Failed",
+			"power_mgnt: Reverted (reverted: no connectivity after apply)",
+		],
+	],
+]) {
+	test(`applyStatusLines renders ${name}`, () => {
+		assert.deepEqual(applyStatusLines(statuses), expected);
 	});
 }
