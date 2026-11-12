@@ -1,3 +1,7 @@
+-- Every /home poll queues behind the ACCESS EXCLUSIVE lock while it waits, so
+-- fail the deploy instead of stalling the fleet behind a long transaction.
+SET LOCAL lock_timeout = '3s';
+
 -- A device holds a download slot for a release from the moment it is told to
 -- move to it. Keying the slot on the release means a retarget elsewhere
 -- invalidates it without touching the retarget queries.

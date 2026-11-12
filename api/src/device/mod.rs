@@ -1070,8 +1070,15 @@ async fn try_take_download_slot(
     target: i32,
 ) -> sqlx::Result<bool> {
     let mut tx = pool.begin().await?;
+    // The pool's 10 s lock wait would hold the IP lock past smithd's /home
+    // timeout and queue every other device on the IP behind it.
+    sqlx::query(crate::home::RESULT_TX_TIMEOUTS)
+        .execute(&mut *tx)
+        .await?;
+    // NO KEY: still serializes grants, but does not block the FK check of a
+    // ping that moves a device onto this IP.
     let ip = sqlx::query!(
-        "SELECT max_concurrent_downloads FROM ip_address WHERE id = $1 FOR UPDATE",
+        "SELECT max_concurrent_downloads FROM ip_address WHERE id = $1 FOR NO KEY UPDATE",
         ip_address_id
     )
     .fetch_one(&mut *tx)

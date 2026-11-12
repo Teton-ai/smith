@@ -61,9 +61,9 @@ const SYSTEM_COMMAND_LOCK: i32 = 3;
 /// sends the results again, so work after that only adds load.
 const SAVE_BUDGET: Duration = Duration::from_secs(5);
 
-/// Bounds each wait of a result's transaction, so an overload fails fast and
+/// Bounds each wait of a /home transaction, so an overload fails fast and
 /// frees its connection.
-const RESULT_TX_TIMEOUTS: &str =
+pub(crate) const RESULT_TX_TIMEOUTS: &str =
     "SELECT set_config('lock_timeout', '1s', true), set_config('statement_timeout', '3s', true)";
 
 /// Older smithd deadlocks above ~20 commands in one answer; the rest leave with later posts.
