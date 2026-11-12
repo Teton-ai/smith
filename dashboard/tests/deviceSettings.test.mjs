@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import {
 	applyResultSummary,
@@ -6,6 +7,7 @@ import {
 	hasUnappliedEdits,
 	hasWantedSettings,
 	isL4t36,
+	SETTING_LABEL,
 	settingSource,
 	settingState,
 	wantedRows,
@@ -284,3 +286,41 @@ for (const [name, statuses, expected] of [
 		assert.deepEqual(applyStatusLines(statuses), expected);
 	});
 }
+
+// Real `GET /devices/{id}/settings` responses from a dev device (no
+// NetworkManager, so every Wi-Fi setting is a read error).
+const realResponse = (name) =>
+	JSON.parse(
+		readFileSync(new URL(`fixtures/${name}.json`, import.meta.url), "utf8"),
+	);
+const managedFields = Object.keys(SETTING_LABEL);
+
+test("real response with nothing managed has no source or state", () => {
+	const settings = realResponse("device-settings-unmanaged");
+	assert.equal(hasWantedSettings(settings), false);
+	assert.deepEqual(
+		managedFields.map((f) => [
+			f,
+			settingSource(settings, f),
+			settingState(settings, f),
+		]),
+		managedFields.map((f) => [f, undefined, undefined]),
+	);
+});
+
+test("real response after a failed hostname pin flags only the hostname", () => {
+	const settings = realResponse("device-settings-pin-failed");
+	assert.equal(hasUnappliedEdits(settings), false);
+	assert.deepEqual(
+		managedFields
+			.map((f) => [f, settingSource(settings, f), settingState(settings, f)])
+			.filter(([, source, state]) => source || state),
+		[
+			[
+				"hostname",
+				"pinned",
+				{ state: "failed", reason: "hostnamectl exited with exit status: 1" },
+			],
+		],
+	);
+});
