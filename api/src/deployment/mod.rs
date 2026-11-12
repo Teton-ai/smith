@@ -934,6 +934,9 @@ pub struct RolloutProgress {
     pub eligible: i64,
     /// Already on the release.
     pub updated: i64,
+    /// Part of `eligible`: not told to download yet because their public IP
+    /// has no free download slot.
+    pub waiting_for_slot: i64,
     pub next_bucket_at: Option<chrono::DateTime<chrono::Utc>>,
     /// When the last bucket opens (or opened).
     pub expected_end_at: Option<chrono::DateTime<chrono::Utc>>,
@@ -957,6 +960,11 @@ where
                 AND (target_release_eligible_at IS NULL OR target_release_eligible_at <= NOW())
             ) AS "eligible!",
             COUNT(*) FILTER (WHERE release_id = target_release_id) AS "updated!",
+            COUNT(*) FILTER (
+                WHERE release_id IS DISTINCT FROM target_release_id
+                AND (target_release_eligible_at IS NULL OR target_release_eligible_at <= NOW())
+                AND download_slot_release_id IS DISTINCT FROM target_release_id
+            ) AS "waiting_for_slot!",
             MIN(target_release_eligible_at) FILTER (
                 WHERE release_id IS DISTINCT FROM target_release_id
                 AND target_release_eligible_at > NOW()
@@ -1312,6 +1320,17 @@ pub(crate) mod tests {
         assert_eq!(after.scheduled, 0);
         assert_eq!(after.eligible, 19);
         assert_eq!(after.next_bucket_at, None);
+        assert_eq!(
+            after.waiting_for_slot, 19,
+            "nobody has been told to download yet"
+        );
+
+        sqlx::query("UPDATE device SET download_slot_release_id = $1, download_slot_at = NOW() WHERE id = $2")
+            .bind(target)
+            .bind(ids[1])
+            .execute(&pool)
+            .await?;
+        assert_eq!(rollout_progress(target, &pool).await?.waiting_for_slot, 18);
         Ok(())
     }
 }
