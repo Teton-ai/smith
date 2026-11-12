@@ -293,6 +293,17 @@ impl Storage {
         Ok(Bucket::new(bucket_name, region, credentials)?)
     }
 
+    /// Cached creds can be near expiry, sign only immediate requests.
+    async fn shared_bucket(bucket_name: &str) -> anyhow::Result<Box<Bucket>> {
+        static BUCKET: tokio::sync::OnceCell<Box<Bucket>> = tokio::sync::OnceCell::const_new();
+        let mut bucket = BUCKET
+            .get_or_try_init(|| async { Self::bucket(bucket_name) })
+            .await?
+            .clone();
+        bucket.name = bucket_name.to_owned();
+        Ok(bucket)
+    }
+
     /// Opens a multipart upload and returns its id. Content type and
     /// disposition are fixed here rather than signed into the part URLs: a
     /// signed header has to be echoed back byte-identically by the client or S3
@@ -484,20 +495,22 @@ impl Storage {
         object_key: &str,
         upload_id: &str,
     ) -> anyhow::Result<Vec<UploadPart>> {
-        let bucket = Self::bucket(bucket_name)?;
+        let bucket = Self::shared_bucket(bucket_name).await?;
         let queries = HashMap::from([
             ("uploadId".to_owned(), upload_id.to_owned()),
             ("max-parts".to_owned(), "1000".to_owned()),
         ]);
         let url = bucket.presign_get(object_key, 900, Some(queries)).await?;
-        static CLIENT: std::sync::LazyLock<reqwest::Client> = std::sync::LazyLock::new(|| {
-            reqwest::Client::builder()
-                .timeout(std::time::Duration::from_secs(30))
-                .redirect(reqwest::redirect::Policy::none())
-                .build()
-                .expect("static reqwest client settings are valid")
-        });
-        let response = CLIENT.get(url).send().await.map_err(|e| e.without_url())?;
+        static CLIENT: tokio::sync::OnceCell<reqwest::Client> = tokio::sync::OnceCell::const_new();
+        let client = CLIENT
+            .get_or_try_init(|| async {
+                reqwest::Client::builder()
+                    .timeout(std::time::Duration::from_secs(30))
+                    .redirect(reqwest::redirect::Policy::none())
+                    .build()
+            })
+            .await?;
+        let response = client.get(url).send().await.map_err(|e| e.without_url())?;
         let status = response.status().as_u16();
         let body = response.text().await.map_err(|e| e.without_url())?;
         if missing_upload_body(&body) {
@@ -531,7 +544,7 @@ impl Storage {
         size: i64,
         checksum: &str,
     ) -> anyhow::Result<bool> {
-        let bucket = Self::bucket(bucket_name)?;
+        let bucket = Self::shared_bucket(bucket_name).await?;
         Self::matches_bucket_object(&bucket, object_key, size, checksum).await
     }
 
