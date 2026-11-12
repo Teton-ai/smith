@@ -17,6 +17,7 @@ use crate::tunnel::TunnelHandle;
 use crate::updater::UpdaterHandle;
 use crate::utils::net_guard::NetGuard;
 use crate::utils::system::SystemInfo;
+use tokio::sync::watch;
 use tracing::info;
 
 pub async fn run() {
@@ -41,8 +42,15 @@ pub async fn run() {
 
     let police = PoliceHandle::new(shutdown.signals());
 
-    let downloader =
-        DownloaderHandle::new(shutdown.signals(), configuration.clone(), session.clone());
+    // The postman owns the sender, but is created after the downloader.
+    let (link_delay_tx, link_delay) = watch::channel(None);
+
+    let downloader = DownloaderHandle::new(
+        shutdown.signals(),
+        configuration.clone(),
+        session.clone(),
+        link_delay,
+    );
 
     let updater = UpdaterHandle::new(
         shutdown.signals(),
@@ -92,6 +100,8 @@ pub async fn run() {
         commander.clone(),
         configuration.clone(),
         session.clone(),
+        link_delay_tx,
+        downloader.downloading(),
     );
 
     // Follows the postman's polls to revert an apply that lost the api.
