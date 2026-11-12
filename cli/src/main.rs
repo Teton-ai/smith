@@ -1901,6 +1901,9 @@ async fn main() -> anyhow::Result<()> {
             Commands::Releases { command } => {
                 command.handle(config).await?;
             }
+            Commands::Deployments { command } => {
+                command.handle(config).await?;
+            }
             Commands::Completion { shell } => {
                 let mut cmd = Cli::command();
                 let name = env!("CARGO_BIN_NAME");

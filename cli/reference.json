@@ -835,7 +835,7 @@
     },
     {
       "path": "sm releases deploy",
-      "about": "Deploy a release",
+      "about": "Deploy a release. Canaries are picked automatically. A stable release then rolls out to the fleet; a release candidate needs a pilot group, which it rolls out to instead. A pilot group under 10 devices is deployed to directly, without a canary",
       "usage": "sm releases deploy [OPTIONS] <RELEASE_NUMBER>",
       "arguments": [
         {
@@ -846,13 +846,176 @@
       ],
       "options": [
         {
-          "name": "--canary-device-labels",
-          "value": "<CANARY_DEVICE_LABELS>",
+          "name": "--pilot-label",
+          "value": "<PILOT_DEVICE_LABELS>",
           "required": false,
-          "help": "Customize which devices are canary released, by filtering devices by labels. e.g. --labels label1=a --labels label2=b"
+          "help": "A release candidate's pilot group: devices with any of these labels. Repeat for several"
+        },
+        {
+          "name": "--pilot-device",
+          "value": "<PILOT_DEVICE_IDS>",
+          "required": false,
+          "help": "A release candidate's pilot group: these device IDs. Repeat for several"
         }
       ],
-      "examples": []
+      "examples": [
+        "sm releases deploy 1520",
+        "sm releases deploy 1521 --pilot-label env=staging",
+        "sm releases deploy 1521 --pilot-device 12 --pilot-device 15"
+      ]
+    },
+    {
+      "path": "sm deployments list",
+      "about": "List deployments, newest first",
+      "usage": "sm deployments list [OPTIONS]",
+      "arguments": [],
+      "options": [
+        {
+          "name": "--release",
+          "value": "<RELEASE>",
+          "required": false,
+          "help": "Only deployments of this release"
+        },
+        {
+          "name": "--distribution",
+          "value": "<DISTRIBUTION>",
+          "required": false,
+          "help": "Only deployments in this distribution"
+        },
+        {
+          "name": "--limit",
+          "value": "<LIMIT>",
+          "required": false,
+          "help": "At most this many, up to 200",
+          "default": "20"
+        },
+        {
+          "name": "--json",
+          "required": false,
+          "help": ""
+        }
+      ],
+      "examples": [
+        "sm deployments list",
+        "sm deployments list --release 1516",
+        "sm deployments list --distribution 14 --json"
+      ]
+    },
+    {
+      "path": "sm deployments get",
+      "about": "Show a deployment: where it is, its waves, what blocks confirming it, and its activity",
+      "usage": "sm deployments get [OPTIONS] <DEPLOYMENT_ID>",
+      "arguments": [
+        {
+          "name": "<DEPLOYMENT_ID>",
+          "required": true,
+          "help": ""
+        }
+      ],
+      "options": [
+        {
+          "name": "--json",
+          "required": false,
+          "help": ""
+        }
+      ],
+      "examples": [
+        "sm deployments get 42"
+      ]
+    },
+    {
+      "path": "sm deployments confirm",
+      "about": "Confirm the rollout once the canary is healthy. A stable release then updates the fleet in staggered waves; a release candidate updates the rest of its pilot group",
+      "usage": "sm deployments confirm <DEPLOYMENT_ID>",
+      "arguments": [
+        {
+          "name": "<DEPLOYMENT_ID>",
+          "required": true,
+          "help": ""
+        }
+      ],
+      "options": [],
+      "examples": [
+        "sm deployments confirm 42"
+      ]
+    },
+    {
+      "path": "sm deployments pause",
+      "about": "Stop devices from starting the update. A device already downloading finishes and stays there",
+      "usage": "sm deployments pause [OPTIONS] <DEPLOYMENT_ID>",
+      "arguments": [
+        {
+          "name": "<DEPLOYMENT_ID>",
+          "required": true,
+          "help": ""
+        }
+      ],
+      "options": [
+        {
+          "name": "--reason",
+          "value": "<REASON>",
+          "required": false,
+          "help": "Why, for the deployment's activity log"
+        }
+      ],
+      "examples": [
+        "sm deployments pause 42 --reason \"canary reboots\""
+      ]
+    },
+    {
+      "path": "sm deployments resume",
+      "about": "Resume a paused deployment. Waves still to come keep their spacing",
+      "usage": "sm deployments resume <DEPLOYMENT_ID>",
+      "arguments": [
+        {
+          "name": "<DEPLOYMENT_ID>",
+          "required": true,
+          "help": ""
+        }
+      ],
+      "options": [],
+      "examples": [
+        "sm deployments resume 42"
+      ]
+    },
+    {
+      "path": "sm deployments finalize",
+      "about": "Stop waiting for devices that haven't updated: they are marked timed out and the deployment completes. They keep the release as their target and still update on their own once they come online. Every wave must have opened; this also happens on its own at the deployment's timeout",
+      "usage": "sm deployments finalize <DEPLOYMENT_ID>",
+      "arguments": [
+        {
+          "name": "<DEPLOYMENT_ID>",
+          "required": true,
+          "help": ""
+        }
+      ],
+      "options": [],
+      "examples": [
+        "sm deployments finalize 42"
+      ]
+    },
+    {
+      "path": "sm deployments yank",
+      "about": "Withdraw the deployment's release and move every device on it back to the release the deployment started from, at once. This is how a rollout is stopped: no device that follows latest is left on a release that isn't latest",
+      "usage": "sm deployments yank [OPTIONS] <DEPLOYMENT_ID>",
+      "arguments": [
+        {
+          "name": "<DEPLOYMENT_ID>",
+          "required": true,
+          "help": ""
+        }
+      ],
+      "options": [
+        {
+          "name": "--reason",
+          "value": "<REASON>",
+          "required": false,
+          "help": "Why, for the release and the deployment's activity log"
+        }
+      ],
+      "examples": [
+        "sm deployments yank 42 --reason \"bad build\""
+      ]
     },
     {
       "path": "sm tunnel",
@@ -1147,7 +1310,7 @@
     {
       "path": "sm pin",
       "about": "Pin devices so fleet-wide rollouts do not update them",
-      "description": "A pinned device is skipped by full rollouts and by automatic canary selection. It still moves when a canary targets it by label or ID, when its release is rolled back, or when its target release is set directly. Use `--release` to put the devices on a release and keep them there.",
+      "description": "A pinned device is skipped by full rollouts and by canary selection. It still moves when it is in a release candidate's pilot group, when its release is rolled back, or when its target release is set directly. Use `--release` to put the devices on a release and keep them there.",
       "usage": "sm pin [OPTIONS] [IDS]...",
       "arguments": [
         {

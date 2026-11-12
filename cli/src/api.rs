@@ -57,6 +57,84 @@ pub struct SpeedStats {
     pub q75: f64,
 }
 
+/// How many devices of a deployment are in each state.
+#[derive(Debug, Deserialize, serde::Serialize)]
+pub struct DeviceCounts {
+    pub total: i64,
+    pub updated: i64,
+    pub updating: i64,
+    pub scheduled: i64,
+    pub held: i64,
+    pub offline: i64,
+    /// Hadn't updated when the rollout ended; still updates on its own later.
+    pub timed_out: i64,
+    pub superseded: i64,
+    pub canceled: i64,
+    pub unhealthy: i64,
+}
+
+#[derive(Debug, Deserialize, serde::Serialize)]
+pub struct DeploymentSummary {
+    pub id: i32,
+    /// `staged` (canary, then a staggered rollout), `direct` (straight to the
+    /// devices) or `rollback` (devices moved off a yanked release).
+    pub kind: String,
+    pub state: String,
+    pub release_id: i32,
+    pub release_version: String,
+    pub release_candidate: bool,
+    pub release_yanked: bool,
+    pub rolled_back_from_version: Option<String>,
+    pub distribution_name: String,
+    pub created_at: DateTime<Utc>,
+    pub created_by: Option<String>,
+    pub promoted_at: Option<DateTime<Utc>>,
+    pub completed_at: Option<DateTime<Utc>>,
+    pub counts: DeviceCounts,
+    pub canary: DeviceCounts,
+    pub next_wave_at: Option<DateTime<Utc>>,
+    pub last_wave_at: Option<DateTime<Utc>>,
+    /// When devices still not updated time out, while it rolls out.
+    pub times_out_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Deserialize, serde::Serialize)]
+pub struct WaveProgress {
+    /// 0 is the canary.
+    pub wave: i32,
+    pub opens_at: DateTime<Utc>,
+    pub counts: DeviceCounts,
+}
+
+#[derive(Debug, Deserialize, serde::Serialize)]
+pub struct DeploymentEvent {
+    pub kind: String,
+    pub user_email: Option<String>,
+    pub detail: Option<String>,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Deserialize, serde::Serialize)]
+pub struct DeploymentActions {
+    pub can_promote: bool,
+    pub can_finalize: bool,
+    pub promote_blockers: Vec<String>,
+    pub denied_reason: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct FinalizeResult {
+    pub devices_timed_out: i64,
+}
+
+#[derive(Debug, Deserialize, serde::Serialize)]
+pub struct DeploymentDetail {
+    pub summary: DeploymentSummary,
+    pub waves: Vec<WaveProgress>,
+    pub events: Vec<DeploymentEvent>,
+    pub actions: DeploymentActions,
+}
+
 trait HandleApiError: Sized {
     async fn handle_error(self) -> anyhow::Result<Self>;
 }
@@ -305,20 +383,70 @@ impl SmithAPI {
         Ok(deployment)
     }
 
-    pub async fn deploy_release_check_done(&self, release_id: String) -> Result<Deployment> {
-        let client = Client::new();
+    pub async fn list_deployments(
+        &self,
+        release_id: Option<i32>,
+        distribution_id: Option<i32>,
+        limit: i64,
+    ) -> Result<Vec<DeploymentSummary>> {
+        let mut query = vec![("limit", limit.to_string())];
+        query.extend(release_id.map(|id| ("release_id", id.to_string())));
+        query.extend(distribution_id.map(|id| ("distribution_id", id.to_string())));
+        let resp = Client::new()
+            .get(format!("{}/deployments", self.domain))
+            .header("Authorization", format!("Bearer {}", &self.bearer_token))
+            .query(&query)
+            .send()
+            .await?
+            .handle_error()
+            .await?;
+        Ok(resp.json().await?)
+    }
 
-        let resp = client
-            .patch(format!(
-                "{}/releases/{}/deployment",
-                self.domain, release_id
+    pub async fn get_deployment(&self, deployment_id: i32) -> Result<DeploymentDetail> {
+        let resp = Client::new()
+            .get(format!("{}/deployments/{}", self.domain, deployment_id))
+            .header("Authorization", format!("Bearer {}", &self.bearer_token))
+            .send()
+            .await?
+            .handle_error()
+            .await?;
+        Ok(resp.json().await?)
+    }
+
+    pub async fn finalize_deployment(&self, deployment_id: i32) -> Result<FinalizeResult> {
+        let resp = Client::new()
+            .post(format!(
+                "{}/deployments/{}/finalize",
+                self.domain, deployment_id
             ))
             .header("Authorization", format!("Bearer {}", &self.bearer_token))
-            .send();
+            .send()
+            .await?
+            .handle_error()
+            .await?;
+        Ok(resp.json().await?)
+    }
 
-        let deployment = resp.await?.error_for_status()?.json().await?;
-
-        Ok(deployment)
+    /// Runs `action` (`promote`, `pause`, `resume` or `yank`) on a deployment.
+    pub async fn control_deployment(
+        &self,
+        deployment_id: i32,
+        action: &str,
+        reason: Option<String>,
+    ) -> Result<()> {
+        Client::new()
+            .post(format!(
+                "{}/deployments/{}/{}",
+                self.domain, deployment_id, action
+            ))
+            .header("Authorization", format!("Bearer {}", &self.bearer_token))
+            .json(&serde_json::json!({ "reason": reason }))
+            .send()
+            .await?
+            .handle_error()
+            .await?;
+        Ok(())
     }
 
     pub async fn get_distributions(&self) -> Result<Vec<Distribution>> {

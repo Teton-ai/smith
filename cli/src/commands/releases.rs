@@ -3,7 +3,7 @@ use anyhow::Context as _;
 use chrono_humanize::HumanTime;
 use clap::{Args, Subcommand};
 use models::{
-    deployment::{DeploymentRequest, DeploymentStatus},
+    deployment::DeploymentRequest,
     distribution::NewDistributionRelease,
     release::{UpdateRelease, VersionBump, next_version},
 };
@@ -38,14 +38,26 @@ pub enum ReleasesCommands {
         #[clap(subcommand)]
         command: OsCommands,
     },
-    /// Deploy a release
+    /// Deploy a release. Canaries are picked automatically. A stable release
+    /// then rolls out to the fleet; a release candidate needs a pilot group,
+    /// which it rolls out to instead. A pilot group under 10 devices is
+    /// deployed to directly, without a canary.
+    #[command(after_long_help = "\
+Examples:
+  sm releases deploy 1520
+  sm releases deploy 1521 --pilot-label env=staging
+  sm releases deploy 1521 --pilot-device 12 --pilot-device 15
+")]
     Deploy {
         release_number: String,
-        /// Customize which devices are canary released,
-        /// by filtering devices by labels.
-        /// e.g. --labels label1=a --labels label2=b
-        #[arg(long, visible_alias = "labels")]
-        canary_device_labels: Option<Vec<String>>,
+        /// A release candidate's pilot group: devices with any of these labels.
+        /// Repeat for several.
+        #[arg(long = "pilot-label", conflicts_with = "pilot_device_ids")]
+        pilot_device_labels: Option<Vec<String>>,
+        /// A release candidate's pilot group: these device IDs. Repeat for
+        /// several.
+        #[arg(long = "pilot-device")]
+        pilot_device_ids: Option<Vec<i32>>,
     },
 }
 
@@ -104,8 +116,19 @@ impl ReleasesCommands {
             ReleasesCommands::Os { command } => command.handle(config).await?,
             ReleasesCommands::Deploy {
                 release_number,
-                canary_device_labels,
-            } => deploy_release(release_number, canary_device_labels, config).await?,
+                pilot_device_labels,
+                pilot_device_ids,
+            } => {
+                deploy_release(
+                    release_number,
+                    DeploymentRequest {
+                        pilot_device_labels,
+                        pilot_device_ids,
+                    },
+                    config,
+                )
+                .await?
+            }
         };
 
         Ok(())
@@ -114,7 +137,7 @@ impl ReleasesCommands {
 
 async fn deploy_release(
     release_number: String,
-    canary_device_labels: Option<Vec<String>>,
+    request: DeploymentRequest,
     config: crate::config::Config,
 ) -> anyhow::Result<()> {
     let secrets = auth::get_secrets(&config)
@@ -123,57 +146,25 @@ async fn deploy_release(
         .with_context(|| "No Token found, please Login")?;
     let api = SmithAPI::new(secrets, &config);
 
-    // Start the deployment
-    api.deploy_release(
-        release_number.clone(),
-        canary_device_labels.map(|l| DeploymentRequest {
-            pilot_device_labels: Some(l),
-            pilot_device_ids: None,
-        }),
-    )
-    .await?;
-
-    // Set up polling parameters
-    let start_time = std::time::Instant::now();
-    let timeout = std::time::Duration::from_secs(5 * 60); // 5 minutes
-    let check_interval = std::time::Duration::from_secs(5); // Check every 5 seconds
-
-    println!("Checking for deployment completion...");
-
-    // Start polling loop
-    loop {
-        // Check if we've exceeded the timeout
-        if start_time.elapsed() > timeout {
-            println!("Deployment timed out after 5 minutes");
-            return Err(anyhow::anyhow!("Deployment timed out after 5 minutes"));
-        }
-
-        // Check deployment status
-        let deployment = api
-            .deploy_release_check_done(release_number.clone())
-            .await?;
-
-        // Check if the deployment is done
-        let status = deployment.status;
-        println!("Current status: {}", status);
-
-        if status == DeploymentStatus::Done {
-            println!("Deployment completed successfully!");
-            return Ok(());
-        }
-
-        // If status is "failed" or any other terminal state, we can exit early
-        if status == DeploymentStatus::Failed {
-            return Err(anyhow::anyhow!("Deployment failed"));
-        }
-
-        // Wait before the next check
+    let deployment = api.deploy_release(release_number, Some(request)).await?;
+    let detail = api.get_deployment(deployment.id).await?;
+    if detail.summary.kind == "direct" {
         println!(
-            "Waiting for devices to update... (elapsed: {:?})",
-            start_time.elapsed()
+            "Deployment {} started: {} pilot devices update directly.",
+            deployment.id, detail.summary.counts.total
         );
-        tokio::time::sleep(check_interval).await;
+    } else {
+        println!(
+            "Deployment {} started: {} canary devices.",
+            deployment.id, detail.summary.canary.total
+        );
+        println!(
+            "Once they are healthy, confirm with: sm deployments confirm {}",
+            deployment.id
+        );
     }
+    println!("Follow it with: sm deployments get {}", deployment.id);
+    Ok(())
 }
 
 async fn handle_releases_get(

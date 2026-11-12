@@ -1,6 +1,7 @@
 use clap::{Args, Parser, Subcommand, value_parser};
 use clap_complete::Shell;
 
+use crate::commands::deployments::DeploymentsCommands;
 use crate::commands::releases::ReleasesCommands;
 
 #[derive(Parser)]
@@ -363,6 +364,14 @@ Examples:
         command: ReleasesCommands,
     },
 
+    /// Follow and control deployments: confirm a rollout once its canary is
+    /// healthy, pause it, or yank its release
+    #[command(visible_alias = "deploys")]
+    Deployments {
+        #[clap(subcommand)]
+        command: DeploymentsCommands,
+    },
+
     /// Tunneling options into a device
     #[command(after_long_help = "\
 Examples:
@@ -492,9 +501,9 @@ Examples:
 
     /// Pin devices so fleet-wide rollouts do not update them
     ///
-    /// A pinned device is skipped by full rollouts and by automatic canary
-    /// selection. It still moves when a canary targets it by label or ID, when
-    /// its release is rolled back, or when its target release is set directly.
+    /// A pinned device is skipped by full rollouts and by canary selection. It
+    /// still moves when it is in a release candidate's pilot group, when its
+    /// release is rolled back, or when its target release is set directly.
     /// Use `--release` to put the devices on a release and keep them there.
     #[command(after_long_help = "\
 Examples:
