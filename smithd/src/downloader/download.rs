@@ -1,17 +1,19 @@
+use super::pace::{Pacer, Probe};
 use crate::magic::MagicHandle;
 use crate::session::SessionHandle;
 use anyhow::{self, Context};
 use futures::StreamExt;
-use governor::{Quota, RateLimiter};
 use md5::{Digest, Md5};
 use reqwest::{Client, Url};
-use std::num::NonZeroU32;
 use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::fs;
 use tokio::io::AsyncWriteExt;
+use tokio::net::{TcpStream, lookup_host};
+use tokio::sync::watch;
+use tokio::task::JoinHandle;
 use tracing::{error, info, warn};
 
 /// The ETag the API reports for the S3 object, set on the `.part` and kept by
@@ -30,6 +32,77 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// A stalled connection otherwise holds the global download lock for ever.
 const READ_TIMEOUT: Duration = Duration::from_secs(60);
+
+const PROBE_INTERVAL: Duration = Duration::from_secs(2);
+const PROBE_TIMEOUT: Duration = Duration::from_millis(1500);
+
+/// Aborts the probe task when the download ends.
+struct ProbeGuard(Option<JoinHandle<()>>);
+
+impl Drop for ProbeGuard {
+    fn drop(&mut self) {
+        if let Some(handle) = &self.0 {
+            handle.abort();
+        }
+    }
+}
+
+/// Probes the round trip to the download host and publishes the allowed rate
+/// (`None` while paused). Without a probe the rate stays at the cap.
+async fn start_probe(presigned_url: &str, cap: u64) -> (watch::Receiver<Option<u64>>, ProbeGuard) {
+    let (tx, rx) = watch::channel(Some(cap));
+    let addr = match probe_addr(presigned_url).await {
+        Ok(addr) => addr,
+        Err(e) => {
+            warn!("Download congestion probe disabled: {e:#}");
+            return (rx, ProbeGuard(None));
+        }
+    };
+    let handle = tokio::spawn(async move {
+        let mut pacer = Pacer::new(cap, Instant::now());
+        let mut ticker = tokio::time::interval(PROBE_INTERVAL);
+        loop {
+            ticker.tick().await;
+            let started = Instant::now();
+            let probe = match tokio::time::timeout(PROBE_TIMEOUT, TcpStream::connect(addr)).await {
+                Ok(_) => Probe::Rtt(started.elapsed()),
+                Err(_) => Probe::Lost,
+            };
+            let now = Instant::now();
+            pacer.observe(probe, now);
+            tx.send_replace(pacer.rate(now));
+        }
+    });
+    (rx, ProbeGuard(Some(handle)))
+}
+
+async fn probe_addr(presigned_url: &str) -> anyhow::Result<std::net::SocketAddr> {
+    let url = Url::parse(presigned_url)?;
+    let host = url.host_str().context("URL has no host")?;
+    let port = url.port_or_known_default().context("URL has no port")?;
+    lookup_host(format!("{host}:{port}"))
+        .await?
+        .next()
+        .context("host has no address")
+}
+
+/// The rate to pace the next chunk at. Waits while the pacer has paused; a
+/// `force_stop` ends the wait so the chunk loop can sync the `.part` and stop.
+async fn allowed_rate(
+    rate_rx: &mut watch::Receiver<Option<u64>>,
+    cap: u64,
+    force_stop: &AtomicBool,
+) -> u64 {
+    loop {
+        if let Some(rate) = *rate_rx.borrow_and_update() {
+            return rate.max(1);
+        }
+        if force_stop.load(std::sync::atomic::Ordering::SeqCst) || rate_rx.changed().await.is_err()
+        {
+            return cap.max(1);
+        }
+    }
+}
 
 pub(crate) async fn md5_of_file(path: &Path) -> anyhow::Result<String> {
     let path = path.to_path_buf();
@@ -322,20 +395,12 @@ async fn fetch(
         f
     };
 
-    let bytes_per_second_u32 = (bytes_per_second.min(u32::MAX as u64)) as u32;
-    let max_burst = NonZeroU32::new(bytes_per_second_u32).unwrap_or(NonZeroU32::MIN);
-    let limiter = RateLimiter::direct(Quota::per_second(max_burst));
+    let (mut rate_rx, _probe) = start_probe(presigned_url, bytes_per_second).await;
     let mut stream = response.bytes_stream();
     let mut session_downloaded: u64 = 0;
     let mut unsynced: u64 = 0;
     let start = std::time::Instant::now();
-
-    // Force rate limiter to start empty so we don't have a large burst when starting download
-    match limiter.check_n(max_burst) {
-        Ok(_) => (),
-
-        Err(e) => error!("Rate limit exceeded: {}", e),
-    }
+    let mut next = tokio::time::Instant::now();
 
     while let Some(chunk_result) = stream.next().await {
         // Check if download should be forcefully stopped
@@ -347,14 +412,14 @@ async fn fetch(
 
         match chunk_result {
             Ok(chunk) => {
-                let Some(chunk_size) = NonZeroU32::new(chunk.len() as u32) else {
+                if chunk.is_empty() {
                     continue;
-                };
-
-                // Wait for rate limiter
-                if let Err(e) = limiter.until_n_ready(chunk_size).await {
-                    warn!("Rate limit exceeded: {}", e);
                 }
+
+                let rate = allowed_rate(&mut rate_rx, bytes_per_second, &force_stop).await;
+                next = next.max(tokio::time::Instant::now())
+                    + Duration::from_secs_f64(chunk.len() as f64 / rate as f64);
+                tokio::time::sleep_until(next).await;
 
                 // Write chunk to file
                 file.write_all(&chunk).await?;
