@@ -61,6 +61,9 @@ impl Pacer {
                 self.base_rtt = Some(self.base_rtt.map_or(rtt, |base| base.min(rtt)));
                 Some(rtt)
             }
+            // Until one probe gets through, a loss may be a firewall or proxy
+            // that blocks the probe and not the download.
+            Probe::Lost if self.base_rtt.is_none() => return,
             Probe::Lost => None,
         };
         let slow = match (sample, self.base_rtt) {
@@ -231,6 +234,21 @@ mod tests {
         assert_eq!(pacer.rate(now), None);
         assert_eq!(pacer.rate(now + Duration::from_secs(29)), None);
         assert_eq!(pacer.rate(now + Duration::from_secs(30)), Some(250_000));
+    }
+
+    #[test]
+    fn lost_probes_before_any_round_trip_do_not_pause() {
+        let now = Instant::now();
+        let mut pacer = Pacer::new(CAP, now);
+        for _ in 0..10 {
+            pacer.observe(Probe::Lost, now);
+        }
+        assert_eq!(pacer.rate(now), Some(CAP));
+        pacer.observe(FAST, now);
+        for _ in 0..3 {
+            pacer.observe(Probe::Lost, now);
+        }
+        assert_eq!(pacer.rate(now), None);
     }
 
     #[test]
