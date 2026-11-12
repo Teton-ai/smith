@@ -490,14 +490,14 @@ impl Storage {
             ("max-parts".to_owned(), "1000".to_owned()),
         ]);
         let url = bucket.presign_get(object_key, 900, Some(queries)).await?;
-        let response = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(30))
-            .redirect(reqwest::redirect::Policy::none())
-            .build()?
-            .get(url)
-            .send()
-            .await
-            .map_err(|e| e.without_url())?;
+        static CLIENT: std::sync::LazyLock<reqwest::Client> = std::sync::LazyLock::new(|| {
+            reqwest::Client::builder()
+                .timeout(std::time::Duration::from_secs(30))
+                .redirect(reqwest::redirect::Policy::none())
+                .build()
+                .expect("static reqwest client settings are valid")
+        });
+        let response = CLIENT.get(url).send().await.map_err(|e| e.without_url())?;
         let status = response.status().as_u16();
         let body = response.text().await.map_err(|e| e.without_url())?;
         if missing_upload_body(&body) {
