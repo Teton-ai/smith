@@ -3,7 +3,7 @@ use crate::slack::send_slack_notification;
 use models::release::Release;
 use serde::{Deserialize, Serialize, Serializer};
 use serde_json::{Value, json};
-use smith::utils::schema::{DeviceRegistration, DeviceRegistrationResponse};
+use smith::utils::schema::{DeviceRegistration, DeviceRegistrationResponse, LinkDelay};
 use sqlx::types::chrono::{DateTime, Utc};
 use sqlx::types::{Json as SqlxJson, chrono, ipnetwork};
 use sqlx::{PgConnection, PgPool};
@@ -850,6 +850,22 @@ async fn close_open_downtime(
         .await?;
     }
 
+    Ok(())
+}
+
+pub async fn save_link_delay(
+    device_id: i32,
+    link_delay: LinkDelay,
+    pool: &PgPool,
+) -> anyhow::Result<()> {
+    sqlx::query!(
+        "UPDATE device SET link_baseline_ms = $2, link_current_ms = $3, link_delay_at = NOW() WHERE id = $1",
+        device_id,
+        i32::try_from(link_delay.baseline_ms).unwrap_or(i32::MAX),
+        i32::try_from(link_delay.current_ms).unwrap_or(i32::MAX),
+    )
+    .execute(pool)
+    .await?;
     Ok(())
 }
 
