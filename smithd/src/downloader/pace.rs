@@ -1,6 +1,8 @@
 //! Delay-based download rate control. The rate starts low and creeps up while
-//! the round trip to the api stays near its baseline, and backs off when it
-//! grows (a congested link).
+//! the round trip to the api stays near its baseline. A slow sample halves it,
+//! and pauses the download once it is at the floor: devices that share a link
+//! can fill it even at the floor. The /home link delay is already a minimum
+//! over several polls, so one slow sample means lasting congestion.
 
 use std::time::{Duration, Instant};
 use tracing::info;
@@ -8,7 +10,6 @@ use tracing::info;
 const MIN_RATE: u64 = 250_000;
 const RATE_STEP: u64 = 250_000;
 const SLOW_MARGIN: Duration = Duration::from_millis(100);
-const SLOW_SAMPLES_TO_BACK_OFF: u32 = 2;
 const LOST_PROBES_TO_PAUSE: u32 = 3;
 const PAUSE: Duration = Duration::from_secs(30);
 /// Spreads the resumes of devices that paused together.
@@ -36,14 +37,8 @@ pub(super) struct PacerStats {
 }
 
 enum Mode {
-    Running {
-        rate: u64,
-        slow_streak: u32,
-        clean_since: Instant,
-    },
-    Paused {
-        until: Instant,
-    },
+    Running { rate: u64, clean_since: Instant },
+    Paused { until: Instant },
 }
 
 pub(super) struct Pacer {
@@ -64,7 +59,6 @@ impl Pacer {
             lost_streak: 0,
             mode: Mode::Running {
                 rate: floor,
-                slow_streak: 0,
                 clean_since: now,
             },
             stats: PacerStats {
@@ -86,11 +80,14 @@ impl Pacer {
     /// `jitter` in `0..=1` stretches a pause.
     pub(super) fn observe(&mut self, probe: Probe, now: Instant, jitter: f64) {
         let lost = matches!(probe, Probe::Lost);
-        let slow = match probe {
+        match probe {
             Probe::Delay { baseline, current } => {
                 self.stats.delay_samples += 1;
                 self.stats.last_delay = Some((baseline, current));
-                current > baseline + SLOW_MARGIN
+                self.lost_streak = 0;
+                if current <= baseline + SLOW_MARGIN {
+                    return;
+                }
             }
             Probe::Lost => {
                 self.stats.lost += 1;
@@ -99,60 +96,41 @@ impl Pacer {
                 if self.stats.delay_samples == 0 {
                     return;
                 }
-                true
+                self.lost_streak += 1;
             }
-        };
+        }
         let floor = self.floor();
         let last_delay = self.stats.last_delay;
-
-        let Mode::Running {
-            rate,
-            slow_streak,
-            clean_since,
-        } = &mut self.mode
-        else {
+        let Mode::Running { rate, clean_since } = &mut self.mode else {
             return;
         };
+        *clean_since = now;
 
-        if !slow {
-            *slow_streak = 0;
-            self.lost_streak = 0;
-            return;
-        }
-        *slow_streak += 1;
-        if lost {
-            self.lost_streak += 1;
-        } else {
-            self.lost_streak = 0;
-        }
-
-        if self.lost_streak >= LOST_PROBES_TO_PAUSE {
+        let pause_reason = if lost {
+            (self.lost_streak >= LOST_PROBES_TO_PAUSE).then_some("no link delay samples")
+        } else if *rate > floor {
+            let new_rate = (*rate / 2).max(floor);
             info!(
                 remote = %self.remote,
                 old_rate = *rate,
+                new_rate,
                 ?last_delay,
-                "download paused, no link delay samples"
+                "download rate lowered"
             );
+            *rate = new_rate;
+            self.stats.back_offs += 1;
+            self.stats.lowest_rate = self.stats.lowest_rate.min(new_rate);
+            None
+        } else {
+            Some("link still slow at the lowest rate")
+        };
+
+        if let Some(reason) = pause_reason {
+            info!(remote = %self.remote, old_rate = *rate, ?last_delay, reason, "download paused");
             self.lost_streak = 0;
             self.stats.pauses += 1;
             let pause = PAUSE + PAUSE_JITTER.mul_f64(jitter.clamp(0.0, 1.0));
             self.mode = Mode::Paused { until: now + pause };
-        } else if *slow_streak >= SLOW_SAMPLES_TO_BACK_OFF {
-            let new_rate = (*rate / 2).max(floor);
-            if new_rate != *rate {
-                info!(
-                    remote = %self.remote,
-                    old_rate = *rate,
-                    new_rate,
-                    ?last_delay,
-                    "download rate lowered"
-                );
-                self.stats.back_offs += 1;
-            }
-            *rate = new_rate;
-            *slow_streak = 0;
-            *clean_since = now;
-            self.stats.lowest_rate = self.stats.lowest_rate.min(new_rate);
         }
     }
 
@@ -167,14 +145,11 @@ impl Pacer {
                 info!(remote = %self.remote, new_rate = rate, "download resumed");
                 self.mode = Mode::Running {
                     rate,
-                    slow_streak: 0,
                     clean_since: now,
                 };
                 Some(rate)
             }
-            Mode::Running {
-                rate, clean_since, ..
-            } => {
+            Mode::Running { rate, clean_since } => {
                 if now.duration_since(*clean_since) >= RECOVERY_INTERVAL && *rate < self.cap {
                     let new_rate = (*rate + RATE_STEP).min(self.cap);
                     info!(remote = %self.remote, old_rate = *rate, new_rate, "download rate raised");
@@ -238,11 +213,8 @@ mod tests {
     }
 
     #[test]
-    fn halves_after_two_slow_samples() {
-        let now = Instant::now();
-        let (mut pacer, now) = pacer_at_cap(now);
-        pacer.observe(SLOW, now, 0.0);
-        assert_eq!(pacer.rate(now), Some(CAP));
+    fn a_slow_sample_halves_the_rate() {
+        let (mut pacer, now) = pacer_at_cap(Instant::now());
         pacer.observe(SLOW, now, 0.0);
         assert_eq!(pacer.rate(now), Some(1_000_000));
         assert_eq!(pacer.stats().back_offs, 1);
@@ -250,44 +222,39 @@ mod tests {
     }
 
     #[test]
-    fn a_clean_sample_between_slow_ones_resets_the_streak() {
-        let (mut pacer, now) = pacer_at_cap(Instant::now());
-        pacer.observe(SLOW, now, 0.0);
-        pacer.observe(FAST, now, 0.0);
-        pacer.observe(SLOW, now, 0.0);
-        assert_eq!(pacer.rate(now), Some(CAP));
-    }
-
-    #[test]
     fn slow_is_judged_against_the_reported_baseline() {
         let (mut pacer, now) = pacer_at_cap(Instant::now());
-        for _ in 0..5 {
-            pacer.observe(delay(400, 500), now, 0.0);
-        }
+        pacer.observe(delay(400, 500), now, 0.0);
         assert_eq!(pacer.rate(now), Some(CAP));
-        for _ in 0..2 {
-            pacer.observe(delay(400, 501), now, 0.0);
-        }
+        pacer.observe(delay(400, 501), now, 0.0);
         assert_eq!(pacer.rate(now), Some(1_000_000));
     }
 
     #[test]
-    fn the_rate_floors_at_min_rate() {
+    fn a_slow_sample_restarts_the_clean_interval() {
         let (mut pacer, now) = pacer_at_cap(Instant::now());
-        for _ in 0..20 {
+        pacer.observe(SLOW, now, 0.0);
+        pacer.observe(FAST, now + secs(5), 0.0);
+        assert_eq!(pacer.rate(now + secs(14)), Some(1_000_000));
+        assert_eq!(pacer.rate(now + secs(15)), Some(1_250_000));
+
+        pacer.observe(SLOW, now + secs(20), 0.0);
+        assert_eq!(pacer.rate(now + secs(34)), Some(625_000));
+        assert_eq!(pacer.rate(now + secs(35)), Some(875_000));
+    }
+
+    #[test]
+    fn slow_at_the_floor_pauses() {
+        let (mut pacer, now) = pacer_at_cap(Instant::now());
+        for _ in 0..3 {
             pacer.observe(SLOW, now, 0.0);
         }
         assert_eq!(pacer.rate(now), Some(250_000));
         assert_eq!(pacer.stats().back_offs, 3);
-    }
-
-    #[test]
-    fn a_back_off_restarts_the_clean_interval() {
-        let (mut pacer, now) = pacer_at_cap(Instant::now());
         pacer.observe(SLOW, now, 0.0);
-        pacer.observe(SLOW, now, 0.0);
-        assert_eq!(pacer.rate(now + secs(14)), Some(1_000_000));
-        assert_eq!(pacer.rate(now + secs(15)), Some(1_250_000));
+        assert_eq!(pacer.rate(now + secs(29)), None);
+        assert_eq!(pacer.rate(now + secs(30)), Some(250_000));
+        assert_eq!(pacer.stats().pauses, 1);
     }
 
     #[test]
@@ -340,7 +307,10 @@ mod tests {
         pacer.observe(Probe::Lost, now, 0.0);
         pacer.observe(FAST, now, 0.0);
         pacer.observe(Probe::Lost, now, 0.0);
-        assert_eq!(pacer.rate(now), Some(1_000_000));
+        pacer.observe(Probe::Lost, now, 0.0);
+        assert_eq!(pacer.rate(now), Some(CAP));
+        pacer.observe(Probe::Lost, now, 0.0);
+        assert_eq!(pacer.rate(now), None);
     }
 
     #[test]
@@ -365,15 +335,9 @@ mod tests {
         let now = Instant::now();
         let mut pacer = Pacer::new(100_000, "pkg", now);
         assert_eq!(pacer.rate(now + secs(60)), Some(100_000));
-        pacer.observe(FAST, now, 0.0);
         pacer.observe(SLOW, now, 0.0);
-        pacer.observe(SLOW, now, 0.0);
-        assert_eq!(pacer.rate(now), Some(100_000));
         assert_eq!(pacer.stats().back_offs, 0);
-
-        for _ in 0..3 {
-            pacer.observe(Probe::Lost, now, 0.0);
-        }
+        assert_eq!(pacer.rate(now), None);
         assert_eq!(pacer.rate(now + secs(30)), Some(100_000));
     }
 }
