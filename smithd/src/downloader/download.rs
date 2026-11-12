@@ -64,12 +64,20 @@ async fn start_probe(presigned_url: &str, cap: u64) -> (watch::Receiver<Option<u
         loop {
             ticker.tick().await;
             let started = Instant::now();
+            // A refused connect is still a round trip; other connect errors say
+            // nothing about congestion, so they give no sample.
             let probe = match tokio::time::timeout(PROBE_TIMEOUT, TcpStream::connect(addr)).await {
-                Ok(_) => Probe::Rtt(started.elapsed()),
-                Err(_) => Probe::Lost,
+                Ok(Ok(_)) => Some(Probe::Rtt(started.elapsed())),
+                Ok(Err(e)) if e.kind() == std::io::ErrorKind::ConnectionRefused => {
+                    Some(Probe::Rtt(started.elapsed()))
+                }
+                Ok(Err(_)) => None,
+                Err(_) => Some(Probe::Lost),
             };
             let now = Instant::now();
-            pacer.observe(probe, now);
+            if let Some(probe) = probe {
+                pacer.observe(probe, now);
+            }
             tx.send_replace(pacer.rate(now));
         }
     });
