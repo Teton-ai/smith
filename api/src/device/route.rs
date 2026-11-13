@@ -3241,6 +3241,10 @@ pub struct DeviceAudit {
     pub disk_encrypted: Option<bool>,
     /// Whether SSH password login is disabled. `None` if never reported.
     pub password_access_disabled: Option<bool>,
+    /// Whether all console login prompts are closed. `None` if never reported.
+    pub console_logins_closed: Option<bool>,
+    /// Whether the reboot watchdog is set to 4 min. `None` if never reported.
+    pub reboot_watchdog_set: Option<bool>,
     /// Derived server-side: the device is on its target release.
     pub running_latest_release: bool,
     /// When the device last reported an audit. `None` if it never has.
@@ -3275,6 +3279,8 @@ pub async fn get_audit_for_device(
         SELECT
             da.disk_encrypted,
             da.password_access_disabled,
+            da.console_logins_closed,
+            da.reboot_watchdog_set,
             da.checked_at as "checked_at?",
             COALESCE(d.target_release_id IS NULL OR d.release_id = d.target_release_id, false) as "running_latest_release!"
         FROM device d
@@ -3301,6 +3307,8 @@ pub async fn get_audit_for_device(
     Ok(Json(DeviceAudit {
         disk_encrypted: audit.disk_encrypted,
         password_access_disabled: audit.password_access_disabled,
+        console_logins_closed: audit.console_logins_closed,
+        reboot_watchdog_set: audit.reboot_watchdog_set,
         running_latest_release: audit.running_latest_release,
         checked_at: audit.checked_at,
     }))
