@@ -93,6 +93,8 @@ fn start_feed(pacing: &Pacing) -> (watch::Receiver<Paced>, FeedGuard) {
         stats: pacer.stats().clone(),
     });
     let mut link_delay = pacing.link_delay.clone();
+    // A clone reports a value sent before this download as new.
+    link_delay.mark_unchanged();
     let handle = tokio::spawn(async move {
         let mut ticker = tokio::time::interval_at(started + FEED_INTERVAL, FEED_INTERVAL);
         ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
@@ -912,5 +914,37 @@ mod tests {
         assert_eq!(ranges(&cdn), []);
         assert!(!local.exists());
         Ok(())
+    }
+
+    fn feed_pacing(link_delay: LinkDelayWatch) -> Pacing {
+        Pacing {
+            remote: "test".to_owned(),
+            cap: 2_000_000,
+            force_stop: Arc::new(AtomicBool::new(false)),
+            link_delay,
+        }
+    }
+
+    const SLOW: LinkDelay = LinkDelay {
+        baseline_ms: 20,
+        current_ms: 500,
+    };
+
+    #[tokio::test(start_paused = true)]
+    async fn feed_pauses_on_a_slow_link_delay() {
+        let (tx, rx) = watch::channel(None);
+        let (rate, _guard) = start_feed(&feed_pacing(rx));
+        tx.send_replace(Some(SLOW));
+        tokio::time::sleep(FEED_INTERVAL + Duration::from_millis(1)).await;
+        assert_eq!(rate.borrow().rate, None);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn feed_ignores_a_link_delay_sent_before_the_download() {
+        let (tx, rx) = watch::channel(None);
+        tx.send_replace(Some(SLOW));
+        let (rate, _guard) = start_feed(&feed_pacing(rx));
+        tokio::time::sleep(FEED_INTERVAL + Duration::from_millis(1)).await;
+        assert!(rate.borrow().rate.is_some());
     }
 }
