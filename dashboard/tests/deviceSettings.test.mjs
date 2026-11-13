@@ -7,6 +7,7 @@ import {
 	applyErrorMessage,
 	applyResultSummary,
 	applyStatusLines,
+	bulkEditTarget,
 	defaultLabel,
 	draftToChange,
 	editGroups,
@@ -616,5 +617,48 @@ for (const [name, err, expected] of [
 ]) {
 	test(`applyErrorMessage: ${name}`, () => {
 		assert.equal(applyErrorMessage(err), expected);
+	});
+}
+
+test("bulkEditTarget picks the first device when all share a distribution", () => {
+	assert.deepEqual(
+		bulkEditTarget(
+			[
+				{ id: 7, release: { distribution_id: 1 } },
+				{ id: 9, release: { distribution_id: 1 } },
+			],
+			2,
+		),
+		{ kind: "ready", referenceId: 7 },
+	);
+});
+
+for (const [name, devices, fragment] of [
+	[
+		"mixed distributions",
+		[
+			{ id: 1, release: { distribution_id: 1 } },
+			{ id: 2, release: { distribution_id: 2 } },
+		],
+		"more than one distribution",
+	],
+	[
+		"a device without distribution",
+		[
+			{ id: 1, release: { distribution_id: 1 } },
+			{ id: 2, release: null },
+		],
+		"has no distribution",
+	],
+	[
+		"a selected device that is not loaded",
+		[{ id: 1, release: { distribution_id: 1 } }],
+		"not in the current list",
+	],
+]) {
+	test(`bulkEditTarget blocks ${name}`, () => {
+		const target = bulkEditTarget(devices, 2);
+		assert.equal(target.kind, "blocked");
+		assert.ok(target.message.includes(fragment));
 	});
 }

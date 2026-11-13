@@ -674,3 +674,47 @@ export const applyErrorMessage = (err: unknown): string => {
 			return "Failed to queue the apply.";
 	}
 };
+
+type BulkEditDevice = {
+	id: number;
+	release?: { distribution_id: number } | null;
+};
+
+export type BulkEditTarget =
+	| { kind: "ready"; referenceId: number }
+	| { kind: "blocked"; message: string };
+
+/** Bulk edit reads defaults and supported groups from one device, so it is only
+ *  offered when the whole selection shares a distribution. */
+export const bulkEditTarget = (
+	devices: BulkEditDevice[],
+	selectedCount: number,
+): BulkEditTarget => {
+	const [first] = devices;
+	if (!first) return { kind: "blocked", message: "No devices selected." };
+	// A device selected under an earlier filter is not loaded, so its
+	// distribution is unknown.
+	if (devices.length < selectedCount) {
+		return {
+			kind: "blocked",
+			message:
+				"Some selected devices are not in the current list, so their distribution is unknown. Show them, or clear the selection and select again.",
+		};
+	}
+	if (devices.some((d) => d.release?.distribution_id == null)) {
+		return {
+			kind: "blocked",
+			message:
+				"A selected device has no distribution, so its settings cannot be edited in bulk.",
+		};
+	}
+	const distributions = new Set(devices.map((d) => d.release?.distribution_id));
+	if (distributions.size > 1) {
+		return {
+			kind: "blocked",
+			message:
+				"The selected devices span more than one distribution. Select devices from a single distribution to edit their settings together.",
+		};
+	}
+	return { kind: "ready", referenceId: first.id };
+};
