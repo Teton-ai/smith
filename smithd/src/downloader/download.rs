@@ -1,17 +1,20 @@
+use super::pace::{Pacer, PacerStats, Probe};
 use crate::magic::MagicHandle;
+use crate::postman::{LinkDelay, LinkDelayWatch};
 use crate::session::SessionHandle;
 use anyhow::{self, Context};
 use futures::StreamExt;
-use governor::{Quota, RateLimiter};
 use md5::{Digest, Md5};
 use reqwest::{Client, Url};
-use std::num::NonZeroU32;
 use std::path::Path;
 use std::sync::Arc;
-use std::sync::atomic::AtomicBool;
-use std::time::Duration;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{Duration, Instant};
 use tokio::fs;
 use tokio::io::AsyncWriteExt;
+use tokio::sync::watch;
+use tokio::task::JoinHandle;
+use tokio::time::MissedTickBehavior;
 use tracing::{error, info, warn};
 
 /// The ETag the API reports for the S3 object, set on the `.part` and kept by
@@ -30,6 +33,122 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// A stalled connection otherwise holds the global download lock for ever.
 const READ_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// How often the pacer reads the link delay and publishes a rate.
+const FEED_INTERVAL: Duration = Duration::from_secs(5);
+
+/// Feed ticks without a new link delay before the pacer counts a loss. A /home
+/// post that fails or stalls gives no sample.
+const UNCHANGED_TICKS_TO_LOST: u32 = 3;
+
+/// A paused download rechecks `force_stop` this often, within the 5 s
+/// shutdown timeout.
+const FORCE_STOP_POLL: Duration = Duration::from_secs(1);
+
+/// What a download needs to pace itself and to stop.
+#[derive(Clone)]
+pub(super) struct Pacing {
+    pub remote: String,
+    /// Highest rate in bytes per second.
+    pub cap: u64,
+    pub force_stop: Arc<AtomicBool>,
+    pub link_delay: LinkDelayWatch,
+}
+
+/// The pacer's state as the feed last published it.
+struct Paced {
+    /// `None` while paused.
+    rate: Option<u64>,
+    stats: PacerStats,
+}
+
+/// Aborts the feed task when dropped, so no exit path leaves it running.
+struct FeedGuard(JoinHandle<()>);
+
+impl Drop for FeedGuard {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
+}
+
+fn next_probe(changed: bool, value: Option<LinkDelay>, unchanged_ticks: &mut u32) -> Option<Probe> {
+    if changed && let Some(delay) = value {
+        *unchanged_ticks = 0;
+        return Some(Probe::Delay {
+            baseline: Duration::from_millis(delay.baseline_ms.into()),
+            current: Duration::from_millis(delay.current_ms.into()),
+        });
+    }
+    *unchanged_ticks = unchanged_ticks.saturating_add(1);
+    (*unchanged_ticks >= UNCHANGED_TICKS_TO_LOST).then_some(Probe::Lost)
+}
+
+/// Feeds the pacer from the /home link delay and publishes the allowed rate.
+fn start_feed(pacing: &Pacing) -> (watch::Receiver<Paced>, FeedGuard) {
+    // The tokio clock keeps the pacer in step with the sleeps that follow its rate.
+    let started = tokio::time::Instant::now();
+    let mut pacer = Pacer::new(pacing.cap, &pacing.remote, started.into_std());
+    let (tx, rx) = watch::channel(Paced {
+        rate: pacer.rate(started.into_std()),
+        stats: pacer.stats().clone(),
+    });
+    let mut link_delay = pacing.link_delay.clone();
+    // A clone reports a value sent before this download as new.
+    link_delay.mark_unchanged();
+    let handle = tokio::spawn(async move {
+        let mut ticker = tokio::time::interval_at(started + FEED_INTERVAL, FEED_INTERVAL);
+        ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
+        let mut unchanged_ticks = 0;
+        loop {
+            ticker.tick().await;
+            let changed = link_delay.has_changed().unwrap_or(false);
+            let value = *link_delay.borrow_and_update();
+            let now = tokio::time::Instant::now().into_std();
+            if let Some(probe) = next_probe(changed, value, &mut unchanged_ticks) {
+                pacer.observe(probe, now, rand::random());
+            }
+            tx.send_replace(Paced {
+                rate: pacer.rate(now),
+                stats: pacer.stats().clone(),
+            });
+        }
+    });
+    (rx, FeedGuard(handle))
+}
+
+/// The rate to pace the next chunk at. Waits while the pacer has paused; a
+/// `force_stop` ends the wait so the chunk loop can sync the `.part` and stop.
+async fn allowed_rate(rate_rx: &mut watch::Receiver<Paced>, pacing: &Pacing) -> u64 {
+    loop {
+        if let Some(rate) = rate_rx.borrow_and_update().rate {
+            return rate.max(1);
+        }
+        if pacing.force_stop.load(Ordering::SeqCst) {
+            return pacing.cap.max(1);
+        }
+        if let Ok(Err(_)) = tokio::time::timeout(FORCE_STOP_POLL, rate_rx.changed()).await {
+            return pacing.cap.max(1);
+        }
+    }
+}
+
+fn log_summary(remote: &str, bytes: u64, started: Instant, paced: &watch::Receiver<Paced>) {
+    let stats = paced.borrow().stats.clone();
+    let (baseline, current) = stats.last_delay.unzip();
+    info!(
+        remote,
+        bytes,
+        seconds = started.elapsed().as_secs(),
+        delay_samples = stats.delay_samples,
+        lost_ticks = stats.lost,
+        lowest_rate = stats.lowest_rate,
+        back_offs = stats.back_offs,
+        pauses = stats.pauses,
+        ?baseline,
+        ?current,
+        "download paced"
+    );
+}
 
 pub(crate) async fn md5_of_file(path: &Path) -> anyhow::Result<String> {
     let path = path.to_path_buf();
@@ -86,18 +205,23 @@ pub async fn download_file_mb(
     local_file: String,
     rate: f64,
     force_stop: Arc<AtomicBool>,
+    link_delay: LinkDelayWatch,
 ) -> anyhow::Result<DownloadStats> {
     // Convert the MB rate to bytes/sec
     let bytes_per_second = ((rate * 1_000_000.0).ceil() as u64).max(1);
+    let pacing = Pacing {
+        remote: remote_file.clone(),
+        cap: bytes_per_second,
+        force_stop,
+        link_delay,
+    };
 
-    // Example: download at 1MB per second
     let result = download_file(
         magic,
         session,
         local_file.as_str(),
         remote_file.as_str(),
-        bytes_per_second,
-        force_stop,
+        pacing,
     )
     .await?;
 
@@ -109,8 +233,7 @@ async fn download_file(
     session: SessionHandle,
     local_path: &str,
     remote_path: &str,
-    bytes_per_second: u64,
-    force_stop: Arc<AtomicBool>,
+    pacing: Pacing,
 ) -> anyhow::Result<DownloadStats> {
     let client = Client::builder()
         .connect_timeout(CONNECT_TIMEOUT)
@@ -131,16 +254,7 @@ async fn download_file(
         url.to_string()
     };
 
-    fetch(
-        &client,
-        &url,
-        &token,
-        local_path,
-        bytes_per_second,
-        force_stop,
-        None,
-    )
-    .await
+    fetch(&client, &url, &token, local_path, pacing, None).await
 }
 
 async fn fetch(
@@ -148,8 +262,7 @@ async fn fetch(
     url: &str,
     token: &str,
     local_path: &str,
-    bytes_per_second: u64,
-    force_stop: Arc<AtomicBool>,
+    pacing: Pacing,
     recurse: Option<u32>,
 ) -> anyhow::Result<DownloadStats> {
     let mut rec_track = 0;
@@ -322,39 +435,32 @@ async fn fetch(
         f
     };
 
-    let bytes_per_second_u32 = (bytes_per_second.min(u32::MAX as u64)) as u32;
-    let max_burst = NonZeroU32::new(bytes_per_second_u32).unwrap_or(NonZeroU32::MIN);
-    let limiter = RateLimiter::direct(Quota::per_second(max_burst));
+    let (mut rate_rx, feed) = start_feed(&pacing);
     let mut stream = response.bytes_stream();
     let mut session_downloaded: u64 = 0;
     let mut unsynced: u64 = 0;
     let start = std::time::Instant::now();
-
-    // Force rate limiter to start empty so we don't have a large burst when starting download
-    match limiter.check_n(max_burst) {
-        Ok(_) => (),
-
-        Err(e) => error!("Rate limit exceeded: {}", e),
-    }
+    let mut next = tokio::time::Instant::now();
 
     while let Some(chunk_result) = stream.next().await {
         // Check if download should be forcefully stopped
-        if force_stop.load(std::sync::atomic::Ordering::SeqCst) {
+        if pacing.force_stop.load(Ordering::SeqCst) {
             warn!("Timeout interrupt - download stopping forcefully");
             sync_part(&mut file, part_path_str, downloaded + session_downloaded).await?;
+            log_summary(&pacing.remote, session_downloaded, start, &rate_rx);
             return Err(anyhow::anyhow!("Download interrupted by force_stop"));
         }
 
         match chunk_result {
             Ok(chunk) => {
-                let Some(chunk_size) = NonZeroU32::new(chunk.len() as u32) else {
+                if chunk.is_empty() {
                     continue;
-                };
-
-                // Wait for rate limiter
-                if let Err(e) = limiter.until_n_ready(chunk_size).await {
-                    warn!("Rate limit exceeded: {}", e);
                 }
+
+                let rate = allowed_rate(&mut rate_rx, &pacing).await;
+                next = next.max(tokio::time::Instant::now())
+                    + Duration::from_secs_f64(chunk.len() as f64 / rate as f64);
+                tokio::time::sleep_until(next).await;
 
                 // Write chunk to file
                 file.write_all(&chunk).await?;
@@ -369,11 +475,14 @@ async fn fetch(
             Err(e) => {
                 error!("Error downloading chunk: {}", e);
                 sync_part(&mut file, part_path_str, downloaded + session_downloaded).await?;
+                log_summary(&pacing.remote, session_downloaded, start, &rate_rx);
                 return Err(anyhow::anyhow!("Download error: {}", e));
             }
         }
     }
 
+    drop(feed);
+    log_summary(&pacing.remote, session_downloaded, start, &rate_rx);
     file.flush().await?;
     drop(file);
 
@@ -415,8 +524,7 @@ async fn fetch(
                     url,
                     token,
                     local_path,
-                    bytes_per_second,
-                    force_stop,
+                    pacing,
                     Some(rec_track),
                 ))
                 .await;
@@ -526,6 +634,51 @@ mod tests {
 
     const MIB: usize = 1024 * 1024;
 
+    fn delay(baseline_ms: u32, current_ms: u32) -> Option<LinkDelay> {
+        Some(LinkDelay {
+            baseline_ms,
+            current_ms,
+        })
+    }
+
+    #[test]
+    fn a_changed_delay_is_a_sample_and_silence_becomes_a_loss_on_the_third_tick() {
+        let mut unchanged = 0;
+        let seen = |probe: Option<Probe>| match probe {
+            None => "none",
+            Some(Probe::Lost) => "lost",
+            Some(Probe::Delay { .. }) => "delay",
+        };
+        let ticks = [
+            (true, delay(20, 30), "delay"),
+            (false, delay(20, 30), "none"),
+            (false, delay(20, 30), "none"),
+            (false, delay(20, 30), "lost"),
+            (false, delay(20, 30), "lost"),
+            (true, None, "lost"),
+            (true, delay(20, 400), "delay"),
+            (false, delay(20, 400), "none"),
+        ];
+        for (i, (changed, value, want)) in ticks.into_iter().enumerate() {
+            let got = seen(next_probe(changed, value, &mut unchanged));
+            assert_eq!(got, want, "tick {i}");
+        }
+        assert_eq!(unchanged, 1);
+    }
+
+    #[test]
+    fn a_delay_sample_carries_both_values() {
+        let mut unchanged = 2;
+        let Some(Probe::Delay { baseline, current }) =
+            next_probe(true, delay(18, 250), &mut unchanged)
+        else {
+            panic!("expected a delay sample");
+        };
+        assert_eq!(baseline, Duration::from_millis(18));
+        assert_eq!(current, Duration::from_millis(250));
+        assert_eq!(unchanged, 0);
+    }
+
     struct FakeCdn {
         base: String,
         data: Vec<u8>,
@@ -619,8 +772,12 @@ mod tests {
             &format!("{}/download", cdn.base),
             "token",
             local.to_str().unwrap_or_default(),
-            1_000_000_000,
-            Arc::new(AtomicBool::new(false)),
+            Pacing {
+                remote: "pkg".to_owned(),
+                cap: 1_000_000_000,
+                force_stop: Arc::new(AtomicBool::new(false)),
+                link_delay: watch::channel(None).1,
+            },
             None,
         )
         .await
@@ -649,7 +806,7 @@ mod tests {
         Ok(())
     }
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn resume_after_connection_reset_gives_identical_file() -> anyhow::Result<()> {
         let cdn = serve(package_bytes(20 * MIB), None).await?;
         *cdn.drop_after.lock().map_err(|e| anyhow::anyhow!("{e}"))? = Some(10 * MIB + 123);
@@ -668,7 +825,7 @@ mod tests {
         Ok(())
     }
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn resume_truncates_part_to_synced_length() -> anyhow::Result<()> {
         let cdn = serve(package_bytes(20 * MIB), None).await?;
         let temp = tempfile::tempdir()?;
@@ -688,7 +845,7 @@ mod tests {
         Ok(())
     }
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn part_without_synced_length_downloads_again() -> anyhow::Result<()> {
         let cdn = serve(package_bytes(20 * MIB), None).await?;
         let temp = tempfile::tempdir()?;
@@ -708,7 +865,7 @@ mod tests {
         Ok(())
     }
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn content_that_does_not_match_etag_is_not_accepted() -> anyhow::Result<()> {
         let cdn = serve(package_bytes(20 * MIB), None).await?;
         let temp = tempfile::tempdir()?;
@@ -742,7 +899,7 @@ mod tests {
         Ok(())
     }
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn multipart_etag_is_refused_before_download() -> anyhow::Result<()> {
         let cdn = serve(package_bytes(MIB), Some("\"abc-2\"".to_owned())).await?;
         let temp = tempfile::tempdir()?;
@@ -757,5 +914,37 @@ mod tests {
         assert_eq!(ranges(&cdn), []);
         assert!(!local.exists());
         Ok(())
+    }
+
+    fn feed_pacing(link_delay: LinkDelayWatch) -> Pacing {
+        Pacing {
+            remote: "test".to_owned(),
+            cap: 2_000_000,
+            force_stop: Arc::new(AtomicBool::new(false)),
+            link_delay,
+        }
+    }
+
+    const SLOW: LinkDelay = LinkDelay {
+        baseline_ms: 20,
+        current_ms: 500,
+    };
+
+    #[tokio::test(start_paused = true)]
+    async fn feed_pauses_on_a_slow_link_delay() {
+        let (tx, rx) = watch::channel(None);
+        let (rate, _guard) = start_feed(&feed_pacing(rx));
+        tx.send_replace(Some(SLOW));
+        tokio::time::sleep(FEED_INTERVAL + Duration::from_millis(1)).await;
+        assert_eq!(rate.borrow().rate, None);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn feed_ignores_a_link_delay_sent_before_the_download() {
+        let (tx, rx) = watch::channel(None);
+        tx.send_replace(Some(SLOW));
+        let (rate, _guard) = start_feed(&feed_pacing(rx));
+        tokio::time::sleep(FEED_INTERVAL + Duration::from_millis(1)).await;
+        assert!(rate.borrow().rate.is_some());
     }
 }

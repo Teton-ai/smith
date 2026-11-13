@@ -1,15 +1,17 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 mod download;
+mod pace;
 use crate::downloader::download::DownloadStats;
 use crate::magic::MagicHandle;
+use crate::postman::LinkDelayWatch;
 use crate::session::SessionHandle;
 use crate::shutdown::ShutdownSignals;
 use crate::utils::network::NetworkClient;
 use anyhow::{self, Context};
 use download::download_file_mb;
 pub(crate) use download::{ETAG_XATTR, md5_from_etag, md5_of_file};
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, watch};
 use tokio::{
     sync::{mpsc, oneshot},
     time,
@@ -42,6 +44,8 @@ struct Downloader {
     magic: MagicHandle,
     session: SessionHandle,
     downloading_count: Arc<AtomicUsize>,
+    downloading: Arc<watch::Sender<bool>>,
+    link_delay: LinkDelayWatch,
     network: NetworkClient,
     force_stop: Arc<AtomicBool>,
     last_download_status: Arc<AtomicBool>,
@@ -55,6 +59,8 @@ impl Downloader {
         receiver: mpsc::Receiver<DownloaderMessage>,
         magic: MagicHandle,
         session: SessionHandle,
+        link_delay: LinkDelayWatch,
+        downloading: watch::Sender<bool>,
         timeout: u64,
     ) -> Self {
         let network = NetworkClient::new();
@@ -70,6 +76,8 @@ impl Downloader {
             session,
             network,
             downloading_count: is_downloading,
+            downloading: Arc::new(downloading),
+            link_delay,
             force_stop,
             timeout,
             last_download_status,
@@ -86,11 +94,14 @@ impl Downloader {
                 rpc,
             } => {
                 self.downloading_count.fetch_add(1, Ordering::SeqCst);
+                self.downloading.send_replace(true);
 
                 let magic = self.magic.clone();
                 let session = self.session.clone();
                 let force_stop = self.force_stop.clone();
                 let is_downloading = self.downloading_count.clone();
+                let downloading = self.downloading.clone();
+                let link_delay = self.link_delay.clone();
                 let last_download_status = self.last_download_status.clone();
                 let download_lock = self.download_lock.clone();
 
@@ -106,6 +117,7 @@ impl Downloader {
                         local_file,
                         rate,
                         force_stop,
+                        link_delay,
                     )
                     .await;
 
@@ -118,7 +130,9 @@ impl Downloader {
                     }
 
                     // Reset status
-                    is_downloading.fetch_sub(1, Ordering::SeqCst);
+                    if is_downloading.fetch_sub(1, Ordering::SeqCst) == 1 {
+                        downloading.send_replace(false);
+                    }
 
                     if let Some(rpc) = rpc {
                         let _ = rpc.send(result);
@@ -190,19 +204,42 @@ impl Downloader {
 
 pub struct DownloaderHandle {
     sender: mpsc::Sender<DownloaderMessage>,
+    downloading: watch::Receiver<bool>,
 }
 
 impl DownloaderHandle {
-    pub fn new(shutdown: ShutdownSignals, magic: MagicHandle, session: SessionHandle) -> Self {
+    pub fn new(
+        shutdown: ShutdownSignals,
+        magic: MagicHandle,
+        session: SessionHandle,
+        link_delay: LinkDelayWatch,
+    ) -> Self {
         let (sender, receiver) = mpsc::channel(8);
+        let (downloading_tx, downloading) = watch::channel(false);
 
         let timeout = 5; // 5 second timeout
 
-        let mut actor = Downloader::new(shutdown, receiver, magic, session, timeout);
+        let mut actor = Downloader::new(
+            shutdown,
+            receiver,
+            magic,
+            session,
+            link_delay,
+            downloading_tx,
+            timeout,
+        );
 
         tokio::spawn(async move { actor.run().await });
 
-        Self { sender }
+        Self {
+            sender,
+            downloading,
+        }
+    }
+
+    /// True while a download is queued or running.
+    pub fn downloading(&self) -> watch::Receiver<bool> {
+        self.downloading.clone()
     }
 
     pub async fn download(
