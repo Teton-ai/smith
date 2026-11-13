@@ -1046,7 +1046,7 @@ const DevicesPage = () => {
 	};
 
 	return (
-		<div className="flex flex-col flex-1 min-h-0 overflow-hidden">
+		<div className="flex flex-col flex-1 min-h-0 overflow-y-auto">
 			{/* Toast Notification */}
 			<Toast toast={toast} onClose={() => setToast(null)} />
 
@@ -1335,8 +1335,8 @@ const DevicesPage = () => {
 				</div>
 			</div>
 
-			{/* Device List — scrollable */}
-			<div className="flex-1 overflow-y-auto px-4 sm:px-6 lg:px-8 pb-6 min-h-0">
+			{/* On short viewports the page is the single scroll region, so the list must not trap scrolling. */}
+			<div className="flex-1 px-4 sm:px-6 lg:px-8 pb-6 [@media(min-height:40rem)]:min-h-64 [@media(min-height:40rem)]:overflow-y-auto">
 				<div className="pb-2 text-sm text-gray-500">
 					{loading
 						? "Loading devices…"
@@ -1648,12 +1648,12 @@ const DevicesPage = () => {
 
 			{/* Bulk Action Bar */}
 			{selectedDeviceIds.size > 0 && (
-				<div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 shadow-lg p-4 flex items-center justify-between z-40">
+				<div className="sticky bottom-0 shrink-0 bg-white border-t border-gray-200 shadow-lg p-4 flex flex-wrap items-center justify-between gap-3 z-40">
 					<span className="text-sm font-medium text-gray-700">
 						{selectedDeviceIds.size} device
 						{selectedDeviceIds.size > 1 ? "s" : ""} selected
 					</span>
-					<div className="flex gap-2">
+					<div className="flex flex-wrap gap-2">
 						<Button
 							variant="soft"
 							tone="gray"
