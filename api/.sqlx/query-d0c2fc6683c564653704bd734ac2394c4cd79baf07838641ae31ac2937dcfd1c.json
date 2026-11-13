@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT\n            ip.id,\n            ip.ip_address,\n            ip.name,\n            ip.continent,\n            ip.continent_code,\n            ip.country_code,\n            ip.country,\n            ip.region,\n            ip.city,\n            ip.isp,\n            ip.coordinates[0] as longitude,\n            ip.coordinates[1] as latitude,\n            ip.proxy,\n            ip.hosting,\n            ip.created_at,\n            ip.updated_at,\n            COUNT(d.id) as device_count\n        FROM ip_address ip\n        LEFT JOIN device d ON d.ip_address_id = ip.id\n        GROUP BY ip.id\n        HAVING COUNT(d.id) > 0\n        ORDER BY COUNT(d.id) DESC\n        ",
+  "query": "\n        SELECT\n            ip.id,\n            ip.ip_address,\n            ip.name,\n            ip.continent,\n            ip.continent_code,\n            ip.country_code,\n            ip.country,\n            ip.region,\n            ip.city,\n            ip.isp,\n            ip.coordinates[0] as longitude,\n            ip.coordinates[1] as latitude,\n            ip.proxy,\n            ip.hosting,\n            ip.created_at,\n            ip.updated_at,\n            ip.max_concurrent_downloads,\n            COUNT(d.id) as device_count\n        FROM ip_address ip\n        LEFT JOIN device d ON d.ip_address_id = ip.id\n        WHERE ip.id = $1\n        GROUP BY ip.id\n        ",
   "describe": {
     "columns": [
       {
@@ -85,12 +85,19 @@
       },
       {
         "ordinal": 16,
+        "name": "max_concurrent_downloads",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 17,
         "name": "device_count",
         "type_info": "Int8"
       }
     ],
     "parameters": {
-      "Left": []
+      "Left": [
+        "Int8"
+      ]
     },
     "nullable": [
       false,
@@ -109,8 +116,9 @@
       true,
       false,
       false,
+      true,
       null
     ]
   },
-  "hash": "723a1be53caaab94cbc3240cde6f10611c1f306af6e7375561000aa4335b0a61"
+  "hash": "d0c2fc6683c564653704bd734ac2394c4cd79baf07838641ae31ac2937dcfd1c"
 }
