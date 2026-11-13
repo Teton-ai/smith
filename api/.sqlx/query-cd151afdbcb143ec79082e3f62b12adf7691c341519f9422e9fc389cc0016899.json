@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE deployment SET times_out_at = NOW() + make_interval(mins => $2) WHERE id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "cd151afdbcb143ec79082e3f62b12adf7691c341519f9422e9fc389cc0016899"
+}

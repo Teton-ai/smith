@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "WITH waiting AS (\n             SELECT id FROM device\n             WHERE target_release_id = $1 AND target_release_eligible_at > NOW()\n               AND release_id IS DISTINCT FROM target_release_id AND NOT archived\n             FOR UPDATE\n         ), opened AS (\n             UPDATE deployment_devices dd SET opens_at = NOW()\n             FROM waiting, deployment dep\n             WHERE dd.device_id = waiting.id AND dep.id = dd.deployment_id\n               AND dep.release_id = $1 AND dep.completed_at IS NULL AND dd.opens_at > NOW()\n             RETURNING dd.device_id\n         )\n         UPDATE device d SET target_release_eligible_at = NOW()\n         FROM waiting WHERE d.id = waiting.id",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "93d039e806eca01bf6b89d81138ced2971f94986f8731eaff81d8ba0ecee5d2a"
+}

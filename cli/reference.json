@@ -855,6 +855,81 @@
       "examples": []
     },
     {
+      "path": "sm deployments list",
+      "about": "List deployments, newest first",
+      "usage": "sm deployments list [OPTIONS]",
+      "arguments": [],
+      "options": [
+        {
+          "name": "--release",
+          "value": "<RELEASE>",
+          "required": false,
+          "help": "Only deployments of this release"
+        },
+        {
+          "name": "--distribution",
+          "value": "<DISTRIBUTION>",
+          "required": false,
+          "help": "Only deployments in this distribution"
+        },
+        {
+          "name": "--limit",
+          "value": "<LIMIT>",
+          "required": false,
+          "help": "At most this many, up to 200",
+          "default": "20"
+        },
+        {
+          "name": "--json",
+          "required": false,
+          "help": ""
+        }
+      ],
+      "examples": [
+        "sm deployments list",
+        "sm deployments list --release 1516",
+        "sm deployments list --distribution 14 --json"
+      ]
+    },
+    {
+      "path": "sm deployments get",
+      "about": "Show a deployment: where it is, its waves, what blocks confirming it, and its activity",
+      "usage": "sm deployments get [OPTIONS] <DEPLOYMENT_ID>",
+      "arguments": [
+        {
+          "name": "<DEPLOYMENT_ID>",
+          "required": true,
+          "help": ""
+        }
+      ],
+      "options": [
+        {
+          "name": "--json",
+          "required": false,
+          "help": ""
+        }
+      ],
+      "examples": [
+        "sm deployments get 42"
+      ]
+    },
+    {
+      "path": "sm deployments confirm",
+      "about": "Confirm a stable release's rollout once the canary is healthy. The fleet then updates in staggered waves. Release candidates cannot be confirmed",
+      "usage": "sm deployments confirm <DEPLOYMENT_ID>",
+      "arguments": [
+        {
+          "name": "<DEPLOYMENT_ID>",
+          "required": true,
+          "help": ""
+        }
+      ],
+      "options": [],
+      "examples": [
+        "sm deployments confirm 42"
+      ]
+    },
+    {
       "path": "sm tunnel",
       "about": "Tunneling options into a device",
       "usage": "sm tunnel [OPTIONS] <SERIAL_NUMBER>",

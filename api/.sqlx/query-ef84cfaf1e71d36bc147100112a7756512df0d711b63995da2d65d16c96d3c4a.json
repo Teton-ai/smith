@@ -1,11 +1,11 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT device_id FROM deployment_devices WHERE deployment_id = $1",
+  "query": "SELECT r.distribution_id FROM deployment d JOIN release r ON r.id = d.release_id WHERE d.id = $1",
   "describe": {
     "columns": [
       {
         "ordinal": 0,
-        "name": "device_id",
+        "name": "distribution_id",
         "type_info": "Int4"
       }
     ],
@@ -18,5 +18,5 @@
       false
     ]
   },
-  "hash": "90819c189440e695053e0b50a1b7dabfcce87de03ac4ad63e4728f5d537cba47"
+  "hash": "ef84cfaf1e71d36bc147100112a7756512df0d711b63995da2d65d16c96d3c4a"
 }

@@ -1,8 +1,6 @@
 import {
-	BADGE_COLORS,
 	BackLink,
 	Badge,
-	type BadgeVariant,
 	Button,
 	Card,
 	ListRow,
@@ -14,11 +12,7 @@ import {
 	ArrowLeftRight,
 	Calendar,
 	ChevronRight,
-	Cpu,
-	HardDrive,
 	Minus,
-	Monitor,
-	Package,
 	Plus,
 	ShieldCheck,
 	Tag,
@@ -36,42 +30,14 @@ import {
 	useGetDistributionReleasePackages,
 	useGetDistributionReleases,
 } from "@/app/api-client";
+import {
+	ArchitectureIcon,
+	architectureVariant,
+} from "@/app/components/ArchitectureIcon";
 import { Modal } from "@/app/components/modal";
 import { RelativeTime } from "@/app/components/RelativeTime";
 import { SidePanel } from "@/app/components/side-panel";
 import { isStableRelease } from "@/app/utils/release";
-
-const getArchIcon = (architecture: string) => {
-	switch (architecture.toLowerCase()) {
-		case "x86_64":
-		case "amd64":
-			return <Monitor className="w-5 h-5" />;
-		case "arm64":
-		case "aarch64":
-			return <Cpu className="w-5 h-5" />;
-		case "armv7":
-		case "arm":
-			return <HardDrive className="w-5 h-5" />;
-		default:
-			return <Package className="w-5 h-5" />;
-	}
-};
-
-const getArchVariant = (architecture: string): BadgeVariant => {
-	switch (architecture.toLowerCase()) {
-		case "x86_64":
-		case "amd64":
-			return "blue";
-		case "arm64":
-		case "aarch64":
-			return "green";
-		case "armv7":
-		case "arm":
-			return "purple";
-		default:
-			return "gray";
-	}
-};
 
 interface ReleaseRowProps {
 	release: Release;
@@ -408,7 +374,7 @@ const DistributionDetailPage = () => {
 		);
 	}
 
-	const archVariant = getArchVariant(distribution.architecture);
+	const archVariant = architectureVariant(distribution.architecture);
 
 	return (
 		<PageContainer>
@@ -418,9 +384,7 @@ const DistributionDetailPage = () => {
 			{/* Distribution Header */}
 			<Card className="p-4">
 				<div className="flex items-center space-x-3">
-					<div className={`p-2 rounded-lg ${BADGE_COLORS[archVariant]}`}>
-						{getArchIcon(distribution.architecture)}
-					</div>
+					<ArchitectureIcon architecture={distribution.architecture} />
 					<div className="flex-1 min-w-0">
 						<div className="flex items-center space-x-3">
 							<h1 className="text-xl font-bold text-gray-900 truncate">

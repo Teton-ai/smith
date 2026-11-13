@@ -1,0 +1,25 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT d.id FROM device d\n         JOIN release r ON d.release_id = r.id\n         WHERE r.distribution_id = $1 AND d.release_id <> $2\n           AND d.release_id = d.target_release_id\n           AND d.last_ping > NOW() - INTERVAL '3 minutes'\n           AND (($3::int[] IS NOT NULL AND d.id = ANY($3)) OR\n                ($4::text[] IS NOT NULL AND EXISTS (\n                    SELECT 1 FROM device_label dl JOIN label l ON l.id = dl.label_id\n                    WHERE dl.device_id = d.id AND l.name || '=' || dl.value = ANY($4)\n                )))",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Int4",
+        "Int4Array",
+        "TextArray"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "f97757ab2ad26860fcd3db3b9cf5a1c5959f904cd70a06bacd5257e4dbbc0048"
+}

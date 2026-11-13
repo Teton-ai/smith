@@ -260,6 +260,7 @@ async fn start_main_server(
 
     // An unreachable device cannot report its own absence, so downtime has to be
     // inferred by polling for silence. Runs on its own task, off the request path.
+    deployment::spawn_completion_recorder(state.pg_pool.clone());
     device::spawn_downtime_sweeper(state.pg_pool.clone());
 
     // Staged device files are removed within the hour; S3 lifecycle rules only
@@ -427,6 +428,11 @@ async fn start_main_server(
         .routes(routes!(deployment::route::api_get_stagger_policy))
         .routes(routes!(deployment::route::api_finish_now))
         .routes(routes!(deployment::route::api_get_rollout_progress))
+        .routes(routes!(deployment::route::api_list_deployments))
+        .routes(routes!(deployment::route::api_get_deployment))
+        .routes(routes!(deployment::route::api_list_deployment_devices))
+        .routes(routes!(deployment::route::api_promote_deployment))
+        .routes(routes!(deployment::route::api_list_deployment_creators))
         .routes(routes!(
             deployment::route::api_get_deployment_service_health
         ))

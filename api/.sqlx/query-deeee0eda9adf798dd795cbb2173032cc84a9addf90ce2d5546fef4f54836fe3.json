@@ -1,0 +1,88 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT\n            wave AS \"wave!\",\n            MIN(opens_at) AS \"opens_at!\",\n            COUNT(*) AS \"total!\",\n            COUNT(*) FILTER (WHERE state = 'updated') AS \"updated!\",\n            COUNT(*) FILTER (WHERE state = 'updating') AS \"updating!\",\n            COUNT(*) FILTER (WHERE state = 'scheduled') AS \"scheduled!\",\n            COUNT(*) FILTER (WHERE state = 'held') AS \"held!\",\n            COUNT(*) FILTER (WHERE state = 'offline') AS \"offline!\",\n            COUNT(*) FILTER (WHERE state = 'timed_out') AS \"timed_out!\",\n            COUNT(*) FILTER (WHERE state = 'superseded') AS \"superseded!\",\n            COUNT(*) FILTER (WHERE state = 'canceled') AS \"canceled!\",\n            COUNT(*) FILTER (WHERE unhealthy) AS \"unhealthy!\"\n        FROM deployment_device_state\n        WHERE deployment_id = $1\n        GROUP BY wave\n        ORDER BY wave",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "wave!",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "opens_at!",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 2,
+        "name": "total!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 3,
+        "name": "updated!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 4,
+        "name": "updating!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 5,
+        "name": "scheduled!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 6,
+        "name": "held!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 7,
+        "name": "offline!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 8,
+        "name": "timed_out!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 9,
+        "name": "superseded!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 10,
+        "name": "canceled!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 11,
+        "name": "unhealthy!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4"
+      ]
+    },
+    "nullable": [
+      true,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "deeee0eda9adf798dd795cbb2173032cc84a9addf90ce2d5546fef4f54836fe3"
+}

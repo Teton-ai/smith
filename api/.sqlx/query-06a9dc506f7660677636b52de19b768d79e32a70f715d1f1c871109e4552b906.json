@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id FROM deployment WHERE release_id = $1",
+  "query": "SELECT id FROM device WHERE release_id IN (SELECT id FROM release WHERE distribution_id = $1)\n         AND follow_latest AND NOT archived FOR UPDATE",
   "describe": {
     "columns": [
       {
@@ -18,5 +18,5 @@
       false
     ]
   },
-  "hash": "8bcc8178f7e722e6fb054d7301c5687f8a303d4d2cbe3789cec535f3a6b766ae"
+  "hash": "06a9dc506f7660677636b52de19b768d79e32a70f715d1f1c871109e4552b906"
 }

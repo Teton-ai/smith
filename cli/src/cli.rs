@@ -1,6 +1,7 @@
 use clap::{Args, Parser, Subcommand, value_parser};
 use clap_complete::Shell;
 
+use crate::commands::deployments::DeploymentsCommands;
 use crate::commands::releases::ReleasesCommands;
 
 #[derive(Parser)]
@@ -361,6 +362,13 @@ Examples:
     Releases {
         #[clap(subcommand)]
         command: ReleasesCommands,
+    },
+
+    /// Follow deployments and confirm a rollout once its canary is healthy
+    #[command(visible_alias = "deploys")]
+    Deployments {
+        #[clap(subcommand)]
+        command: DeploymentsCommands,
     },
 
     /// Tunneling options into a device

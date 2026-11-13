@@ -13,6 +13,20 @@ pub struct CurrentUser {
 }
 
 impl CurrentUser {
+    #[cfg(test)]
+    pub fn for_tests(user_id: i32, permissions: &[(&str, &str)]) -> Self {
+        Self {
+            user_id,
+            permissions: permissions
+                .iter()
+                .map(|(resource, action)| authorization::Permission {
+                    resource: resource.to_string(),
+                    action: action.to_string(),
+                })
+                .collect(),
+        }
+    }
+
     pub fn has_permission(&self, resource: &str, action: &str) -> bool {
         self.permissions
             .iter()

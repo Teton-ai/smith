@@ -406,8 +406,13 @@ impl SmithMcp {
         idempotent_hint = true,
         open_world_hint = false
     ))]
-    async fn publish_release(&self, Parameters(params): Parameters<ReleaseParams>) -> ToolResult {
+    async fn publish_release(
+        &self,
+        Parameters(params): Parameters<ReleaseParams>,
+        Extension(parts): Extension<Parts>,
+    ) -> ToolResult {
         self.update_release(
+            &parts,
             params.release_id,
             UpdateRelease {
                 draft: Some(false),
@@ -426,8 +431,13 @@ impl SmithMcp {
         idempotent_hint = true,
         open_world_hint = false
     ))]
-    async fn set_release_lts(&self, Parameters(params): Parameters<SetLtsParams>) -> ToolResult {
+    async fn set_release_lts(
+        &self,
+        Parameters(params): Parameters<SetLtsParams>,
+        Extension(parts): Extension<Parts>,
+    ) -> ToolResult {
         self.update_release(
+            &parts,
             params.release_id,
             UpdateRelease {
                 draft: None,
@@ -446,8 +456,13 @@ impl SmithMcp {
         idempotent_hint = true,
         open_world_hint = false
     ))]
-    async fn yank_release(&self, Parameters(params): Parameters<YankParams>) -> ToolResult {
+    async fn yank_release(
+        &self,
+        Parameters(params): Parameters<YankParams>,
+        Extension(parts): Extension<Parts>,
+    ) -> ToolResult {
         self.update_release(
+            &parts,
             params.release_id,
             UpdateRelease {
                 draft: None,
@@ -521,8 +536,9 @@ impl SmithMcp {
             AxumExtension(self.state.clone()),
         ))
         .await?;
-        let (_, AxumJson(devices)) = call(deployment_route::api_get_deployment_devices(
-            Path(params.release_id),
+        let AxumJson(devices) = call(deployment_route::api_list_deployment_devices(
+            Path(deployment.id),
+            Query(deployment_route::DeploymentDeviceParams::default()),
             AxumExtension(self.state.clone()),
         ))
         .await?;
@@ -538,8 +554,9 @@ impl SmithMcp {
                 json!({
                     "device_id": device.device_id,
                     "serial_number": device.serial_number,
-                    "updated": device.release_id == Some(params.release_id),
-                    "release_id": device.release_id,
+                    "wave": device.wave,
+                    "state": device.state,
+                    "current_version": device.current_version,
                     "last_ping": device.last_ping,
                 })
             })
@@ -557,7 +574,7 @@ impl SmithMcp {
         }))
     }
 
-    /// Roll a release out to the whole fleet once its canary devices are healthy. Devices are released in staggered groups over up to 95 minutes, so they don't all update at once.
+    /// Roll a stable release out to the whole fleet once its canary devices are healthy. Devices are released in staggered groups over up to 95 minutes, so they don't all update at once.
     #[tool(annotations(
         read_only_hint = false,
         destructive_hint = true,
@@ -570,8 +587,13 @@ impl SmithMcp {
         Extension(parts): Extension<Parts>,
     ) -> ToolResult {
         let user = current_user(&parts)?;
-        let (_, AxumJson(deployment)) = call(deployment_route::api_confirm_full_rollout(
+        let (_, AxumJson(latest)) = call(deployment_route::api_get_release_deployment(
             Path(params.release_id),
+            AxumExtension(self.state.clone()),
+        ))
+        .await?;
+        let AxumJson(deployment) = call(deployment_route::api_promote_deployment(
+            Path(latest.id),
             AxumExtension(self.state.clone()),
             AxumExtension(user),
         ))
@@ -707,10 +729,17 @@ impl SmithMcp {
         Ok(release)
     }
 
-    async fn update_release(&self, release_id: i32, update: UpdateRelease) -> ToolResult {
+    async fn update_release(
+        &self,
+        parts: &Parts,
+        release_id: i32,
+        update: UpdateRelease,
+    ) -> ToolResult {
+        let user = current_user(parts)?;
         call(release_route::update_release(
             Path(release_id),
             AxumExtension(self.state.clone()),
+            AxumExtension(user),
             AxumJson(update),
         ))
         .await?;

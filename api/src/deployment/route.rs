@@ -1,9 +1,12 @@
 use crate::State;
 use crate::deployment::{
-    Deployment, DeploymentDeviceWithStatus, DeviceServiceHealth, FinishNowResult, RollbackRequest,
-    RollbackResult, RolloutProgress, StaggerPolicy, confirm_full_rollout, finish_now,
-    get_deployment, get_deployment_service_health, get_devices_in_deployment, new_deployment,
-    rollback_release, rollout_progress, stagger_policy,
+    Deployment, DeploymentCreator, DeploymentDetail, DeploymentDeviceFilter, DeploymentDeviceInfo,
+    DeploymentDeviceWithStatus, DeploymentKind, DeploymentListFilter, DeploymentSummary,
+    DeviceServiceHealth, FinishNowResult, RollbackRequest, RollbackResult, RolloutProgress,
+    StaggerPolicy, confirm_full_rollout, deployment_creators, deployment_detail,
+    deployment_devices, finish_now, get_deployment, get_deployment_service_health,
+    get_devices_in_deployment, list_deployments, new_deployment, promote, rollback_release,
+    rollout_progress, stagger_policy,
 };
 use crate::error::ApiError;
 use crate::user::CurrentUser;
@@ -16,6 +19,8 @@ use utoipa::IntoParams;
 
 const TAG: &str = "deployment";
 
+/// The release's most recent deployment. A release can be deployed more than
+/// once; `/deployments?release_id=` lists every run.
 #[utoipa::path(
     get,
     path = "/releases/{release_id}/deployment",
@@ -52,7 +57,8 @@ pub async fn api_get_release_deployment(
   request_body = DeploymentRequest,
   responses(
         (status = StatusCode::OK, body = Deployment),
-        (status = StatusCode::BAD_REQUEST, description = "Release is draft or yanked, a deployment is already in progress, or no canary devices matched"),
+        (status = StatusCode::BAD_REQUEST, description = "Release is draft or yanked, another deployment is active, or no canary devices matched"),
+        (status = StatusCode::FORBIDDEN, description = "Your role does not allow this deployment"),
         (status = StatusCode::NOT_FOUND, description = "Release not found"),
   ),
   security(
@@ -73,15 +79,16 @@ pub async fn api_release_deployment(
         request.map(|req| req.0),
         &state.pg_pool,
         state.config,
+        &current_user,
         user_email.as_deref(),
     )
     .await
-    .inspect_err(|e| {
-        tracing::error!("Failed to create new deployment: {e:?}");
-    })?;
+    .inspect_err(|e| e.log_if_unexpected("Failed to create new deployment"))?;
     Ok(Json(release))
 }
 
+/// Canary devices of the release's most recent deployment. Deprecated: use
+/// `/deployments/{deployment_id}/devices`, which names the run.
 #[utoipa::path(
   get,
   path = "/releases/{release_id}/deployment/devices",
@@ -96,6 +103,7 @@ pub async fn api_release_deployment(
   ),
   tag = TAG
 )]
+#[deprecated = "names no deployment run; use the /deployments/{deployment_id} routes"]
 pub async fn api_get_deployment_devices(
     Path(release_id): Path<i32>,
     Extension(state): Extension<State>,
@@ -106,6 +114,8 @@ pub async fn api_get_deployment_devices(
     Ok((StatusCode::OK, Json(devices)))
 }
 
+/// Promote the release's most recent deployment. Deprecated: use
+/// `/deployments/{deployment_id}/promote`, which names the run.
 #[utoipa::path(
   post,
   path = "/releases/{release_id}/deployment/confirm",
@@ -114,7 +124,8 @@ pub async fn api_get_deployment_devices(
     ),
   responses(
         (status = StatusCode::OK, body = Deployment),
-        (status = StatusCode::BAD_REQUEST, description = "Canary devices have not finished updating or are unhealthy, or the release is a release candidate, yanked, or its deployment was canceled"),
+        (status = StatusCode::BAD_REQUEST, description = "Canary devices have not finished updating or are unhealthy, the release is yanked or its deployment was canceled, or it is a release candidate"),
+        (status = StatusCode::FORBIDDEN, description = "Your role does not allow this deployment"),
         (status = StatusCode::NOT_FOUND, description = "Deployment not found"),
   ),
   security(
@@ -122,6 +133,7 @@ pub async fn api_get_deployment_devices(
   ),
   tag = TAG
 )]
+#[deprecated = "names no deployment run; use the /deployments/{deployment_id} routes"]
 pub async fn api_confirm_full_rollout(
     Path(release_id): Path<i32>,
     Extension(state): Extension<State>,
@@ -133,19 +145,22 @@ pub async fn api_confirm_full_rollout(
         release_id,
         &state.pg_pool,
         state.config,
+        &current_user,
         user_email.as_deref(),
     )
     .await
     .inspect_err(|e| {
-        tracing::error!("Failed to confirm full rollout for release {release_id}: {e:?}");
+        e.log_if_unexpected(format!(
+            "Failed to confirm full rollout for release {release_id}"
+        ))
     })?;
     Ok((StatusCode::OK, Json(deployment)))
 }
 
-/// Immediately move every device targeting a yanked release to another stable
-/// release in the same distribution, skipping the canary phase. Any in-progress
-/// deployment of the yanked release is canceled, and the distribution's latest
-/// release is repointed if it was the yanked one.
+/// Yank the release if it isn't yet, and in the same transaction move every
+/// device on it or heading to it to another stable release in the same
+/// distribution, skipping the canary phase. Its active deployments are
+/// canceled, and the distribution's latest is repointed if it was this release.
 #[utoipa::path(
   post,
   path = "/releases/{release_id}/rollback",
@@ -156,6 +171,7 @@ pub async fn api_confirm_full_rollout(
   responses(
         (status = StatusCode::OK, body = RollbackResult),
         (status = StatusCode::BAD_REQUEST, description = "Release is not yanked, or the target is not a stable release in the same distribution"),
+        (status = StatusCode::FORBIDDEN, description = "Your role does not allow this deployment"),
         (status = StatusCode::NOT_FOUND, description = "Release not found"),
   ),
   security(
@@ -176,12 +192,11 @@ pub async fn api_rollback_release(
         request.target_release_id,
         &state.pg_pool,
         state.config,
+        &current_user,
         user_email.as_deref(),
     )
     .await
-    .inspect_err(|e| {
-        tracing::error!("Failed to roll back release {release_id}: {e:?}");
-    })?;
+    .inspect_err(|e| e.log_if_unexpected(format!("Failed to roll back release {release_id}")))?;
     Ok(Json(result))
 }
 
@@ -218,6 +233,188 @@ pub async fn api_get_stagger_policy(
         .and_then(|count| usize::try_from(count).ok())
         .unwrap_or(0);
     Json(stagger_policy(device_count))
+}
+
+#[derive(Deserialize, Debug, IntoParams)]
+#[into_params(parameter_in = Query)]
+pub struct DeploymentListParams {
+    distribution_id: Option<i32>,
+    release_id: Option<i32>,
+    /// Rollbacks that moved devices off this (yanked) release.
+    rolled_back_from: Option<i32>,
+    /// Started by this user.
+    created_by: Option<i32>,
+    kind: Option<DeploymentKind>,
+    /// Only running (canary, rolling out, paused) or only finished deployments.
+    active: Option<bool>,
+    /// At most 200; defaults to 50.
+    limit: Option<i64>,
+}
+
+/// Everyone who has started a deployment, for filtering the list by user.
+#[utoipa::path(
+    get,
+    path = "/deployments/creators",
+    responses(
+        (status = StatusCode::OK, body = Vec<DeploymentCreator>),
+    ),
+    security(
+        ("auth_token" = [])
+    ),
+    tag = TAG
+)]
+pub async fn api_list_deployment_creators(
+    Extension(state): Extension<State>,
+) -> Result<Json<Vec<DeploymentCreator>>, ApiError> {
+    let creators = deployment_creators(&state.pg_pool)
+        .await
+        .inspect_err(|e| tracing::error!("Failed to list deployment creators: {e}"))?;
+    Ok(Json(creators))
+}
+
+/// Deployments, newest first, with how far each one has got.
+#[utoipa::path(
+    get,
+    path = "/deployments",
+    params(DeploymentListParams),
+    responses(
+        (status = StatusCode::OK, body = Vec<DeploymentSummary>),
+    ),
+    security(
+        ("auth_token" = [])
+    ),
+    tag = TAG
+)]
+pub async fn api_list_deployments(
+    Query(params): Query<DeploymentListParams>,
+    Extension(state): Extension<State>,
+) -> Result<Json<Vec<DeploymentSummary>>, ApiError> {
+    let limit = params.limit.unwrap_or(50).clamp(1, 200);
+    let deployments = list_deployments(
+        DeploymentListFilter {
+            distribution_id: params.distribution_id,
+            release_id: params.release_id,
+            rolled_back_from: params.rolled_back_from,
+            created_by: params.created_by,
+            kind: params.kind,
+            active: params.active,
+            limit,
+        },
+        &state.pg_pool,
+    )
+    .await
+    .inspect_err(|e| tracing::error!("Failed to list deployments: {e}"))?;
+    Ok(Json(deployments))
+}
+
+/// A deployment's progress wave by wave, its history, and what
+/// the signed-in user can do to it.
+#[utoipa::path(
+    get,
+    path = "/deployments/{deployment_id}",
+    params(("deployment_id" = i32, Path)),
+    responses(
+        (status = StatusCode::OK, body = DeploymentDetail),
+        (status = StatusCode::NOT_FOUND, description = "Deployment not found"),
+    ),
+    security(
+        ("auth_token" = [])
+    ),
+    tag = TAG
+)]
+pub async fn api_get_deployment(
+    Path(deployment_id): Path<i32>,
+    Extension(state): Extension<State>,
+    Extension(current_user): Extension<CurrentUser>,
+) -> Result<Json<DeploymentDetail>, ApiError> {
+    let detail = deployment_detail(deployment_id, &current_user, &state.pg_pool)
+        .await
+        .inspect_err(|e| {
+            e.log_if_unexpected(format!("Failed to get deployment {deployment_id}"))
+        })?;
+    Ok(Json(detail))
+}
+
+#[derive(Deserialize, Debug, Default, IntoParams)]
+#[into_params(parameter_in = Query)]
+pub struct DeploymentDeviceParams {
+    /// A device state (`updated`, `updating`, `offline`, ...), or `unhealthy`.
+    pub state: Option<String>,
+    pub wave: Option<i32>,
+    /// Part of a serial number.
+    pub search: Option<String>,
+    /// At most 500; defaults to 25.
+    pub limit: Option<i64>,
+}
+
+/// A deployment's devices and what each is doing, first by wave then serial.
+/// Capped: the wave and state totals are on the deployment itself.
+#[utoipa::path(
+    get,
+    path = "/deployments/{deployment_id}/devices",
+    params(("deployment_id" = i32, Path), DeploymentDeviceParams),
+    responses(
+        (status = StatusCode::OK, body = Vec<DeploymentDeviceInfo>),
+    ),
+    security(
+        ("auth_token" = [])
+    ),
+    tag = TAG
+)]
+pub async fn api_list_deployment_devices(
+    Path(deployment_id): Path<i32>,
+    Query(params): Query<DeploymentDeviceParams>,
+    Extension(state): Extension<State>,
+) -> Result<Json<Vec<DeploymentDeviceInfo>>, ApiError> {
+    let filter = DeploymentDeviceFilter {
+        state: params.state,
+        wave: params.wave,
+        search: params.search.filter(|s| !s.trim().is_empty()),
+        limit: params.limit.unwrap_or(25).clamp(1, 500),
+    };
+    let devices = deployment_devices(deployment_id, filter, &state.pg_pool)
+        .await
+        .inspect_err(|e| {
+            tracing::error!("Failed to list devices of deployment {deployment_id}: {e}");
+        })?;
+    Ok(Json(devices))
+}
+
+/// Move a deployment from its canary to the staggered rollout: to the fleet, or
+/// release candidates cannot be confirmed fleet-wide.
+#[utoipa::path(
+    post,
+    path = "/deployments/{deployment_id}/promote",
+    params(("deployment_id" = i32, Path)),
+    responses(
+        (status = StatusCode::OK, body = Deployment),
+        (status = StatusCode::BAD_REQUEST, description = "Canary devices are not ready, the deployment is paused or has ended, another deployment is active, or the pilot group matches no device"),
+        (status = StatusCode::FORBIDDEN, description = "Your role does not allow this deployment"),
+        (status = StatusCode::NOT_FOUND, description = "Deployment not found"),
+    ),
+    security(
+        ("auth_token" = [])
+    ),
+    tag = TAG
+)]
+pub async fn api_promote_deployment(
+    Path(deployment_id): Path<i32>,
+    Extension(state): Extension<State>,
+    Extension(current_user): Extension<CurrentUser>,
+) -> Result<Json<Deployment>, ApiError> {
+    let user_email = current_user_email(&state, &current_user).await;
+    let deployment = promote(
+        deployment_id,
+        &state.pg_pool,
+        state.config,
+        &current_user,
+        user_email.as_deref(),
+    )
+    .await
+    .inspect_err(|e| {
+        e.log_if_unexpected(format!("Failed to promote deployment {deployment_id}"))
+    })?;
+    Ok(Json(deployment))
 }
 
 /// Let every device still waiting for its bucket move to the release now.
@@ -285,7 +482,10 @@ pub async fn api_get_rollout_progress(
     Ok(Json(progress))
 }
 
-async fn current_user_email(state: &State, current_user: &CurrentUser) -> Option<String> {
+pub(crate) async fn current_user_email(
+    state: &State,
+    current_user: &CurrentUser,
+) -> Option<String> {
     // Only used to attribute Slack notifications, so a lookup failure must not
     // block the operation itself.
     sqlx::query_scalar!(

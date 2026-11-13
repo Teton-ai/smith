@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT\n            d.id AS device_id,\n            d.serial_number,\n            dss.release_service_id,\n            rs.service_name,\n            dss.active_state,\n            dss.n_restarts,\n            dss.checked_at\n        FROM deployment_devices dd\n        JOIN device d ON dd.device_id = d.id\n        JOIN device_service_status dss ON dss.device_id = d.id\n        JOIN release_services rs ON rs.id = dss.release_service_id\n        WHERE dd.deployment_id = $1\n          AND rs.release_id = $2\n          AND rs.watchdog_sec IS NOT NULL\n        ORDER BY d.serial_number, rs.service_name\n        ",
+  "query": "\n        SELECT\n            d.id AS device_id,\n            d.serial_number,\n            dss.release_service_id,\n            rs.service_name,\n            dss.active_state,\n            dss.n_restarts,\n            dss.checked_at\n        FROM deployment_devices dd\n        JOIN device d ON dd.device_id = d.id\n        JOIN device_service_status dss ON dss.device_id = d.id\n        JOIN release_services rs ON rs.id = dss.release_service_id\n        WHERE dd.deployment_id = $1\n          AND dd.wave = 0\n          AND rs.release_id = $2\n          AND rs.watchdog_sec IS NOT NULL\n        ORDER BY d.serial_number, rs.service_name\n        ",
   "describe": {
     "columns": [
       {
@@ -55,5 +55,5 @@
       false
     ]
   },
-  "hash": "550f46e0865126513df68c885ceae24acb489a249a6c2475f3abd9748db93caf"
+  "hash": "be9951dfc45c9cdcb91c916315a77c50e15b40db5a4df9a464af9bac4d07fe1f"
 }

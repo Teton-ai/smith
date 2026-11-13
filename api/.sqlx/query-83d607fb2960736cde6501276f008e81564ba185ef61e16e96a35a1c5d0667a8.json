@@ -1,0 +1,20 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT dep.id FROM deployment dep\n         WHERE dep.completed_at IS NULL AND (dep.status IN ('canceled', 'failed') OR (\n           dep.status = 'done' AND dep.promoted_at IS NOT NULL\n           AND (\n               NOT EXISTS (\n                   SELECT 1 FROM deployment_device_state s\n                   WHERE s.deployment_id = dep.id AND s.state IN ('scheduled', 'updating', 'held')\n               )\n               OR dep.times_out_at < NOW()\n           )))\n         ORDER BY dep.id FOR UPDATE OF dep SKIP LOCKED",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "83d607fb2960736cde6501276f008e81564ba185ef61e16e96a35a1c5d0667a8"
+}

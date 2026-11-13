@@ -3,7 +3,7 @@ title: Deployments
 description: Roll out new releases canary-first, verify they're healthy, then confirm across the distribution.
 ---
 
-Deployments are how you roll out new releases to your fleet. Smith uses a canary-first approach: you select a small set of devices, verify they're healthy, then confirm a full rollout to all remaining devices in the distribution.
+Deployments are how you roll out new releases to your fleet. Smith uses a canary-first approach: a small set of devices updates first, you verify they are healthy, then confirm a rollout to the rest of the distribution. The **Deployments** page shows each run and its progress.
 
 ## Core concepts
 
@@ -77,29 +77,32 @@ This means the healthiest, best-connected devices in your fleet receive the upda
 
 After verifying the automatic canary devices are healthy, confirm the full rollout from the deployment detail page. All remaining devices in the distribution will update to the new release, in staggered groups over up to 95 minutes. The deployment page follows their progress.
 
+## Deployment history
+
+Each deployment is its own record with its own history, so deploying a release again adds a new run. The deployment page shows its canaries, waves, device states, who started it and its activity. Fleet deployments run one at a time per distribution.
+
+Use `sm deployments list` and `sm deployments get <id>` to follow a run from the CLI, and `sm deployments confirm <id>` once its canaries are healthy.
+
+A rollout completes when nothing is waiting or pending, or at its timeout: twice its stagger window after the first wave opened, at least an hour. Offline devices never hold it open. Devices that have not updated are recorded as **Timed out**, but keep their target and can update later. Its recorded outcome stays unchanged when devices check in later.
+
 ## Staggered rollouts
 
 Confirming a full rollout does not move every device at once. When a whole site downloads a release together, its network can saturate and devices drop offline, so the devices are split into up to 20 groups that open 5 minutes apart: a full fleet rollout takes about 95 minutes from confirm to the last group. Smaller sets get one device per group.
 
 - **Who goes first** is pseudo-random, derived from the device and the release, so it changes with every release and never follows device ids (a site's devices are provisioned in a row) or network quality.
 - **Groups open on time only.** Nothing halts automatically and no group waits for the previous one to finish; the canary remains the risk gate, and yanking a release remains the way to stop a bad one.
-- **A waiting device stays on its current release.** It shows as *Scheduled, eligible at HH:MM* on its device page, and it is neither pending nor outdated until its group opens. The 30 minute grace before an update counts as stuck starts when the group opens.
+- **A waiting device stays on its current release.** It shows as *Scheduled, eligible at HH:MM* on its device page and updates once its wave opens.
 - **The latest action wins.** Setting a device's release by hand, a rollback, or a newer rollout replaces any pending schedule for that device.
 
-The deployment page shows a **Phase 3: Staggered rollout** section after confirm, with how many devices are scheduled, eligible and updated, when the next group opens and when the last one does. **Finish now** opens every remaining group at once; it asks for confirmation because some departments may have trouble updating all their devices together, and it is meant for emergencies only. Finishing early is posted to the deployment Slack channel.
+The deployment page follows each wave, showing how many devices are waiting, pending, offline or updated, when the next wave opens and when the last one does.
 
 ### Deploy to Selected
 
 Deploying a release directly to selected devices from the device list follows the same rule above 15 devices: the selection is staggered over up to 95 minutes, and the deploy dialog says so before you submit. **Deploy all at once** skips the stagger after the same emergency confirmation. Selections of 15 devices or fewer update right away. The CLI uses the same default.
 
-```text
-PUT  /devices/release                              { "target_release_id": 42, "devices": [...], "all_at_once": false }
-GET  /deployments/stagger-policy                   # threshold, group count and interval
-GET  /releases/{release_id}/deployment/rollout-progress
-POST /releases/{release_id}/deployment/finish-now
-```
+It is recorded as a deployment with no canary phase, so its progress and history can be followed the same way. It does not change what the fleet follows and can run alongside other deployments.
 
-Single-device target changes and rollbacks are never staggered.
+Single-device target changes are never recorded as deployments. Single-device changes and rollbacks are never staggered.
 
 ## Selection strategies
 

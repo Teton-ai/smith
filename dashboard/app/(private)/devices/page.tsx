@@ -569,11 +569,12 @@ const DevicesPage = () => {
 	const { mutate: updateDevicesRelease, isPending: isDeploying } =
 		useUpdateDevicesTargetRelease({
 			mutation: {
-				onSuccess: () => {
+				onSuccess: ({ deployment_id }) => {
 					setShowBulkDeployModal(false);
 					setShowAllAtOnceConfirm(false);
 					setSelectedDeviceIds(new Set());
 					setSelectedReleaseId(undefined);
+					if (deployment_id) navigate(`/deployments/${deployment_id}`);
 				},
 				onError: (error) => {
 					console.error("Failed to deploy:", error);

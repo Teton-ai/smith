@@ -3,7 +3,7 @@ use anyhow::Context as _;
 use chrono_humanize::HumanTime;
 use clap::{Args, Subcommand};
 use models::{
-    deployment::{DeploymentRequest, DeploymentStatus},
+    deployment::DeploymentRequest,
     distribution::NewDistributionRelease,
     release::{UpdateRelease, VersionBump, next_version},
 };
@@ -123,57 +123,24 @@ async fn deploy_release(
         .with_context(|| "No Token found, please Login")?;
     let api = SmithAPI::new(secrets, &config);
 
-    // Start the deployment
-    api.deploy_release(
-        release_number.clone(),
-        canary_device_labels.map(|l| DeploymentRequest {
-            canary_device_labels: Some(l),
-            canary_device_ids: None,
-        }),
-    )
-    .await?;
-
-    // Set up polling parameters
-    let start_time = std::time::Instant::now();
-    let timeout = std::time::Duration::from_secs(5 * 60); // 5 minutes
-    let check_interval = std::time::Duration::from_secs(5); // Check every 5 seconds
-
-    println!("Checking for deployment completion...");
-
-    // Start polling loop
-    loop {
-        // Check if we've exceeded the timeout
-        if start_time.elapsed() > timeout {
-            println!("Deployment timed out after 5 minutes");
-            return Err(anyhow::anyhow!("Deployment timed out after 5 minutes"));
-        }
-
-        // Check deployment status
-        let deployment = api
-            .deploy_release_check_done(release_number.clone())
-            .await?;
-
-        // Check if the deployment is done
-        let status = deployment.status;
-        println!("Current status: {}", status);
-
-        if status == DeploymentStatus::Done {
-            println!("Deployment completed successfully!");
-            return Ok(());
-        }
-
-        // If status is "failed" or any other terminal state, we can exit early
-        if status == DeploymentStatus::Failed {
-            return Err(anyhow::anyhow!("Deployment failed"));
-        }
-
-        // Wait before the next check
+    let request = canary_device_labels.map(|labels| DeploymentRequest {
+        canary_device_labels: Some(labels),
+        canary_device_ids: None,
+    });
+    let deployment = api.deploy_release(release_number, request).await?;
+    let detail = api.get_deployment(deployment.id).await?;
+    println!(
+        "Deployment {} started: {} canary devices.",
+        deployment.id, detail.summary.canary.total
+    );
+    if !detail.summary.release_candidate {
         println!(
-            "Waiting for devices to update... (elapsed: {:?})",
-            start_time.elapsed()
+            "Once they are healthy, confirm with: sm deployments confirm {}",
+            deployment.id
         );
-        tokio::time::sleep(check_interval).await;
     }
+    println!("Follow it with: sm deployments get {}", deployment.id);
+    Ok(())
 }
 
 async fn handle_releases_get(

@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT distribution_id, release_candidate, yanked FROM release WHERE id = $1",
+  "query": "SELECT r.distribution_id, r.yanked, r.release_candidate\n         FROM deployment d JOIN release r ON r.id = d.release_id\n         WHERE d.id = $1",
   "describe": {
     "columns": [
       {
@@ -10,12 +10,12 @@
       },
       {
         "ordinal": 1,
-        "name": "release_candidate",
+        "name": "yanked",
         "type_info": "Bool"
       },
       {
         "ordinal": 2,
-        "name": "yanked",
+        "name": "release_candidate",
         "type_info": "Bool"
       }
     ],
@@ -30,5 +30,5 @@
       false
     ]
   },
-  "hash": "bf074de2d6b8a72cf1e21a5aefa2c5c163aa835fdb596f7d86f9df111c73e85a"
+  "hash": "5a92489e26ad66ab4d4eb32b97c195fcb410ceb250fdb57c03dacfbb034134ac"
 }

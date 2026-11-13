@@ -1,0 +1,46 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT e.id, e.kind, u.email AS \"user_email?\", e.detail, e.created_at\n           FROM deployment_event e\n           LEFT JOIN auth.users u ON u.id = e.user_id\n           WHERE e.deployment_id = $1\n           ORDER BY e.id DESC",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "kind",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "user_email?",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 3,
+        "name": "detail",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      true,
+      false
+    ]
+  },
+  "hash": "9d2e8cbf9c2fb341bfea21ff7a8531bd8508ceafcb3e1ac04a9374c008d75476"
+}

@@ -40,13 +40,20 @@ import {
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router";
 import {
+	isActive,
+	ProgressBar,
+	StateBadge,
+} from "@/app/(private)/deployments/shared";
+import {
 	type DeploymentRequest,
 	type Device,
 	getGetOsQueryKey,
 	type Package,
 	type Release,
 	useAddPackageToRelease,
-	useApiGetReleaseDeployment,
+	useApiFinishNow,
+	useApiGetRolloutProgress,
+	useApiListDeployments,
 	useApiReleaseDeployment,
 	useApiRollbackRelease,
 	useDeleteOs,
@@ -64,7 +71,7 @@ import {
 	usePatchRelease,
 } from "@/app/api-client";
 import LabelAutocomplete from "@/app/components/LabelAutocomplete";
-import { Modal } from "@/app/components/modal";
+import { EmergencyConfirmModal, Modal } from "@/app/components/modal";
 import { RelativeTime } from "@/app/components/RelativeTime";
 import { humanBytes } from "@/app/utils/format";
 import {
@@ -87,6 +94,55 @@ const getArchVariant = (architecture: string): BadgeVariant => {
 		default:
 			return "gray";
 	}
+};
+
+/** Existing release-wide emergency control, retained until per-run Rush is added. */
+const ReleaseRolloutControls = ({ releaseId }: { releaseId: number }) => {
+	const queryClient = useQueryClient();
+	const [confirmOpen, setConfirmOpen] = useState(false);
+	const [error, setError] = useState<string | null>(null);
+	const { data: progress, queryKey } = useApiGetRolloutProgress(releaseId, {
+		query: { refetchInterval: 5000 },
+	});
+	const finish = useApiFinishNow({
+		mutation: {
+			onMutate: () => setError(null),
+			onSuccess: () => {
+				setConfirmOpen(false);
+				queryClient.invalidateQueries({ queryKey });
+			},
+			onError: (error) => setError(requestErrorMessage(error)),
+		},
+	});
+	if (!progress || progress.scheduled === 0) return null;
+	return (
+		<Card className="p-4 space-y-3">
+			<h3 className="font-medium text-gray-900">
+				Scheduled devices for this release
+			</h3>
+			<p className="text-sm text-gray-700">
+				{progress.scheduled} devices are waiting to update. Finish now releases
+				every waiting device targeting this release, including devices in other
+				deployment runs.
+			</p>
+			<Button tone="gray" onClick={() => setConfirmOpen(true)}>
+				Finish release rollout now
+			</Button>
+			{error && (
+				<p role="alert" className="text-sm text-red-700">
+					{error}
+				</p>
+			)}
+			<EmergencyConfirmModal
+				open={confirmOpen}
+				title={`Let all ${progress.scheduled} waiting devices targeting this release update now, across every run?`}
+				confirmLabel="Finish release rollout now"
+				loading={finish.isPending}
+				onCancel={() => setConfirmOpen(false)}
+				onConfirm={() => finish.mutate({ releaseId })}
+			/>
+		</Card>
+	);
 };
 
 const ReleaseDetailPage = () => {
@@ -159,12 +215,19 @@ const ReleaseDetailPage = () => {
 			},
 		});
 
-	const { data: existingDeployment } = useApiGetReleaseDeployment(releaseId, {
-		query: {
-			enabled: !!releaseId && !!release && !release.draft && !release.yanked,
-			retry: false,
-		},
-	});
+	// Each run stays in the history when this release is deployed again.
+	const {
+		data: releaseDeployments = [],
+		isLoading: deploymentsLoading,
+		isError: deploymentsError,
+	} = useApiListDeployments(
+		{ release_id: releaseId, limit: 200 },
+		{ query: { enabled: !!release && !release.draft, refetchInterval: 10000 } },
+	);
+
+	const activeDeployment = releaseDeployments.find((deployment) =>
+		isActive(deployment.state),
+	);
 
 	const rollbackPickerOpen = showYankModal || showRollbackModal;
 	const { data: distributionReleases = [] } = useGetDistributionReleases(
@@ -532,9 +595,12 @@ const ReleaseDetailPage = () => {
 
 		setDeploying(true);
 		try {
-			await releaseDeploymentHook.mutateAsync({ releaseId, data });
+			const deployment = await releaseDeploymentHook.mutateAsync({
+				releaseId,
+				data,
+			});
 			setShowDeployModal(false);
-			navigate(`/releases/${releaseId}/deployment`);
+			navigate(`/deployments/${deployment.id}`);
 		} catch (error: any) {
 			console.error("Failed to deploy release:", error);
 			alert(`Failed to deploy release: ${error?.message || "Unknown error"}`);
@@ -723,7 +789,7 @@ const ReleaseDetailPage = () => {
 										Yanked
 									</Badge>
 								)}
-								{existingDeployment?.status === "InProgress" && (
+								{activeDeployment && (
 									<Badge
 										variant="blue"
 										pill
@@ -804,11 +870,11 @@ const ReleaseDetailPage = () => {
 								>
 									Yank
 								</Button>
-								{existingDeployment?.status === "InProgress" ? (
+								{activeDeployment ? (
 									<Button
 										variant="solid"
 										tone="blue"
-										to={`/releases/${releaseId}/deployment`}
+										to={`/deployments/${activeDeployment.id}`}
 										icon={<Loader2 className="w-4 h-4 animate-spin" />}
 									>
 										View Deployment
@@ -847,6 +913,10 @@ const ReleaseDetailPage = () => {
 						</p>
 					</div>
 				</div>
+			)}
+
+			{!release.draft && !release.yanked && !release.release_candidate && (
+				<ReleaseRolloutControls releaseId={releaseId} />
 			)}
 
 			{/* Deploy Confirmation Modal */}
@@ -1925,6 +1995,77 @@ const ReleaseDetailPage = () => {
 					)}
 				</SectionCard>
 			</div>
+			{!release.draft && (
+				<SectionCard
+					icon={Rocket}
+					title="Deployments"
+					count={releaseDeployments.length}
+					theme={SECTION_THEMES.blue}
+				>
+					{deploymentsLoading ? (
+						<p className="p-6 text-center text-sm text-gray-500">
+							Loading deployments...
+						</p>
+					) : deploymentsError ? (
+						<p role="alert" className="p-6 text-center text-sm text-red-600">
+							Could not load deployments.
+						</p>
+					) : releaseDeployments.length === 0 ? (
+						<div className="p-6 text-center">
+							<Rocket className="w-8 h-8 text-gray-400 mx-auto mb-2" />
+							<p className="text-sm text-gray-500">
+								This release has not been deployed yet
+							</p>
+						</div>
+					) : (
+						releaseDeployments.map((deployment) => (
+							<ListRow
+								key={deployment.id}
+								to={`/deployments/${deployment.id}`}
+								className="gap-4"
+							>
+								{/* flex-1: Firefox otherwise sizes this to almost nothing and truncates it. */}
+								<div className="min-w-0 flex-1">
+									<div className="flex flex-wrap items-center gap-2">
+										<span className="text-xs text-gray-400">
+											#{deployment.id}
+										</span>
+										<span className="font-medium text-gray-900">
+											{deployment.kind === "rollback"
+												? `Rollback from v${deployment.rolled_back_from_version ?? "?"}`
+												: deployment.kind === "direct"
+													? "Selected devices"
+													: deployment.release_candidate
+														? "Release candidate canary"
+														: "Fleet"}
+										</span>
+										<StateBadge state={deployment.state} />
+									</div>
+									<div className="text-xs text-gray-500 mt-1 truncate">
+										{deployment.created_by ?? "Unknown"} ·{" "}
+										<RelativeTime date={deployment.created_at} />
+										{deployment.base_version &&
+											` · from v${deployment.base_version}`}
+									</div>
+								</div>
+								<div className="w-40 flex-shrink-0 space-y-1 text-right">
+									{deployment.counts.total > 0 ? (
+										<>
+											<ProgressBar counts={deployment.counts} />
+											<div className="text-xs text-gray-500 tabular-nums">
+												{deployment.counts.updated}/{deployment.counts.total}{" "}
+												updated
+											</div>
+										</>
+									) : (
+										<span className="text-xs text-gray-400">Not tracked</span>
+									)}
+								</div>
+							</ListRow>
+						))
+					)}
+				</SectionCard>
+			)}
 		</PageContainer>
 	);
 };
