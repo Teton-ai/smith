@@ -26,6 +26,19 @@ const fromBool = (value: boolean | null | undefined) => ({
 	status: (value == null ? "unknown" : value ? "pass" : "fail") as CheckStatus,
 });
 
+const slotLabels = { a: "Slot A", b: "Slot B", single: "Single slot" };
+
+const rootfsSlot = (slot: DeviceAudit["rootfs_slot"] | undefined) =>
+	slot == null
+		? { status: "unknown" as const }
+		: { status: "info" as const, label: slotLabels[slot] };
+
+const fallbackSlot = (audit: DeviceAudit | undefined) =>
+	// a single-slot unit has nothing to fall back to, which isn't unknown
+	audit?.rootfs_slot === "single"
+		? { status: "info" as const, label: "No other slot" }
+		: fromBool(audit?.rootfs_other_slot_bootable);
+
 const pillStyles: Record<
 	CheckStatus,
 	{ className: string; icon: typeof CheckCircle2; label: string }
@@ -104,6 +117,16 @@ const SecurityPage = () => {
 			name: "Reboot watchdog set",
 			help: "A hung shutdown resets the device instead of hanging.",
 			...fromBool(audit?.reboot_watchdog_set),
+		},
+		{
+			name: "Rootfs slot",
+			help: "Which of the two root filesystems the device booted from.",
+			...rootfsSlot(audit?.rootfs_slot),
+		},
+		{
+			name: "Fallback slot bootable",
+			help: "If an update breaks the running system, the device can still boot its other root filesystem.",
+			...fallbackSlot(audit),
 		},
 		{
 			name: "Running latest release",
