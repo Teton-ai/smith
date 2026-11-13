@@ -374,8 +374,10 @@ const DeviceHeader: React.FC<DeviceHeaderProps> = ({ device, serial }) => {
 
 	return (
 		<div className="bg-white rounded-lg border border-gray-200 p-4">
-			<div className="flex flex-col gap-3 lg:flex-row lg:items-center">
-				<div className="flex flex-1 items-center space-x-3 min-w-0">
+			{/* actions stay on the right and only wrap below when the card is too
+			    narrow, so the right-aligned menu always opens into the card */}
+			<div className="flex flex-wrap items-center gap-3">
+				<div className="flex flex-1 basis-64 items-center space-x-3 min-w-0">
 					<Tooltip
 						content={
 							architecture ? architecture.toUpperCase() : "Unknown architecture"
@@ -463,7 +465,7 @@ const DeviceHeader: React.FC<DeviceHeaderProps> = ({ device, serial }) => {
 						</div>
 					</div>
 				</div>
-				<div className="flex items-center lg:flex-shrink-0">
+				<div className="flex items-center flex-shrink-0 ml-auto">
 					<DropdownMenu
 						label="Actions"
 						tone="gray"

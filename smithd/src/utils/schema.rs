@@ -220,6 +220,9 @@ pub enum SafeCommandRx {
     AuditReport {
         disk_encrypted: Option<bool>,
         password_access_disabled: Option<bool>,
+        // missing from older smithd, serde fills `None`
+        console_logins_closed: Option<bool>,
+        reboot_watchdog_set: Option<bool>,
     },
     ApplyNetworksResult {
         applied_version: i32,
@@ -780,6 +783,27 @@ mod tests {
                 assert_eq!(grep, None);
             }
             _ => panic!("expected GetLogs variant"),
+        }
+    }
+
+    #[test]
+    fn audit_report_from_older_smithd_has_no_hardening_fields() {
+        // devices on an older release keep reporting until they update
+        let json = r#"{"AuditReport":{"disk_encrypted":true,"password_access_disabled":false}}"#;
+        let rx: SafeCommandRx = serde_json::from_str(json).unwrap();
+        match rx {
+            SafeCommandRx::AuditReport {
+                disk_encrypted,
+                password_access_disabled,
+                console_logins_closed,
+                reboot_watchdog_set,
+            } => {
+                assert_eq!(disk_encrypted, Some(true));
+                assert_eq!(password_access_disabled, Some(false));
+                assert_eq!(console_logins_closed, None);
+                assert_eq!(reboot_watchdog_set, None);
+            }
+            _ => panic!("expected AuditReport variant"),
         }
     }
 

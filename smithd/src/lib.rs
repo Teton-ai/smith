@@ -5,6 +5,7 @@ pub mod daemon;
 pub mod downloader;
 pub mod filebrowser;
 pub mod filemanager;
+pub mod hardening;
 pub mod link_health;
 pub mod logstream;
 pub mod magic;

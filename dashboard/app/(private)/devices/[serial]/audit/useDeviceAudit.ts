@@ -4,6 +4,8 @@ import { useClientMutator } from "@/app/api-client-mutator";
 export interface DeviceAudit {
 	disk_encrypted: boolean | null;
 	password_access_disabled: boolean | null;
+	console_logins_closed: boolean | null;
+	reboot_watchdog_set: boolean | null;
 	running_latest_release: boolean;
 	checked_at: string | null;
 }
