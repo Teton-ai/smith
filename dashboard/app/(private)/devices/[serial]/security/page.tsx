@@ -1,9 +1,19 @@
-import { Button, Card } from "@teton/smith-ui";
+import {
+	Button,
+	Card,
+	type IconComponent,
+	SECTION_THEMES,
+	SectionCard,
+	type SectionTheme,
+} from "@teton/smith-ui";
 import {
 	CheckCircle2,
+	History,
 	Info,
+	KeyRound,
 	MinusCircle,
 	RefreshCw,
+	ShieldCheck,
 	XCircle,
 } from "lucide-react";
 import { useParams } from "react-router";
@@ -20,6 +30,13 @@ interface Check {
 	status: CheckStatus;
 	/** text in the pill, defaults to Yes / No / Unknown */
 	label?: string;
+}
+
+interface CheckGroup {
+	title: string;
+	icon: IconComponent;
+	theme: SectionTheme;
+	checks: Check[];
 }
 
 const fromBool = (value: boolean | null | undefined) => ({
@@ -107,46 +124,70 @@ const SecurityPage = () => {
 		});
 	};
 
-	const checks: Check[] = [
+	// red and green stay reserved for the pills, so no header uses them
+	const groups: CheckGroup[] = [
 		{
-			name: "Disk encrypted",
-			help: "A LUKS-encrypted volume was detected on the device.",
-			...fromBool(audit?.disk_encrypted),
+			title: "Access",
+			icon: KeyRound,
+			theme: SECTION_THEMES.blue,
+			checks: [
+				{
+					name: "Password access disabled",
+					help: "SSH password login is disabled and key-based login is enabled.",
+					...fromBool(audit?.password_access_disabled),
+				},
+				{
+					name: "Console logins closed",
+					help: "No login prompt on the screen, serial or USB ports, and console login is refused.",
+					...fromBool(audit?.console_logins_closed),
+				},
+			],
 		},
 		{
-			name: "Password access disabled",
-			help: "SSH password login is disabled and key-based login is enabled.",
-			...fromBool(audit?.password_access_disabled),
+			title: "Boot & encryption",
+			icon: ShieldCheck,
+			theme: SECTION_THEMES.purple,
+			checks: [
+				{
+					name: "UEFI Secure Boot",
+					help: "The firmware only boots a kernel signed with the device's enrolled keys.",
+					...secureBoot(audit?.uefi_secure_boot),
+				},
+				{
+					name: "Disk encrypted",
+					help: "A LUKS-encrypted volume was detected on the device.",
+					...fromBool(audit?.disk_encrypted),
+				},
+			],
 		},
 		{
-			name: "Console logins closed",
-			help: "No login prompt on the screen, serial or USB ports, and console login is refused.",
-			...fromBool(audit?.console_logins_closed),
-		},
-		{
-			name: "Reboot watchdog set",
-			help: "A hung shutdown resets the device instead of hanging.",
-			...fromBool(audit?.reboot_watchdog_set),
-		},
-		{
-			name: "Rootfs slot",
-			help: "Which of the two root filesystems the device booted from.",
-			...rootfsSlot(audit?.rootfs_slot),
-		},
-		{
-			name: "Fallback slot bootable",
-			help: "If an update breaks the running system, the device can still boot its other root filesystem.",
-			...fallbackSlot(audit),
-		},
-		{
-			name: "UEFI Secure Boot",
-			help: "The firmware only boots a kernel signed with the device's enrolled keys.",
-			...secureBoot(audit?.uefi_secure_boot),
-		},
-		{
-			name: "Running latest release",
-			help: "The device is on its target release.",
-			...fromBool((audit as DeviceAudit | undefined)?.running_latest_release),
+			title: "Updates & recovery",
+			icon: History,
+			theme: SECTION_THEMES.gray,
+			checks: [
+				{
+					name: "Running latest release",
+					help: "The device is on its target release.",
+					...fromBool(
+						(audit as DeviceAudit | undefined)?.running_latest_release,
+					),
+				},
+				{
+					name: "Rootfs slot",
+					help: "Which of the two root filesystems the device booted from.",
+					...rootfsSlot(audit?.rootfs_slot),
+				},
+				{
+					name: "Fallback slot bootable",
+					help: "If an update breaks the running system, the device can still boot its other root filesystem.",
+					...fallbackSlot(audit),
+				},
+				{
+					name: "Reboot watchdog set",
+					help: "A hung shutdown resets the device instead of hanging.",
+					...fromBool(audit?.reboot_watchdog_set),
+				},
+			],
 		},
 	];
 
@@ -175,12 +216,17 @@ const SecurityPage = () => {
 				</>
 			}
 		>
-			<Card className="overflow-hidden">
-				{isLoading ? (
-					<div className="px-4 py-6 text-gray-500">Loading audit...</div>
-				) : (
-					<div className="divide-y divide-gray-100">
-						{checks.map((check) => (
+			{isLoading ? (
+				<Card className="px-4 py-6 text-gray-500">Loading audit...</Card>
+			) : (
+				groups.map((group) => (
+					<SectionCard
+						key={group.title}
+						icon={group.icon}
+						title={group.title}
+						theme={group.theme}
+					>
+						{group.checks.map((check) => (
 							<div
 								key={check.name}
 								className="flex items-center justify-between gap-4 px-4 py-3"
@@ -192,9 +238,9 @@ const SecurityPage = () => {
 								<StatusPill status={check.status} label={check.label} />
 							</div>
 						))}
-					</div>
-				)}
-			</Card>
+					</SectionCard>
+				))
+			)}
 
 			{!isLoading && !audit?.checked_at && (
 				<p className="text-sm text-gray-400">
