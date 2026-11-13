@@ -5,8 +5,6 @@ use std::time::{Duration, Instant};
 const BUCKET: Duration = Duration::from_secs(60 * 60);
 const WINDOW: Duration = Duration::from_secs(6 * 60 * 60);
 const RECENT_SAMPLES: usize = 3;
-/// Older than this, the latest samples no longer describe the link.
-const STALE: Duration = Duration::from_secs(2 * 60);
 // Larger posts measure the upload, not the round trip.
 const MAX_SAMPLED_BODY: usize = 16 * 1024;
 
@@ -25,7 +23,6 @@ pub struct LinkMonitor {
     /// Minimum per hour, oldest first.
     buckets: VecDeque<(Instant, Duration)>,
     recent: VecDeque<Duration>,
-    last_sample: Option<Instant>,
 }
 
 impl LinkMonitor {
@@ -41,7 +38,6 @@ impl LinkMonitor {
             self.recent.pop_front();
         }
         self.recent.push_back(sample);
-        self.last_sample = Some(now);
     }
 
     /// Lowest round trip over the last six hours, so it follows route changes.
@@ -58,11 +54,8 @@ impl LinkMonitor {
         self.recent.iter().copied().min()
     }
 
-    /// `None` when no sample is recent, so an old value never reads as the current link.
+    /// Readers see a new value only after a successful poll, so they judge its age.
     pub fn snapshot(&self, now: Instant) -> Option<LinkDelay> {
-        if now.saturating_duration_since(self.last_sample?) > STALE {
-            return None;
-        }
         Some(LinkDelay {
             baseline_ms: millis(self.baseline(now)?),
             current_ms: millis(self.current()?),
@@ -182,21 +175,6 @@ mod tests {
         monitor.observe(ms(35), t0 + hours(1));
         assert_eq!(monitor.buckets.len(), 2);
         assert_eq!(monitor.baseline(t0 + hours(1)), Some(ms(30)));
-    }
-
-    #[test]
-    fn the_snapshot_is_empty_once_samples_are_stale() {
-        let mut monitor = LinkMonitor::default();
-        let t0 = Instant::now();
-        monitor.observe(ms(30), t0);
-        assert_eq!(
-            monitor.snapshot(t0 + Duration::from_secs(120)),
-            Some(LinkDelay {
-                baseline_ms: 30,
-                current_ms: 30
-            })
-        );
-        assert_eq!(monitor.snapshot(t0 + Duration::from_secs(121)), None);
     }
 
     #[test]
