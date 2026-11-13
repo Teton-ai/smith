@@ -6,8 +6,8 @@
 
 use anyhow::{Context as _, Result, ensure};
 use smith_e2e::{
-    Ctx, ROUND_TRIP_TIMEOUT, UPGRADE_TIMEOUT, enqueue, ensure_device_online, seed_minimum,
-    wait_for_api, wait_for_response, wait_until,
+    Ctx, UPGRADE_TIMEOUT, enqueue, ensure_device_online, seed_minimum, wait_for_api,
+    wait_for_response, wait_until,
 };
 use sqlx::Row;
 
@@ -1413,107 +1413,6 @@ async fn gc_sweep_does_not_collect_while_internal_reference_remains() -> Result<
     ensure!(
         outcome?,
         "a network with a surviving device_configured_network row must not be collected by the sweep"
-    );
-    Ok(())
-}
-
-/// The `link_delay_at` column only exists once the link delay migration has
-/// run; its absence means a released-api version-skew job.
-async fn has_link_delay(ctx: &Ctx) -> Result<bool> {
-    sqlx::query_scalar(
-        "SELECT EXISTS (SELECT 1 FROM information_schema.columns
-         WHERE table_name = 'device' AND column_name = 'link_delay_at')",
-    )
-    .fetch_one(&ctx.db)
-    .await
-    .context("checking for device.link_delay_at")
-}
-
-/// Drives the real handler over `POST /smith/home` with the device's own token:
-/// the answer carries the API's own time, and a reported link delay is stored.
-/// The daemon may report its own values in between, so only the timestamp is
-/// compared with this post.
-#[tokio::test]
-#[ignore = "requires running compose stack; use make test.e2e"]
-async fn home_times_itself_and_stores_the_link_delay() -> Result<()> {
-    let (ctx, device_id) = setup().await?;
-
-    if !has_link_delay(&ctx).await? {
-        println!(
-            "skipping home_times_itself_and_stores_the_link_delay: \
-             device.link_delay_at not present (released-api version-skew job)"
-        );
-        return Ok(());
-    }
-
-    let token: String = sqlx::query("SELECT token FROM device WHERE id = $1")
-        .bind(device_id)
-        .fetch_one(&ctx.db)
-        .await
-        .context("reading device token")?
-        .get::<Option<String>, _>("token")
-        .context("device should hold a token")?;
-
-    let before: f64 = sqlx::query_scalar("SELECT EXTRACT(EPOCH FROM NOW())::float8")
-        .fetch_one(&ctx.db)
-        .await
-        .context("reading the database clock")?;
-
-    let body = serde_json::json!({
-        "timestamp": { "secs": 0, "nanos": 0 },
-        "release_id": null,
-        "service_statuses": [],
-        "responses": [],
-        "link_delay": { "baseline_ms": 41, "current_ms": 97 },
-    });
-    let response = ctx
-        .http
-        .post(format!("{}/smith/home", ctx.api_url))
-        .bearer_auth(&token)
-        .json(&body)
-        .send()
-        .await
-        .context("posting home")?;
-    ensure!(
-        response.status().is_success(),
-        "home answered {}",
-        response.status()
-    );
-    let timing = response
-        .headers()
-        .get("server-timing")
-        .context("home answered without a Server-Timing header")?
-        .to_str()
-        .context("Server-Timing is not text")?
-        .to_owned();
-    ensure!(timing.starts_with("app;dur="), "Server-Timing is {timing}");
-
-    // The handler saves the link delay after it answers.
-    let (baseline, current) = wait_until(
-        "the link delay to be stored",
-        ROUND_TRIP_TIMEOUT,
-        || async {
-            let row = sqlx::query(
-                "SELECT link_baseline_ms, link_current_ms FROM device
-             WHERE id = $1 AND link_delay_at >= to_timestamp($2)",
-            )
-            .bind(device_id)
-            .bind(before)
-            .fetch_optional(&ctx.db)
-            .await
-            .context("reading the link delay")?;
-            Ok(row.map(|row| {
-                (
-                    row.get::<Option<i32>, _>("link_baseline_ms"),
-                    row.get::<Option<i32>, _>("link_current_ms"),
-                )
-            }))
-        },
-    )
-    .await?;
-    ensure!(
-        baseline.is_some() && current.is_some(),
-        "link delay stored as {baseline:?}/{current:?}"
     );
     Ok(())
 }

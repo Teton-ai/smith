@@ -104,7 +104,6 @@ pub async fn home(
     };
     let release_id = payload.release_id;
     let service_statuses = std::mem::take(&mut payload.service_statuses);
-    let link_delay = payload.link_delay;
     // Not 200, so smithd keeps the results and sends them again on a later poll.
     match crate::home::save_responses(device.id, &device.serial_number, payload, &state.pg_pool)
         .await
@@ -186,12 +185,6 @@ pub async fn home(
                     .inspect_err(|err| {
                         error!("Error saving service statuses: {:?}", err);
                     });
-        }
-        if let Some(link_delay) = link_delay
-            && let Err(err) =
-                crate::device::save_link_delay(device.id, link_delay, &state.pg_pool).await
-        {
-            error!("Error saving link delay: {:?}", err);
         }
     });
 

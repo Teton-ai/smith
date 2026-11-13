@@ -17,16 +17,6 @@ pub struct DeviceNetwork {
     pub updated_at: Option<DateTime<Utc>>,
 }
 
-/// Round trip to the API as measured by the device.
-#[derive(Debug, Serialize, Deserialize, utoipa::ToSchema)]
-pub struct DeviceLinkDelay {
-    /// Lowest round trip over the last hours.
-    pub baseline_ms: i32,
-    /// Lowest of the latest few round trips.
-    pub current_ms: i32,
-    pub measured_at: DateTime<Utc>,
-}
-
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct Device {
     pub id: i32,
@@ -56,7 +46,6 @@ pub struct Device {
     pub release: Option<Release>,
     pub target_release: Option<Release>,
     pub network: Option<DeviceNetwork>,
-    pub link_delay: Option<DeviceLinkDelay>,
     pub intent_version: i32,
     pub observed_intent_version: Option<i32>,
     #[schema(value_type = Option<serde_json::Value>)]
