@@ -18,6 +18,10 @@ const HOSTNAME_PATH: &str = "/etc/hostname";
 /// Upper bound for every helper process (`iw`, `chronyc`, `NetworkManager`),
 /// each run once per check.
 const PROCESS_TIMEOUT: Duration = Duration::from_secs(5);
+/// zbus waits forever for a reply by default; a NetworkManager or systemd
+/// that never answers would hold an apply, the net guard and every command
+/// queued behind it. Bounding the connection covers every call made on it.
+const DBUS_METHOD_TIMEOUT: Duration = Duration::from_secs(10);
 /// wpa_supplicant's object path for "no network".
 const NO_NETWORK_PATH: &str = "/";
 
@@ -248,7 +252,13 @@ impl SettingsReader {
         if let Some(conn) = &self.conn {
             return Ok(conn.clone());
         }
-        let conn = Connection::system().await?;
+        // method_timeout does not cover the connect and auth handshake.
+        let build = zbus::connection::Builder::system()?
+            .method_timeout(DBUS_METHOD_TIMEOUT)
+            .build();
+        let conn = tokio::time::timeout(DBUS_METHOD_TIMEOUT, build)
+            .await
+            .context("settings: D-Bus connect timed out")??;
         self.conn = Some(conn.clone());
         Ok(conn)
     }
