@@ -1,6 +1,4 @@
-//! Security and reliability baseline smithd enforces on every boot. Not a
-//! setting: nothing remote can turn these off. Each rule is idempotent and
-//! a failure only logs, so a broken rule never stops the daemon from starting.
+//! baseline enforced every boot. not a setting, nothing remote can turn these off
 
 mod console;
 mod ssh;
@@ -14,11 +12,10 @@ use tokio::process::Command;
 use tokio::time::{Duration, timeout};
 use tracing::{error, info};
 
-/// this runs in the boot path, a hung systemctl must not hold up the daemon
+/// runs in the boot path, a hung systemctl can't hold up the daemon
 const SYSTEMCTL_TIMEOUT: Duration = Duration::from_secs(30);
 
 pub async fn run() {
-    // self-heals if an os update or someone flips it back
     if let Err(err) = ssh::disable_ssh_password_auth().await {
         error!("Failed to disable SSH password auth: {err:#}");
     }
@@ -34,7 +31,7 @@ pub async fn run() {
     }
 }
 
-/// audit probe, `None` when the check itself couldn't run
+/// `None` if the check couldn't run
 pub async fn console_logins_closed() -> Option<bool> {
     console::is_closed()
         .await
@@ -42,7 +39,7 @@ pub async fn console_logins_closed() -> Option<bool> {
         .ok()
 }
 
-/// audit probe, `None` when the check itself couldn't run
+/// `None` if the check couldn't run
 pub async fn reboot_watchdog_set() -> Option<bool> {
     watchdog::is_set()
         .await
@@ -50,8 +47,7 @@ pub async fn reboot_watchdog_set() -> Option<bool> {
         .ok()
 }
 
-/// writes `contents` unless the file already has them, returns whether it wrote.
-/// keeps the existing mode, `new_mode` is only for a file that doesn't exist yet
+/// returns whether it wrote. keeps the existing mode, `new_mode` is for new files
 async fn write_if_different(path: &Path, contents: &str, new_mode: u32) -> Result<bool> {
     if let Ok(existing) = tokio::fs::read_to_string(path).await
         && existing == contents

@@ -6,16 +6,14 @@ use std::path::Path;
 use tracing::{error, info};
 
 const ACCESS_FILE: &str = "/etc/security/access-nologin.conf";
-/// pam_access rule: deny every user from every origin
+/// deny everyone from everywhere
 const ACCESS_RULE: &str = "-:ALL:ALL\n";
 const PAM_LOGIN: &str = "/etc/pam.d/login";
-/// same line forge writes. only /bin/login reads it, sshd and sudo have their own stacks
+/// only /bin/login reads this, sshd and sudo have their own stacks
 const PAM_LINE: &str =
     "account required pam_access.so accessfile=/etc/security/access-nologin.conf";
 
-/// getty@ covers tty1-6, autovt@ is what logind starts on alt+fn, getty-static is
-/// the tty2-6 fallback when logind is down, ttyTCU0 is the debug uart (forge masked
-/// it before the rest), ttyGS0 is the usb gadget's serial port
+/// vt gettys, logind's alt+fn gettys, the tty2-6 fallback, debug uart, usb gadget serial
 const MASKED_UNITS: [&str; 5] = [
     "getty@.service",
     "autovt@.service",
@@ -23,11 +21,10 @@ const MASKED_UNITS: [&str; 5] = [
     "serial-getty@ttyTCU0.service",
     "serial-getty@ttyGS0.service",
 ];
-/// nvidia-l4t-init ships nvgetty (debug uart getty) as a real file in /etc/systemd/system,
-/// so `systemctl mask` refuses it. forge overwrites it with the mask symlink, so do we
+/// ships as a real unit file, so `systemctl mask` refuses it
 const FORCE_MASKED_UNITS: [&str; 1] = ["nvgetty.service"];
 const UNIT_DIR: &str = "/etc/systemd/system";
-/// masking only blocks future starts, these catch what's already running
+/// masking doesn't stop what's already running
 const RUNNING_PATTERNS: [&str; 5] = [
     "getty@*",
     "autovt@*",
@@ -37,15 +34,14 @@ const RUNNING_PATTERNS: [&str; 5] = [
 ];
 
 const LOGIND_DROPIN: &str = "/etc/systemd/logind.conf.d/99-no-vt.conf";
-/// takes effect next boot, restarting logind isn't worth the risk
+/// applies next boot, logind isn't restarted
 const LOGIND_BODY: &str = "[Login]\nNAutoVTs=0\nReserveVT=0\n";
 
-/// craft needs the gadget's ncm network, not its serial port. read at gadget start (boot)
+/// craft only needs the gadget's network, not its serial port
 const USB_GADGET_CONFIG: &str = "/opt/nvidia/l4t-usb-device-mode/nv-l4t-usb-device-mode-config.sh";
 
 pub(super) async fn close_console_logins() -> Result<()> {
-    // independent steps, one failing shouldn't skip the rest.
-    // access file before the pam line so login never points at a missing file
+    // independent steps. access file first so login never points at a missing one
     let steps = [
         ("access rule", write_access_rule().await),
         (
@@ -71,8 +67,7 @@ pub(super) async fn close_console_logins() -> Result<()> {
     Ok(())
 }
 
-/// read-only check for the audit, true only when every part the rule applies is
-/// in place. doesn't look at hardware, so a v1 honestly reports false
+/// no hardware check, so an unenforced v1 reports false
 pub(super) async fn is_closed() -> Result<bool> {
     let mut open = Vec::new();
 
@@ -96,7 +91,6 @@ pub(super) async fn is_closed() -> Result<bool> {
     if read_optional(Path::new(LOGIND_DROPIN)).await?.as_deref() != Some(LOGIND_BODY) {
         open.push(format!("{LOGIND_DROPIN} missing or changed"));
     }
-    // no gadget config means no usb serial port to worry about
     if let Some(script) = read_optional(Path::new(USB_GADGET_CONFIG)).await?
         && !acm_off(&script)
     {
@@ -104,13 +98,11 @@ pub(super) async fn is_closed() -> Result<bool> {
     }
 
     if !open.is_empty() {
-        // the audit only carries a bool, this is where to look for why it's false
         info!("Console logins open: {}", open.join(", "));
     }
     Ok(open.is_empty())
 }
 
-/// `None` when the file doesn't exist
 async fn read_optional(path: &Path) -> Result<Option<String>> {
     match tokio::fs::read_to_string(path).await {
         Ok(contents) => Ok(Some(contents)),
@@ -125,7 +117,7 @@ async fn write_access_rule() -> Result<()> {
 }
 
 async fn mask_gettys() -> Result<()> {
-    // checking directly avoids a daemon-reload every boot
+    // avoids a daemon-reload every boot
     let mut forced = Vec::new();
     for unit in FORCE_MASKED_UNITS {
         if !is_masked(unit).await {
@@ -141,7 +133,7 @@ async fn mask_gettys() -> Result<()> {
     }
 
     if !missing.is_empty() {
-        // mask reloads systemd itself, which also picks up the forced ones
+        // mask reloads systemd, which covers the forced ones too
         let mut args = vec!["mask"];
         args.extend(&missing);
         systemctl(&args).await?;
@@ -163,8 +155,7 @@ async fn is_masked(unit: &str) -> bool {
     )
 }
 
-/// same as forge's `ln -sf /dev/null`, but through a rename so the unit file is
-/// never half replaced
+/// forge's `ln -sf /dev/null`, via rename so the unit is never half replaced
 async fn force_mask(unit: &str) -> Result<()> {
     let path = Path::new(UNIT_DIR).join(unit);
     let tmp = Path::new(UNIT_DIR).join(format!(".{unit}.smith-tmp"));
@@ -229,7 +220,7 @@ async fn disable_usb_serial() -> Result<()> {
 
     patch_file(path, with_acm_off).await?;
 
-    // same check as forge's grep -qx, so a sed that didn't take is a failure
+    // fail if the edit didn't take, like forge's grep -qx
     let script = tokio::fs::read_to_string(path)
         .await
         .with_context(|| format!("reading {}", path.display()))?;
@@ -239,8 +230,7 @@ async fn disable_usb_serial() -> Result<()> {
     Ok(())
 }
 
-/// rewrites an existing file through `patch`, which returns `None` when there's
-/// nothing to change. keeps the mode (the gadget config is an executable script)
+/// keeps the mode, the gadget config is an executable script
 async fn patch_file(path: &Path, patch: fn(&str) -> Option<String>) -> Result<()> {
     let current = tokio::fs::read_to_string(path)
         .await
@@ -287,8 +277,7 @@ fn with_acm_off(script: &str) -> Option<String> {
     Some(out)
 }
 
-/// true when an active (uncommented) line matches ours, ignoring whitespace.
-/// a commented-out copy doesn't count, unlike forge's grep
+/// active lines only, a commented-out copy doesn't count (forge's grep is fooled by it)
 fn has_pam_line(pam: &str) -> bool {
     let wanted: Vec<&str> = PAM_LINE.split_whitespace().collect();
     pam.lines().any(|line| {
@@ -297,7 +286,7 @@ fn has_pam_line(pam: &str) -> bool {
     })
 }
 
-/// `pam` with our line appended, or `None` if it's already there
+/// `None` if it's already there
 fn with_pam_line(pam: &str) -> Option<String> {
     if has_pam_line(pam) {
         return None;

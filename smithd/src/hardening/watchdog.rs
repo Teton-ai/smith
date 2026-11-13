@@ -1,5 +1,4 @@
-//! hardware watchdog during the last phase of a reboot, so a hung shutdown still
-//! resets the device. same drop-in as forge, for units built before it.
+//! reboot watchdog, so a hung shutdown still resets the device
 
 use super::{systemctl, write_if_different};
 use anyhow::{Context, Result, bail};
@@ -7,7 +6,7 @@ use std::path::Path;
 use tracing::info;
 
 const DROPIN: &str = "/etc/systemd/system.conf.d/reboot-watchdog.conf";
-/// byte for byte what forge ships, so forge-built units are left alone
+/// identical to forge's file so forge builds aren't rewritten
 const BODY: &str = "\
 # hardware watchdog during the last phase of a reboot, so a hung shutdown
 # still resets the device.
@@ -18,7 +17,6 @@ const BODY: &str = "\
 [Manager]
 RebootWatchdogSec=4min
 ";
-/// how `systemctl show` prints 4min
 const EXPECTED: &str = "4min";
 
 pub(super) async fn set_reboot_watchdog() -> Result<()> {
@@ -33,8 +31,7 @@ pub(super) async fn set_reboot_watchdog() -> Result<()> {
         systemctl(&["daemon-reload"]).await?;
     }
 
-    // the live value is the source of truth, catches a reload that didn't pick it
-    // up and any later drop-in overriding ours
+    // trust systemd's live value over the file
     let live = live_value().await?;
     if live != EXPECTED {
         bail!("systemd reports RebootWatchdogUSec={live}, wanted {EXPECTED}");
@@ -43,7 +40,6 @@ pub(super) async fn set_reboot_watchdog() -> Result<()> {
     Ok(())
 }
 
-/// read-only check for the audit
 pub(super) async fn is_set() -> Result<bool> {
     let live = live_value().await?;
     if live != EXPECTED {
