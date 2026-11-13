@@ -2,8 +2,11 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import {
+	AUTOCONNECT_RETRIES_OPTIONS,
 	applyResultSummary,
 	applyStatusLines,
+	defaultLabel,
+	editGroups,
 	hasUnappliedEdits,
 	hasWantedSettings,
 	isL4t36,
@@ -286,6 +289,90 @@ for (const [name, statuses, expected] of [
 		assert.deepEqual(applyStatusLines(statuses), expected);
 	});
 }
+
+const group = (key) => editGroups({}).find((g) => g.key === key);
+
+test("editGroups lists groups in display order, supported when resolved", () => {
+	const groups = editGroups({
+		power_mgnt: "Unmanaged",
+		roam_flags: null,
+		hostname: { Set: "h" },
+	});
+	assert.deepEqual(
+		groups.map((g) => [g.key, g.supported]),
+		[
+			["wireless_mode", false],
+			["power_mgnt", true],
+			["roam_flags", false],
+			["roam_tuning", false],
+			["nm_wifi_powersave", false],
+			["nm_autoconnect_retries", false],
+			["mac", false],
+			["hostname", true],
+			["ntp_servers", false],
+			["bgscan", false],
+		],
+	);
+});
+
+test("editGroups has no hostname group in bulk mode", () => {
+	assert.equal(
+		editGroups({ hostname: { Set: "h" } }, true).some(
+			(g) => g.key === "hostname",
+		),
+		false,
+	);
+});
+
+for (const [name, key, defaults, expected] of [
+	["not managed", "power_mgnt", { power_mgnt: null }, "Default (not managed)"],
+	["named power mgmt", "power_mgnt", { power_mgnt: 2 }, "Default (Max)"],
+	[
+		"named NM power save",
+		"nm_wifi_powersave",
+		{ nm_wifi_powersave: 2 },
+		"Default (Disabled)",
+	],
+	[
+		"autoconnect forever",
+		"nm_autoconnect_retries",
+		{ nm_autoconnect_retries: 0 },
+		"Default (Forever)",
+	],
+	[
+		"driver mode bits",
+		"wireless_mode",
+		{ wireless_mode: 1 | 4 | 32 },
+		"Default (802.11b, 802.11a, AUTO)",
+	],
+	[
+		"roam tuning with one field set",
+		"roam_tuning",
+		{ idle_diff: 15, busy_diff: null },
+		"Default (idle_diff 15)",
+	],
+	[
+		"mac",
+		"mac",
+		{ nm_cloned_mac: "preserve", nm_scan_rand_mac: false },
+		"Default (preserve, scan randomization off)",
+	],
+	["ntp servers", "ntp_servers", { ntp_servers: ["a", "b"] }, "Default (a, b)"],
+]) {
+	test(`defaultLabel: ${name}`, () => {
+		assert.equal(defaultLabel(group(key), defaults), expected);
+	});
+}
+
+test("named options are sorted by value, negative first", () => {
+	assert.deepEqual(
+		AUTOCONNECT_RETRIES_OPTIONS.map((o) => [o.value, o.name]),
+		[
+			[-1, "NM default"],
+			[0, "Forever"],
+		],
+	);
+});
 
 // Real `GET /devices/{id}/settings` responses from a dev device (no
 // NetworkManager, so every Wi-Fi setting is a read error).

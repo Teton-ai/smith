@@ -14,11 +14,18 @@ import { RelativeTime } from "@/app/components/RelativeTime";
 import { Tooltip } from "@/app/components/tooltip";
 import { countryDiffersFromAp } from "@/app/utils/country";
 import {
+	type Flag,
 	hasUnappliedEdits,
 	hasWantedSettings,
 	isL4t36,
 	isSet,
 	type ManagedField,
+	MODE_BITS,
+	type NamedValue,
+	NM_POWERSAVE,
+	OTHER_MODE_BITS,
+	POWER_MGNT,
+	ROAM_BITS,
 	runningDiffers,
 	runningValue,
 	SETTING_LABEL,
@@ -206,29 +213,6 @@ const SettingLabel = ({ text, info }: { text: string; info: string }) => (
 	</span>
 );
 
-interface Flag {
-	bit: number;
-	label: string;
-}
-
-// Bits from the driver's `rtw_wireless_mode` (include/ieee80211.h).
-const MODE_BITS: Flag[] = [
-	{ bit: 1, label: "802.11b" },
-	{ bit: 2, label: "802.11g" },
-	{ bit: 4, label: "802.11a" },
-	{ bit: 8, label: "802.11n (2.4 GHz)" },
-	{ bit: 16, label: "802.11n (5 GHz)" },
-	{ bit: 64, label: "802.11ac" },
-];
-const OTHER_MODE_BITS: Record<number, string> = { 32: "AUTO" };
-
-// Bits from the driver's `roam_flags` (include/rtw_mlme.h).
-const ROAM_BITS: Flag[] = [
-	{ bit: 1, label: "On link loss" },
-	{ bit: 2, label: "On resume" },
-	{ bit: 4, label: "Active (weak signal)" },
-];
-
 /** Read-only checkboxes for a driver bit field; set bits outside `flags` are
  *  listed below, by name when known. */
 const DriverFlags = ({
@@ -281,29 +265,6 @@ const Described = ({ value, note }: { value: ReactNode; note?: string }) => (
 		{note && <span className="text-xs text-gray-500">{note}</span>}
 	</span>
 );
-
-interface NamedValue {
-	name: string;
-	note?: string;
-}
-
-/** `rtw_power_mgnt` values (include/rtw_pwrctrl.h). */
-const POWER_MGNT: Record<number, NamedValue> = {
-	0: { name: "Active", note: "Radio never sleeps" },
-	1: { name: "Min", note: "Light power saving" },
-	2: { name: "Max", note: "Deepest power saving, slowest to wake" },
-	3: { name: "DTIM", note: "Wakes at each DTIM beacon" },
-	4: { name: "VoIP", note: "Power saving tuned for voice traffic" },
-	5: { name: "UAPSD WMM", note: "Power saving driven by WMM traffic" },
-};
-
-/** NetworkManager `wifi.powersave` values. */
-const NM_POWERSAVE: Record<number, NamedValue> = {
-	0: { name: "Default", note: "Follows the global default" },
-	1: { name: "Ignore", note: "Left to the driver's own power saving" },
-	2: { name: "Disabled" },
-	3: { name: "Enabled" },
-};
 
 /** Named value with its note, or the raw number when unknown. */
 const NamedSetting = ({
