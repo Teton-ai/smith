@@ -3,6 +3,8 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 import {
 	AUTOCONNECT_RETRIES_OPTIONS,
+	applyAction,
+	applyErrorMessage,
 	applyResultSummary,
 	applyStatusLines,
 	defaultLabel,
@@ -576,3 +578,43 @@ test("real response after a failed hostname pin flags only the hostname", () => 
 		],
 	);
 });
+
+for (const [name, settings, expected] of [
+	[
+		"offers Apply for unapplied edits",
+		fixture({ settings_version: 4 }),
+		{ label: "Apply", canApply: true },
+	],
+	[
+		"offers Re-apply when the device is current",
+		fixture(),
+		{ label: "Re-apply", canApply: true },
+	],
+	[
+		"refuses settings version 0",
+		fixture({ settings_version: 0 }, { applied_version: 0 }),
+		{ label: "Re-apply", canApply: false },
+	],
+]) {
+	test(`applyAction ${name}`, () => {
+		assert.deepEqual(applyAction(settings), expected);
+	});
+}
+
+for (const [name, err, expected] of [
+	[
+		"nothing to apply",
+		{ response: { status: 400 } },
+		"Nothing to apply: no setting was ever pinned or defaulted.",
+	],
+	[
+		"forbidden",
+		{ response: { status: 403 } },
+		"You don't have permission to apply settings.",
+	],
+	["unknown", new Error("x"), "Failed to queue the apply."],
+]) {
+	test(`applyErrorMessage: ${name}`, () => {
+		assert.equal(applyErrorMessage(err), expected);
+	});
+}
