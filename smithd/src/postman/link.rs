@@ -1,4 +1,3 @@
-use crate::utils::schema::LinkDelay;
 use reqwest::{StatusCode, header::HeaderMap};
 use std::collections::VecDeque;
 use std::time::{Duration, Instant};
@@ -10,6 +9,15 @@ const RECENT_SAMPLES: usize = 3;
 const STALE: Duration = Duration::from_secs(2 * 60);
 // Larger posts measure the upload, not the round trip.
 const MAX_SAMPLED_BODY: usize = 16 * 1024;
+
+/// Round trip to the API as the device measures it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LinkDelay {
+    /// Lowest round trip over the last hours.
+    pub baseline_ms: u32,
+    /// Lowest of the latest few round trips.
+    pub current_ms: u32,
+}
 
 /// Round trip to the API: request time minus the time the API reports spending.
 #[derive(Debug, Default)]
@@ -50,7 +58,7 @@ impl LinkMonitor {
         self.recent.iter().copied().min()
     }
 
-    /// `None` when no sample is recent, so the api never stores an old value as new.
+    /// `None` when no sample is recent, so an old value never reads as the current link.
     pub fn snapshot(&self, now: Instant) -> Option<LinkDelay> {
         if now.saturating_duration_since(self.last_sample?) > STALE {
             return None;
