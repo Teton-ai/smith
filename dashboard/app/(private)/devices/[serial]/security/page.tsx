@@ -33,6 +33,16 @@ const rootfsSlot = (slot: DeviceAudit["rootfs_slot"] | undefined) =>
 		? { status: "unknown" as const }
 		: { status: "info" as const, label: slotLabels[slot] };
 
+const secureBootStates = {
+	on: { status: "pass" as const, label: "On" },
+	off: { status: "fail" as const, label: "Off" },
+	// anyone can enroll keys in setup mode, so it doesn't protect anything
+	setup: { status: "fail" as const, label: "Setup mode" },
+};
+
+const secureBoot = (state: DeviceAudit["uefi_secure_boot"] | undefined) =>
+	state == null ? { status: "unknown" as const } : secureBootStates[state];
+
 const fallbackSlot = (audit: DeviceAudit | undefined) =>
 	// a single-slot unit has nothing to fall back to, which isn't unknown
 	audit?.rootfs_slot === "single"
@@ -127,6 +137,11 @@ const SecurityPage = () => {
 			name: "Fallback slot bootable",
 			help: "If an update breaks the running system, the device can still boot its other root filesystem.",
 			...fallbackSlot(audit),
+		},
+		{
+			name: "UEFI Secure Boot",
+			help: "The firmware only boots a kernel signed with the device's enrolled keys.",
+			...secureBoot(audit?.uefi_secure_boot),
 		},
 		{
 			name: "Running latest release",

@@ -622,13 +622,12 @@ async fn save_response(
             reboot_watchdog_set,
             rootfs_slot,
             rootfs_other_slot_bootable,
-            // TODO(3b): store uefi_secure_boot
-            ..
+            uefi_secure_boot,
         } => {
             sqlx::query!(
                 r#"
-        INSERT INTO device_audit (device_id, disk_encrypted, password_access_disabled, console_logins_closed, reboot_watchdog_set, rootfs_slot, rootfs_other_slot_bootable, checked_at)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
+        INSERT INTO device_audit (device_id, disk_encrypted, password_access_disabled, console_logins_closed, reboot_watchdog_set, rootfs_slot, rootfs_other_slot_bootable, uefi_secure_boot, checked_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
         ON CONFLICT (device_id) DO UPDATE SET
             disk_encrypted = EXCLUDED.disk_encrypted,
             password_access_disabled = EXCLUDED.password_access_disabled,
@@ -636,6 +635,7 @@ async fn save_response(
             reboot_watchdog_set = EXCLUDED.reboot_watchdog_set,
             rootfs_slot = EXCLUDED.rootfs_slot,
             rootfs_other_slot_bootable = EXCLUDED.rootfs_other_slot_bootable,
+            uefi_secure_boot = EXCLUDED.uefi_secure_boot,
             checked_at = EXCLUDED.checked_at
         "#,
                 device_id,
@@ -645,6 +645,7 @@ async fn save_response(
                 reboot_watchdog_set,
                 rootfs_slot as Option<schema::RootfsSlot>,
                 rootfs_other_slot_bootable,
+                uefi_secure_boot as Option<schema::UefiSecureBoot>,
             )
             .execute(&mut *tx)
             .await?;

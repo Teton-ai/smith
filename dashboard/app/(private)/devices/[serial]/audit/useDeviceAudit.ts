@@ -8,6 +8,7 @@ export interface DeviceAudit {
 	reboot_watchdog_set: boolean | null;
 	rootfs_slot: "a" | "b" | "single" | null;
 	rootfs_other_slot_bootable: boolean | null;
+	uefi_secure_boot: "off" | "setup" | "on" | null;
 	running_latest_release: boolean;
 	checked_at: string | null;
 }
