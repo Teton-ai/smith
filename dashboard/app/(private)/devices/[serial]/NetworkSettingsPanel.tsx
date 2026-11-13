@@ -183,7 +183,7 @@ const ManagedRow = <K extends ManagedField>({
 					<span className="text-xs text-red-600">{status.reason}</span>
 				)}
 				{settings.reported &&
-					status?.state !== "unreadable" &&
+					!settings.reported.read_errors?.includes(field) &&
 					runningDiffers(settings, field) && (
 						<span className="flex flex-col items-end text-xs text-gray-500">
 							Running: {running === undefined ? "None" : render(running)}
