@@ -56,7 +56,7 @@ pub struct SmithMcp {
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct ListDevicesParams {
-    /// Only devices with all of these labels, formatted `key=value`.
+    /// Only devices with all of these labels, formatted `key=value`, or `key` for a tag.
     #[serde(default)]
     pub labels: Vec<String>,
     /// true for devices seen in the last 3 minutes, false for offline devices.
@@ -160,7 +160,7 @@ pub struct PromoteParams {
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct DeployParams {
     pub release_id: i32,
-    /// Pick canary devices by label (`key=value`). Cannot be combined with canary_device_ids.
+    /// Pick canary devices by label (`key=value`, or `key` for a tag). Cannot be combined with canary_device_ids.
     pub canary_device_labels: Option<Vec<String>>,
     /// Pick exact canary devices by id. Cannot be combined with canary_device_labels.
     pub canary_device_ids: Option<Vec<i32>>,

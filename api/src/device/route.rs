@@ -2,9 +2,9 @@ use crate::State;
 use crate::device::{
     ApplyIntentResponse, ApproveDeviceBody, ConfiguredNetwork, CreateIntentRequest, DeviceHealth,
     DeviceLedgerItem, DeviceLedgerItemPaginated, DeviceNetworkIntent, DeviceRelease, DeviceUptime,
-    FollowLatestRequest, FollowLatestUpdated, LabelWithValues, NewVariable, Note,
+    FollowLatestRequest, FollowLatestUpdated, LabelWithValues, NewVariable, Note, PINNED_TAG,
     PatchIntentRequest, RawDevice, SMITHD_SERVICE_NAME, ServiceOutage, UpdateDeviceRelease,
-    UpdateDevicesRelease, Variable, WifiScanResult, as_device_id,
+    UpdateDevicesRelease, Variable, WifiScanResult, as_device_id, normalize_label_selectors,
 };
 use crate::event::PublicEvent;
 use crate::handlers::AuthedDevice;
@@ -79,10 +79,9 @@ pub async fn get_device(
             d.intent_version,
             d.observed_intent_version,
             d.network_conditions,
-            COALESCE(JSONB_OBJECT_AGG(l.name, dl.value) FILTER (WHERE l.name IS NOT NULL), '{}') as "labels!: SqlxJson<HashMap<String, String>>"
+            COALESCE(JSONB_OBJECT_AGG(dl.name, dl.value) FILTER (WHERE dl.name IS NOT NULL), '{}') as "labels!: SqlxJson<HashMap<String, String>>"
         FROM device d
-        LEFT JOIN device_label dl ON dl.device_id = d.id
-        LEFT JOIN label l ON l.id = dl.label_id
+        LEFT JOIN effective_device_label dl ON dl.device_id = d.id
         WHERE
             d.id = $1
         GROUP BY d.id
@@ -149,6 +148,8 @@ pub async fn get_devices(
     let sort_labels_desc = matches!(filter.sort, Some(DeviceSortField::Labels))
         && matches!(filter.order, Some(DeviceSortDirection::Desc));
     let search_terms = parse_search_terms(filter.search.as_deref().unwrap_or(""));
+    let labels = normalize_label_selectors(&filter.labels);
+    let exclude_labels = normalize_label_selectors(&filter.exclude_labels);
 
     #[allow(deprecated)]
     let devices = sqlx::query!(
@@ -228,7 +229,7 @@ pub async fn get_devices(
             d.intent_version,
             d.observed_intent_version,
             d.network_conditions,
-            COALESCE(JSONB_OBJECT_AGG(l.name, dl.value) FILTER (WHERE l.name IS NOT NULL), '{}') as "labels!: SqlxJson<HashMap<String, String>>",
+            COALESCE(JSONB_OBJECT_AGG(dl.name, dl.value) FILTER (WHERE dl.name IS NOT NULL), '{}') as "labels!: SqlxJson<HashMap<String, String>>",
             -- Evaluated after GROUP BY but before LIMIT/OFFSET, so this counts
             -- every device matching the filter, not just the ones on this page.
             COUNT(*) OVER () as "total_count!"
@@ -241,18 +242,16 @@ pub async fn get_devices(
         LEFT JOIN distribution trd ON tr.distribution_id = trd.id
         LEFT JOIN device_network dn ON d.id = dn.device_id
         LEFT JOIN device_settings_reported dsr ON dsr.device_id = d.id
-        LEFT JOIN device_label dl ON dl.device_id = d.id
-        LEFT JOIN label l ON l.id = dl.label_id
+        LEFT JOIN effective_device_label dl ON dl.device_id = d.id
         WHERE ($1::text IS NULL OR d.serial_number = $1)
           AND ($2::boolean IS NULL OR d.approved = $2)
           AND (COALESCE($3, false) = true OR d.archived = false)
           -- A subquery, not a filter on the joined rows, so every label of a
           -- matching device still reaches the aggregate.
           AND (CARDINALITY($4::text[]) = 0 OR EXISTS (
-              SELECT 1 FROM device_label fdl
-              JOIN label fl ON fl.id = fdl.label_id
+              SELECT 1 FROM effective_device_label fdl
               WHERE fdl.device_id = d.id
-              AND fl.name || '=' || fdl.value = ANY($4)
+              AND fdl.name || '=' || fdl.value = ANY($4)
           ))
           AND ($5::boolean IS NULL OR
                ($5 = true AND d.last_ping >= now() - INTERVAL '3 minutes') OR
@@ -268,10 +267,9 @@ pub async fn get_devices(
                COALESCE(d.target_release_eligible_at, d.target_release_id_set_at)
                    <= now() - make_interval(mins => $12::int))
           AND (CARDINALITY($7::text[]) = 0 OR NOT EXISTS (
-              SELECT 1 FROM device_label edl
-              JOIN label el ON el.id = edl.label_id
+              SELECT 1 FROM effective_device_label edl
               WHERE edl.device_id = d.id
-              AND el.name || '=' || edl.value = ANY($7)
+              AND edl.name || '=' || edl.value = ANY($7)
           ))
           AND (CARDINALITY($10::text[]) = 0 OR EXISTS (
               SELECT 1 FROM unnest($10::text[]) AS term
@@ -302,15 +300,13 @@ pub async fn get_devices(
             -- only, which would make every filtered device tie on the same
             -- filtered label instead of sorting by its actual first label.
             CASE WHEN $17 THEN (
-                SELECT MIN(l2.name || '=' || dl2.value)
-                FROM device_label dl2
-                JOIN label l2 ON l2.id = dl2.label_id
+                SELECT MIN(dl2.name || '=' || dl2.value)
+                FROM effective_device_label dl2
                 WHERE dl2.device_id = d.id
             ) END ASC NULLS LAST,
             CASE WHEN $18 THEN (
-                SELECT MIN(l2.name || '=' || dl2.value)
-                FROM device_label dl2
-                JOIN label l2 ON l2.id = dl2.label_id
+                SELECT MIN(dl2.name || '=' || dl2.value)
+                FROM effective_device_label dl2
                 WHERE dl2.device_id = d.id
             ) END DESC NULLS LAST,
             d.last_ping DESC NULLS LAST,
@@ -321,10 +317,10 @@ pub async fn get_devices(
         filter.serial_number,
         filter.approved,
         filter.archived,
-        filter.labels.as_slice(),
+        labels.as_slice(),
         filter.online,
         filter.outdated,
-        filter.exclude_labels.as_slice(),
+        exclude_labels.as_slice(),
         filter.limit.unwrap_or(100).clamp(1, 1000),
         filter.offset.unwrap_or(0).max(0),
         search_terms.as_slice(),
@@ -1768,7 +1764,10 @@ async fn set_devices_follow_latest(
     body: FollowLatestRequest,
 ) -> Result<u64, StatusCode> {
     let ids = body.devices.filter(|d| !d.is_empty());
-    let labels = body.labels.filter(|l| !l.is_empty());
+    let labels = body
+        .labels
+        .filter(|l| !l.is_empty())
+        .map(normalize_label_selectors);
 
     let mut tx = pool.begin().await.map_err(|err| {
         error!("Failed to start follow_latest transaction: {err}");
@@ -1794,11 +1793,10 @@ async fn set_devices_follow_latest(
                 WHERE NOT archived
                 AND id IN (
                     SELECT dl.device_id
-                    FROM device_label dl
-                    JOIN label l ON l.id = dl.label_id
-                    WHERE l.name || '=' || dl.value = ANY($2)
+                    FROM effective_device_label dl
+                    WHERE dl.name || '=' || dl.value = ANY($2)
                     GROUP BY dl.device_id
-                    HAVING COUNT(DISTINCT l.name || '=' || dl.value)
+                    HAVING COUNT(DISTINCT dl.name || '=' || dl.value)
                         = (SELECT COUNT(DISTINCT term) FROM UNNEST($2::text[]) AS term)
                 )
                 FOR UPDATE
@@ -2209,7 +2207,7 @@ pub async fn load_device_info(
         d.intent_version,
         d.observed_intent_version,
         d.network_conditions,
-        COALESCE(JSONB_OBJECT_AGG(l.name, dl.value) FILTER (WHERE l.name IS NOT NULL), '{}') as "labels!: SqlxJson<HashMap<String, String>>"
+        COALESCE(JSONB_OBJECT_AGG(dl.name, dl.value) FILTER (WHERE dl.name IS NOT NULL), '{}') as "labels!: SqlxJson<HashMap<String, String>>"
         FROM device d
         LEFT JOIN ip_address ip ON d.ip_address_id = ip.id
         LEFT JOIN modem m ON d.modem_id = m.id
@@ -2218,8 +2216,7 @@ pub async fn load_device_info(
         LEFT JOIN release tr ON d.target_release_id = tr.id
         LEFT JOIN distribution trd ON tr.distribution_id = trd.id
         LEFT JOIN device_network dn ON d.id = dn.device_id
-        LEFT JOIN device_label dl ON dl.device_id = d.id
-        LEFT JOIN label l ON l.id = dl.label_id
+        LEFT JOIN effective_device_label dl ON dl.device_id = d.id
         WHERE d.id = COALESCE($2::int4, (SELECT id FROM device WHERE serial_number = $1))
         GROUP BY d.id, ip.id, m.id, r.id, rd.id, tr.id, trd.id, dn.device_id
         "#,
@@ -2429,6 +2426,7 @@ pub struct UpdateDeviceRequest {
     responses(
         (status = StatusCode::OK, description = "Device updated successfully"),
         (status = StatusCode::NOT_FOUND, description = "Device not found"),
+        (status = StatusCode::CONFLICT, description = "The labels give `pinned` a different state than the device's pin state. Labels without `pinned` leave it as it is"),
         (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to update device"),
     ),
     security(
@@ -2441,11 +2439,11 @@ pub async fn update_device(
     Extension(state): Extension<State>,
     Extension(current_user): Extension<CurrentUser>,
     Json(payload): Json<UpdateDeviceRequest>,
-) -> axum::response::Result<StatusCode, StatusCode> {
+) -> axum::response::Result<StatusCode> {
     let allowed = authorization::check(current_user, "devices", "write");
 
     if !allowed {
-        return Err(StatusCode::FORBIDDEN);
+        return Err(StatusCode::FORBIDDEN.into());
     }
 
     if let Some(labels) = payload.labels {
@@ -2453,7 +2451,9 @@ pub async fn update_device(
             error!("Failed to start transaction {err}");
             StatusCode::INTERNAL_SERVER_ERROR
         })?;
-        replace_device_labels(&mut tx, &device_id, labels).await?;
+        replace_device_labels(&mut tx, &device_id, labels)
+            .await
+            .map_err(explain_label_conflict)?;
         tx.commit().await.map_err(|err| {
             error!("Failed to commit transaction {err}");
             StatusCode::INTERNAL_SERVER_ERROR
@@ -2466,7 +2466,7 @@ pub async fn update_device(
 /// Incremental changes: null removes a key; a string sets its value.
 #[derive(serde::Deserialize, utoipa::ToSchema)]
 pub struct UpdateDeviceLabelsRequest {
-    /// Only these keys are changed. Null removes a key; an empty string is stored as a value.
+    /// Only these keys are changed. Null removes a key; an empty string sets a tag.
     pub changes: HashMap<String, Option<String>>,
 }
 
@@ -2479,6 +2479,7 @@ pub struct UpdateDeviceLabelsRequest {
         (status = StatusCode::OK, description = "Label changes applied; other keys are preserved"),
         (status = StatusCode::FORBIDDEN, description = "Forbidden"),
         (status = StatusCode::NOT_FOUND, description = "Device not found"),
+        (status = StatusCode::CONFLICT, description = "The `pinned` tag follows the device's pin state and cannot be changed directly"),
         (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to update labels"),
     ),
     security(("auth_token" = [])),
@@ -2489,20 +2490,36 @@ pub async fn update_device_labels(
     Extension(state): Extension<State>,
     Extension(current_user): Extension<CurrentUser>,
     Json(payload): Json<UpdateDeviceLabelsRequest>,
-) -> Result<StatusCode, StatusCode> {
+) -> axum::response::Result<StatusCode> {
     if !authorization::check(current_user, "devices", "write") {
-        return Err(StatusCode::FORBIDDEN);
+        return Err(StatusCode::FORBIDDEN.into());
     }
     let mut tx = state.pg_pool.begin().await.map_err(|err| {
         error!("Failed to start label transaction {err}");
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
-    change_device_labels(&mut tx, &device_id, payload.changes).await?;
+    change_device_labels(&mut tx, &device_id, payload.changes)
+        .await
+        .map_err(explain_label_conflict)?;
     tx.commit().await.map_err(|err| {
         error!("Failed to commit label changes {err}");
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
     Ok(StatusCode::OK)
+}
+
+// CONFLICT only comes from the pinned tag checks, and a bare status would not
+// tell the caller to pin or unpin instead.
+fn explain_label_conflict(status: StatusCode) -> axum::response::ErrorResponse {
+    if status == StatusCode::CONFLICT {
+        (
+            status,
+            "The `pinned` tag follows the device's pin state. Pin or unpin the device instead.",
+        )
+            .into()
+    } else {
+        status.into()
+    }
 }
 
 // All label writers take this shared lock before any device/label row locks.
@@ -2534,7 +2551,7 @@ async fn change_device_labels(
 async fn write_device_labels(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     device_id: &str,
-    labels: HashMap<String, String>,
+    mut labels: HashMap<String, String>,
     changed_keys: Option<Vec<String>>,
 ) -> Result<(), StatusCode> {
     sqlx::query("SELECT pg_advisory_xact_lock_shared($1)")
@@ -2546,9 +2563,9 @@ async fn write_device_labels(
             StatusCode::INTERNAL_SERVER_ERROR
         })?;
     // Serialize replacements even when the device currently has no labels.
-    let device_id = sqlx::query_scalar!(
+    let device = sqlx::query!(
         r#"
-        SELECT id FROM device
+        SELECT id, follow_latest FROM device
         WHERE CASE
             WHEN $2::int4 IS NOT NULL THEN
                 id = $2
@@ -2567,6 +2584,24 @@ async fn write_device_labels(
         StatusCode::INTERNAL_SERVER_ERROR
     })?
     .ok_or(StatusCode::NOT_FOUND)?;
+    let device_id = device.id;
+
+    // `pinned` is computed from the pin state, never stored. Restating the state
+    // lets a client send back the labels it read; any other value is refused.
+    let mentions_pinned = labels.contains_key(PINNED_TAG)
+        || changed_keys
+            .as_ref()
+            .is_some_and(|keys| keys.iter().any(|key| key == PINNED_TAG));
+    let current_pinned = (!device.follow_latest).then_some("");
+    if mentions_pinned && labels.get(PINNED_TAG).map(String::as_str) != current_pinned {
+        return Err(StatusCode::CONFLICT);
+    }
+    labels.remove(PINNED_TAG);
+    let changed_keys = changed_keys.map(|keys| {
+        keys.into_iter()
+            .filter(|key| key != PINNED_TAG)
+            .collect::<Vec<_>>()
+    });
 
     let (keys, values): (Vec<_>, Vec<_>) = labels.into_iter().unzip();
     // Insert shared dictionary entries in the same order on every device.
@@ -2593,9 +2628,13 @@ async fn write_device_labels(
           AND ($2::text[] IS NULL OR label_id IN (
               SELECT id FROM label WHERE name = ANY($2)
           ))
+          -- A `pinned` row set by hand before the key was reserved is hidden
+          -- by effective_device_label; a replacement leaves it alone.
+          AND label_id NOT IN (SELECT id FROM label WHERE name = $3)
         "#,
         device_id,
-        changed_keys.as_deref()
+        changed_keys.as_deref(),
+        PINNED_TAG
     )
     .execute(&mut **tx)
     .await
@@ -2626,6 +2665,9 @@ async fn write_device_labels(
 }
 
 async fn delete_label_globally(pool: &sqlx::PgPool, key: &str) -> Result<(), StatusCode> {
+    if key == PINNED_TAG {
+        return Err(StatusCode::CONFLICT);
+    }
     let mut tx = pool.begin().await.map_err(|err| {
         error!("Failed to start global label deletion {err}");
         StatusCode::INTERNAL_SERVER_ERROR
@@ -2667,6 +2709,7 @@ async fn delete_label_globally(pool: &sqlx::PgPool, key: &str) -> Result<(), Sta
     responses(
         (status = StatusCode::NO_CONTENT, description = "Label deleted from all devices"),
         (status = StatusCode::FORBIDDEN, description = "Forbidden"),
+        (status = StatusCode::CONFLICT, description = "The `pinned` tag follows each device's pin state and cannot be deleted"),
         (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to delete label"),
     ),
     security(
@@ -2678,14 +2721,16 @@ pub async fn delete_label(
     Path(key): Path<String>,
     Extension(state): Extension<State>,
     Extension(current_user): Extension<CurrentUser>,
-) -> axum::response::Result<StatusCode, StatusCode> {
+) -> axum::response::Result<StatusCode> {
     let allowed = authorization::check(current_user, "devices", "write");
 
     if !allowed {
-        return Err(StatusCode::FORBIDDEN);
+        return Err(StatusCode::FORBIDDEN.into());
     }
 
-    delete_label_globally(&state.pg_pool, &key).await?;
+    delete_label_globally(&state.pg_pool, &key)
+        .await
+        .map_err(explain_label_conflict)?;
 
     Ok(StatusCode::NO_CONTENT)
 }
@@ -3120,11 +3165,10 @@ pub async fn get_labels(
 ) -> axum::response::Result<Json<Vec<LabelWithValues>>, StatusCode> {
     let rows = sqlx::query!(
         r#"
-        SELECT l.name as key, ARRAY_AGG(DISTINCT dl.value ORDER BY dl.value) as "values!"
-        FROM label l
-        INNER JOIN device_label dl ON dl.label_id = l.id
-        GROUP BY l.name
-        ORDER BY l.name
+        SELECT dl.name as "key!", ARRAY_AGG(DISTINCT dl.value ORDER BY dl.value) as "values!"
+        FROM effective_device_label dl
+        GROUP BY dl.name
+        ORDER BY dl.name
         "#
     )
     .fetch_all(&state.pg_pool)
@@ -4213,7 +4257,10 @@ mod tests {
 /// `DATABASE_URL=... cargo test -p api label_updates -- --ignored --test-threads=1`.
 #[cfg(test)]
 mod label_updates {
-    use super::{change_device_labels, delete_label_globally, replace_device_labels};
+    use super::{
+        change_device_labels, delete_label_globally, normalize_label_selectors,
+        replace_device_labels,
+    };
     use axum::http::StatusCode;
     use sqlx::PgPool;
     use std::{collections::HashMap, time::Duration};
@@ -4234,10 +4281,33 @@ mod label_updates {
         )
     }
 
+    async fn set_follow_latest(pool: &PgPool, id: i32, follow_latest: bool) -> anyhow::Result<()> {
+        sqlx::query("UPDATE device SET follow_latest = $1 WHERE id = $2")
+            .bind(follow_latest)
+            .bind(id)
+            .execute(pool)
+            .await?;
+        Ok(())
+    }
+
     async fn labels_of(pool: &PgPool, id: i32) -> anyhow::Result<HashMap<String, String>> {
         let rows = sqlx::query_as::<_, (String, String)>(
             "SELECT l.name, dl.value FROM device_label dl
              JOIN label l ON l.id = dl.label_id WHERE dl.device_id = $1",
+        )
+        .bind(id)
+        .fetch_all(pool)
+        .await?;
+        Ok(rows.into_iter().collect())
+    }
+
+    /// Labels as the API returns them, including the computed `pinned` tag.
+    async fn effective_labels_of(
+        pool: &PgPool,
+        id: i32,
+    ) -> anyhow::Result<HashMap<String, String>> {
+        let rows = sqlx::query_as::<_, (String, String)>(
+            "SELECT name, value FROM effective_device_label WHERE device_id = $1",
         )
         .bind(id)
         .fetch_all(pool)
@@ -4253,6 +4323,176 @@ mod label_updates {
         replace_device_labels(tx, device, labels)
             .await
             .map_err(|status| anyhow::anyhow!("unexpected status: {status}"))
+    }
+
+    #[test]
+    fn tag_selectors_match_an_empty_value() {
+        assert_eq!(
+            normalize_label_selectors(["pinned", "env=prod", "env=", "a=b=c"]),
+            ["pinned=", "env=prod", "env=", "a=b=c"]
+        );
+    }
+
+    #[sqlx::test]
+    #[ignore = "needs Postgres with pg_partman; run with --test-threads=1"]
+    async fn pinned_tag_follows_pin_state(pool: PgPool) -> anyhow::Result<()> {
+        // New devices are pinned by the column default.
+        let id = insert_device(&pool, "new-device").await?;
+        assert_eq!(
+            effective_labels_of(&pool, id).await?,
+            labels(&[("pinned", "")])
+        );
+
+        let mut tx = pool.begin().await?;
+        replace(&mut tx, &id.to_string(), labels(&[("env", "prod")])).await?;
+        tx.commit().await?;
+        // Computed, never stored.
+        assert_eq!(labels_of(&pool, id).await?, labels(&[("env", "prod")]));
+
+        set_follow_latest(&pool, id, true).await?;
+        assert_eq!(
+            effective_labels_of(&pool, id).await?,
+            labels(&[("env", "prod")])
+        );
+        set_follow_latest(&pool, id, false).await?;
+        assert_eq!(
+            effective_labels_of(&pool, id).await?,
+            labels(&[("env", "prod"), ("pinned", "")])
+        );
+
+        // A bare selector finds the tag through the `name=value` comparison.
+        let following = insert_device(&pool, "following").await?;
+        set_follow_latest(&pool, following, true).await?;
+        let matched: Vec<i32> = sqlx::query_scalar(
+            "SELECT device_id FROM effective_device_label
+             WHERE name || '=' || value = ANY($1)",
+        )
+        .bind(normalize_label_selectors(["pinned"]))
+        .fetch_all(&pool)
+        .await?;
+        assert_eq!(matched, [id]);
+        Ok(())
+    }
+
+    #[sqlx::test]
+    #[ignore = "needs Postgres with pg_partman; run with --test-threads=1"]
+    async fn stored_pinned_label_is_hidden_and_kept(pool: PgPool) -> anyhow::Result<()> {
+        let id = insert_device(&pool, "legacy").await?;
+        set_follow_latest(&pool, id, true).await?;
+        // Set by hand before `pinned` was reserved.
+        sqlx::query(
+            "WITH l AS (INSERT INTO label (name) VALUES ('pinned') RETURNING id)
+             INSERT INTO device_label (device_id, label_id, value) SELECT $1, id, 'build-b' FROM l",
+        )
+        .bind(id)
+        .execute(&pool)
+        .await?;
+        assert!(effective_labels_of(&pool, id).await?.is_empty());
+
+        set_follow_latest(&pool, id, false).await?;
+        assert_eq!(
+            effective_labels_of(&pool, id).await?,
+            labels(&[("pinned", "")])
+        );
+
+        let mut tx = pool.begin().await?;
+        replace(&mut tx, &id.to_string(), labels(&[("env", "prod")])).await?;
+        tx.commit().await?;
+        assert_eq!(
+            labels_of(&pool, id).await?,
+            labels(&[("env", "prod"), ("pinned", "build-b")])
+        );
+        Ok(())
+    }
+
+    #[sqlx::test]
+    #[ignore = "needs Postgres with pg_partman; run with --test-threads=1"]
+    async fn pinned_tag_cannot_be_changed_directly(pool: PgPool) -> anyhow::Result<()> {
+        let pinned = insert_device(&pool, "pinned").await?;
+        let unpinned = insert_device(&pool, "unpinned").await?;
+        set_follow_latest(&pool, unpinned, true).await?;
+        let (pinned_id, unpinned_id) = (pinned.to_string(), unpinned.to_string());
+
+        let refused_changes = [
+            (&pinned_id, None),
+            (&pinned_id, Some("true")),
+            (&unpinned_id, Some("")),
+            (&unpinned_id, Some("true")),
+        ];
+        for (device, value) in refused_changes {
+            let mut tx = pool.begin().await?;
+            assert_eq!(
+                change_device_labels(
+                    &mut tx,
+                    device,
+                    HashMap::from([("pinned".into(), value.map(Into::into))]),
+                )
+                .await,
+                Err(StatusCode::CONFLICT),
+            );
+            tx.rollback().await?;
+        }
+
+        let refused_replacements = [
+            (&pinned_id, labels(&[("pinned", "true")])),
+            (&unpinned_id, labels(&[("pinned", "")])),
+        ];
+        for (device, replacement) in refused_replacements {
+            let mut tx = pool.begin().await?;
+            assert_eq!(
+                replace_device_labels(&mut tx, device, replacement).await,
+                Err(StatusCode::CONFLICT),
+            );
+            tx.rollback().await?;
+        }
+
+        assert_eq!(
+            delete_label_globally(&pool, "pinned").await,
+            Err(StatusCode::CONFLICT),
+        );
+
+        // Restating the current state is allowed, so a client can send back the
+        // labels it read, and leaving `pinned` out of a replacement keeps it.
+        let mut tx = pool.begin().await?;
+        replace(
+            &mut tx,
+            &pinned_id,
+            labels(&[("pinned", ""), ("env", "prod")]),
+        )
+        .await?;
+        replace(&mut tx, &pinned_id, labels(&[("env", "prod")])).await?;
+        change_device_labels(
+            &mut tx,
+            &pinned_id,
+            HashMap::from([("pinned".into(), Some(String::new()))]),
+        )
+        .await
+        .map_err(|s| anyhow::anyhow!("{s}"))?;
+        change_device_labels(
+            &mut tx,
+            &unpinned_id,
+            HashMap::from([("pinned".into(), None)]),
+        )
+        .await
+        .map_err(|s| anyhow::anyhow!("{s}"))?;
+        tx.commit().await?;
+        assert_eq!(
+            effective_labels_of(&pool, pinned).await?,
+            labels(&[("pinned", ""), ("env", "prod")])
+        );
+        assert!(effective_labels_of(&pool, unpinned).await?.is_empty());
+        let stored: Option<i32> = sqlx::query_scalar("SELECT id FROM label WHERE name = 'pinned'")
+            .fetch_optional(&pool)
+            .await?;
+        assert_eq!(stored, None);
+
+        // Unpinning is the way to remove it.
+        set_follow_latest(&pool, pinned, true).await?;
+        assert_eq!(
+            effective_labels_of(&pool, pinned).await?,
+            labels(&[("env", "prod")])
+        );
+        Ok(())
     }
 
     #[sqlx::test]

@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT COUNT(*) FROM device d\n            WHERE d.archived = false\n            AND NOT EXISTS (\n                SELECT 1 FROM effective_device_label dl\n                WHERE dl.device_id = d.id\n                AND dl.name || '=' || dl.value = ANY($1)\n            )\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "TextArray"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "72d7cb4849235e03424a9397342dc064dd57be4367ce735ec9c5602af1140e6e"
+}

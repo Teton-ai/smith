@@ -635,23 +635,20 @@ impl SmithAPI {
     pub async fn update_device_labels(
         &self,
         device_id: u64,
-        labels: &HashMap<String, String>,
+        changes: &HashMap<String, Option<String>>,
     ) -> Result<()> {
         let client = Client::new();
-        let changes: HashMap<_, _> = labels
-            .iter()
-            .map(|(key, value)| (key, (!value.is_empty()).then_some(value)))
-            .collect();
 
         // A separate endpoint makes older servers fail explicitly with 404,
         // rather than silently ignoring an unknown field on PATCH /devices/{id}.
-        let resp = client
+        client
             .patch(format!("{}/devices/{}/labels", self.domain, device_id))
             .header("Authorization", format!("Bearer {}", &self.bearer_token))
             .json(&serde_json::json!({ "changes": changes }))
-            .send();
-
-        resp.await?.error_for_status()?;
+            .send()
+            .await?
+            .handle_error()
+            .await?;
 
         Ok(())
     }
@@ -962,7 +959,13 @@ mod label_tests {
                 .collect::<Result<Vec<Device>, _>>()?;
             use clap::Parser;
             let cli = crate::cli::Cli::try_parse_from([
-                "sm", "label", "-d", "device", "env=", "team=ops",
+                "sm",
+                "label",
+                "-d",
+                "device",
+                "env=",
+                "team=ops",
+                "maintenance",
             ])?;
             let Some(crate::cli::Commands::Label { set_labels, .. }) = cli.command else {
                 panic!("expected label command");
@@ -971,10 +974,11 @@ mod label_tests {
             let result = crate::apply_labels_to_devices(&api, &devices, &changes).await;
             let bodies = server.join().expect("mock server panicked")?;
             for body in bodies {
-                // No stale labels are sent; removals are explicit nulls.
+                // No stale labels are sent; removals are explicit nulls, and a
+                // tag is an empty string.
                 assert_eq!(
                     body,
-                    serde_json::json!({"changes": {"env": null, "team": "ops"}})
+                    serde_json::json!({"changes": {"env": null, "team": "ops", "maintenance": ""}})
                 );
             }
             let failures = statuses.iter().filter(|status| **status >= 400).count();

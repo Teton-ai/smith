@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT COUNT(*) FROM device d\n            WHERE d.release_id != d.target_release_id\n            AND NOT COALESCE(d.target_release_eligible_at > now(), false)\n            AND d.archived = false\n            AND NOT EXISTS (\n                SELECT 1 FROM effective_device_label dl\n                WHERE dl.device_id = d.id\n                AND dl.name || '=' || dl.value = ANY($1)\n            )\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "TextArray"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "f0700907e6f766620a6e9d2baa419826e77e2af3496c3dca33432905408b0ee6"
+}

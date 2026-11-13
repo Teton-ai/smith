@@ -48,6 +48,28 @@ mod as_device_id_tests {
     }
 }
 
+/// Mirrors `NOT follow_latest`. The `effective_device_label` view computes it,
+/// so it is never stored and changes only by pinning and unpinning.
+pub const PINNED_TAG: &str = "pinned";
+
+/// Selectors are compared against `name=value`, and a tag is stored with an empty
+/// value, so `pinned` has to select the same rows as `pinned=`.
+pub fn normalize_label_selectors<S: AsRef<str>>(
+    selectors: impl IntoIterator<Item = S>,
+) -> Vec<String> {
+    selectors
+        .into_iter()
+        .map(|selector| {
+            let selector = selector.as_ref();
+            if selector.contains('=') {
+                selector.to_string()
+            } else {
+                format!("{selector}=")
+            }
+        })
+        .collect()
+}
+
 // TODO: Change this, this needs to be device and the other is PublicDevice, API type
 #[derive(Debug, Serialize, utoipa::ToSchema, Clone)]
 pub struct RawDevice {
@@ -135,8 +157,8 @@ pub struct FollowLatestRequest {
     pub follow_latest: bool,
     /// Explicit device ids. Mutually exclusive with `labels`.
     pub devices: Option<Vec<i32>>,
-    /// Label selectors as `key=value`. A device must carry *every* label listed
-    /// to match. Mutually exclusive with `devices`.
+    /// Label selectors as `key=value`, or `key` for a tag. A device must carry
+    /// *every* label listed to match. Mutually exclusive with `devices`.
     pub labels: Option<Vec<String>>,
 }
 

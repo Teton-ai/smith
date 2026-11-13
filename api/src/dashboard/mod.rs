@@ -21,10 +21,9 @@ pub async fn get_registration_counts(
         SELECT DATE_TRUNC('month', created_on)::date as "date!", COUNT(*) as "count!"
         FROM device d
         WHERE NOT EXISTS (
-            SELECT 1 FROM device_label dl
-            JOIN label l ON l.id = dl.label_id
+            SELECT 1 FROM effective_device_label dl
             WHERE dl.device_id = d.id
-            AND l.name || '=' || dl.value = ANY($1)
+            AND dl.name || '=' || dl.value = ANY($1)
         )
         GROUP BY DATE_TRUNC('month', created_on)
         ORDER BY DATE_TRUNC('month', created_on)
@@ -51,10 +50,9 @@ impl Dashboard {
             SELECT COUNT(*) FROM device d
             WHERE d.archived = false
             AND NOT EXISTS (
-                SELECT 1 FROM device_label dl
-                JOIN label l ON l.id = dl.label_id
+                SELECT 1 FROM effective_device_label dl
                 WHERE dl.device_id = d.id
-                AND l.name || '=' || dl.value = ANY($1)
+                AND dl.name || '=' || dl.value = ANY($1)
             )
             "#,
             excluded_labels
@@ -70,10 +68,9 @@ impl Dashboard {
             WHERE d.last_ping >= now() - INTERVAL '3 minutes'
             AND d.archived = false
             AND NOT EXISTS (
-                SELECT 1 FROM device_label dl
-                JOIN label l ON l.id = dl.label_id
+                SELECT 1 FROM effective_device_label dl
                 WHERE dl.device_id = d.id
-                AND l.name || '=' || dl.value = ANY($1)
+                AND dl.name || '=' || dl.value = ANY($1)
             )
             "#,
             excluded_labels
@@ -89,10 +86,9 @@ impl Dashboard {
             WHERE d.last_ping < now() - INTERVAL '3 minutes'
             AND d.archived = false
             AND NOT EXISTS (
-                SELECT 1 FROM device_label dl
-                JOIN label l ON l.id = dl.label_id
+                SELECT 1 FROM effective_device_label dl
                 WHERE dl.device_id = d.id
-                AND l.name || '=' || dl.value = ANY($1)
+                AND dl.name || '=' || dl.value = ANY($1)
             )
             "#,
             excluded_labels
@@ -109,10 +105,9 @@ impl Dashboard {
             AND NOT COALESCE(d.target_release_eligible_at > now(), false)
             AND d.archived = false
             AND NOT EXISTS (
-                SELECT 1 FROM device_label dl
-                JOIN label l ON l.id = dl.label_id
+                SELECT 1 FROM effective_device_label dl
                 WHERE dl.device_id = d.id
-                AND l.name || '=' || dl.value = ANY($1)
+                AND dl.name || '=' || dl.value = ANY($1)
             )
             "#,
             excluded_labels
@@ -127,10 +122,9 @@ impl Dashboard {
             SELECT COUNT(*) FROM device d
             WHERE d.archived = true
             AND NOT EXISTS (
-                SELECT 1 FROM device_label dl
-                JOIN label l ON l.id = dl.label_id
+                SELECT 1 FROM effective_device_label dl
                 WHERE dl.device_id = d.id
-                AND l.name || '=' || dl.value = ANY($1)
+                AND dl.name || '=' || dl.value = ANY($1)
             )
             "#,
             excluded_labels
@@ -184,10 +178,9 @@ pub async fn get_unhealthy_service_devices(
           AND rs.watchdog_sec IS NOT NULL
           AND dss.active_state != 'active'
           AND NOT EXISTS (
-              SELECT 1 FROM device_label dl
-              JOIN label l ON l.id = dl.label_id
+              SELECT 1 FROM effective_device_label dl
               WHERE dl.device_id = d.id
-              AND l.name || '=' || dl.value = ANY($1)
+              AND dl.name || '=' || dl.value = ANY($1)
           )
         ORDER BY d.serial_number, rs.service_name
         "#,

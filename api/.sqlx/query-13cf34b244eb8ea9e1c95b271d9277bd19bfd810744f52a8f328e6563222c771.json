@@ -1,0 +1,26 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT dl.name as \"key!\", ARRAY_AGG(DISTINCT dl.value ORDER BY dl.value) as \"values!\"\n        FROM effective_device_label dl\n        GROUP BY dl.name\n        ORDER BY dl.name\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "key!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 1,
+        "name": "values!",
+        "type_info": "VarcharArray"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      true,
+      null
+    ]
+  },
+  "hash": "13cf34b244eb8ea9e1c95b271d9277bd19bfd810744f52a8f328e6563222c771"
+}

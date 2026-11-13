@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT\n                d.id AS device_id,\n                d.serial_number,\n                d.release_id,\n                d.target_release_id,\n                d.last_ping,\n                dd.created_at AS added_at,\n                COALESCE(JSONB_OBJECT_AGG(l.name, dl.value) FILTER (WHERE l.name IS NOT NULL), '{}') as \"labels!: SqlxJson<HashMap<String, String>>\"\n            FROM deployment_devices dd\n            JOIN device d ON dd.device_id = d.id\n            LEFT JOIN device_label dl ON dl.device_id = d.id\n            LEFT JOIN label l ON l.id = dl.label_id\n            WHERE dd.deployment_id = $1\n            GROUP BY d.id, d.serial_number, d.release_id, d.target_release_id, d.last_ping, dd.created_at\n            ORDER BY dd.created_at ASC\n            ",
+  "query": "\n            SELECT\n                d.id AS device_id,\n                d.serial_number,\n                d.release_id,\n                d.target_release_id,\n                d.last_ping,\n                dd.created_at AS added_at,\n                COALESCE(JSONB_OBJECT_AGG(dl.name, dl.value) FILTER (WHERE dl.name IS NOT NULL), '{}') as \"labels!: SqlxJson<HashMap<String, String>>\"\n            FROM deployment_devices dd\n            JOIN device d ON dd.device_id = d.id\n            LEFT JOIN effective_device_label dl ON dl.device_id = d.id\n            WHERE dd.deployment_id = $1\n            GROUP BY d.id, d.serial_number, d.release_id, d.target_release_id, d.last_ping, dd.created_at\n            ORDER BY dd.created_at ASC\n            ",
   "describe": {
     "columns": [
       {
@@ -54,5 +54,5 @@
       null
     ]
   },
-  "hash": "5a08a45afa1572f8968acb8b9f86c3e7dc6b47a67b4d26fb567a6c4875d8ae41"
+  "hash": "6111a6b9e036a20af01d78b31a00b63edeb32b5e3d6f88a756592ecd46fa327c"
 }
