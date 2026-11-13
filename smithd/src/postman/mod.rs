@@ -5,7 +5,7 @@ use crate::session::{RefreshOutcome, SessionHandle};
 use crate::shutdown::ShutdownSignals;
 use crate::utils::network::NetworkClient;
 use crate::utils::schema::{
-    DeviceRegistration, DeviceRegistrationResponse, HomePost, HomePostResponse, LinkDelay,
+    DeviceRegistration, DeviceRegistrationResponse, HomePost, HomePostResponse,
     SafeCommandResponse, SafeCommandRx, ServiceCheck, ServiceStatus,
 };
 use crate::utils::system::SystemInfo;
@@ -17,6 +17,7 @@ use tokio::time;
 use tracing::{error, info, warn};
 
 mod link;
+pub use link::LinkDelay;
 use link::LinkMonitor;
 
 /// When the api last answered a home poll, with any status; `None` until it
@@ -261,8 +262,7 @@ impl Postman {
                     let release_id = self.magic.get_release_id().await.ok();
                     let service_statuses = self.check_services().await;
 
-                    let mut ping_home_body = HomePost::new(responses, release_id, service_statuses);
-                    ping_home_body.link_delay = self.link.snapshot(Instant::now());
+                    let ping_home_body = HomePost::new(responses, release_id, service_statuses);
 
                     let response = match self.ping_home(&ping_home_body).await {
                         Ok(response) => response,
