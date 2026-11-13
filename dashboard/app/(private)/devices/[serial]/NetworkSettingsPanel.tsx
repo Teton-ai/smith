@@ -1,7 +1,8 @@
 import { Badge, Button, InfoRow, Panel, SECTION_THEMES } from "@teton/smith-ui";
-import { Info, Pencil, RefreshCw, SlidersHorizontal } from "lucide-react";
+import { Info, Pencil, Play, RefreshCw, SlidersHorizontal } from "lucide-react";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import SettingsEditor from "@/app/(private)/devices/SettingsEditor";
+import { ApplySettingsConfirmModal } from "@/app/(private)/devices/SettingsModals";
 import {
 	type Device,
 	type DeviceSetting,
@@ -9,6 +10,7 @@ import {
 	type ReportedSettings,
 	type SettingsChanges,
 	type SettingValues,
+	useApplySettingsForDevice,
 	useGetSettingsForDevice,
 	useIssueCommandsToDevices,
 	useUpdateSettingsForDevice,
@@ -17,6 +19,8 @@ import { RelativeTime } from "@/app/components/RelativeTime";
 import { Tooltip } from "@/app/components/tooltip";
 import { countryDiffersFromAp } from "@/app/utils/country";
 import {
+	applyAction,
+	applyErrorMessage,
 	type Flag,
 	hasUnappliedEdits,
 	hasWantedSettings,
@@ -41,8 +45,9 @@ import {
 } from "@/app/utils/deviceSettings";
 
 const POLL_INTERVAL_MS = 30_000;
-/** A requested report lands after the device's next poll plus its POST. */
-const REFETCH_AFTER_REFRESH_MS = [5_000, 25_000];
+/** The device answers a queued command on its next poll, so refetch at these
+ *  delays rather than waiting for the regular interval. */
+const REFETCH_AFTER_COMMAND_MS = [5_000, 25_000];
 
 /** The vendor driver's `scan_int` counts in 2 s units. */
 const SCAN_INTERVAL_UNIT_S = 2;
@@ -68,10 +73,9 @@ const useDeviceSettings = (device: Device | undefined) =>
 		},
 	});
 
-const useRefreshDeviceSettings = (
-	device: Device | undefined,
-	refetch: () => void,
-) => {
+/** Refetches after a queued command so its answer shows; timers are cleared on
+ *  unmount. */
+const useRefetchSoon = (refetch: () => void) => {
 	const timers = useRef<ReturnType<typeof setTimeout>[]>([]);
 	useEffect(
 		() => () => {
@@ -79,13 +83,21 @@ const useRefreshDeviceSettings = (
 		},
 		[],
 	);
+	return () => {
+		for (const delay of REFETCH_AFTER_COMMAND_MS) {
+			timers.current.push(setTimeout(refetch, delay));
+		}
+	};
+};
+
+const useRefreshDeviceSettings = (
+	device: Device | undefined,
+	refetch: () => void,
+) => {
+	const refetchSoon = useRefetchSoon(refetch);
 	const { mutate, isPending } = useIssueCommandsToDevices({
 		mutation: {
-			onSuccess: () => {
-				for (const delay of REFETCH_AFTER_REFRESH_MS) {
-					timers.current.push(setTimeout(refetch, delay));
-				}
-			},
+			onSuccess: refetchSoon,
 			onError: (error) => {
 				console.error("Failed to request a settings report:", error);
 			},
@@ -129,6 +141,35 @@ const useSaveDeviceSettings = (
 		isSaving: isPending,
 		saveError: error ? settingsErrorMessage(error) : undefined,
 		resetError: reset,
+	};
+};
+
+/** Queues ApplySettings by device id, then refetches now and at the delayed
+ *  intervals so Pending and then the result show up. */
+const useApplyDeviceSettings = (
+	device: Device | undefined,
+	refetch: () => void,
+	onQueued: () => void,
+) => {
+	const refetchSoon = useRefetchSoon(refetch);
+	const { mutate, isPending, error, reset } = useApplySettingsForDevice({
+		mutation: {
+			onSuccess: () => {
+				refetch();
+				refetchSoon();
+				onQueued();
+			},
+		},
+	});
+	const apply = () => {
+		if (device?.id === undefined) return;
+		mutate({ deviceId: String(device.id) });
+	};
+	return {
+		apply,
+		isApplying: isPending,
+		applyError: error ? applyErrorMessage(error) : undefined,
+		resetApplyError: reset,
 	};
 };
 
@@ -376,6 +417,14 @@ const NetworkSettingsPanel = ({ device }: { device: Device | undefined }) => {
 		refetch,
 		() => setEditing(false),
 	);
+	const [confirmingApply, setConfirmingApply] = useState(false);
+	const { apply, isApplying, applyError, resetApplyError } =
+		useApplyDeviceSettings(device, refetch, () => setConfirmingApply(false));
+	const closeApplyConfirm = () => {
+		resetApplyError();
+		setConfirmingApply(false);
+	};
+	const applyState = settings ? applyAction(settings) : undefined;
 	const reported = settings?.reported;
 	// Without a report `r` is empty, which is safe: `SettingValue` shows "Not
 	// reported" before rendering any of it.
@@ -412,6 +461,17 @@ const NetworkSettingsPanel = ({ device }: { device: Device | undefined }) => {
 							icon={<Pencil className="w-3.5 h-3.5" />}
 						>
 							Edit
+						</Button>
+					)}
+					{applyState && (
+						<Button
+							variant="soft"
+							size="sm"
+							disabled={editing || !applyState.canApply}
+							onClick={() => setConfirmingApply(true)}
+							icon={<Play className="w-3.5 h-3.5" />}
+						>
+							{applyState.label}
 						</Button>
 					)}
 				</div>
@@ -703,6 +763,14 @@ const NetworkSettingsPanel = ({ device }: { device: Device | undefined }) => {
 					</section>
 				</div>
 			)}
+			<ApplySettingsConfirmModal
+				open={confirmingApply}
+				label={applyState?.label ?? "Apply"}
+				pending={isApplying}
+				error={applyError}
+				onConfirm={apply}
+				onClose={closeApplyConfirm}
+			/>
 		</Panel>
 	);
 };

@@ -652,3 +652,25 @@ export const settingsErrorMessage = (err: unknown): string => {
 			return "Failed to save the settings.";
 	}
 };
+
+/** Apply while edits are waiting, Re-apply once the device is current. The
+ *  API refuses version 0 (nothing was ever pinned or defaulted). */
+export const applyAction = (
+	settings: Pick<DeviceSettings, "settings_version" | "reported">,
+): { label: "Apply" | "Re-apply"; canApply: boolean } => ({
+	label: hasUnappliedEdits(settings) ? "Apply" : "Re-apply",
+	canApply: settings.settings_version > 0,
+});
+
+export const applyErrorMessage = (err: unknown): string => {
+	switch (errorResponse(err)?.status) {
+		case 400:
+			return "Nothing to apply: no setting was ever pinned or defaulted.";
+		case 403:
+			return "You don't have permission to apply settings.";
+		case 404:
+			return "Device not found.";
+		default:
+			return "Failed to queue the apply.";
+	}
+};
