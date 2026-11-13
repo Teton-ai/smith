@@ -1,9 +1,8 @@
+use super::{systemctl, write_if_different};
 use crate::utils::files::write_file_atomic;
 use anyhow::{Context, Result, bail};
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
-use tokio::process::Command;
-use tokio::time::{Duration, timeout};
 use tracing::{error, info};
 
 const ACCESS_FILE: &str = "/etc/security/access-nologin.conf";
@@ -43,10 +42,6 @@ const LOGIND_BODY: &str = "[Login]\nNAutoVTs=0\nReserveVT=0\n";
 
 /// craft needs the gadget's ncm network, not its serial port. read at gadget start (boot)
 const USB_GADGET_CONFIG: &str = "/opt/nvidia/l4t-usb-device-mode/nv-l4t-usb-device-mode-config.sh";
-
-/// this runs in the boot path, a hung systemctl must not hold up the daemon
-const SYSTEMCTL_TIMEOUT: Duration = Duration::from_secs(30);
-
 pub(super) async fn close_console_logins() -> Result<()> {
     // independent steps, one failing shouldn't skip the rest.
     // access file before the pam line so login never points at a missing file
@@ -76,7 +71,8 @@ pub(super) async fn close_console_logins() -> Result<()> {
 }
 
 async fn write_access_rule() -> Result<()> {
-    write_if_different(Path::new(ACCESS_FILE), ACCESS_RULE, 0o644).await
+    write_if_different(Path::new(ACCESS_FILE), ACCESS_RULE, 0o644).await?;
+    Ok(())
 }
 
 async fn mask_gettys() -> Result<()> {
@@ -163,7 +159,8 @@ async fn write_logind_dropin() -> Result<()> {
             .await
             .with_context(|| format!("creating {}", dir.display()))?;
     }
-    write_if_different(path, LOGIND_BODY, 0o644).await
+    write_if_different(path, LOGIND_BODY, 0o644).await?;
+    Ok(())
 }
 
 async fn disable_usb_serial() -> Result<()> {
@@ -188,25 +185,6 @@ async fn disable_usb_serial() -> Result<()> {
     Ok(())
 }
 
-/// writes `contents` unless the file already has them. keeps the existing mode,
-/// `new_mode` is only for a file that doesn't exist yet
-async fn write_if_different(path: &Path, contents: &str, new_mode: u32) -> Result<()> {
-    if let Ok(existing) = tokio::fs::read_to_string(path).await
-        && existing == contents
-    {
-        return Ok(());
-    }
-
-    let mode = match tokio::fs::metadata(path).await {
-        Ok(meta) => meta.permissions().mode() & 0o7777,
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => new_mode,
-        Err(err) => return Err(err).with_context(|| format!("reading {}", path.display())),
-    };
-    write_file_atomic(path, contents, mode).await?;
-    info!("Wrote {}", path.display());
-    Ok(())
-}
-
 /// rewrites an existing file through `patch`, which returns `None` when there's
 /// nothing to change. keeps the mode (the gadget config is an executable script)
 async fn patch_file(path: &Path, patch: fn(&str) -> Option<String>) -> Result<()> {
@@ -226,23 +204,6 @@ async fn patch_file(path: &Path, patch: fn(&str) -> Option<String>) -> Result<()
     write_file_atomic(path, &patched, mode).await?;
     info!("Patched {}", path.display());
     Ok(())
-}
-
-async fn systemctl(args: &[&str]) -> Result<String> {
-    let mut command = Command::new("systemctl");
-    command.args(args).kill_on_drop(true);
-    let output = timeout(SYSTEMCTL_TIMEOUT, command.output())
-        .await
-        .with_context(|| format!("systemctl {} timed out", args.join(" ")))?
-        .context("running systemctl")?;
-    if !output.status.success() {
-        bail!(
-            "systemctl {} failed: {}",
-            args.join(" "),
-            String::from_utf8_lossy(&output.stderr).trim()
-        );
-    }
-    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
 }
 
 /// matches forge's `grep -qx enable_acm=0`
