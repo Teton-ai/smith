@@ -227,6 +227,9 @@ pub enum SafeCommandRx {
         /// whether the device could still fall back to its other rootfs slot
         rootfs_other_slot_bootable: Option<bool>,
         uefi_secure_boot: Option<UefiSecureBoot>,
+        /// whether the filesystem mounted at `/` sits on a crypt mapping
+        root_encrypted: Option<bool>,
+        uda_encryption: Option<UdaEncryption>,
     },
     ApplyNetworksResult {
         applied_version: i32,
@@ -627,6 +630,16 @@ pub enum RootfsSlot {
     Single,
 }
 
+/// whether the user data partition (gpt label `UDA`) is encrypted, if the unit has one
+#[derive(Type, Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, utoipa::ToSchema)]
+#[sqlx(type_name = "uda_encryption", rename_all = "lowercase")]
+#[serde(rename_all = "lowercase")]
+pub enum UdaEncryption {
+    Encrypted,
+    Unencrypted,
+    Absent,
+}
+
 /// uefi secure boot state. `Setup` means anyone can enroll keys, so it isn't enforcing
 #[derive(Type, Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, utoipa::ToSchema)]
 #[sqlx(type_name = "uefi_secure_boot", rename_all = "lowercase")]
@@ -824,6 +837,8 @@ mod tests {
                 rootfs_slot,
                 rootfs_other_slot_bootable,
                 uefi_secure_boot,
+                root_encrypted,
+                uda_encryption,
             } => {
                 assert_eq!(disk_encrypted, Some(true));
                 assert_eq!(password_access_disabled, Some(false));
@@ -832,6 +847,8 @@ mod tests {
                 assert_eq!(rootfs_slot, None);
                 assert_eq!(rootfs_other_slot_bootable, None);
                 assert_eq!(uefi_secure_boot, None);
+                assert_eq!(root_encrypted, None);
+                assert_eq!(uda_encryption, None);
             }
             _ => panic!("expected AuditReport variant"),
         }

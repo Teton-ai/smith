@@ -1,6 +1,8 @@
 use crate::commander::CommanderHandle;
 use crate::shutdown::ShutdownSignals;
-use crate::utils::schema::{RootfsSlot, SafeCommandResponse, SafeCommandRx, UefiSecureBoot};
+use crate::utils::schema::{
+    RootfsSlot, SafeCommandResponse, SafeCommandRx, UdaEncryption, UefiSecureBoot,
+};
 use std::path::Path;
 use tokio::process::Command;
 use tokio::sync::mpsc;
@@ -90,7 +92,7 @@ impl Actor {
 /// Run the host compliance checks into an `AuditReport`. Each value is `None`
 /// when its probe couldn't be run or parsed.
 pub async fn run_audit_checks() -> SafeCommandRx {
-    let disk_encrypted = check_disk_encrypted().await;
+    let (disk_encrypted, root_encrypted, uda_encryption) = check_block_devices().await;
     let password_access_disabled = check_password_auth_disabled().await;
     let console_logins_closed = crate::hardening::console_logins_closed().await;
     let reboot_watchdog_set = crate::hardening::reboot_watchdog_set().await;
@@ -105,6 +107,8 @@ pub async fn run_audit_checks() -> SafeCommandRx {
         ?rootfs_slot,
         ?rootfs_other_slot_bootable,
         ?uefi_secure_boot,
+        ?root_encrypted,
+        ?uda_encryption,
         "Audit complete"
     );
 
@@ -116,6 +120,8 @@ pub async fn run_audit_checks() -> SafeCommandRx {
         rootfs_slot,
         rootfs_other_slot_bootable,
         uefi_secure_boot,
+        root_encrypted,
+        uda_encryption,
     }
 }
 
@@ -271,12 +277,26 @@ fn parse_rootfs_slots(output: &str) -> (Option<RootfsSlot>, Option<bool>) {
     (Some(slot), other_bootable)
 }
 
-/// True if any block device is a LUKS/crypt mapping. `None` if lsblk can't be
-/// run or its output can't be parsed.
-async fn check_disk_encrypted() -> Option<bool> {
+/// `(disk_encrypted, root_encrypted, uda_encryption)` from one `lsblk` call:
+/// any crypt mapping at all, whether `/` sits on one, and whether the `UDA`
+/// partition does. All `None` if lsblk can't be run or parsed.
+async fn check_block_devices() -> (Option<bool>, Option<bool>, Option<UdaEncryption>) {
+    let Some(json) = lsblk_tree().await else {
+        return (None, None, None);
+    };
+    (
+        Some(json_has_crypt(&json)),
+        root_on_crypt(&json),
+        Some(uda_encryption(&json)),
+    )
+}
+
+async fn lsblk_tree() -> Option<serde_json::Value> {
     let output = time::timeout(
         PROBE_TIMEOUT,
-        Command::new("lsblk").args(["-J", "-o", "TYPE"]).output(),
+        Command::new("lsblk")
+            .args(["-J", "-o", "NAME,TYPE,PARTLABEL,MOUNTPOINT"])
+            .output(),
     )
     .await
     .inspect_err(|_| error!("lsblk timed out after {PROBE_TIMEOUT:?}"))
@@ -290,11 +310,60 @@ async fn check_disk_encrypted() -> Option<bool> {
     }
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    let json: serde_json::Value = serde_json::from_str(&stdout)
+    serde_json::from_str(&stdout)
         .inspect_err(|e| error!("Failed to parse lsblk JSON: {e}"))
-        .ok()?;
+        .ok()
+}
 
-    Some(json_has_crypt(&json))
+fn lsblk_children(node: &serde_json::Value) -> impl Iterator<Item = &serde_json::Value> {
+    node.get("children")
+        .and_then(|c| c.as_array())
+        .into_iter()
+        .flatten()
+}
+
+fn lsblk_field<'a>(node: &'a serde_json::Value, key: &str) -> Option<&'a str> {
+    node.get(key).and_then(|v| v.as_str())
+}
+
+/// lsblk nests a crypt mapping under its partition, so `/` is encrypted when the
+/// node mounted there or anything above it is a crypt device. `None` if nothing
+/// is mounted at `/`
+fn root_on_crypt(json: &serde_json::Value) -> Option<bool> {
+    fn walk(node: &serde_json::Value, crypt_above: bool) -> Option<bool> {
+        let crypt = crypt_above || lsblk_field(node, "type") == Some("crypt");
+        if lsblk_field(node, "mountpoint") == Some("/") {
+            return Some(crypt);
+        }
+        lsblk_children(node).find_map(|child| walk(child, crypt))
+    }
+    json.get("blockdevices")?
+        .as_array()?
+        .iter()
+        .find_map(|device| walk(device, false))
+}
+
+/// encrypted when the partition labelled `UDA` has a crypt mapping under it
+fn uda_encryption(json: &serde_json::Value) -> UdaEncryption {
+    fn find_uda(node: &serde_json::Value) -> Option<&serde_json::Value> {
+        if lsblk_field(node, "partlabel") == Some("UDA") {
+            return Some(node);
+        }
+        lsblk_children(node).find_map(find_uda)
+    }
+    let uda = json
+        .get("blockdevices")
+        .and_then(|d| d.as_array())
+        .into_iter()
+        .flatten()
+        .find_map(find_uda);
+    match uda {
+        Some(partition) if lsblk_children(partition).any(json_has_crypt) => {
+            UdaEncryption::Encrypted
+        }
+        Some(_) => UdaEncryption::Unencrypted,
+        None => UdaEncryption::Absent,
+    }
 }
 
 /// Recursively scans lsblk JSON for any node whose `type` is `crypt`.
@@ -393,6 +462,82 @@ slot: 1,             retry_count: 2,             status: normal
             "slot: 1,             retry_count: 2,             status: something-new",
         );
         assert_eq!(parse_rootfs_slots(&output), (Some(RootfsSlot::A), None));
+    }
+
+    /// the dev unit's nvme layout on 2026-11-13, trimmed, with the mountpoints
+    /// lsblk adds for MOUNTPOINT
+    fn dev_unit_lsblk() -> serde_json::Value {
+        serde_json::json!({"blockdevices": [
+            {"name": "loop0", "type": "loop", "partlabel": null, "mountpoint": null},
+            {"name": "nvme0n1", "type": "disk", "partlabel": null, "mountpoint": null, "children": [
+                {"name": "nvme0n1p1", "type": "part", "partlabel": "APP", "mountpoint": null},
+                {"name": "nvme0n1p2", "type": "part", "partlabel": "APP_b", "mountpoint": null},
+                {"name": "nvme0n1p3", "type": "part", "partlabel": "APP_ENC", "mountpoint": null, "children": [
+                    {"name": "crypt_root", "type": "crypt", "partlabel": null, "mountpoint": "/"}
+                ]},
+                {"name": "nvme0n1p4", "type": "part", "partlabel": "APP_ENC_b", "mountpoint": null, "children": [
+                    {"name": "crypt_root_other", "type": "crypt", "partlabel": null, "mountpoint": null}
+                ]},
+                {"name": "nvme0n1p17", "type": "part", "partlabel": "UDA", "mountpoint": null, "children": [
+                    {"name": "crypt_UDA", "type": "crypt", "partlabel": null, "mountpoint": "/mnt/crypt_UDA"}
+                ]}
+            ]}
+        ]})
+    }
+
+    #[test]
+    fn dev_unit_root_and_uda_encrypted() {
+        let json = dev_unit_lsblk();
+        assert!(json_has_crypt(&json));
+        assert_eq!(root_on_crypt(&json), Some(true));
+        assert_eq!(uda_encryption(&json), UdaEncryption::Encrypted);
+    }
+
+    #[test]
+    fn plain_root_and_plain_uda() {
+        let json = serde_json::json!({"blockdevices": [
+            {"name": "nvme0n1", "type": "disk", "partlabel": null, "mountpoint": null, "children": [
+                {"name": "nvme0n1p1", "type": "part", "partlabel": "APP", "mountpoint": "/"},
+                {"name": "nvme0n1p17", "type": "part", "partlabel": "UDA", "mountpoint": "/data"}
+            ]}
+        ]});
+        assert!(!json_has_crypt(&json));
+        assert_eq!(root_on_crypt(&json), Some(false));
+        assert_eq!(uda_encryption(&json), UdaEncryption::Unencrypted);
+    }
+
+    #[test]
+    fn encrypted_uda_does_not_make_a_plain_root_pass() {
+        // the gap the old any-crypt check had
+        let json = serde_json::json!({"blockdevices": [
+            {"name": "nvme0n1", "type": "disk", "partlabel": null, "mountpoint": null, "children": [
+                {"name": "nvme0n1p1", "type": "part", "partlabel": "APP", "mountpoint": "/"},
+                {"name": "nvme0n1p17", "type": "part", "partlabel": "UDA", "mountpoint": null, "children": [
+                    {"name": "crypt_UDA", "type": "crypt", "partlabel": null, "mountpoint": "/mnt/crypt_UDA"}
+                ]}
+            ]}
+        ]});
+        assert!(json_has_crypt(&json));
+        assert_eq!(root_on_crypt(&json), Some(false));
+        assert_eq!(uda_encryption(&json), UdaEncryption::Encrypted);
+    }
+
+    #[test]
+    fn no_uda_partition_is_absent() {
+        let json = serde_json::json!({"blockdevices": [
+            {"name": "mmcblk0", "type": "disk", "partlabel": null, "mountpoint": null, "children": [
+                {"name": "mmcblk0p1", "type": "part", "partlabel": "APP", "mountpoint": "/"}
+            ]}
+        ]});
+        assert_eq!(uda_encryption(&json), UdaEncryption::Absent);
+    }
+
+    #[test]
+    fn nothing_mounted_at_root_is_none() {
+        let json = serde_json::json!({"blockdevices": [
+            {"name": "sda", "type": "disk", "partlabel": null, "mountpoint": "/mnt/usb"}
+        ]});
+        assert_eq!(root_on_crypt(&json), None);
     }
 
     /// fake efi tree with the given variables, values as efivarfs stores them

@@ -623,6 +623,8 @@ async fn save_response(
             rootfs_slot,
             rootfs_other_slot_bootable,
             uefi_secure_boot,
+            // TODO(4b): store root_encrypted and uda_encryption
+            ..
         } => {
             sqlx::query!(
                 r#"
