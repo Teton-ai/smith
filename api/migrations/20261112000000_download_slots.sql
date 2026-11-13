@@ -13,6 +13,5 @@ ALTER TABLE device
 ALTER TABLE ip_address
     ADD COLUMN max_concurrent_downloads INT CHECK (max_concurrent_downloads > 0);
 
-CREATE INDEX device_download_slot_ip_idx
-    ON device (ip_address_id)
-    WHERE download_slot_release_id IS NOT NULL;
+-- Every slot request counts all devices on its IP, holders and active ones.
+CREATE INDEX device_ip_address_id_idx ON device (ip_address_id);

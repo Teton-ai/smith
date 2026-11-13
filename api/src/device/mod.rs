@@ -993,9 +993,15 @@ async fn record_ping_without_ip(device_id: i32, pool: &PgPool) -> anyhow::Result
     Ok(())
 }
 
-/// Devices behind one public IP that may download a release at once when the
-/// IP has no override.
-pub const DEFAULT_MAX_CONCURRENT_DOWNLOADS: i64 = 2;
+/// Floor of the per-IP download limit when the IP has no override.
+pub const MIN_CONCURRENT_DOWNLOADS: i64 = 5;
+
+/// Without an override, an IP downloads at most one stagger bucket's share of
+/// its devices at once (5% with 20 buckets), and never fewer than the floor.
+fn default_download_limit(active_devices: i64) -> i64 {
+    let buckets = crate::deployment::STAGGER_MAX_BUCKETS as i64;
+    MIN_CONCURRENT_DOWNLOADS.max((active_devices + buckets - 1) / buckets)
+}
 
 struct TargetRow {
     release_id: Option<i32>,
@@ -1083,29 +1089,35 @@ async fn try_take_download_slot(
     )
     .fetch_one(&mut *tx)
     .await?;
-    let limit = ip
-        .max_concurrent_downloads
-        .map_or(DEFAULT_MAX_CONCURRENT_DOWNLOADS, i64::from);
 
     // Offline and long-stuck holders stop blocking the site. A fresh grant
     // counts before its ping is saved: /home saves last_ping after answering.
-    let holders = sqlx::query_scalar!(
-        r#"SELECT COUNT(*) AS "count!" FROM device
-        WHERE ip_address_id = $1 AND id <> $2
-          AND download_slot_release_id = target_release_id
-          AND download_slot_at >= COALESCE(target_release_id_set_at, '-infinity')
-          AND release_id IS DISTINCT FROM target_release_id
-          AND archived = false
-          AND (last_ping > NOW() - INTERVAL '5 minutes'
-               OR download_slot_at > NOW() - INTERVAL '5 minutes')
-          AND download_slot_at > NOW() - INTERVAL '2 hours'"#,
+    // Dead devices still assigned to the IP would inflate the default limit,
+    // so only those seen in the last day size it.
+    let counts = sqlx::query!(
+        r#"SELECT
+            COUNT(*) FILTER (
+                WHERE id <> $2
+                  AND download_slot_release_id = target_release_id
+                  AND download_slot_at >= COALESCE(target_release_id_set_at, '-infinity')
+                  AND release_id IS DISTINCT FROM target_release_id
+                  AND (last_ping > NOW() - INTERVAL '5 minutes'
+                       OR download_slot_at > NOW() - INTERVAL '5 minutes')
+                  AND download_slot_at > NOW() - INTERVAL '2 hours'
+            ) AS "holders!",
+            COUNT(*) FILTER (WHERE last_ping > NOW() - INTERVAL '1 day') AS "active!"
+        FROM device
+        WHERE ip_address_id = $1 AND archived = false"#,
         ip_address_id,
         device_id
     )
     .fetch_one(&mut *tx)
     .await?;
+    let limit = ip
+        .max_concurrent_downloads
+        .map_or_else(|| default_download_limit(counts.active), i64::from);
 
-    let granted = holders < limit;
+    let granted = counts.holders < limit;
     if granted {
         sqlx::query!(
             // Stamped after the IP lock wait, not at transaction start, so a
@@ -1521,6 +1533,12 @@ mod target_release_tests {
         .bind(&devices)
         .execute(pool)
         .await?;
+        // Small sites would never fill the default limit; the default has its
+        // own tests below.
+        sqlx::query("UPDATE ip_address SET max_concurrent_downloads = 2 WHERE id = $1")
+            .bind(ip)
+            .execute(pool)
+            .await?;
         Ok(Site {
             current,
             target,
@@ -1543,7 +1561,7 @@ mod target_release_tests {
 
     #[sqlx::test]
     #[ignore = "needs the compose Postgres; run with --test-threads=1"]
-    async fn only_two_devices_per_ip_get_the_target(pool: PgPool) -> anyhow::Result<()> {
+    async fn only_the_limit_of_devices_per_ip_get_the_target(pool: PgPool) -> anyhow::Result<()> {
         let Site {
             current,
             target,
@@ -1756,6 +1774,66 @@ mod target_release_tests {
         )
         .await;
         assert_eq!(answers.iter().filter(|a| **a == Some(target)).count(), 2);
+        Ok(())
+    }
+
+    #[test]
+    fn default_limit_is_one_bucket_with_a_floor() {
+        assert_eq!(default_download_limit(0), 5);
+        assert_eq!(default_download_limit(100), 5);
+        assert_eq!(default_download_limit(101), 6);
+        assert_eq!(default_download_limit(168), 9);
+    }
+
+    /// Clears the override `site` sets, so the default applies.
+    async fn use_default_limit(pool: &PgPool, ip: i64) -> anyhow::Result<()> {
+        sqlx::query("UPDATE ip_address SET max_concurrent_downloads = NULL WHERE id = $1")
+            .bind(ip)
+            .execute(pool)
+            .await?;
+        Ok(())
+    }
+
+    fn granted(answers: &[Option<i32>], target: i32) -> usize {
+        answers.iter().filter(|a| **a == Some(target)).count()
+    }
+
+    #[sqlx::test]
+    #[ignore = "needs the compose Postgres; run with --test-threads=1"]
+    async fn a_small_site_gets_the_floor(pool: PgPool) -> anyhow::Result<()> {
+        let Site {
+            target,
+            ip,
+            devices,
+            ..
+        } = site(&pool, 8).await?;
+        use_default_limit(&pool, ip).await?;
+        assert_eq!(granted(&poll_all(&pool, &devices).await, target), 5);
+        Ok(())
+    }
+
+    #[sqlx::test]
+    #[ignore = "needs the compose Postgres; run with --test-threads=1"]
+    async fn a_big_site_gets_one_bucket_of_its_active_devices(pool: PgPool) -> anyhow::Result<()> {
+        let Site {
+            target,
+            ip,
+            devices,
+            ..
+        } = site(&pool, 130).await?;
+        use_default_limit(&pool, ip).await?;
+        // Counting either the stale or the archived devices gives 6 or 7.
+        let (gone, active) = devices.split_at(30);
+        sqlx::query("UPDATE device SET last_ping = NOW() - INTERVAL '2 days' WHERE id = ANY($1)")
+            .bind(&gone[..20])
+            .execute(&pool)
+            .await?;
+        sqlx::query("UPDATE device SET archived = true WHERE id = ANY($1)")
+            .bind(&gone[20..])
+            .execute(&pool)
+            .await?;
+        // 100 active devices: ceil(100 / 20) = 5, where 130 would give 7.
+        assert_eq!(granted(&poll_all(&pool, active).await, target), 5);
         Ok(())
     }
 }

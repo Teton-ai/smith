@@ -334,7 +334,8 @@ pub async fn update_ip_address(
 /// new target once fewer than this many other devices on the IP are
 /// downloading; the others keep their current release and retry on their next
 /// poll. Devices that are offline, archived or stuck for over two hours do not
-/// count. Null restores the default of 2.
+/// count. Null restores the default: one stagger bucket's share (5%) of the
+/// devices on the IP seen in the last day, and at least 5.
 #[utoipa::path(
     put,
     path = "/ip_address/{ip_address_id}/download-limit",
