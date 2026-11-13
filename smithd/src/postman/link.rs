@@ -1,4 +1,4 @@
-use reqwest::{StatusCode, header::HeaderMap};
+use reqwest::header::HeaderMap;
 use std::collections::VecDeque;
 use std::time::{Duration, Instant};
 
@@ -95,14 +95,10 @@ fn app_duration(header: &str) -> Option<Duration> {
     Duration::try_from_secs_f64(millis / 1000.0).ok()
 }
 
-/// The round trip of one post, when it says something about the link.
-pub fn round_trip(
-    elapsed: Duration,
-    body_len: usize,
-    status: StatusCode,
-    headers: &HeaderMap,
-) -> Option<Duration> {
-    if !status.is_success() || body_len > MAX_SAMPLED_BODY {
+/// The round trip of one post, when it says something about the link. Any
+/// status counts: a shed 503 crossed the same link as a 200.
+pub fn round_trip(elapsed: Duration, body_len: usize, headers: &HeaderMap) -> Option<Duration> {
+    if body_len > MAX_SAMPLED_BODY {
         return None;
     }
     let server = app_duration(headers.get("server-timing")?.to_str().ok()?)?;
@@ -222,21 +218,16 @@ mod tests {
     }
 
     #[test]
-    fn round_trip_needs_a_successful_small_post_with_a_timing_header() {
+    fn round_trip_needs_a_small_post_with_a_timing_header() {
         let mut headers = HeaderMap::new();
         headers.insert(
             "server-timing",
             reqwest::header::HeaderValue::from_static("app;dur=10.0"),
         );
-        let ok = StatusCode::OK;
-        assert_eq!(round_trip(ms(35), 500, ok, &headers), Some(ms(25)));
-        assert_eq!(round_trip(ms(35), 16 * 1024, ok, &headers), Some(ms(25)));
-        assert_eq!(round_trip(ms(35), 16 * 1024 + 1, ok, &headers), None);
-        assert_eq!(
-            round_trip(ms(35), 500, StatusCode::SERVICE_UNAVAILABLE, &headers),
-            None
-        );
-        assert_eq!(round_trip(ms(5), 500, ok, &headers), None);
-        assert_eq!(round_trip(ms(35), 500, ok, &HeaderMap::new()), None);
+        assert_eq!(round_trip(ms(35), 500, &headers), Some(ms(25)));
+        assert_eq!(round_trip(ms(35), 16 * 1024, &headers), Some(ms(25)));
+        assert_eq!(round_trip(ms(35), 16 * 1024 + 1, &headers), None);
+        assert_eq!(round_trip(ms(5), 500, &headers), None);
+        assert_eq!(round_trip(ms(35), 500, &HeaderMap::new()), None);
     }
 }

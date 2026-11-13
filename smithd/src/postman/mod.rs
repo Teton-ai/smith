@@ -433,13 +433,9 @@ impl Postman {
             .send_compressed_post_timed(&token, "/home", message)
             .await;
 
-        if let Ok((status_code, response, timing)) = &result
-            && let Some(sample) = link::round_trip(
-                timing.elapsed,
-                timing.body_len,
-                *status_code,
-                response.headers(),
-            )
+        if let Ok((_, response, timing)) = &result
+            && let Some(sample) =
+                link::round_trip(timing.elapsed, timing.body_len, response.headers())
         {
             let now = Instant::now();
             self.link.observe(sample, now);
