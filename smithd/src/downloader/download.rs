@@ -1,8 +1,7 @@
 use super::pace::{Pacer, PacerStats, Probe};
 use crate::magic::MagicHandle;
-use crate::postman::LinkDelayWatch;
+use crate::postman::{LinkDelay, LinkDelayWatch};
 use crate::session::SessionHandle;
-use crate::utils::schema::LinkDelay;
 use anyhow::{self, Context};
 use futures::StreamExt;
 use md5::{Digest, Md5};
