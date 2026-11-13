@@ -1,0 +1,31 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        INSERT INTO device_audit (device_id, disk_encrypted, password_access_disabled, console_logins_closed, reboot_watchdog_set, rootfs_slot, rootfs_other_slot_bootable, checked_at)\n        VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())\n        ON CONFLICT (device_id) DO UPDATE SET\n            disk_encrypted = EXCLUDED.disk_encrypted,\n            password_access_disabled = EXCLUDED.password_access_disabled,\n            console_logins_closed = EXCLUDED.console_logins_closed,\n            reboot_watchdog_set = EXCLUDED.reboot_watchdog_set,\n            rootfs_slot = EXCLUDED.rootfs_slot,\n            rootfs_other_slot_bootable = EXCLUDED.rootfs_other_slot_bootable,\n            checked_at = EXCLUDED.checked_at\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Bool",
+        "Bool",
+        "Bool",
+        "Bool",
+        {
+          "Custom": {
+            "name": "rootfs_slot",
+            "kind": {
+              "Enum": [
+                "a",
+                "b",
+                "single"
+              ]
+            }
+          }
+        },
+        "Bool"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "6179230fadb467709d0748a54857f1a1a73ea8ac6229e2f29f0a6dbfea85440e"
+}

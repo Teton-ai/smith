@@ -1,0 +1,76 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT\n            da.disk_encrypted,\n            da.password_access_disabled,\n            da.console_logins_closed,\n            da.reboot_watchdog_set,\n            da.rootfs_slot as \"rootfs_slot: smith::utils::schema::RootfsSlot\",\n            da.rootfs_other_slot_bootable,\n            da.checked_at as \"checked_at?\",\n            COALESCE(d.target_release_id IS NULL OR d.release_id = d.target_release_id, false) as \"running_latest_release!\"\n        FROM device d\n        LEFT JOIN device_audit da ON da.device_id = d.id\n        WHERE\n            CASE\n                WHEN $2::int4 IS NOT NULL THEN\n                    d.id = $2\n                ELSE\n                    d.serial_number = $1\n            END\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "disk_encrypted",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 1,
+        "name": "password_access_disabled",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 2,
+        "name": "console_logins_closed",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 3,
+        "name": "reboot_watchdog_set",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 4,
+        "name": "rootfs_slot: smith::utils::schema::RootfsSlot",
+        "type_info": {
+          "Custom": {
+            "name": "rootfs_slot",
+            "kind": {
+              "Enum": [
+                "a",
+                "b",
+                "single"
+              ]
+            }
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "rootfs_other_slot_bootable",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 6,
+        "name": "checked_at?",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 7,
+        "name": "running_latest_release!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Int4"
+      ]
+    },
+    "nullable": [
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      false,
+      null
+    ]
+  },
+  "hash": "613efd9dde76645cf4ccea2e757008a82ce37da18fc9f8afb4d6db7e4bb22ef2"
+}
