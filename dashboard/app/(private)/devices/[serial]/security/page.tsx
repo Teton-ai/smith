@@ -43,7 +43,7 @@ const fromBool = (value: boolean | null | undefined) => ({
 	status: (value == null ? "unknown" : value ? "pass" : "fail") as CheckStatus,
 });
 
-const slotLabels = { a: "Slot A", b: "Slot B", single: "Single slot" };
+const slotLabels = { a: "A", b: "B", single: "Single slot" };
 
 const rootfsSlot = (slot: DeviceAudit["rootfs_slot"] | undefined) =>
 	slot == null
@@ -51,14 +51,23 @@ const rootfsSlot = (slot: DeviceAudit["rootfs_slot"] | undefined) =>
 		: { status: "info" as const, label: slotLabels[slot] };
 
 const secureBootStates = {
-	on: { status: "pass" as const, label: "On" },
-	off: { status: "fail" as const, label: "Off" },
+	on: { status: "pass" as const },
+	off: { status: "fail" as const },
 	// anyone can enroll keys in setup mode, so it doesn't protect anything
 	setup: { status: "fail" as const, label: "Setup mode" },
 };
 
 const secureBoot = (state: DeviceAudit["uefi_secure_boot"] | undefined) =>
 	state == null ? { status: "unknown" as const } : secureBootStates[state];
+
+const udaStates = {
+	encrypted: { status: "pass" as const },
+	unencrypted: { status: "fail" as const },
+	absent: { status: "info" as const, label: "No UDA" },
+};
+
+const uda = (state: DeviceAudit["uda_encryption"] | undefined) =>
+	state == null ? { status: "unknown" as const } : udaStates[state];
 
 const fallbackSlot = (audit: DeviceAudit | undefined) =>
 	// a single-slot unit has nothing to fall back to, which isn't unknown
@@ -149,9 +158,19 @@ const SecurityPage = () => {
 			theme: SECTION_THEMES.purple,
 			checks: [
 				{
-					name: "UEFI Secure Boot",
+					name: "UEFI Secure Boot enabled",
 					help: "The firmware only boots a kernel signed with the device's enrolled keys.",
 					...secureBoot(audit?.uefi_secure_boot),
+				},
+				{
+					name: "Root encrypted",
+					help: "The filesystem the device runs from is on a LUKS-encrypted volume.",
+					...fromBool(audit?.root_encrypted),
+				},
+				{
+					name: "User data encrypted",
+					help: "The user data partition (UDA) is LUKS-encrypted, if the device has one.",
+					...uda(audit?.uda_encryption),
 				},
 				{
 					name: "Disk encrypted",

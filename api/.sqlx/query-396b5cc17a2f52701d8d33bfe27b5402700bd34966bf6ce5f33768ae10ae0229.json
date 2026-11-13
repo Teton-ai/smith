@@ -1,0 +1,56 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        INSERT INTO device_audit (device_id, disk_encrypted, password_access_disabled, console_logins_closed, reboot_watchdog_set, rootfs_slot, rootfs_other_slot_bootable, uefi_secure_boot, root_encrypted, uda_encryption, checked_at)\n        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())\n        ON CONFLICT (device_id) DO UPDATE SET\n            disk_encrypted = EXCLUDED.disk_encrypted,\n            password_access_disabled = EXCLUDED.password_access_disabled,\n            console_logins_closed = EXCLUDED.console_logins_closed,\n            reboot_watchdog_set = EXCLUDED.reboot_watchdog_set,\n            rootfs_slot = EXCLUDED.rootfs_slot,\n            rootfs_other_slot_bootable = EXCLUDED.rootfs_other_slot_bootable,\n            uefi_secure_boot = EXCLUDED.uefi_secure_boot,\n            root_encrypted = EXCLUDED.root_encrypted,\n            uda_encryption = EXCLUDED.uda_encryption,\n            checked_at = EXCLUDED.checked_at\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Bool",
+        "Bool",
+        "Bool",
+        "Bool",
+        {
+          "Custom": {
+            "name": "rootfs_slot",
+            "kind": {
+              "Enum": [
+                "a",
+                "b",
+                "single"
+              ]
+            }
+          }
+        },
+        "Bool",
+        {
+          "Custom": {
+            "name": "uefi_secure_boot",
+            "kind": {
+              "Enum": [
+                "off",
+                "setup",
+                "on"
+              ]
+            }
+          }
+        },
+        "Bool",
+        {
+          "Custom": {
+            "name": "uda_encryption",
+            "kind": {
+              "Enum": [
+                "encrypted",
+                "unencrypted",
+                "absent"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "396b5cc17a2f52701d8d33bfe27b5402700bd34966bf6ce5f33768ae10ae0229"
+}

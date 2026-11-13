@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT\n            da.disk_encrypted,\n            da.password_access_disabled,\n            da.console_logins_closed,\n            da.reboot_watchdog_set,\n            da.rootfs_slot as \"rootfs_slot: smith::utils::schema::RootfsSlot\",\n            da.rootfs_other_slot_bootable,\n            da.uefi_secure_boot as \"uefi_secure_boot: smith::utils::schema::UefiSecureBoot\",\n            da.checked_at as \"checked_at?\",\n            COALESCE(d.target_release_id IS NULL OR d.release_id = d.target_release_id, false) as \"running_latest_release!\"\n        FROM device d\n        LEFT JOIN device_audit da ON da.device_id = d.id\n        WHERE\n            CASE\n                WHEN $2::int4 IS NOT NULL THEN\n                    d.id = $2\n                ELSE\n                    d.serial_number = $1\n            END\n        ",
+  "query": "\n        SELECT\n            da.disk_encrypted,\n            da.password_access_disabled,\n            da.console_logins_closed,\n            da.reboot_watchdog_set,\n            da.rootfs_slot as \"rootfs_slot: smith::utils::schema::RootfsSlot\",\n            da.rootfs_other_slot_bootable,\n            da.uefi_secure_boot as \"uefi_secure_boot: smith::utils::schema::UefiSecureBoot\",\n            da.root_encrypted,\n            da.uda_encryption as \"uda_encryption: smith::utils::schema::UdaEncryption\",\n            da.checked_at as \"checked_at?\",\n            COALESCE(d.target_release_id IS NULL OR d.release_id = d.target_release_id, false) as \"running_latest_release!\"\n        FROM device d\n        LEFT JOIN device_audit da ON da.device_id = d.id\n        WHERE\n            CASE\n                WHEN $2::int4 IS NOT NULL THEN\n                    d.id = $2\n                ELSE\n                    d.serial_number = $1\n            END\n        ",
   "describe": {
     "columns": [
       {
@@ -62,11 +62,32 @@
       },
       {
         "ordinal": 7,
+        "name": "root_encrypted",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 8,
+        "name": "uda_encryption: smith::utils::schema::UdaEncryption",
+        "type_info": {
+          "Custom": {
+            "name": "uda_encryption",
+            "kind": {
+              "Enum": [
+                "encrypted",
+                "unencrypted",
+                "absent"
+              ]
+            }
+          }
+        }
+      },
+      {
+        "ordinal": 9,
         "name": "checked_at?",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 8,
+        "ordinal": 10,
         "name": "running_latest_release!",
         "type_info": "Bool"
       }
@@ -85,9 +106,11 @@
       true,
       true,
       true,
+      true,
+      true,
       false,
       null
     ]
   },
-  "hash": "5a4eb478b70b018442ebb3a1eb023c70abdc1fce602ccce0f6dffc1bf7762419"
+  "hash": "34ff554c89c1dbfb5b3db0baf396753c7cc5d51208effa0fda684d3c4616334b"
 }
