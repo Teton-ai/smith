@@ -6,13 +6,19 @@ import {
 	applyResultSummary,
 	applyStatusLines,
 	defaultLabel,
+	draftToChange,
 	editGroups,
+	groupsToReset,
 	hasUnappliedEdits,
 	hasWantedSettings,
+	initialDraft,
 	isL4t36,
+	optionsWith,
+	pinSeed,
 	SETTING_LABEL,
 	settingSource,
 	settingState,
+	settingsErrorMessage,
 	wantedRows,
 } from "../app/utils/deviceSettings.ts";
 
@@ -373,6 +379,167 @@ test("named options are sorted by value, negative first", () => {
 		],
 	);
 });
+
+for (const [name, wanted, bulk, expected] of [
+	[
+		"one device resets only its pinned groups",
+		{ power_mgnt: 0, bgscan: null },
+		false,
+		["power_mgnt"],
+	],
+	["bulk resets every supported group", {}, true, ["power_mgnt", "bgscan"]],
+]) {
+	test(`groupsToReset: ${name}`, () => {
+		assert.deepEqual(
+			groupsToReset(
+				editGroups({ power_mgnt: "Unmanaged", bgscan: "Unmanaged" }, bulk),
+				wanted,
+				bulk,
+			),
+			expected,
+		);
+	});
+}
+
+test("optionsWith keeps the list when the value is listed", () => {
+	assert.equal(
+		optionsWith(AUTOCONNECT_RETRIES_OPTIONS, 0),
+		AUTOCONNECT_RETRIES_OPTIONS,
+	);
+});
+
+test("optionsWith adds a value set outside the list", () => {
+	assert.deepEqual(optionsWith(AUTOCONNECT_RETRIES_OPTIONS, 4).at(-1), {
+		value: 4,
+		name: "4 (not a listed value)",
+	});
+});
+
+for (const [name, wanted, expected] of [
+	[
+		"starts from the device's pin",
+		{ power_mgnt: 3 },
+		{ mode: "pin", value: 3 },
+	],
+	[
+		"starts on default without a pin",
+		{ power_mgnt: null },
+		{ mode: "default" },
+	],
+]) {
+	test(`initialDraft ${name}`, () => {
+		assert.deepEqual(initialDraft("power_mgnt", wanted), expected);
+	});
+}
+
+for (const [name, key, wanted, defaults, expected] of [
+	["prefers the pin", "power_mgnt", { power_mgnt: 3 }, { power_mgnt: 1 }, 3],
+	["falls back to the default", "power_mgnt", {}, { power_mgnt: 1 }, 1],
+	["falls back to a blank", "wireless_mode", {}, {}, 0],
+]) {
+	test(`pinSeed ${name}`, () => {
+		assert.equal(pinSeed(key, wanted, defaults), expected);
+	});
+}
+
+for (const [name, key, draft, unsupported, expected] of [
+	["default", "power_mgnt", { mode: "default" }, [], { change: "default" }],
+	[
+		"integer pin",
+		"power_mgnt",
+		{ mode: "pin", value: 2 },
+		[],
+		{ change: { pin: 2 } },
+	],
+	[
+		"NTP split on commas and lines",
+		"ntp_servers",
+		{ mode: "pin", value: "a.org, b.org\nc.org\n\n" },
+		[],
+		{ change: { pin: ["a.org", "b.org", "c.org"] } },
+	],
+	[
+		"roam tuning numbers",
+		"roam_tuning",
+		{
+			mode: "pin",
+			value: {
+				idle_diff: "15",
+				busy_diff: "",
+				scanr_exp_ms: "1",
+				scan_int: "5",
+				idle_th: "30",
+				busy_th: "",
+			},
+		},
+		["busy_diff", "busy_th"],
+		{
+			change: {
+				pin: { idle_diff: 15, scanr_exp_ms: 1, scan_int: 5, idle_th: 30 },
+			},
+		},
+	],
+	[
+		"roam tuning rejects a blank supported field",
+		"roam_tuning",
+		{
+			mode: "pin",
+			value: {
+				idle_diff: "15",
+				busy_diff: "",
+				scanr_exp_ms: "1",
+				scan_int: "5",
+				idle_th: "30",
+				busy_th: "30",
+			},
+		},
+		[],
+		{ error: "Roam tuning: busy_diff must be a whole number" },
+	],
+	[
+		"MAC pin",
+		"mac",
+		{ mode: "pin", value: { cloned_mac: " preserve ", scan_rand_mac: true } },
+		[],
+		{ change: { pin: { cloned_mac: "preserve", scan_rand_mac: true } } },
+	],
+	[
+		"empty hostname",
+		"hostname",
+		{ mode: "pin", value: "  " },
+		[],
+		{ error: "Hostname is empty" },
+	],
+	[
+		"driver mode with no standard",
+		"wireless_mode",
+		{ mode: "pin", value: 0 },
+		[],
+		{ error: "Driver mode: select at least one standard" },
+	],
+]) {
+	test(`draftToChange: ${name}`, () => {
+		assert.deepEqual(draftToChange(key, draft, unsupported), expected);
+	});
+}
+
+for (const [name, err, expected] of [
+	[
+		"a body",
+		{ response: { status: 400, data: " bad hostname " } },
+		"bad hostname",
+	],
+	[
+		"a bare 400",
+		{ response: { status: 400, data: "" } },
+		"The server rejected a value: check the hostname, NTP servers, MAC and bgscan.",
+	],
+	["no response", new Error("network"), "Failed to save the settings."],
+]) {
+	test(`settingsErrorMessage: ${name}`, () => {
+		assert.equal(settingsErrorMessage(err), expected);
+	});
+}
 
 // Real `GET /devices/{id}/settings` responses from a dev device (no
 // NetworkManager, so every Wi-Fi setting is a read error).

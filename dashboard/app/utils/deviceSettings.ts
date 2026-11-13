@@ -2,6 +2,7 @@ import type { BadgeVariant } from "@teton/smith-ui";
 import type {
 	DeviceSetting,
 	DeviceSettings,
+	SettingChangeRoamTuning,
 	SettingStatus,
 	SettingsChanges,
 	SettingsReport,
@@ -459,3 +460,195 @@ export const defaultLabel = (
 	group.fields.some((f) => isSet(defaults[f as keyof SettingValues]))
 		? `Default (${formatDefault(group, defaults)})`
 		: "Default (not managed)";
+
+/** Bulk resets every supported group, since the selection's pins are unknown.
+ *  One device resets only its pinned groups: sending a group already on default
+ *  would bump the settings version for nothing. */
+export const groupsToReset = (
+	groups: EditGroup[],
+	wanted: SettingValues,
+	bulk: boolean,
+): EditGroupKey[] =>
+	groups
+		.filter(
+			(g) =>
+				g.supported && (bulk || initialDraft(g.key, wanted).mode === "pin"),
+		)
+		.map((g) => g.key);
+
+/** Adds the current value when no option matches: the API accepts any integer,
+ *  so a pin made elsewhere must still show. */
+export const optionsWith = (
+	options: NamedOption[],
+	value: number,
+): NamedOption[] =>
+	options.some((o) => o.value === value)
+		? options
+		: [...options, { value, name: `${value} (not a listed value)` }];
+
+/** What the editor holds for one group: the default, or a pin whose value is
+ *  kept as typed (text, or a mask for driver bit fields). */
+export type PinFields = Record<string, string | boolean>;
+export type PinValue = number | string | PinFields;
+export type EditDraft = { mode: "default" } | { mode: "pin"; value: PinValue };
+
+/** Roam tuning fields the editor shows: the busy ones only where the driver
+ *  has them. */
+export const roamTuningFields = (
+	unsupported: DeviceSetting[] = [],
+): (keyof SettingValues)[] =>
+	ROAM_TUNING_FIELDS.filter((f) => !unsupported.includes(f));
+
+/** A group's value as the editor holds it, from `wanted` or `defaults`;
+ *  `undefined` when none of its fields is set there. */
+const draftValueFrom = (
+	key: EditGroupKey,
+	values: SettingValues,
+): PinValue | undefined => {
+	switch (key) {
+		case "roam_tuning": {
+			if (!ROAM_TUNING_FIELDS.some((f) => isSet(values[f]))) return undefined;
+			return Object.fromEntries(
+				ROAM_TUNING_FIELDS.map((f) => [f, String(values[f] ?? "")]),
+			);
+		}
+		case "mac":
+			if (!isSet(values.nm_cloned_mac) && !isSet(values.nm_scan_rand_mac)) {
+				return undefined;
+			}
+			return {
+				cloned_mac: values.nm_cloned_mac ?? "",
+				scan_rand_mac: values.nm_scan_rand_mac ?? false,
+			};
+		case "ntp_servers":
+			return isSet(values.ntp_servers)
+				? values.ntp_servers.join("\n")
+				: undefined;
+		default: {
+			const value = values[key];
+			return isSet(value) ? (value as number | string) : undefined;
+		}
+	}
+};
+
+const BLANK_DRAFT: Partial<Record<EditGroupKey, PinValue>> = {
+	wireless_mode: 0,
+	roam_flags: 0,
+	power_mgnt: POWER_MGNT_OPTIONS[0].value,
+	nm_wifi_powersave: NM_POWERSAVE_OPTIONS[0].value,
+	nm_autoconnect_retries: AUTOCONNECT_RETRIES_OPTIONS[0].value,
+	mac: { cloned_mac: "", scan_rand_mac: false },
+	roam_tuning: Object.fromEntries(ROAM_TUNING_FIELDS.map((f) => [f, ""])),
+};
+
+/** Where an edit starts: the device's pin, or the default when it has none. */
+export const initialDraft = (
+	key: EditGroupKey,
+	wanted: SettingValues,
+): EditDraft => {
+	const value = draftValueFrom(key, wanted);
+	return value === undefined ? { mode: "default" } : { mode: "pin", value };
+};
+
+/** The value a pin control starts from when the user switches to pinning:
+ *  the device's pin, else the default, else a blank. */
+export const pinSeed = (
+	key: EditGroupKey,
+	wanted: SettingValues,
+	defaults: SettingValues,
+): PinValue =>
+	draftValueFrom(key, wanted) ??
+	draftValueFrom(key, defaults) ??
+	BLANK_DRAFT[key] ??
+	"";
+
+export const sameDraft = (a: EditDraft, b: EditDraft): boolean =>
+	JSON.stringify(a) === JSON.stringify(b);
+
+const parseInteger = (text: unknown): number | undefined => {
+	const trimmed = String(text).trim();
+	return /^-?\d+$/.test(trimmed) ? Number(trimmed) : undefined;
+};
+
+/** A draft as an API change, or an error naming the field that cannot be sent.
+ *  Free text is only trimmed: the API validates it. */
+export const draftToChange = (
+	key: EditGroupKey,
+	draft: EditDraft,
+	unsupported: DeviceSetting[] = [],
+):
+	| { change: NonNullable<SettingsChanges[EditGroupKey]> }
+	| { error: string } => {
+	if (draft.mode === "default") return { change: "default" };
+	const { value } = draft;
+	const label = EDIT_GROUPS.find((g) => g.key === key)?.label ?? key;
+	switch (key) {
+		case "roam_tuning": {
+			const fields = value as PinFields;
+			const pin: Record<string, number> = {};
+			for (const field of roamTuningFields(unsupported)) {
+				const parsed = parseInteger(fields[field]);
+				if (parsed === undefined) {
+					return { error: `${label}: ${field} must be a whole number` };
+				}
+				pin[field] = parsed;
+			}
+			return { change: { pin } as SettingChangeRoamTuning };
+		}
+		case "mac": {
+			const { cloned_mac, scan_rand_mac } = value as PinFields;
+			const mac = String(cloned_mac).trim();
+			if (!mac) return { error: `${label}: the connection MAC is empty` };
+			return {
+				change: {
+					pin: { cloned_mac: mac, scan_rand_mac: scan_rand_mac === true },
+				},
+			};
+		}
+		case "ntp_servers":
+			return {
+				change: {
+					pin: String(value)
+						.split(/[,\n]/)
+						.map((s) => s.trim())
+						.filter(Boolean),
+				},
+			};
+		case "hostname":
+		case "bgscan": {
+			const text = String(value).trim();
+			if (!text) return { error: `${label} is empty` };
+			return { change: { pin: text } };
+		}
+		// The API does not validate the mode, and 0 would leave the device without Wi-Fi.
+		case "wireless_mode":
+			if (Number(value) === 0) {
+				return { error: `${label}: select at least one standard` };
+			}
+			return { change: { pin: Number(value) } };
+		default:
+			return { change: { pin: Number(value) } };
+	}
+};
+
+/** The text to show for a failed save. The API answers 400 and 422 with a
+ *  bare status, so a missing body falls back to what each status means. */
+const errorResponse = (err: unknown) =>
+	(err as { response?: { status?: number; data?: unknown } } | null)?.response;
+
+export const settingsErrorMessage = (err: unknown): string => {
+	const response = errorResponse(err);
+	if (typeof response?.data === "string" && response.data.trim()) {
+		return response.data.trim();
+	}
+	switch (response?.status) {
+		case 400:
+			return "The server rejected a value: check the hostname, NTP servers, MAC and bgscan.";
+		case 422:
+			return "A pinned setting is not supported on this device's distribution.";
+		case 404:
+			return "Device not found.";
+		default:
+			return "Failed to save the settings.";
+	}
+};

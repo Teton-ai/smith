@@ -1,14 +1,17 @@
 import { Badge, Button, InfoRow, Panel, SECTION_THEMES } from "@teton/smith-ui";
-import { Info, RefreshCw, SlidersHorizontal } from "lucide-react";
-import { type ReactNode, useEffect, useRef } from "react";
+import { Info, Pencil, RefreshCw, SlidersHorizontal } from "lucide-react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
+import SettingsEditor from "@/app/(private)/devices/SettingsEditor";
 import {
 	type Device,
 	type DeviceSetting,
 	type DeviceSettings,
 	type ReportedSettings,
+	type SettingsChanges,
 	type SettingValues,
 	useGetSettingsForDevice,
 	useIssueCommandsToDevices,
+	useUpdateSettingsForDevice,
 } from "@/app/api-client";
 import { RelativeTime } from "@/app/components/RelativeTime";
 import { Tooltip } from "@/app/components/tooltip";
@@ -33,6 +36,7 @@ import {
 	STATE_BADGE,
 	settingSource,
 	settingState,
+	settingsErrorMessage,
 	wantedValue,
 } from "@/app/utils/deviceSettings";
 
@@ -99,6 +103,33 @@ const useRefreshDeviceSettings = (
 		});
 	};
 	return { refresh, isPending, canRefresh: device?.id !== undefined };
+};
+
+/** Saves pins by device id, then refetches so the badges and the unapplied
+ *  edits banner update. */
+const useSaveDeviceSettings = (
+	device: Device | undefined,
+	refetch: () => Promise<unknown>,
+	onSaved: () => void,
+) => {
+	const { mutate, isPending, error, reset } = useUpdateSettingsForDevice({
+		mutation: {
+			onSuccess: async () => {
+				await refetch();
+				onSaved();
+			},
+		},
+	});
+	const save = (changes: SettingsChanges) => {
+		if (device?.id === undefined) return;
+		mutate({ deviceId: String(device.id), data: changes });
+	};
+	return {
+		save,
+		isSaving: isPending,
+		saveError: error ? settingsErrorMessage(error) : undefined,
+		resetError: reset,
+	};
 };
 
 /** Renders a setting's value, or in its place why there is none: "not used"
@@ -327,7 +358,7 @@ const describeBgscan = (bgscan: string) => {
 };
 
 /** Wanted settings next to what the device runs: Realtek driver, roaming,
- *  NetworkManager defaults, time sync and hostname. Read only. */
+ *  NetworkManager defaults, time sync and hostname, with an editor for the pins. */
 const NetworkSettingsPanel = ({ device }: { device: Device | undefined }) => {
 	const {
 		data: settings,
@@ -338,6 +369,12 @@ const NetworkSettingsPanel = ({ device }: { device: Device | undefined }) => {
 	const { refresh, isPending, canRefresh } = useRefreshDeviceSettings(
 		device,
 		refetch,
+	);
+	const [editing, setEditing] = useState(false);
+	const { save, isSaving, saveError, resetError } = useSaveDeviceSettings(
+		device,
+		refetch,
+		() => setEditing(false),
 	);
 	const reported = settings?.reported;
 	// Without a report `r` is empty, which is safe: `SettingValue` shows "Not
@@ -367,6 +404,16 @@ const NetworkSettingsPanel = ({ device }: { device: Device | undefined }) => {
 					>
 						Refresh
 					</Button>
+					{settings && !editing && (
+						<Button
+							variant="soft"
+							size="sm"
+							onClick={() => setEditing(true)}
+							icon={<Pencil className="w-3.5 h-3.5" />}
+						>
+							Edit
+						</Button>
+					)}
 				</div>
 			}
 		>
@@ -374,6 +421,20 @@ const NetworkSettingsPanel = ({ device }: { device: Device | undefined }) => {
 				<p className="text-sm text-amber-600">Couldn't load settings.</p>
 			) : isLoading || !settings ? (
 				<div className="h-4 animate-pulse rounded bg-gray-100" />
+			) : editing ? (
+				<SettingsEditor
+					resolved={settings.resolved}
+					defaults={settings.defaults}
+					unsupported={settings.unsupported}
+					wanted={settings.wanted}
+					saving={isSaving}
+					error={saveError}
+					onSave={save}
+					onCancel={() => {
+						resetError();
+						setEditing(false);
+					}}
+				/>
 			) : !reported && !hasWantedSettings(settings) ? (
 				<p className="text-sm text-gray-500">
 					Not reported. The device needs a smithd version that reports its
