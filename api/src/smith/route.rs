@@ -450,6 +450,52 @@ pub async fn upload_file(
     }))
 }
 
+#[derive(Deserialize, Debug, IntoParams)]
+pub struct RestartPollQuery {
+    /// The kernel boot id, from `/proc/sys/kernel/random/boot_id`.
+    boot_id: uuid::Uuid,
+}
+
+#[derive(Serialize, Debug, ToSchema)]
+pub struct RestartPollResponse {
+    /// Set when the device must reboot: the boot that the reboot must end.
+    /// smith-rescue reboots only if this is its current boot id.
+    target_boot: Option<uuid::Uuid>,
+}
+
+/// The restart channel that smith-rescue polls, apart from `/smith/home`. It
+/// hands out the device's Restart commands, bound to the boot that polled. A
+/// poll from a later boot marks them done.
+#[utoipa::path(
+  get,
+  path = "/smith/restart",
+  params(RestartPollQuery),
+  responses(
+        (status = 200, description = "Whether the device must reboot", body = RestartPollResponse),
+        (status = 401, description = "Unknown device token"),
+        (status = 503, description = "Database busy; poll again later")
+  ),
+  security(
+        ("device_token" = [])
+  ),
+)]
+pub async fn restart_poll(
+    device: AuthedDevice,
+    Query(query): Query<RestartPollQuery>,
+    Extension(state): Extension<State>,
+) -> Result<Json<RestartPollResponse>, StatusCode> {
+    let target_boot = crate::restart::poll(&state.pg_pool, device.id, query.boot_id)
+        .await
+        .map_err(|err| {
+            warn!(device_id = device.id, "Restart poll failed: {err:?}");
+            StatusCode::SERVICE_UNAVAILABLE
+        })?;
+    if target_boot.is_some() {
+        info!(device_id = device.id, boot_id = %query.boot_id, "Restart handed to smith-rescue");
+    }
+    Ok(Json(RestartPollResponse { target_boot }))
+}
+
 #[utoipa::path(
   get,
   path = "/smith/releases/{release_id}/packages",

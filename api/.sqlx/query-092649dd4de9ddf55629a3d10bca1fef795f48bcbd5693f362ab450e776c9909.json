@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE command_queue SET fetched_at = CURRENT_TIMESTAMP, fetched = true\n             WHERE id = ANY($1) AND fetched = false\n             RETURNING id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4Array"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "092649dd4de9ddf55629a3d10bca1fef795f48bcbd5693f362ab450e776c9909"
+}
