@@ -622,6 +622,8 @@ async fn save_response(
             reboot_watchdog_set,
             rootfs_slot,
             rootfs_other_slot_bootable,
+            // TODO(3b): store uefi_secure_boot
+            ..
         } => {
             sqlx::query!(
                 r#"

@@ -1,6 +1,7 @@
 use crate::commander::CommanderHandle;
 use crate::shutdown::ShutdownSignals;
-use crate::utils::schema::{RootfsSlot, SafeCommandResponse, SafeCommandRx};
+use crate::utils::schema::{RootfsSlot, SafeCommandResponse, SafeCommandRx, UefiSecureBoot};
+use std::path::Path;
 use tokio::process::Command;
 use tokio::sync::mpsc;
 use tokio::time::{self, Duration};
@@ -94,6 +95,7 @@ pub async fn run_audit_checks() -> SafeCommandRx {
     let console_logins_closed = crate::hardening::console_logins_closed().await;
     let reboot_watchdog_set = crate::hardening::reboot_watchdog_set().await;
     let (rootfs_slot, rootfs_other_slot_bootable) = check_rootfs_slots().await;
+    let uefi_secure_boot = check_uefi_secure_boot(Path::new(EFI_DIR)).await;
 
     info!(
         ?disk_encrypted,
@@ -102,6 +104,7 @@ pub async fn run_audit_checks() -> SafeCommandRx {
         ?reboot_watchdog_set,
         ?rootfs_slot,
         ?rootfs_other_slot_bootable,
+        ?uefi_secure_boot,
         "Audit complete"
     );
 
@@ -112,6 +115,60 @@ pub async fn run_audit_checks() -> SafeCommandRx {
         reboot_watchdog_set,
         rootfs_slot,
         rootfs_other_slot_bootable,
+        uefi_secure_boot,
+    }
+}
+
+const EFI_DIR: &str = "/sys/firmware/efi";
+/// uefi global variable guid, `SecureBoot` and `SetupMode` live under it
+const EFI_GLOBAL_GUID: &str = "8be4df61-93ca-11d2-aa0d-00e098032b8c";
+
+/// `None` when the device didn't boot through uefi, there's nothing to say then.
+/// `efi_dir` is a parameter so tests can point it at a fake tree
+async fn check_uefi_secure_boot(efi_dir: &Path) -> Option<UefiSecureBoot> {
+    if !tokio::fs::try_exists(efi_dir)
+        .await
+        .inspect_err(|e| warn!("Failed to check {}: {e}", efi_dir.display()))
+        .ok()?
+    {
+        return None;
+    }
+
+    let vars = efi_dir.join("efivars");
+    let secure_boot = read_efi_bool(&vars, "SecureBoot").await;
+    let setup_mode = read_efi_bool(&vars, "SetupMode").await;
+    Some(secure_boot_state(secure_boot?, setup_mode?))
+}
+
+/// efivarfs files are 4 attribute bytes then the value. a missing variable reads
+/// as false: firmware without secure boot support doesn't define them.
+/// `None` only when the variable exists but can't be read
+async fn read_efi_bool(vars: &Path, name: &str) -> Option<bool> {
+    let path = vars.join(format!("{name}-{EFI_GLOBAL_GUID}"));
+    match tokio::fs::read(&path).await {
+        Ok(bytes) => match bytes.get(4) {
+            Some(value) => Some(*value == 1),
+            None => {
+                warn!("{} is too short to hold a value", path.display());
+                None
+            }
+        },
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Some(false),
+        Err(e) => {
+            warn!("Failed to read {}: {e}", path.display());
+            None
+        }
+    }
+}
+
+/// in setup mode secure boot can't be enforcing, whatever `SecureBoot` says
+fn secure_boot_state(secure_boot: bool, setup_mode: bool) -> UefiSecureBoot {
+    if setup_mode {
+        UefiSecureBoot::Setup
+    } else if secure_boot {
+        UefiSecureBoot::On
+    } else {
+        UefiSecureBoot::Off
     }
 }
 
@@ -336,6 +393,65 @@ slot: 1,             retry_count: 2,             status: normal
             "slot: 1,             retry_count: 2,             status: something-new",
         );
         assert_eq!(parse_rootfs_slots(&output), (Some(RootfsSlot::A), None));
+    }
+
+    /// fake efi tree with the given variables, values as efivarfs stores them
+    fn efi_tree(vars: &[(&str, u8)]) -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        let efivars = dir.path().join("efivars");
+        std::fs::create_dir(&efivars).unwrap();
+        for (name, value) in vars {
+            std::fs::write(
+                efivars.join(format!("{name}-{EFI_GLOBAL_GUID}")),
+                [6, 0, 0, 0, *value],
+            )
+            .unwrap();
+        }
+        dir
+    }
+
+    #[tokio::test]
+    async fn secure_boot_on_like_the_dev_unit() {
+        // the dev unit read 6 0 0 0 1 and 6 0 0 0 0 on 2026-11-13
+        let dir = efi_tree(&[("SecureBoot", 1), ("SetupMode", 0)]);
+        assert_eq!(
+            check_uefi_secure_boot(dir.path()).await,
+            Some(UefiSecureBoot::On)
+        );
+    }
+
+    #[tokio::test]
+    async fn setup_mode_is_not_on() {
+        let dir = efi_tree(&[("SecureBoot", 0), ("SetupMode", 1)]);
+        assert_eq!(
+            check_uefi_secure_boot(dir.path()).await,
+            Some(UefiSecureBoot::Setup)
+        );
+    }
+
+    #[tokio::test]
+    async fn secure_boot_off() {
+        let dir = efi_tree(&[("SecureBoot", 0), ("SetupMode", 0)]);
+        assert_eq!(
+            check_uefi_secure_boot(dir.path()).await,
+            Some(UefiSecureBoot::Off)
+        );
+    }
+
+    #[tokio::test]
+    async fn uefi_without_secure_boot_variables_is_off() {
+        let dir = efi_tree(&[]);
+        assert_eq!(
+            check_uefi_secure_boot(dir.path()).await,
+            Some(UefiSecureBoot::Off)
+        );
+    }
+
+    #[tokio::test]
+    async fn no_uefi_is_none() {
+        let dir = tempfile::tempdir().unwrap();
+        let missing = dir.path().join("efi");
+        assert_eq!(check_uefi_secure_boot(&missing).await, None);
     }
 
     #[test]

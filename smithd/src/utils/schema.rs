@@ -226,6 +226,7 @@ pub enum SafeCommandRx {
         rootfs_slot: Option<RootfsSlot>,
         /// whether the device could still fall back to its other rootfs slot
         rootfs_other_slot_bootable: Option<bool>,
+        uefi_secure_boot: Option<UefiSecureBoot>,
     },
     ApplyNetworksResult {
         applied_version: i32,
@@ -626,6 +627,16 @@ pub enum RootfsSlot {
     Single,
 }
 
+/// uefi secure boot state. `Setup` means anyone can enroll keys, so it isn't enforcing
+#[derive(Type, Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, utoipa::ToSchema)]
+#[sqlx(type_name = "uefi_secure_boot", rename_all = "lowercase")]
+#[serde(rename_all = "lowercase")]
+pub enum UefiSecureBoot {
+    Off,
+    Setup,
+    On,
+}
+
 #[derive(Type, Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[sqlx(type_name = "network_type", rename_all = "lowercase")]
 #[serde(rename_all = "lowercase")]
@@ -812,6 +823,7 @@ mod tests {
                 reboot_watchdog_set,
                 rootfs_slot,
                 rootfs_other_slot_bootable,
+                uefi_secure_boot,
             } => {
                 assert_eq!(disk_encrypted, Some(true));
                 assert_eq!(password_access_disabled, Some(false));
@@ -819,6 +831,7 @@ mod tests {
                 assert_eq!(reboot_watchdog_set, None);
                 assert_eq!(rootfs_slot, None);
                 assert_eq!(rootfs_other_slot_bootable, None);
+                assert_eq!(uefi_secure_boot, None);
             }
             _ => panic!("expected AuditReport variant"),
         }
