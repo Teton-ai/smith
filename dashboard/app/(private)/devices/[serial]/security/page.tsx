@@ -1,29 +1,51 @@
 import { Button, Card } from "@teton/smith-ui";
-import { CheckCircle2, MinusCircle, RefreshCw, XCircle } from "lucide-react";
+import {
+	CheckCircle2,
+	Info,
+	MinusCircle,
+	RefreshCw,
+	XCircle,
+} from "lucide-react";
 import { useParams } from "react-router";
 import { useGetDeviceInfo, useIssueCommandsToDevices } from "@/app/api-client";
 import { type DeviceAudit, useDeviceAudit } from "../audit/useDeviceAudit";
 import { DeviceDetailLayout } from "../DeviceDetailLayout";
 
-/** Renders a yes / no / unknown status pill for a single audit check. */
-const StatusPill = ({ value }: { value: boolean | null }) => {
-	if (value === null || value === undefined) {
-		return (
-			<span className="inline-flex items-center gap-1.5 text-gray-400 text-sm font-medium">
-				<MinusCircle className="w-4 h-4" />
-				Unknown
-			</span>
-		);
-	}
-	return value ? (
-		<span className="inline-flex items-center gap-1.5 text-green-600 text-sm font-medium">
-			<CheckCircle2 className="w-4 h-4" />
-			Yes
-		</span>
-	) : (
-		<span className="inline-flex items-center gap-1.5 text-red-600 text-sm font-medium">
-			<XCircle className="w-4 h-4" />
-			No
+/** `info` is for facts that aren't good or bad on their own, like the boot slot. */
+type CheckStatus = "pass" | "fail" | "info" | "unknown";
+
+interface Check {
+	name: string;
+	help: string;
+	status: CheckStatus;
+	/** text in the pill, defaults to Yes / No / Unknown */
+	label?: string;
+}
+
+const fromBool = (value: boolean | null | undefined) => ({
+	status: (value == null ? "unknown" : value ? "pass" : "fail") as CheckStatus,
+});
+
+const pillStyles: Record<
+	CheckStatus,
+	{ className: string; icon: typeof CheckCircle2; label: string }
+> = {
+	pass: { className: "text-green-600", icon: CheckCircle2, label: "Yes" },
+	fail: { className: "text-red-600", icon: XCircle, label: "No" },
+	info: { className: "text-gray-700", icon: Info, label: "" },
+	unknown: { className: "text-gray-400", icon: MinusCircle, label: "Unknown" },
+};
+
+/** Renders the status pill for a single audit check. */
+const StatusPill = ({ status, label }: Pick<Check, "status" | "label">) => {
+	const style = pillStyles[status];
+	const Icon = style.icon;
+	return (
+		<span
+			className={`inline-flex items-center gap-1.5 text-sm font-medium whitespace-nowrap ${style.className}`}
+		>
+			<Icon className="w-4 h-4" />
+			{label ?? style.label}
 		</span>
 	);
 };
@@ -62,31 +84,31 @@ const SecurityPage = () => {
 		});
 	};
 
-	const checks: { name: string; help: string; value: boolean | null }[] = [
+	const checks: Check[] = [
 		{
 			name: "Disk encrypted",
 			help: "A LUKS-encrypted volume was detected on the device.",
-			value: audit?.disk_encrypted ?? null,
+			...fromBool(audit?.disk_encrypted),
 		},
 		{
 			name: "Password access disabled",
 			help: "SSH password login is disabled and key-based login is enabled.",
-			value: audit?.password_access_disabled ?? null,
+			...fromBool(audit?.password_access_disabled),
 		},
 		{
 			name: "Console logins closed",
 			help: "No login prompt on the screen, serial or USB ports, and console login is refused.",
-			value: audit?.console_logins_closed ?? null,
+			...fromBool(audit?.console_logins_closed),
 		},
 		{
 			name: "Reboot watchdog set",
 			help: "A hung shutdown resets the device instead of hanging.",
-			value: audit?.reboot_watchdog_set ?? null,
+			...fromBool(audit?.reboot_watchdog_set),
 		},
 		{
 			name: "Running latest release",
 			help: "The device is on its target release.",
-			value: (audit as DeviceAudit | undefined)?.running_latest_release ?? null,
+			...fromBool((audit as DeviceAudit | undefined)?.running_latest_release),
 		},
 	];
 
@@ -129,7 +151,7 @@ const SecurityPage = () => {
 									<div className="text-gray-900 font-medium">{check.name}</div>
 									<div className="text-sm text-gray-400">{check.help}</div>
 								</div>
-								<StatusPill value={check.value} />
+								<StatusPill status={check.status} label={check.label} />
 							</div>
 						))}
 					</div>

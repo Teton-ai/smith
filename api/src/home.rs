@@ -620,6 +620,8 @@ async fn save_response(
             password_access_disabled,
             console_logins_closed,
             reboot_watchdog_set,
+            // TODO(2b): store rootfs_slot and rootfs_other_slot_bootable
+            ..
         } => {
             sqlx::query!(
                 r#"

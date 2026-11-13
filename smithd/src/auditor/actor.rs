@@ -1,6 +1,6 @@
 use crate::commander::CommanderHandle;
 use crate::shutdown::ShutdownSignals;
-use crate::utils::schema::{SafeCommandResponse, SafeCommandRx};
+use crate::utils::schema::{RootfsSlot, SafeCommandResponse, SafeCommandRx};
 use tokio::process::Command;
 use tokio::sync::mpsc;
 use tokio::time::{self, Duration};
@@ -93,12 +93,15 @@ pub async fn run_audit_checks() -> SafeCommandRx {
     let password_access_disabled = check_password_auth_disabled().await;
     let console_logins_closed = crate::hardening::console_logins_closed().await;
     let reboot_watchdog_set = crate::hardening::reboot_watchdog_set().await;
+    let (rootfs_slot, rootfs_other_slot_bootable) = check_rootfs_slots().await;
 
     info!(
         ?disk_encrypted,
         ?password_access_disabled,
         ?console_logins_closed,
         ?reboot_watchdog_set,
+        ?rootfs_slot,
+        ?rootfs_other_slot_bootable,
         "Audit complete"
     );
 
@@ -107,7 +110,108 @@ pub async fn run_audit_checks() -> SafeCommandRx {
         password_access_disabled,
         console_logins_closed,
         reboot_watchdog_set,
+        rootfs_slot,
+        rootfs_other_slot_bootable,
     }
+}
+
+/// Booted rootfs slot and whether the other one could still boot, from
+/// nvidia's `nvbootctrl`. Both `None` off jetson or if the output can't be read.
+async fn check_rootfs_slots() -> (Option<RootfsSlot>, Option<bool>) {
+    let output = match time::timeout(
+        PROBE_TIMEOUT,
+        Command::new("nvbootctrl")
+            .args(["-t", "rootfs", "dump-slots-info"])
+            .output(),
+    )
+    .await
+    {
+        Ok(Ok(output)) => output,
+        Ok(Err(e)) => {
+            warn!("Failed to run nvbootctrl: {e}");
+            return (None, None);
+        }
+        Err(_) => {
+            error!("nvbootctrl timed out after {PROBE_TIMEOUT:?}");
+            return (None, None);
+        }
+    };
+
+    if !output.status.success() {
+        warn!("nvbootctrl exited with status {:?}", output.status);
+        return (None, None);
+    }
+
+    parse_rootfs_slots(&String::from_utf8_lossy(&output.stdout))
+}
+
+/// Parses `nvbootctrl -t rootfs dump-slots-info`:
+/// ```text
+/// Current rootfs slot: A
+/// Active rootfs slot: A
+/// num_slots: 2
+/// slot: 0,             retry_count: 2,             status: normal
+/// slot: 1,             retry_count: 2,             status: normal
+/// ```
+fn parse_rootfs_slots(output: &str) -> (Option<RootfsSlot>, Option<bool>) {
+    let mut current = None;
+    let mut num_slots = None;
+    let mut statuses = Vec::new();
+
+    for line in output.lines() {
+        let line = line.trim();
+        if let Some(slot) = line.strip_prefix("Current rootfs slot:") {
+            current = match slot.trim() {
+                "A" => Some(0),
+                "B" => Some(1),
+                _ => None,
+            };
+        } else if let Some(n) = line.strip_prefix("num_slots:") {
+            num_slots = n.trim().parse::<u32>().ok();
+        } else if line.starts_with("slot:") {
+            let mut index = None;
+            let mut status = None;
+            for field in line.split(',') {
+                match field.trim().split_once(':') {
+                    Some(("slot", v)) => index = v.trim().parse::<usize>().ok(),
+                    Some(("status", v)) => status = Some(v.trim().to_owned()),
+                    _ => {}
+                }
+            }
+            if let (Some(index), Some(status)) = (index, status) {
+                statuses.push((index, status));
+            }
+        }
+    }
+
+    // (untested) assumes a unit without rootfs a/b reports a single slot
+    if num_slots == Some(1) {
+        return (Some(RootfsSlot::Single), None);
+    }
+    let Some(current) = current else {
+        return (None, None);
+    };
+    let slot = if current == 0 {
+        RootfsSlot::A
+    } else {
+        RootfsSlot::B
+    };
+
+    let other = 1 - current;
+    let other_bootable =
+        statuses
+            .iter()
+            .find(|(index, _)| *index == other)
+            .and_then(|(_, status)| match status.as_str() {
+                "normal" => Some(true),
+                "unbootable" => Some(false),
+                unknown => {
+                    warn!("Unknown rootfs slot status {unknown:?}");
+                    None
+                }
+            });
+
+    (Some(slot), other_bootable)
 }
 
 /// True if any block device is a LUKS/crypt mapping. `None` if lsblk can't be
@@ -187,6 +291,58 @@ fn parse_password_auth_disabled(sshd_config: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // verbatim from the dev unit on 2026-11-13
+    const TWO_SLOTS_ON_A: &str = "Current rootfs slot: A
+Active rootfs slot: A
+num_slots: 2
+slot: 0,             retry_count: 2,             status: normal
+slot: 1,             retry_count: 2,             status: normal
+";
+
+    #[test]
+    fn rootfs_on_a_with_b_bootable() {
+        assert_eq!(
+            parse_rootfs_slots(TWO_SLOTS_ON_A),
+            (Some(RootfsSlot::A), Some(true))
+        );
+    }
+
+    #[test]
+    fn rootfs_on_b_with_a_unbootable() {
+        let output = TWO_SLOTS_ON_A
+            .replace("Current rootfs slot: A", "Current rootfs slot: B")
+            .replace(
+                "slot: 0,             retry_count: 2,             status: normal",
+                "slot: 0,             retry_count: 0,             status: unbootable",
+            );
+        assert_eq!(
+            parse_rootfs_slots(&output),
+            (Some(RootfsSlot::B), Some(false))
+        );
+    }
+
+    #[test]
+    fn single_rootfs_slot() {
+        let output =
+            "Current rootfs slot: A\nnum_slots: 1\nslot: 0, retry_count: 3, status: normal\n";
+        assert_eq!(parse_rootfs_slots(output), (Some(RootfsSlot::Single), None));
+    }
+
+    #[test]
+    fn unknown_other_slot_status_is_none() {
+        let output = TWO_SLOTS_ON_A.replace(
+            "slot: 1,             retry_count: 2,             status: normal",
+            "slot: 1,             retry_count: 2,             status: something-new",
+        );
+        assert_eq!(parse_rootfs_slots(&output), (Some(RootfsSlot::A), None));
+    }
+
+    #[test]
+    fn unreadable_output_is_none() {
+        assert_eq!(parse_rootfs_slots("garbage"), (None, None));
+        assert_eq!(parse_rootfs_slots(""), (None, None));
+    }
 
     #[test]
     fn detects_crypt_node_in_lsblk_tree() {
