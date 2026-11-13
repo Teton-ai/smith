@@ -232,6 +232,7 @@ export const docsNavigation: DocsNavGroup[] = [
 		links: [
 			{ title: "Deployments", href: "/docs/deployments" },
 			{ title: "WiFi management", href: "/docs/wifi" },
+			{ title: "Device settings", href: "/docs/device-settings" },
 			{ title: "Integrations", href: "/docs/integrations" },
 			{ title: "MCP server", href: "/docs/mcp" },
 		],
