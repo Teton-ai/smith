@@ -224,7 +224,10 @@ mod tests {
     #[test]
     fn round_trip_needs_a_successful_small_post_with_a_timing_header() {
         let mut headers = HeaderMap::new();
-        headers.insert("server-timing", "app;dur=10.0".parse().unwrap());
+        headers.insert(
+            "server-timing",
+            reqwest::header::HeaderValue::from_static("app;dur=10.0"),
+        );
         let ok = StatusCode::OK;
         assert_eq!(round_trip(ms(35), 500, ok, &headers), Some(ms(25)));
         assert_eq!(round_trip(ms(35), 16 * 1024, ok, &headers), Some(ms(25)));
