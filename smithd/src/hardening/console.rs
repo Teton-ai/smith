@@ -42,6 +42,7 @@ const LOGIND_BODY: &str = "[Login]\nNAutoVTs=0\nReserveVT=0\n";
 
 /// craft needs the gadget's ncm network, not its serial port. read at gadget start (boot)
 const USB_GADGET_CONFIG: &str = "/opt/nvidia/l4t-usb-device-mode/nv-l4t-usb-device-mode-config.sh";
+
 pub(super) async fn close_console_logins() -> Result<()> {
     // independent steps, one failing shouldn't skip the rest.
     // access file before the pam line so login never points at a missing file
@@ -68,6 +69,54 @@ pub(super) async fn close_console_logins() -> Result<()> {
         bail!("failed steps: {}", failed.join(", "));
     }
     Ok(())
+}
+
+/// read-only check for the audit, true only when every part the rule applies is
+/// in place. doesn't look at hardware, so a v1 honestly reports false
+pub(super) async fn is_closed() -> Result<bool> {
+    let mut open = Vec::new();
+
+    for unit in MASKED_UNITS.iter().chain(&FORCE_MASKED_UNITS) {
+        if !is_masked(unit).await {
+            open.push(format!("{unit} not masked"));
+        }
+    }
+    for unit in running_gettys().await? {
+        open.push(format!("{unit} running"));
+    }
+    if read_optional(Path::new(ACCESS_FILE)).await?.as_deref() != Some(ACCESS_RULE) {
+        open.push(format!("{ACCESS_FILE} missing or changed"));
+    }
+    if !read_optional(Path::new(PAM_LOGIN))
+        .await?
+        .is_some_and(|pam| has_pam_line(&pam))
+    {
+        open.push(format!("{PAM_LOGIN} has no deny-all line"));
+    }
+    if read_optional(Path::new(LOGIND_DROPIN)).await?.as_deref() != Some(LOGIND_BODY) {
+        open.push(format!("{LOGIND_DROPIN} missing or changed"));
+    }
+    // no gadget config means no usb serial port to worry about
+    if let Some(script) = read_optional(Path::new(USB_GADGET_CONFIG)).await?
+        && !acm_off(&script)
+    {
+        open.push("usb gadget serial port enabled".to_owned());
+    }
+
+    if !open.is_empty() {
+        // the audit only carries a bool, this is where to look for why it's false
+        info!("Console logins open: {}", open.join(", "));
+    }
+    Ok(open.is_empty())
+}
+
+/// `None` when the file doesn't exist
+async fn read_optional(path: &Path) -> Result<Option<String>> {
+    match tokio::fs::read_to_string(path).await {
+        Ok(contents) => Ok(Some(contents)),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(err) => Err(err).with_context(|| format!("reading {}", path.display())),
+    }
 }
 
 async fn write_access_rule() -> Result<()> {
@@ -133,20 +182,25 @@ async fn force_mask(unit: &str) -> Result<()> {
     Ok(())
 }
 
-async fn stop_running_gettys() -> Result<()> {
+async fn running_gettys() -> Result<Vec<String>> {
     let mut args = vec!["list-units", "--state=active", "--plain", "--no-legend"];
     args.extend(RUNNING_PATTERNS);
     let listing = systemctl(&args).await?;
-    let running: Vec<&str> = listing
+    Ok(listing
         .lines()
         .filter_map(|line| line.split_whitespace().next())
-        .collect();
+        .map(str::to_owned)
+        .collect())
+}
+
+async fn stop_running_gettys() -> Result<()> {
+    let running = running_gettys().await?;
     if running.is_empty() {
         return Ok(());
     }
 
     let mut args = vec!["stop"];
-    args.extend(&running);
+    args.extend(running.iter().map(String::as_str));
     systemctl(&args).await?;
     info!("Stopped {}", running.join(", "));
     Ok(())

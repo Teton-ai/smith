@@ -34,6 +34,22 @@ pub async fn run() {
     }
 }
 
+/// audit probe, `None` when the check itself couldn't run
+pub async fn console_logins_closed() -> Option<bool> {
+    console::is_closed()
+        .await
+        .inspect_err(|err| error!("Failed to check console logins: {err:#}"))
+        .ok()
+}
+
+/// audit probe, `None` when the check itself couldn't run
+pub async fn reboot_watchdog_set() -> Option<bool> {
+    watchdog::is_set()
+        .await
+        .inspect_err(|err| error!("Failed to check the reboot watchdog: {err:#}"))
+        .ok()
+}
+
 /// writes `contents` unless the file already has them, returns whether it wrote.
 /// keeps the existing mode, `new_mode` is only for a file that doesn't exist yet
 async fn write_if_different(path: &Path, contents: &str, new_mode: u32) -> Result<bool> {

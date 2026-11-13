@@ -618,6 +618,8 @@ async fn save_response(
         SafeCommandRx::AuditReport {
             disk_encrypted,
             password_access_disabled,
+            // TODO(6b): store console_logins_closed and reboot_watchdog_set
+            ..
         } => {
             sqlx::query!(
                 r#"

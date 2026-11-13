@@ -35,11 +35,24 @@ pub(super) async fn set_reboot_watchdog() -> Result<()> {
 
     // the live value is the source of truth, catches a reload that didn't pick it
     // up and any later drop-in overriding ours
-    let live = systemctl(&["show", "-p", "RebootWatchdogUSec", "--value"]).await?;
-    let live = live.trim();
+    let live = live_value().await?;
     if live != EXPECTED {
         bail!("systemd reports RebootWatchdogUSec={live}, wanted {EXPECTED}");
     }
     info!("Reboot watchdog set to {live}");
     Ok(())
+}
+
+/// read-only check for the audit
+pub(super) async fn is_set() -> Result<bool> {
+    let live = live_value().await?;
+    if live != EXPECTED {
+        info!("Reboot watchdog is {live}, wanted {EXPECTED}");
+    }
+    Ok(live == EXPECTED)
+}
+
+async fn live_value() -> Result<String> {
+    let live = systemctl(&["show", "-p", "RebootWatchdogUSec", "--value"]).await?;
+    Ok(live.trim().to_owned())
 }
