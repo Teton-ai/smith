@@ -3,7 +3,13 @@ use anyhow::{Context, Result};
 use flate2::{Compression, write::GzEncoder};
 use futures::{StreamExt, stream::FuturesUnordered};
 use reqwest::{Response, StatusCode};
-use std::{collections::HashMap, env, future::Future, io::Write, time::Duration};
+use std::{
+    collections::HashMap,
+    env,
+    future::Future,
+    io::Write,
+    time::{Duration, Instant},
+};
 use tracing::{error, info, warn};
 
 #[zbus::proxy(
@@ -31,6 +37,13 @@ fn validate_permanent_mac(value: &str) -> Result<String> {
         "Invalid permanent Wi-Fi MAC"
     );
     Ok(mac.to_string())
+}
+
+/// Wire cost of one post: time to the response headers, and the compressed body size.
+#[derive(Debug, Clone, Copy)]
+pub struct PostTiming {
+    pub elapsed: Duration,
+    pub body_len: usize,
 }
 
 const WIFI_MAC_TIMEOUT: Duration = Duration::from_secs(5);
@@ -152,6 +165,19 @@ impl NetworkClient {
         endpoint: &str,
         message: &T,
     ) -> Result<(StatusCode, Response)> {
+        let (status_code, response, _) = self
+            .send_compressed_post_timed(token, endpoint, message)
+            .await?;
+        Ok((status_code, response))
+    }
+
+    /// Also returns what the post cost on the wire, for round trip measuring.
+    pub async fn send_compressed_post_timed<T: serde::Serialize>(
+        &self,
+        token: &str,
+        endpoint: &str,
+        message: &T,
+    ) -> Result<(StatusCode, Response, PostTiming)> {
         let client = self.client.clone();
         let url = format!("{}{}", self.hostname, endpoint);
 
@@ -160,7 +186,9 @@ impl NetworkClient {
         encoder.write_all(&json)?;
 
         let compressed_data = encoder.finish()?;
+        let body_len = compressed_data.len();
 
+        let started = Instant::now();
         let request = client
             .post(&url)
             .header("Authorization", format!("Bearer {}", token))
@@ -169,10 +197,12 @@ impl NetworkClient {
             .body(compressed_data)
             .send()
             .await?;
+        // The response headers are in, the body is not read.
+        let elapsed = started.elapsed();
 
         let status_code = request.status();
 
-        Ok((status_code, request))
+        Ok((status_code, request, PostTiming { elapsed, body_len }))
     }
 
     pub async fn get_release_packages(
