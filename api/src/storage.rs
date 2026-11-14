@@ -459,16 +459,17 @@ impl Storage {
         if !response.status().is_success() {
             let status = response.status().as_u16();
             let body = response.text().await.map_err(|e| e.without_url())?;
-            if missing_upload_body(&body) {
+            let code = s3_error_code(&body);
+            if let Some(code @ ("NoSuchUpload" | "RequestTimeout")) = code.as_deref() {
                 return Err(s3::error::S3Error::HttpFailWithBody(
                     status,
-                    "<Error><Code>NoSuchUpload</Code></Error>".into(),
+                    format!("<Error><Code>{code}</Code></Error>"),
                 )
                 .into());
             }
             anyhow::bail!(
                 "S3 rejected upload part ({status} {})",
-                s3_error_code(&body).unwrap_or_default()
+                code.unwrap_or_default()
             );
         }
         Ok(response
@@ -626,6 +627,12 @@ fn regional(region: String) -> Region {
 pub fn is_missing_upload(error: &anyhow::Error) -> bool {
     error.downcast_ref::<s3::error::S3Error>().is_some_and(|error| {
         matches!(error, s3::error::S3Error::HttpFailWithBody(_, body) if missing_upload_body(body))
+    })
+}
+
+pub fn is_request_timeout(error: &anyhow::Error) -> bool {
+    error.downcast_ref::<s3::error::S3Error>().is_some_and(|error| {
+        matches!(error, s3::error::S3Error::HttpFailWithBody(_, body) if s3_error_code(body).as_deref() == Some("RequestTimeout"))
     })
 }
 
@@ -818,6 +825,25 @@ mod tests {
         assert_eq!(url_lifetime(3600, Some(1000))?, 940);
         assert!(url_lifetime(3600, Some(100)).is_err());
         Ok(())
+    }
+
+    #[test]
+    fn request_timeout_is_told_apart_from_other_rejections() {
+        let timeout = anyhow::Error::from(s3::error::S3Error::HttpFailWithBody(
+            400,
+            "<Error><Code>RequestTimeout</Code></Error>".into(),
+        ));
+        let cases = [
+            ("timeout", timeout, true),
+            (
+                "other",
+                anyhow::anyhow!("S3 rejected upload part (400 )"),
+                false,
+            ),
+        ];
+        for (name, error, want) in cases {
+            assert_eq!(super::is_request_timeout(&error), want, "{name}");
+        }
     }
 
     #[test]
