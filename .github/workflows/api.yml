@@ -6,6 +6,7 @@ on:
       - '*'
     branches:
       - main
+  workflow_dispatch:
 
 concurrency:
   group: api-${{ github.ref }}
@@ -45,10 +46,17 @@ jobs:
             DATE=$(date +%Y%m%d)
             SHORT_SHA=$(git rev-parse --short=7 HEAD)
             API_VERSION="${BASE_VERSION}-rc.${DATE}.${SHORT_SHA}"
-          else
+            LATEST_TAG=tetonai/smith-api
+          elif [[ "$GITHUB_REF" == refs/tags/* ]]; then
             API_VERSION=$(cargo metadata --format-version=1 | jq -r '.packages[] | select(.name == "api") | .version')
+            LATEST_TAG=tetonai/smith-api
+          else
+            BASE_VERSION=$(cargo metadata --format-version=1 | jq -r '.packages[] | select(.name == "api") | .version')
+            API_VERSION="${BASE_VERSION}-dev.$(git rev-parse --short=7 HEAD)"
+            LATEST_TAG=
           fi
           echo "API_VERSION=${API_VERSION}" >> "$GITHUB_ENV"
+          echo "LATEST_TAG=${LATEST_TAG}" >> "$GITHUB_ENV"
         env:
           GH_TOKEN: ${{ secrets.RELEASE_PR_TOKEN }}
 
@@ -68,7 +76,7 @@ jobs:
           file: api/Dockerfile
           push: true
           tags: |
-            tetonai/smith-api
+            ${{ env.LATEST_TAG }}
             tetonai/smith-api:${{ env.API_VERSION }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
