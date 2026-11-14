@@ -431,6 +431,7 @@ async fn stateless_routes_verify_tokens_parts_and_completion() -> anyhow::Result
         upload_id: "expired".into(),
         size_bytes: 3,
         checksum: "a".repeat(64),
+        crc64nvme: None,
         expires_at: chrono::Utc::now().timestamp() - 1,
     })?;
     assert_eq!(
