@@ -490,13 +490,22 @@ impl Storage {
             bucket.add_header(CRC64NVME_CHECKSUM_HEADER, crc64nvme);
             bucket.add_header(CHECKSUM_TYPE_HEADER, FULL_OBJECT);
         }
-        let response = bucket
-            .complete_multipart_upload(object_key, upload_id, parts)
-            .await?;
+        let completed: anyhow::Result<()> = async {
+            let response = bucket
+                .complete_multipart_upload(object_key, upload_id, parts)
+                .await?;
+            validate_completion(response.status_code(), response.as_str()?)
+        }
+        .await;
 
-        validate_completion(response.status_code(), response.as_str()?)?;
+        if let Err(refused) = &completed
+            && is_bad_digest(refused)
+            && let Err(abort) = bucket.abort_upload(object_key, upload_id).await
+        {
+            error!("Failed to abort an upload S3 refused as BadDigest: {abort}");
+        }
 
-        Ok(())
+        completed
     }
 
     /// Keeps other parts when S3 rejects this part. rust-s3's chunk helper aborts them.
@@ -995,9 +1004,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn crc_mismatch_is_a_bad_digest() -> anyhow::Result<()> {
+    async fn crc_mismatch_is_a_bad_digest_and_ends_the_upload() -> anyhow::Result<()> {
+        use axum::http::Method;
         const BAD_DIGEST: &str = "<Error><Code>BadDigest</Code><Message>The crc64nvme you specified did not match the calculated checksum.</Message></Error>";
-        let (bucket, _, server) = fake_s3(400, vec![], BAD_DIGEST).await?;
+        let (bucket, seen, server) = fake_s3(400, vec![], BAD_DIGEST).await?;
         let result =
             Storage::complete_bucket_multipart(bucket, "object", "up", vec![], Some(CRC)).await;
         server.abort();
@@ -1006,6 +1016,17 @@ mod tests {
         };
         assert!(super::is_bad_digest(&error));
         assert!(!super::is_missing_upload(&error));
+        let methods: Vec<Method> = seen
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|(m, _)| m.clone())
+            .collect();
+        assert_eq!(
+            methods,
+            [Method::POST, Method::DELETE],
+            "a refused upload is aborted, so the device's retry gets NoSuchUpload and starts over"
+        );
         Ok(())
     }
 
