@@ -13,8 +13,8 @@ use tracing::error;
 const CHECKSUM_ALGORITHM_HEADER: &str = "x-amz-checksum-algorithm";
 const CHECKSUM_TYPE_HEADER: &str = "x-amz-checksum-type";
 const CRC64NVME_CHECKSUM_HEADER: &str = "x-amz-checksum-crc64nvme";
-const CRC64NVME_METADATA: &str = "crc64nvme";
-const CRC64NVME_METADATA_HEADER: &str = "x-amz-meta-crc64nvme";
+const CHECKSUM_MODE_HEADER: &str = "x-amz-checksum-mode";
+const CHECKSUM_MODE_ENABLED: &str = "ENABLED";
 const CRC64NVME: &str = "CRC64NVME";
 const FULL_OBJECT: &str = "FULL_OBJECT";
 const BAD_DIGEST: &str = "BadDigest";
@@ -359,11 +359,14 @@ impl Storage {
             anyhow::bail!("Content-Disposition is not encodable as a header value");
         }
 
-        bucket.add_header("content-disposition", content_disposition);
         if let Some(crc64nvme) = crc64nvme {
+            ensure_base64(crc64nvme)?;
+        }
+
+        bucket.add_header("content-disposition", content_disposition);
+        if crc64nvme.is_some() {
             bucket.add_header(CHECKSUM_ALGORITHM_HEADER, CRC64NVME);
             bucket.add_header(CHECKSUM_TYPE_HEADER, FULL_OBJECT);
-            bucket.add_header(CRC64NVME_METADATA_HEADER, crc64nvme);
         }
 
         let response = bucket
@@ -487,6 +490,7 @@ impl Storage {
         crc64nvme: Option<&str>,
     ) -> anyhow::Result<()> {
         if let Some(crc64nvme) = crc64nvme {
+            ensure_base64(crc64nvme)?;
             bucket.add_header(CRC64NVME_CHECKSUM_HEADER, crc64nvme);
             bucket.add_header(CHECKSUM_TYPE_HEADER, FULL_OBJECT);
         }
@@ -628,7 +632,16 @@ impl Storage {
         size: i64,
         crc64nvme: &str,
     ) -> anyhow::Result<bool> {
-        let (head, status) = match bucket.head_object(object_key).await {
+        use s3::request::Request;
+        let mut bucket = bucket.clone();
+        bucket.add_header(CHECKSUM_MODE_HEADER, CHECKSUM_MODE_ENABLED);
+        let request = s3::request::tokio_backend::HyperRequest::new(
+            &bucket,
+            object_key,
+            s3::command::Command::HeadObject,
+        )
+        .await?;
+        let (headers, status) = match request.response_header().await {
             Ok(response) => response,
             Err(s3::error::S3Error::HttpFailWithBody(404, _)) => return Ok(false),
             Err(error) => return Err(error.into()),
@@ -637,11 +650,10 @@ impl Storage {
             return Ok(false);
         }
         anyhow::ensure!(status == 200, "S3 object metadata read failed");
-        let stored = head
-            .metadata
-            .as_ref()
-            .and_then(|metadata| metadata.get(CRC64NVME_METADATA));
-        Ok(head.content_length == Some(size) && stored.map(String::as_str) == Some(crc64nvme))
+
+        let header = |name: &str| headers.get(name).and_then(|value| value.to_str().ok());
+        let length: Option<i64> = header("content-length").and_then(|value| value.parse().ok());
+        Ok(length == Some(size) && header(CRC64NVME_CHECKSUM_HEADER) == Some(crc64nvme))
     }
 
     async fn matches_bucket_object(
@@ -780,8 +792,19 @@ pub fn redacted(error: &anyhow::Error) -> String {
         .join(": ")
 }
 
+fn ensure_base64(value: &str) -> anyhow::Result<()> {
+    anyhow::ensure!(
+        !value.is_empty()
+            && value
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b"+/=".contains(&b)),
+        "checksum is not base64"
+    );
+    Ok(())
+}
+
 fn validate_completion(status: u16, body: &str) -> anyhow::Result<()> {
-    if missing_upload_body(body) {
+    if s3_error_code(body).is_some() {
         return Err(s3::error::S3Error::HttpFailWithBody(status, body.to_owned()).into());
     }
     anyhow::ensure!(
@@ -974,7 +997,11 @@ mod tests {
                 header(&seen, 0, "x-amz-checksum-type"),
                 expected("FULL_OBJECT")
             );
-            assert_eq!(header(&seen, 0, "x-amz-meta-crc64nvme"), expected(CRC));
+            assert_eq!(
+                header(&seen, 0, "x-amz-meta-crc64nvme"),
+                None,
+                "the device's claim is not stored on the object; only S3's checksum is trusted"
+            );
         }
         Ok(())
     }
@@ -1031,25 +1058,31 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn crc_object_check_reads_only_metadata() -> anyhow::Result<()> {
+    async fn crc_object_check_compares_the_checksum_s3_computed() -> anyhow::Result<()> {
         use axum::http::Method;
-        for (status, stored, size, expected) in [
-            (200, Some(CRC), 5, Some(true)),
-            (200, Some("AAAAAAAAAAA="), 5, Some(false)),
-            (200, None, 5, Some(false)),
-            (200, Some(CRC), 4, Some(false)),
-            (404, None, 5, Some(false)),
-            (503, None, 5, None),
+        const OTHER: &str = "AAAAAAAAAAA=";
+        for (status, computed, claimed, size, expected) in [
+            (200, Some(CRC), None, 5, Some(true)),
+            (200, Some(OTHER), Some(CRC), 5, Some(false)),
+            (200, None, Some(CRC), 5, Some(false)),
+            (200, Some(CRC), None, 4, Some(false)),
+            (404, None, None, 5, Some(false)),
+            (503, None, None, 5, None),
         ] {
             let mut headers = vec![("content-length", "5")];
-            if let Some(stored) = stored {
-                headers.push(("x-amz-meta-crc64nvme", stored));
+            if let Some(computed) = computed {
+                headers.push(("x-amz-checksum-crc64nvme", computed));
+            }
+            if let Some(claimed) = claimed {
+                headers.push(("x-amz-meta-crc64nvme", claimed));
             }
             let (bucket, seen, server) = fake_s3(status, headers, "").await?;
             let result = Storage::matches_crc_bucket_object(&bucket, "object", size, CRC).await;
             server.abort();
             match expected {
-                Some(value) => assert_eq!(result?, value),
+                Some(value) => {
+                    assert_eq!(result?, value, "{status} {computed:?} {claimed:?} {size}")
+                }
                 None => assert!(result.is_err()),
             }
             let methods: Vec<Method> = seen
@@ -1059,7 +1092,50 @@ mod tests {
                 .map(|(m, _)| m.clone())
                 .collect();
             assert_eq!(methods, [Method::HEAD]);
+            assert_eq!(
+                header(&seen, 0, "x-amz-checksum-mode").as_deref(),
+                Some("ENABLED")
+            );
         }
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn bad_digest_inside_a_successful_completion_is_a_bad_digest() -> anyhow::Result<()> {
+        use axum::http::Method;
+        const EMBEDDED: &str = "<?xml version=\"1.0\"?>\n<Error><Code>BadDigest</Code></Error>";
+        let (bucket, seen, server) = fake_s3(200, vec![], EMBEDDED).await?;
+        let result =
+            Storage::complete_bucket_multipart(bucket, "object", "up", vec![], Some(CRC)).await;
+        server.abort();
+        let Err(error) = result else {
+            anyhow::bail!("an error body means S3 did not complete the upload");
+        };
+        assert!(super::is_bad_digest(&error));
+        let methods: Vec<Method> = seen
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|(m, _)| m.clone())
+            .collect();
+        assert_eq!(methods, [Method::POST, Method::DELETE]);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn crc_that_is_not_base64_is_refused_before_any_request() -> anyhow::Result<()> {
+        let (bucket, seen, server) = fake_s3(200, vec![], "").await?;
+        let result = Storage::initiate_bucket_multipart(
+            bucket,
+            "object",
+            "application/octet-stream",
+            "attachment",
+            Some("zM77/A2g\nEEE="),
+        )
+        .await;
+        server.abort();
+        assert!(result.is_err());
+        assert!(seen.lock().unwrap().is_empty());
         Ok(())
     }
 
