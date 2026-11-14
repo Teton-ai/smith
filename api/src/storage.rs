@@ -10,6 +10,15 @@ use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tracing::error;
 
+const CHECKSUM_ALGORITHM_HEADER: &str = "x-amz-checksum-algorithm";
+const CHECKSUM_TYPE_HEADER: &str = "x-amz-checksum-type";
+const CRC64NVME_CHECKSUM_HEADER: &str = "x-amz-checksum-crc64nvme";
+const CRC64NVME_METADATA: &str = "crc64nvme";
+const CRC64NVME_METADATA_HEADER: &str = "x-amz-meta-crc64nvme";
+const CRC64NVME: &str = "CRC64NVME";
+const FULL_OBJECT: &str = "FULL_OBJECT";
+const BAD_DIGEST: &str = "BadDigest";
+
 /// Lifetime of a package's CloudFront URL. Packages are small enough that an
 /// hour comfortably covers a download plus retries.
 pub const PACKAGE_SIGNED_URL_TTL_SECONDS: u64 = 60 * 60;
@@ -309,6 +318,36 @@ impl Storage {
         content_type: &str,
         content_disposition: &str,
     ) -> anyhow::Result<String> {
+        let bucket = Self::bucket(bucket_name)?;
+        Self::initiate_bucket_multipart(bucket, object_key, content_type, content_disposition, None)
+            .await
+    }
+
+    pub async fn initiate_crc_multipart(
+        bucket_name: &str,
+        object_key: &str,
+        content_type: &str,
+        content_disposition: &str,
+        crc64nvme: &str,
+    ) -> anyhow::Result<String> {
+        let bucket = Self::bucket(bucket_name)?;
+        Self::initiate_bucket_multipart(
+            bucket,
+            object_key,
+            content_type,
+            content_disposition,
+            Some(crc64nvme),
+        )
+        .await
+    }
+
+    async fn initiate_bucket_multipart(
+        mut bucket: Box<Bucket>,
+        object_key: &str,
+        content_type: &str,
+        content_disposition: &str,
+        crc64nvme: Option<&str>,
+    ) -> anyhow::Result<String> {
         // `add_header` unwraps whatever it cannot parse, so the value is checked
         // here instead of trusted: a header value is visible ASCII plus space.
         // `validate_file_name` already rejects anything else, and this keeps a
@@ -320,8 +359,12 @@ impl Storage {
             anyhow::bail!("Content-Disposition is not encodable as a header value");
         }
 
-        let mut bucket = Self::bucket(bucket_name)?;
         bucket.add_header("content-disposition", content_disposition);
+        if let Some(crc64nvme) = crc64nvme {
+            bucket.add_header(CHECKSUM_ALGORITHM_HEADER, CRC64NVME);
+            bucket.add_header(CHECKSUM_TYPE_HEADER, FULL_OBJECT);
+            bucket.add_header(CRC64NVME_METADATA_HEADER, crc64nvme);
+        }
 
         let response = bucket
             .initiate_multipart_upload(object_key, content_type)
@@ -422,6 +465,31 @@ impl Storage {
         parts: Vec<Part>,
     ) -> anyhow::Result<()> {
         let bucket = Self::bucket(bucket_name)?;
+        Self::complete_bucket_multipart(bucket, object_key, upload_id, parts, None).await
+    }
+
+    pub async fn complete_crc_multipart(
+        bucket_name: &str,
+        object_key: &str,
+        upload_id: &str,
+        parts: Vec<Part>,
+        crc64nvme: &str,
+    ) -> anyhow::Result<()> {
+        let bucket = Self::bucket(bucket_name)?;
+        Self::complete_bucket_multipart(bucket, object_key, upload_id, parts, Some(crc64nvme)).await
+    }
+
+    async fn complete_bucket_multipart(
+        mut bucket: Box<Bucket>,
+        object_key: &str,
+        upload_id: &str,
+        parts: Vec<Part>,
+        crc64nvme: Option<&str>,
+    ) -> anyhow::Result<()> {
+        if let Some(crc64nvme) = crc64nvme {
+            bucket.add_header(CRC64NVME_CHECKSUM_HEADER, crc64nvme);
+            bucket.add_header(CHECKSUM_TYPE_HEADER, FULL_OBJECT);
+        }
         let response = bucket
             .complete_multipart_upload(object_key, upload_id, parts)
             .await?;
@@ -535,6 +603,38 @@ impl Storage {
         Self::matches_bucket_object(&bucket, object_key, size, checksum).await
     }
 
+    pub async fn matches_crc_object(
+        bucket_name: &str,
+        object_key: &str,
+        size: i64,
+        crc64nvme: &str,
+    ) -> anyhow::Result<bool> {
+        let bucket = Self::bucket(bucket_name)?;
+        Self::matches_crc_bucket_object(&bucket, object_key, size, crc64nvme).await
+    }
+
+    async fn matches_crc_bucket_object(
+        bucket: &Bucket,
+        object_key: &str,
+        size: i64,
+        crc64nvme: &str,
+    ) -> anyhow::Result<bool> {
+        let (head, status) = match bucket.head_object(object_key).await {
+            Ok(response) => response,
+            Err(s3::error::S3Error::HttpFailWithBody(404, _)) => return Ok(false),
+            Err(error) => return Err(error.into()),
+        };
+        if status == 404 {
+            return Ok(false);
+        }
+        anyhow::ensure!(status == 200, "S3 object metadata read failed");
+        let stored = head
+            .metadata
+            .as_ref()
+            .and_then(|metadata| metadata.get(CRC64NVME_METADATA));
+        Ok(head.content_length == Some(size) && stored.map(String::as_str) == Some(crc64nvme))
+    }
+
     async fn matches_bucket_object(
         bucket: &Bucket,
         object_key: &str,
@@ -629,6 +729,12 @@ pub fn is_missing_upload(error: &anyhow::Error) -> bool {
     })
 }
 
+pub fn is_bad_digest(error: &anyhow::Error) -> bool {
+    error.downcast_ref::<s3::error::S3Error>().is_some_and(|error| {
+        matches!(error, s3::error::S3Error::HttpFailWithBody(_, body) if s3_error_code(body).as_deref() == Some(BAD_DIGEST))
+    })
+}
+
 fn missing_upload_body(body: &str) -> bool {
     s3_error_code(body).as_deref() == Some("NoSuchUpload")
 }
@@ -692,8 +798,8 @@ fn validate_completion(status: u16, body: &str) -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::{
-        Bucket, Credentials, HashMap, Storage, UploadMetrics, redacted, regional, url_lifetime,
-        validate_completion,
+        Bucket, Credentials, HashMap, Part, Storage, UploadMetrics, redacted, regional,
+        url_lifetime, validate_completion,
     };
 
     #[test]
@@ -776,6 +882,162 @@ mod tests {
                 vec![Method::HEAD]
             };
             assert_eq!(*calls.lock().unwrap(), expected_calls);
+        }
+        Ok(())
+    }
+
+    const CRC: &str = "zM77/A2gEEE=";
+
+    type Seen = std::sync::Arc<std::sync::Mutex<Vec<(axum::http::Method, axum::http::HeaderMap)>>>;
+
+    async fn fake_s3(
+        status: u16,
+        headers: Vec<(&'static str, &'static str)>,
+        body: &'static str,
+    ) -> anyhow::Result<(
+        Box<Bucket>,
+        Seen,
+        tokio::task::JoinHandle<std::io::Result<()>>,
+    )> {
+        use axum::{Router, body::Body, http::Request, response::Response, routing::any};
+        let seen = Seen::default();
+        let record = seen.clone();
+        let app = Router::new().fallback(any(move |request: Request<Body>| {
+            let record = record.clone();
+            let headers = headers.clone();
+            async move {
+                record
+                    .lock()
+                    .unwrap()
+                    .push((request.method().clone(), request.headers().clone()));
+                let mut response = Response::builder().status(status);
+                for (name, value) in headers {
+                    response = response.header(name, value);
+                }
+                response.body(Body::from(body)).unwrap()
+            }
+        }));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+        let endpoint = format!("http://{}", listener.local_addr()?);
+        let server = tokio::spawn(async move { axum::serve(listener, app).await });
+        let bucket = Bucket::new(
+            "bucket",
+            s3::Region::Custom {
+                region: "test".into(),
+                endpoint,
+            },
+            Credentials::new(Some("test"), Some("test"), None, None, None)?,
+        )?
+        .with_path_style();
+        Ok((bucket, seen, server))
+    }
+
+    fn header(seen: &Seen, index: usize, name: &str) -> Option<String> {
+        let seen = seen.lock().unwrap();
+        seen.get(index)?
+            .1
+            .get(name)
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_string)
+    }
+
+    #[tokio::test]
+    async fn crc_upload_asks_s3_for_a_full_object_checksum() -> anyhow::Result<()> {
+        const INITIATED: &str = "<InitiateMultipartUploadResult><Bucket>bucket</Bucket><Key>object</Key><UploadId>up</UploadId></InitiateMultipartUploadResult>";
+        for crc in [Some(CRC), None] {
+            let (bucket, seen, server) = fake_s3(200, vec![], INITIATED).await?;
+            let upload_id = Storage::initiate_bucket_multipart(
+                bucket,
+                "object",
+                "application/octet-stream",
+                "attachment",
+                crc,
+            )
+            .await;
+            server.abort();
+            assert_eq!(upload_id?, "up");
+            let expected = |value: &str| crc.map(|_| value.to_string());
+            assert_eq!(
+                header(&seen, 0, "x-amz-checksum-algorithm"),
+                expected("CRC64NVME")
+            );
+            assert_eq!(
+                header(&seen, 0, "x-amz-checksum-type"),
+                expected("FULL_OBJECT")
+            );
+            assert_eq!(header(&seen, 0, "x-amz-meta-crc64nvme"), expected(CRC));
+        }
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn crc_completion_sends_the_object_checksum() -> anyhow::Result<()> {
+        const COMPLETED: &str =
+            "<CompleteMultipartUploadResult><ETag>\"e\"</ETag></CompleteMultipartUploadResult>";
+        let (bucket, seen, server) = fake_s3(200, vec![], COMPLETED).await?;
+        let parts = vec![Part {
+            part_number: 1,
+            etag: "\"p\"".into(),
+        }];
+        let result =
+            Storage::complete_bucket_multipart(bucket, "object", "up", parts, Some(CRC)).await;
+        server.abort();
+        result?;
+        assert_eq!(
+            header(&seen, 0, "x-amz-checksum-crc64nvme").as_deref(),
+            Some(CRC)
+        );
+        assert_eq!(
+            header(&seen, 0, "x-amz-checksum-type").as_deref(),
+            Some("FULL_OBJECT")
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn crc_mismatch_is_a_bad_digest() -> anyhow::Result<()> {
+        const BAD_DIGEST: &str = "<Error><Code>BadDigest</Code><Message>The crc64nvme you specified did not match the calculated checksum.</Message></Error>";
+        let (bucket, _, server) = fake_s3(400, vec![], BAD_DIGEST).await?;
+        let result =
+            Storage::complete_bucket_multipart(bucket, "object", "up", vec![], Some(CRC)).await;
+        server.abort();
+        let Err(error) = result else {
+            anyhow::bail!("S3 refused the completion, so it must fail");
+        };
+        assert!(super::is_bad_digest(&error));
+        assert!(!super::is_missing_upload(&error));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn crc_object_check_reads_only_metadata() -> anyhow::Result<()> {
+        use axum::http::Method;
+        for (status, stored, size, expected) in [
+            (200, Some(CRC), 5, Some(true)),
+            (200, Some("AAAAAAAAAAA="), 5, Some(false)),
+            (200, None, 5, Some(false)),
+            (200, Some(CRC), 4, Some(false)),
+            (404, None, 5, Some(false)),
+            (503, None, 5, None),
+        ] {
+            let mut headers = vec![("content-length", "5")];
+            if let Some(stored) = stored {
+                headers.push(("x-amz-meta-crc64nvme", stored));
+            }
+            let (bucket, seen, server) = fake_s3(status, headers, "").await?;
+            let result = Storage::matches_crc_bucket_object(&bucket, "object", size, CRC).await;
+            server.abort();
+            match expected {
+                Some(value) => assert_eq!(result?, value),
+                None => assert!(result.is_err()),
+            }
+            let methods: Vec<Method> = seen
+                .lock()
+                .unwrap()
+                .iter()
+                .map(|(m, _)| m.clone())
+                .collect();
+            assert_eq!(methods, [Method::HEAD]);
         }
         Ok(())
     }

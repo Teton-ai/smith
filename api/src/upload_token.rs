@@ -19,6 +19,8 @@ pub struct UploadClaims {
     pub upload_id: String,
     pub size_bytes: i64,
     pub checksum: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub crc64nvme: Option<String>,
     pub expires_at: i64,
 }
 
@@ -93,6 +95,7 @@ mod tests {
             upload_id: "id/+".into(),
             size_bytes: 42,
             checksum: "b".repeat(64),
+            crc64nvme: None,
             expires_at: 100,
         };
         let token = key.sign(&claims).unwrap();
@@ -132,5 +135,31 @@ mod tests {
         }
         assert!(UploadTokenKey::new("short").is_err());
         assert!(!format!("{key:?}").contains(&"a".repeat(32)));
+    }
+
+    #[test]
+    fn tokens_from_before_crc64nvme_still_verify() {
+        let key = UploadTokenKey::new(&"a".repeat(32)).unwrap();
+        let old = serde_json::json!({
+            "device_id": 1, "bucket": "assets", "key": "clips/a", "upload_id": "up",
+            "size_bytes": 42, "checksum": "b".repeat(64), "expires_at": 100,
+        });
+        let payload = URL_SAFE_NO_PAD.encode(serde_json::to_vec(&old).unwrap());
+        let mut mac = Hmac::<Sha256>::new_from_slice(&"a".repeat(32).into_bytes()).unwrap();
+        mac.update(payload.as_bytes());
+        let token = format!(
+            "{payload}.{}",
+            URL_SAFE_NO_PAD.encode(mac.finalize().into_bytes())
+        );
+        let verified = key.verify(&token, 1, 99).unwrap();
+        assert_eq!(verified.crc64nvme, None);
+        let signed = key.sign(&verified).unwrap();
+        let (payload, _) = signed.split_once('.').unwrap();
+        let fields: serde_json::Value =
+            serde_json::from_slice(&URL_SAFE_NO_PAD.decode(payload).unwrap()).unwrap();
+        assert_eq!(
+            fields, old,
+            "a claim without a CRC signs the same fields as before"
+        );
     }
 }

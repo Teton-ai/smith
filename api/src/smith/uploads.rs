@@ -10,6 +10,7 @@ use axum::{
     http::{HeaderMap, HeaderValue, StatusCode, header},
     response::{IntoResponse, Response},
 };
+use base64::{Engine, engine::general_purpose::STANDARD};
 use futures::StreamExt;
 use serde::{Deserialize, Serialize};
 use std::sync::{
@@ -26,6 +27,7 @@ const TOKEN_TTL_SECONDS: i64 = 24 * 60 * 60;
 pub const RETRY_AFTER_SECONDS: &str = "30";
 /// Devices ask for fresh part URLs before this runs out.
 const PART_URL_TTL_SECONDS: u32 = 60 * 60;
+const CRC64NVME_BYTES: usize = 8;
 
 pub struct UploadError(StatusCode, &'static str);
 
@@ -49,6 +51,9 @@ impl IntoResponse for UploadError {
 }
 
 fn storage_error(error: anyhow::Error) -> UploadError {
+    if crate::storage::is_bad_digest(&error) {
+        return UploadError(StatusCode::UNPROCESSABLE_ENTITY, "ChecksumMismatch");
+    }
     if crate::storage::is_missing_upload(&error) {
         return UploadError(StatusCode::GONE, "NoSuchUpload");
     }
@@ -66,6 +71,8 @@ pub struct OpenUpload {
     checksum: String,
     #[serde(default)]
     sensitive: bool,
+    #[serde(default)]
+    crc64nvme: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, ToSchema)]
@@ -111,6 +118,13 @@ fn validate(request: &OpenUpload) -> Result<(), StatusCode> {
     {
         return Err(StatusCode::BAD_REQUEST);
     }
+    if let Some(crc64nvme) = &request.crc64nvme
+        && !STANDARD
+            .decode(crc64nvme)
+            .is_ok_and(|bytes| bytes.len() == CRC64NVME_BYTES)
+    {
+        return Err(StatusCode::BAD_REQUEST);
+    }
     Ok(())
 }
 
@@ -149,14 +163,22 @@ fn object_url(claims: &UploadClaims) -> String {
 }
 
 async fn matches_object(claims: &UploadClaims) -> Result<bool, UploadError> {
-    Storage::matches_object(
-        &claims.bucket,
-        &claims.key,
-        claims.size_bytes,
-        &claims.checksum,
-    )
-    .await
-    .map_err(storage_error)
+    let matched = match &claims.crc64nvme {
+        Some(crc64nvme) => {
+            Storage::matches_crc_object(&claims.bucket, &claims.key, claims.size_bytes, crc64nvme)
+                .await
+        }
+        None => {
+            Storage::matches_object(
+                &claims.bucket,
+                &claims.key,
+                claims.size_bytes,
+                &claims.checksum,
+            )
+            .await
+        }
+    };
+    matched.map_err(storage_error)
 }
 
 async fn plan(claims: &UploadClaims) -> Result<UploadPlan, UploadError> {
@@ -291,13 +313,27 @@ pub async fn open(
     } else {
         &state.config.assets_bucket_name
     };
-    let upload_id = Storage::initiate_multipart(
-        bucket,
-        &request.key,
-        "application/octet-stream",
-        "attachment",
-    )
-    .await
+    let upload_id = match &request.crc64nvme {
+        Some(crc64nvme) => {
+            Storage::initiate_crc_multipart(
+                bucket,
+                &request.key,
+                "application/octet-stream",
+                "attachment",
+                crc64nvme,
+            )
+            .await
+        }
+        None => {
+            Storage::initiate_multipart(
+                bucket,
+                &request.key,
+                "application/octet-stream",
+                "attachment",
+            )
+            .await
+        }
+    }
     .map_err(storage_error)?;
     let claims = UploadClaims {
         device_id: device.id,
@@ -306,6 +342,7 @@ pub async fn open(
         upload_id: upload_id.clone(),
         size_bytes: request.size_bytes,
         checksum: request.checksum,
+        crc64nvme: request.crc64nvme,
         expires_at: chrono::Utc::now().timestamp() + TOKEN_TTL_SECONDS,
     };
     let token = state
@@ -423,19 +460,35 @@ pub async fn complete(
             return Err(UploadError(StatusCode::CONFLICT, "MissingParts"));
         }
         let parts = plan.confirmed_parts.len() as u64;
-        let result = Storage::complete_multipart(
-            &claims.bucket,
-            &claims.key,
-            &claims.upload_id,
-            plan.confirmed_parts
-                .into_iter()
-                .map(|part| s3::serde_types::Part {
-                    part_number: part.part_number as u32,
-                    etag: part.etag,
-                })
-                .collect(),
-        )
-        .await;
+        let confirmed: Vec<s3::serde_types::Part> = plan
+            .confirmed_parts
+            .into_iter()
+            .map(|part| s3::serde_types::Part {
+                part_number: part.part_number as u32,
+                etag: part.etag,
+            })
+            .collect();
+        let result = match &claims.crc64nvme {
+            Some(crc64nvme) => {
+                Storage::complete_crc_multipart(
+                    &claims.bucket,
+                    &claims.key,
+                    &claims.upload_id,
+                    confirmed,
+                    crc64nvme,
+                )
+                .await
+            }
+            None => {
+                Storage::complete_multipart(
+                    &claims.bucket,
+                    &claims.key,
+                    &claims.upload_id,
+                    confirmed,
+                )
+                .await
+            }
+        };
         let verified = matches_object(&claims).await?;
         if let Err(error) = result
             && !verified
@@ -460,12 +513,46 @@ mod tests {
     use super::*;
 
     #[test]
+    fn validates_crc64nvme_as_eight_base64_bytes() {
+        let mut request = OpenUpload {
+            key: "clips/one.mp4".into(),
+            size_bytes: 1,
+            checksum: "a".repeat(64),
+            sensitive: false,
+            crc64nvme: Some("zM77/A2gEEE=".into()),
+        };
+        assert_eq!(validate(&request), Ok(()));
+        for crc in [
+            "",
+            "zM77/A2gEEE",
+            "zM77/A2gEEEA",
+            "zM77/A2gEEE=\n",
+            "AAAAAAAAAAAAAAAA",
+        ] {
+            request.crc64nvme = Some(crc.into());
+            assert_eq!(validate(&request), Err(StatusCode::BAD_REQUEST), "{crc:?}");
+        }
+    }
+
+    #[test]
+    fn bad_digest_is_a_checksum_mismatch() {
+        let body = "<Error><Code>BadDigest</Code></Error>";
+        let error = anyhow::Error::from(s3::error::S3Error::HttpFailWithBody(400, body.into()));
+        let UploadError(status, code) = storage_error(error);
+        assert_eq!(
+            (status, code),
+            (StatusCode::UNPROCESSABLE_ENTITY, "ChecksumMismatch")
+        );
+    }
+
+    #[test]
     fn validates_immutable_identity_and_ranges() {
         let mut request = OpenUpload {
             key: "clips/one.mp4".into(),
             size_bytes: PART_SIZE + 1,
             checksum: "a".repeat(64),
             sensitive: true,
+            crc64nvme: None,
         };
         assert_eq!(validate(&request), Ok(()));
         assert_eq!(part_length(request.size_bytes, 1).ok(), Some(PART_SIZE));
