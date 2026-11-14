@@ -506,7 +506,10 @@ impl Storage {
             && is_bad_digest(refused)
             && let Err(abort) = bucket.abort_upload(object_key, upload_id).await
         {
-            error!("Failed to abort an upload S3 refused as BadDigest: {abort}");
+            error!(
+                error = redacted(&anyhow::Error::from(abort)),
+                "Failed to abort an upload S3 refused as BadDigest"
+            );
         }
 
         completed
