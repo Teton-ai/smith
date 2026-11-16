@@ -187,6 +187,7 @@ pub async fn get_devices(
             ip.hosting as "ip_hosting?",
             ip.created_at as "ip_created_at?",
             ip.updated_at as "ip_updated_at?",
+            ip.max_concurrent_downloads as "ip_max_concurrent_downloads?",
             m.id as "modem_id_nested?",
             m.imei as "modem_imei?",
             m.network_provider as "modem_network_provider?",
@@ -374,6 +375,7 @@ pub async fn get_devices(
                     proxy: row.ip_proxy,
                     hosting: row.ip_hosting,
                     device_count: None,
+                    max_concurrent_downloads: row.ip_max_concurrent_downloads,
                     created_at: row.ip_created_at.unwrap(),
                     updated_at: row.ip_updated_at.unwrap(),
                 })
@@ -2168,6 +2170,7 @@ pub async fn load_device_info(
         ip.hosting as "ip_hosting?",
         ip.created_at as "ip_created_at?",
         ip.updated_at as "ip_updated_at?",
+        ip.max_concurrent_downloads as "ip_max_concurrent_downloads?",
         m.id as "modem_id_nested?",
         m.imei as "modem_imei?",
         m.network_provider as "modem_network_provider?",
@@ -2260,6 +2263,7 @@ pub async fn load_device_info(
             proxy: device_row.ip_proxy,
             hosting: device_row.ip_hosting,
             device_count: None,
+            max_concurrent_downloads: device_row.ip_max_concurrent_downloads,
             created_at: device_row.ip_created_at.unwrap(),
             updated_at: device_row.ip_updated_at.unwrap(),
         })

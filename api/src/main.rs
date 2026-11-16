@@ -358,6 +358,7 @@ async fn start_main_server(
             ip_address::route::get_ip_address_info,
             ip_address::route::update_ip_address
         ))
+        .routes(routes!(ip_address::route::update_download_limit))
         .routes(routes!(release::route::get_releases))
         .routes(routes!(
             release::route::get_release,
