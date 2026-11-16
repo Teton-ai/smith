@@ -16,6 +16,7 @@ import {
 	ChevronRight,
 	Cpu,
 	HardDrive,
+	Loader2,
 	Minus,
 	Monitor,
 	Package,
@@ -28,8 +29,8 @@ import {
 import React, { useCallback, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router";
 import {
+	type DistributionRelease,
 	type Package as PackageType,
-	type Release,
 	useCreateDistributionRelease,
 	useGetDistributionById,
 	useGetDistributionLatestRelease,
@@ -74,7 +75,7 @@ const getArchVariant = (architecture: string): BadgeVariant => {
 };
 
 interface ReleaseRowProps {
-	release: Release;
+	release: DistributionRelease;
 	compareMode: boolean;
 	isSelected: boolean;
 	selectionLabel: string | null;
@@ -116,6 +117,12 @@ const ReleaseRow = React.memo(function ReleaseRow({
 						{isDeployed && (
 							<Badge variant="green" pill>
 								Deployed
+							</Badge>
+						)}
+						{release.deploying && (
+							<Badge variant="blue" pill className="inline-flex items-center">
+								<Loader2 className="w-3 h-3 mr-1 animate-spin" />
+								Deploying
 							</Badge>
 						)}
 						{release.draft && (
@@ -203,10 +210,14 @@ const DistributionDetailPage = () => {
 		useGetDistributionReleases(
 			distributionId,
 			ltsOnly ? { lts: true } : undefined,
+			{ query: { refetchInterval: 5000 } },
 		);
 
-	const { data: deployedRelease } =
-		useGetDistributionLatestRelease(distributionId);
+	// Polled with the release list so the Deployed badge follows completions.
+	const { data: deployedRelease } = useGetDistributionLatestRelease(
+		distributionId,
+		{ query: { refetchInterval: 5000 } },
+	);
 
 	// Use the most recent stable release as the base for new drafts
 	const baseRelease = allReleases.find(isStableRelease) || allReleases[0];

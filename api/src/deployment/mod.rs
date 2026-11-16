@@ -237,10 +237,52 @@ pub struct DeploymentDeviceWithStatus {
     pub labels: SqlxJson<HashMap<String, String>>,
 }
 
+/// RCs have no fleet-confirmation phase. Finish after all selected devices
+/// report the deployed release; target assignment alone does not count.
+/// Watchdog services must be healthy too, as for a full-rollout confirm,
+/// since completion unlocks promotion.
+pub async fn complete_candidate_deployment(release_id: i32, pool: &PgPool) -> sqlx::Result<()> {
+    complete_candidate_deployments(&[release_id], pool).await
+}
+
+pub async fn complete_candidate_deployments(
+    release_ids: &[i32],
+    pool: &PgPool,
+) -> sqlx::Result<()> {
+    sqlx::query!(
+        "UPDATE deployment dep SET status = 'done', updated_at = NOW()
+         FROM release r
+         WHERE dep.release_id = ANY($1) AND r.id = dep.release_id AND r.release_candidate
+           AND NOT r.yanked AND dep.status = 'in_progress'
+           AND EXISTS (SELECT 1 FROM deployment_devices dd WHERE dd.deployment_id = dep.id)
+           AND NOT EXISTS (
+               SELECT 1 FROM deployment_devices dd JOIN device dev ON dev.id = dd.device_id
+               WHERE dd.deployment_id = dep.id AND dev.release_id IS DISTINCT FROM dep.release_id
+           )
+           AND NOT EXISTS (
+               SELECT 1 FROM deployment_devices dd
+               JOIN release_services rs
+                 ON rs.release_id = dep.release_id AND rs.watchdog_sec IS NOT NULL
+               WHERE dd.deployment_id = dep.id
+                 AND NOT EXISTS (
+                     SELECT 1 FROM device_service_status dss
+                     WHERE dss.device_id = dd.device_id
+                       AND dss.release_service_id = rs.id
+                       AND dss.active_state = 'active'
+                 )
+           )",
+        release_ids,
+    )
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
 pub async fn get_deployment(
     release_id: i32,
     pg_pool: &PgPool,
 ) -> anyhow::Result<Option<Deployment>> {
+    complete_candidate_deployment(release_id, pg_pool).await?;
     Ok(sqlx::query_as!(
         Deployment,
         r#"
@@ -511,6 +553,21 @@ pub async fn confirm_full_rollout(
     .fetch_one(&mut *tx)
     .await?;
 
+    let release = sqlx::query!(
+        "SELECT distribution_id, release_candidate, yanked FROM release WHERE id = $1",
+        release_id
+    )
+    .fetch_one(&mut *tx)
+    .await?;
+
+    // Before the Done shortcut: completed RC deployments are also Done, and
+    // must not report a successful fleet confirmation.
+    if release.release_candidate {
+        return Err(ApiError::bad_request(
+            "Cannot perform full rollout for a release candidate",
+        ));
+    }
+
     match deployment.status {
         DeploymentStatus::Done => return Ok(deployment),
         DeploymentStatus::InProgress => {}
@@ -522,18 +579,6 @@ pub async fn confirm_full_rollout(
         }
     }
 
-    let release = sqlx::query!(
-        "SELECT distribution_id, release_candidate, yanked FROM release WHERE id = $1",
-        release_id
-    )
-    .fetch_one(&mut *tx)
-    .await?;
-
-    if release.release_candidate {
-        return Err(ApiError::bad_request(
-            "Cannot perform full rollout for a release candidate",
-        ));
-    }
     if release.yanked {
         return Err(ApiError::bad_request(
             "Cannot perform full rollout for a yanked release",
@@ -1219,6 +1264,187 @@ pub(crate) mod tests {
             .into_iter()
             .map(|(id, secs)| (id, secs.map(|secs| (secs / 60.0).round() as i64)))
             .collect())
+    }
+
+    #[sqlx::test]
+    #[ignore = "needs disposable Postgres; run with --test-threads=1"]
+    async fn candidate_completion_requires_all_reports_and_preserves_stable_gate(
+        pool: PgPool,
+    ) -> anyhow::Result<()> {
+        let [current, candidate, stable, empty_candidate] = insert_releases(&pool).await?;
+        sqlx::query("UPDATE release SET draft=false, release_candidate=(id=ANY($1))")
+            .bind(vec![candidate, empty_candidate])
+            .execute(&pool)
+            .await?;
+        let devices = insert_devices(&pool, 3, Some(current)).await?;
+        let ids: Vec<i32> = sqlx::query_scalar("INSERT INTO deployment(release_id,status) SELECT n,'in_progress' FROM UNNEST($1::int[]) n RETURNING id")
+            .bind(vec![candidate,stable,empty_candidate]).fetch_all(&pool).await?;
+        sqlx::query(
+            "INSERT INTO deployment_devices(deployment_id,device_id) VALUES($1,$2),($1,$3),($4,$5)",
+        )
+        .bind(ids[0])
+        .bind(devices[0])
+        .bind(devices[1])
+        .bind(ids[1])
+        .bind(devices[2])
+        .execute(&pool)
+        .await?;
+        sqlx::query("UPDATE device SET target_release_id=$1 WHERE id=ANY($2)")
+            .bind(candidate)
+            .bind(&devices[..2])
+            .execute(&pool)
+            .await?;
+        let status = |id| {
+            let pool = pool.clone();
+            async move {
+                sqlx::query_scalar::<_, String>("SELECT status::text FROM deployment WHERE id=$1")
+                    .bind(id)
+                    .fetch_one(&pool)
+                    .await
+            }
+        };
+        complete_candidate_deployment(candidate, &pool).await?;
+        assert_eq!(
+            status(ids[0]).await?,
+            "in_progress",
+            "assigning targets is not completion"
+        );
+        crate::device::save_release_id(devices[0], Some(candidate), &pool).await?;
+        assert_eq!(
+            status(ids[0]).await?,
+            "in_progress",
+            "one device still has not reported"
+        );
+        let service_id: i32 = sqlx::query_scalar(
+            "INSERT INTO release_services(release_id,service_name,watchdog_sec) VALUES($1,'app',30) RETURNING id",
+        )
+        .bind(candidate)
+        .fetch_one(&pool)
+        .await?;
+        let report_health = |device, state: &'static str| {
+            let pool = pool.clone();
+            async move {
+                sqlx::query("INSERT INTO device_service_status(device_id,release_service_id,active_state) VALUES($1,$2,$3) ON CONFLICT (device_id,release_service_id) DO UPDATE SET active_state=EXCLUDED.active_state")
+                    .bind(device)
+                    .bind(service_id)
+                    .bind(state)
+                    .execute(&pool)
+                    .await
+            }
+        };
+        report_health(devices[0], "active").await?;
+        report_health(devices[1], "failed").await?;
+        tokio::try_join!(
+            crate::device::save_release_id(devices[0], Some(candidate), &pool),
+            crate::device::save_release_id(devices[1], Some(candidate), &pool),
+        )?;
+        assert_eq!(
+            status(ids[0]).await?,
+            "in_progress",
+            "an unhealthy watchdog service blocks completion"
+        );
+        report_health(devices[1], "active").await?;
+        crate::device::save_release_id(devices[1], Some(candidate), &pool).await?;
+        assert_eq!(status(ids[0]).await?, "done");
+
+        // Simulate a completion that failed after the report committed: the
+        // next, unchanged report must still finish the deployment.
+        sqlx::query("UPDATE deployment SET status='in_progress' WHERE id=$1")
+            .bind(ids[0])
+            .execute(&pool)
+            .await?;
+        crate::device::save_release_id(devices[0], Some(candidate), &pool).await?;
+        assert_eq!(
+            status(ids[0]).await?,
+            "done",
+            "unchanged reports retry completion"
+        );
+
+        crate::device::save_release_id(devices[2], Some(stable), &pool).await?;
+        assert_eq!(
+            status(ids[1]).await?,
+            "in_progress",
+            "stable canaries still need fleet confirmation"
+        );
+        complete_candidate_deployment(empty_candidate, &pool).await?;
+        assert_eq!(
+            status(ids[2]).await?,
+            "in_progress",
+            "an empty selection must not complete"
+        );
+        let state = crate::smith::uploads::integration_tests::test_state(pool.clone())?;
+        let axum::Json(releases) = crate::distribution::route::get_distribution_releases(
+            axum::extract::Path(
+                sqlx::query_scalar::<_, i32>("SELECT distribution_id FROM release WHERE id=$1")
+                    .bind(current)
+                    .fetch_one(&pool)
+                    .await?,
+            ),
+            axum::Extension(state.clone()),
+            axum::extract::Query(models::release::ReleaseFilter::default()),
+        )
+        .await
+        .map_err(|err| anyhow::anyhow!("{err:?}"))?;
+        assert!(
+            !releases
+                .iter()
+                .find(|r| r.release.id == candidate)
+                .unwrap()
+                .deploying
+        );
+        assert!(
+            releases
+                .iter()
+                .find(|r| r.release.id == stable)
+                .unwrap()
+                .deploying
+        );
+        let response = serde_json::to_value(&releases)?;
+        assert!(response[0].get("version").is_some());
+        assert!(response[0].get("deploying").is_some());
+        assert!(
+            response[0].get("release").is_none(),
+            "release fields must remain flat for existing clients"
+        );
+        let fleet_state = || {
+            let pool = pool.clone();
+            async move {
+                sqlx::query_as::<_, (i32, Option<i32>, Option<i32>)>(
+                    "SELECT d.id, d.target_release_id, dist.latest_release_id
+                     FROM device d, release r JOIN distribution dist ON dist.id = r.distribution_id
+                     WHERE r.id = $1 ORDER BY d.id",
+                )
+                .bind(current)
+                .fetch_all(&pool)
+                .await
+            }
+        };
+        let before = fleet_state().await?;
+        assert!(
+            confirm_full_rollout(candidate, &pool, state.config, None)
+                .await
+                .is_err(),
+            "a completed RC must still reject fleet confirmation"
+        );
+        assert_eq!(
+            fleet_state().await?,
+            before,
+            "rejected RC confirm has no side effects"
+        );
+        sqlx::query("UPDATE deployment SET status='done' WHERE id=$1")
+            .bind(ids[1])
+            .execute(&pool)
+            .await?;
+        let confirmed = confirm_full_rollout(stable, &pool, state.config, None)
+            .await
+            .map_err(|err| anyhow::anyhow!("{err:?}"))?;
+        assert_eq!(
+            confirmed.status,
+            DeploymentStatus::Done,
+            "stable confirm stays idempotent"
+        );
+        assert_eq!(fleet_state().await?, before);
+        Ok(())
     }
 
     #[sqlx::test]

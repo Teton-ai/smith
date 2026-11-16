@@ -293,12 +293,18 @@ impl SmithMcp {
         let filter = ReleaseFilter { lts: params.lts };
         let AxumJson(mut releases) = match params.distribution_id {
             Some(distribution_id) => {
-                call(distribution_route::get_distribution_releases(
+                let AxumJson(releases) = call(distribution_route::get_distribution_releases(
                     Path(distribution_id),
                     AxumExtension(self.state.clone()),
                     Query(filter),
                 ))
-                .await?
+                .await?;
+                AxumJson(
+                    releases
+                        .into_iter()
+                        .map(|release| release.release)
+                        .collect(),
+                )
             }
             None => {
                 call(release_route::get_releases(
@@ -359,6 +365,11 @@ impl SmithMcp {
             Query(ReleaseFilter::default()),
         ))
         .await?;
+
+        let releases: Vec<_> = releases
+            .into_iter()
+            .map(|release| release.release)
+            .collect();
 
         // Releases come back newest first, matching `sm releases draft`.
         let base = match params.base_release_id {

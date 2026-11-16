@@ -859,6 +859,10 @@ export interface Distribution {
 	num_packages?: number;
 }
 
+export type DistributionRelease = Release & {
+	deploying: boolean;
+};
+
 export interface DistributionRolloutStats {
 	distribution_id: number;
 	pending_devices?: number;
@@ -14483,7 +14487,7 @@ export const useUpdateDistributionArchived = <
 };
 
 export const useGetDistributionReleasesHook = () => {
-	const getDistributionReleases = useClientMutator<Release[]>();
+	const getDistributionReleases = useClientMutator<DistributionRelease[]>();
 
 	return useCallback(
 		(

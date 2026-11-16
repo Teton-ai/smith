@@ -8,8 +8,9 @@ use axum::http::StatusCode;
 use axum::{Extension, Json};
 use models::distribution::{Distribution, NewDistributionRelease};
 use models::release::{Release, ReleaseFilter};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use smith::utils::schema::Package;
+use std::collections::HashSet;
 use tracing::{error, warn};
 
 const DISTRIBUTIONS_TAG: &str = "distributions";
@@ -168,6 +169,13 @@ pub async fn get_distribution_by_id(
     Ok(Json(distribution))
 }
 
+#[derive(Serialize, utoipa::ToSchema)]
+pub struct DistributionRelease {
+    #[serde(flatten)]
+    pub release: Release,
+    pub deploying: bool,
+}
+
 #[utoipa::path(
     get,
     path = "/distributions/{distribution_id}/releases",
@@ -176,7 +184,7 @@ pub async fn get_distribution_by_id(
         ReleaseFilter,
     ),
     responses(
-        (status = StatusCode::OK, description = "List of releases from given distribution retrieved successfully", body = Vec<Release>),
+        (status = StatusCode::OK, description = "List of releases from given distribution retrieved successfully", body = Vec<DistributionRelease>),
         (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to distribution releases"),
     ),
     security(
@@ -188,7 +196,7 @@ pub async fn get_distribution_releases(
     Path(distribution_id): Path<i32>,
     Extension(state): Extension<State>,
     Query(filter): Query<ReleaseFilter>,
-) -> axum::response::Result<Json<Vec<Release>>, StatusCode> {
+) -> axum::response::Result<Json<Vec<DistributionRelease>>, StatusCode> {
     let releases = sqlx::query_as!(
         Release,
         r#"
@@ -212,7 +220,34 @@ pub async fn get_distribution_releases(
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
 
-    Ok(Json(releases))
+    let release_ids: Vec<i32> = releases.iter().map(|release| release.id).collect();
+    crate::deployment::complete_candidate_deployments(&release_ids, &state.pg_pool)
+        .await
+        .map_err(|err| {
+            error!("Failed to refresh candidate deployments {err}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+    let deploying: HashSet<i32> = sqlx::query_scalar!(
+        "SELECT release_id FROM deployment WHERE release_id = ANY($1) AND status = 'in_progress'",
+        &release_ids,
+    )
+    .fetch_all(&state.pg_pool)
+    .await
+    .map_err(|err| {
+        error!("Failed to get deployment states {err}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?
+    .into_iter()
+    .collect();
+    Ok(Json(
+        releases
+            .into_iter()
+            .map(|release| DistributionRelease {
+                deploying: !release.draft && !release.yanked && deploying.contains(&release.id),
+                release,
+            })
+            .collect(),
+    ))
 }
 
 #[utoipa::path(

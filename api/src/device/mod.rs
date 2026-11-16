@@ -1202,7 +1202,8 @@ pub async fn save_release_id(
             .fetch_one(&mut *tx)
             .await?;
 
-        if current.release_id != Some(new_release_id) {
+        let release_changed = current.release_id != Some(new_release_id);
+        if release_changed {
             sqlx::query!(
                 "UPDATE device SET release_id = $1 WHERE id = $2",
                 new_release_id,
@@ -1230,6 +1231,11 @@ pub async fn save_release_id(
         }
 
         tx.commit().await?;
+        // Use a fresh snapshot after committing the device report. Concurrent
+        // final reports must not leave an otherwise-complete RC in progress.
+        // Run on unchanged reports too: a completion that failed after the
+        // commit above would otherwise never be retried by later reports.
+        crate::deployment::complete_candidate_deployment(new_release_id, pool).await?;
     }
     Ok(())
 }

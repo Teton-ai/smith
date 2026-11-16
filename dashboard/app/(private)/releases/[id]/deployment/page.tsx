@@ -11,7 +11,7 @@ import {
 	XCircle,
 } from "lucide-react";
 import moment from "moment";
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import {
 	type Deployment,
@@ -150,6 +150,7 @@ const DeploymentStatusPage = () => {
 	const queryClient = useQueryClient();
 	const [elapsedTime, setElapsedTime] = useState(0);
 	const [promoteVersion, setPromoteVersion] = useState("");
+	const promoteVersionId = useId();
 	const [confirmError, setConfirmError] = useState<string | null>(null);
 
 	const { data: release, isLoading: releaseLoading } = useGetRelease(releaseId);
@@ -342,6 +343,61 @@ const DeploymentStatusPage = () => {
 		);
 	}
 
+	const candidatePromotionPanel = (
+		<div className="mt-4 p-3 bg-orange-50 border border-orange-200 rounded-lg space-y-3">
+			<p className="text-sm text-orange-800">
+				<strong>Release Candidate:</strong> Full rollout is not available for RC
+				releases. Promote this to a stable release to deploy fleet-wide.
+			</p>
+			{alreadyPromoted && (
+				<p className="text-sm text-orange-700">
+					A stable release for this version already exists:{" "}
+					<Link
+						to={`/releases/${alreadyPromoted.id}`}
+						className="underline font-medium"
+					>
+						v{alreadyPromoted.version}
+					</Link>
+				</p>
+			)}
+			<div className="flex items-end gap-2">
+				<div className="flex-1">
+					<label
+						htmlFor={promoteVersionId}
+						className="block text-xs font-medium text-gray-700 mb-1"
+					>
+						New release version
+					</label>
+					<input
+						id={promoteVersionId}
+						type="text"
+						placeholder={release.version.replace(/-rc.*$/, "")}
+						value={promoteVersion}
+						onChange={(e) => setPromoteVersion(e.target.value)}
+						className="w-full px-2.5 py-1.5 text-sm bg-white text-gray-900 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500 placeholder:text-gray-400"
+					/>
+				</div>
+				<Button
+					loading={promoteReleaseHook.isPending}
+					disabled={!promoteVersion.trim()}
+					icon={
+						!promoteReleaseHook.isPending ? (
+							<Rocket className="w-4 h-4" />
+						) : undefined
+					}
+					onClick={() => {
+						promoteReleaseHook.mutate({
+							releaseId,
+							data: { version: promoteVersion.trim() },
+						});
+					}}
+				>
+					{promoteReleaseHook.isPending ? "Promoting..." : "Promote to Release"}
+				</Button>
+			</div>
+		</div>
+	);
+
 	return (
 		<div className="flex-1 overflow-y-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
 			<div className="flex items-center space-x-4">
@@ -460,70 +516,20 @@ const DeploymentStatusPage = () => {
 								>
 									{deployment.status === "InProgress" && (
 										<div className="space-y-2">
-											<p className="font-medium">Phase 1: Canary Deployment</p>
+											<p className="font-medium">
+												{release.release_candidate
+													? "Release Candidate Deployment"
+													: "Phase 1: Canary Deployment"}
+											</p>
 											{isCanaryComplete() ? (
 												<>
 													<p>
-														All canary devices have been successfully updated!
+														{release.release_candidate
+															? "All selected devices have been successfully updated!"
+															: "All canary devices have been successfully updated!"}
 													</p>
 													{release.release_candidate ? (
-														<div className="mt-4 p-3 bg-orange-50 border border-orange-200 rounded-lg space-y-3">
-															<p className="text-sm text-orange-800">
-																<strong>Release Candidate:</strong> Full rollout
-																is not available for RC releases. Promote this
-																to a stable release to deploy fleet-wide.
-															</p>
-															{alreadyPromoted && (
-																<p className="text-sm text-orange-700">
-																	A stable release for this version already
-																	exists:{" "}
-																	<Link
-																		to={`/releases/${alreadyPromoted.id}`}
-																		className="underline font-medium"
-																	>
-																		v{alreadyPromoted.version}
-																	</Link>
-																</p>
-															)}
-															<div className="flex items-end gap-2">
-																<div className="flex-1">
-																	<label className="block text-xs font-medium text-gray-700 mb-1">
-																		New release version
-																	</label>
-																	<input
-																		type="text"
-																		placeholder={release.version.replace(
-																			/-rc.*$/,
-																			"",
-																		)}
-																		value={promoteVersion}
-																		onChange={(e) =>
-																			setPromoteVersion(e.target.value)
-																		}
-																		className="w-full px-2.5 py-1.5 text-sm bg-white text-gray-900 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500 placeholder:text-gray-400"
-																	/>
-																</div>
-																<Button
-																	loading={promoteReleaseHook.isPending}
-																	disabled={!promoteVersion.trim()}
-																	icon={
-																		!promoteReleaseHook.isPending ? (
-																			<Rocket className="w-4 h-4" />
-																		) : undefined
-																	}
-																	onClick={() => {
-																		promoteReleaseHook.mutate({
-																			releaseId,
-																			data: { version: promoteVersion.trim() },
-																		});
-																	}}
-																>
-																	{promoteReleaseHook.isPending
-																		? "Promoting..."
-																		: "Promote to Release"}
-																</Button>
-															</div>
-														</div>
+														candidatePromotionPanel
 													) : (
 														<div className="mt-4">
 															<Button
@@ -566,12 +572,17 @@ const DeploymentStatusPage = () => {
 									)}
 									{deployment.status === "Done" && (
 										<div className="space-y-2">
-											<p className="font-medium">All phases complete!</p>
-											<p>
-												The release has been successfully deployed. All devices
-												in this distribution will update to v{release.version}{" "}
-												as their group opens and they come online.
+											<p className="font-medium">
+												{release.release_candidate
+													? "Release candidate deployed"
+													: "All phases complete!"}
 											</p>
+											<p>
+												{release.release_candidate
+													? "All selected devices are running this release candidate. The rest of the distribution is unchanged."
+													: `The release has been successfully deployed. All devices in this distribution will update to v${release.version} as their group opens and they come online.`}
+											</p>
+											{release.release_candidate && candidatePromotionPanel}
 										</div>
 									)}
 									{deployment.status === "Failed" && (
@@ -602,7 +613,7 @@ const DeploymentStatusPage = () => {
 										</p>
 									</div>
 								)}
-							{deployment.status === "Done" && (
+							{deployment.status === "Done" && !release.release_candidate && (
 								<StaggeredRolloutProgress releaseId={releaseId} />
 							)}
 						</div>
@@ -614,7 +625,7 @@ const DeploymentStatusPage = () => {
 									every 5 seconds to show the latest status.{" "}
 									{isCanaryComplete()
 										? release.release_candidate
-											? "RC canary deployment is complete."
+											? "Release candidate deployment is complete."
 											: "Please confirm full rollout to proceed."
 										: "You can safely navigate away and return later."}
 								</p>

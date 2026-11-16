@@ -161,6 +161,7 @@ const ReleaseDetailPage = () => {
 	const { data: existingDeployment } = useApiGetReleaseDeployment(releaseId, {
 		query: {
 			enabled: !!releaseId && !!release && !release.draft && !release.yanked,
+			refetchInterval: 5000,
 			retry: false,
 		},
 	});

@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE deployment dep SET status = 'done', updated_at = NOW()\n         FROM release r\n         WHERE dep.release_id = ANY($1) AND r.id = dep.release_id AND r.release_candidate\n           AND NOT r.yanked AND dep.status = 'in_progress'\n           AND EXISTS (SELECT 1 FROM deployment_devices dd WHERE dd.deployment_id = dep.id)\n           AND NOT EXISTS (\n               SELECT 1 FROM deployment_devices dd JOIN device dev ON dev.id = dd.device_id\n               WHERE dd.deployment_id = dep.id AND dev.release_id IS DISTINCT FROM dep.release_id\n           )\n           AND NOT EXISTS (\n               SELECT 1 FROM deployment_devices dd\n               JOIN release_services rs\n                 ON rs.release_id = dep.release_id AND rs.watchdog_sec IS NOT NULL\n               WHERE dd.deployment_id = dep.id\n                 AND NOT EXISTS (\n                     SELECT 1 FROM device_service_status dss\n                     WHERE dss.device_id = dd.device_id\n                       AND dss.release_service_id = rs.id\n                       AND dss.active_state = 'active'\n                 )\n           )",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int4Array"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "31abbfb67a06cb82e82cd4456060ba477a867579066f470595e61fbb6241f2b9"
+}
