@@ -15,7 +15,7 @@ use std::{collections::HashMap, sync::Arc, time::Duration};
 use tokio::sync::{Mutex, Semaphore, broadcast};
 use uuid::Uuid;
 
-fn test_state(pool: PgPool) -> anyhow::Result<State> {
+pub(crate) fn test_state(pool: PgPool) -> anyhow::Result<State> {
     test_state_with_cdn(pool, None)
 }
 
