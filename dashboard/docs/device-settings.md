@@ -98,5 +98,5 @@ Each setting shows one of these states, taken from the device's last report.
 
 On the **Devices** page, select devices to use **Edit settings** and **Apply settings** next to **Deploy to Selected**.
 
-- **Edit settings** needs every selected device on the same distribution, since the defaults and supported settings depend on it. With a mix, the dialog shows a message instead of the form. The form is the same as for one device, without **Hostname**, which is always per device. Only the groups you touch are changed.
+- **Edit settings** needs every selected device on the same distribution, since the defaults and supported settings depend on it. With a mix, the dialog shows a message instead of the form. The form is the same as for one device, without **Hostname**, which is always per device. Each group starts as **Unchanged**, with neither option selected, since the selected devices may have different pins. Only the groups you touch are changed: picking **Default** on a group removes its pin on every selected device.
 - **Apply settings** works on any selection, and queues one staggered bundle with a command per device. Devices with nothing to apply (settings version 0) are skipped. Driver settings can reload the Wi-Fi driver on each device, with the same 90 second self revert.

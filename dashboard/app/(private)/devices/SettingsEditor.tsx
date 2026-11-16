@@ -231,7 +231,9 @@ const GroupRow = ({
 						<input
 							type="radio"
 							name={name}
-							checked={draft.mode === "default"}
+							// Bulk starts unchanged, not reset: leaving Default unchecked
+							// until picked lets a click on it record the reset.
+							checked={draft.mode === "default" && (!bulk || touched)}
 							onChange={onDefault}
 						/>
 						{defaultLabel(group, defaults)}
@@ -345,7 +347,9 @@ const SettingsEditor = ({
 
 	const touchedCount = Object.keys(edits).length;
 	return (
-		<div className="space-y-4">
+		// Disabled while saving: the editor closes on success, which would drop
+		// any edit made after Save was pressed.
+		<fieldset disabled={saving} className="min-w-0 space-y-4">
 			{groups.map((group) => (
 				<GroupRow
 					key={group.key}
@@ -393,7 +397,7 @@ const SettingsEditor = ({
 					</Button>
 				</div>
 			</div>
-		</div>
+		</fieldset>
 	);
 };
 

@@ -76,9 +76,12 @@ const BulkEditBody = ({
 	onSaved: (message: string) => void;
 	onClose: () => void;
 }) => {
-	const { data: settings, isLoading } = useGetSettingsForDevice(
-		String(referenceId),
-	);
+	const {
+		data: settings,
+		isLoading,
+		isError,
+		refetch,
+	} = useGetSettingsForDevice(String(referenceId));
 	const { mutate, isPending, error } = useUpdateSettingsForDevices({
 		mutation: {
 			onSuccess: (versions) =>
@@ -87,6 +90,16 @@ const BulkEditBody = ({
 				),
 		},
 	});
+	if (isError && !settings) {
+		return (
+			<div className="flex items-center gap-3 text-sm text-amber-600">
+				Couldn't load settings.
+				<Button variant="soft" tone="gray" size="sm" onClick={() => refetch()}>
+					Retry
+				</Button>
+			</div>
+		);
+	}
 	if (isLoading || !settings) {
 		return <div className="h-4 animate-pulse rounded bg-gray-100" />;
 	}
