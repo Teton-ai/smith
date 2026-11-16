@@ -58,7 +58,7 @@ export function DeviceDetailLayout({
 		>
 			<BackLink to={back}>Back to Devices</BackLink>
 
-			{device && <DeviceHeader device={device} serial={serial} />}
+			{device && <DeviceHeader key={serial} device={device} serial={serial} />}
 
 			<TabNav
 				actions={tabActions}

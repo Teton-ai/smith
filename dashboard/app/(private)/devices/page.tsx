@@ -29,6 +29,7 @@ import {
 	getCommandErrorMessage,
 	useCommandForm,
 } from "@/app/(private)/commands/shared";
+import { DevicePinBadge } from "@/app/components/DevicePinBadge";
 import LabelAutocomplete from "@/app/components/LabelAutocomplete";
 import { EmergencyConfirmModal, Modal } from "@/app/components/modal";
 import NetworkQualityIndicator from "@/app/components/NetworkQualityIndicator";
@@ -1505,6 +1506,7 @@ const DevicesPage = () => {
 															<div className="text-sm font-medium text-gray-900 truncate">
 																{getDeviceName(device)}
 															</div>
+															<DevicePinBadge device={device} />
 															{hasUpdatePending(device) && (
 																<Tooltip
 																	content={`Update pending: Release ${device.release_id} → ${device.target_release_id}`}
