@@ -3,7 +3,7 @@ use crate::device::{
 };
 use crate::handlers::AuthedDevice;
 use crate::home::Saved;
-use crate::ip_address::extract_client_ip;
+use crate::ip_address::{extract_client_ip, registration_client_ip};
 use crate::storage::{Storage, UploadMetrics};
 use crate::{State, storage};
 use axum::body::{Body, Bytes};
@@ -30,15 +30,26 @@ use utoipa::{IntoParams, ToSchema};
   path = "/smith/register",
   responses(
         (status = 200, description = "Device registration successful"),
-        (status = 403, description = "Device not approved"),
+        (status = 403, description = "Device not approved or registration IP not allowed"),
         (status = 409, description = "Device already has token"),
         (status = 500, description = "Internal server error")
   )
 )]
 pub async fn register_device(
+    headers: HeaderMap,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
     Extension(state): Extension<State>,
     Json(payload): Json<DeviceRegistration>,
 ) -> (StatusCode, Json<DeviceRegistrationResponse>) {
+    let client_ip = registration_client_ip(&headers, addr);
+    if !state.config.registration_ip_allowlist.allows(client_ip) {
+        info!(?client_ip, "Device registration denied: IP not allowed");
+        return (
+            StatusCode::FORBIDDEN,
+            Json(DeviceRegistrationResponse::default()),
+        );
+    }
+
     let token = crate::device::register_device(payload, &state.pg_pool, state.config).await;
 
     match token {

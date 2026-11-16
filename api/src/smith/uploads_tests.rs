@@ -34,6 +34,7 @@ fn test_state_with_cdn(pool: PgPool, cdn: Option<&str>) -> anyhow::Result<State>
         victoria_metrics_client: None,
         victoria_metrics_read_client: None,
         ip_api_key: None,
+        registration_ip_allowlist: crate::config::RegistrationIpAllowlist::parse(None)?,
         auth0_issuer: "http://127.0.0.1".into(),
         auth0_audience: "upload-test".into(),
         cloudfront: CloudFrontConfig {
