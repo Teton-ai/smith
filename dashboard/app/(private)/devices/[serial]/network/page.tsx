@@ -427,7 +427,7 @@ const NetworkPage = () => {
 					{/* Keyed by serial so filter/reveal state resets when navigating
 					    between devices. */}
 					{device && <WifiPanel key={serial} serial={serial} device={device} />}
-					<NetworkSettingsPanel key={serial} serial={serial} device={device} />
+					<NetworkSettingsPanel key={serial} device={device} />
 				</div>
 			</div>
 		</DeviceDetailLayout>
