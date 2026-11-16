@@ -16,9 +16,16 @@ use tokio::sync::{mpsc, watch};
 use tokio::time;
 use tracing::{error, info, warn};
 
+mod link;
+pub use link::LinkDelay;
+use link::LinkMonitor;
+
 /// When the api last answered a home poll, with any status; `None` until it
 /// first does.
 pub type LastPoll = watch::Receiver<Option<time::Instant>>;
+
+/// The round trip to the api as the latest home poll reported it.
+pub type LinkDelayWatch = watch::Receiver<Option<LinkDelay>>;
 
 const CMD_ID_GET_VARIABLES: i32 = -1;
 const CMD_ID_UPDATE_SYSTEM_INFO: i32 = -2;
@@ -131,6 +138,8 @@ struct Postman {
     poll_mode: PollMode,
     services_to_check: Vec<ServiceCheck>,
     last_poll: watch::Sender<Option<time::Instant>>,
+    link: LinkMonitor,
+    link_delay: watch::Sender<Option<LinkDelay>>,
 }
 
 #[derive(Debug)]
@@ -145,10 +154,11 @@ impl Postman {
         magic: MagicHandle,
         session: SessionHandle,
         last_poll: watch::Sender<Option<time::Instant>>,
-    ) -> Self {
+    ) -> (Self, LinkDelayWatch) {
         let network = NetworkClient::default();
+        let (link_delay, link_delay_rx) = watch::channel(None);
 
-        Self {
+        let postman = Self {
             shutdown,
             police,
             receiver,
@@ -163,7 +173,10 @@ impl Postman {
             poll_mode: PollMode::Idle,
             services_to_check: Vec::new(),
             last_poll,
-        }
+            link: LinkMonitor::default(),
+            link_delay,
+        };
+        (postman, link_delay_rx)
     }
 
     async fn handle_message(&mut self, _msg: PostmanMessage) {}
@@ -417,8 +430,17 @@ impl Postman {
 
         let result = self
             .network
-            .send_compressed_post(&token, "/home", message)
+            .send_compressed_post_timed(&token, "/home", message)
             .await;
+
+        if let Ok((_, response, timing)) = &result
+            && let Some(sample) =
+                link::round_trip(timing.elapsed, timing.body_len, response.headers())
+        {
+            let now = Instant::now();
+            self.link.observe(sample, now);
+            self.link_delay.send_replace(self.link.snapshot(now));
+        }
 
         // Any HTTP answer, even an error status, proves the link works.
         // Also what a settings apply waits for: an overloaded api answering
@@ -432,7 +454,7 @@ impl Postman {
         }
 
         match result {
-            Ok((status_code, response)) => match status_code {
+            Ok((status_code, response, _)) => match status_code {
                 StatusCode::OK => {
                     info!("Posting successful");
                     // The api stored the results even if its answer does not parse.
@@ -517,6 +539,7 @@ impl Postman {
 pub struct PostmanHandle {
     _sender: mpsc::Sender<PostmanMessage>,
     last_poll: LastPoll,
+    link_delay: LinkDelayWatch,
 }
 
 impl PostmanHandle {
@@ -529,7 +552,7 @@ impl PostmanHandle {
     ) -> Self {
         let (_sender, receiver) = mpsc::channel(8);
         let (poll_sender, last_poll) = watch::channel(None);
-        let mut actor = Postman::new(
+        let (mut actor, link_delay) = Postman::new(
             shutdown,
             police,
             receiver,
@@ -540,12 +563,21 @@ impl PostmanHandle {
         );
         tokio::spawn(async move { actor.run().await });
 
-        Self { _sender, last_poll }
+        Self {
+            _sender,
+            last_poll,
+            link_delay,
+        }
     }
 
     /// Follows the time the api last answered a home poll.
     pub fn last_poll(&self) -> LastPoll {
         self.last_poll.clone()
+    }
+
+    /// Follows the round trip to the api, so downloads can back off on a slow link.
+    pub fn link_delay(&self) -> LinkDelayWatch {
+        self.link_delay.clone()
     }
 }
 
