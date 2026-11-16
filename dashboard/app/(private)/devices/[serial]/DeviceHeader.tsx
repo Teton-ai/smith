@@ -2,6 +2,7 @@
 
 import { useQueryClient } from "@tanstack/react-query";
 import { Button, DropdownMenu, LabelChip } from "@teton/smith-ui";
+import { isAxiosError } from "axios";
 import {
 	BarChart3,
 	Check,
@@ -10,6 +11,9 @@ import {
 	Cpu,
 	ExternalLink,
 	GitBranch,
+	LoaderCircle,
+	Pin,
+	PinOff,
 	Power,
 	ScrollText,
 	ShieldOff,
@@ -30,12 +34,17 @@ import {
 import {
 	type CommandRecipe,
 	type Device,
+	getGetDashboardQueryKey,
 	getGetDeviceInfoQueryKey,
+	getGetDevicesInfiniteQueryKey,
+	getGetDevicesQueryKey,
 	useGetRecipes,
 	useIssueCommandsToDevices,
 	useRevokeDevice,
 	useTriggerRecipe,
+	useUpdateDevicesFollowLatest,
 } from "@/app/api-client";
+import { DevicePinBadge } from "@/app/components/DevicePinBadge";
 import { Modal } from "@/app/components/modal";
 import { useConfig } from "@/app/hooks/config";
 import { architectureIcon } from "@/app/utils/release";
@@ -171,6 +180,63 @@ interface DeviceHeaderProps {
 }
 
 const DeviceHeader: React.FC<DeviceHeaderProps> = ({ device, serial }) => {
+	const queryClient = useQueryClient();
+	const [pinError, setPinError] = useState<string | null>(null);
+	const {
+		mutate: updateFollowLatest,
+		isPending: isUpdatingPin,
+		variables: pinVariables,
+	} = useUpdateDevicesFollowLatest({
+		mutation: {
+			onSuccess: async (receipt) => {
+				if (receipt.devices_updated !== 1) {
+					setPinError("Device was not updated. Refresh and try again.");
+				}
+				await Promise.all([
+					queryClient
+						.invalidateQueries(
+							{
+								queryKey: getGetDeviceInfoQueryKey(serial),
+							},
+							{ throwOnError: true },
+						)
+						.catch(() => {
+							if (receipt.devices_updated === 1) {
+								setPinError(
+									"Pin setting saved, but device details could not be refreshed. Refresh the page to see the current state.",
+								);
+							}
+						}),
+					queryClient.invalidateQueries({
+						queryKey: getGetDevicesQueryKey(),
+					}),
+					queryClient.invalidateQueries({
+						queryKey: getGetDevicesInfiniteQueryKey(),
+					}),
+					queryClient.invalidateQueries({
+						queryKey: getGetDashboardQueryKey(),
+					}),
+				]);
+			},
+			onError: (error) => {
+				setPinError(
+					isAxiosError(error) && error.response?.status === 403
+						? "You do not have permission to change device pins."
+						: "Could not change device pin. Please try again.",
+				);
+			},
+		},
+	});
+	const pinProgressLabel = pinVariables?.data.follow_latest
+		? "Unpinning…"
+		: "Pinning…";
+	const handleTogglePin = () => {
+		if (isUpdatingPin) return;
+		setPinError(null);
+		updateFollowLatest({
+			data: { devices: [device.id], follow_latest: !device.follow_latest },
+		});
+	};
 	const [sshCopied, setSshCopied] = useState(false);
 	const [showRunModal, setShowRunModal] = useState(false);
 	const [showRebootModal, setShowRebootModal] = useState(false);
@@ -451,6 +517,20 @@ const DeviceHeader: React.FC<DeviceHeaderProps> = ({ device, serial }) => {
 									</Link>
 								</div>
 							)}
+							{isUpdatingPin ? (
+								<output
+									aria-live="polite"
+									className="flex items-center gap-1 text-gray-500"
+								>
+									<LoaderCircle
+										className="w-4 h-4 animate-spin motion-reduce:animate-none"
+										aria-hidden="true"
+									/>
+									<span>{pinProgressLabel}</span>
+								</output>
+							) : (
+								<DevicePinBadge device={device} plain />
+							)}
 							{update?.status === "scheduled" && (
 								<Tooltip content="Waiting for its turn in a staggered rollout">
 									<span className="flex items-center space-x-1 cursor-help">
@@ -494,6 +574,24 @@ const DeviceHeader: React.FC<DeviceHeaderProps> = ({ device, serial }) => {
 						label="Actions"
 						tone="gray"
 						items={[
+							{
+								label: isUpdatingPin
+									? pinProgressLabel
+									: device.follow_latest
+										? "Pin device"
+										: "Unpin device",
+								description: device.follow_latest
+									? "Keep its assigned target; stop following new releases"
+									: "Follow the installed distribution’s latest release; this may upgrade or downgrade the device",
+								icon: device.follow_latest ? (
+									<Pin className="w-4 h-4" />
+								) : (
+									<PinOff className="w-4 h-4" />
+								),
+								tone: "gray",
+								disabled: isUpdatingPin,
+								onClick: handleTogglePin,
+							},
 							{
 								label: "Run",
 								description: "Run a command on this device",
@@ -565,6 +663,12 @@ const DeviceHeader: React.FC<DeviceHeaderProps> = ({ device, serial }) => {
 					/>
 				</div>
 			</div>
+
+			{pinError && (
+				<p role="alert" className="mt-3 text-sm text-red-600">
+					{pinError}
+				</p>
+			)}
 
 			{/* Run Command Modal */}
 			<Modal
