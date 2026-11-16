@@ -3,7 +3,7 @@ title: Deployments
 description: Roll out new releases canary-first, verify they're healthy, then confirm across the distribution.
 ---
 
-Deployments are how you roll out new releases to your fleet. Smith uses a canary-first approach: you select a small set of devices, verify they're healthy, then confirm a full rollout to all remaining devices in the distribution.
+Deployments are how you roll out new releases to your fleet. Stable releases use a canary-first approach: Smith automatically selects devices, you verify they're healthy, then confirm a full rollout to all remaining devices in the distribution.
 
 ## Core concepts
 
@@ -11,14 +11,14 @@ Deployments are how you roll out new releases to your fleet. Smith uses a canary
 - **Release** — a published snapshot of a package list, immutable once created. Every deployment targets a specific release.
 - **Distribution** — a logical group of devices that shares a target release. Devices belong to exactly one distribution.
 - **Canary devices** — the small subset of devices that receive a release first, before the rest of the fleet.
-- **Release candidate (RC)** — a release flagged so it can never roll out fleet-wide. It stays on its canary devices permanently unless explicitly promoted to a stable release.
+- **Release candidate (RC)** — a release flagged so it can never roll out fleet-wide. It stays on its selected devices permanently unless explicitly promoted to a stable release.
 - **LTS** — a release designated as one to keep devices on long-term. The flag is a record of that decision, so every version ever designated keeps its mark and the history stays readable.
 - **Follow latest** — a per-device flag deciding whether fleet-wide rollouts move that device. Devices that do not follow latest stay where they are until an operator targets them explicitly.
 
 ## How a deployment works
 
 1. **Create a release** from a package list.
-2. **Create a deployment** targeting that release. Smith assigns a set of canary devices.
+2. **Create a deployment** targeting that release. Smith automatically assigns canaries for a stable release. For a release candidate, select target devices by IDs or labels.
 3. **Canary devices update** to the new release.
 4. **Verify health** — check that canary devices are running correctly (services healthy, online, no regressions).
 5. **Confirm full rollout** — the remaining devices in the distribution update in staggered groups (see [Staggered rollouts](#staggered-rollouts)). Or, if something looks wrong, yank the release before it spreads.
@@ -35,7 +35,7 @@ Open the **Package Lists** section in the dashboard and update your package list
 
 From the package list, publish a new release and mark it as a **release candidate**. Give it a meaningful name, such as `v1.5.0-rc.1`.
 
-Because it is an RC, Smith will never automatically roll it out beyond its canary devices — this flag is a hard guardrail.
+Because it is an RC, Smith will never automatically roll it out beyond its selected devices — this flag is a hard guardrail.
 
 ### Step 3 — Deploy the RC to a fixed set of devices
 
@@ -49,7 +49,7 @@ These devices will receive the RC build. The rest of the fleet is unaffected.
 
 ### Step 4 — Validate the RC
 
-Monitor the canary devices in the dashboard. Look for:
+Monitor the selected test devices in the dashboard. Look for:
 
 - All watchdog-monitored services reporting healthy.
 - Devices staying online (last ping within the expected window).
@@ -101,13 +101,19 @@ POST /releases/{release_id}/deployment/finish-now
 
 Single-device target changes and rollbacks are never staggered.
 
-## Selection strategies
+## Device selection
 
-When creating a deployment, you can choose how canary devices are selected:
+Stable releases always use automatic canary selection: up to 10 online, up-to-date devices, prioritizing health, network quality, and network spread. Manual canary selection is rejected by the API.
 
-- **Automatic** (recommended) — Smith picks up to 10 devices based on health, network quality, and recency. Best for most deployments.
-- **Label-based** — targets devices matching one or more labels, useful for deploying to a specific site or hardware variant first.
-- **Explicit device IDs** — hand-pick specific devices, useful for targeting a known lab bench or QA set.
+Release candidates require an explicit selection, either device IDs or labels. These are test devices, not a canary gate for a full rollout. An RC cannot be confirmed fleet-wide.
+
+The API keeps the existing `canary_device_ids` and `canary_device_labels` field names for compatibility; they are accepted only for release candidates. Provide one non-empty selector.
+
+```text
+sm releases deploy <stable_release_id>
+sm releases deploy <rc_release_id> --devices 1,2,3
+sm releases deploy <rc_release_id> --labels stage=testing
+```
 
 ## Release candidates
 
@@ -128,7 +134,7 @@ A device is eligible for *automatic* canary selection when it is:
 - **In the same distribution** — belongs to the distribution the release targets.
 - **Following latest** — `follow_latest` is true.
 
-Explicit selection by device id or label ignores `follow_latest`: naming a device by hand is taken as deliberate, which is what lets a pinned lab bench still be used as a canary.
+Release-candidate selection by device ID or label ignores `follow_latest`, so pinned test devices can receive candidates. Selected devices must still be online, up-to-date, and in the release’s distribution.
 
 ## LTS releases
 

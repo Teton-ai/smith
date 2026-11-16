@@ -35,7 +35,6 @@ import {
 	Tag,
 	Trash2,
 	X,
-	Zap,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router";
@@ -510,7 +509,7 @@ const ReleaseDetailPage = () => {
 	};
 
 	const handleOpenDeployModal = () => {
-		setCanaryMode("automatic");
+		setCanaryMode(release?.release_candidate ? "devices" : "automatic");
 		setCanaryLabels([]);
 		setCanaryDeviceIds(new Map());
 		setDeviceSearchQuery("");
@@ -524,9 +523,17 @@ const ReleaseDetailPage = () => {
 		if (!release || deploying) return;
 
 		let data: DeploymentRequest = {};
-		if (canaryMode === "labels" && canaryLabels.length > 0) {
+		if (
+			release.release_candidate &&
+			canaryMode === "labels" &&
+			canaryLabels.length > 0
+		) {
 			data = { canary_device_labels: canaryLabels };
-		} else if (canaryMode === "devices" && canaryDeviceIds.size > 0) {
+		} else if (
+			release.release_candidate &&
+			canaryMode === "devices" &&
+			canaryDeviceIds.size > 0
+		) {
 			data = { canary_device_ids: Array.from(canaryDeviceIds.keys()) };
 		}
 
@@ -856,7 +863,7 @@ const ReleaseDetailPage = () => {
 				title={`Deploy Release v${release.version}`}
 				subtitle={
 					deployStep === 2
-						? `Step 2 of 2 — ${canaryMode === "labels" ? "Select labels for canary devices" : "Select canary devices"}`
+						? `Step 2 of 2 — ${canaryMode === "labels" ? "Select device labels" : "Select devices"}`
 						: undefined
 				}
 				width={deployStep === 1 ? "w-[520px]" : "w-[900px]"}
@@ -920,64 +927,59 @@ const ReleaseDetailPage = () => {
 					)
 				}
 			>
-				{/* Step 1: Choose canary strategy */}
+				{/* Step 1: Choose release-candidate devices */}
 				{deployStep === 1 && (
 					<div className="space-y-4">
 						<p className="text-sm text-gray-600">
-							First, a small group of canary devices will receive the update.
-							After verifying they update successfully, you can roll out to all
-							remaining devices.
+							{release.release_candidate
+								? "Choose devices for this release candidate. It stays on the selected devices and cannot roll out to the fleet."
+								: "Smith automatically selects up to 10 online canaries, prioritizing health, network quality, and network spread. After verifying them, confirm the rollout to the remaining devices."}
 						</p>
 
-						<div className="space-y-3">
-							{(
-								[
-									{
-										mode: "automatic" as const,
-										title: "Automatic",
-										icon: <Zap className="w-5 h-5 text-amber-500" />,
-										description:
-											"~10 online devices are automatically selected by network quality. Best for routine deployments.",
-									},
-									{
-										mode: "labels" as const,
-										title: "By Labels",
-										icon: <Tag className="w-5 h-5 text-blue-500" />,
-										description:
-											"Target devices matching specific labels (e.g. env=staging). All matching up-to-date devices will be included.",
-									},
-									{
-										mode: "devices" as const,
-										title: "Select Devices",
-										icon: <Cpu className="w-5 h-5 text-purple-500" />,
-										description:
-											"Hand-pick specific devices for the canary. Use this when you need precise control.",
-									},
-								] as const
-							).map((option) => (
-								<button
-									key={option.mode}
-									onClick={() => setCanaryMode(option.mode)}
-									className={`w-full text-left p-4 rounded-lg border-2 transition-all cursor-pointer ${
-										canaryMode === option.mode
-											? "border-blue-500 bg-blue-50"
-											: "border-gray-200 hover:border-gray-300 hover:bg-gray-50"
-									}`}
-								>
-									<div className="flex items-start gap-3">
-										<div className="flex-shrink-0 mt-0.5">{option.icon}</div>
-										<div>
-											<div className="font-medium text-gray-900 text-sm">
-												{option.title}
+						{release.release_candidate && (
+							<div className="space-y-3">
+								{(
+									[
+										{
+											mode: "labels" as const,
+											title: "By Labels",
+											icon: <Tag className="w-5 h-5 text-blue-500" />,
+											description:
+												"Target devices matching specific labels (e.g. env=staging). All matching up-to-date devices will be included.",
+										},
+										{
+											mode: "devices" as const,
+											title: "Select Devices",
+											icon: <Cpu className="w-5 h-5 text-purple-500" />,
+											description:
+												"Choose the devices that should receive this release candidate.",
+										},
+									] as const
+								).map((option) => (
+									<button
+										key={option.mode}
+										onClick={() => setCanaryMode(option.mode)}
+										className={`w-full text-left p-4 rounded-lg border-2 transition-all cursor-pointer ${
+											canaryMode === option.mode
+												? "border-blue-500 bg-blue-50"
+												: "border-gray-200 hover:border-gray-300 hover:bg-gray-50"
+										}`}
+									>
+										<div className="flex items-start gap-3">
+											<div className="flex-shrink-0 mt-0.5">{option.icon}</div>
+											<div>
+												<div className="font-medium text-gray-900 text-sm">
+													{option.title}
+												</div>
+												<p className="text-xs text-gray-500 mt-1">
+													{option.description}
+												</p>
 											</div>
-											<p className="text-xs text-gray-500 mt-1">
-												{option.description}
-											</p>
 										</div>
-									</div>
-								</button>
-							))}
-						</div>
+									</button>
+								))}
+							</div>
+						)}
 					</div>
 				)}
 
@@ -1018,7 +1020,7 @@ const ReleaseDetailPage = () => {
 									)}
 									<p className="text-xs text-gray-500">
 										All up-to-date devices matching these labels will be
-										included in the canary.
+										included in this release-candidate deployment.
 									</p>
 								</div>
 							)}
@@ -1122,7 +1124,7 @@ const ReleaseDetailPage = () => {
 								(canaryLabels.length === 0 ? (
 									<>
 										<h4 className="font-medium text-gray-900 text-sm mb-1">
-											Canary Preview
+											Device Preview
 										</h4>
 										<div className="flex-1 flex items-center justify-center text-sm text-gray-400">
 											Select labels to see matching devices
@@ -1131,7 +1133,7 @@ const ReleaseDetailPage = () => {
 								) : labelDevicesLoading ? (
 									<>
 										<h4 className="font-medium text-gray-900 text-sm mb-3">
-											Canary Preview
+											Device Preview
 										</h4>
 										<div className="flex-1 flex items-center justify-center text-sm text-gray-400">
 											Loading...
@@ -1140,7 +1142,7 @@ const ReleaseDetailPage = () => {
 								) : labelMatchDevices.length === 0 ? (
 									<>
 										<h4 className="font-medium text-gray-900 text-sm mb-1">
-											0 devices will receive the canary update
+											0 devices will receive the release-candidate update
 										</h4>
 										<div className="flex-1 flex items-center justify-center text-sm text-gray-400">
 											No matching devices
@@ -1151,7 +1153,7 @@ const ReleaseDetailPage = () => {
 										<h4 className="font-medium text-gray-900 text-sm mb-3">
 											{labelMatchDevices.length} device
 											{labelMatchDevices.length !== 1 ? "s" : ""} will receive
-											the canary update
+											the release-candidate update
 										</h4>
 										<div className="border border-gray-200 rounded-md bg-white overflow-y-auto flex-1">
 											{labelMatchDevices.map((device: Device) => (
@@ -1187,7 +1189,7 @@ const ReleaseDetailPage = () => {
 								(canaryDeviceIds.size === 0 ? (
 									<>
 										<h4 className="font-medium text-gray-900 text-sm mb-1">
-											Canary Preview
+											Device Preview
 										</h4>
 										<div className="flex-1 flex items-center justify-center text-sm text-gray-400">
 											Select devices from the list
@@ -1198,7 +1200,7 @@ const ReleaseDetailPage = () => {
 										<h4 className="font-medium text-gray-900 text-sm mb-3">
 											{canaryDeviceIds.size} device
 											{canaryDeviceIds.size !== 1 ? "s" : ""} will receive the
-											canary update
+											release-candidate update
 										</h4>
 										<div className="border border-gray-200 rounded-md bg-white overflow-y-auto flex-1">
 											{Array.from(canaryDeviceIds.values()).map(

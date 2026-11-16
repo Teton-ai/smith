@@ -160,9 +160,9 @@ pub struct PromoteParams {
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct DeployParams {
     pub release_id: i32,
-    /// Pick canary devices by label (`key=value`). Cannot be combined with canary_device_ids.
+    /// Select release-candidate devices by label (`key=value`). Stable releases choose canaries automatically. Cannot be combined with canary_device_ids.
     pub canary_device_labels: Option<Vec<String>>,
-    /// Pick exact canary devices by id. Cannot be combined with canary_device_labels.
+    /// Select exact release-candidate devices by id. Cannot be combined with canary_device_labels.
     pub canary_device_ids: Option<Vec<i32>>,
 }
 
@@ -485,7 +485,7 @@ impl SmithMcp {
         json_result(&release)
     }
 
-    /// Start deploying a release to its canary devices. Devices update on their next check-in; follow up with get_deployment and confirm_full_rollout.
+    /// Deploy a stable release to automatic canaries, or a release candidate to explicitly selected devices. Only stable releases can proceed to confirm_full_rollout.
     #[tool(annotations(
         read_only_hint = false,
         destructive_hint = true,
