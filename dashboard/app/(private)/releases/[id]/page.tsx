@@ -161,7 +161,9 @@ const ReleaseDetailPage = () => {
 	const { data: existingDeployment } = useApiGetReleaseDeployment(releaseId, {
 		query: {
 			enabled: !!releaseId && !!release && !release.draft && !release.yanked,
-			refetchInterval: 5000,
+			// Only an in-progress deployment can change status on its own.
+			refetchInterval: (query) =>
+				query.state.data?.status === "InProgress" ? 5000 : false,
 			retry: false,
 		},
 	});
