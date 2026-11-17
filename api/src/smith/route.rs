@@ -168,6 +168,15 @@ pub async fn home(
     tokio::spawn(async move {
         // Held until the background writes finish so they count against the cap.
         let _permit = permit;
+        // Before the release: RC completion checks the health of this report.
+        if !service_statuses.is_empty() {
+            let _ =
+                crate::home::save_service_statuses(device.id, &service_statuses, &state.pg_pool)
+                    .await
+                    .inspect_err(|err| {
+                        error!("Error saving service statuses: {:?}", err);
+                    });
+        }
         let _ = save_release_id(device.id, release_id, &state.pg_pool)
             .await
             .inspect_err(|err| {
@@ -178,14 +187,6 @@ pub async fn home(
             .inspect_err(|err| {
                 error!("Error saving last ping with IP: {:?}", err);
             });
-        if !service_statuses.is_empty() {
-            let _ =
-                crate::home::save_service_statuses(device.id, &service_statuses, &state.pg_pool)
-                    .await
-                    .inspect_err(|err| {
-                        error!("Error saving service statuses: {:?}", err);
-                    });
-        }
     });
 
     (StatusCode::OK, Json(response)).into_response()
