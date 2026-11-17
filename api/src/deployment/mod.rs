@@ -317,16 +317,7 @@ pub async fn new_deployment(
         .and_then(|r| r.canary_device_labels.as_ref());
     let ids_opt = request.as_ref().and_then(|r| r.canary_device_ids.as_ref());
 
-    let has_labels = labels_opt.is_some();
-    let has_ids = ids_opt.is_some();
-
-    let res = if has_ids {
-        let canary_device_ids = request
-            .as_ref()
-            .unwrap()
-            .canary_device_ids
-            .as_ref()
-            .unwrap();
+    let res = if let Some(canary_device_ids) = ids_opt {
         sqlx::query!(
             r#"
             WITH selected_devices AS (
@@ -349,13 +340,7 @@ pub async fn new_deployment(
         )
         .execute(&mut *tx)
         .await?
-    } else if has_labels {
-        let canary_device_labels = request
-            .as_ref()
-            .unwrap()
-            .canary_device_labels
-            .as_ref()
-            .unwrap();
+    } else if let Some(canary_device_labels) = labels_opt {
         sqlx::query!(
             r#"
             WITH selected_devices AS (
