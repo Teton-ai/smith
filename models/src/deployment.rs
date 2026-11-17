@@ -72,12 +72,12 @@ mod tests {
     use super::DeploymentRequest;
 
     #[test]
-    fn deployment_selection_stable_is_automatic() {
+    fn deployment_selection_stable_is_automatic() -> serde_json::Result<()> {
         for body in [
             r#"{}"#,
             r#"{"canary_device_ids":null,"canary_device_labels":null}"#,
         ] {
-            let request: DeploymentRequest = serde_json::from_str(body).unwrap();
+            let request: DeploymentRequest = serde_json::from_str(body)?;
             assert!(request.validate_selection(false).is_ok());
         }
         for body in [
@@ -85,18 +85,19 @@ mod tests {
             r#"{"canary_device_labels":["site=lab"]}"#,
             r#"{"canary_device_ids":[]}"#,
         ] {
-            let request: DeploymentRequest = serde_json::from_str(body).unwrap();
+            let request: DeploymentRequest = serde_json::from_str(body)?;
             assert!(request.validate_selection(false).is_err());
         }
+        Ok(())
     }
 
     #[test]
-    fn deployment_selection_candidates_require_one_nonempty_selector() {
+    fn deployment_selection_candidates_require_one_nonempty_selector() -> serde_json::Result<()> {
         for body in [
             r#"{"canary_device_ids":[1,2]}"#,
             r#"{"canary_device_labels":["site=lab"]}"#,
         ] {
-            let request: DeploymentRequest = serde_json::from_str(body).unwrap();
+            let request: DeploymentRequest = serde_json::from_str(body)?;
             assert!(request.validate_selection(true).is_ok());
         }
         for body in [
@@ -106,8 +107,9 @@ mod tests {
             r#"{"canary_device_labels":[" "]}"#,
             r#"{"canary_device_ids":[1],"canary_device_labels":["site=lab"]}"#,
         ] {
-            let request: DeploymentRequest = serde_json::from_str(body).unwrap();
+            let request: DeploymentRequest = serde_json::from_str(body)?;
             assert!(request.validate_selection(true).is_err());
         }
+        Ok(())
     }
 }
