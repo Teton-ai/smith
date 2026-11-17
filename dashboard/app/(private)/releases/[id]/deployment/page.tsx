@@ -11,7 +11,7 @@ import {
 	XCircle,
 } from "lucide-react";
 import moment from "moment";
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import {
 	type Deployment,
@@ -150,6 +150,7 @@ const DeploymentStatusPage = () => {
 	const queryClient = useQueryClient();
 	const [elapsedTime, setElapsedTime] = useState(0);
 	const [promoteVersion, setPromoteVersion] = useState("");
+	const promoteVersionId = useId();
 	const [confirmError, setConfirmError] = useState<string | null>(null);
 
 	const { data: release, isLoading: releaseLoading } = useGetRelease(releaseId);
@@ -493,10 +494,14 @@ const DeploymentStatusPage = () => {
 															)}
 															<div className="flex items-end gap-2">
 																<div className="flex-1">
-																	<label className="block text-xs font-medium text-gray-700 mb-1">
+																	<label
+																		htmlFor={promoteVersionId}
+																		className="block text-xs font-medium text-gray-700 mb-1"
+																	>
 																		New release version
 																	</label>
 																	<input
+																		id={promoteVersionId}
 																		type="text"
 																		placeholder={release.version.replace(
 																			/-rc.*$/,
