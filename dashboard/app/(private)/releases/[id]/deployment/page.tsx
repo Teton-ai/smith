@@ -343,6 +343,10 @@ const DeploymentStatusPage = () => {
 		);
 	}
 
+	// RCs complete on the server, which also checks watchdog health, so only
+	// stable releases judge their canaries here.
+	const canaryComplete = !release.release_candidate && isCanaryComplete();
+
 	const candidatePromotionPanel = (
 		<div className="mt-4 p-3 bg-orange-50 border border-orange-200 rounded-lg space-y-3">
 			<p className="text-sm text-orange-800">
@@ -521,39 +525,33 @@ const DeploymentStatusPage = () => {
 													? "Release Candidate Deployment"
 													: "Phase 1: Canary Deployment"}
 											</p>
-											{isCanaryComplete() ? (
+											{canaryComplete ? (
 												<>
 													<p>
-														{release.release_candidate
-															? "All selected devices have been successfully updated!"
-															: "All canary devices have been successfully updated!"}
+														All canary devices have been successfully updated!
 													</p>
-													{release.release_candidate ? (
-														candidatePromotionPanel
-													) : (
-														<div className="mt-4">
-															<Button
-																loading={confirmFullRolloutHook.isPending}
-																icon={
-																	!confirmFullRolloutHook.isPending ? (
-																		<CheckCircle2 className="w-4 h-4" />
-																	) : undefined
-																}
-																onClick={() => {
-																	confirmFullRolloutHook.mutate({ releaseId });
-																}}
-															>
-																{confirmFullRolloutHook.isPending
-																	? "Confirming..."
-																	: "Confirm Full Rollout"}
-															</Button>
-															{confirmError && (
-																<p className="mt-2 text-sm text-red-700">
-																	{confirmError}
-																</p>
-															)}
-														</div>
-													)}
+													<div className="mt-4">
+														<Button
+															loading={confirmFullRolloutHook.isPending}
+															icon={
+																!confirmFullRolloutHook.isPending ? (
+																	<CheckCircle2 className="w-4 h-4" />
+																) : undefined
+															}
+															onClick={() => {
+																confirmFullRolloutHook.mutate({ releaseId });
+															}}
+														>
+															{confirmFullRolloutHook.isPending
+																? "Confirming..."
+																: "Confirm Full Rollout"}
+														</Button>
+														{confirmError && (
+															<p className="mt-2 text-sm text-red-700">
+																{confirmError}
+															</p>
+														)}
+													</div>
 												</>
 											) : (
 												<>
@@ -598,7 +596,7 @@ const DeploymentStatusPage = () => {
 							</div>
 
 							{deployment.status === "InProgress" &&
-								!isCanaryComplete() &&
+								!canaryComplete &&
 								!release.release_candidate && (
 									<div className="border border-gray-200 bg-gray-50 rounded-lg p-4">
 										<div className="flex items-center space-x-2 mb-3">
@@ -623,10 +621,8 @@ const DeploymentStatusPage = () => {
 								<p className="text-sm text-yellow-800">
 									<strong>Note:</strong> This page will automatically refresh
 									every 5 seconds to show the latest status.{" "}
-									{isCanaryComplete()
-										? release.release_candidate
-											? "Release candidate deployment is complete."
-											: "Please confirm full rollout to proceed."
+									{canaryComplete
+										? "Please confirm full rollout to proceed."
 										: "You can safely navigate away and return later."}
 								</p>
 							</div>
