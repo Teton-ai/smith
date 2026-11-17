@@ -126,8 +126,13 @@ async fn deploy_release(
         .with_context(|| "Error getting token")?
         .with_context(|| "No Token found, please Login")?;
     let api = SmithAPI::new(secrets, &config);
-    // Only release candidates accept a device selection.
-    let release_candidate = canary_device_labels.is_some() || devices.is_some();
+    let release_candidate = api
+        .get_release_info(release_number.clone())
+        .await?
+        .release_candidate;
+    if release_candidate && canary_device_labels.is_none() && devices.is_none() {
+        anyhow::bail!("Release candidates deploy to selected devices: pass --devices or --labels");
+    }
 
     // Start the deployment
     api.deploy_release(
