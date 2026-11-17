@@ -129,6 +129,7 @@ pub async fn run() {
         tunnel.clone(),
         filemanager.clone(),
         police.clone(),
+        postman.link_up(),
     );
 
     // this will ensure we have a token
