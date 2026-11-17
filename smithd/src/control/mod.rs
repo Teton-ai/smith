@@ -27,6 +27,11 @@ pub struct CheckResponse {
     pub updates_available: bool,
 }
 
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct LinkResponse {
+    pub online: bool,
+}
+
 #[derive(Debug, Default, Serialize, Deserialize, ToSchema)]
 pub struct TunnelRequest {
     /// Local port to expose. Omitted → SSH (22).
