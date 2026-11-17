@@ -23,6 +23,8 @@ use link::LinkMonitor;
 /// When the api last answered a home poll, with any status; `None` until it
 /// first does.
 pub type LastPoll = watch::Receiver<Option<time::Instant>>;
+/// whether the postman thinks the link to the api is up. see `ping_home`
+pub type LinkUp = watch::Receiver<bool>;
 
 /// The round trip to the api as the latest home poll reported it.
 pub type LinkDelayWatch = watch::Receiver<Option<LinkDelay>>;
@@ -154,11 +156,13 @@ struct Postman {
     link: LinkMonitor,
     link_delay: watch::Sender<Option<LinkDelay>>,
     downloading: watch::Receiver<bool>,
+    link_up: watch::Sender<bool>,
 }
 
 /// The watch ends the postman shares with the rest of the daemon.
 struct Watches {
     last_poll: watch::Sender<Option<time::Instant>>,
+    link_up: watch::Sender<bool>,
     link_delay: watch::Sender<Option<LinkDelay>>,
     downloading: watch::Receiver<bool>,
 }
@@ -196,6 +200,7 @@ impl Postman {
             link: LinkMonitor::default(),
             link_delay: watches.link_delay,
             downloading: watches.downloading,
+            link_up: watches.link_up,
         }
     }
 
@@ -476,6 +481,8 @@ impl Postman {
         if result.is_ok() {
             self.failing_since = None;
             self.last_poll.send_replace(Some(time::Instant::now()));
+            self.link_up.send_replace(true);
+
             if let Some(problem) = self.problems.take() {
                 self.police.report_problem_solved(problem).await;
             }
@@ -531,6 +538,7 @@ impl Postman {
                 let failing_for = now.duration_since(*self.failing_since.get_or_insert(now));
                 let link_works =
                     failing_for <= TCP_WORKS_GRACE && can_connect_to_api(&self.hostname).await;
+                self.link_up.send_replace(link_works);
                 if link_works {
                     if let Some(problem) = self.problems.take() {
                         warn!("api unreachable over HTTP but TCP connect works, disarming Police");
@@ -567,6 +575,7 @@ impl Postman {
 pub struct PostmanHandle {
     _sender: mpsc::Sender<PostmanMessage>,
     last_poll: LastPoll,
+    link_up: LinkUp,
 }
 
 impl PostmanHandle {
@@ -581,6 +590,7 @@ impl PostmanHandle {
     ) -> Self {
         let (_sender, receiver) = mpsc::channel(8);
         let (poll_sender, last_poll) = watch::channel(None);
+        let (link_sender, link_up) = watch::channel(false);
         let mut actor = Postman::new(
             shutdown,
             police,
@@ -590,18 +600,28 @@ impl PostmanHandle {
             session,
             Watches {
                 last_poll: poll_sender,
+                link_up: link_sender,
                 link_delay,
                 downloading,
             },
         );
         tokio::spawn(async move { actor.run().await });
 
-        Self { _sender, last_poll }
+        Self {
+            _sender,
+            last_poll,
+            link_up,
+        }
     }
 
     /// Follows the time the api last answered a home poll.
     pub fn last_poll(&self) -> LastPoll {
         self.last_poll.clone()
+    }
+
+    /// Follows the current link status decided by `ping_home`
+    pub fn link_up(&self) -> LinkUp {
+        self.link_up.clone()
     }
 }
 
