@@ -127,7 +127,7 @@ impl Session {
 
         let response = self
             .http
-            .get(url)
+            .post(url)
             .header("Authorization", format!("Bearer {}", opaque))
             .send()
             .await
