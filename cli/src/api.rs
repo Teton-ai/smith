@@ -305,6 +305,22 @@ impl SmithAPI {
         Ok(deployment)
     }
 
+    pub async fn get_deployment(&self, release_id: String) -> Result<Deployment> {
+        let client = Client::new();
+
+        let resp = client
+            .get(format!(
+                "{}/releases/{}/deployment",
+                self.domain, release_id
+            ))
+            .header("Authorization", format!("Bearer {}", &self.bearer_token))
+            .send();
+
+        let deployment = resp.await?.error_for_status()?.json().await?;
+
+        Ok(deployment)
+    }
+
     pub async fn deploy_release_check_done(&self, release_id: String) -> Result<Deployment> {
         let client = Client::new();
 
