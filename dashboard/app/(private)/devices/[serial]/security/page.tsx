@@ -74,6 +74,16 @@ const SecurityPage = () => {
 			value: audit?.password_access_disabled ?? null,
 		},
 		{
+			name: "Console logins closed",
+			help: "No login prompt on the screen, serial or USB ports, and console login is refused.",
+			value: audit?.console_logins_closed ?? null,
+		},
+		{
+			name: "Reboot watchdog set",
+			help: "A hung shutdown resets the device instead of hanging.",
+			value: audit?.reboot_watchdog_set ?? null,
+		},
+		{
 			name: "Running latest release",
 			help: "The device is on its target release.",
 			value: (audit as DeviceAudit | undefined)?.running_latest_release ?? null,

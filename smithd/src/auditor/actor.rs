@@ -51,14 +51,10 @@ impl Actor {
     }
 
     async fn run_audit(&self) {
-        let (disk_encrypted, password_access_disabled) = run_audit_checks().await;
         self.commander
             .insert_result(vec![SafeCommandResponse {
                 id: AUDIT_RESULT_ID,
-                command: SafeCommandRx::AuditReport {
-                    disk_encrypted,
-                    password_access_disabled,
-                },
+                command: run_audit_checks().await,
                 status: 0,
             }])
             .await;
@@ -90,16 +86,28 @@ impl Actor {
     }
 }
 
-/// Run the host compliance checks, returning `(disk_encrypted,
-/// password_access_disabled)`. Each value is `None` when its probe couldn't be
-/// run or parsed.
-pub async fn run_audit_checks() -> (Option<bool>, Option<bool>) {
+/// Run the host compliance checks into an `AuditReport`. Each value is `None`
+/// when its probe couldn't be run or parsed.
+pub async fn run_audit_checks() -> SafeCommandRx {
     let disk_encrypted = check_disk_encrypted().await;
     let password_access_disabled = check_password_auth_disabled().await;
+    let console_logins_closed = crate::hardening::console_logins_closed().await;
+    let reboot_watchdog_set = crate::hardening::reboot_watchdog_set().await;
 
-    info!(?disk_encrypted, ?password_access_disabled, "Audit complete");
+    info!(
+        ?disk_encrypted,
+        ?password_access_disabled,
+        ?console_logins_closed,
+        ?reboot_watchdog_set,
+        "Audit complete"
+    );
 
-    (disk_encrypted, password_access_disabled)
+    SafeCommandRx::AuditReport {
+        disk_encrypted,
+        password_access_disabled,
+        console_logins_closed,
+        reboot_watchdog_set,
+    }
 }
 
 /// True if any block device is a LUKS/crypt mapping. `None` if lsblk can't be

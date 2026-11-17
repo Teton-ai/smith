@@ -229,6 +229,22 @@ async fn get_last_boot_time() -> u64 {
         .unwrap_or(0)
 }
 
+// only in our j40mini dt, same check as forge provisioning. nvidia names are unreliable
+const V2_MARKER: &str = "/sys/devices/platform/virtual-therm";
+
+static IS_V2: OnceLock<bool> = OnceLock::new();
+
+// false for v1 and non-jetsons
+pub fn is_v2() -> bool {
+    *IS_V2.get_or_init(|| match std::fs::exists(V2_MARKER) {
+        Ok(exists) => exists,
+        Err(err) => {
+            error!("Failed to check {V2_MARKER}, assuming not v2: {err}");
+            false
+        }
+    })
+}
+
 static DUMMY_SERIAL_NUMBER: OnceLock<String> = OnceLock::new();
 
 fn get_dummy_serial_number() -> String {

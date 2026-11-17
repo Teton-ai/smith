@@ -45,7 +45,9 @@ export interface TabItem {
 
 /** Underlined tab bar used across the device detail subpages. The active tab
  *  renders as static text; the rest are router links. `actions` renders on the
- *  right of the bar, for controls that belong to the active tab's content. */
+ *  right of the bar, for controls that belong to the active tab's content.
+ *  When the bar is too narrow for both, the actions move to a line above the
+ *  tabs, so the tabs keep their underline on the border. */
 export function TabNav({
 	items,
 	actions,
@@ -54,7 +56,7 @@ export function TabNav({
 	actions?: ReactNode;
 }) {
 	return (
-		<div className="border-b border-gray-200 flex items-end justify-between gap-4">
+		<div className="border-b border-gray-200 flex flex-wrap-reverse items-end justify-between gap-x-4 gap-y-2">
 			<nav className="-mb-px flex space-x-8">
 				{items.map((item) => {
 					const cls = item.active
@@ -77,7 +79,9 @@ export function TabNav({
 				})}
 			</nav>
 			{actions && (
-				<div className="flex items-center gap-2 pb-1.5">{actions}</div>
+				<div className="flex items-center gap-2 pb-1.5 ml-auto whitespace-nowrap">
+					{actions}
+				</div>
 			)}
 		</div>
 	);

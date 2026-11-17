@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        INSERT INTO device_audit (device_id, disk_encrypted, password_access_disabled, console_logins_closed, reboot_watchdog_set, checked_at)\n        VALUES ($1, $2, $3, $4, $5, NOW())\n        ON CONFLICT (device_id) DO UPDATE SET\n            disk_encrypted = EXCLUDED.disk_encrypted,\n            password_access_disabled = EXCLUDED.password_access_disabled,\n            console_logins_closed = EXCLUDED.console_logins_closed,\n            reboot_watchdog_set = EXCLUDED.reboot_watchdog_set,\n            checked_at = EXCLUDED.checked_at\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Bool",
+        "Bool",
+        "Bool",
+        "Bool"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "eaa893fab6c0d6c4bce9245c69955b326e659f70ff90b0a39e0a3917e0649dd7"
+}
