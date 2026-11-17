@@ -1,24 +1,38 @@
 import { Badge, Button, InfoRow, Panel, SECTION_THEMES } from "@teton/smith-ui";
-import { Info, RefreshCw, SlidersHorizontal } from "lucide-react";
-import { type ReactNode, useEffect, useRef } from "react";
+import { Info, Pencil, Play, RefreshCw, SlidersHorizontal } from "lucide-react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
+import SettingsEditor from "@/app/(private)/devices/SettingsEditor";
+import { ApplySettingsConfirmModal } from "@/app/(private)/devices/SettingsModals";
 import {
 	type Device,
 	type DeviceSetting,
 	type DeviceSettings,
 	type ReportedSettings,
+	type SettingsChanges,
 	type SettingValues,
+	useApplySettingsForDevice,
 	useGetSettingsForDevice,
 	useIssueCommandsToDevices,
+	useUpdateSettingsForDevice,
 } from "@/app/api-client";
 import { RelativeTime } from "@/app/components/RelativeTime";
 import { Tooltip } from "@/app/components/tooltip";
 import { countryDiffersFromAp } from "@/app/utils/country";
 import {
+	applyAction,
+	applyErrorMessage,
+	type Flag,
 	hasUnappliedEdits,
 	hasWantedSettings,
 	isL4t36,
 	isSet,
 	type ManagedField,
+	MODE_BITS,
+	type NamedValue,
+	NM_POWERSAVE,
+	OTHER_MODE_BITS,
+	POWER_MGNT,
+	ROAM_BITS,
 	runningDiffers,
 	runningValue,
 	SETTING_LABEL,
@@ -26,12 +40,14 @@ import {
 	STATE_BADGE,
 	settingSource,
 	settingState,
+	settingsErrorMessage,
 	wantedValue,
 } from "@/app/utils/deviceSettings";
 
 const POLL_INTERVAL_MS = 30_000;
-/** A requested report lands after the device's next poll plus its POST. */
-const REFETCH_AFTER_REFRESH_MS = [5_000, 25_000];
+/** The device answers a queued command on its next poll, so refetch at these
+ *  delays rather than waiting for the regular interval. */
+const REFETCH_AFTER_COMMAND_MS = [5_000, 25_000];
 
 /** The vendor driver's `scan_int` counts in 2 s units. */
 const SCAN_INTERVAL_UNIT_S = 2;
@@ -57,10 +73,9 @@ const useDeviceSettings = (device: Device | undefined) =>
 		},
 	});
 
-const useRefreshDeviceSettings = (
-	device: Device | undefined,
-	refetch: () => void,
-) => {
+/** Refetches after a queued command so its answer shows; timers are cleared on
+ *  unmount. */
+const useRefetchSoon = (refetch: () => void) => {
 	const timers = useRef<ReturnType<typeof setTimeout>[]>([]);
 	useEffect(
 		() => () => {
@@ -68,13 +83,21 @@ const useRefreshDeviceSettings = (
 		},
 		[],
 	);
+	return () => {
+		for (const delay of REFETCH_AFTER_COMMAND_MS) {
+			timers.current.push(setTimeout(refetch, delay));
+		}
+	};
+};
+
+const useRefreshDeviceSettings = (
+	device: Device | undefined,
+	refetch: () => void,
+) => {
+	const refetchSoon = useRefetchSoon(refetch);
 	const { mutate, isPending } = useIssueCommandsToDevices({
 		mutation: {
-			onSuccess: () => {
-				for (const delay of REFETCH_AFTER_REFRESH_MS) {
-					timers.current.push(setTimeout(refetch, delay));
-				}
-			},
+			onSuccess: refetchSoon,
 			onError: (error) => {
 				console.error("Failed to request a settings report:", error);
 			},
@@ -92,6 +115,62 @@ const useRefreshDeviceSettings = (
 		});
 	};
 	return { refresh, isPending, canRefresh: device?.id !== undefined };
+};
+
+/** Saves pins by device id, then refetches so the badges and the unapplied
+ *  edits banner update. */
+const useSaveDeviceSettings = (
+	device: Device | undefined,
+	refetch: () => Promise<unknown>,
+	onSaved: () => void,
+) => {
+	const { mutate, isPending, error, reset } = useUpdateSettingsForDevice({
+		mutation: {
+			onSuccess: async () => {
+				await refetch();
+				onSaved();
+			},
+		},
+	});
+	const save = (changes: SettingsChanges) => {
+		if (device?.id === undefined) return;
+		mutate({ deviceId: String(device.id), data: changes });
+	};
+	return {
+		save,
+		isSaving: isPending,
+		saveError: error ? settingsErrorMessage(error) : undefined,
+		resetError: reset,
+	};
+};
+
+/** Queues ApplySettings by device id, then refetches now and at the delayed
+ *  intervals so Pending and then the result show up. */
+const useApplyDeviceSettings = (
+	device: Device | undefined,
+	refetch: () => void,
+	onQueued: () => void,
+) => {
+	const refetchSoon = useRefetchSoon(refetch);
+	const { mutate, isPending, error, reset } = useApplySettingsForDevice({
+		mutation: {
+			onSuccess: () => {
+				refetch();
+				refetchSoon();
+				onQueued();
+			},
+		},
+	});
+	const apply = () => {
+		if (device?.id === undefined) return;
+		mutate({ deviceId: String(device.id) });
+	};
+	return {
+		apply,
+		isApplying: isPending,
+		applyError: error ? applyErrorMessage(error) : undefined,
+		resetApplyError: reset,
+	};
 };
 
 /** Renders a setting's value, or in its place why there is none: "not used"
@@ -206,29 +285,6 @@ const SettingLabel = ({ text, info }: { text: string; info: string }) => (
 	</span>
 );
 
-interface Flag {
-	bit: number;
-	label: string;
-}
-
-// Bits from the driver's `rtw_wireless_mode` (include/ieee80211.h).
-const MODE_BITS: Flag[] = [
-	{ bit: 1, label: "802.11b" },
-	{ bit: 2, label: "802.11g" },
-	{ bit: 4, label: "802.11a" },
-	{ bit: 8, label: "802.11n (2.4 GHz)" },
-	{ bit: 16, label: "802.11n (5 GHz)" },
-	{ bit: 64, label: "802.11ac" },
-];
-const OTHER_MODE_BITS: Record<number, string> = { 32: "AUTO" };
-
-// Bits from the driver's `roam_flags` (include/rtw_mlme.h).
-const ROAM_BITS: Flag[] = [
-	{ bit: 1, label: "On link loss" },
-	{ bit: 2, label: "On resume" },
-	{ bit: 4, label: "Active (weak signal)" },
-];
-
 /** Read-only checkboxes for a driver bit field; set bits outside `flags` are
  *  listed below, by name when known. */
 const DriverFlags = ({
@@ -281,29 +337,6 @@ const Described = ({ value, note }: { value: ReactNode; note?: string }) => (
 		{note && <span className="text-xs text-gray-500">{note}</span>}
 	</span>
 );
-
-interface NamedValue {
-	name: string;
-	note?: string;
-}
-
-/** `rtw_power_mgnt` values (include/rtw_pwrctrl.h). */
-const POWER_MGNT: Record<number, NamedValue> = {
-	0: { name: "Active", note: "Radio never sleeps" },
-	1: { name: "Min", note: "Light power saving" },
-	2: { name: "Max", note: "Deepest power saving, slowest to wake" },
-	3: { name: "DTIM", note: "Wakes at each DTIM beacon" },
-	4: { name: "VoIP", note: "Power saving tuned for voice traffic" },
-	5: { name: "UAPSD WMM", note: "Power saving driven by WMM traffic" },
-};
-
-/** NetworkManager `wifi.powersave` values. */
-const NM_POWERSAVE: Record<number, NamedValue> = {
-	0: { name: "Default", note: "Follows the global default" },
-	1: { name: "Ignore", note: "Left to the driver's own power saving" },
-	2: { name: "Disabled" },
-	3: { name: "Enabled" },
-};
 
 /** Named value with its note, or the raw number when unknown. */
 const NamedSetting = ({
@@ -366,7 +399,7 @@ const describeBgscan = (bgscan: string) => {
 };
 
 /** Wanted settings next to what the device runs: Realtek driver, roaming,
- *  NetworkManager defaults, time sync and hostname. Read only. */
+ *  NetworkManager defaults, time sync and hostname, with an editor for the pins. */
 const NetworkSettingsPanel = ({ device }: { device: Device | undefined }) => {
 	const {
 		data: settings,
@@ -378,6 +411,20 @@ const NetworkSettingsPanel = ({ device }: { device: Device | undefined }) => {
 		device,
 		refetch,
 	);
+	const [editing, setEditing] = useState(false);
+	const { save, isSaving, saveError, resetError } = useSaveDeviceSettings(
+		device,
+		refetch,
+		() => setEditing(false),
+	);
+	const [confirmingApply, setConfirmingApply] = useState(false);
+	const { apply, isApplying, applyError, resetApplyError } =
+		useApplyDeviceSettings(device, refetch, () => setConfirmingApply(false));
+	const closeApplyConfirm = () => {
+		resetApplyError();
+		setConfirmingApply(false);
+	};
+	const applyState = settings ? applyAction(settings) : undefined;
 	const reported = settings?.reported;
 	// Without a report `r` is empty, which is safe: `SettingValue` shows "Not
 	// reported" before rendering any of it.
@@ -406,6 +453,27 @@ const NetworkSettingsPanel = ({ device }: { device: Device | undefined }) => {
 					>
 						Refresh
 					</Button>
+					{settings && !editing && (
+						<Button
+							variant="soft"
+							size="sm"
+							onClick={() => setEditing(true)}
+							icon={<Pencil className="w-3.5 h-3.5" />}
+						>
+							Edit
+						</Button>
+					)}
+					{applyState && (
+						<Button
+							variant="soft"
+							size="sm"
+							disabled={editing || !applyState.canApply}
+							onClick={() => setConfirmingApply(true)}
+							icon={<Play className="w-3.5 h-3.5" />}
+						>
+							{applyState.label}
+						</Button>
+					)}
 				</div>
 			}
 		>
@@ -413,6 +481,20 @@ const NetworkSettingsPanel = ({ device }: { device: Device | undefined }) => {
 				<p className="text-sm text-amber-600">Couldn't load settings.</p>
 			) : isLoading || !settings ? (
 				<div className="h-4 animate-pulse rounded bg-gray-100" />
+			) : editing ? (
+				<SettingsEditor
+					resolved={settings.resolved}
+					defaults={settings.defaults}
+					unsupported={settings.unsupported}
+					wanted={settings.wanted}
+					saving={isSaving}
+					error={saveError}
+					onSave={save}
+					onCancel={() => {
+						resetError();
+						setEditing(false);
+					}}
+				/>
 			) : !reported && !hasWantedSettings(settings) ? (
 				<p className="text-sm text-gray-500">
 					Not reported. The device needs a smithd version that reports its
@@ -681,6 +763,14 @@ const NetworkSettingsPanel = ({ device }: { device: Device | undefined }) => {
 					</section>
 				</div>
 			)}
+			<ApplySettingsConfirmModal
+				open={confirmingApply}
+				label={applyState?.label ?? "Apply"}
+				pending={isApplying}
+				error={applyError}
+				onConfirm={apply}
+				onClose={closeApplyConfirm}
+			/>
 		</Panel>
 	);
 };

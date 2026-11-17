@@ -33,6 +33,7 @@ import LabelAutocomplete from "@/app/components/LabelAutocomplete";
 import { EmergencyConfirmModal, Modal } from "@/app/components/modal";
 import NetworkQualityIndicator from "@/app/components/NetworkQualityIndicator";
 import { RelativeTime } from "@/app/components/RelativeTime";
+import { bulkEditTarget } from "@/app/utils/deviceSettings";
 import {
 	type Device,
 	type DistributionRolloutStats,
@@ -56,6 +57,10 @@ import {
 	UPTIME_RANGES,
 	type UptimeRange,
 } from "./[serial]/uptime";
+import {
+	BulkApplySettingsModal,
+	BulkEditSettingsModal,
+} from "./SettingsModals";
 
 const Tooltip = ({
 	children,
@@ -264,6 +269,8 @@ const DevicesPage = () => {
 		new Set(),
 	);
 	const [showBulkDeployModal, setShowBulkDeployModal] = useState(false);
+	const [showBulkEditSettings, setShowBulkEditSettings] = useState(false);
+	const [showBulkApplySettings, setShowBulkApplySettings] = useState(false);
 	const [showAllAtOnceConfirm, setShowAllAtOnceConfirm] = useState(false);
 	// Which bulk deploy button was used, so only that one shows the spinner.
 	const [bulkDeployMode, setBulkDeployMode] = useState<
@@ -1729,6 +1736,20 @@ const DevicesPage = () => {
 									Run Command
 								</Button>
 								<Button
+									variant="soft"
+									tone="gray"
+									onClick={() => setShowBulkEditSettings(true)}
+								>
+									Edit settings
+								</Button>
+								<Button
+									variant="soft"
+									tone="gray"
+									onClick={() => setShowBulkApplySettings(true)}
+								>
+									Apply settings
+								</Button>
+								<Button
 									variant="solid"
 									tone="orange"
 									onClick={() => setShowBulkDeployModal(true)}
@@ -1740,6 +1761,28 @@ const DevicesPage = () => {
 					</div>
 				</div>
 			)}
+
+			{/* Every selected id, not only loaded ones, so filtered-out selections are not dropped. */}
+			<BulkEditSettingsModal
+				open={showBulkEditSettings}
+				onClose={() => setShowBulkEditSettings(false)}
+				onSaved={(message) => {
+					setShowBulkEditSettings(false);
+					setToast({ message, type: "success" });
+				}}
+				deviceIds={[...selectedDeviceIds]}
+				target={bulkEditTarget(selectedDevices, selectedDeviceIds.size)}
+			/>
+			<BulkApplySettingsModal
+				open={showBulkApplySettings}
+				onClose={() => setShowBulkApplySettings(false)}
+				onQueued={(message) => {
+					setShowBulkApplySettings(false);
+					setSelectedDeviceIds(new Set());
+					setToast({ message, type: "success" });
+				}}
+				deviceIds={[...selectedDeviceIds]}
+			/>
 
 			{/* Bulk Deploy Modal */}
 			<Modal
