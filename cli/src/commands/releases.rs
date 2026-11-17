@@ -126,6 +126,8 @@ async fn deploy_release(
         .with_context(|| "Error getting token")?
         .with_context(|| "No Token found, please Login")?;
     let api = SmithAPI::new(secrets, &config);
+    // Only release candidates accept a device selection.
+    let release_candidate = canary_device_labels.is_some() || devices.is_some();
 
     // Start the deployment
     api.deploy_release(
@@ -136,6 +138,15 @@ async fn deploy_release(
         }),
     )
     .await?;
+
+    // The polling below confirms a full rollout, which release candidates
+    // reject, so there is nothing to wait for.
+    if release_candidate {
+        println!(
+            "Release candidate deployment started. It stays on the selected devices until promoted."
+        );
+        return Ok(());
+    }
 
     // Set up polling parameters
     let start_time = std::time::Instant::now();
