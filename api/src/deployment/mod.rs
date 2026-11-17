@@ -359,16 +359,7 @@ pub async fn new_deployment(
         .and_then(|r| r.canary_device_labels.as_ref());
     let ids_opt = request.as_ref().and_then(|r| r.canary_device_ids.as_ref());
 
-    let has_labels = labels_opt.is_some();
-    let has_ids = ids_opt.is_some();
-
-    let res = if has_ids {
-        let canary_device_ids = request
-            .as_ref()
-            .unwrap()
-            .canary_device_ids
-            .as_ref()
-            .unwrap();
+    let res = if let Some(canary_device_ids) = ids_opt {
         sqlx::query!(
             r#"
             WITH selected_devices AS (
@@ -391,13 +382,7 @@ pub async fn new_deployment(
         )
         .execute(&mut *tx)
         .await?
-    } else if has_labels {
-        let canary_device_labels = request
-            .as_ref()
-            .unwrap()
-            .canary_device_labels
-            .as_ref()
-            .unwrap();
+    } else if let Some(canary_device_labels) = labels_opt {
         sqlx::query!(
             r#"
             WITH selected_devices AS (
@@ -1386,24 +1371,23 @@ pub(crate) mod tests {
         .await
         .map_err(|err| anyhow::anyhow!("{err:?}"))?;
         assert!(
-            !releases
+            releases
                 .iter()
-                .find(|r| r.release.id == candidate)
-                .unwrap()
-                .deploying
+                .any(|r| r.release.id == candidate && !r.deploying)
         );
         assert!(
             releases
                 .iter()
-                .find(|r| r.release.id == stable)
-                .unwrap()
-                .deploying
+                .any(|r| r.release.id == stable && r.deploying)
         );
         let response = serde_json::to_value(&releases)?;
-        assert!(response[0].get("version").is_some());
-        assert!(response[0].get("deploying").is_some());
+        let first = response
+            .get(0)
+            .ok_or_else(|| anyhow::anyhow!("no releases returned"))?;
+        assert!(first.get("version").is_some());
+        assert!(first.get("deploying").is_some());
         assert!(
-            response[0].get("release").is_none(),
+            first.get("release").is_none(),
             "release fields must remain flat for existing clients"
         );
         let fleet_state = || {

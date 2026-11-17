@@ -360,14 +360,14 @@ mod selection_tests {
     use clap::Parser;
 
     #[test]
-    fn deployment_selection_cli_accepts_device_ids_and_rejects_mixed_selectors() {
-        let cli =
-            Cli::try_parse_from(["sm", "releases", "deploy", "42", "--devices", "1,2,3"]).unwrap();
+    fn deployment_selection_cli_accepts_device_ids_and_rejects_mixed_selectors()
+    -> anyhow::Result<()> {
+        let cli = Cli::try_parse_from(["sm", "releases", "deploy", "42", "--devices", "1,2,3"])?;
         let Some(Commands::Releases {
             command: ReleasesCommands::Deploy { devices, .. },
         }) = cli.command
         else {
-            panic!("expected release deployment");
+            anyhow::bail!("expected release deployment");
         };
         assert_eq!(devices, Some(vec![1, 2, 3]));
         assert!(
@@ -383,5 +383,6 @@ mod selection_tests {
             ])
             .is_err()
         );
+        Ok(())
     }
 }
