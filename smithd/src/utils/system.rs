@@ -169,6 +169,7 @@ impl SystemInfo {
             },
             connection_statuses: get_connection_statuses(),
             operational_mode: get_operational_mode().await,
+            facts: read_facts().await,
         }
     }
     pub fn print(&self) {
@@ -504,6 +505,7 @@ fn parse_connection_statuses(statuses: &str) -> Vec<ConnectionStatus> {
 
 const FACTS_DIR: &str = "/etc/smith/facts.d";
 const MAX_FACT_BYTES: u64 = 4 * 1024;
+const MAX_FACTS: usize = 32;
 
 async fn read_facts() -> BTreeMap<String, String> {
     read_facts_in(Path::new(FACTS_DIR)).await
@@ -551,33 +553,43 @@ async fn read_facts_in(dir: &Path) -> BTreeMap<String, String> {
         };
 
         if meta.permissions().mode() & 0o0004 == 0 {
-            tracing::debug!(path = %path.display(), "Skipping fact, not world-readable");
+            tracing::warn!(path = %path.display(), "Skipping fact, not world-readable");
+            continue;
+        }
+        if !meta.is_file() {
+            tracing::debug!(path = %path.display(), "Skipping fact, not a file");
             continue;
         }
 
-        if meta.is_file() {
-            let mut buf = Vec::new();
-            let read = async {
-                let file = tokio::fs::File::open(&path).await?;
-                file.take(MAX_FACT_BYTES + 1).read_to_end(&mut buf).await
-            };
-            if let Err(e) = read.await {
-                warn!(path = %path.display(), "Skipping fact, can't read it: {e}");
-                continue;
-            }
-            if buf.len() > MAX_FACT_BYTES as usize {
-                warn!(path = %path.display(), "Skipping fact, over {MAX_FACT_BYTES} bytes");
-                continue;
-            }
-            let Ok(content) = String::from_utf8(buf) else {
-                warn!(path = %path.display(), "Skipping fact, not UTF-8");
-                continue;
-            };
-
-            facts.insert(name.to_owned(), content.trim().to_owned());
-        } else {
-            tracing::debug!(path = %path.display(), "Skipping fact, not a file");
+        // pre skip on obvious files
+        if meta.len() > MAX_FACT_BYTES {
+            warn!(path = %path.display(), "Skipping fact, over {MAX_FACT_BYTES} bytes");
             continue;
+        }
+
+        // read max MAX_FACT_BYTES from each secret (+1 to check if secret too large)
+        let mut buf = Vec::new();
+        let read = async {
+            let file = tokio::fs::File::open(&path).await?;
+            file.take(MAX_FACT_BYTES + 1).read_to_end(&mut buf).await
+        };
+        if let Err(e) = read.await {
+            warn!(path = %path.display(), "Skipping fact, can't read it: {e}");
+            continue;
+        }
+        if buf.len() > MAX_FACT_BYTES as usize {
+            warn!(path = %path.display(), "Skipping fact, over {MAX_FACT_BYTES} bytes");
+            continue;
+        }
+        let Ok(content) = String::from_utf8(buf) else {
+            warn!(path = %path.display(), "Skipping fact, not UTF-8");
+            continue;
+        };
+
+        facts.insert(name.to_owned(), content.trim().to_owned());
+        if facts.len() > MAX_FACTS {
+            warn!(dir = %dir.display(), "Skipping fact, over {MAX_FACTS} facts");
+            break;
         }
     }
 
