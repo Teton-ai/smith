@@ -3,9 +3,13 @@ use pnet::datalink::NetworkInterface;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use serde_json::json;
+use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::net::Ipv4Addr;
+use std::os::unix::fs::PermissionsExt;
+use std::path::Path;
 use std::sync::OnceLock;
+use tokio::io::AsyncReadExt;
 use tracing::{error, info, warn};
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
@@ -91,6 +95,8 @@ pub struct SystemInfo {
     pub connection_statuses: Vec<ConnectionStatus>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub operational_mode: Option<String>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub facts: BTreeMap<String, String>,
 }
 
 impl SystemInfo {
@@ -494,6 +500,88 @@ fn parse_connection_statuses(statuses: &str) -> Vec<ConnectionStatus> {
             }
         })
         .collect()
+}
+
+const FACTS_DIR: &str = "/etc/smith/facts.d";
+const MAX_FACT_BYTES: u64 = 4 * 1024;
+
+async fn read_facts() -> BTreeMap<String, String> {
+    read_facts_in(Path::new(FACTS_DIR)).await
+}
+
+async fn read_facts_in(dir: &Path) -> BTreeMap<String, String> {
+    let mut facts = BTreeMap::new();
+    let mut entries = match tokio::fs::read_dir(&dir).await {
+        Ok(entries) => entries,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return facts,
+        Err(e) => {
+            warn!(dir = %dir.display(), "Failed to read facts directory: {}", e);
+            return facts;
+        }
+    };
+
+    loop {
+        let entry = match entries.next_entry().await {
+            Ok(Some(entry)) => entry,
+            Ok(None) => break,
+            Err(e) => {
+                warn!(dir = %dir.display(), "Failed to read facts directory: {}", e);
+                break;
+            }
+        };
+
+        let file_name = entry.file_name();
+        let Some(name) = file_name.to_str() else {
+            continue;
+        };
+        if name.starts_with('.') {
+            continue;
+        }
+        let path = entry.path();
+        let meta = match tokio::fs::metadata(&path).await {
+            Ok(metadata) => metadata,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                tracing::debug!(path = %path.display(), "Skipping fact, broken symlink");
+                continue;
+            }
+            Err(e) => {
+                warn!(path = %path.display(), "Skipping fact, can't stat it: {e}");
+                continue;
+            }
+        };
+
+        if meta.permissions().mode() & 0o0004 == 0 {
+            tracing::debug!(path = %path.display(), "Skipping fact, not world-readable");
+            continue;
+        }
+
+        if meta.is_file() {
+            let mut buf = Vec::new();
+            let read = async {
+                let file = tokio::fs::File::open(&path).await?;
+                file.take(MAX_FACT_BYTES + 1).read_to_end(&mut buf).await
+            };
+            if let Err(e) = read.await {
+                warn!(path = %path.display(), "Skipping fact, can't read it: {e}");
+                continue;
+            }
+            if buf.len() > MAX_FACT_BYTES as usize {
+                warn!(path = %path.display(), "Skipping fact, over {MAX_FACT_BYTES} bytes");
+                continue;
+            }
+            let Ok(content) = String::from_utf8(buf) else {
+                warn!(path = %path.display(), "Skipping fact, not UTF-8");
+                continue;
+            };
+
+            facts.insert(name.to_owned(), content.trim().to_owned());
+        } else {
+            tracing::debug!(path = %path.display(), "Skipping fact, not a file");
+            continue;
+        }
+    }
+
+    facts
 }
 
 #[cfg(test)]
