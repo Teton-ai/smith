@@ -649,4 +649,90 @@ eth0\t00000000\t0300000A\t0003\t0\t0\t200\t00000000
         );
         assert_eq!(find_arp_mac(ARP, Ipv4Addr::new(10, 0, 0, 1), "eth0"), None);
     }
+
+    // test helper
+    fn write_fact(dir: &Path, name: &str, contents: &[u8], mode: u32) {
+        let path = dir.join(name);
+        std::fs::write(&path, contents).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(mode)).unwrap();
+    }
+
+    #[tokio::test]
+    async fn reads_facts_by_file_name() {
+        let dir = tempfile::tempdir().unwrap();
+        write_fact(dir.path(), "harald-device-key", b"abc=\n", 0o644);
+        write_fact(dir.path(), "empty", b"", 0o644);
+
+        let facts = read_facts_in(dir.path()).await;
+        assert_eq!(
+            facts.get("harald-device-key").map(String::as_str),
+            Some("abc=")
+        );
+        assert_eq!(facts.get("empty").map(String::as_str), Some(""));
+        assert_eq!(facts.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn missing_dir_has_no_facts() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(read_facts_in(&dir.path().join("nope")).await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn skips_files_that_are_not_facts() {
+        let dir = tempfile::tempdir().unwrap();
+        write_fact(dir.path(), "private", b"secret", 0o600);
+        write_fact(dir.path(), ".harald-device-key.tmp", b"half", 0o644);
+        write_fact(dir.path(), "not-utf8", &[0xff, 0xfe], 0o644);
+        let too_big = vec![b'a'; MAX_FACT_BYTES as usize + 1];
+        write_fact(dir.path(), "too-big", &too_big, 0o644);
+        std::fs::create_dir(dir.path().join("subdir")).unwrap();
+
+        assert!(read_facts_in(dir.path()).await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn exactly_max_bytes_is_kept() {
+        let dir = tempfile::tempdir().unwrap();
+        let max = vec![b'a'; MAX_FACT_BYTES as usize];
+        write_fact(dir.path(), "max", &max, 0o644);
+
+        let facts = read_facts_in(dir.path()).await;
+        assert_eq!(
+            facts.get("max").map(String::len),
+            Some(MAX_FACT_BYTES as usize)
+        );
+    }
+
+    #[tokio::test]
+    async fn follows_symlinks_but_not_to_private_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = tempfile::tempdir().unwrap();
+        // same layout harald uses: public half readable, private half 600
+        write_fact(target.path(), "device-key.pub", b"pub=\n", 0o644);
+        write_fact(target.path(), "device-key", b"priv", 0o600);
+
+        let link = |name: &str, to: &str| {
+            std::os::unix::fs::symlink(target.path().join(to), dir.path().join(name)).unwrap()
+        };
+        link("harald-device-key", "device-key.pub");
+        link("oops", "device-key");
+        link("dangling", "gone");
+
+        let facts = read_facts_in(dir.path()).await;
+        assert_eq!(
+            facts.get("harald-device-key").map(String::as_str),
+            Some("pub=")
+        );
+        assert_eq!(facts.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn caps_the_number_of_facts() {
+        let dir = tempfile::tempdir().unwrap();
+        for i in 0..MAX_FACTS + 5 {
+            write_fact(dir.path(), &format!("fact-{i}"), b"x", 0o644);
+        }
+        assert_eq!(read_facts_in(dir.path()).await.len(), MAX_FACTS);
+    }
 }
