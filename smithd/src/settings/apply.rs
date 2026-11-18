@@ -207,9 +207,12 @@ pub fn roam_flags_line(flags: i16) -> String {
     format!("0x{flags:02x}")
 }
 
+/// The newline is required: the vendor handlers copy exactly the written bytes
+/// into an unterminated stack buffer and `sscanf` it, so without one the parse
+/// runs into stale bytes (`0x07` read back as `0x77`, `busy_th` 30 as 229).
 async fn write_proc(paths: &DriverPaths, interface: &str, file: &str, line: &str) -> Result<()> {
     let path = paths.proc.join(interface).join(file);
-    tokio::fs::write(&path, line)
+    tokio::fs::write(&path, format!("{line}\n"))
         .await
         .with_context(|| format!("writing {}", path.display()))
 }
@@ -672,7 +675,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn roam_values_are_written_to_the_interface_proc_dir() {
+    async fn roam_values_are_written_newline_terminated_to_the_interface_proc_dir() {
         let tmp = tempfile::tempdir().unwrap();
         let paths = DriverPaths {
             net: tmp.path().join("net"),
@@ -687,11 +690,11 @@ mod tests {
         write_roam_flags(&paths, "wlP1p1s0", 3).await.unwrap();
         assert_eq!(
             std::fs::read_to_string(dir.join("roam_param")).unwrap(),
-            "15 15 10000 5 30 30"
+            "15 15 10000 5 30 30\n"
         );
         assert_eq!(
             std::fs::read_to_string(dir.join("roam_flags")).unwrap(),
-            "0x03"
+            "0x03\n"
         );
     }
 }
