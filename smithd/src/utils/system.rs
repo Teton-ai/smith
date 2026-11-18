@@ -552,12 +552,12 @@ async fn read_facts_in(dir: &Path) -> BTreeMap<String, String> {
             }
         };
 
-        if meta.permissions().mode() & 0o0004 == 0 {
-            tracing::warn!(path = %path.display(), "Skipping fact, not world-readable");
-            continue;
-        }
         if !meta.is_file() {
             tracing::debug!(path = %path.display(), "Skipping fact, not a file");
+            continue;
+        }
+        if meta.permissions().mode() & 0o0004 == 0 {
+            tracing::warn!(path = %path.display(), "Skipping fact, not world-readable");
             continue;
         }
 
@@ -567,7 +567,7 @@ async fn read_facts_in(dir: &Path) -> BTreeMap<String, String> {
             continue;
         }
 
-        // read max MAX_FACT_BYTES from each secret (+1 to check if secret too large)
+        // read max MAX_FACT_BYTES from each fact (+1 to check if fact too large)
         let mut buf = Vec::new();
         let read = async {
             let file = tokio::fs::File::open(&path).await?;
@@ -587,7 +587,7 @@ async fn read_facts_in(dir: &Path) -> BTreeMap<String, String> {
         };
 
         facts.insert(name.to_owned(), content.trim().to_owned());
-        if facts.len() > MAX_FACTS {
+        if facts.len() >= MAX_FACTS {
             warn!(dir = %dir.display(), "Skipping fact, over {MAX_FACTS} facts");
             break;
         }
