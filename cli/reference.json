@@ -1,6 +1,6 @@
 {
   "name": "sm",
-  "version": "0.2.242",
+  "version": "0.2.243",
   "about": "Smith CLI - Fleet management tool",
   "global_options": [],
   "commands": [
