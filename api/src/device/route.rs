@@ -114,6 +114,14 @@ fn parse_search_terms(search: &str) -> Vec<String> {
         .collect()
 }
 
+fn exact_serial_numbers(serial_numbers: &[String]) -> Vec<String> {
+    serial_numbers
+        .iter()
+        .filter(|serial_number| !serial_number.is_empty())
+        .cloned()
+        .collect()
+}
+
 #[utoipa::path(
     get,
     path = "/devices",
@@ -149,6 +157,7 @@ pub async fn get_devices(
     let sort_labels_desc = matches!(filter.sort, Some(DeviceSortField::Labels))
         && matches!(filter.order, Some(DeviceSortDirection::Desc));
     let search_terms = parse_search_terms(filter.search.as_deref().unwrap_or(""));
+    let serial_numbers = exact_serial_numbers(&filter.serial_number);
 
     #[allow(deprecated)]
     let devices = sqlx::query!(
@@ -319,7 +328,7 @@ pub async fn get_devices(
         LIMIT $8
         OFFSET $9
         "#,
-        filter.serial_number.as_slice(),
+        serial_numbers.as_slice(),
         filter.approved,
         filter.archived,
         filter.labels.as_slice(),
@@ -4095,7 +4104,7 @@ pub async fn apply_device_intent(
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_search_terms, wire_credentials};
+    use super::{exact_serial_numbers, parse_search_terms, wire_credentials};
     use axum::http::Request;
     use axum_extra::extract::Query;
     use models::device::DeviceFilter;
@@ -4236,6 +4245,19 @@ mod tests {
             filter.serial_number.is_empty(),
             "no param means no serial filter"
         );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn empty_serial_number_disables_the_filter() -> anyhow::Result<()> {
+        let filter = device_filter("/devices?serial_number=").await?;
+        assert!(
+            exact_serial_numbers(&filter.serial_number).is_empty(),
+            "an empty serial_number lists every device, as it did before it became repeatable"
+        );
+
+        let filter = device_filter("/devices?serial_number=a&serial_number=").await?;
+        assert_eq!(exact_serial_numbers(&filter.serial_number), vec!["a"]);
         Ok(())
     }
 }
