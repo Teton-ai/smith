@@ -114,6 +114,14 @@ fn parse_search_terms(search: &str) -> Vec<String> {
         .collect()
 }
 
+fn exact_serial_numbers(serial_numbers: &[String]) -> Vec<String> {
+    serial_numbers
+        .iter()
+        .filter(|serial_number| !serial_number.is_empty())
+        .cloned()
+        .collect()
+}
+
 #[utoipa::path(
     get,
     path = "/devices",
@@ -149,6 +157,7 @@ pub async fn get_devices(
     let sort_labels_desc = matches!(filter.sort, Some(DeviceSortField::Labels))
         && matches!(filter.order, Some(DeviceSortDirection::Desc));
     let search_terms = parse_search_terms(filter.search.as_deref().unwrap_or(""));
+    let serial_numbers = exact_serial_numbers(&filter.serial_number);
 
     #[allow(deprecated)]
     let devices = sqlx::query!(
@@ -244,7 +253,7 @@ pub async fn get_devices(
         LEFT JOIN device_settings_reported dsr ON dsr.device_id = d.id
         LEFT JOIN device_label dl ON dl.device_id = d.id
         LEFT JOIN label l ON l.id = dl.label_id
-        WHERE ($1::text IS NULL OR d.serial_number = $1)
+        WHERE (CARDINALITY($1::text[]) = 0 OR d.serial_number = ANY($1))
           AND ($2::boolean IS NULL OR d.approved = $2)
           AND (COALESCE($3, false) = true OR d.archived = false)
           -- A subquery, not a filter on the joined rows, so every label of a
@@ -319,7 +328,7 @@ pub async fn get_devices(
         LIMIT $8
         OFFSET $9
         "#,
-        filter.serial_number,
+        serial_numbers.as_slice(),
         filter.approved,
         filter.archived,
         filter.labels.as_slice(),
@@ -4095,7 +4104,10 @@ pub async fn apply_device_intent(
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_search_terms, wire_credentials};
+    use super::{exact_serial_numbers, parse_search_terms, wire_credentials};
+    use axum::http::Request;
+    use axum_extra::extract::Query;
+    use models::device::DeviceFilter;
     use serde_json::json;
 
     // Mirrors the legacy inline heuristic in apply_device_intent exactly.
@@ -4210,6 +4222,43 @@ mod tests {
         assert_eq!(parse_search_terms(&search).len(), 50);
         assert_eq!(parse_search_terms(&search)[0], "0");
         assert_eq!(parse_search_terms(&search)[49], "49");
+    }
+
+    async fn device_filter(uri: &str) -> anyhow::Result<DeviceFilter> {
+        use axum::extract::FromRequestParts;
+
+        let (mut parts, ()) = Request::get(uri).body(())?.into_parts();
+        let Query(filter) = Query::<DeviceFilter>::from_request_parts(&mut parts, &()).await?;
+        Ok(filter)
+    }
+
+    #[tokio::test]
+    async fn serial_number_filter_repeats() -> anyhow::Result<()> {
+        let filter = device_filter("/devices?serial_number=a&serial_number=b").await?;
+        assert_eq!(filter.serial_number, vec!["a", "b"]);
+
+        let filter = device_filter("/devices?serial_number=a").await?;
+        assert_eq!(filter.serial_number, vec!["a"]);
+
+        let filter = device_filter("/devices").await?;
+        assert!(
+            filter.serial_number.is_empty(),
+            "no param means no serial filter"
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn empty_serial_number_disables_the_filter() -> anyhow::Result<()> {
+        let filter = device_filter("/devices?serial_number=").await?;
+        assert!(
+            exact_serial_numbers(&filter.serial_number).is_empty(),
+            "an empty serial_number lists every device, as it did before it became repeatable"
+        );
+
+        let filter = device_filter("/devices?serial_number=a&serial_number=").await?;
+        assert_eq!(exact_serial_numbers(&filter.serial_number), vec!["a"]);
+        Ok(())
     }
 }
 
