@@ -1,5 +1,5 @@
 # This tries to emulate an Ubuntu device as we would see in the real world.
-# It runs smithd and smith-updater with systemd, sets up ssh and such
+# It runs smithd, smith-updater and smith-rescue with systemd, sets up ssh and such
 
 # This needs to be run in privileged mode
 # docker run -d --privileged device
@@ -38,9 +38,10 @@ FROM toolchain AS builder
 # Copy the workspace
 COPY . .
 
-# Build smithd and smith-updater
+# Build smithd, smith-updater and smith-rescue
 RUN cargo build --package smith --bin smithd
 RUN cargo build --package smith-updater
+RUN cargo build --package smith-rescue
 
 # Stage 3: runtime - the actual device container
 ARG BASE_IMAGE
@@ -79,10 +80,12 @@ RUN mkdir -p /root/.ssh
 # Copy binaries from builder
 COPY --from=builder /app/target/debug/smithd /usr/bin/smithd
 COPY --from=builder /app/target/debug/smith-updater /usr/bin/smith-updater
+COPY --from=builder /app/target/debug/smith-rescue /usr/bin/smith-rescue
 
 # Copy systemd service files
 COPY smithd/debian/smithd.service /etc/systemd/system/smithd.service
 COPY updater/debian/smith-updater.service /etc/systemd/system/smith-updater.service
+COPY rescue/debian/smith-rescue.service /etc/systemd/system/smith-rescue.service
 
 # Copy network throttle script for simulating different network conditions
 COPY scripts/network-throttle.sh /app/network-throttle.sh
@@ -93,11 +96,12 @@ COPY scripts/mock-iw.sh /usr/local/bin/iw
 RUN chmod +x /usr/local/bin/iw
 
 # Make binaries executable
-RUN chmod +x /usr/bin/smithd /usr/bin/smith-updater
+RUN chmod +x /usr/bin/smithd /usr/bin/smith-updater /usr/bin/smith-rescue
 
 # Enable services
 RUN systemctl enable smithd.service
 RUN systemctl enable smith-updater.service
+RUN systemctl enable smith-rescue.service
 
 # Set environment variables
 ENV RUST_LOG=INFO

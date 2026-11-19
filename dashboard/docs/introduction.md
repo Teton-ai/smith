@@ -14,12 +14,13 @@ Smith is built in Rust and was born from managing thousands of devices across he
 
 ## Architecture
 
-Smith consists of five components:
+Smith consists of six components:
 
 | Component | What it does |
 |---|---|
 | `smithd` | Daemon that runs on each device to execute deployments and report status |
 | `updater` | Daemon that keeps `smithd` up to date |
+| `smith-rescue` | Separate daemon on each device that runs the `Restart` command, so a device whose `smithd` is stuck can still be rebooted |
 | `api` | Backend service managing deployment configurations and fleet status |
 | `dashboard` | Visual interface to monitor your fleet in real time, and home of these docs |
 | `sm` | Command line tool for fleet administrators |
