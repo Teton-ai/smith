@@ -218,12 +218,12 @@ export interface DeploymentDeviceWithStatus {
 
 export interface DeploymentRequest {
 	/**
-	 * Optionally specify exact device IDs for the canary release.
+	 * Select exact release-candidate device IDs, instead of labels.
 	 * Cannot be used together with `canary_device_labels`.
 	 */
 	canary_device_ids?: number[];
 	/**
-	 * Optionally decide which devices go into the canary release with this filter.
+	 * Select release-candidate devices by labels. Stable releases choose canaries automatically.
 	 * e.g. `canary_device_labels=["label1=a", "label2=b"]`
 	 */
 	canary_device_labels?: string[];

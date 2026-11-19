@@ -849,7 +849,13 @@
           "name": "--canary-device-labels",
           "value": "<CANARY_DEVICE_LABELS>",
           "required": false,
-          "help": "Customize which devices are canary released, by filtering devices by labels. e.g. --labels label1=a --labels label2=b"
+          "help": "Select release-candidate devices by labels. Stable releases use automatic canaries. e.g. --labels label1=a --labels label2=b"
+        },
+        {
+          "name": "--devices",
+          "value": "<DEVICES>",
+          "required": false,
+          "help": "Select release-candidate device IDs (comma-separated)"
         }
       ],
       "examples": []

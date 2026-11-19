@@ -599,4 +599,4 @@ mod tests {
 
 #[cfg(test)]
 #[path = "uploads_tests.rs"]
-mod integration_tests;
+pub(crate) mod integration_tests;

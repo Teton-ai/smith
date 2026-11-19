@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT distribution_id, draft, yanked FROM release WHERE id = $1",
+  "query": "SELECT distribution_id, draft, yanked, release_candidate FROM release WHERE id = $1",
   "describe": {
     "columns": [
       {
@@ -17,6 +17,11 @@
         "ordinal": 2,
         "name": "yanked",
         "type_info": "Bool"
+      },
+      {
+        "ordinal": 3,
+        "name": "release_candidate",
+        "type_info": "Bool"
       }
     ],
     "parameters": {
@@ -27,8 +32,9 @@
     "nullable": [
       false,
       false,
+      false,
       false
     ]
   },
-  "hash": "8b49f192cce1f003b8e9afc4df6a96ada3d5cd29d0248e39501a3815351780fb"
+  "hash": "a61514b7d7f681c9656c79a57dfce1c117ca7fb0550ffc236e7a3e97d523324d"
 }

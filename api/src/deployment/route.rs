@@ -52,7 +52,7 @@ pub async fn api_get_release_deployment(
   request_body = DeploymentRequest,
   responses(
         (status = StatusCode::OK, body = Deployment),
-        (status = StatusCode::BAD_REQUEST, description = "Release is draft or yanked, a deployment is already in progress, or no canary devices matched"),
+        (status = StatusCode::BAD_REQUEST, description = "Release is draft or yanked, device selection is invalid, a deployment is already in progress, or no eligible devices matched"),
         (status = StatusCode::NOT_FOUND, description = "Release not found"),
   ),
   security(

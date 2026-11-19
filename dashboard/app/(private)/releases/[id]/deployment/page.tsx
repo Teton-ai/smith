@@ -11,7 +11,7 @@ import {
 	XCircle,
 } from "lucide-react";
 import moment from "moment";
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import {
 	type Deployment,
@@ -150,6 +150,7 @@ const DeploymentStatusPage = () => {
 	const queryClient = useQueryClient();
 	const [elapsedTime, setElapsedTime] = useState(0);
 	const [promoteVersion, setPromoteVersion] = useState("");
+	const promoteVersionId = useId();
 	const [confirmError, setConfirmError] = useState<string | null>(null);
 
 	const { data: release, isLoading: releaseLoading } = useGetRelease(releaseId);
@@ -460,18 +461,24 @@ const DeploymentStatusPage = () => {
 								>
 									{deployment.status === "InProgress" && (
 										<div className="space-y-2">
-											<p className="font-medium">Phase 1: Canary Deployment</p>
+											<p className="font-medium">
+												{release.release_candidate
+													? "Release Candidate Deployment"
+													: "Phase 1: Canary Deployment"}
+											</p>
 											{isCanaryComplete() ? (
 												<>
 													<p>
-														All canary devices have been successfully updated!
+														{release.release_candidate
+															? "All selected devices have been successfully updated!"
+															: "All canary devices have been successfully updated!"}
 													</p>
 													{release.release_candidate ? (
 														<div className="mt-4 p-3 bg-orange-50 border border-orange-200 rounded-lg space-y-3">
 															<p className="text-sm text-orange-800">
-																<strong>Release Candidate:</strong> Full rollout
-																is not available for RC releases. Promote this
-																to a stable release to deploy fleet-wide.
+																<strong>Release Candidate:</strong> Promote this
+																to a stable release to deploy it to the whole
+																fleet.
 															</p>
 															{alreadyPromoted && (
 																<p className="text-sm text-orange-700">
@@ -487,10 +494,14 @@ const DeploymentStatusPage = () => {
 															)}
 															<div className="flex items-end gap-2">
 																<div className="flex-1">
-																	<label className="block text-xs font-medium text-gray-700 mb-1">
+																	<label
+																		htmlFor={promoteVersionId}
+																		className="block text-xs font-medium text-gray-700 mb-1"
+																	>
 																		New release version
 																	</label>
 																	<input
+																		id={promoteVersionId}
 																		type="text"
 																		placeholder={release.version.replace(
 																			/-rc.*$/,
@@ -552,9 +563,9 @@ const DeploymentStatusPage = () => {
 											) : (
 												<>
 													<p>
-														Deploying to ~10 recently active devices. Please
-														confirm full rollout once all canary devices have
-														successfully updated.
+														{release.release_candidate
+															? "Deploying to the selected devices."
+															: "Deploying to ~10 recently active devices. Please confirm full rollout once all canary devices have successfully updated."}
 													</p>
 													<div className="mt-3 flex items-center space-x-2">
 														<Loader2 className="w-4 h-4 animate-spin" />
@@ -614,7 +625,7 @@ const DeploymentStatusPage = () => {
 									every 5 seconds to show the latest status.{" "}
 									{isCanaryComplete()
 										? release.release_candidate
-											? "RC canary deployment is complete."
+											? "All selected devices are running this release candidate."
 											: "Please confirm full rollout to proceed."
 										: "You can safely navigate away and return later."}
 								</p>
