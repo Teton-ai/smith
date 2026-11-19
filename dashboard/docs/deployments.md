@@ -149,6 +149,8 @@ GET /distributions/{distribution_id}/releases/lts
 
 ## Pinning devices off rollouts
 
+The dashboard shows pinned devices in the device list and their pinned target release in the device header. Use **Actions → Pin device / Unpin device** to change this setting. Pinning preserves the assigned target, which can differ from the installed release; it does not cancel an update to that target. Unpinning assigns the designated latest release of the installed distribution when one exists. This can immediately target an older version or replace a target from another distribution.
+
 `confirm_full_rollout` retargets every device in the distribution **except** those with `follow_latest = false`. This is a hard skip, not a warning: a fleet-wide rollout cannot move a pinned device.
 
 New devices are pinned by default, so a freshly flashed device stays on the release it shipped with until someone decides otherwise. Devices that existed before the flag was introduced were backfilled as following latest, so the existing fleet's behaviour is unchanged.
