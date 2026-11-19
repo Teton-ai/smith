@@ -300,12 +300,14 @@ Examples:
         resource: StatusResourceType,
     },
 
-    /// Get logs for a device (runs 'journalctl -r' on the device)
+    /// Get logs for devices (runs 'journalctl -r' on each device)
     ///
-    /// Entries come from the systemd journal, newest first.
+    /// Entries come from the systemd journal, newest first. Every selected
+    /// device gets the command at once; the output comes per device.
     #[command(after_long_help = "\
 Examples:
   sm logs ABC123
+  sm logs ABC123 DEF456 --unit smithd --since \"10 min ago\"
   sm logs ABC123 --unit smithd --since \"1h ago\"
   sm logs ABC123 --grep \"error|panic\"
   sm logs -l env=production --nowait
@@ -325,7 +327,7 @@ Examples:
         /// Filter log lines by pattern. Passed to journalctl --grep (supports ERE regex)
         #[arg(long, value_name = "PATTERN", allow_hyphen_values = true)]
         grep: Option<String>,
-        /// Don't wait for result, just queue the command and return immediately (faster, recommended for agents - use 'sm command <id>' to check results later)
+        /// Don't wait for results, just queue the commands and return immediately (use 'sm command <id>' to check results later)
         #[arg(long, default_value = "false")]
         nowait: bool,
     },

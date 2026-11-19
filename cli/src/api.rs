@@ -57,6 +57,21 @@ pub struct SpeedStats {
     pub q75: f64,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct DeploymentDevice {
+    pub serial_number: String,
+    pub release_id: Option<i32>,
+    pub target_release_id: Option<i32>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct DeploymentServiceHealth {
+    pub serial_number: String,
+    pub service_name: String,
+    pub active_state: String,
+    pub n_restarts: i32,
+}
+
 trait HandleApiError: Sized {
     async fn handle_error(self) -> anyhow::Result<Self>;
 }
@@ -71,6 +86,16 @@ impl HandleApiError for Response {
             Ok(self)
         }
     }
+}
+
+/// The deployment routes answer 404 with no body when a release has no deployment.
+fn require_deployment(resp: Response, release_id: i32) -> Result<Response> {
+    if resp.status() == reqwest::StatusCode::NOT_FOUND {
+        anyhow::bail!(
+            "Release {release_id} has no deployment. Start one with `sm releases deploy {release_id}`"
+        );
+    }
+    Ok(resp)
 }
 
 pub struct SmithAPI {
@@ -107,6 +132,74 @@ impl SmithAPI {
         Ok(packages)
     }
 
+    pub async fn add_release_package(&self, release_id: i32, package_id: i32) -> Result<()> {
+        let client = Client::new();
+
+        client
+            .post(format!("{}/releases/{}/packages", self.domain, release_id))
+            .header("Authorization", format!("Bearer {}", &self.bearer_token))
+            .json(&serde_json::json!({ "id": package_id }))
+            .send()
+            .await?
+            .handle_error()
+            .await?;
+
+        Ok(())
+    }
+
+    pub async fn replace_release_package(
+        &self,
+        release_id: i32,
+        old_package_id: i32,
+        new_package_id: i32,
+    ) -> Result<()> {
+        let client = Client::new();
+
+        client
+            .put(format!(
+                "{}/releases/{}/packages/{}",
+                self.domain, release_id, old_package_id
+            ))
+            .header("Authorization", format!("Bearer {}", &self.bearer_token))
+            .json(&serde_json::json!({ "id": new_package_id }))
+            .send()
+            .await?
+            .handle_error()
+            .await?;
+
+        Ok(())
+    }
+
+    pub async fn delete_release_package(&self, release_id: i32, package_id: i32) -> Result<()> {
+        let client = Client::new();
+
+        client
+            .delete(format!(
+                "{}/releases/{}/packages/{}",
+                self.domain, release_id, package_id
+            ))
+            .header("Authorization", format!("Bearer {}", &self.bearer_token))
+            .send()
+            .await?
+            .handle_error()
+            .await?;
+
+        Ok(())
+    }
+
+    pub async fn get_packages(&self) -> Result<Vec<Package>> {
+        let client = Client::new();
+
+        let resp = client
+            .get(format!("{}/packages", self.domain))
+            .header("Authorization", format!("Bearer {}", &self.bearer_token))
+            .send()
+            .await?
+            .error_for_status()?;
+
+        Ok(resp.json().await?)
+    }
+
     pub async fn create_distribution_release(
         &self,
         distribution_id: i32,
@@ -123,7 +216,8 @@ impl SmithAPI {
             .json(&request)
             .send()
             .await?
-            .error_for_status()?;
+            .handle_error()
+            .await?;
 
         let new_release_id = resp.json().await?;
 
@@ -305,20 +399,73 @@ impl SmithAPI {
         Ok(deployment)
     }
 
-    pub async fn deploy_release_check_done(&self, release_id: String) -> Result<Deployment> {
+    pub async fn get_deployment(&self, release_id: i32) -> Result<Deployment> {
         let client = Client::new();
 
         let resp = client
-            .patch(format!(
+            .get(format!(
                 "{}/releases/{}/deployment",
                 self.domain, release_id
             ))
             .header("Authorization", format!("Bearer {}", &self.bearer_token))
-            .send();
+            .send()
+            .await?;
+        let resp = require_deployment(resp, release_id)?.handle_error().await?;
 
-        let deployment = resp.await?.error_for_status()?.json().await?;
+        Ok(resp.json().await?)
+    }
 
-        Ok(deployment)
+    pub async fn get_deployment_devices(&self, release_id: i32) -> Result<Vec<DeploymentDevice>> {
+        let client = Client::new();
+
+        let resp = client
+            .get(format!(
+                "{}/releases/{}/deployment/devices",
+                self.domain, release_id
+            ))
+            .header("Authorization", format!("Bearer {}", &self.bearer_token))
+            .send()
+            .await?
+            .handle_error()
+            .await?;
+
+        Ok(resp.json().await?)
+    }
+
+    pub async fn get_deployment_service_health(
+        &self,
+        release_id: i32,
+    ) -> Result<Vec<DeploymentServiceHealth>> {
+        let client = Client::new();
+
+        let resp = client
+            .get(format!(
+                "{}/releases/{}/deployment/service-health",
+                self.domain, release_id
+            ))
+            .header("Authorization", format!("Bearer {}", &self.bearer_token))
+            .send()
+            .await?
+            .handle_error()
+            .await?;
+
+        Ok(resp.json().await?)
+    }
+
+    pub async fn confirm_deployment(&self, release_id: i32) -> Result<Deployment> {
+        let client = Client::new();
+
+        let resp = client
+            .post(format!(
+                "{}/releases/{}/deployment/confirm",
+                self.domain, release_id
+            ))
+            .header("Authorization", format!("Bearer {}", &self.bearer_token))
+            .send()
+            .await?;
+        let resp = require_deployment(resp, release_id)?.handle_error().await?;
+
+        Ok(resp.json().await?)
     }
 
     pub async fn get_distributions(&self) -> Result<Vec<Distribution>> {
@@ -473,44 +620,6 @@ impl SmithAPI {
             .error_for_status()?;
 
         Ok(resp.json().await?)
-    }
-
-    pub async fn send_logs_command(
-        &self,
-        device_id: u64,
-        unit: Option<String>,
-        since: Option<String>,
-        until: Option<String>,
-        grep: Option<String>,
-    ) -> Result<(u64, u64)> {
-        let client = Client::new();
-
-        let logs_command = schema::SafeCommandRequest {
-            id: 0,
-            command: schema::SafeCommandTx::GetLogs {
-                unit,
-                since,
-                until,
-                grep,
-            },
-            continue_on_error: false,
-        };
-
-        let resp = client
-            .post(format!("{}/devices/{device_id}/commands", self.domain))
-            .header("Authorization", format!("Bearer {}", &self.bearer_token))
-            .json(&serde_json::json!([logs_command]))
-            .send();
-
-        resp.await?.error_for_status()?;
-
-        // Brief delay to let the API process the command
-        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-
-        // The API returns 201 with empty body, so we need to fetch the last command to get the ID
-        let last_command = self.get_last_command(device_id).await?;
-
-        Ok((device_id, last_command.cmd_id as u64))
     }
 
     pub async fn send_service_status_command(
