@@ -1196,10 +1196,10 @@ pub async fn save_release_id(
     pool: &PgPool,
 ) -> anyhow::Result<()> {
     if let Some(new_release_id) = release_id {
-        let current = sqlx::query!("SELECT release_id FROM device WHERE id = $1", device_id)
+        let stored = sqlx::query!("SELECT release_id FROM device WHERE id = $1", device_id)
             .fetch_one(pool)
             .await?;
-        if current.release_id == Some(new_release_id) {
+        if stored.release_id == Some(new_release_id) {
             return Ok(());
         }
 
