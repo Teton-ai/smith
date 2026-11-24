@@ -15,9 +15,9 @@ use futures::StreamExt;
 use serde::{Deserialize, Serialize};
 use std::sync::{
     Arc,
-    atomic::{AtomicBool, AtomicU64, Ordering},
+    atomic::{AtomicU8, AtomicU64, Ordering},
 };
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use utoipa::ToSchema;
 
 pub const PART_SIZE: i64 = 5 * 1024 * 1024;
@@ -27,6 +27,9 @@ const TOKEN_TTL_SECONDS: i64 = 24 * 60 * 60;
 pub const RETRY_AFTER_SECONDS: &str = "30";
 /// Devices ask for fresh part URLs before this runs out.
 const PART_URL_TTL_SECONDS: u32 = 60 * 60;
+/// Max wait for the next body chunk from a device before aborting the transfer
+/// and releasing the upload permit. Exceeds the slowest 16 KiB paced interval (16 s at 1 KiB/s).
+const PART_IDLE_TIMEOUT: Duration = Duration::from_secs(30);
 const CRC64NVME_BYTES: usize = 8;
 
 pub struct UploadError(StatusCode, &'static str);
@@ -371,13 +374,46 @@ pub async fn status(
 }
 
 #[utoipa::path(put,path="/smith/upload-sessions/parts/{number}",params(("number"=i32,Path),("x-upload-token"=String,Header)),
-    request_body(content=Vec<u8>,content_type="application/octet-stream"),responses((status=200,body=UploadPart),(status=400,description="Invalid part length or ClientAborted"),(status=410,description="Upload no longer exists"),(status=503,description="Upload capacity reached, retry after the Retry-After delay")),security(("device_token"=[])))]
+    request_body(content=Vec<u8>,content_type="application/octet-stream"),responses((status=200,body=UploadPart),(status=400,description="Invalid part length or ClientAborted"),(status=408,description="Device upload timed out"),(status=410,description="Upload no longer exists"),(status=503,description="Upload capacity reached, retry after the Retry-After delay")),security(("device_token"=[])))]
 pub async fn put_part(
     device: AuthedDevice,
     Extension(state): Extension<State>,
     Path(number): Path<i32>,
     request: axum::extract::Request,
 ) -> Result<Json<UploadPart>, UploadError> {
+    put_part_with(
+        device,
+        state,
+        number,
+        request,
+        PART_IDLE_TIMEOUT,
+        |claims, number, body, size| async move {
+            Storage::upload_session_part(
+                &claims.bucket,
+                &claims.key,
+                &claims.upload_id,
+                number,
+                body,
+                size,
+            )
+            .await
+        },
+    )
+    .await
+}
+
+async fn put_part_with<F, Fut>(
+    device: AuthedDevice,
+    state: State,
+    number: i32,
+    request: axum::extract::Request,
+    idle_timeout: Duration,
+    upload_part: F,
+) -> Result<Json<UploadPart>, UploadError>
+where
+    F: FnOnce(UploadClaims, i32, reqwest::Body, u64) -> Fut,
+    Fut: std::future::Future<Output = anyhow::Result<String>>,
+{
     let claims = claims(&device, &state, request.headers())?;
     let size = part_length(claims.size_bytes, number)?;
     if request
@@ -396,54 +432,170 @@ pub async fn put_part(
             "UploadCapacity",
         ));
     };
-    // Body read error means the device disconnected.
-    let client_error = Arc::new(AtomicBool::new(false));
-    let bytes = Arc::new(AtomicU64::new(0));
-    let body = reqwest::Body::wrap_stream(request.into_body().into_data_stream().inspect({
-        let client_error = client_error.clone();
-        let bytes = bytes.clone();
-        move |chunk| match chunk {
-            Ok(chunk) => {
-                bytes.fetch_add(chunk.len() as u64, Ordering::Relaxed);
-            }
-            Err(_) => client_error.store(true, Ordering::Relaxed),
-        }
-    }));
+    let progress = Arc::new(PartStreamState::default());
+    let body = reqwest::Body::wrap_stream(idle_timeout_stream(
+        request.into_body().into_data_stream(),
+        idle_timeout,
+        progress.clone(),
+    ));
+    let key = claims.key.clone();
+    let bucket = bucket_label(&state, &claims);
     let started = Instant::now();
-    let etag = Storage::upload_session_part(
-        &claims.bucket,
-        &claims.key,
-        &claims.upload_id,
-        number,
-        body,
-        size as u64,
-    )
-    .await
-    .map_err(|error| {
-        let elapsed_ms = started.elapsed().as_millis() as u64;
-        if client_error.load(Ordering::Relaxed) {
-            tracing::warn!(
-                serial = %device.serial_number,
-                part = number,
-                bytes = bytes.load(Ordering::Relaxed),
+    let etag = upload_part(claims, number, body, size as u64)
+        .await
+        .map_err(|error| {
+            let elapsed_ms = started.elapsed().as_millis() as u64;
+            part_upload_error(
+                error,
+                &device.serial_number,
+                number,
+                &key,
                 elapsed_ms,
-                key = claims.key,
-                error = crate::storage::redacted(&error),
-                "Device upload aborted by client"
-            );
-            return UploadError(StatusCode::BAD_REQUEST, "ClientAborted");
-        }
-        storage_error(error.context(format!(
-            "part {number} of {} after {elapsed_ms} ms",
-            device.serial_number
-        )))
-    })?;
-    metrics::increment_counter!("smith_upload_proxied_parts_total", "bucket" => bucket_label(&state, &claims));
+                &progress,
+            )
+        })?;
+    metrics::increment_counter!("smith_upload_proxied_parts_total", "bucket" => bucket);
     Ok(Json(UploadPart {
         part_number: number,
         etag,
         size_bytes: size,
     }))
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum StreamFailure {
+    None,
+    Aborted,
+    TimedOut,
+}
+
+#[derive(Default)]
+struct PartStreamState {
+    bytes: AtomicU64,
+    failure: AtomicU8,
+}
+
+impl PartStreamState {
+    const NONE: u8 = 0;
+    const ABORTED: u8 = 1;
+    const TIMED_OUT: u8 = 2;
+
+    fn add_bytes(&self, count: u64) {
+        self.bytes.fetch_add(count, Ordering::Release);
+    }
+
+    fn bytes(&self) -> u64 {
+        self.bytes.load(Ordering::Acquire)
+    }
+
+    fn set_failure(&self, failure: StreamFailure) {
+        let value = match failure {
+            StreamFailure::None => Self::NONE,
+            StreamFailure::Aborted => Self::ABORTED,
+            StreamFailure::TimedOut => Self::TIMED_OUT,
+        };
+        self.failure.store(value, Ordering::Release);
+    }
+
+    fn failure(&self) -> StreamFailure {
+        match self.failure.load(Ordering::Acquire) {
+            Self::ABORTED => StreamFailure::Aborted,
+            Self::TIMED_OUT => StreamFailure::TimedOut,
+            _ => StreamFailure::None,
+        }
+    }
+}
+
+/// Wraps a device upload body stream so an idle device fails with `TimedOut`
+/// instead of holding an upload permit while stalled.
+fn idle_timeout_stream<S, E>(
+    stream: S,
+    idle_timeout: Duration,
+    progress: Arc<PartStreamState>,
+) -> impl futures::Stream<Item = Result<axum::body::Bytes, std::io::Error>> + Send + 'static
+where
+    S: futures::Stream<Item = Result<axum::body::Bytes, E>> + Send + Unpin + 'static,
+    E: std::error::Error + Send + Sync + 'static,
+{
+    futures::stream::unfold(Some(stream), move |stream| {
+        let progress = progress.clone();
+        async move {
+            let mut stream = stream?;
+            // Empty chunks carry no payload and must not reset the idle timer.
+            let next_chunk = async {
+                loop {
+                    match stream.next().await {
+                        Some(Ok(chunk)) if chunk.is_empty() => continue,
+                        other => return other,
+                    }
+                }
+            };
+            match tokio::time::timeout(idle_timeout, next_chunk).await {
+                Ok(Some(Ok(chunk))) => {
+                    progress.add_bytes(chunk.len() as u64);
+                    Some((Ok(chunk), Some(stream)))
+                }
+                Ok(Some(Err(err))) => {
+                    progress.set_failure(StreamFailure::Aborted);
+                    Some((Err(std::io::Error::other(err)), None))
+                }
+                Ok(None) => None,
+                Err(_) => {
+                    progress.set_failure(StreamFailure::TimedOut);
+                    Some((
+                        Err(std::io::Error::new(
+                            std::io::ErrorKind::TimedOut,
+                            "device upload body idle timeout",
+                        )),
+                        None,
+                    ))
+                }
+            }
+        }
+    })
+}
+
+fn part_upload_error(
+    error: anyhow::Error,
+    serial: &str,
+    part: i32,
+    key: &str,
+    elapsed_ms: u64,
+    progress: &PartStreamState,
+) -> UploadError {
+    // Explicit S3 missing-upload responses must stay 410 so the device opens a new session.
+    if crate::storage::is_missing_upload(&error) {
+        return storage_error(error);
+    }
+    let failure = progress.failure();
+    let bytes = progress.bytes();
+    let client_outcome =
+        if failure == StreamFailure::TimedOut || crate::storage::is_request_timeout(&error) {
+            Some((
+                "Device upload timed out",
+                UploadError(StatusCode::REQUEST_TIMEOUT, "UploadTimeout"),
+            ))
+        } else if failure == StreamFailure::Aborted {
+            Some((
+                "Device upload aborted by client",
+                UploadError(StatusCode::BAD_REQUEST, "ClientAborted"),
+            ))
+        } else {
+            None
+        };
+    if let Some((message, response)) = client_outcome {
+        tracing::warn!(
+            serial,
+            part,
+            bytes,
+            elapsed_ms,
+            key,
+            error = crate::storage::redacted(&error),
+            "{message}"
+        );
+        return response;
+    }
+    storage_error(error.context(format!("part {part} of {serial} after {elapsed_ms} ms")))
 }
 
 #[utoipa::path(post,path="/smith/upload-sessions/complete",params(("x-upload-token"=String,Header)),
@@ -594,6 +746,189 @@ mod tests {
             cdn_url("https://cdn.teton.ai/device-uploads", "sensitive", presigned).ok(),
             Some("https://cdn.teton.ai/device-uploads/sensitive/clips/a%20b.mp4?partNumber=2&uploadId=u%2B1&X-Amz-Signature=s".into())
         );
+    }
+
+    #[test]
+    fn part_upload_error_maps_timeouts_aborts_and_storage_errors() {
+        let state = |bytes, failure| {
+            let progress = PartStreamState::default();
+            progress.add_bytes(bytes);
+            progress.set_failure(failure);
+            progress
+        };
+
+        let s3_timeout = anyhow::Error::from(s3::error::S3Error::HttpFailWithBody(
+            400,
+            "<Error><Code>RequestTimeout</Code></Error>".into(),
+        ));
+        let UploadError(status, code) = part_upload_error(
+            s3_timeout,
+            "1423925028380",
+            1,
+            "clips/a.mp4",
+            62_000,
+            &state(1024, StreamFailure::None),
+        );
+        assert_eq!(
+            (status, code),
+            (StatusCode::REQUEST_TIMEOUT, "UploadTimeout")
+        );
+
+        let UploadError(status, code) = part_upload_error(
+            anyhow::anyhow!("stream timed out"),
+            "1423925028380",
+            1,
+            "clips/a.mp4",
+            30_000,
+            &state(1024, StreamFailure::TimedOut),
+        );
+        assert_eq!(
+            (status, code),
+            (StatusCode::REQUEST_TIMEOUT, "UploadTimeout")
+        );
+
+        let UploadError(status, code) = part_upload_error(
+            anyhow::anyhow!("connection reset"),
+            "1423925028380",
+            1,
+            "clips/a.mp4",
+            5_000,
+            &state(1024, StreamFailure::Aborted),
+        );
+        assert_eq!((status, code), (StatusCode::BAD_REQUEST, "ClientAborted"));
+
+        for failure in [
+            StreamFailure::None,
+            StreamFailure::Aborted,
+            StreamFailure::TimedOut,
+        ] {
+            let missing = anyhow::Error::from(s3::error::S3Error::HttpFailWithBody(
+                404,
+                "<Error><Code>NoSuchUpload</Code></Error>".into(),
+            ));
+            let UploadError(status, code) = part_upload_error(
+                missing,
+                "1423925028380",
+                1,
+                "clips/a.mp4",
+                5_000,
+                &state(1024, failure),
+            );
+            assert_eq!(
+                (status, code),
+                (StatusCode::GONE, "NoSuchUpload"),
+                "{failure:?}"
+            );
+        }
+
+        let UploadError(status, code) = part_upload_error(
+            anyhow::anyhow!("S3 rejected upload part (500 InternalError)"),
+            "1423925028380",
+            1,
+            "clips/a.mp4",
+            1_000,
+            &state(1024, StreamFailure::None),
+        );
+        assert_eq!(
+            (status, code),
+            (StatusCode::BAD_GATEWAY, "StorageUnavailable")
+        );
+    }
+
+    #[tokio::test]
+    async fn idle_timeout_stream_fails_stalled_device_and_ignores_empty_chunks()
+    -> anyhow::Result<()> {
+        let stalled = futures::stream::unfold(0u8, |step| async move {
+            match step {
+                0 => Some((
+                    Ok::<axum::body::Bytes, std::io::Error>(axum::body::Bytes::from_static(
+                        b"hello",
+                    )),
+                    1,
+                )),
+                _ => {
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                    Some((Ok(axum::body::Bytes::new()), step))
+                }
+            }
+        });
+        let progress = Arc::new(PartStreamState::default());
+        let mut wrapped = Box::pin(idle_timeout_stream(
+            Box::pin(stalled),
+            Duration::from_millis(35),
+            progress.clone(),
+        ));
+
+        let first = wrapped
+            .next()
+            .await
+            .ok_or_else(|| anyhow::anyhow!("missing first chunk"))??;
+        assert_eq!(&first[..], b"hello");
+        assert_eq!(progress.bytes(), 5);
+
+        let second = wrapped
+            .next()
+            .await
+            .ok_or_else(|| anyhow::anyhow!("missing timeout error"))?;
+        assert_eq!(
+            second.err().map(|e| e.kind()),
+            Some(std::io::ErrorKind::TimedOut)
+        );
+        assert_eq!(progress.failure(), StreamFailure::TimedOut);
+        assert!(wrapped.next().await.is_none());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn idle_timeout_stream_marks_client_abort_and_preserves_error_source()
+    -> anyhow::Result<()> {
+        #[derive(Debug)]
+        struct OuterBodyError(std::io::Error);
+
+        impl std::fmt::Display for OuterBodyError {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.write_str("error reading a body from connection")
+            }
+        }
+
+        impl std::error::Error for OuterBodyError {
+            fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+                Some(&self.0)
+            }
+        }
+
+        let broken = futures::stream::iter(vec![
+            Ok(axum::body::Bytes::from_static(b"hi")),
+            Err(OuterBodyError(std::io::Error::new(
+                std::io::ErrorKind::ConnectionReset,
+                "connection reset by peer",
+            ))),
+        ]);
+        let progress = Arc::new(PartStreamState::default());
+        let mut wrapped = Box::pin(idle_timeout_stream(
+            broken,
+            Duration::from_secs(5),
+            progress.clone(),
+        ));
+
+        let first = wrapped
+            .next()
+            .await
+            .ok_or_else(|| anyhow::anyhow!("missing first chunk"))??;
+        assert_eq!(&first[..], b"hi");
+        let second = wrapped
+            .next()
+            .await
+            .ok_or_else(|| anyhow::anyhow!("missing stream error"))?;
+        let Err(err) = second else {
+            anyhow::bail!("expected stream error");
+        };
+        let logged = crate::storage::redacted(&anyhow::Error::from(err));
+        assert!(logged.contains("connection reset by peer"), "{logged}");
+        assert_eq!(progress.failure(), StreamFailure::Aborted);
+        assert_eq!(progress.bytes(), 2);
+        assert!(wrapped.next().await.is_none());
+        Ok(())
     }
 }
 
