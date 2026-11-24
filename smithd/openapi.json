@@ -57,7 +57,7 @@
       }
     },
     "/link": {
-      "post": {
+      "get": {
         "tags": [
           "device"
         ],
