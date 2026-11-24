@@ -381,6 +381,39 @@ pub async fn put_part(
     Path(number): Path<i32>,
     request: axum::extract::Request,
 ) -> Result<Json<UploadPart>, UploadError> {
+    put_part_with(
+        device,
+        state,
+        number,
+        request,
+        PART_IDLE_TIMEOUT,
+        |claims, number, body, size| async move {
+            Storage::upload_session_part(
+                &claims.bucket,
+                &claims.key,
+                &claims.upload_id,
+                number,
+                body,
+                size,
+            )
+            .await
+        },
+    )
+    .await
+}
+
+async fn put_part_with<F, Fut>(
+    device: AuthedDevice,
+    state: State,
+    number: i32,
+    request: axum::extract::Request,
+    idle_timeout: Duration,
+    upload_part: F,
+) -> Result<Json<UploadPart>, UploadError>
+where
+    F: FnOnce(UploadClaims, i32, reqwest::Body, u64) -> Fut,
+    Fut: std::future::Future<Output = anyhow::Result<String>>,
+{
     let claims = claims(&device, &state, request.headers())?;
     let size = part_length(claims.size_bytes, number)?;
     if request
@@ -402,31 +435,26 @@ pub async fn put_part(
     let progress = Arc::new(PartStreamState::default());
     let body = reqwest::Body::wrap_stream(idle_timeout_stream(
         request.into_body().into_data_stream(),
-        PART_IDLE_TIMEOUT,
+        idle_timeout,
         progress.clone(),
     ));
+    let key = claims.key.clone();
+    let bucket = bucket_label(&state, &claims);
     let started = Instant::now();
-    let etag = Storage::upload_session_part(
-        &claims.bucket,
-        &claims.key,
-        &claims.upload_id,
-        number,
-        body,
-        size as u64,
-    )
-    .await
-    .map_err(|error| {
-        let elapsed_ms = started.elapsed().as_millis() as u64;
-        part_upload_error(
-            error,
-            &device.serial_number,
-            number,
-            &claims.key,
-            elapsed_ms,
-            &progress,
-        )
-    })?;
-    metrics::increment_counter!("smith_upload_proxied_parts_total", "bucket" => bucket_label(&state, &claims));
+    let etag = upload_part(claims, number, body, size as u64)
+        .await
+        .map_err(|error| {
+            let elapsed_ms = started.elapsed().as_millis() as u64;
+            part_upload_error(
+                error,
+                &device.serial_number,
+                number,
+                &key,
+                elapsed_ms,
+                &progress,
+            )
+        })?;
+    metrics::increment_counter!("smith_upload_proxied_parts_total", "bucket" => bucket);
     Ok(Json(UploadPart {
         part_number: number,
         etag,
@@ -900,62 +928,6 @@ mod tests {
         assert_eq!(progress.failure(), StreamFailure::Aborted);
         assert_eq!(progress.bytes(), 2);
         assert!(wrapped.next().await.is_none());
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn stalled_part_upload_aborts_reqwest_put_with_408() -> anyhow::Result<()> {
-        use axum::{Router, body::Body, http::Request, routing::put};
-
-        let app = Router::new().route(
-            "/part",
-            put(|request: Request<Body>| async move {
-                match axum::body::to_bytes(request.into_body(), 1024).await {
-                    Ok(_) => StatusCode::OK,
-                    Err(_) => StatusCode::BAD_REQUEST,
-                }
-            }),
-        );
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
-        let url = format!("http://{}/part", listener.local_addr()?);
-        let server = tokio::spawn(async move { axum::serve(listener, app).await });
-
-        let stalled = futures::stream::unfold(0u8, |step| async move {
-            match step {
-                0 => Some((
-                    Ok::<axum::body::Bytes, std::io::Error>(axum::body::Bytes::from_static(
-                        b"hello",
-                    )),
-                    1,
-                )),
-                _ => std::future::pending().await,
-            }
-        });
-        let progress = Arc::new(PartStreamState::default());
-        let body = reqwest::Body::wrap_stream(idle_timeout_stream(
-            Box::pin(stalled),
-            Duration::from_millis(50),
-            progress.clone(),
-        ));
-
-        let result = tokio::time::timeout(
-            Duration::from_secs(2),
-            crate::storage::put_presigned_part(&url, body, 10),
-        )
-        .await?;
-        server.abort();
-
-        let Err(error) = result else {
-            anyhow::bail!("stalled upload must fail");
-        };
-        assert_eq!(progress.failure(), StreamFailure::TimedOut);
-        assert_eq!(progress.bytes(), 5);
-        let UploadError(status, code) =
-            part_upload_error(error, "1423925028380", 1, "clips/a.mp4", 50, &progress);
-        assert_eq!(
-            (status, code),
-            (StatusCode::REQUEST_TIMEOUT, "UploadTimeout")
-        );
         Ok(())
     }
 }

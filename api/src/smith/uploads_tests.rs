@@ -715,3 +715,313 @@ async fn client_contract_resumes_across_real_smith_routes() -> anyhow::Result<()
     server.abort();
     Ok(())
 }
+
+fn stalled_body(initial: &'static [u8]) -> reqwest::Body {
+    reqwest::Body::wrap_stream(futures::stream::unfold(0u8, move |step| async move {
+        match step {
+            0 => Some((
+                Ok::<axum::body::Bytes, std::io::Error>(axum::body::Bytes::from_static(initial)),
+                1,
+            )),
+            _ => std::future::pending().await,
+        }
+    }))
+}
+
+#[tokio::test]
+async fn loopback_put_part_returns_408_and_releases_permit_on_stall_and_s3_timeout()
+-> anyhow::Result<()> {
+    use axum::{body::Body, http::Request, response::IntoResponse};
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use tokio::sync::Notify;
+
+    let mut state = test_state(PgPool::connect_lazy("postgres://127.0.0.1/unused")?)?;
+    state.upload_permits = Arc::new(Semaphore::new(1));
+    let device_jwt = state.device_jwt_signer.mint(1, "1423925028380")?;
+    let upload_token = state.config.upload_token_key.sign(&UploadClaims {
+        device_id: 1,
+        bucket: "upload-assets".into(),
+        key: "clips/stalled.mp4".into(),
+        upload_id: "up-1".into(),
+        size_bytes: 10,
+        checksum: "a".repeat(64),
+        crc64nvme: None,
+        expires_at: chrono::Utc::now().timestamp() + 3600,
+    })?;
+
+    let first_chunk_at_s3 = Arc::new(Notify::new());
+    let s3_return_timeout = Arc::new(AtomicBool::new(false));
+    let s3_received = Arc::new(Mutex::new(Vec::<u8>::new()));
+    let s3_app = Router::new().route(
+        "/part",
+        put({
+            let first_chunk_at_s3 = first_chunk_at_s3.clone();
+            let s3_return_timeout = s3_return_timeout.clone();
+            let s3_received = s3_received.clone();
+            move |request: Request<Body>| {
+                let first_chunk_at_s3 = first_chunk_at_s3.clone();
+                let s3_return_timeout = s3_return_timeout.clone();
+                let s3_received = s3_received.clone();
+                async move {
+                    if s3_return_timeout.load(Ordering::Acquire) {
+                        return (
+                            StatusCode::BAD_REQUEST,
+                            "<Error><Code>RequestTimeout</Code><Message>socket timeout</Message></Error>",
+                        )
+                            .into_response();
+                    }
+                    let mut stream = request.into_body().into_data_stream();
+                    let mut collected = Vec::new();
+                    while let Some(chunk) = stream.next().await {
+                        match chunk {
+                            Ok(bytes) => {
+                                if collected.is_empty() && !bytes.is_empty() {
+                                    first_chunk_at_s3.notify_one();
+                                }
+                                collected.extend_from_slice(&bytes);
+                            }
+                            Err(_) => return StatusCode::BAD_REQUEST.into_response(),
+                        }
+                    }
+                    *s3_received.lock().await = collected;
+                    (StatusCode::OK, [("etag", "\"part-1\"")]).into_response()
+                }
+            }
+        }),
+    );
+    let s3_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+    let s3_url = format!("http://{}/part", s3_listener.local_addr()?);
+    let s3_server = tokio::spawn(async move { axum::serve(s3_listener, s3_app).await });
+
+    let smith_app = Router::new()
+        .route(
+            "/smith/upload-sessions/parts/:number",
+            put({
+                let s3_url = s3_url.clone();
+                move |device: AuthedDevice,
+                      Extension(state): Extension<State>,
+                      Path(number): Path<i32>,
+                      request: axum::extract::Request| {
+                    let s3_url = s3_url.clone();
+                    async move {
+                        put_part_with(
+                            device,
+                            state,
+                            number,
+                            request,
+                            Duration::from_millis(80),
+                            |_claims, _number, body, size| async move {
+                                crate::storage::put_presigned_part(&s3_url, body, size).await
+                            },
+                        )
+                        .await
+                    }
+                }
+            }),
+        )
+        .layer(Extension(state.clone()));
+    let smith_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+    let part_url = format!(
+        "http://{}/smith/upload-sessions/parts/1",
+        smith_listener.local_addr()?
+    );
+    let smith_server = tokio::spawn(async move { axum::serve(smith_listener, smith_app).await });
+
+    let client = reqwest::Client::new();
+
+    // 1. Stalled device body: permit is held while streaming, then released with 408.
+    let stalled_request = tokio::spawn({
+        let client = client.clone();
+        let part_url = part_url.clone();
+        let device_jwt = device_jwt.clone();
+        let upload_token = upload_token.clone();
+        async move {
+            client
+                .put(part_url)
+                .bearer_auth(device_jwt)
+                .header("x-upload-token", upload_token)
+                .header("content-length", 10)
+                .body(stalled_body(b"hello"))
+                .send()
+                .await
+        }
+    });
+    tokio::time::timeout(Duration::from_secs(2), first_chunk_at_s3.notified()).await?;
+    assert_eq!(state.upload_permits.available_permits(), 0);
+    let response = tokio::time::timeout(Duration::from_secs(2), stalled_request).await???;
+    assert_eq!(response.status(), StatusCode::REQUEST_TIMEOUT);
+    let body: serde_json::Value = response.json().await?;
+    assert_eq!(body["code"], "UploadTimeout");
+    assert_eq!(state.upload_permits.available_permits(), 1);
+
+    // 2. Subsequent healthy part upload acquires the freed permit and succeeds.
+    let ok = client
+        .put(&part_url)
+        .bearer_auth(&device_jwt)
+        .header("x-upload-token", &upload_token)
+        .header("content-length", 10)
+        .body(b"helloworld".to_vec())
+        .send()
+        .await?;
+    assert_eq!(ok.status(), StatusCode::OK);
+    let uploaded: UploadPart = ok.json().await?;
+    assert_eq!(uploaded.part_number, 1);
+    assert_eq!(uploaded.etag, "\"part-1\"");
+    assert_eq!(uploaded.size_bytes, 10);
+    assert_eq!(*s3_received.lock().await, b"helloworld");
+    assert_eq!(state.upload_permits.available_permits(), 1);
+
+    // 3. S3 returning 400 RequestTimeout maps to 408 UploadTimeout and frees the permit.
+    s3_return_timeout.store(true, Ordering::Release);
+    let s3_timed_out = tokio::time::timeout(
+        Duration::from_secs(2),
+        client
+            .put(&part_url)
+            .bearer_auth(&device_jwt)
+            .header("x-upload-token", &upload_token)
+            .header("content-length", 10)
+            .body(stalled_body(b"hello"))
+            .send(),
+    )
+    .await??;
+    assert_eq!(s3_timed_out.status(), StatusCode::REQUEST_TIMEOUT);
+    let body: serde_json::Value = s3_timed_out.json().await?;
+    assert_eq!(body["code"], "UploadTimeout");
+    assert_eq!(state.upload_permits.available_permits(), 1);
+
+    smith_server.abort();
+    s3_server.abort();
+    Ok(())
+}
+
+#[tokio::test]
+async fn loopback_put_part_408_propagates_through_streaming_proxy() -> anyhow::Result<()> {
+    use axum::{body::Body, http::Request, response::IntoResponse};
+
+    let mut state = test_state(PgPool::connect_lazy("postgres://127.0.0.1/unused")?)?;
+    state.upload_permits = Arc::new(Semaphore::new(1));
+    let device_jwt = state.device_jwt_signer.mint(1, "1423925028380")?;
+    let upload_token = state.config.upload_token_key.sign(&UploadClaims {
+        device_id: 1,
+        bucket: "upload-assets".into(),
+        key: "clips/proxied.mp4".into(),
+        upload_id: "up-2".into(),
+        size_bytes: 10,
+        checksum: "a".repeat(64),
+        crc64nvme: None,
+        expires_at: chrono::Utc::now().timestamp() + 3600,
+    })?;
+
+    let s3_app = Router::new().route(
+        "/part",
+        put(|request: Request<Body>| async move {
+            match axum::body::to_bytes(request.into_body(), 1024).await {
+                Ok(_) => (StatusCode::OK, [("etag", "\"part-1\"")]).into_response(),
+                Err(_) => StatusCode::BAD_REQUEST.into_response(),
+            }
+        }),
+    );
+    let s3_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+    let s3_url = format!("http://{}/part", s3_listener.local_addr()?);
+    let s3_server = tokio::spawn(async move { axum::serve(s3_listener, s3_app).await });
+
+    let smith_app = Router::new()
+        .route(
+            "/smith/upload-sessions/parts/:number",
+            put({
+                let s3_url = s3_url.clone();
+                move |device: AuthedDevice,
+                      Extension(state): Extension<State>,
+                      Path(number): Path<i32>,
+                      request: axum::extract::Request| {
+                    let s3_url = s3_url.clone();
+                    async move {
+                        put_part_with(
+                            device,
+                            state,
+                            number,
+                            request,
+                            Duration::from_millis(80),
+                            |_claims, _number, body, size| async move {
+                                crate::storage::put_presigned_part(&s3_url, body, size).await
+                            },
+                        )
+                        .await
+                    }
+                }
+            }),
+        )
+        .layer(Extension(state.clone()));
+    let smith_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+    let smith_base = format!("http://{}/smith", smith_listener.local_addr()?);
+    let smith_server = tokio::spawn(async move { axum::serve(smith_listener, smith_app).await });
+
+    // Mirrors plex's session_proxy streaming forwarder (plex/src/server/upload.rs).
+    let proxy_client = reqwest::Client::new();
+    let proxy_app = Router::new().route(
+        "/upload-sessions/parts/:number",
+        put({
+            let proxy_client = proxy_client.clone();
+            let smith_base = smith_base.clone();
+            let device_jwt = device_jwt.clone();
+            move |request: Request<Body>| {
+                let proxy_client = proxy_client.clone();
+                let smith_base = smith_base.clone();
+                let device_jwt = device_jwt.clone();
+                async move {
+                    let (parts, body) = request.into_parts();
+                    let mut headers = parts.headers;
+                    headers.remove("host");
+                    headers.remove("authorization");
+                    let upstream = match proxy_client
+                        .request(parts.method, format!("{smith_base}{}", parts.uri))
+                        .headers(headers)
+                        .bearer_auth(device_jwt)
+                        .body(reqwest::Body::wrap_stream(body.into_data_stream()))
+                        .send()
+                        .await
+                    {
+                        Ok(response) => response,
+                        Err(_) => return StatusCode::BAD_GATEWAY.into_response(),
+                    };
+                    let status = upstream.status();
+                    let mut response_headers = upstream.headers().clone();
+                    response_headers.remove("connection");
+                    response_headers.remove("transfer-encoding");
+                    (
+                        status,
+                        response_headers,
+                        Body::from_stream(upstream.bytes_stream()),
+                    )
+                        .into_response()
+                }
+            }
+        }),
+    );
+    let proxy_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+    let proxy_url = format!(
+        "http://{}/upload-sessions/parts/1",
+        proxy_listener.local_addr()?
+    );
+    let proxy_server = tokio::spawn(async move { axum::serve(proxy_listener, proxy_app).await });
+
+    let response = tokio::time::timeout(
+        Duration::from_secs(2),
+        reqwest::Client::new()
+            .put(&proxy_url)
+            .header("x-upload-token", &upload_token)
+            .header("content-length", 10)
+            .body(stalled_body(b"hello"))
+            .send(),
+    )
+    .await??;
+    assert_eq!(response.status(), StatusCode::REQUEST_TIMEOUT);
+    let body: serde_json::Value = response.json().await?;
+    assert_eq!(body["code"], "UploadTimeout");
+    assert_eq!(state.upload_permits.available_permits(), 1);
+
+    proxy_server.abort();
+    smith_server.abort();
+    s3_server.abort();
+    Ok(())
+}
