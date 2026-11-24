@@ -18,6 +18,7 @@ const CHECKSUM_MODE_ENABLED: &str = "ENABLED";
 const CRC64NVME: &str = "CRC64NVME";
 const FULL_OBJECT: &str = "FULL_OBJECT";
 const BAD_DIGEST: &str = "BadDigest";
+const REQUEST_TIMEOUT: &str = "RequestTimeout";
 
 /// Lifetime of a package's CloudFront URL. Packages are small enough that an
 /// hour comfortably covers a download plus retries.
@@ -530,37 +531,7 @@ impl Storage {
         let (_, url) = urls
             .first()
             .ok_or_else(|| anyhow::anyhow!("Missing part URL"))?;
-        let response = reqwest::Client::builder()
-            .connect_timeout(std::time::Duration::from_secs(10))
-            .redirect(reqwest::redirect::Policy::none())
-            .build()?
-            .put(url)
-            .header("content-length", size)
-            .body(body)
-            .send()
-            .await
-            .map_err(|e| e.without_url())?;
-        if !response.status().is_success() {
-            let status = response.status().as_u16();
-            let body = response.text().await.map_err(|e| e.without_url())?;
-            if missing_upload_body(&body) {
-                return Err(s3::error::S3Error::HttpFailWithBody(
-                    status,
-                    "<Error><Code>NoSuchUpload</Code></Error>".into(),
-                )
-                .into());
-            }
-            anyhow::bail!(
-                "S3 rejected upload part ({status} {})",
-                s3_error_code(&body).unwrap_or_default()
-            );
-        }
-        Ok(response
-            .headers()
-            .get("etag")
-            .ok_or_else(|| anyhow::anyhow!("S3 part has no ETag"))?
-            .to_str()?
-            .to_owned())
+        put_presigned_part(url, body, size).await
     }
 
     pub async fn list_upload_parts(
@@ -726,6 +697,42 @@ impl Storage {
     }
 }
 
+async fn put_presigned_part(url: &str, body: reqwest::Body, size: u64) -> anyhow::Result<String> {
+    let response = reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(10))
+        .redirect(reqwest::redirect::Policy::none())
+        .build()?
+        .put(url)
+        .header("content-length", size)
+        .body(body)
+        .send()
+        .await
+        .map_err(|e| e.without_url())?;
+    if !response.status().is_success() {
+        let status = response.status().as_u16();
+        let body = response.text().await.map_err(|e| e.without_url())?;
+        if let Some(code) = s3_error_code(&body)
+            && matches!(code.as_str(), "NoSuchUpload" | REQUEST_TIMEOUT)
+        {
+            return Err(s3::error::S3Error::HttpFailWithBody(
+                status,
+                format!("<Error><Code>{code}</Code></Error>"),
+            )
+            .into());
+        }
+        anyhow::bail!(
+            "S3 rejected upload part ({status} {})",
+            s3_error_code(&body).unwrap_or_default()
+        );
+    }
+    Ok(response
+        .headers()
+        .get("etag")
+        .ok_or_else(|| anyhow::anyhow!("S3 part has no ETag"))?
+        .to_str()?
+        .to_owned())
+}
+
 /// Seconds a presigned URL can live: `wanted`, but at most the time the
 /// signing credentials have left, less one minute.
 fn url_lifetime(wanted: u32, credentials_left: Option<i64>) -> anyhow::Result<u32> {
@@ -756,6 +763,12 @@ pub fn is_missing_upload(error: &anyhow::Error) -> bool {
 pub fn is_bad_digest(error: &anyhow::Error) -> bool {
     error.downcast_ref::<s3::error::S3Error>().is_some_and(|error| {
         matches!(error, s3::error::S3Error::HttpFailWithBody(_, body) if s3_error_code(body).as_deref() == Some(BAD_DIGEST))
+    })
+}
+
+pub fn is_request_timeout(error: &anyhow::Error) -> bool {
+    error.downcast_ref::<s3::error::S3Error>().is_some_and(|error| {
+        matches!(error, s3::error::S3Error::HttpFailWithBody(_, body) if s3_error_code(body).as_deref() == Some(REQUEST_TIMEOUT))
     })
 }
 
@@ -847,6 +860,37 @@ mod tests {
             redacted(&error),
             "part 1: S3 HTTP 403 SignatureDoesNotMatch"
         );
+    }
+
+    #[tokio::test]
+    async fn put_presigned_part_classifies_request_timeout_and_missing_upload() -> anyhow::Result<()>
+    {
+        for (status, body, is_timeout, is_missing) in [
+            (
+                400,
+                "<Error><Code>RequestTimeout</Code><Message>Your socket connection to the server was not read from or written to within the timeout period.</Message></Error>",
+                true,
+                false,
+            ),
+            (404, "<Error><Code>NoSuchUpload</Code></Error>", false, true),
+            (
+                500,
+                "<Error><Code>InternalError</Code></Error>",
+                false,
+                false,
+            ),
+        ] {
+            let (bucket, _seen, server) = fake_s3(status, vec![], body).await?;
+            let url = format!("{}/object", bucket.url());
+            let result = super::put_presigned_part(&url, reqwest::Body::from("abc"), 3).await;
+            server.abort();
+            let Err(error) = result else {
+                anyhow::bail!("non-2xx S3 response must fail");
+            };
+            assert_eq!(super::is_request_timeout(&error), is_timeout, "{body}");
+            assert_eq!(super::is_missing_upload(&error), is_missing, "{body}");
+        }
+        Ok(())
     }
 
     #[tokio::test]

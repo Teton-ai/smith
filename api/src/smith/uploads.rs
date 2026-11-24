@@ -17,7 +17,7 @@ use std::sync::{
     Arc,
     atomic::{AtomicBool, AtomicU64, Ordering},
 };
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use utoipa::ToSchema;
 
 pub const PART_SIZE: i64 = 5 * 1024 * 1024;
@@ -27,6 +27,9 @@ const TOKEN_TTL_SECONDS: i64 = 24 * 60 * 60;
 pub const RETRY_AFTER_SECONDS: &str = "30";
 /// Devices ask for fresh part URLs before this runs out.
 const PART_URL_TTL_SECONDS: u32 = 60 * 60;
+/// Max wait for the next body chunk from a device before releasing the upload permit.
+/// Exceeds the slowest 16 KiB paced interval (16 s at 1 KiB/s) while staying below S3's timeout.
+const PART_IDLE_TIMEOUT: Duration = Duration::from_secs(30);
 const CRC64NVME_BYTES: usize = 8;
 
 pub struct UploadError(StatusCode, &'static str);
@@ -371,7 +374,7 @@ pub async fn status(
 }
 
 #[utoipa::path(put,path="/smith/upload-sessions/parts/{number}",params(("number"=i32,Path),("x-upload-token"=String,Header)),
-    request_body(content=Vec<u8>,content_type="application/octet-stream"),responses((status=200,body=UploadPart),(status=400,description="Invalid part length or ClientAborted"),(status=410,description="Upload no longer exists"),(status=503,description="Upload capacity reached, retry after the Retry-After delay")),security(("device_token"=[])))]
+    request_body(content=Vec<u8>,content_type="application/octet-stream"),responses((status=200,body=UploadPart),(status=400,description="Invalid part length or ClientAborted"),(status=408,description="Device upload timed out"),(status=410,description="Upload no longer exists"),(status=503,description="Upload capacity reached, retry after the Retry-After delay")),security(("device_token"=[])))]
 pub async fn put_part(
     device: AuthedDevice,
     Extension(state): Extension<State>,
@@ -396,19 +399,16 @@ pub async fn put_part(
             "UploadCapacity",
         ));
     };
-    // Body read error means the device disconnected.
     let client_error = Arc::new(AtomicBool::new(false));
+    let client_timeout = Arc::new(AtomicBool::new(false));
     let bytes = Arc::new(AtomicU64::new(0));
-    let body = reqwest::Body::wrap_stream(request.into_body().into_data_stream().inspect({
-        let client_error = client_error.clone();
-        let bytes = bytes.clone();
-        move |chunk| match chunk {
-            Ok(chunk) => {
-                bytes.fetch_add(chunk.len() as u64, Ordering::Relaxed);
-            }
-            Err(_) => client_error.store(true, Ordering::Relaxed),
-        }
-    }));
+    let body = reqwest::Body::wrap_stream(idle_timeout_stream(
+        request.into_body().into_data_stream(),
+        PART_IDLE_TIMEOUT,
+        bytes.clone(),
+        client_error.clone(),
+        client_timeout.clone(),
+    ));
     let started = Instant::now();
     let etag = Storage::upload_session_part(
         &claims.bucket,
@@ -421,22 +421,16 @@ pub async fn put_part(
     .await
     .map_err(|error| {
         let elapsed_ms = started.elapsed().as_millis() as u64;
-        if client_error.load(Ordering::Relaxed) {
-            tracing::warn!(
-                serial = %device.serial_number,
-                part = number,
-                bytes = bytes.load(Ordering::Relaxed),
-                elapsed_ms,
-                key = claims.key,
-                error = crate::storage::redacted(&error),
-                "Device upload aborted by client"
-            );
-            return UploadError(StatusCode::BAD_REQUEST, "ClientAborted");
-        }
-        storage_error(error.context(format!(
-            "part {number} of {} after {elapsed_ms} ms",
-            device.serial_number
-        )))
+        part_upload_error(
+            error,
+            &device.serial_number,
+            number,
+            &claims.key,
+            bytes.load(Ordering::Relaxed),
+            elapsed_ms,
+            client_error.load(Ordering::Relaxed),
+            client_timeout.load(Ordering::Relaxed),
+        )
     })?;
     metrics::increment_counter!("smith_upload_proxied_parts_total", "bucket" => bucket_label(&state, &claims));
     Ok(Json(UploadPart {
@@ -444,6 +438,90 @@ pub async fn put_part(
         etag,
         size_bytes: size,
     }))
+}
+
+/// Wraps a device upload body stream so an idle device fails with `TimedOut`
+/// instead of holding an upload permit until S3 closes the connection.
+fn idle_timeout_stream<S, E>(
+    stream: S,
+    idle_timeout: Duration,
+    bytes: Arc<AtomicU64>,
+    client_error: Arc<AtomicBool>,
+    client_timeout: Arc<AtomicBool>,
+) -> impl futures::Stream<Item = Result<axum::body::Bytes, std::io::Error>> + Send + 'static
+where
+    S: futures::Stream<Item = Result<axum::body::Bytes, E>> + Send + Unpin + 'static,
+    E: std::fmt::Display + Send + 'static,
+{
+    futures::stream::unfold((stream, false), move |(mut stream, finished)| {
+        let bytes = bytes.clone();
+        let client_error = client_error.clone();
+        let client_timeout = client_timeout.clone();
+        async move {
+            if finished {
+                return None;
+            }
+            match tokio::time::timeout(idle_timeout, stream.next()).await {
+                Ok(Some(Ok(chunk))) => {
+                    bytes.fetch_add(chunk.len() as u64, Ordering::Relaxed);
+                    Some((Ok(chunk), (stream, false)))
+                }
+                Ok(Some(Err(err))) => {
+                    client_error.store(true, Ordering::Relaxed);
+                    Some((Err(std::io::Error::other(err.to_string())), (stream, true)))
+                }
+                Ok(None) => None,
+                Err(_) => {
+                    client_timeout.store(true, Ordering::Relaxed);
+                    Some((
+                        Err(std::io::Error::new(
+                            std::io::ErrorKind::TimedOut,
+                            "device upload body idle timeout",
+                        )),
+                        (stream, true),
+                    ))
+                }
+            }
+        }
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn part_upload_error(
+    error: anyhow::Error,
+    serial: &str,
+    part: i32,
+    key: &str,
+    bytes: u64,
+    elapsed_ms: u64,
+    client_error: bool,
+    client_timeout: bool,
+) -> UploadError {
+    if client_timeout || crate::storage::is_request_timeout(&error) {
+        tracing::warn!(
+            serial,
+            part,
+            bytes,
+            elapsed_ms,
+            key,
+            error = crate::storage::redacted(&error),
+            "Device upload timed out"
+        );
+        return UploadError(StatusCode::REQUEST_TIMEOUT, "UploadTimeout");
+    }
+    if client_error {
+        tracing::warn!(
+            serial,
+            part,
+            bytes,
+            elapsed_ms,
+            key,
+            error = crate::storage::redacted(&error),
+            "Device upload aborted by client"
+        );
+        return UploadError(StatusCode::BAD_REQUEST, "ClientAborted");
+    }
+    storage_error(error.context(format!("part {part} of {serial} after {elapsed_ms} ms")))
 }
 
 #[utoipa::path(post,path="/smith/upload-sessions/complete",params(("x-upload-token"=String,Header)),
@@ -594,6 +672,152 @@ mod tests {
             cdn_url("https://cdn.teton.ai/device-uploads", "sensitive", presigned).ok(),
             Some("https://cdn.teton.ai/device-uploads/sensitive/clips/a%20b.mp4?partNumber=2&uploadId=u%2B1&X-Amz-Signature=s".into())
         );
+    }
+
+    #[test]
+    fn part_upload_error_maps_timeouts_aborts_and_storage_errors() {
+        let s3_timeout = anyhow::Error::from(s3::error::S3Error::HttpFailWithBody(
+            400,
+            "<Error><Code>RequestTimeout</Code></Error>".into(),
+        ));
+        let UploadError(status, code) = part_upload_error(
+            s3_timeout,
+            "1423925028380",
+            1,
+            "clips/a.mp4",
+            1024,
+            62_000,
+            false,
+            false,
+        );
+        assert_eq!(
+            (status, code),
+            (StatusCode::REQUEST_TIMEOUT, "UploadTimeout")
+        );
+
+        let UploadError(status, code) = part_upload_error(
+            anyhow::anyhow!("stream timed out"),
+            "1423925028380",
+            1,
+            "clips/a.mp4",
+            1024,
+            30_000,
+            false,
+            true,
+        );
+        assert_eq!(
+            (status, code),
+            (StatusCode::REQUEST_TIMEOUT, "UploadTimeout")
+        );
+
+        let UploadError(status, code) = part_upload_error(
+            anyhow::anyhow!("connection reset"),
+            "1423925028380",
+            1,
+            "clips/a.mp4",
+            1024,
+            5_000,
+            true,
+            false,
+        );
+        assert_eq!((status, code), (StatusCode::BAD_REQUEST, "ClientAborted"));
+
+        let UploadError(status, code) = part_upload_error(
+            anyhow::anyhow!("S3 rejected upload part (500 InternalError)"),
+            "1423925028380",
+            1,
+            "clips/a.mp4",
+            1024,
+            1_000,
+            false,
+            false,
+        );
+        assert_eq!(
+            (status, code),
+            (StatusCode::BAD_GATEWAY, "StorageUnavailable")
+        );
+    }
+
+    #[tokio::test]
+    async fn idle_timeout_stream_fails_stalled_device_and_tracks_bytes() -> anyhow::Result<()> {
+        let stalled = futures::stream::unfold(0u8, |step| async move {
+            match step {
+                0 => Some((
+                    Ok::<axum::body::Bytes, std::io::Error>(axum::body::Bytes::from_static(
+                        b"hello",
+                    )),
+                    1,
+                )),
+                _ => std::future::pending().await,
+            }
+        });
+        let bytes = Arc::new(AtomicU64::new(0));
+        let client_error = Arc::new(AtomicBool::new(false));
+        let client_timeout = Arc::new(AtomicBool::new(false));
+        let mut wrapped = Box::pin(idle_timeout_stream(
+            Box::pin(stalled),
+            Duration::from_millis(30),
+            bytes.clone(),
+            client_error.clone(),
+            client_timeout.clone(),
+        ));
+
+        let first = wrapped
+            .next()
+            .await
+            .ok_or_else(|| anyhow::anyhow!("missing first chunk"))??;
+        assert_eq!(&first[..], b"hello");
+        assert_eq!(bytes.load(Ordering::Relaxed), 5);
+
+        let second = wrapped
+            .next()
+            .await
+            .ok_or_else(|| anyhow::anyhow!("missing timeout error"))?;
+        assert!(second.is_err());
+        assert_eq!(
+            second.err().map(|e| e.kind()),
+            Some(std::io::ErrorKind::TimedOut)
+        );
+        assert!(client_timeout.load(Ordering::Relaxed));
+        assert!(!client_error.load(Ordering::Relaxed));
+        assert!(wrapped.next().await.is_none());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn idle_timeout_stream_marks_client_abort_on_stream_error() -> anyhow::Result<()> {
+        let broken = futures::stream::iter(vec![
+            Ok(axum::body::Bytes::from_static(b"hi")),
+            Err(std::io::Error::new(
+                std::io::ErrorKind::ConnectionReset,
+                "reset",
+            )),
+        ]);
+        let bytes = Arc::new(AtomicU64::new(0));
+        let client_error = Arc::new(AtomicBool::new(false));
+        let client_timeout = Arc::new(AtomicBool::new(false));
+        let mut wrapped = Box::pin(idle_timeout_stream(
+            broken,
+            Duration::from_secs(5),
+            bytes.clone(),
+            client_error.clone(),
+            client_timeout.clone(),
+        ));
+
+        let first = wrapped
+            .next()
+            .await
+            .ok_or_else(|| anyhow::anyhow!("missing first chunk"))??;
+        assert_eq!(&first[..], b"hi");
+        let second = wrapped
+            .next()
+            .await
+            .ok_or_else(|| anyhow::anyhow!("missing stream error"))?;
+        assert!(second.is_err());
+        assert!(client_error.load(Ordering::Relaxed));
+        assert!(!client_timeout.load(Ordering::Relaxed));
+        assert_eq!(bytes.load(Ordering::Relaxed), 2);
+        Ok(())
     }
 }
 
