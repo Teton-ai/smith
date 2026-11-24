@@ -18,6 +18,7 @@ const CHECKSUM_MODE_ENABLED: &str = "ENABLED";
 const CRC64NVME: &str = "CRC64NVME";
 const FULL_OBJECT: &str = "FULL_OBJECT";
 const BAD_DIGEST: &str = "BadDigest";
+const NO_SUCH_UPLOAD: &str = "NoSuchUpload";
 const REQUEST_TIMEOUT: &str = "RequestTimeout";
 
 /// Lifetime of a package's CloudFront URL. Packages are small enough that an
@@ -697,7 +698,11 @@ impl Storage {
     }
 }
 
-async fn put_presigned_part(url: &str, body: reqwest::Body, size: u64) -> anyhow::Result<String> {
+pub(crate) async fn put_presigned_part(
+    url: &str,
+    body: reqwest::Body,
+    size: u64,
+) -> anyhow::Result<String> {
     let response = reqwest::Client::builder()
         .connect_timeout(std::time::Duration::from_secs(10))
         .redirect(reqwest::redirect::Policy::none())
@@ -711,8 +716,9 @@ async fn put_presigned_part(url: &str, body: reqwest::Body, size: u64) -> anyhow
     if !response.status().is_success() {
         let status = response.status().as_u16();
         let body = response.text().await.map_err(|e| e.without_url())?;
-        if let Some(code) = s3_error_code(&body)
-            && matches!(code.as_str(), "NoSuchUpload" | REQUEST_TIMEOUT)
+        let code = s3_error_code(&body);
+        if let Some(code) = code.as_deref()
+            && matches!(code, NO_SUCH_UPLOAD | REQUEST_TIMEOUT)
         {
             return Err(s3::error::S3Error::HttpFailWithBody(
                 status,
@@ -720,10 +726,10 @@ async fn put_presigned_part(url: &str, body: reqwest::Body, size: u64) -> anyhow
             )
             .into());
         }
-        anyhow::bail!(
-            "S3 rejected upload part ({status} {})",
-            s3_error_code(&body).unwrap_or_default()
-        );
+        match code.as_deref().filter(|code| !code.is_empty()) {
+            Some(code) => anyhow::bail!("S3 rejected upload part ({status} {code})"),
+            None => anyhow::bail!("S3 rejected upload part ({status})"),
+        }
     }
     Ok(response
         .headers()
@@ -755,25 +761,31 @@ fn regional(region: String) -> Region {
 }
 
 pub fn is_missing_upload(error: &anyhow::Error) -> bool {
-    error.downcast_ref::<s3::error::S3Error>().is_some_and(|error| {
-        matches!(error, s3::error::S3Error::HttpFailWithBody(_, body) if missing_upload_body(body))
-    })
+    has_s3_error_code(error, NO_SUCH_UPLOAD)
 }
 
 pub fn is_bad_digest(error: &anyhow::Error) -> bool {
-    error.downcast_ref::<s3::error::S3Error>().is_some_and(|error| {
-        matches!(error, s3::error::S3Error::HttpFailWithBody(_, body) if s3_error_code(body).as_deref() == Some(BAD_DIGEST))
-    })
+    has_s3_error_code(error, BAD_DIGEST)
 }
 
 pub fn is_request_timeout(error: &anyhow::Error) -> bool {
-    error.downcast_ref::<s3::error::S3Error>().is_some_and(|error| {
-        matches!(error, s3::error::S3Error::HttpFailWithBody(_, body) if s3_error_code(body).as_deref() == Some(REQUEST_TIMEOUT))
-    })
+    has_s3_error_code(error, REQUEST_TIMEOUT)
+}
+
+fn has_s3_error_code(error: &anyhow::Error, expected: &str) -> bool {
+    error
+        .downcast_ref::<s3::error::S3Error>()
+        .is_some_and(|error| {
+            matches!(
+                error,
+                s3::error::S3Error::HttpFailWithBody(_, body)
+                    if s3_error_code(body).as_deref() == Some(expected)
+            )
+        })
 }
 
 fn missing_upload_body(body: &str) -> bool {
-    s3_error_code(body).as_deref() == Some("NoSuchUpload")
+    s3_error_code(body).as_deref() == Some(NO_SUCH_UPLOAD)
 }
 
 fn s3_error_code(body: &str) -> Option<String> {
@@ -865,19 +877,34 @@ mod tests {
     #[tokio::test]
     async fn put_presigned_part_classifies_request_timeout_and_missing_upload() -> anyhow::Result<()>
     {
-        for (status, body, is_timeout, is_missing) in [
+        for (status, body, is_timeout, is_missing, expected_msg) in [
             (
                 400,
                 "<Error><Code>RequestTimeout</Code><Message>Your socket connection to the server was not read from or written to within the timeout period.</Message></Error>",
                 true,
                 false,
+                None,
             ),
-            (404, "<Error><Code>NoSuchUpload</Code></Error>", false, true),
+            (
+                404,
+                "<Error><Code>NoSuchUpload</Code></Error>",
+                false,
+                true,
+                None,
+            ),
             (
                 500,
                 "<Error><Code>InternalError</Code></Error>",
                 false,
                 false,
+                Some("S3 rejected upload part (500 InternalError)"),
+            ),
+            (
+                500,
+                "gateway failure",
+                false,
+                false,
+                Some("S3 rejected upload part (500)"),
             ),
         ] {
             let (bucket, _seen, server) = fake_s3(status, vec![], body).await?;
@@ -889,6 +916,9 @@ mod tests {
             };
             assert_eq!(super::is_request_timeout(&error), is_timeout, "{body}");
             assert_eq!(super::is_missing_upload(&error), is_missing, "{body}");
+            if let Some(expected_msg) = expected_msg {
+                assert_eq!(error.to_string(), expected_msg, "{body}");
+            }
         }
         Ok(())
     }
