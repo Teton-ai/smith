@@ -275,7 +275,7 @@ async fn start_ota(State(state): State<ControlState>) -> Result<Json<MessageResp
 /// to an hour). offline until the first poll. harald listens for Wi-Fi setup
 /// phones while this is false
 #[utoipa::path(
-    post,
+    get,
     path = "/link",
     tag = DEVICE,
     responses((status=200, body = LinkResponse)),
