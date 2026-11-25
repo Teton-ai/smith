@@ -11,6 +11,13 @@ const POWER_RESET: [&str; 4] = ["system", "reset", "power-board", "power-reset"]
 
 /// What the reboot needs from the device, so the order can be tested.
 pub trait Device {
+    /// Held across the reboot so no new package install starts after the check
+    /// and before power cuts.
+    type LockGuard;
+
+    /// Waits up to a bound for any running dpkg/apt install to finish and
+    /// holds the dpkg locks until the guard drops.
+    fn lock_dpkg(&mut self) -> Self::LockGuard;
     fn has_program(&self, program: &str) -> bool;
     /// Runs `program` and returns whether it exited 0 before `timeout`.
     fn run(&mut self, program: &str, args: &[&str], timeout: Duration) -> bool;
@@ -24,6 +31,7 @@ pub trait Device {
 /// Each step waits for the one before it to take the device down. The device
 /// is still up after a step only when that step failed.
 pub fn reboot(device: &mut impl Device) {
+    let _dpkg_locks = device.lock_dpkg();
     device.sync();
 
     if device.has_program(ESP_HOST) {
@@ -62,31 +70,51 @@ pub fn reboot(device: &mut impl Device) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    struct FakeGuard(Rc<RefCell<Vec<String>>>);
+
+    impl Drop for FakeGuard {
+        fn drop(&mut self) {
+            self.0.borrow_mut().push("unlock dpkg".into());
+        }
+    }
 
     /// Records each step. No step takes the device down, so `reboot` runs all
     /// of them, as on a device where each one fails.
     #[derive(Default)]
     struct Fake {
         esp_host: bool,
-        steps: Vec<String>,
+        steps: Rc<RefCell<Vec<String>>>,
     }
 
     impl Device for Fake {
+        type LockGuard = FakeGuard;
+
+        fn lock_dpkg(&mut self) -> Self::LockGuard {
+            self.steps.borrow_mut().push("lock dpkg".into());
+            FakeGuard(Rc::clone(&self.steps))
+        }
         fn has_program(&self, program: &str) -> bool {
             program == ESP_HOST && self.esp_host
         }
         fn run(&mut self, program: &str, args: &[&str], _timeout: Duration) -> bool {
-            self.steps.push(format!("{program} {}", args.join(" ")));
+            self.steps
+                .borrow_mut()
+                .push(format!("{program} {}", args.join(" ")));
             false
         }
         fn wait(&mut self, duration: Duration) {
-            self.steps.push(format!("wait {}s", duration.as_secs()));
+            self.steps
+                .borrow_mut()
+                .push(format!("wait {}s", duration.as_secs()));
         }
         fn sync(&mut self) {
-            self.steps.push("sync".into());
+            self.steps.borrow_mut().push("sync".into());
         }
         fn force_reboot(&mut self) {
-            self.steps.push("reboot(2)".into());
+            self.steps.borrow_mut().push("reboot(2)".into());
         }
     }
 
@@ -98,8 +126,9 @@ mod tests {
         };
         reboot(&mut device);
         assert_eq!(
-            device.steps,
+            *device.steps.borrow(),
             [
+                "lock dpkg",
                 "sync",
                 "esp-host system reset power-board power-reset",
                 "wait 60s",
@@ -109,6 +138,7 @@ mod tests {
                 "wait 60s",
                 "sync",
                 "reboot(2)",
+                "unlock dpkg",
             ]
         );
     }
@@ -117,7 +147,8 @@ mod tests {
     fn without_esp_host_the_computer_reboots() {
         let mut device = Fake::default();
         reboot(&mut device);
-        assert_eq!(device.steps[..2], ["sync", "systemctl reboot"]);
-        assert_eq!(device.steps.last().map(String::as_str), Some("reboot(2)"));
+        let steps = device.steps.borrow();
+        assert_eq!(steps[..3], ["lock dpkg", "sync", "systemctl reboot"]);
+        assert_eq!(steps[steps.len() - 2..], ["reboot(2)", "unlock dpkg"]);
     }
 }

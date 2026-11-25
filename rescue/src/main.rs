@@ -10,8 +10,13 @@ mod reboot;
 
 use anyhow::{Context, Result};
 use serde::Deserialize;
+use std::fs::{File, OpenOptions};
+use std::io::ErrorKind;
 use std::os::unix::net::UnixDatagram;
+use std::path::PathBuf;
 use std::process::{Command, Stdio};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 use tracing::{error, info, warn};
 
@@ -22,6 +27,10 @@ const HTTP_TIMEOUT: Duration = Duration::from_secs(10);
 /// Shorter than the unit's `WatchdogSec`.
 const WATCHDOG_EVERY: Duration = Duration::from_secs(30);
 const SYNC_TIMEOUT: Duration = Duration::from_secs(30);
+/// Locked in the same order as apt and dpkg: frontend first, then dpkg itself.
+const DPKG_LOCK_FILES: [&str; 2] = ["/var/lib/dpkg/lock-frontend", "/var/lib/dpkg/lock"];
+const DPKG_LOCK_TIMEOUT: Duration = Duration::from_secs(180);
+const DPKG_LOCK_POLL: Duration = Duration::from_secs(1);
 
 #[derive(Deserialize)]
 struct Magic {
@@ -148,9 +157,115 @@ fn notify_systemd(socket: &std::ffi::OsStr, state: &str) -> std::io::Result<()> 
     Ok(())
 }
 
+/// Keeps acquired dpkg lock files open until the reboot finishes or returns.
+struct DpkgLockGuard(#[allow(dead_code)] Vec<File>);
+
+fn lock_file_nonblocking(file: &File) -> std::result::Result<(), nix::errno::Errno> {
+    let fl = nix::libc::flock {
+        l_type: nix::libc::F_WRLCK as _,
+        l_whence: nix::libc::SEEK_SET as _,
+        l_start: 0,
+        l_len: 0,
+        l_pid: 0,
+    };
+    nix::fcntl::fcntl(file, nix::fcntl::FcntlArg::F_SETLK(&fl))?;
+    Ok(())
+}
+
+/// Tries to lock every existing dpkg lock file without blocking. Returns `None`
+/// (and releases any lock taken earlier in this call) when dpkg or apt holds one.
+fn try_acquire_dpkg_locks(paths: &[PathBuf]) -> Option<Vec<File>> {
+    let mut held = Vec::with_capacity(paths.len());
+    for path in paths {
+        let file = match OpenOptions::new().write(true).open(path) {
+            Ok(file) => file,
+            Err(err) if err.kind() == ErrorKind::NotFound => continue,
+            Err(err) => {
+                warn!("Could not open {}: {err}; skipping lock", path.display());
+                continue;
+            }
+        };
+        match lock_file_nonblocking(&file) {
+            Ok(()) => held.push(file),
+            Err(nix::errno::Errno::EAGAIN | nix::errno::Errno::EACCES) => {
+                return None;
+            }
+            Err(err) => {
+                warn!("Could not lock {}: {err}; skipping lock", path.display());
+            }
+        }
+    }
+    Some(held)
+}
+
+/// Waits up to `timeout` for dpkg/apt to finish, then holds the locks so no new
+/// package install starts before power cuts. Runs on a helper thread so a stuck
+/// disk cannot block the reboot past `timeout`.
+fn acquire_dpkg_locks(
+    paths: &[PathBuf],
+    timeout: Duration,
+    poll_interval: Duration,
+) -> DpkgLockGuard {
+    let paths = paths.to_vec();
+    let stop = Arc::new(AtomicBool::new(false));
+    let stop_worker = Arc::clone(&stop);
+    let (done, finished) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let mut logged_wait = false;
+        loop {
+            if stop_worker.load(Ordering::Relaxed) {
+                return;
+            }
+            if let Some(files) = try_acquire_dpkg_locks(&paths) {
+                if logged_wait {
+                    info!("dpkg lock cleared; continuing with the reboot");
+                }
+                // After the timeout nobody waits for this; dropping `files`
+                // releases the locks.
+                if done.send(files).is_err() {
+                    info!("dpkg lock cleared after the reboot went on");
+                }
+                return;
+            }
+            if !logged_wait {
+                info!("Waiting up to {timeout:?} for dpkg to finish before rebooting");
+                logged_wait = true;
+            }
+            std::thread::sleep(poll_interval);
+        }
+    });
+
+    let deadline = Instant::now() + timeout;
+    loop {
+        feed_watchdog();
+        let left = deadline.saturating_duration_since(Instant::now());
+        if left.is_zero() {
+            break;
+        }
+        match finished.recv_timeout(left.min(Duration::from_secs(1))) {
+            Ok(files) => return DpkgLockGuard(files),
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                return DpkgLockGuard(Vec::new());
+            }
+        }
+    }
+
+    stop.store(true, Ordering::Relaxed);
+    warn!("dpkg lock still held after {timeout:?}; going on with the reboot");
+    DpkgLockGuard(Vec::new())
+}
+
 struct RealDevice;
 
 impl reboot::Device for RealDevice {
+    type LockGuard = DpkgLockGuard;
+
+    fn lock_dpkg(&mut self) -> Self::LockGuard {
+        let paths: Vec<PathBuf> = DPKG_LOCK_FILES.iter().map(PathBuf::from).collect();
+        acquire_dpkg_locks(&paths, DPKG_LOCK_TIMEOUT, DPKG_LOCK_POLL)
+    }
+
     fn has_program(&self, program: &str) -> bool {
         std::env::var_os("PATH")
             .is_some_and(|path| std::env::split_paths(&path).any(|dir| dir.join(program).is_file()))
@@ -278,5 +393,107 @@ mod tests {
             boot
         ));
         assert!(!is_this_boot(None, boot));
+    }
+
+    /// Takes an open-file-description write lock. On Linux this conflicts with
+    /// `F_SETLK` even inside the same process, letting tests simulate dpkg.
+    fn try_ofd_lock(file: &File) -> std::result::Result<(), nix::errno::Errno> {
+        let fl = nix::libc::flock {
+            l_type: nix::libc::F_WRLCK as _,
+            l_whence: nix::libc::SEEK_SET as _,
+            l_start: 0,
+            l_len: 0,
+            l_pid: 0,
+        };
+        nix::fcntl::fcntl(file, nix::fcntl::FcntlArg::F_OFD_SETLK(&fl))?;
+        Ok(())
+    }
+
+    fn temp_lock_dir(name: &str) -> Result<PathBuf> {
+        let dir =
+            std::env::temp_dir().join(format!("smith-rescue-test-{}-{name}", std::process::id()));
+        std::fs::create_dir_all(&dir)?;
+        Ok(dir)
+    }
+
+    #[test]
+    fn dpkg_lock_waits_for_holder_and_keeps_lock_until_dropped() -> Result<()> {
+        let dir = temp_lock_dir("wait-and-hold")?;
+        let frontend = dir.join("lock-frontend");
+        let lock = dir.join("lock");
+        File::create(&frontend)?;
+        File::create(&lock)?;
+
+        let holder = OpenOptions::new().write(true).open(&lock)?;
+        try_ofd_lock(&holder)?;
+
+        let release_after = Duration::from_millis(80);
+        let releaser = std::thread::spawn(move || {
+            std::thread::sleep(release_after);
+            drop(holder);
+        });
+
+        let start = Instant::now();
+        let guard = acquire_dpkg_locks(
+            &[frontend.clone(), lock.clone()],
+            Duration::from_secs(2),
+            Duration::from_millis(20),
+        );
+        assert!(
+            start.elapsed() >= release_after,
+            "acquired before holder released"
+        );
+        assert_eq!(guard.0.len(), 2);
+
+        // While the guard lives, another process (simulated by OFD lock) cannot lock either file.
+        let probe_frontend = OpenOptions::new().write(true).open(&frontend)?;
+        let probe_lock = OpenOptions::new().write(true).open(&lock)?;
+        assert_eq!(
+            try_ofd_lock(&probe_frontend),
+            Err(nix::errno::Errno::EAGAIN)
+        );
+        assert_eq!(try_ofd_lock(&probe_lock), Err(nix::errno::Errno::EAGAIN));
+
+        drop(guard);
+        assert!(try_ofd_lock(&probe_frontend).is_ok());
+        assert!(try_ofd_lock(&probe_lock).is_ok());
+
+        assert!(releaser.join().is_ok());
+        std::fs::remove_dir_all(&dir)?;
+        Ok(())
+    }
+
+    #[test]
+    fn dpkg_lock_proceeds_when_timeout_expires() -> Result<()> {
+        let dir = temp_lock_dir("timeout")?;
+        let lock = dir.join("lock-frontend");
+        File::create(&lock)?;
+
+        let holder = OpenOptions::new().write(true).open(&lock)?;
+        try_ofd_lock(&holder)?;
+
+        let timeout = Duration::from_millis(80);
+        let start = Instant::now();
+        let guard = acquire_dpkg_locks(&[lock], timeout, Duration::from_millis(20));
+        assert!(start.elapsed() >= timeout);
+        assert!(guard.0.is_empty());
+
+        drop(holder);
+        std::fs::remove_dir_all(&dir)?;
+        Ok(())
+    }
+
+    #[test]
+    fn missing_dpkg_lock_files_are_skipped() -> Result<()> {
+        let dir = temp_lock_dir("missing")?;
+        let missing = dir.join("does-not-exist");
+        let guard = acquire_dpkg_locks(
+            &[missing],
+            Duration::from_secs(1),
+            Duration::from_millis(20),
+        );
+        assert!(guard.0.is_empty());
+        std::fs::remove_dir_all(&dir)?;
+        Ok(())
     }
 }
