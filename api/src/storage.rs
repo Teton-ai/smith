@@ -410,6 +410,44 @@ impl Storage {
         parts: &[(i32, u64)],
         expiry_secs: u32,
     ) -> anyhow::Result<Vec<(i32, String)>> {
+        let (bucket, expiry_secs) = Self::regional_presign_bucket(bucket_name, expiry_secs)?;
+        let parts: Vec<(i32, Option<u64>)> = parts
+            .iter()
+            .map(|(number, length)| (*number, Some(*length)))
+            .collect();
+        Self::presign_parts(&bucket, object_key, upload_id, &parts, expiry_secs).await
+    }
+
+    /// Presigns a single `PutObject` request for the CloudFront regional S3 origin.
+    /// Signs `content-length`, `content-type`, `content-disposition`, and optional
+    /// `x-amz-checksum-crc64nvme`, returning the URL and the non-length headers the
+    /// client must echo on the PUT.
+    pub async fn presign_regional_put_object(
+        bucket_name: &str,
+        object_key: &str,
+        length: u64,
+        content_type: &str,
+        content_disposition: &str,
+        crc64nvme: Option<&str>,
+        expiry_secs: u32,
+    ) -> anyhow::Result<(String, std::collections::BTreeMap<String, String>)> {
+        let (bucket, expiry_secs) = Self::regional_presign_bucket(bucket_name, expiry_secs)?;
+        Self::presign_put_object(
+            &bucket,
+            object_key,
+            length,
+            content_type,
+            content_disposition,
+            crc64nvme,
+            expiry_secs,
+        )
+        .await
+    }
+
+    fn regional_presign_bucket(
+        bucket_name: &str,
+        expiry_secs: u32,
+    ) -> anyhow::Result<(Box<Bucket>, u32)> {
         let region = match std::env::var("AWS_ENDPOINT") {
             Ok(_) => Region::from_default_env()?,
             Err(_) => regional(std::env::var("AWS_REGION")?),
@@ -423,12 +461,54 @@ impl Storage {
                 .as_ref()
                 .map(|at| at.unix_timestamp() - now),
         )?;
-        let bucket = Bucket::new(bucket_name, region, credentials)?;
-        let parts: Vec<(i32, Option<u64>)> = parts
-            .iter()
-            .map(|(number, length)| (*number, Some(*length)))
-            .collect();
-        Self::presign_parts(&bucket, object_key, upload_id, &parts, expiry_secs).await
+        Ok((Bucket::new(bucket_name, region, credentials)?, expiry_secs))
+    }
+
+    async fn presign_put_object(
+        bucket: &Bucket,
+        object_key: &str,
+        length: u64,
+        content_type: &str,
+        content_disposition: &str,
+        crc64nvme: Option<&str>,
+        expiry_secs: u32,
+    ) -> anyhow::Result<(String, std::collections::BTreeMap<String, String>)> {
+        if !content_disposition
+            .bytes()
+            .all(|b| (0x20..=0x7e).contains(&b))
+        {
+            anyhow::bail!("Content-Disposition is not encodable as a header value");
+        }
+        if let Some(crc64nvme) = crc64nvme {
+            ensure_base64(crc64nvme)?;
+        }
+
+        let mut signed_headers = http02::HeaderMap::new();
+        signed_headers.insert(http02::header::CONTENT_LENGTH, length.into());
+        signed_headers.insert(http02::header::CONTENT_TYPE, content_type.parse()?);
+        signed_headers.insert(
+            http02::header::CONTENT_DISPOSITION,
+            content_disposition.parse()?,
+        );
+
+        let mut put_headers = std::collections::BTreeMap::new();
+        put_headers.insert("content-type".to_string(), content_type.to_string());
+        put_headers.insert(
+            "content-disposition".to_string(),
+            content_disposition.to_string(),
+        );
+        if let Some(crc64nvme) = crc64nvme {
+            signed_headers.insert(
+                http02::header::HeaderName::from_static(CRC64NVME_CHECKSUM_HEADER),
+                crc64nvme.parse()?,
+            );
+            put_headers.insert(CRC64NVME_CHECKSUM_HEADER.to_string(), crc64nvme.to_string());
+        }
+
+        let url = bucket
+            .presign_put(object_key, expiry_secs, Some(signed_headers), None)
+            .await?;
+        Ok((url, put_headers))
     }
 
     async fn presign_parts(
@@ -1244,6 +1324,51 @@ mod tests {
                 .get("X-Amz-Credential")
                 .is_some_and(|c| c.contains("/eu-north-1/s3/"))
         );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn regional_put_object_presign_signs_headers_without_multipart_query()
+    -> anyhow::Result<()> {
+        let credentials = Credentials::new(Some("AKIDEXAMPLE"), Some("secret"), None, None, None)?;
+        let bucket = Bucket::new("assets-55c9d7e", regional("eu-north-1".into()), credentials)?;
+        let (url, headers) = Storage::presign_put_object(
+            &bucket,
+            "thumbs/one.jpg",
+            4321,
+            "application/octet-stream",
+            "attachment",
+            Some(CRC),
+            60,
+        )
+        .await?;
+        let url = reqwest::Url::parse(&url)?;
+        assert_eq!(
+            url.host_str(),
+            Some("assets-55c9d7e.s3.eu-north-1.amazonaws.com")
+        );
+        assert_eq!(url.path(), "/thumbs/one.jpg");
+        let query: HashMap<_, _> = url.query_pairs().into_owned().collect();
+        assert!(!query.contains_key("partNumber"));
+        assert!(!query.contains_key("uploadId"));
+        assert!(query.contains_key("X-Amz-Signature"));
+        assert_eq!(
+            query.get("X-Amz-SignedHeaders").map(String::as_str),
+            Some("content-disposition;content-length;content-type;host;x-amz-checksum-crc64nvme")
+        );
+        assert_eq!(
+            headers.get("content-type").map(String::as_str),
+            Some("application/octet-stream")
+        );
+        assert_eq!(
+            headers.get("content-disposition").map(String::as_str),
+            Some("attachment")
+        );
+        assert_eq!(
+            headers.get("x-amz-checksum-crc64nvme").map(String::as_str),
+            Some(CRC)
+        );
+        assert!(!headers.contains_key("content-length"));
         Ok(())
     }
 

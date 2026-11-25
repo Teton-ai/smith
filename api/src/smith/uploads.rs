@@ -76,13 +76,24 @@ pub struct OpenUpload {
     sensitive: bool,
     #[serde(default)]
     crc64nvme: Option<String>,
+    /// Client supports a single presigned `PutObject` CDN URL for files <= `PART_SIZE`.
+    #[serde(default)]
+    single_put: bool,
 }
 
 #[derive(Serialize, Deserialize, ToSchema)]
 pub struct OpenedUpload {
+    #[serde(default)]
     upload_id: String,
+    #[serde(default)]
     token: String,
     part_size: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    put_url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    url: Option<String>,
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    put_headers: std::collections::BTreeMap<String, String>,
 }
 
 #[derive(Serialize, Deserialize, ToSchema)]
@@ -287,12 +298,16 @@ async fn part_urls(state: &State, claims: &UploadClaims, parts: &[i32]) -> Vec<P
 
 /// `sensitive` for the data engine bucket, `assets` for the other bucket. It is
 /// the CDN path prefix and the counter label.
-fn bucket_label(state: &State, claims: &UploadClaims) -> &'static str {
-    if claims.bucket == state.config.data_engine_bucket_name {
+fn bucket_label_name(state: &State, bucket: &str) -> &'static str {
+    if bucket == state.config.data_engine_bucket_name {
         "sensitive"
     } else {
         "assets"
     }
+}
+
+fn bucket_label(state: &State, claims: &UploadClaims) -> &'static str {
+    bucket_label_name(state, &claims.bucket)
 }
 
 fn cdn_url(cdn: &str, prefix: &str, presigned: &str) -> anyhow::Result<String> {
@@ -316,6 +331,45 @@ pub async fn open(
     } else {
         &state.config.assets_bucket_name
     };
+    if request.single_put
+        && request.size_bytes <= PART_SIZE
+        && let Some(cdn) = &state.config.device_upload_cdn_url
+    {
+        let prefix = bucket_label_name(&state, bucket);
+        match Storage::presign_regional_put_object(
+            bucket,
+            &request.key,
+            request.size_bytes as u64,
+            "application/octet-stream",
+            "attachment",
+            request.crc64nvme.as_deref(),
+            PART_URL_TTL_SECONDS,
+        )
+        .await
+        .and_then(|(presigned, put_headers)| Ok((cdn_url(cdn, prefix, &presigned)?, put_headers)))
+        {
+            Ok((put_url, put_headers)) => {
+                metrics::increment_counter!(
+                    "smith_upload_single_put_urls_total",
+                    "bucket" => prefix
+                );
+                return Ok(Json(OpenedUpload {
+                    upload_id: String::new(),
+                    token: String::new(),
+                    part_size: PART_SIZE,
+                    put_url: Some(put_url),
+                    url: Some(format!("s3://{bucket}/{}", request.key)),
+                    put_headers,
+                }));
+            }
+            Err(error) => {
+                tracing::error!(
+                    error = crate::storage::redacted(&error),
+                    "Failed to presign CDN PutObject URL, falling back to multipart upload"
+                );
+            }
+        }
+    }
     let upload_id = match &request.crc64nvme {
         Some(crc64nvme) => {
             Storage::initiate_crc_multipart(
@@ -357,6 +411,9 @@ pub async fn open(
         upload_id,
         token,
         part_size: PART_SIZE,
+        put_url: None,
+        url: None,
+        put_headers: std::collections::BTreeMap::new(),
     }))
 }
 
@@ -672,6 +729,7 @@ mod tests {
             checksum: "a".repeat(64),
             sensitive: false,
             crc64nvme: Some("zM77/A2gEEE=".into()),
+            single_put: false,
         };
         assert_eq!(validate(&request), Ok(()));
         for crc in [
@@ -684,6 +742,30 @@ mod tests {
             request.crc64nvme = Some(crc.into());
             assert_eq!(validate(&request), Err(StatusCode::BAD_REQUEST), "{crc:?}");
         }
+    }
+
+    #[test]
+    fn opened_upload_omits_single_put_fields_for_multipart_clients() -> anyhow::Result<()> {
+        let multipart = OpenedUpload {
+            upload_id: "u1".into(),
+            token: "t1".into(),
+            part_size: PART_SIZE,
+            put_url: None,
+            url: None,
+            put_headers: std::collections::BTreeMap::new(),
+        };
+        let value = serde_json::to_value(&multipart)?;
+        assert_eq!(
+            value,
+            serde_json::json!({"upload_id": "u1", "token": "t1", "part_size": PART_SIZE})
+        );
+        let parsed: OpenUpload = serde_json::from_value(serde_json::json!({
+            "key": "clips/one.mp4",
+            "size_bytes": 100,
+            "checksum": "a".repeat(64)
+        }))?;
+        assert!(!parsed.single_put);
+        Ok(())
     }
 
     #[test]
@@ -705,6 +787,7 @@ mod tests {
             checksum: "a".repeat(64),
             sensitive: true,
             crc64nvme: None,
+            single_put: false,
         };
         assert_eq!(validate(&request), Ok(()));
         assert_eq!(part_length(request.size_bytes, 1).ok(), Some(PART_SIZE));
