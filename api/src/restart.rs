@@ -1,8 +1,8 @@
 //! The restart channel. smith-rescue, a process apart from smithd, polls
-//! `/smith/restart` with the device's boot id. It takes all Restart commands:
-//! each one is bound to the boot of the poll that takes it, and is done when a
-//! poll comes from another boot. So a lost answer only delays the reboot, and
-//! no Restart reboots a device twice.
+//! `/smith/restart` with the device's boot id. Once it has polled for a device,
+//! `/home` leaves Restart commands to it: each one is bound to the boot of the
+//! poll that takes it, and is done when a poll comes from another boot. So a
+//! lost answer only delays the reboot, and no Restart reboots a device twice.
 
 use anyhow::Result;
 use sqlx::PgPool;
@@ -24,6 +24,15 @@ pub async fn poll(pool: &PgPool, device_id: i32, boot_id: Uuid) -> Result<Option
     sqlx::query!(
         "SELECT pg_advisory_xact_lock($1, $2)",
         RESTART_POLL_LOCK,
+        device_id
+    )
+    .execute(&mut *tx)
+    .await?;
+
+    // Once smith-rescue polls, /home stops handing out Restarts for this device.
+    sqlx::query!(
+        "UPDATE device SET has_restart_channel = true
+         WHERE id = $1 AND NOT has_restart_channel",
         device_id
     )
     .execute(&mut *tx)
@@ -186,9 +195,22 @@ mod tests {
 
     #[sqlx::test]
     #[ignore = "needs the compose Postgres; run with --test-threads=1"]
-    async fn home_never_gives_a_restart_to_smithd(pool: PgPool) -> Result<()> {
+    async fn home_hands_out_restarts_until_rescue_polls(pool: PgPool) -> Result<()> {
         let device = insert_device(&pool).await?;
-        let restart = queue(&pool, device, r#""Restart""#).await?;
+        let early = queue(&pool, device, r#""Restart""#).await?;
+
+        // Before smith-rescue has ever polled, /home still hands out Restarts.
+        let fetched_ids: Vec<i32> = crate::home::get_commands(device, "d", &pool)
+            .await?
+            .iter()
+            .map(|c| c.id)
+            .collect();
+        assert_eq!(fetched_ids, [early]);
+        assert!(fetched(&pool, early).await?);
+
+        // Once smith-rescue polls, /home leaves Restarts to /smith/restart.
+        assert_eq!(poll(&pool, device, Uuid::new_v4()).await?, None);
+        let after_poll = queue(&pool, device, r#""Restart""#).await?;
         let ping = queue(&pool, device, r#""Ping""#).await?;
 
         let fetched_ids: Vec<i32> = crate::home::get_commands(device, "d", &pool)
@@ -197,7 +219,11 @@ mod tests {
             .map(|c| c.id)
             .collect();
         assert_eq!(fetched_ids, [ping]);
-        assert!(!fetched(&pool, restart).await?);
+        assert!(!fetched(&pool, after_poll).await?);
+
+        let boot = Uuid::new_v4();
+        assert_eq!(poll(&pool, device, boot).await?, Some(boot));
+        assert!(fetched(&pool, after_poll).await?);
         Ok(())
     }
 }
