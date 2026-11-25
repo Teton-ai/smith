@@ -706,6 +706,21 @@ pub async fn get_commands(
     device_serial_number: &str,
     pool: &PgPool,
 ) -> Result<Vec<SafeCommandRequest>, sqlx::Error> {
+    let has_pending = sqlx::query_scalar!(
+        r#"
+            SELECT EXISTS (
+                SELECT 1
+                FROM command_queue
+                WHERE device_id = $1 AND fetched = false AND canceled = false AND available_at <= now()
+            ) AS "exists!""#,
+        device_id
+    )
+    .fetch_one(pool)
+    .await?;
+    if !has_pending {
+        return Ok(Vec::new());
+    }
+
     let mut tx = pool.begin().await?;
 
     // FOR UPDATE: a concurrent queue_latest refresh waits for this fetch to commit.
