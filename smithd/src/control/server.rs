@@ -9,12 +9,13 @@
 //! it replaces, which allowed any local user to call every method.
 
 use super::{
-    CONTROL_SOCKET, CheckResponse, DownloadRequest, ErrorResponse, HoldRequest, MessageResponse,
-    TunnelRequest, TunnelResponse,
+    CONTROL_SOCKET, CheckResponse, DownloadRequest, ErrorResponse, HoldRequest, LinkResponse,
+    MessageResponse, TunnelRequest, TunnelResponse,
 };
 use crate::downloader::DownloaderHandle;
 use crate::filemanager::FileManagerHandle;
 use crate::police::{PoliceHandle, RebootStatus};
+use crate::postman::LinkUp;
 use crate::shutdown::ShutdownSignals;
 use crate::tunnel::TunnelHandle;
 use crate::updater::UpdaterHandle;
@@ -37,6 +38,7 @@ struct ControlState {
     downloader: DownloaderHandle,
     tunnel: TunnelHandle,
     filemanager: FileManagerHandle,
+    link: LinkUp,
 }
 
 /// Any handler failure becomes a 500 with a JSON body, and is logged once here
@@ -266,6 +268,24 @@ async fn start_ota(State(state): State<ControlState>) -> Result<Json<MessageResp
     }))
 }
 
+/// Link status
+///
+/// Whether smithd considers its link to the api up: the api answered the last
+/// pull, or a TCP connect to the api host works while the api doesn't (for up
+/// to an hour). offline until the first poll. harald listens for Wi-Fi setup
+/// phones while this is false
+#[utoipa::path(
+    get,
+    path = "/link",
+    tag = DEVICE,
+    responses((status=200, body = LinkResponse)),
+)]
+async fn link(State(state): State<ControlState>) -> Json<LinkResponse> {
+    Json(LinkResponse {
+        online: *state.link.borrow(),
+    })
+}
+
 // Routes are registered through utoipa so a route cannot be served without
 // also appearing in the spec.
 
@@ -285,6 +305,7 @@ fn control_routes() -> OpenApiRouter<ControlState> {
         .routes(routes!(open_tunnel))
         .routes(routes!(start_download))
         .routes(routes!(start_ota))
+        .routes(routes!(link))
 }
 
 fn watchdog_router(police: PoliceHandle) -> Router {
@@ -347,12 +368,14 @@ impl ControlHandle {
         tunnel: TunnelHandle,
         filemanager: FileManagerHandle,
         police: PoliceHandle,
+        link: LinkUp,
     ) -> Self {
         let state = ControlState {
             updater,
             downloader,
             tunnel,
             filemanager,
+            link,
         };
 
         tokio::spawn(async move {

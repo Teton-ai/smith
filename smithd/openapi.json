@@ -56,6 +56,28 @@
         }
       }
     },
+    "/link": {
+      "get": {
+        "tags": [
+          "device"
+        ],
+        "summary": "Link status",
+        "description": "Whether smithd considers its link to the api up: the api answered the last\npull, or a TCP connect to the api host works while the api doesn't (for up\nto an hour). offline until the first poll. harald listens for Wi-Fi setup\nphones while this is false",
+        "operationId": "link",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LinkResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/ota/start": {
       "post": {
         "tags": [
@@ -331,6 +353,17 @@
             "format": "int64",
             "description": "Lease length in seconds. Omitted → the daemon's default TTL. Values are\ncapped server-side; renew before expiry to keep a reboot deferred.",
             "minimum": 0
+          }
+        }
+      },
+      "LinkResponse": {
+        "type": "object",
+        "required": [
+          "online"
+        ],
+        "properties": {
+          "online": {
+            "type": "boolean"
           }
         }
       },
