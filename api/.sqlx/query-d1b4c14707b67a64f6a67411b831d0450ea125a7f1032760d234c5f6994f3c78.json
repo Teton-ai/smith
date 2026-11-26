@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT release_id, target_release_id, target_release_id_set_at,\n            target_release_eligible_at, download_slot_release_id, download_slot_at,\n            ip_address_id, NOW() AS \"now!\"\n        FROM device WHERE id = $1",
+  "query": "SELECT release_id, target_release_id, target_release_id_set_at,\n            target_release_eligible_at, download_slot_release_id, download_slot_at,\n            ip_address_id, settings_version, archived, NOW() AS \"now!\"\n        FROM device WHERE id = $1",
   "describe": {
     "columns": [
       {
@@ -40,6 +40,16 @@
       },
       {
         "ordinal": 7,
+        "name": "settings_version",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 8,
+        "name": "archived",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 9,
         "name": "now!",
         "type_info": "Timestamptz"
       }
@@ -57,8 +67,10 @@
       true,
       true,
       true,
+      false,
+      false,
       null
     ]
   },
-  "hash": "7a09382c318664d854bbad56f4cc9f2ae3a92fd23ba53c607a6a8f6696efa4d9"
+  "hash": "d1b4c14707b67a64f6a67411b831d0450ea125a7f1032760d234c5f6994f3c78"
 }

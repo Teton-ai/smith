@@ -82,6 +82,7 @@ pub struct State {
     device_jwt_signer: DeviceJwtSigner,
     upload_permits: Arc<Semaphore>,
     home_permits: Arc<Semaphore>,
+    home_cache: Arc<smith::HomeCache>,
 }
 
 // Below the pool's max_connections, so /home posts alone cannot exhaust the pool.
@@ -256,6 +257,7 @@ async fn start_main_server(
         device_jwt_signer,
         upload_permits: Arc::new(Semaphore::new(config.max_concurrent_uploads)),
         home_permits: Arc::new(Semaphore::new(HOME_PERMITS)),
+        home_cache: Arc::new(smith::HomeCache::new()),
     };
 
     // An unreachable device cannot report its own absence, so downtime has to be

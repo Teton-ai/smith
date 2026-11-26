@@ -1,0 +1,27 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        WITH valid_input AS (\n            SELECT i.release_service_id, i.active_state, i.n_restarts, rs.service_name\n            FROM UNNEST($2::int4[], $3::text[], $4::int4[])\n                AS i(release_service_id, active_state, n_restarts)\n            JOIN release_services rs ON rs.id = i.release_service_id\n        ),\n        upsert AS (\n            INSERT INTO device_service_status\n                (device_id, release_service_id, active_state, n_restarts, checked_at)\n            SELECT $1, vi.release_service_id, vi.active_state, vi.n_restarts, NOW()\n            FROM valid_input vi\n            ON CONFLICT (device_id, release_service_id)\n            DO UPDATE SET active_state = EXCLUDED.active_state,\n                          n_restarts   = EXCLUDED.n_restarts,\n                          checked_at   = NOW()\n            WHERE device_service_status.active_state IS DISTINCT FROM EXCLUDED.active_state\n               OR device_service_status.n_restarts   IS DISTINCT FROM EXCLUDED.n_restarts\n               OR device_service_status.checked_at   <  NOW() - make_interval(secs => $5::double precision)\n            RETURNING release_service_id, active_state\n        ),\n        written AS (\n            SELECT u.active_state, vi.service_name\n            FROM upsert u\n            JOIN valid_input vi ON vi.release_service_id = u.release_service_id\n            WHERE vi.service_name <> $6\n        ),\n        open_outages AS (\n            INSERT INTO device_service_outage (device_id, service_name, started_at)\n            SELECT DISTINCT $1, w.service_name, NOW()\n            FROM written w\n            WHERE w.active_state IN ('failed', 'inactive')\n            ON CONFLICT DO NOTHING\n        ),\n        close_outages AS (\n            UPDATE device_service_outage o\n            SET ended_at = NOW()\n            FROM (\n                SELECT DISTINCT service_name\n                FROM written\n                WHERE active_state = 'active'\n                  AND service_name NOT IN (\n                      SELECT service_name\n                      FROM written\n                      WHERE active_state IN ('failed', 'inactive')\n                  )\n            ) w\n            WHERE o.device_id = $1\n              AND o.service_name = w.service_name\n              AND o.ended_at IS NULL\n        )\n        SELECT COUNT(*) FROM upsert\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Int4Array",
+        "TextArray",
+        "Int4Array",
+        "Float8",
+        "Text"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "9baf8ccf9c08a72bd4191d29fcf0d905b66b86c1068956a9e174b360b08250a2"
+}
