@@ -729,12 +729,13 @@ pub async fn get_commands(
                 UPDATE command_queue
                 SET fetched_at = CURRENT_TIMESTAMP, fetched = true
                 WHERE id IN (SELECT id FROM fetched)
+                RETURNING id, cmd, continue_on_error
             )
             SELECT
                 id AS "id!",
                 cmd AS "cmd!",
                 continue_on_error AS "continue_on_error!"
-            FROM fetched
+            FROM marked
             ORDER BY id
         "#,
         device_id,
@@ -763,19 +764,16 @@ pub async fn get_commands(
         .collect())
 }
 
-/// systemd states that definitely mean a unit is not running. Everything else is
-/// indeterminate and must never open an outage — in particular smithd reports the
-/// literal `"unknown"` when its `systemctl show` call times out or exits non-zero
-/// (`smithd/src/postman/mod.rs`), so treating anything but these as failure would
-/// fabricate outages on a merely busy device.
-fn is_service_down(active_state: &str) -> bool {
-    matches!(active_state, "failed" | "inactive")
-}
-
 /// Refreshes `checked_at` periodically even when a service stays healthy so
 /// dashboard freshness timestamps stay bounded without rewriting rows every 20 s.
 const SERVICE_STATUS_HEARTBEAT_SECS: f64 = 300.0;
 
+/// Batches `device_service_status` upserts and `device_service_outage` transitions
+/// into one atomic statement.
+///
+/// Only `"failed"` and `"inactive"` open an outage; everything else (such as
+/// `"unknown"` when `systemctl show` times out) is indeterminate and never opens
+/// or closes an outage. `smithd` reachability outages belong to the sweeper alone.
 pub async fn save_service_statuses(
     device_id: i32,
     statuses: &[ServiceStatus],
@@ -789,8 +787,8 @@ pub async fn save_service_statuses(
     // UPDATE cannot target the same key twice.
     let mut deduped: Vec<&ServiceStatus> = Vec::with_capacity(statuses.len());
     for status in statuses {
-        if let Some(pos) = deduped.iter().position(|s| s.id == status.id) {
-            deduped[pos] = status;
+        if let Some(slot) = deduped.iter_mut().find(|s| s.id == status.id) {
+            *slot = status;
         } else {
             deduped.push(status);
         }
@@ -800,24 +798,22 @@ pub async fn save_service_statuses(
     let active_states: Vec<String> = deduped.iter().map(|s| s.active_state.clone()).collect();
     let n_restarts: Vec<i32> = deduped.iter().map(|s| s.n_restarts as i32).collect();
 
-    // Batch upsert skipping unchanged rows within the heartbeat window so steady
-    // polls generate zero heap updates or WAL while state transitions write at once.
-    let changed = sqlx::query!(
+    // Join release_services up front so deleted service ids from a replica cache
+    // are skipped instead of aborting the batch with a foreign key error. Unchanged
+    // rows within the heartbeat window produce zero heap updates or WAL.
+    sqlx::query!(
         r#"
-        WITH input(release_service_id, active_state, n_restarts) AS (
-            SELECT * FROM UNNEST($2::int4[], $3::text[], $4::int4[])
-        ),
-        prev AS (
-            SELECT dss.release_service_id, dss.active_state
-            FROM device_service_status dss
-            JOIN input i ON i.release_service_id = dss.release_service_id
-            WHERE dss.device_id = $1
+        WITH valid_input AS (
+            SELECT i.release_service_id, i.active_state, i.n_restarts, rs.service_name
+            FROM UNNEST($2::int4[], $3::text[], $4::int4[])
+                AS i(release_service_id, active_state, n_restarts)
+            JOIN release_services rs ON rs.id = i.release_service_id
         ),
         upsert AS (
             INSERT INTO device_service_status
                 (device_id, release_service_id, active_state, n_restarts, checked_at)
-            SELECT $1, i.release_service_id, i.active_state, i.n_restarts, NOW()
-            FROM input i
+            SELECT $1, vi.release_service_id, vi.active_state, vi.n_restarts, NOW()
+            FROM valid_input vi
             ON CONFLICT (device_id, release_service_id)
             DO UPDATE SET active_state = EXCLUDED.active_state,
                           n_restarts   = EXCLUDED.n_restarts,
@@ -826,62 +822,49 @@ pub async fn save_service_statuses(
                OR device_service_status.n_restarts   IS DISTINCT FROM EXCLUDED.n_restarts
                OR device_service_status.checked_at   <  NOW() - make_interval(secs => $5::double precision)
             RETURNING release_service_id, active_state
+        ),
+        written AS (
+            SELECT u.active_state, vi.service_name
+            FROM upsert u
+            JOIN valid_input vi ON vi.release_service_id = u.release_service_id
+            WHERE vi.service_name <> $6
+        ),
+        open_outages AS (
+            INSERT INTO device_service_outage (device_id, service_name, started_at)
+            SELECT DISTINCT $1, w.service_name, NOW()
+            FROM written w
+            WHERE w.active_state IN ('failed', 'inactive')
+            ON CONFLICT DO NOTHING
+        ),
+        close_outages AS (
+            UPDATE device_service_outage o
+            SET ended_at = NOW()
+            FROM (
+                SELECT DISTINCT service_name
+                FROM written
+                WHERE active_state = 'active'
+                  AND service_name NOT IN (
+                      SELECT service_name
+                      FROM written
+                      WHERE active_state IN ('failed', 'inactive')
+                  )
+            ) w
+            WHERE o.device_id = $1
+              AND o.service_name = w.service_name
+              AND o.ended_at IS NULL
         )
-        SELECT
-            u.active_state AS "active_state!",
-            p.active_state AS "previous_active_state?",
-            rs.service_name AS "service_name?"
-        FROM upsert u
-        LEFT JOIN prev p ON p.release_service_id = u.release_service_id
-        LEFT JOIN release_services rs ON rs.id = u.release_service_id
+        SELECT COUNT(*) FROM upsert
         "#,
         device_id,
         &service_ids,
         &active_states,
         &n_restarts,
         SERVICE_STATUS_HEARTBEAT_SECS,
+        SMITHD_SERVICE_NAME,
     )
-    .fetch_all(pool)
+    .fetch_one(pool)
     .await?;
 
-    for reported in changed {
-        // A release_service row the API no longer has cannot be attributed a
-        // name, and reachability rows belong to the sweeper alone.
-        let Some(service_name) = reported.service_name else {
-            continue;
-        };
-        if service_name == SMITHD_SERVICE_NAME {
-            continue;
-        }
-
-        let previous = reported.previous_active_state.as_deref();
-        let down_now = is_service_down(&reported.active_state);
-        let down_before = previous.is_some_and(is_service_down);
-
-        if down_now && !down_before {
-            // Deliberately not backdated: this report is the first moment the
-            // failure was observed, and it could have happened any time since the
-            // previous one. Under-reporting by one ping beats inventing a start.
-            sqlx::query!(
-                "INSERT INTO device_service_outage (device_id, service_name, started_at)
-                 VALUES ($1, $2, NOW())
-                 ON CONFLICT DO NOTHING",
-                device_id,
-                service_name
-            )
-            .execute(pool)
-            .await?;
-        } else if reported.active_state == "active" && previous != Some("active") {
-            sqlx::query!(
-                "UPDATE device_service_outage SET ended_at = NOW()
-                 WHERE device_id = $1 AND service_name = $2 AND ended_at IS NULL",
-                device_id,
-                service_name
-            )
-            .execute(pool)
-            .await?;
-        }
-    }
     Ok(())
 }
 
@@ -1728,10 +1711,12 @@ mod tests {
         .await?;
 
         let fetched = get_commands(device_id, "cmd-dev", &pool).await?;
-        let fetched_ids: Vec<i32> = fetched.iter().map(|c| c.id).collect();
-        assert_eq!(fetched_ids, vec![first_id, second_id]);
-        assert!(!fetched[0].continue_on_error);
-        assert!(fetched[1].continue_on_error);
+        let [first, second] = fetched.as_slice() else {
+            anyhow::bail!("expected 2 fetched commands, got {}", fetched.len());
+        };
+        assert_eq!((first.id, second.id), (first_id, second_id));
+        assert!(!first.continue_on_error);
+        assert!(second.continue_on_error);
 
         // Second poll sees zero pending commands.
         assert!(get_commands(device_id, "cmd-dev", &pool).await?.is_empty());
@@ -1895,14 +1880,22 @@ mod tests {
         .await?;
         assert_eq!(restarts, 2);
 
-        // Transition active -> failed opens an outage; failed -> active closes it.
+        // Transition active -> failed opens an outage even when the batch also
+        // carries a deleted release_service_id from a stale replica cache.
         save_service_statuses(
             device_id,
-            &[ServiceStatus {
-                id: brain_svc,
-                active_state: "failed".into(),
-                n_restarts: 2,
-            }],
+            &[
+                ServiceStatus {
+                    id: 999_999,
+                    active_state: "failed".into(),
+                    n_restarts: 1,
+                },
+                ServiceStatus {
+                    id: brain_svc,
+                    active_state: "failed".into(),
+                    n_restarts: 2,
+                },
+            ],
             &pool,
         )
         .await?;
@@ -1914,6 +1907,26 @@ mod tests {
         .fetch_one(&pool)
         .await?;
         assert_eq!(open_count, 1);
+
+        // Indeterminate "unknown" must not close the open outage.
+        save_service_statuses(
+            device_id,
+            &[ServiceStatus {
+                id: brain_svc,
+                active_state: "unknown".into(),
+                n_restarts: 2,
+            }],
+            &pool,
+        )
+        .await?;
+        let still_open: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM device_service_outage
+             WHERE device_id = $1 AND service_name = 'brain.service' AND ended_at IS NULL",
+        )
+        .bind(device_id)
+        .fetch_one(&pool)
+        .await?;
+        assert_eq!(still_open, 1);
 
         save_service_statuses(
             device_id,

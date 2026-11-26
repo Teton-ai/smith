@@ -770,5 +770,7 @@ pub async fn promote_release(
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
 
+    state.home_cache.invalidate_release_services(new_release.id);
+
     Ok((StatusCode::CREATED, Json(new_release.id)))
 }

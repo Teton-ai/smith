@@ -44,7 +44,7 @@ impl HomeCache {
             .release_services
             .write()
             .unwrap_or_else(|err| err.into_inner());
-        if guard.len() >= MAX_RELEASE_SERVICES_ENTRIES {
+        if guard.len() >= MAX_RELEASE_SERVICES_ENTRIES && !guard.contains_key(&release_id) {
             guard.retain(|_, (expires_at, _)| *expires_at > now);
             if guard.len() >= MAX_RELEASE_SERVICES_ENTRIES {
                 guard.clear();
@@ -79,13 +79,21 @@ impl HomeCache {
             .ip_addresses
             .write()
             .unwrap_or_else(|err| err.into_inner());
-        if guard.len() >= MAX_IP_ADDRESS_ENTRIES {
+        if guard.len() >= MAX_IP_ADDRESS_ENTRIES && !guard.contains_key(&ip) {
             guard.retain(|_, (expires_at, _)| *expires_at > now);
             if guard.len() >= MAX_IP_ADDRESS_ENTRIES {
                 guard.clear();
             }
         }
         guard.insert(ip, (now + IP_ADDRESS_TTL, id));
+    }
+
+    pub fn invalidate_ip_id(&self, ip: IpAddr) {
+        let mut guard = self
+            .ip_addresses
+            .write()
+            .unwrap_or_else(|err| err.into_inner());
+        guard.remove(&ip);
     }
 }
 
@@ -124,6 +132,10 @@ mod tests {
         cache.insert_ip_id(ip, 99);
         assert_eq!(cache.get_ip_id(ip), Some(99));
 
+        cache.invalidate_ip_id(ip);
+        assert_eq!(cache.get_ip_id(ip), None);
+
+        cache.insert_ip_id(ip, 99);
         // Force entry into the past to confirm expiry.
         if let Ok(mut guard) = cache.ip_addresses.write() {
             guard.insert(ip, (Instant::now() - Duration::from_secs(1), 99));

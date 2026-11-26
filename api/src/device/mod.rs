@@ -853,6 +853,138 @@ async fn close_open_downtime(
     Ok(())
 }
 
+async fn resolve_ip_id(ip: IpAddr, pool: &PgPool) -> Result<(i64, bool), sqlx::Error> {
+    let ip_network: ipnetwork::IpNetwork = ip.into();
+
+    // SELECT first to avoid burning an IDENTITY sequence value on every ping —
+    // ON CONFLICT DO NOTHING still advances the sequence on conflict.
+    let existing = sqlx::query!(
+        r#"
+            SELECT id,
+                   CASE
+                       WHEN updated_at < NOW() - INTERVAL '24 hours' THEN true
+                       ELSE false
+                   END as needs_update
+            FROM ip_address
+            WHERE ip_address = $1
+        "#,
+        ip_network
+    )
+    .fetch_optional(pool)
+    .await?;
+
+    match existing {
+        Some(record) => Ok((record.id, record.needs_update.unwrap_or(false))),
+        None => {
+            let inserted = sqlx::query!(
+                "INSERT INTO ip_address (ip_address, created_at) VALUES ($1, NOW()) ON CONFLICT (ip_address) DO NOTHING RETURNING id",
+                ip_network
+            )
+            .fetch_optional(pool)
+            .await?;
+            match inserted {
+                Some(record) => Ok((record.id, true)),
+                None => {
+                    // Concurrent insert won the race; fetch the now-existing row.
+                    let row = sqlx::query!(
+                        "SELECT id FROM ip_address WHERE ip_address = $1",
+                        ip_network
+                    )
+                    .fetch_one(pool)
+                    .await?;
+                    Ok((row.id, true))
+                }
+            }
+        }
+    }
+}
+
+async fn update_device_ping_with_ip(
+    device_id: i32,
+    ip_id: i64,
+    pool: &PgPool,
+) -> anyhow::Result<()> {
+    let mut tx = pool.begin().await?;
+
+    // The CTE reads the pre-UPDATE snapshot, so this hands back both the
+    // ping timestamp being replaced and whether the gap was long enough
+    // to have been recorded as an outage — decided on the database
+    // clock, with no extra round trip. For a device pinging on cadence
+    // nothing further runs, which matters at hundreds of pings/sec.
+    let ping = sqlx::query!(
+        r#"
+        WITH prev AS (SELECT last_ping FROM device WHERE id = $1)
+        UPDATE device SET last_ping = NOW(), ip_address_id = $2
+        WHERE id = $1
+        RETURNING
+            (SELECT last_ping FROM prev) AS previous_last_ping,
+            (SELECT last_ping < NOW() - make_interval(secs => $3::double precision)
+             FROM prev) AS was_stale
+        "#,
+        device_id,
+        ip_id,
+        DOWNTIME_STALE_AFTER_SECS,
+    )
+    .fetch_optional(&mut *tx)
+    .await?;
+
+    if let Some(ping) = ping
+        && ping.was_stale.unwrap_or(false)
+        && let Some(previous) = ping.previous_last_ping
+    {
+        close_open_downtime(device_id, previous, &mut tx).await?;
+    }
+
+    tx.commit().await?;
+    Ok(())
+}
+
+fn is_foreign_key_violation(err: &anyhow::Error) -> bool {
+    matches!(
+        err.downcast_ref::<sqlx::Error>(),
+        Some(sqlx::Error::Database(db_err)) if db_err.code().as_deref() == Some("23503")
+    )
+}
+
+async fn record_device_ping_ip(
+    device_id: i32,
+    ip: IpAddr,
+    pool: &PgPool,
+    cache: Option<&crate::smith::HomeCache>,
+) -> anyhow::Result<(i64, bool)> {
+    // Resolve and commit the ip_address row before caching or opening the
+    // device transaction so HomeCache never holds an uncommitted id.
+    let (mut ip_id, mut should_update_geolocation, from_cache) =
+        if let Some(cached_id) = cache.and_then(|c| c.get_ip_id(ip)) {
+            (cached_id, false, true)
+        } else {
+            let (id, needs_geo) = resolve_ip_id(ip, pool).await?;
+            if let Some(cache) = cache {
+                cache.insert_ip_id(ip, id);
+            }
+            (id, needs_geo, false)
+        };
+
+    if let Err(err) = update_device_ping_with_ip(device_id, ip_id, pool).await {
+        if from_cache && is_foreign_key_violation(&err) {
+            if let Some(cache) = cache {
+                cache.invalidate_ip_id(ip);
+            }
+            let (fresh_id, needs_geo) = resolve_ip_id(ip, pool).await?;
+            if let Some(cache) = cache {
+                cache.insert_ip_id(ip, fresh_id);
+            }
+            ip_id = fresh_id;
+            should_update_geolocation = needs_geo;
+            update_device_ping_with_ip(device_id, ip_id, pool).await?;
+        } else {
+            return Err(err);
+        }
+    }
+
+    Ok((ip_id, should_update_geolocation))
+}
+
 pub async fn save_last_ping_with_ip(
     device_id: i32,
     ip_address: Option<IpAddr>,
@@ -862,92 +994,8 @@ pub async fn save_last_ping_with_ip(
 ) -> anyhow::Result<()> {
     match ip_address {
         Some(ip) => {
-            let mut tx = pool.begin().await?;
-
-            let (ip_id, should_update_geolocation) = if let Some(cached_id) =
-                cache.and_then(|c| c.get_ip_id(ip))
-            {
-                (cached_id, false)
-            } else {
-                let ip_network: ipnetwork::IpNetwork = ip.into();
-
-                // SELECT first to avoid burning an IDENTITY sequence value on every ping —
-                // ON CONFLICT DO NOTHING still advances the sequence on conflict.
-                let existing = sqlx::query!(
-                    r#"
-                        SELECT id,
-                               CASE
-                                   WHEN updated_at < NOW() - INTERVAL '24 hours' THEN true
-                                   ELSE false
-                               END as needs_update
-                        FROM ip_address
-                        WHERE ip_address = $1
-                    "#,
-                    ip_network
-                )
-                .fetch_optional(&mut *tx)
-                .await?;
-
-                let (ip_id, should_update_geolocation) = match existing {
-                    Some(record) => (record.id, record.needs_update.unwrap_or(false)),
-                    None => {
-                        let inserted = sqlx::query!(
-                            "INSERT INTO ip_address (ip_address, created_at) VALUES ($1, NOW()) ON CONFLICT (ip_address) DO NOTHING RETURNING id",
-                            ip_network
-                        )
-                        .fetch_optional(&mut *tx)
-                        .await?;
-                        match inserted {
-                            Some(record) => (record.id, true),
-                            None => {
-                                // Concurrent insert won the race; fetch the now-existing row.
-                                let row = sqlx::query!(
-                                    "SELECT id FROM ip_address WHERE ip_address = $1",
-                                    ip_network
-                                )
-                                .fetch_one(&mut *tx)
-                                .await?;
-                                (row.id, true)
-                            }
-                        }
-                    }
-                };
-                if let Some(cache) = cache {
-                    cache.insert_ip_id(ip, ip_id);
-                }
-                (ip_id, should_update_geolocation)
-            };
-
-            // The CTE reads the pre-UPDATE snapshot, so this hands back both the
-            // ping timestamp being replaced and whether the gap was long enough
-            // to have been recorded as an outage — decided on the database
-            // clock, with no extra round trip. For a device pinging on cadence
-            // nothing further runs, which matters at hundreds of pings/sec.
-            let ping = sqlx::query!(
-                r#"
-                WITH prev AS (SELECT last_ping FROM device WHERE id = $1)
-                UPDATE device SET last_ping = NOW(), ip_address_id = $2
-                WHERE id = $1
-                RETURNING
-                    (SELECT last_ping FROM prev) AS previous_last_ping,
-                    (SELECT last_ping < NOW() - make_interval(secs => $3::double precision)
-                     FROM prev) AS was_stale
-                "#,
-                device_id,
-                ip_id,
-                DOWNTIME_STALE_AFTER_SECS,
-            )
-            .fetch_optional(&mut *tx)
-            .await?;
-
-            if let Some(ping) = ping
-                && ping.was_stale.unwrap_or(false)
-                && let Some(previous) = ping.previous_last_ping
-            {
-                close_open_downtime(device_id, previous, &mut tx).await?;
-            }
-
-            tx.commit().await?;
+            let (ip_id, should_update_geolocation) =
+                record_device_ping_ip(device_id, ip, pool, cache).await?;
 
             // If geolocation data needs updating and API key is available, spawn a background task
             if should_update_geolocation {
@@ -1876,7 +1924,9 @@ mod target_release_tests {
     async fn load_poll_state_reflects_settings_and_release(pool: PgPool) -> anyhow::Result<()> {
         let [current, target] = insert_releases(&pool).await?;
         let devices = insert_devices(&pool, 1, Some(current)).await?;
-        let device_id = devices[0];
+        let &[device_id] = devices.as_slice() else {
+            anyhow::bail!("expected 1 inserted device");
+        };
 
         sqlx::query("UPDATE device SET settings_version = 1, target_release_id = $1 WHERE id = $2")
             .bind(target)
@@ -1902,6 +1952,37 @@ mod target_release_tests {
             .await
             .ok_or_else(|| anyhow::anyhow!("poll state missing"))?;
         assert!(state.needs_auto_apply_settings());
+        Ok(())
+    }
+
+    #[sqlx::test]
+    #[ignore = "needs the compose Postgres; run with --test-threads=1"]
+    async fn save_last_ping_with_ip_recovers_from_stale_cached_ip_id(
+        pool: PgPool,
+    ) -> anyhow::Result<()> {
+        let [current, _] = insert_releases(&pool).await?;
+        let devices = insert_devices(&pool, 1, Some(current)).await?;
+        let &[device_id] = devices.as_slice() else {
+            anyhow::bail!("expected 1 inserted device");
+        };
+        let cache = crate::smith::HomeCache::new();
+        let ip = std::net::IpAddr::V4(std::net::Ipv4Addr::new(203, 0, 113, 77));
+
+        // Seed cache with a nonexistent ip_address.id to simulate a deleted row.
+        cache.insert_ip_id(ip, 999_999);
+
+        let (resolved_id, needs_geo) =
+            record_device_ping_ip(device_id, ip, &pool, Some(&cache)).await?;
+        assert!(needs_geo);
+        assert_ne!(resolved_id, 999_999);
+
+        let saved_ip_id: Option<i64> =
+            sqlx::query_scalar("SELECT ip_address_id FROM device WHERE id = $1")
+                .bind(device_id)
+                .fetch_one(&pool)
+                .await?;
+        assert_eq!(saved_ip_id, Some(resolved_id));
+        assert_eq!(cache.get_ip_id(ip), Some(resolved_id));
         Ok(())
     }
 }
