@@ -119,17 +119,11 @@ impl Execute for Handles {
                 until,
                 grep,
             } => free::execute_get_logs(action.id, unit, since, until, grep).await,
-            SafeCommandTx::RunAudit => {
-                let (disk_encrypted, password_access_disabled) = run_audit_checks().await;
-                SafeCommandResponse {
-                    id: action.id,
-                    command: SafeCommandRx::AuditReport {
-                        disk_encrypted,
-                        password_access_disabled,
-                    },
-                    status: 0,
-                }
-            }
+            SafeCommandTx::RunAudit => SafeCommandResponse {
+                id: action.id,
+                command: run_audit_checks().await,
+                status: 0,
+            },
             SafeCommandTx::ReportNMProfiles => network::execute_report_nm_profiles(action.id).await,
             SafeCommandTx::WifiScan => network::execute_wifi_scan(action.id).await,
             SafeCommandTx::ApplyNetworks { version, networks } => {
