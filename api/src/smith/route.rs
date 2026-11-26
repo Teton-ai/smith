@@ -62,6 +62,7 @@ pub async fn register_device(
   path = "/smith/home",
   responses(
         (status = 200, description = "Device home response"),
+        (status = 401, description = "Device is not authenticated, or was revoked or archived"),
         (status = 503, description = "Results not stored now; send them again later")
   ),
   security(
@@ -83,6 +84,17 @@ pub async fn home(
         )
             .into_response();
     };
+    // /home delivers queued commands, network secrets included, so a revoked or
+    // archived device must not keep getting them on a JWT minted before that.
+    // A 401 makes smithd refresh, which fails, and it then drops its token.
+    match device.is_active(&state.pg_pool).await {
+        Ok(true) => {}
+        Ok(false) => return StatusCode::UNAUTHORIZED.into_response(),
+        Err(err) => {
+            error!("Failed to check device {} is active: {err}", device.id);
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
+    }
     // Temporary diagnostic: axum's `Json<HomePost>` extractor rejects with 422
     // before the handler runs, and the raw body/error aren't logged anywhere,
     // making a payload mismatch invisible. Parse manually here so we can see

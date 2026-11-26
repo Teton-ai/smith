@@ -1,5 +1,5 @@
 use crate::State;
-use crate::handlers::AuthedDevice;
+use crate::handlers::OpaqueAuthedDevice;
 use axum::http::StatusCode;
 use axum::http::header::CACHE_CONTROL;
 use axum::response::{IntoResponse, Response};
@@ -70,7 +70,7 @@ pub struct DeviceSessionResponse {
     path = "/auth/session",
     responses(
         (status = StatusCode::OK, description = "Mint a short-lived device JWT", body = DeviceSessionResponse),
-        (status = StatusCode::UNAUTHORIZED, description = "Caller is not an authenticated device"),
+        (status = StatusCode::UNAUTHORIZED, description = "Bearer is not the opaque token of an approved, unarchived device (JWTs are refused)"),
         (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to mint JWT"),
     ),
     security(
@@ -80,7 +80,7 @@ pub struct DeviceSessionResponse {
 )]
 pub async fn session(
     Extension(state): Extension<State>,
-    device: AuthedDevice,
+    OpaqueAuthedDevice(device): OpaqueAuthedDevice,
 ) -> Result<Json<DeviceSessionResponse>, StatusCode> {
     let token = state
         .device_jwt_signer

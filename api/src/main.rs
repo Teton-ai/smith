@@ -456,9 +456,9 @@ async fn start_main_server(
         .routes(routes!(device::route::get_ledger_for_device))
         .routes(routes!(
             device::route::approve_device,
-            device::route::revoke_device
+            device::route::revoke_device_approval
         ))
-        .routes(routes!(device::route::delete_token))
+        .routes(routes!(device::route::revoke_device))
         .routes(routes!(device::route::update_devices_target_release))
         .routes(routes!(device::route::update_devices_follow_latest))
         .routes(routes!(device::route::get_variables))

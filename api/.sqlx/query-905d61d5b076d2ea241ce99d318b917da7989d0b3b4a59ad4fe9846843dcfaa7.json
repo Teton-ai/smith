@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT serial_number, approved FROM device WHERE id = $1 FOR UPDATE",
+  "query": "SELECT serial_number, approved FROM device WHERE id = $1 AND NOT archived FOR UPDATE",
   "describe": {
     "columns": [
       {
@@ -24,5 +24,5 @@
       false
     ]
   },
-  "hash": "78cc3fe522532a2cbcf92c6b8e12e7496d731b5288b78e1dc94ece102e416350"
+  "hash": "905d61d5b076d2ea241ce99d318b917da7989d0b3b4a59ad4fe9846843dcfaa7"
 }

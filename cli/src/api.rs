@@ -742,7 +742,7 @@ impl SmithAPI {
         let client = Client::new();
 
         client
-            .delete(format!("{}/devices/{}/approval", self.domain, device_id))
+            .post(format!("{}/devices/{}/revoke", self.domain, device_id))
             .header("Authorization", format!("Bearer {}", &self.bearer_token))
             .send()
             .await?

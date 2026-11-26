@@ -2338,11 +2338,7 @@ async fn main() -> anyhow::Result<()> {
                 let total_count = approved_devices.len();
                 let preview_count = 10.min(total_count);
 
-                println!(
-                    "{} {} device(s):",
-                    "Revoking approval for".bold().red(),
-                    total_count
-                );
+                println!("{} {} device(s):", "Revoking".bold().red(), total_count);
 
                 for device in approved_devices.iter().take(preview_count) {
                     println!("  - {}", device.serial_number);
@@ -2358,7 +2354,7 @@ async fn main() -> anyhow::Result<()> {
 
                 println!(
                     "\n{}",
-                    "Warning: Revoked devices will not receive commands or updates."
+                    "Warning: Revoked devices are disconnected and their token is invalidated. Approve them again to reconnect."
                         .yellow()
                         .bold()
                 );
@@ -2376,7 +2372,7 @@ async fn main() -> anyhow::Result<()> {
                     }
                 }
 
-                println!("\n{} device approvals...", "Revoking".bold());
+                println!("\n{} devices...", "Revoking".bold());
 
                 for device in &approved_devices {
                     let device_id = device.id;
@@ -2384,11 +2380,7 @@ async fn main() -> anyhow::Result<()> {
 
                     match api.revoke_device(device_id as u64).await {
                         Ok(()) => {
-                            println!(
-                                "  {} [{}] - Approval revoked",
-                                serial_number.yellow(),
-                                device_id
-                            );
+                            println!("  {} [{}] - Revoked", serial_number.yellow(), device_id);
                         }
                         Err(e) => {
                             println!("  {} [{}] - Failed: {}", serial_number.red(), device_id, e);
