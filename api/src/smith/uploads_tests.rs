@@ -27,7 +27,6 @@ fn test_state_with_cdn(pool: PgPool, cdn: Option<&str>) -> anyhow::Result<State>
         packages_bucket_name: "packages".into(),
         assets_bucket_name: "upload-assets".into(),
         data_engine_bucket_name: "upload-sensitive".into(),
-        aws_region: "us-east-1".into(),
         sentry_url: None,
         slack_hook_url: None,
         deployment_slack_hook_url: None,

@@ -185,7 +185,6 @@ pub struct Config {
     pub packages_bucket_name: String,
     pub assets_bucket_name: String,
     pub data_engine_bucket_name: String,
-    pub aws_region: String,
     pub sentry_url: Option<String>,
     pub slack_hook_url: Option<String>,
     pub deployment_slack_hook_url: Option<String>,
@@ -323,6 +322,7 @@ impl Config {
         _ = dotenvy::dotenv();
 
         let auth0_audience = env::var("AUTH0_AUDIENCE").context("AUTH0_AUDIENCE is required.")?;
+        env::var("AWS_REGION").context("AWS_REGION is required.")?;
         let mcp = McpConfig::from_audience(&auth0_audience);
 
         Ok(Config {
@@ -333,7 +333,6 @@ impl Config {
                 .context("ASSETS_BUCKET_NAME is required.")?,
             data_engine_bucket_name: env::var("DATA_ENGINE_BUCKET_NAME")
                 .context("DATA_ENGINE_BUCKET_NAME is required.")?,
-            aws_region: env::var("AWS_REGION").context("AWS_REGION is required.")?,
             sentry_url: env::var("SENTRY_URL").ok(),
             slack_hook_url: env::var("SLACK_HOOK_URL").ok(),
             deployment_slack_hook_url: env::var("DEPLOYMENT_SLACK_HOOK_URL").ok(),

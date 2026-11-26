@@ -91,9 +91,7 @@ impl Storage {
         file_name: &str,
         data: &[u8],
     ) -> anyhow::Result<()> {
-        let region = Region::from_default_env()?;
-        let credentials = Credentials::default()?;
-        let bucket = Bucket::new(bucket_name, region, credentials)?;
+        let bucket = Self::bucket(bucket_name)?;
 
         let object_key = match path {
             Some(p) => format!("{}/{}", p, file_name),
@@ -217,17 +215,13 @@ impl Storage {
     }
 
     pub async fn delete_from_s3(bucket_name: &str, path: &str) -> anyhow::Result<()> {
-        let region = Region::from_default_env()?;
-        let credentials = Credentials::default()?;
-        let bucket = Bucket::new(bucket_name, region, credentials)?;
+        let bucket = Self::bucket(bucket_name)?;
         bucket.delete_object(path).await?;
         Ok(())
     }
 
     pub async fn download_from_s3(bucket_name: &str, file_name: &str) -> anyhow::Result<Vec<u8>> {
-        let region = Region::from_default_env()?;
-        let credentials = Credentials::default()?;
-        let bucket = Bucket::new(bucket_name, region, credentials)?;
+        let bucket = Self::bucket(bucket_name)?;
         let response = bucket.get_object(file_name).await?;
         Ok(response.to_vec())
     }
@@ -246,9 +240,7 @@ impl Storage {
         cdn_private_key: &str,
         ttl_seconds: u64,
     ) -> anyhow::Result<Response> {
-        let region = Region::from_default_env()?;
-        let credentials = Credentials::default()?;
-        let bucket = Bucket::new(bucket_name, region, credentials)?;
+        let bucket = Self::bucket(bucket_name)?;
 
         let object_key = match path {
             Some(p) => {
@@ -298,10 +290,27 @@ impl Storage {
 
     /// A `Bucket` is a config handle rather than a connection, so building one
     /// per call is free and avoids threading state through every helper.
-    fn bucket(bucket_name: &str) -> anyhow::Result<Box<Bucket>> {
+    /// Uses path-style addressing when `AWS_ENDPOINT` is set (for S3-compatible
+    /// stores such as MinIO).
+    pub(crate) fn bucket(bucket_name: &str) -> anyhow::Result<Box<Bucket>> {
+        let custom_endpoint = std::env::var("AWS_ENDPOINT").is_ok();
         let region = Region::from_default_env()?;
         let credentials = Credentials::default()?;
-        Ok(Bucket::new(bucket_name, region, credentials)?)
+        Self::build_bucket(bucket_name, region, credentials, custom_endpoint)
+    }
+
+    fn build_bucket(
+        bucket_name: &str,
+        region: Region,
+        credentials: Credentials,
+        path_style: bool,
+    ) -> anyhow::Result<Box<Bucket>> {
+        let bucket = Bucket::new(bucket_name, region, credentials)?;
+        Ok(if path_style {
+            bucket.with_path_style()
+        } else {
+            bucket
+        })
     }
 
     /// Opens a multipart upload and returns its id. Content type and
@@ -410,9 +419,11 @@ impl Storage {
         parts: &[(i32, u64)],
         expiry_secs: u32,
     ) -> anyhow::Result<Vec<(i32, String)>> {
-        let region = match std::env::var("AWS_ENDPOINT") {
-            Ok(_) => Region::from_default_env()?,
-            Err(_) => regional(std::env::var("AWS_REGION")?),
+        let custom_endpoint = std::env::var("AWS_ENDPOINT").is_ok();
+        let region = if custom_endpoint {
+            Region::from_default_env()?
+        } else {
+            regional(std::env::var("AWS_REGION")?)
         };
         let credentials = Credentials::default()?;
         let now = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs() as i64;
@@ -424,6 +435,11 @@ impl Storage {
                 .map(|at| at.unix_timestamp() - now),
         )?;
         let bucket = Bucket::new(bucket_name, region, credentials)?;
+        let bucket = if custom_endpoint {
+            bucket.with_path_style()
+        } else {
+            bucket
+        };
         let parts: Vec<(i32, Option<u64>)> = parts
             .iter()
             .map(|(number, length)| (*number, Some(*length)))
@@ -1319,5 +1335,23 @@ mod tests {
                 "{name}: histogram"
             );
         }
+    }
+
+    #[test]
+    fn custom_endpoint_uses_path_style_bucket() -> anyhow::Result<()> {
+        let region = s3::Region::Custom {
+            region: "eu-north-1".into(),
+            endpoint: "http://minio:9000".into(),
+        };
+        let credentials =
+            s3::creds::Credentials::new(Some("minio"), Some("minio"), None, None, None)?;
+        let path_style =
+            Storage::build_bucket("smith-packages", region.clone(), credentials.clone(), true)?;
+        assert!(path_style.is_path_style());
+        assert_eq!(path_style.url(), "http://minio:9000/smith-packages");
+
+        let virtual_host = Storage::build_bucket("smith-packages", region, credentials, false)?;
+        assert!(!virtual_host.is_path_style());
+        Ok(())
     }
 }
