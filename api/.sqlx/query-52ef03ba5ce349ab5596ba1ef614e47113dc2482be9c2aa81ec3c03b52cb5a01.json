@@ -1,0 +1,38 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        WITH input(release_service_id, active_state, n_restarts) AS (\n            SELECT * FROM UNNEST($2::int4[], $3::text[], $4::int4[])\n        ),\n        prev AS (\n            SELECT dss.release_service_id, dss.active_state\n            FROM device_service_status dss\n            JOIN input i ON i.release_service_id = dss.release_service_id\n            WHERE dss.device_id = $1\n        ),\n        upsert AS (\n            INSERT INTO device_service_status\n                (device_id, release_service_id, active_state, n_restarts, checked_at)\n            SELECT $1, i.release_service_id, i.active_state, i.n_restarts, NOW()\n            FROM input i\n            ON CONFLICT (device_id, release_service_id)\n            DO UPDATE SET active_state = EXCLUDED.active_state,\n                          n_restarts   = EXCLUDED.n_restarts,\n                          checked_at   = NOW()\n            WHERE device_service_status.active_state IS DISTINCT FROM EXCLUDED.active_state\n               OR device_service_status.n_restarts   IS DISTINCT FROM EXCLUDED.n_restarts\n               OR device_service_status.checked_at   <  NOW() - make_interval(secs => $5::double precision)\n            RETURNING release_service_id, active_state\n        )\n        SELECT\n            u.active_state AS \"active_state!\",\n            p.active_state AS \"previous_active_state?\",\n            rs.service_name AS \"service_name?\"\n        FROM upsert u\n        LEFT JOIN prev p ON p.release_service_id = u.release_service_id\n        LEFT JOIN release_services rs ON rs.id = u.release_service_id\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "active_state!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "previous_active_state?",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "service_name?",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Int4Array",
+        "TextArray",
+        "Int4Array",
+        "Float8"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "52ef03ba5ce349ab5596ba1ef614e47113dc2482be9c2aa81ec3c03b52cb5a01"
+}

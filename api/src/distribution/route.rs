@@ -360,6 +360,7 @@ pub async fn create_distribution_release(
     let package_ids = distribution_release.packages.clone();
     let pg_pool = state.pg_pool.clone();
     let bucket_name = state.config.packages_bucket_name.clone();
+    let home_cache = state.home_cache.clone();
 
     tokio::spawn(async move {
         let packages = match sqlx::query_as!(
@@ -421,6 +422,7 @@ pub async fn create_distribution_release(
                 }
             }
         }
+        home_cache.invalidate_release_services(release_id);
     });
 
     Ok(Json(release.id))

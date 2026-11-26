@@ -1,5 +1,6 @@
 use crate::device::{
-    RegistrationError, get_target_release, save_last_ping_with_ip, save_release_id,
+    RegistrationError, load_device_poll_state, resolve_target_release, save_last_ping_with_ip,
+    save_release_id,
 };
 use crate::handlers::AuthedDevice;
 use crate::home::Saved;
@@ -128,27 +129,48 @@ pub async fn home(
                 .into_response();
         }
     }
+    // One PK lookup feeds settings auto-apply, target release, and release-id persistence.
+    let poll_state = load_device_poll_state(device.id, &state.pg_pool).await;
+
     // Before fetching commands, so an automatic settings apply leaves with this
     // poll. Its errors are logged where they happen and never fail the poll.
-    if crate::device::settings::auto_apply_settings(&state.pg_pool, device.id)
-        .await
-        .is_err()
+    if poll_state
+        .as_ref()
+        .is_none_or(|state| state.needs_auto_apply_settings())
+        && crate::device::settings::auto_apply_settings(&state.pg_pool, device.id)
+            .await
+            .is_err()
     {
         error!(device_id = device.id, "Automatic settings apply failed");
     }
 
-    let target_release_id = get_target_release(device.id, &state.pg_pool).await;
+    let target_release_id = match poll_state.as_ref() {
+        Some(device_state) => resolve_target_release(device.id, device_state, &state.pg_pool).await,
+        None => None,
+    };
 
     let services = if let Some(rid) = target_release_id.or(release_id) {
-        sqlx::query_as!(
-            ServiceCheck,
-            "SELECT id, service_name as name FROM release_services WHERE release_id = $1 AND watchdog_sec IS NOT NULL",
-            rid
-        )
-        .fetch_all(&state.pg_pool)
-        .await
-        .inspect_err(|err| error!("Error fetching services for release: {:?}", err))
-        .unwrap_or_default()
+        if let Some(cached) = state.home_cache.get_release_services(rid) {
+            cached
+        } else {
+            match sqlx::query_as!(
+                ServiceCheck,
+                "SELECT id, service_name as name FROM release_services WHERE release_id = $1 AND watchdog_sec IS NOT NULL",
+                rid
+            )
+            .fetch_all(&state.pg_pool)
+            .await
+            {
+                Ok(fetched) => {
+                    state.home_cache.insert_release_services(rid, fetched.clone());
+                    fetched
+                }
+                Err(err) => {
+                    error!("Error fetching services for release: {:?}", err);
+                    Vec::new()
+                }
+            }
+        }
     } else {
         Vec::new()
     };
@@ -159,32 +181,45 @@ pub async fn home(
             .unwrap_or_default(),
         commands: crate::home::get_commands(device.id, &device.serial_number, &state.pg_pool)
             .await
-            .unwrap_or(Vec::new()),
+            .inspect_err(|err| {
+                error!(
+                    device_id = device.id,
+                    "Error fetching commands for device: {err:?}"
+                );
+            })
+            .unwrap_or_default(),
         target_release_id,
         services,
     };
 
+    let known_release_id = poll_state.and_then(|s| s.release_id);
     let client_ip = Some(extract_client_ip(&headers, addr));
     tokio::spawn(async move {
         // Held until the background writes finish so they count against the cap.
         let _permit = permit;
-        let _ = save_release_id(device.id, release_id, &state.pg_pool)
-            .await
-            .inspect_err(|err| {
-                error!("Error saving release_id: {:?}", err);
-            });
-        let _ = save_last_ping_with_ip(device.id, client_ip, &state.pg_pool, state.config)
-            .await
-            .inspect_err(|err| {
-                error!("Error saving last ping with IP: {:?}", err);
-            });
-        if !service_statuses.is_empty() {
-            let _ =
+        if release_id.is_some()
+            && release_id != known_release_id
+            && let Err(err) = save_release_id(device.id, release_id, &state.pg_pool).await
+        {
+            error!("Error saving release_id: {:?}", err);
+        }
+        if let Err(err) = save_last_ping_with_ip(
+            device.id,
+            client_ip,
+            &state.pg_pool,
+            state.config,
+            Some(&state.home_cache),
+        )
+        .await
+        {
+            error!("Error saving last ping with IP: {:?}", err);
+        }
+        if !service_statuses.is_empty()
+            && let Err(err) =
                 crate::home::save_service_statuses(device.id, &service_statuses, &state.pg_pool)
                     .await
-                    .inspect_err(|err| {
-                        error!("Error saving service statuses: {:?}", err);
-                    });
+        {
+            error!("Error saving service statuses: {:?}", err);
         }
     });
 

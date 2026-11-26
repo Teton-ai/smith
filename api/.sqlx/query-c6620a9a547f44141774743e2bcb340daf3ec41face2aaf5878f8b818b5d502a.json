@@ -1,0 +1,35 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            WITH fetched AS (\n                SELECT\n                    id,\n                    cmd,\n                    continue_on_error\n                FROM command_queue\n                WHERE device_id = $1\n                  AND fetched = false\n                  AND canceled = false\n                  AND available_at <= now()\n                ORDER BY id\n                LIMIT $2\n                FOR UPDATE\n            ),\n            marked AS (\n                UPDATE command_queue\n                SET fetched_at = CURRENT_TIMESTAMP, fetched = true\n                WHERE id IN (SELECT id FROM fetched)\n            )\n            SELECT\n                id AS \"id!\",\n                cmd AS \"cmd!\",\n                continue_on_error AS \"continue_on_error!\"\n            FROM fetched\n            ORDER BY id\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "cmd!",
+        "type_info": "Json"
+      },
+      {
+        "ordinal": 2,
+        "name": "continue_on_error!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "c6620a9a547f44141774743e2bcb340daf3ec41face2aaf5878f8b818b5d502a"
+}

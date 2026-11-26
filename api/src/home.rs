@@ -706,39 +706,42 @@ pub async fn get_commands(
     device_serial_number: &str,
     pool: &PgPool,
 ) -> Result<Vec<SafeCommandRequest>, sqlx::Error> {
-    let mut tx = pool.begin().await?;
-
-    // FOR UPDATE: a concurrent queue_latest refresh waits for this fetch to commit.
+    // Single atomic CTE avoids explicit BEGIN/COMMIT round trips on every poll
+    // while keeping FOR UPDATE serialization against concurrent queue_latest refreshes.
     let fetched_commands: Vec<CommandsDB> = sqlx::query_as!(
         CommandsDB,
         r#"
+            WITH fetched AS (
+                SELECT
+                    id,
+                    cmd,
+                    continue_on_error
+                FROM command_queue
+                WHERE device_id = $1
+                  AND fetched = false
+                  AND canceled = false
+                  AND available_at <= now()
+                ORDER BY id
+                LIMIT $2
+                FOR UPDATE
+            ),
+            marked AS (
+                UPDATE command_queue
+                SET fetched_at = CURRENT_TIMESTAMP, fetched = true
+                WHERE id IN (SELECT id FROM fetched)
+            )
             SELECT
-                id,
-                cmd,
-                continue_on_error
-            FROM command_queue
-            WHERE device_id = $1 AND fetched = false AND canceled = false AND available_at <= now()
+                id AS "id!",
+                cmd AS "cmd!",
+                continue_on_error AS "continue_on_error!"
+            FROM fetched
             ORDER BY id
-            LIMIT $2
-            FOR UPDATE"#,
+        "#,
         device_id,
         COMMANDS_PER_ANSWER
     )
-    .fetch_all(&mut *tx)
+    .fetch_all(pool)
     .await?;
-
-    // If commands are fetched successfully, update fetched_at timestamp
-    if !fetched_commands.is_empty() {
-        let ids: Vec<i32> = fetched_commands.iter().map(|cmd| cmd.id).collect();
-        let _ = sqlx::query!(
-                    "UPDATE command_queue SET fetched_at = CURRENT_TIMESTAMP, fetched = true WHERE id = ANY($1)",
-                    &ids
-                )
-                .execute(&mut *tx)
-                .await;
-    }
-
-    tx.commit().await?;
 
     Ok(fetched_commands
         .into_iter()
@@ -769,45 +772,79 @@ fn is_service_down(active_state: &str) -> bool {
     matches!(active_state, "failed" | "inactive")
 }
 
+/// Refreshes `checked_at` periodically even when a service stays healthy so
+/// dashboard freshness timestamps stay bounded without rewriting rows every 20 s.
+const SERVICE_STATUS_HEARTBEAT_SECS: f64 = 300.0;
+
 pub async fn save_service_statuses(
     device_id: i32,
     statuses: &[ServiceStatus],
     pool: &PgPool,
 ) -> Result<()> {
-    let mut tx = pool.begin().await?;
-    for status in statuses {
-        // The `prev` CTE reads the pre-upsert snapshot, so a single round trip
-        // yields both the state being replaced and the service's stable name. A
-        // data-modifying CTE always runs to completion whether or not the outer
-        // query reads its output, so the upsert still happens.
-        let reported = sqlx::query!(
-            r#"
-            WITH prev AS (
-                SELECT active_state FROM device_service_status
-                WHERE device_id = $1 AND release_service_id = $2
-            ),
-            upsert AS (
-                INSERT INTO device_service_status
-                    (device_id, release_service_id, active_state, n_restarts, checked_at)
-                VALUES ($1, $2, $3, $4, NOW())
-                ON CONFLICT (device_id, release_service_id)
-                DO UPDATE SET active_state = EXCLUDED.active_state,
-                              n_restarts  = EXCLUDED.n_restarts,
-                              checked_at  = NOW()
-                RETURNING 1
-            )
-            SELECT
-                (SELECT active_state FROM prev) AS previous_active_state,
-                (SELECT service_name FROM release_services WHERE id = $2) AS service_name
-            "#,
-            device_id,
-            status.id,
-            status.active_state,
-            status.n_restarts as i32
-        )
-        .fetch_one(&mut *tx)
-        .await?;
+    if statuses.is_empty() {
+        return Ok(());
+    }
 
+    // Deduplicate by release_service_id (last wins) so a single ON CONFLICT DO
+    // UPDATE cannot target the same key twice.
+    let mut deduped: Vec<&ServiceStatus> = Vec::with_capacity(statuses.len());
+    for status in statuses {
+        if let Some(pos) = deduped.iter().position(|s| s.id == status.id) {
+            deduped[pos] = status;
+        } else {
+            deduped.push(status);
+        }
+    }
+
+    let service_ids: Vec<i32> = deduped.iter().map(|s| s.id).collect();
+    let active_states: Vec<String> = deduped.iter().map(|s| s.active_state.clone()).collect();
+    let n_restarts: Vec<i32> = deduped.iter().map(|s| s.n_restarts as i32).collect();
+
+    // Batch upsert skipping unchanged rows within the heartbeat window so steady
+    // polls generate zero heap updates or WAL while state transitions write at once.
+    let changed = sqlx::query!(
+        r#"
+        WITH input(release_service_id, active_state, n_restarts) AS (
+            SELECT * FROM UNNEST($2::int4[], $3::text[], $4::int4[])
+        ),
+        prev AS (
+            SELECT dss.release_service_id, dss.active_state
+            FROM device_service_status dss
+            JOIN input i ON i.release_service_id = dss.release_service_id
+            WHERE dss.device_id = $1
+        ),
+        upsert AS (
+            INSERT INTO device_service_status
+                (device_id, release_service_id, active_state, n_restarts, checked_at)
+            SELECT $1, i.release_service_id, i.active_state, i.n_restarts, NOW()
+            FROM input i
+            ON CONFLICT (device_id, release_service_id)
+            DO UPDATE SET active_state = EXCLUDED.active_state,
+                          n_restarts   = EXCLUDED.n_restarts,
+                          checked_at   = NOW()
+            WHERE device_service_status.active_state IS DISTINCT FROM EXCLUDED.active_state
+               OR device_service_status.n_restarts   IS DISTINCT FROM EXCLUDED.n_restarts
+               OR device_service_status.checked_at   <  NOW() - make_interval(secs => $5::double precision)
+            RETURNING release_service_id, active_state
+        )
+        SELECT
+            u.active_state AS "active_state!",
+            p.active_state AS "previous_active_state?",
+            rs.service_name AS "service_name?"
+        FROM upsert u
+        LEFT JOIN prev p ON p.release_service_id = u.release_service_id
+        LEFT JOIN release_services rs ON rs.id = u.release_service_id
+        "#,
+        device_id,
+        &service_ids,
+        &active_states,
+        &n_restarts,
+        SERVICE_STATUS_HEARTBEAT_SECS,
+    )
+    .fetch_all(pool)
+    .await?;
+
+    for reported in changed {
         // A release_service row the API no longer has cannot be attributed a
         // name, and reachability rows belong to the sweeper alone.
         let Some(service_name) = reported.service_name else {
@@ -818,7 +855,7 @@ pub async fn save_service_statuses(
         }
 
         let previous = reported.previous_active_state.as_deref();
-        let down_now = is_service_down(&status.active_state);
+        let down_now = is_service_down(&reported.active_state);
         let down_before = previous.is_some_and(is_service_down);
 
         if down_now && !down_before {
@@ -832,20 +869,19 @@ pub async fn save_service_statuses(
                 device_id,
                 service_name
             )
-            .execute(&mut *tx)
+            .execute(pool)
             .await?;
-        } else if status.active_state == "active" && previous != Some("active") {
+        } else if reported.active_state == "active" && previous != Some("active") {
             sqlx::query!(
                 "UPDATE device_service_outage SET ended_at = NOW()
                  WHERE device_id = $1 AND service_name = $2 AND ended_at IS NULL",
                 device_id,
                 service_name
             )
-            .execute(&mut *tx)
+            .execute(pool)
             .await?;
         }
     }
-    tx.commit().await?;
     Ok(())
 }
 
@@ -989,10 +1025,10 @@ pub async fn save_settings_report(
 #[cfg(test)]
 mod tests {
     use super::{
-        COMMAND_RESULT_LOCK, Saved, map_key_mgmt, queue_latest, save_responses,
-        save_settings_report, schema,
+        COMMAND_RESULT_LOCK, Saved, get_commands, map_key_mgmt, queue_latest, save_responses,
+        save_service_statuses, save_settings_report, schema,
     };
-    use schema::{HomePost, SafeCommandRequest, SafeCommandRx, SafeCommandTx};
+    use schema::{HomePost, SafeCommandRequest, SafeCommandRx, SafeCommandTx, ServiceStatus};
     use serde_json::{Value, json};
     use sqlx::PgPool;
     use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
@@ -1636,6 +1672,268 @@ mod tests {
         for value in &enum_values {
             serde_json::from_value::<schema::DeviceSetting>(serde_json::json!(value))?;
         }
+        Ok(())
+    }
+
+    #[sqlx::test]
+    #[ignore = "needs the compose Postgres; run with --test-threads=1"]
+    async fn get_commands_marks_pending_rows_atomically_in_id_order(
+        pool: PgPool,
+    ) -> anyhow::Result<()> {
+        let device_id = insert_device(&pool, "cmd-dev").await?;
+        let bundle = uuid::Uuid::new_v4();
+        sqlx::query("INSERT INTO command_bundles (uuid) VALUES ($1)")
+            .bind(bundle)
+            .execute(&pool)
+            .await?;
+
+        let first_id: i32 = sqlx::query_scalar(
+            "INSERT INTO command_queue (device_id, cmd, continue_on_error, bundle)
+             VALUES ($1, $2, false, $3) RETURNING id",
+        )
+        .bind(device_id)
+        .bind(serde_json::to_value(schema::SafeCommandTx::Ping)?)
+        .bind(bundle)
+        .fetch_one(&pool)
+        .await?;
+
+        let second_id: i32 = sqlx::query_scalar(
+            "INSERT INTO command_queue (device_id, cmd, continue_on_error, bundle)
+             VALUES ($1, $2, true, $3) RETURNING id",
+        )
+        .bind(device_id)
+        .bind(serde_json::to_value(schema::SafeCommandTx::Ping)?)
+        .bind(bundle)
+        .fetch_one(&pool)
+        .await?;
+
+        // Canceled and future-scheduled commands must not be returned.
+        sqlx::query(
+            "INSERT INTO command_queue (device_id, cmd, continue_on_error, canceled, bundle)
+             VALUES ($1, $2, false, true, $3)",
+        )
+        .bind(device_id)
+        .bind(serde_json::to_value(schema::SafeCommandTx::Ping)?)
+        .bind(bundle)
+        .execute(&pool)
+        .await?;
+        sqlx::query(
+            "INSERT INTO command_queue (device_id, cmd, continue_on_error, bundle, available_at)
+             VALUES ($1, $2, false, $3, NOW() + INTERVAL '1 hour')",
+        )
+        .bind(device_id)
+        .bind(serde_json::to_value(schema::SafeCommandTx::Ping)?)
+        .bind(bundle)
+        .execute(&pool)
+        .await?;
+
+        let fetched = get_commands(device_id, "cmd-dev", &pool).await?;
+        let fetched_ids: Vec<i32> = fetched.iter().map(|c| c.id).collect();
+        assert_eq!(fetched_ids, vec![first_id, second_id]);
+        assert!(!fetched[0].continue_on_error);
+        assert!(fetched[1].continue_on_error);
+
+        // Second poll sees zero pending commands.
+        assert!(get_commands(device_id, "cmd-dev", &pool).await?.is_empty());
+
+        let marked: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM command_queue
+             WHERE id = ANY($1) AND fetched = true AND fetched_at IS NOT NULL",
+        )
+        .bind(vec![first_id, second_id])
+        .fetch_one(&pool)
+        .await?;
+        assert_eq!(marked, 2);
+        Ok(())
+    }
+
+    #[sqlx::test]
+    #[ignore = "needs the compose Postgres; run with --test-threads=1"]
+    async fn save_service_statuses_batches_skips_unchanged_and_tracks_outages(
+        pool: PgPool,
+    ) -> anyhow::Result<()> {
+        let device_id = insert_device(&pool, "svc-dev").await?;
+        let dist_id: i32 = sqlx::query_scalar(
+            "INSERT INTO distribution (name, description, architecture)
+             VALUES ('svc-dist', 'test', 'arm64') RETURNING id",
+        )
+        .fetch_one(&pool)
+        .await?;
+        let release_id: i32 = sqlx::query_scalar(
+            "INSERT INTO release (distribution_id, version) VALUES ($1, 'v1') RETURNING id",
+        )
+        .bind(dist_id)
+        .fetch_one(&pool)
+        .await?;
+        let brain_svc: i32 = sqlx::query_scalar(
+            "INSERT INTO release_services (release_id, service_name, watchdog_sec)
+             VALUES ($1, 'brain.service', 30) RETURNING id",
+        )
+        .bind(release_id)
+        .fetch_one(&pool)
+        .await?;
+        let smithd_svc: i32 = sqlx::query_scalar(
+            "INSERT INTO release_services (release_id, service_name, watchdog_sec)
+             VALUES ($1, 'smithd', 30) RETURNING id",
+        )
+        .bind(release_id)
+        .fetch_one(&pool)
+        .await?;
+
+        // Duplicate id in one payload: last value ("active") wins.
+        save_service_statuses(
+            device_id,
+            &[
+                ServiceStatus {
+                    id: brain_svc,
+                    active_state: "inactive".into(),
+                    n_restarts: 0,
+                },
+                ServiceStatus {
+                    id: brain_svc,
+                    active_state: "active".into(),
+                    n_restarts: 0,
+                },
+                ServiceStatus {
+                    id: smithd_svc,
+                    active_state: "failed".into(),
+                    n_restarts: 0,
+                },
+            ],
+            &pool,
+        )
+        .await?;
+
+        let first_checked: chrono::DateTime<chrono::Utc> = sqlx::query_scalar(
+            "SELECT checked_at FROM device_service_status
+             WHERE device_id = $1 AND release_service_id = $2",
+        )
+        .bind(device_id)
+        .bind(brain_svc)
+        .fetch_one(&pool)
+        .await?;
+
+        // Identical poll within 5 minutes skips the update so checked_at stays untouched.
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        save_service_statuses(
+            device_id,
+            &[ServiceStatus {
+                id: brain_svc,
+                active_state: "active".into(),
+                n_restarts: 0,
+            }],
+            &pool,
+        )
+        .await?;
+        let second_checked: chrono::DateTime<chrono::Utc> = sqlx::query_scalar(
+            "SELECT checked_at FROM device_service_status
+             WHERE device_id = $1 AND release_service_id = $2",
+        )
+        .bind(device_id)
+        .bind(brain_svc)
+        .fetch_one(&pool)
+        .await?;
+        assert_eq!(second_checked, first_checked);
+
+        // smithd reports must never open an outage row.
+        let smithd_outages: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM device_service_outage
+             WHERE device_id = $1 AND service_name = 'smithd'",
+        )
+        .bind(device_id)
+        .fetch_one(&pool)
+        .await?;
+        assert_eq!(smithd_outages, 0);
+
+        // Stale checked_at (> 5 min) refreshes on an identical poll.
+        sqlx::query(
+            "UPDATE device_service_status SET checked_at = NOW() - INTERVAL '6 minutes'
+             WHERE device_id = $1 AND release_service_id = $2",
+        )
+        .bind(device_id)
+        .bind(brain_svc)
+        .execute(&pool)
+        .await?;
+        save_service_statuses(
+            device_id,
+            &[ServiceStatus {
+                id: brain_svc,
+                active_state: "active".into(),
+                n_restarts: 0,
+            }],
+            &pool,
+        )
+        .await?;
+        let refreshed_checked: chrono::DateTime<chrono::Utc> = sqlx::query_scalar(
+            "SELECT checked_at FROM device_service_status
+             WHERE device_id = $1 AND release_service_id = $2",
+        )
+        .bind(device_id)
+        .bind(brain_svc)
+        .fetch_one(&pool)
+        .await?;
+        assert!(refreshed_checked > first_checked);
+
+        // Restart increment updates immediately even while active.
+        save_service_statuses(
+            device_id,
+            &[ServiceStatus {
+                id: brain_svc,
+                active_state: "active".into(),
+                n_restarts: 2,
+            }],
+            &pool,
+        )
+        .await?;
+        let restarts: i32 = sqlx::query_scalar(
+            "SELECT n_restarts FROM device_service_status
+             WHERE device_id = $1 AND release_service_id = $2",
+        )
+        .bind(device_id)
+        .bind(brain_svc)
+        .fetch_one(&pool)
+        .await?;
+        assert_eq!(restarts, 2);
+
+        // Transition active -> failed opens an outage; failed -> active closes it.
+        save_service_statuses(
+            device_id,
+            &[ServiceStatus {
+                id: brain_svc,
+                active_state: "failed".into(),
+                n_restarts: 2,
+            }],
+            &pool,
+        )
+        .await?;
+        let open_count: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM device_service_outage
+             WHERE device_id = $1 AND service_name = 'brain.service' AND ended_at IS NULL",
+        )
+        .bind(device_id)
+        .fetch_one(&pool)
+        .await?;
+        assert_eq!(open_count, 1);
+
+        save_service_statuses(
+            device_id,
+            &[ServiceStatus {
+                id: brain_svc,
+                active_state: "active".into(),
+                n_restarts: 3,
+            }],
+            &pool,
+        )
+        .await?;
+        let closed_count: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM device_service_outage
+             WHERE device_id = $1 AND service_name = 'brain.service' AND ended_at IS NOT NULL",
+        )
+        .bind(device_id)
+        .fetch_one(&pool)
+        .await?;
+        assert_eq!(closed_count, 1);
+
         Ok(())
     }
 }

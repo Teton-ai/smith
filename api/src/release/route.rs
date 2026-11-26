@@ -204,6 +204,8 @@ pub async fn update_release(
         error!("Failed to commit transaction: {err}");
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
+    state.home_cache.invalidate_release_services(release_id);
+
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -301,6 +303,7 @@ pub async fn add_package_to_release(
                             warn!("Failed to insert service {}: {}", service.name, e);
                         }
                     }
+                    state.home_cache.invalidate_release_services(release_id);
                 }
                 Err(e) => {
                     warn!(
@@ -460,6 +463,8 @@ pub async fn delete_package_for_release(
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
 
+    state.home_cache.invalidate_release_services(release_id);
+
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -597,6 +602,8 @@ pub async fn create_release_service(
         }
     })?;
 
+    state.home_cache.invalidate_release_services(release_id);
+
     Ok((StatusCode::CREATED, Json(created_service)))
 }
 
@@ -655,6 +662,8 @@ pub async fn delete_release_service(
     if result.rows_affected() == 0 {
         return Err(StatusCode::NOT_FOUND);
     }
+
+    state.home_cache.invalidate_release_services(release_id);
 
     Ok(StatusCode::NO_CONTENT)
 }

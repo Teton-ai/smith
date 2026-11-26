@@ -858,52 +858,64 @@ pub async fn save_last_ping_with_ip(
     ip_address: Option<IpAddr>,
     pool: &PgPool,
     config: &Config,
+    cache: Option<&crate::smith::HomeCache>,
 ) -> anyhow::Result<()> {
     match ip_address {
         Some(ip) => {
             let mut tx = pool.begin().await?;
-            let ip_network: ipnetwork::IpNetwork = ip.into();
 
-            // SELECT first to avoid burning an IDENTITY sequence value on every ping —
-            // ON CONFLICT DO NOTHING still advances the sequence on conflict.
-            let existing = sqlx::query!(
-                r#"
-                    SELECT id,
-                           CASE
-                               WHEN updated_at < NOW() - INTERVAL '24 hours' THEN true
-                               ELSE false
-                           END as needs_update
-                    FROM ip_address
-                    WHERE ip_address = $1
-                "#,
-                ip_network
-            )
-            .fetch_optional(&mut *tx)
-            .await?;
+            let (ip_id, should_update_geolocation) = if let Some(cached_id) =
+                cache.and_then(|c| c.get_ip_id(ip))
+            {
+                (cached_id, false)
+            } else {
+                let ip_network: ipnetwork::IpNetwork = ip.into();
 
-            let (ip_id, should_update_geolocation) = match existing {
-                Some(record) => (record.id, record.needs_update.unwrap_or(false)),
-                None => {
-                    let inserted = sqlx::query!(
-                        "INSERT INTO ip_address (ip_address, created_at) VALUES ($1, NOW()) ON CONFLICT (ip_address) DO NOTHING RETURNING id",
-                        ip_network
-                    )
-                    .fetch_optional(&mut *tx)
-                    .await?;
-                    match inserted {
-                        Some(record) => (record.id, true),
-                        None => {
-                            // Concurrent insert won the race; fetch the now-existing row.
-                            let row = sqlx::query!(
-                                "SELECT id FROM ip_address WHERE ip_address = $1",
-                                ip_network
-                            )
-                            .fetch_one(&mut *tx)
-                            .await?;
-                            (row.id, true)
+                // SELECT first to avoid burning an IDENTITY sequence value on every ping —
+                // ON CONFLICT DO NOTHING still advances the sequence on conflict.
+                let existing = sqlx::query!(
+                    r#"
+                        SELECT id,
+                               CASE
+                                   WHEN updated_at < NOW() - INTERVAL '24 hours' THEN true
+                                   ELSE false
+                               END as needs_update
+                        FROM ip_address
+                        WHERE ip_address = $1
+                    "#,
+                    ip_network
+                )
+                .fetch_optional(&mut *tx)
+                .await?;
+
+                let (ip_id, should_update_geolocation) = match existing {
+                    Some(record) => (record.id, record.needs_update.unwrap_or(false)),
+                    None => {
+                        let inserted = sqlx::query!(
+                            "INSERT INTO ip_address (ip_address, created_at) VALUES ($1, NOW()) ON CONFLICT (ip_address) DO NOTHING RETURNING id",
+                            ip_network
+                        )
+                        .fetch_optional(&mut *tx)
+                        .await?;
+                        match inserted {
+                            Some(record) => (record.id, true),
+                            None => {
+                                // Concurrent insert won the race; fetch the now-existing row.
+                                let row = sqlx::query!(
+                                    "SELECT id FROM ip_address WHERE ip_address = $1",
+                                    ip_network
+                                )
+                                .fetch_one(&mut *tx)
+                                .await?;
+                                (row.id, true)
+                            }
                         }
                     }
+                };
+                if let Some(cache) = cache {
+                    cache.insert_ip_id(ip, ip_id);
                 }
+                (ip_id, should_update_geolocation)
             };
 
             // The CTE reads the pre-UPDATE snapshot, so this hands back both the
@@ -1003,18 +1015,20 @@ fn default_download_limit(active_devices: i64) -> i64 {
     MIN_CONCURRENT_DOWNLOADS.max((active_devices + buckets - 1) / buckets)
 }
 
-struct TargetRow {
-    release_id: Option<i32>,
+pub struct DevicePollState {
+    pub release_id: Option<i32>,
     target_release_id: Option<i32>,
     target_release_id_set_at: Option<DateTime<Utc>>,
     target_release_eligible_at: Option<DateTime<Utc>>,
     download_slot_release_id: Option<i32>,
     download_slot_at: Option<DateTime<Utc>>,
     ip_address_id: Option<i64>,
+    pub settings_version: i32,
+    pub archived: bool,
     now: DateTime<Utc>,
 }
 
-impl TargetRow {
+impl DevicePollState {
     /// A slot from an earlier assignment of the same release (retargeted away
     /// and back) was never checked against the IP's current holders.
     fn holds_slot_for(&self, target: i32) -> bool {
@@ -1024,6 +1038,10 @@ impl TargetRow {
                 (Some(_), None) => true,
                 (None, _) => false,
             }
+    }
+
+    pub fn needs_auto_apply_settings(&self) -> bool {
+        self.settings_version == 0 && !self.archived
     }
 }
 
@@ -1041,7 +1059,7 @@ enum TargetDecision {
 /// release rather than nothing: smithd keeps its cached target when told
 /// nothing. A holder is never told to give its target back, even when its
 /// slot has stopped counting against the IP.
-fn decide_target(row: &TargetRow) -> TargetDecision {
+fn decide_target(row: &DevicePollState) -> TargetDecision {
     let (Some(target), Some(current)) = (row.target_release_id, row.release_id) else {
         return TargetDecision::Answer(row.target_release_id);
     };
@@ -1134,28 +1152,36 @@ async fn try_take_download_slot(
     Ok(granted)
 }
 
-/// The release a polling device should be on. Never fails the poll: when a
-/// slot cannot be decided the device is told to stay on its current release.
-pub async fn get_target_release(device_id: i32, pool: &PgPool) -> Option<i32> {
-    let row = match sqlx::query_as!(
-        TargetRow,
+/// Loads the fields `/smith/home` needs from `device` in a single PK lookup so
+/// settings auto-apply, target release selection, and release-id persistence do
+/// not re-read the same row.
+pub async fn load_device_poll_state(device_id: i32, pool: &PgPool) -> Option<DevicePollState> {
+    match sqlx::query_as!(
+        DevicePollState,
         r#"SELECT release_id, target_release_id, target_release_id_set_at,
             target_release_eligible_at, download_slot_release_id, download_slot_at,
-            ip_address_id, NOW() AS "now!"
+            ip_address_id, settings_version, archived, NOW() AS "now!"
         FROM device WHERE id = $1"#,
         device_id
     )
     .fetch_one(pool)
     .await
     {
-        Ok(row) => row,
+        Ok(row) => Some(row),
         Err(err) => {
-            tracing::error!(device_id, "Failed to load target release: {err:?}");
-            return None;
+            tracing::error!(device_id, "Failed to load device poll state: {err:?}");
+            None
         }
-    };
+    }
+}
 
-    match decide_target(&row) {
+/// Resolves the target release from an already-loaded `DevicePollState`.
+pub async fn resolve_target_release(
+    device_id: i32,
+    row: &DevicePollState,
+    pool: &PgPool,
+) -> Option<i32> {
+    match decide_target(row) {
         TargetDecision::Answer(answer) => answer,
         TargetDecision::NeedsSlot {
             ip_address_id,
@@ -1170,6 +1196,14 @@ pub async fn get_target_release(device_id: i32, pool: &PgPool) -> Option<i32> {
             }
         },
     }
+}
+
+/// The release a polling device should be on. Never fails the poll: when a
+/// slot cannot be decided the device is told to stay on its current release.
+#[cfg(test)]
+pub async fn get_target_release(device_id: i32, pool: &PgPool) -> Option<i32> {
+    let row = load_device_poll_state(device_id, pool).await?;
+    resolve_target_release(device_id, &row, pool).await
 }
 
 /// Complete approval's default target once the installed release is known.
@@ -1834,6 +1868,40 @@ mod target_release_tests {
             .await?;
         // 100 active devices: ceil(100 / 20) = 5, where 130 would give 7.
         assert_eq!(granted(&poll_all(&pool, active).await, target), 5);
+        Ok(())
+    }
+
+    #[sqlx::test]
+    #[ignore = "needs the compose Postgres; run with --test-threads=1"]
+    async fn load_poll_state_reflects_settings_and_release(pool: PgPool) -> anyhow::Result<()> {
+        let [current, target] = insert_releases(&pool).await?;
+        let devices = insert_devices(&pool, 1, Some(current)).await?;
+        let device_id = devices[0];
+
+        sqlx::query("UPDATE device SET settings_version = 1, target_release_id = $1 WHERE id = $2")
+            .bind(target)
+            .bind(device_id)
+            .execute(&pool)
+            .await?;
+
+        let state = load_device_poll_state(device_id, &pool)
+            .await
+            .ok_or_else(|| anyhow::anyhow!("poll state missing"))?;
+        assert_eq!(state.release_id, Some(current));
+        assert!(!state.needs_auto_apply_settings());
+        assert_eq!(
+            resolve_target_release(device_id, &state, &pool).await,
+            Some(target)
+        );
+
+        sqlx::query("UPDATE device SET settings_version = 0 WHERE id = $1")
+            .bind(device_id)
+            .execute(&pool)
+            .await?;
+        let state = load_device_poll_state(device_id, &pool)
+            .await
+            .ok_or_else(|| anyhow::anyhow!("poll state missing"))?;
+        assert!(state.needs_auto_apply_settings());
         Ok(())
     }
 }
