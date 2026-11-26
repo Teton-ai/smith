@@ -2382,6 +2382,42 @@ pub async fn load_device_info(
     Ok(Json(device))
 }
 
+/// Archived devices are hidden from the dashboard, so one that could still
+/// authenticate would be invisible and impossible to revoke. Archiving
+/// therefore revokes too.
+async fn record_device_archival(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    device_id: i32,
+    user_id: i32,
+) -> Result<(), sqlx::Error> {
+    let archived = sqlx::query!(
+        "UPDATE device
+        SET archived = true,
+            approved = false,
+            token = NULL
+        WHERE id = $1",
+        device_id
+    )
+    .execute(&mut **tx)
+    .await?;
+
+    if archived.rows_affected() == 0 {
+        return Err(sqlx::Error::RowNotFound);
+    }
+
+    sqlx::query!(
+        r#"INSERT INTO ledger (device_id, "class", "text", user_id) VALUES ($1, $2, $3, $4)"#,
+        device_id,
+        "archived",
+        "Device archived: approval removed and token cleared.",
+        user_id
+    )
+    .execute(&mut **tx)
+    .await?;
+
+    Ok(())
+}
+
 #[utoipa::path(
     delete,
     path = "/devices/{device_id}",
@@ -2389,7 +2425,9 @@ pub async fn load_device_info(
         ("device_id" = i32, Path),
     ),
     responses(
-        (status = StatusCode::NO_CONTENT, description = "Successfully deleted the device"),
+        (status = StatusCode::NO_CONTENT, description = "Device archived, its approval removed and its token cleared"),
+        (status = StatusCode::FORBIDDEN, description = "Missing devices:write permission"),
+        (status = StatusCode::NOT_FOUND, description = "Device not found"),
         (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Failed to delete device"),
     ),
     security(
@@ -2398,26 +2436,28 @@ pub async fn load_device_info(
     tag = DEVICES_TAG
 )]
 pub async fn delete_device(
+    Extension(current_user): Extension<CurrentUser>,
     Path(device_id): Path<i32>,
     Extension(state): Extension<State>,
 ) -> axum::response::Result<StatusCode, StatusCode> {
+    if !authorization::check(current_user.clone(), "devices", "write") {
+        return Err(StatusCode::FORBIDDEN);
+    }
+
     let mut tx = state.pg_pool.begin().await.map_err(|err| {
         error!("Failed to start transaction {err}");
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
 
-    sqlx::query!(
-        "UPDATE device 
-        SET archived = true
-        WHERE id = $1",
-        device_id
-    )
-    .execute(&mut *tx)
-    .await
-    .map_err(|err| {
-        error!("Failed to archive device {err}");
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
+    record_device_archival(&mut tx, device_id, current_user.user_id)
+        .await
+        .map_err(|err| match err {
+            sqlx::Error::RowNotFound => StatusCode::NOT_FOUND,
+            err => {
+                error!("Failed to archive device {device_id}: {err}");
+                StatusCode::INTERNAL_SERVER_ERROR
+            }
+        })?;
 
     tx.commit().await.map_err(|err| {
         error!("Failed to commit transaction {err}");
@@ -2717,8 +2757,10 @@ async fn record_device_approval(
     device_id: i32,
     user_id: i32,
 ) -> Result<DeviceApproval, sqlx::Error> {
+    // Archived devices cannot authenticate, so approving one would only leave
+    // it holding a token it can never use.
     let device = sqlx::query!(
-        "SELECT serial_number, approved FROM device WHERE id = $1 FOR UPDATE",
+        "SELECT serial_number, approved FROM device WHERE id = $1 AND NOT archived FOR UPDATE",
         device_id
     )
     .fetch_one(&mut **tx)
@@ -2782,7 +2824,8 @@ async fn visible_approver_email(
     request_body(content = Option<ApproveDeviceBody>, content_type = "application/json"),
     responses(
         (status = 200, description = "Device approved successfully", body = bool),
-        (status = 404, description = "Device or release not found"),
+        (status = 403, description = "Missing devices:write permission"),
+        (status = 404, description = "Device or release not found, or device archived"),
         (status = 500, description = "Failed to approve device", body = String),
     ),
     security(
@@ -2796,6 +2839,10 @@ pub async fn approve_device(
     Extension(state): Extension<State>,
     body: Option<Json<ApproveDeviceBody>>,
 ) -> axum::response::Result<Json<bool>, StatusCode> {
+    if !authorization::check(current_user.clone(), "devices", "write") {
+        return Err(StatusCode::FORBIDDEN);
+    }
+
     let target_release_id = body.and_then(|b| b.target_release_id);
 
     if let Some(release_id) = target_release_id {
@@ -2876,15 +2923,94 @@ pub async fn approve_device(
     Ok(Json(true))
 }
 
+/// Revoking has to cut the device off, not just flip a flag. Clearing the token
+/// makes every opaque-token request and JWT refresh fail, and registration will
+/// not hand out a new token until the device is approved again.
+async fn record_device_revocation(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    device_id: i32,
+    user_id: i32,
+) -> Result<(), sqlx::Error> {
+    let revoked = sqlx::query!(
+        r#"UPDATE device
+        SET approved = false,
+            approved_by_user_id = NULL,
+            approved_at = NULL,
+            token = NULL,
+            release_id = NULL,
+            target_release_id = NULL,
+            target_release_eligible_at = NULL
+        WHERE id = $1"#,
+        device_id
+    )
+    .execute(&mut **tx)
+    .await?;
+
+    if revoked.rows_affected() == 0 {
+        return Err(sqlx::Error::RowNotFound);
+    }
+
+    sqlx::query!(
+        r#"INSERT INTO ledger (device_id, "class", "text", user_id) VALUES ($1, $2, $3, $4)"#,
+        device_id,
+        "revoked",
+        "Device revoked: approval removed and token cleared.",
+        user_id
+    )
+    .execute(&mut **tx)
+    .await?;
+
+    Ok(())
+}
+
+async fn revoke(
+    current_user: CurrentUser,
+    device_id: i32,
+    state: State,
+) -> axum::response::Result<Json<bool>, StatusCode> {
+    if !authorization::check(current_user.clone(), "devices", "write") {
+        return Err(StatusCode::FORBIDDEN);
+    }
+
+    let mut tx = state.pg_pool.begin().await.map_err(|err| {
+        error!("Failed to start transaction {err}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    record_device_revocation(&mut tx, device_id, current_user.user_id)
+        .await
+        .map_err(|err| match err {
+            sqlx::Error::RowNotFound => StatusCode::NOT_FOUND,
+            err => {
+                error!("Failed to revoke device {device_id}: {err}");
+                StatusCode::INTERNAL_SERVER_ERROR
+            }
+        })?;
+
+    tx.commit().await.map_err(|err| {
+        error!("Failed to commit transaction {err}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    Ok(Json(true))
+}
+
+/// Revoke a device: remove its approval and invalidate its credentials.
+///
+/// The device's token is cleared, so it can no longer authenticate or mint new
+/// session JWTs, and `/smith/home` stops serving it immediately. To bring it
+/// back, approve it again; it then registers and receives a new token.
 #[utoipa::path(
-    delete,
-    path = "/devices/{device_id}/approval",
+    post,
+    path = "/devices/{device_id}/revoke",
     params(
         ("device_id" = i32, Path),
     ),
     responses(
-        (status = 200, description = "Device approval revoked successfully", body = bool),
-        (status = 500, description = "Failed to revoke device approval", body = String),
+        (status = 200, description = "Device revoked", body = bool),
+        (status = 403, description = "Missing devices:write permission"),
+        (status = 404, description = "Device not found"),
+        (status = 500, description = "Failed to revoke device", body = String),
     ),
     security(
         ("auth_token" = [])
@@ -2896,102 +3022,35 @@ pub async fn revoke_device(
     Path(device_id): Path<i32>,
     Extension(state): Extension<State>,
 ) -> axum::response::Result<Json<bool>, StatusCode> {
-    let mut tx = state.pg_pool.begin().await.map_err(|err| {
-        error!("Failed to start transaction {err}");
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
-
-    sqlx::query!(
-        r#"UPDATE device 
-        SET approved = false,
-            approved_by_user_id = NULL,
-            approved_at = NULL,
-            release_id = NULL,
-            target_release_id = NULL,
-            target_release_eligible_at = NULL
-        WHERE id = $1"#,
-        device_id
-    )
-    .execute(&mut *tx)
-    .await
-    .map_err(|err| {
-        error!("Failed to revoke device approval {err}");
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
-
-    sqlx::query!(
-        r#"INSERT INTO ledger (device_id, "class", "text", user_id) VALUES ($1, $2, $3, $4)"#,
-        device_id,
-        "revoked",
-        "Device approval revoked.",
-        current_user.user_id
-    )
-    .execute(&mut *tx)
-    .await
-    .map_err(|err| {
-        error!("Failed to insert ledger entry for device {err}");
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
-
-    tx.commit().await.map_err(|err| {
-        error!("Failed to commit transaction {err}");
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
-
-    Ok(Json(true))
+    revoke(current_user, device_id, state).await
 }
 
+/// Same as `POST /devices/{device_id}/revoke`. Kept so older CLIs that call it
+/// still cut the device off instead of only clearing the approval flag.
 #[utoipa::path(
     delete,
-    path = "/devices/{device_id}/token",
+    path = "/devices/{device_id}/approval",
     params(
         ("device_id" = i32, Path),
     ),
     responses(
-        (status = 200, description = "Device token deleted successfully"),
-        (status = 500, description = "Failed to delete device token", body = String),
+        (status = 200, description = "Device revoked", body = bool),
+        (status = 403, description = "Missing devices:write permission"),
+        (status = 404, description = "Device not found"),
+        (status = 500, description = "Failed to revoke device", body = String),
     ),
     security(
         ("auth_token" = [])
     ),
     tag = DEVICES_TAG
 )]
-pub async fn delete_token(
+#[deprecated(note = "Use POST /devices/{device_id}/revoke")]
+pub async fn revoke_device_approval(
+    Extension(current_user): Extension<CurrentUser>,
     Path(device_id): Path<i32>,
     Extension(state): Extension<State>,
-) -> axum::response::Result<Json<()>, StatusCode> {
-    let mut tx = state.pg_pool.begin().await.map_err(|err| {
-        error!("Failed to start transaction {err}");
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
-
-    sqlx::query!(r#"UPDATE device SET token = NULL WHERE id = $1"#, device_id)
-        .execute(&mut *tx)
-        .await
-        .map_err(|err| {
-            error!("Failed to delete token for device {err}");
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?;
-
-    sqlx::query!(
-        r#"INSERT INTO ledger (device_id, "class", "text") VALUES ($1, $2, $3)"#,
-        device_id,
-        "token",
-        format!("Token reset.")
-    )
-    .execute(&mut *tx)
-    .await
-    .map_err(|err| {
-        error!("Failed to insert ledger entry for device {err}");
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
-
-    tx.commit().await.map_err(|err| {
-        error!("Failed to commit transaction {err}");
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
-
-    Ok(Json(()))
+) -> axum::response::Result<Json<bool>, StatusCode> {
+    revoke(current_user, device_id, state).await
 }
 
 #[utoipa::path(
@@ -5234,6 +5293,162 @@ mod approval_attribution {
         let (approver, approved_at) = attribution(&pool, device).await?;
         assert_eq!(approver, None);
         assert!(approved_at.is_some());
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod device_revocation {
+    use super::{record_device_approval, record_device_archival, record_device_revocation};
+    use crate::handlers::{AuthedDevice, device_by_opaque_token};
+    use axum::http::StatusCode;
+    use sqlx::PgPool;
+
+    async fn insert_approved_device(
+        pool: &PgPool,
+        serial: &str,
+        token: &str,
+    ) -> anyhow::Result<i32> {
+        Ok(sqlx::query_scalar(
+            "INSERT INTO device (serial_number, approved, token) VALUES ($1, true, $2) RETURNING id",
+        )
+        .bind(serial)
+        .bind(token)
+        .fetch_one(pool)
+        .await?)
+    }
+
+    async fn insert_user(pool: &PgPool) -> anyhow::Result<i32> {
+        Ok(sqlx::query_scalar(
+            "INSERT INTO auth.users (auth0_user_id) VALUES ('revoker') RETURNING id",
+        )
+        .fetch_one(pool)
+        .await?)
+    }
+
+    async fn token_status(pool: &PgPool, token: &str) -> Option<StatusCode> {
+        device_by_opaque_token(pool, token)
+            .await
+            .err()
+            .map(|response| response.status())
+    }
+
+    async fn is_active(pool: &PgPool, id: i32) -> anyhow::Result<bool> {
+        let device = AuthedDevice {
+            id,
+            serial_number: String::new(),
+        };
+        Ok(device.is_active(pool).await?)
+    }
+
+    async fn state(pool: &PgPool, id: i32) -> anyhow::Result<(bool, bool, Option<String>)> {
+        Ok(
+            sqlx::query_as("SELECT approved, archived, token FROM device WHERE id = $1")
+                .bind(id)
+                .fetch_one(pool)
+                .await?,
+        )
+    }
+
+    async fn last_ledger(pool: &PgPool, id: i32) -> anyhow::Result<(String, Option<i32>)> {
+        Ok(sqlx::query_as(
+            r#"SELECT "class", user_id FROM ledger WHERE device_id = $1 ORDER BY id DESC LIMIT 1"#,
+        )
+        .bind(id)
+        .fetch_one(pool)
+        .await?)
+    }
+
+    #[sqlx::test]
+    #[ignore = "needs Postgres with pg_partman; run with --test-threads=1"]
+    async fn revoke_invalidates_token(pool: PgPool) -> anyhow::Result<()> {
+        let user = insert_user(&pool).await?;
+        let device = insert_approved_device(&pool, "revoke-me", "revoke-token").await?;
+        assert_eq!(token_status(&pool, "revoke-token").await, None);
+        assert!(is_active(&pool, device).await?);
+
+        let mut tx = pool.begin().await?;
+        record_device_revocation(&mut tx, device, user).await?;
+        tx.commit().await?;
+
+        assert_eq!(state(&pool, device).await?, (false, false, None));
+        assert_eq!(
+            token_status(&pool, "revoke-token").await,
+            Some(StatusCode::UNAUTHORIZED)
+        );
+        assert!(!is_active(&pool, device).await?);
+        assert_eq!(
+            last_ledger(&pool, device).await?,
+            ("revoked".into(), Some(user))
+        );
+        Ok(())
+    }
+
+    #[sqlx::test]
+    #[ignore = "needs Postgres with pg_partman; run with --test-threads=1"]
+    async fn revoking_missing_device_is_not_found(pool: PgPool) -> anyhow::Result<()> {
+        let user = insert_user(&pool).await?;
+        let mut tx = pool.begin().await?;
+        assert!(matches!(
+            record_device_revocation(&mut tx, i32::MAX, user).await,
+            Err(sqlx::Error::RowNotFound)
+        ));
+        Ok(())
+    }
+
+    #[sqlx::test]
+    #[ignore = "needs Postgres with pg_partman; run with --test-threads=1"]
+    async fn archive_invalidates_token(pool: PgPool) -> anyhow::Result<()> {
+        let user = insert_user(&pool).await?;
+        let device = insert_approved_device(&pool, "archive-me", "archive-token").await?;
+
+        let mut tx = pool.begin().await?;
+        record_device_archival(&mut tx, device, user).await?;
+        tx.commit().await?;
+
+        assert_eq!(state(&pool, device).await?, (false, true, None));
+        assert_eq!(
+            token_status(&pool, "archive-token").await,
+            Some(StatusCode::UNAUTHORIZED)
+        );
+        assert!(!is_active(&pool, device).await?);
+        assert_eq!(
+            last_ledger(&pool, device).await?,
+            ("archived".into(), Some(user))
+        );
+
+        // An archived device cannot be approved back into holding a token.
+        let mut tx = pool.begin().await?;
+        assert!(matches!(
+            record_device_approval(&mut tx, device, user).await,
+            Err(sqlx::Error::RowNotFound)
+        ));
+        Ok(())
+    }
+
+    /// Devices revoked before revocation cleared the token still hold one; it
+    /// must not authenticate them.
+    #[sqlx::test]
+    #[ignore = "needs Postgres with pg_partman; run with --test-threads=1"]
+    async fn token_alone_does_not_authenticate(pool: PgPool) -> anyhow::Result<()> {
+        let unapproved = insert_approved_device(&pool, "legacy-revoked", "legacy-token").await?;
+        sqlx::query("UPDATE device SET approved = false WHERE id = $1")
+            .bind(unapproved)
+            .execute(&pool)
+            .await?;
+        let archived = insert_approved_device(&pool, "legacy-archived", "archived-token").await?;
+        sqlx::query("UPDATE device SET archived = true WHERE id = $1")
+            .bind(archived)
+            .execute(&pool)
+            .await?;
+
+        for (id, token) in [(unapproved, "legacy-token"), (archived, "archived-token")] {
+            assert_eq!(
+                token_status(&pool, token).await,
+                Some(StatusCode::UNAUTHORIZED)
+            );
+            assert!(!is_active(&pool, id).await?);
+        }
         Ok(())
     }
 }

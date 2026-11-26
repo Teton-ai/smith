@@ -19,6 +19,80 @@ pub struct AuthedDevice {
     pub serial_number: String,
 }
 
+impl AuthedDevice {
+    /// JWTs are verified without the database, so one minted before a revoke
+    /// or archive stays valid until it expires. Handlers that hand the device
+    /// anything sensitive call this to cut it off right away instead.
+    pub async fn is_active(&self, pool: &sqlx::PgPool) -> Result<bool, sqlx::Error> {
+        sqlx::query_scalar!(
+            r#"SELECT EXISTS (
+                SELECT 1 FROM device
+                WHERE id = $1 AND approved AND NOT archived AND token IS NOT NULL
+            ) AS "active!""#,
+            self.id
+        )
+        .fetch_one(pool)
+        .await
+    }
+}
+
+/// A device authenticated by its long-lived opaque token only, never a JWT.
+/// Used to mint JWTs, so a JWT cannot be renewed with itself and outlive the
+/// token it came from.
+#[derive(Debug)]
+pub struct OpaqueAuthedDevice(pub AuthedDevice);
+
+async fn bearer_and_state<S>(parts: &mut Parts, state: &S) -> Result<(String, State), Response>
+where
+    S: Send + Sync,
+{
+    let TypedHeader(Authorization(bearer)) =
+        TypedHeader::<Authorization<Bearer>>::from_request_parts(parts, state)
+            .await
+            .map_err(|_| StatusCode::UNAUTHORIZED.into_response())?;
+
+    use axum::RequestPartsExt;
+    let Extension(state) = parts
+        .extract::<Extension<State>>()
+        .await
+        .map_err(|err| err.into_response())?;
+
+    Ok((bearer.token().to_string(), state))
+}
+
+/// Only approved, unarchived devices may authenticate with their token.
+pub(crate) async fn device_by_opaque_token(
+    pool: &sqlx::PgPool,
+    token: &str,
+) -> Result<AuthedDevice, Response> {
+    let device = sqlx::query!(
+        r#"
+        SELECT
+            id,
+            serial_number
+        FROM device
+        WHERE
+            token IS NOT NULL AND
+            token = $1 AND
+            approved AND
+            NOT archived
+        "#,
+        token
+    )
+    .fetch_optional(pool)
+    .await
+    .map_err(|err| {
+        error!("Database error: {:?}", err);
+        StatusCode::INTERNAL_SERVER_ERROR.into_response()
+    })?
+    .ok_or_else(|| StatusCode::UNAUTHORIZED.into_response())?;
+
+    Ok(AuthedDevice {
+        id: device.id,
+        serial_number: device.serial_number,
+    })
+}
+
 #[async_trait]
 impl<S> FromRequestParts<S> for AuthedDevice
 where
@@ -27,22 +101,11 @@ where
     type Rejection = Response;
 
     async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
-        let TypedHeader(Authorization(bearer)) =
-            TypedHeader::<Authorization<Bearer>>::from_request_parts(parts, state)
-                .await
-                .map_err(|_| StatusCode::UNAUTHORIZED.into_response())?;
-
-        use axum::RequestPartsExt;
-        let Extension(state) = parts
-            .extract::<Extension<State>>()
-            .await
-            .map_err(|err| err.into_response())?;
-
-        let token = bearer.token();
+        let (token, state) = bearer_and_state(parts, state).await?;
 
         // Try the token as a device JWT first; if it isn't a valid one, fall
         // back to the opaque-token lookup below.
-        if let Ok(claims) = state.device_jwt_signer.verify(token) {
+        if let Ok(claims) = state.device_jwt_signer.verify(&token) {
             let id = claims
                 .sub
                 .parse::<i32>()
@@ -54,29 +117,21 @@ where
             });
         }
 
-        let device = sqlx::query!(
-            r#"
-            SELECT
-                id,
-                serial_number
-            FROM device
-            WHERE
-                token IS NOT NULL AND
-                token = $1
-            "#,
-            token
-        )
-        .fetch_optional(&state.pg_pool)
-        .await
-        .map_err(|err| {
-            error!("Database error: {:?}", err);
-            StatusCode::INTERNAL_SERVER_ERROR.into_response()
-        })?
-        .ok_or_else(|| StatusCode::UNAUTHORIZED.into_response())?;
+        device_by_opaque_token(&state.pg_pool, &token).await
+    }
+}
 
-        Ok(AuthedDevice {
-            id: device.id,
-            serial_number: device.serial_number,
-        })
+#[async_trait]
+impl<S> FromRequestParts<S> for OpaqueAuthedDevice
+where
+    S: Send + Sync,
+{
+    type Rejection = Response;
+
+    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
+        let (token, state) = bearer_and_state(parts, state).await?;
+        device_by_opaque_token(&state.pg_pool, &token)
+            .await
+            .map(OpaqueAuthedDevice)
     }
 }

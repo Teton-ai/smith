@@ -1,5 +1,6 @@
 "use client";
 
+import { useQueryClient } from "@tanstack/react-query";
 import { Button, DropdownMenu, LabelChip } from "@teton/smith-ui";
 import {
 	BarChart3,
@@ -11,6 +12,7 @@ import {
 	GitBranch,
 	Power,
 	ScrollText,
+	ShieldOff,
 	Tag,
 	Tags,
 	Terminal,
@@ -28,8 +30,10 @@ import {
 import {
 	type CommandRecipe,
 	type Device,
+	getGetDeviceInfoQueryKey,
 	useGetRecipes,
 	useIssueCommandsToDevices,
+	useRevokeDevice,
 	useTriggerRecipe,
 } from "@/app/api-client";
 import { Modal } from "@/app/components/modal";
@@ -170,6 +174,8 @@ const DeviceHeader: React.FC<DeviceHeaderProps> = ({ device, serial }) => {
 	const [sshCopied, setSshCopied] = useState(false);
 	const [showRunModal, setShowRunModal] = useState(false);
 	const [showRebootModal, setShowRebootModal] = useState(false);
+	const [showRevokeModal, setShowRevokeModal] = useState(false);
+	const [revokeError, setRevokeError] = useState<string | null>(null);
 	const [showRecipeModal, setShowRecipeModal] = useState(false);
 	const [selectedRecipeId, setSelectedRecipeId] = useState<number | null>(null);
 	const [recipeTriggered, setRecipeTriggered] = useState(false);
@@ -256,6 +262,26 @@ const DeviceHeader: React.FC<DeviceHeaderProps> = ({ device, serial }) => {
 				},
 			},
 		});
+
+	const queryClient = useQueryClient();
+	const { mutate: revokeDevice, isPending: isRevoking } = useRevokeDevice({
+		mutation: {
+			onSuccess: () => {
+				setShowRevokeModal(false);
+				queryClient.invalidateQueries({
+					queryKey: getGetDeviceInfoQueryKey(serial),
+				});
+			},
+			onError: () =>
+				setRevokeError("Failed to revoke device. Please try again."),
+		},
+	});
+
+	const closeRevokeModal = () => {
+		if (isRevoking) return;
+		setShowRevokeModal(false);
+		setRevokeError(null);
+	};
 
 	const handleRunCommand = () => {
 		if (!commandIsValid(runCommandState) || !device?.id || isIssuingCommands)
@@ -489,6 +515,17 @@ const DeviceHeader: React.FC<DeviceHeaderProps> = ({ device, serial }) => {
 								tone: "red",
 								onClick: () => setShowRebootModal(true),
 							},
+							...(device.approved
+								? [
+										{
+											label: "Revoke",
+											description: "Remove approval and invalidate its token",
+											icon: <ShieldOff className="w-4 h-4" />,
+											tone: "red" as const,
+											onClick: () => setShowRevokeModal(true),
+										},
+									]
+								: []),
 							{
 								label: sshCopied ? "Copied!" : "SSH",
 								description: sshCopied
@@ -640,6 +677,55 @@ const DeviceHeader: React.FC<DeviceHeaderProps> = ({ device, serial }) => {
 						</div>
 					</div>
 				</div>
+			</Modal>
+
+			{/* Revoke Confirmation Modal */}
+			<Modal
+				open={showRevokeModal}
+				onClose={closeRevokeModal}
+				title="Revoke Device"
+				footer={
+					<>
+						<Button
+							variant="soft"
+							tone="gray"
+							disabled={isRevoking}
+							onClick={closeRevokeModal}
+						>
+							Cancel
+						</Button>
+						<Button
+							variant="solid"
+							tone="red"
+							loading={isRevoking}
+							onClick={() => {
+								setRevokeError(null);
+								revokeDevice({ deviceId: device.id });
+							}}
+						>
+							{isRevoking ? "Revoking..." : "Revoke Device"}
+						</Button>
+					</>
+				}
+			>
+				<div className="bg-red-50 border border-red-200 rounded-lg p-4">
+					<div className="flex gap-3">
+						<ShieldOff className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
+						<div>
+							<p className="text-red-800 font-medium">
+								Revoke {getDeviceName()}
+							</p>
+							<p className="text-red-700 text-sm mt-1">
+								This removes the device's approval and invalidates its token. It
+								stops receiving commands right away and loses all API access
+								within an hour. Approve it again to reconnect it.
+							</p>
+						</div>
+					</div>
+				</div>
+				{revokeError && (
+					<p className="mt-3 text-sm text-red-600">{revokeError}</p>
+				)}
 			</Modal>
 
 			{/* Apply Recipe Modal */}

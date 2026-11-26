@@ -481,7 +481,11 @@ Examples:
         yes: bool,
     },
 
-    /// Revoke device approval
+    /// Revoke devices: remove their approval and invalidate their token
+    ///
+    /// A revoked device stops receiving commands right away, and loses all API
+    /// access once its current session expires (at most an hour). To bring it
+    /// back, approve it again; it then registers and gets a new token.
     Revoke {
         #[command(flatten)]
         selector: DeviceSelector,
