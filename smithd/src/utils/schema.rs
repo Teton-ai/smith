@@ -223,6 +223,13 @@ pub enum SafeCommandRx {
         // missing from older smithd, serde fills `None`
         console_logins_closed: Option<bool>,
         reboot_watchdog_set: Option<bool>,
+        rootfs_slot: Option<RootfsSlot>,
+        /// whether the device could still fall back to its other rootfs slot
+        rootfs_other_slot_bootable: Option<bool>,
+        uefi_secure_boot: Option<UefiSecureBoot>,
+        /// whether the filesystem mounted at `/` sits on a crypt mapping
+        root_encrypted: Option<bool>,
+        uda_encryption: Option<UdaEncryption>,
     },
     ApplyNetworksResult {
         applied_version: i32,
@@ -613,6 +620,36 @@ pub struct WantedSettings {
     pub bgscan: Option<Managed<String>>,
 }
 
+/// rootfs a/b slot the device booted from. `Single` when the device has one rootfs slot
+#[derive(Type, Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, utoipa::ToSchema)]
+#[sqlx(type_name = "rootfs_slot", rename_all = "lowercase")]
+#[serde(rename_all = "lowercase")]
+pub enum RootfsSlot {
+    A,
+    B,
+    Single,
+}
+
+/// whether the user data partition (gpt label `UDA`) is encrypted, if the unit has one
+#[derive(Type, Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, utoipa::ToSchema)]
+#[sqlx(type_name = "uda_encryption", rename_all = "lowercase")]
+#[serde(rename_all = "lowercase")]
+pub enum UdaEncryption {
+    Encrypted,
+    Unencrypted,
+    Absent,
+}
+
+/// uefi secure boot state. `Setup` means anyone can enroll keys, so it isn't enforcing
+#[derive(Type, Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, utoipa::ToSchema)]
+#[sqlx(type_name = "uefi_secure_boot", rename_all = "lowercase")]
+#[serde(rename_all = "lowercase")]
+pub enum UefiSecureBoot {
+    Off,
+    Setup,
+    On,
+}
+
 #[derive(Type, Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[sqlx(type_name = "network_type", rename_all = "lowercase")]
 #[serde(rename_all = "lowercase")]
@@ -797,14 +834,34 @@ mod tests {
                 password_access_disabled,
                 console_logins_closed,
                 reboot_watchdog_set,
+                rootfs_slot,
+                rootfs_other_slot_bootable,
+                uefi_secure_boot,
+                root_encrypted,
+                uda_encryption,
             } => {
                 assert_eq!(disk_encrypted, Some(true));
                 assert_eq!(password_access_disabled, Some(false));
                 assert_eq!(console_logins_closed, None);
                 assert_eq!(reboot_watchdog_set, None);
+                assert_eq!(rootfs_slot, None);
+                assert_eq!(rootfs_other_slot_bootable, None);
+                assert_eq!(uefi_secure_boot, None);
+                assert_eq!(root_encrypted, None);
+                assert_eq!(uda_encryption, None);
             }
             _ => panic!("expected AuditReport variant"),
         }
+    }
+
+    #[test]
+    fn rootfs_slot_serializes_lowercase() {
+        // the api stores the same strings as the postgres enum labels
+        assert_eq!(serde_json::to_string(&RootfsSlot::A).unwrap(), r#""a""#);
+        assert_eq!(
+            serde_json::to_string(&RootfsSlot::Single).unwrap(),
+            r#""single""#
+        );
     }
 
     #[test]

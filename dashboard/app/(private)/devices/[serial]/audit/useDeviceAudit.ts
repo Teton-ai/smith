@@ -6,6 +6,11 @@ export interface DeviceAudit {
 	password_access_disabled: boolean | null;
 	console_logins_closed: boolean | null;
 	reboot_watchdog_set: boolean | null;
+	rootfs_slot: "a" | "b" | "single" | null;
+	rootfs_other_slot_bootable: boolean | null;
+	uefi_secure_boot: "off" | "setup" | "on" | null;
+	root_encrypted: boolean | null;
+	uda_encryption: "encrypted" | "unencrypted" | "absent" | null;
 	running_latest_release: boolean;
 	checked_at: string | null;
 }

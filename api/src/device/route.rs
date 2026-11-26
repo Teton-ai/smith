@@ -3317,6 +3317,16 @@ pub struct DeviceAudit {
     pub console_logins_closed: Option<bool>,
     /// Whether the reboot watchdog is set to 4 min. `None` if never reported.
     pub reboot_watchdog_set: Option<bool>,
+    /// Rootfs slot the device booted from. `None` if never reported.
+    pub rootfs_slot: Option<smith::utils::schema::RootfsSlot>,
+    /// Whether the device could fall back to its other rootfs slot. `None` if never reported.
+    pub rootfs_other_slot_bootable: Option<bool>,
+    /// UEFI Secure Boot state. `None` if never reported or the device didn't boot through UEFI.
+    pub uefi_secure_boot: Option<smith::utils::schema::UefiSecureBoot>,
+    /// Whether the filesystem mounted at `/` is on a LUKS mapping. `None` if never reported.
+    pub root_encrypted: Option<bool>,
+    /// Encryption of the user data partition (`UDA`), `absent` if the device has none. `None` if never reported.
+    pub uda_encryption: Option<smith::utils::schema::UdaEncryption>,
     /// Derived server-side: the device is on its target release.
     pub running_latest_release: bool,
     /// When the device last reported an audit. `None` if it never has.
@@ -3353,6 +3363,11 @@ pub async fn get_audit_for_device(
             da.password_access_disabled,
             da.console_logins_closed,
             da.reboot_watchdog_set,
+            da.rootfs_slot as "rootfs_slot: smith::utils::schema::RootfsSlot",
+            da.rootfs_other_slot_bootable,
+            da.uefi_secure_boot as "uefi_secure_boot: smith::utils::schema::UefiSecureBoot",
+            da.root_encrypted,
+            da.uda_encryption as "uda_encryption: smith::utils::schema::UdaEncryption",
             da.checked_at as "checked_at?",
             COALESCE(d.target_release_id IS NULL OR d.release_id = d.target_release_id, false) as "running_latest_release!"
         FROM device d
@@ -3381,6 +3396,11 @@ pub async fn get_audit_for_device(
         password_access_disabled: audit.password_access_disabled,
         console_logins_closed: audit.console_logins_closed,
         reboot_watchdog_set: audit.reboot_watchdog_set,
+        rootfs_slot: audit.rootfs_slot,
+        rootfs_other_slot_bootable: audit.rootfs_other_slot_bootable,
+        uefi_secure_boot: audit.uefi_secure_boot,
+        root_encrypted: audit.root_encrypted,
+        uda_encryption: audit.uda_encryption,
         running_latest_release: audit.running_latest_release,
         checked_at: audit.checked_at,
     }))

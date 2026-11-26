@@ -1,29 +1,100 @@
-import { Button, Card } from "@teton/smith-ui";
-import { CheckCircle2, MinusCircle, RefreshCw, XCircle } from "lucide-react";
+import {
+	Button,
+	Card,
+	type IconComponent,
+	SECTION_THEMES,
+	SectionCard,
+	type SectionTheme,
+} from "@teton/smith-ui";
+import {
+	CheckCircle2,
+	History,
+	Info,
+	KeyRound,
+	MinusCircle,
+	RefreshCw,
+	ShieldCheck,
+	XCircle,
+} from "lucide-react";
 import { useParams } from "react-router";
 import { useGetDeviceInfo, useIssueCommandsToDevices } from "@/app/api-client";
 import { type DeviceAudit, useDeviceAudit } from "../audit/useDeviceAudit";
 import { DeviceDetailLayout } from "../DeviceDetailLayout";
 
-/** Renders a yes / no / unknown status pill for a single audit check. */
-const StatusPill = ({ value }: { value: boolean | null }) => {
-	if (value === null || value === undefined) {
-		return (
-			<span className="inline-flex items-center gap-1.5 text-gray-400 text-sm font-medium">
-				<MinusCircle className="w-4 h-4" />
-				Unknown
-			</span>
-		);
-	}
-	return value ? (
-		<span className="inline-flex items-center gap-1.5 text-green-600 text-sm font-medium">
-			<CheckCircle2 className="w-4 h-4" />
-			Yes
-		</span>
-	) : (
-		<span className="inline-flex items-center gap-1.5 text-red-600 text-sm font-medium">
-			<XCircle className="w-4 h-4" />
-			No
+/** `info` is for facts that aren't good or bad on their own, like the boot slot. */
+type CheckStatus = "pass" | "fail" | "info" | "unknown";
+
+interface Check {
+	name: string;
+	help: string;
+	status: CheckStatus;
+	/** text in the pill, defaults to Yes / No / Unknown */
+	label?: string;
+}
+
+interface CheckGroup {
+	title: string;
+	icon: IconComponent;
+	theme: SectionTheme;
+	checks: Check[];
+}
+
+const fromBool = (value: boolean | null | undefined) => ({
+	status: (value == null ? "unknown" : value ? "pass" : "fail") as CheckStatus,
+});
+
+const slotLabels = { a: "A", b: "B", single: "Single slot" };
+
+const rootfsSlot = (slot: DeviceAudit["rootfs_slot"] | undefined) =>
+	slot == null
+		? { status: "unknown" as const }
+		: { status: "info" as const, label: slotLabels[slot] };
+
+const secureBootStates = {
+	on: { status: "pass" as const },
+	off: { status: "fail" as const },
+	// anyone can enroll keys in setup mode, so it doesn't protect anything
+	setup: { status: "fail" as const, label: "Setup mode" },
+};
+
+const secureBoot = (state: DeviceAudit["uefi_secure_boot"] | undefined) =>
+	state == null ? { status: "unknown" as const } : secureBootStates[state];
+
+const udaStates = {
+	encrypted: { status: "pass" as const },
+	unencrypted: { status: "fail" as const },
+	absent: { status: "info" as const, label: "No UDA" },
+};
+
+const uda = (state: DeviceAudit["uda_encryption"] | undefined) =>
+	state == null ? { status: "unknown" as const } : udaStates[state];
+
+const fallbackSlot = (audit: DeviceAudit | undefined) =>
+	// a single-slot unit has nothing to fall back to, which isn't unknown
+	audit?.rootfs_slot === "single"
+		? { status: "info" as const, label: "No other slot" }
+		: fromBool(audit?.rootfs_other_slot_bootable);
+
+const pillStyles: Record<
+	CheckStatus,
+	{ className: string; icon: typeof CheckCircle2; label: string }
+> = {
+	pass: { className: "text-green-600", icon: CheckCircle2, label: "Yes" },
+	fail: { className: "text-red-600", icon: XCircle, label: "No" },
+	info: { className: "text-gray-700", icon: Info, label: "" },
+	unknown: { className: "text-gray-400", icon: MinusCircle, label: "Unknown" },
+};
+
+/** Renders the status pill for a single audit check. */
+const StatusPill = ({ status, label }: Pick<Check, "status" | "label">) => {
+	const style = pillStyles[status];
+	const Icon = style.icon;
+	return (
+		<span
+			className={`inline-flex items-center gap-1.5 text-sm font-medium whitespace-nowrap ${style.className}`}
+		>
+			<Icon className="w-4 h-4" />
+			{label ?? style.label}
 		</span>
 	);
 };
@@ -62,31 +133,80 @@ const SecurityPage = () => {
 		});
 	};
 
-	const checks: { name: string; help: string; value: boolean | null }[] = [
+	// red and green stay reserved for the pills, so no header uses them
+	const groups: CheckGroup[] = [
 		{
-			name: "Disk encrypted",
-			help: "A LUKS-encrypted volume was detected on the device.",
-			value: audit?.disk_encrypted ?? null,
+			title: "Access",
+			icon: KeyRound,
+			theme: SECTION_THEMES.blue,
+			checks: [
+				{
+					name: "Password access disabled",
+					help: "SSH password login is disabled and key-based login is enabled.",
+					...fromBool(audit?.password_access_disabled),
+				},
+				{
+					name: "Console logins closed",
+					help: "No login prompt on the screen, serial or USB ports, and console login is refused.",
+					...fromBool(audit?.console_logins_closed),
+				},
+			],
 		},
 		{
-			name: "Password access disabled",
-			help: "SSH password login is disabled and key-based login is enabled.",
-			value: audit?.password_access_disabled ?? null,
+			title: "Boot & encryption",
+			icon: ShieldCheck,
+			theme: SECTION_THEMES.purple,
+			checks: [
+				{
+					name: "UEFI Secure Boot enabled",
+					help: "The firmware only boots a kernel signed with the device's enrolled keys.",
+					...secureBoot(audit?.uefi_secure_boot),
+				},
+				{
+					name: "Root encrypted",
+					help: "The filesystem the device runs from is on a LUKS-encrypted volume.",
+					...fromBool(audit?.root_encrypted),
+				},
+				{
+					name: "User data encrypted",
+					help: "The user data partition (UDA) is LUKS-encrypted, if the device has one.",
+					...uda(audit?.uda_encryption),
+				},
+				{
+					name: "Disk encrypted",
+					help: "A LUKS-encrypted volume was detected on the device.",
+					...fromBool(audit?.disk_encrypted),
+				},
+			],
 		},
 		{
-			name: "Console logins closed",
-			help: "No login prompt on the screen, serial or USB ports, and console login is refused.",
-			value: audit?.console_logins_closed ?? null,
-		},
-		{
-			name: "Reboot watchdog set",
-			help: "A hung shutdown resets the device instead of hanging.",
-			value: audit?.reboot_watchdog_set ?? null,
-		},
-		{
-			name: "Running latest release",
-			help: "The device is on its target release.",
-			value: (audit as DeviceAudit | undefined)?.running_latest_release ?? null,
+			title: "Updates & recovery",
+			icon: History,
+			theme: SECTION_THEMES.gray,
+			checks: [
+				{
+					name: "Running latest release",
+					help: "The device is on its target release.",
+					...fromBool(
+						(audit as DeviceAudit | undefined)?.running_latest_release,
+					),
+				},
+				{
+					name: "Rootfs slot",
+					help: "Which of the two root filesystems the device booted from.",
+					...rootfsSlot(audit?.rootfs_slot),
+				},
+				{
+					name: "Fallback slot bootable",
+					help: "If an update breaks the running system, the device can still boot its other root filesystem.",
+					...fallbackSlot(audit),
+				},
+				{
+					name: "Reboot watchdog set",
+					help: "A hung shutdown resets the device instead of hanging.",
+					...fromBool(audit?.reboot_watchdog_set),
+				},
+			],
 		},
 	];
 
@@ -115,12 +235,17 @@ const SecurityPage = () => {
 				</>
 			}
 		>
-			<Card className="overflow-hidden">
-				{isLoading ? (
-					<div className="px-4 py-6 text-gray-500">Loading audit...</div>
-				) : (
-					<div className="divide-y divide-gray-100">
-						{checks.map((check) => (
+			{isLoading ? (
+				<Card className="px-4 py-6 text-gray-500">Loading audit...</Card>
+			) : (
+				groups.map((group) => (
+					<SectionCard
+						key={group.title}
+						icon={group.icon}
+						title={group.title}
+						theme={group.theme}
+					>
+						{group.checks.map((check) => (
 							<div
 								key={check.name}
 								className="flex items-center justify-between gap-4 px-4 py-3"
@@ -129,12 +254,12 @@ const SecurityPage = () => {
 									<div className="text-gray-900 font-medium">{check.name}</div>
 									<div className="text-sm text-gray-400">{check.help}</div>
 								</div>
-								<StatusPill value={check.value} />
+								<StatusPill status={check.status} label={check.label} />
 							</div>
 						))}
-					</div>
-				)}
-			</Card>
+					</SectionCard>
+				))
+			)}
 
 			{!isLoading && !audit?.checked_at && (
 				<p className="text-sm text-gray-400">
