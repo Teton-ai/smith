@@ -9,7 +9,7 @@ Use isolated Postgres and S3-compatible storage. Do not use a production databas
    INSERT INTO device VALUES (1, 'one', 'one-token'), (2, 'two', 'two-token');
    ```
 
-2. Create both test buckets. For MinIO, set `MINIO_DOMAIN=localhost` and ensure bucket subdomains of `localhost` resolve to loopback.
+2. Create both test buckets. With `AWS_ENDPOINT` set, the API uses path-style bucket URLs, so bucket subdomains are not needed.
 3. Set `UPLOAD_TEST_DATABASE_URL` for the isolated database.
 4. Set `AWS_REGION`, `AWS_ENDPOINT`, `AWS_ACCESS_KEY_ID`, and `AWS_SECRET_ACCESS_KEY` for test storage.
 5. Run the route, token, and storage checks.

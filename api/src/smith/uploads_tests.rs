@@ -528,35 +528,19 @@ async fn full_transfer_capacity_rejects_only_data_transfers() -> anyhow::Result<
 }
 
 /// Sends a CDN part URL to storage the way the CloudFront behavior does:
-/// the prefix maps to a bucket, the bucket goes into the host, and the
-/// signed path and query stay the same.
+/// the prefix is dropped and the signed path (which holds the bucket, as
+/// `AWS_ENDPOINT` uses path style) and query go to the endpoint host.
 async fn put_through_cdn(cdn: &str, url: &str, bytes: Vec<u8>) -> anyhow::Result<String> {
     let rest = url
         .strip_prefix(cdn)
         .ok_or_else(|| anyhow::anyhow!("Part URL is not on the CDN"))?;
-    let (bucket, signed) = if let Some(signed) = rest.strip_prefix("/assets/") {
-        ("upload-assets", signed)
-    } else if let Some(signed) = rest.strip_prefix("/sensitive/") {
-        ("upload-sensitive", signed)
-    } else {
-        anyhow::bail!("Part URL has no CDN prefix");
-    };
-    let endpoint = reqwest::Url::parse(&std::env::var("AWS_ENDPOINT")?)?;
-    let host = endpoint
-        .host_str()
-        .ok_or_else(|| anyhow::anyhow!("AWS_ENDPOINT has no host"))?;
-    let port = endpoint
-        .port_or_known_default()
-        .ok_or_else(|| anyhow::anyhow!("AWS_ENDPOINT has no port"))?;
-    let origin = format!("{bucket}.{host}");
-    let address = tokio::net::lookup_host((host, port))
-        .await?
-        .next()
-        .ok_or_else(|| anyhow::anyhow!("AWS_ENDPOINT does not resolve"))?;
-    let response = reqwest::Client::builder()
-        .resolve(&origin, address)
-        .build()?
-        .put(format!("{}://{origin}:{port}/{signed}", endpoint.scheme()))
+    let signed = rest
+        .strip_prefix("/assets/")
+        .or_else(|| rest.strip_prefix("/sensitive/"))
+        .ok_or_else(|| anyhow::anyhow!("Part URL has no CDN prefix"))?;
+    let endpoint = std::env::var("AWS_ENDPOINT")?;
+    let response = reqwest::Client::new()
+        .put(format!("{}/{signed}", endpoint.trim_end_matches('/')))
         .body(bytes)
         .send()
         .await?;
