@@ -7,8 +7,12 @@ use s3::utils::read_chunk_async;
 use s3::{Bucket, Region};
 use std::borrow::Cow;
 use std::collections::HashMap;
-use std::time::{SystemTime, UNIX_EPOCH};
-use tracing::error;
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use tokio::sync::{Mutex, OnceCell, RwLock};
+use tracing::{error, warn};
+
+const CREDENTIAL_REFRESH_MARGIN_SECS: i64 = 5 * 60;
+const CREDENTIAL_REFRESH_COOLDOWN: Duration = Duration::from_secs(60);
 
 const CHECKSUM_ALGORITHM_HEADER: &str = "x-amz-checksum-algorithm";
 const CHECKSUM_TYPE_HEADER: &str = "x-amz-checksum-type";
@@ -91,9 +95,7 @@ impl Storage {
         file_name: &str,
         data: &[u8],
     ) -> anyhow::Result<()> {
-        let region = Region::from_default_env()?;
-        let credentials = Credentials::default()?;
-        let bucket = Bucket::new(bucket_name, region, credentials)?;
+        let bucket = Self::bucket(bucket_name).await?;
 
         let object_key = match path {
             Some(p) => format!("{}/{}", p, file_name),
@@ -117,7 +119,7 @@ impl Storage {
     {
         const CONTENT_TYPE: &str = "application/octet-stream";
 
-        let bucket = Self::bucket(bucket_name)?;
+        let bucket = Self::bucket(bucket_name).await?;
 
         // Anything that fits in one chunk skips multipart entirely.
         let first_chunk = read_chunk_async(reader).await?;
@@ -217,17 +219,13 @@ impl Storage {
     }
 
     pub async fn delete_from_s3(bucket_name: &str, path: &str) -> anyhow::Result<()> {
-        let region = Region::from_default_env()?;
-        let credentials = Credentials::default()?;
-        let bucket = Bucket::new(bucket_name, region, credentials)?;
+        let bucket = Self::bucket(bucket_name).await?;
         bucket.delete_object(path).await?;
         Ok(())
     }
 
     pub async fn download_from_s3(bucket_name: &str, file_name: &str) -> anyhow::Result<Vec<u8>> {
-        let region = Region::from_default_env()?;
-        let credentials = Credentials::default()?;
-        let bucket = Bucket::new(bucket_name, region, credentials)?;
+        let bucket = Self::bucket(bucket_name).await?;
         let response = bucket.get_object(file_name).await?;
         Ok(response.to_vec())
     }
@@ -246,9 +244,7 @@ impl Storage {
         cdn_private_key: &str,
         ttl_seconds: u64,
     ) -> anyhow::Result<Response> {
-        let region = Region::from_default_env()?;
-        let credentials = Credentials::default()?;
-        let bucket = Bucket::new(bucket_name, region, credentials)?;
+        let bucket = Self::bucket(bucket_name).await?;
 
         let object_key = match path {
             Some(p) => {
@@ -296,12 +292,39 @@ impl Storage {
         Ok(response)
     }
 
-    /// A `Bucket` is a config handle rather than a connection, so building one
-    /// per call is free and avoids threading state through every helper.
-    fn bucket(bucket_name: &str) -> anyhow::Result<Box<Bucket>> {
+    /// Reuses one shared HTTPS client pool and cached AWS credentials so S3 calls
+    /// do not rebuild TLS contexts or block Tokio on ECS metadata lookups.
+    pub(crate) async fn bucket(bucket_name: &str) -> anyhow::Result<Box<Bucket>> {
         let region = Region::from_default_env()?;
-        let credentials = Credentials::default()?;
-        Ok(Bucket::new(bucket_name, region, credentials)?)
+        Self::bucket_in_region(bucket_name, region).await
+    }
+
+    pub(crate) async fn bucket_in_region(
+        bucket_name: &str,
+        region: Region,
+    ) -> anyhow::Result<Box<Bucket>> {
+        Self::bucket_with_min_remaining(bucket_name, region, CREDENTIAL_REFRESH_MARGIN_SECS).await
+    }
+
+    async fn bucket_with_min_remaining(
+        bucket_name: &str,
+        region: Region,
+        min_remaining_secs: i64,
+    ) -> anyhow::Result<Box<Bucket>> {
+        let credentials = cached_credentials(min_remaining_secs).await?;
+        Self::bucket_with_credentials(bucket_name, region, credentials).await
+    }
+
+    async fn bucket_with_credentials(
+        bucket_name: &str,
+        region: Region,
+        credentials: Credentials,
+    ) -> anyhow::Result<Box<Bucket>> {
+        let mut bucket = template_bucket().await?.clone();
+        bucket.name = bucket_name.to_owned();
+        bucket.region = region;
+        bucket.set_credentials(credentials);
+        Ok(bucket)
     }
 
     /// Opens a multipart upload and returns its id. Content type and
@@ -320,7 +343,7 @@ impl Storage {
         content_type: &str,
         content_disposition: &str,
     ) -> anyhow::Result<String> {
-        let bucket = Self::bucket(bucket_name)?;
+        let bucket = Self::bucket(bucket_name).await?;
         Self::initiate_bucket_multipart(bucket, object_key, content_type, content_disposition, None)
             .await
     }
@@ -332,7 +355,7 @@ impl Storage {
         content_disposition: &str,
         crc64nvme: &str,
     ) -> anyhow::Result<String> {
-        let bucket = Self::bucket(bucket_name)?;
+        let bucket = Self::bucket(bucket_name).await?;
         Self::initiate_bucket_multipart(
             bucket,
             object_key,
@@ -392,7 +415,11 @@ impl Storage {
         part_numbers: &[i32],
         expiry_secs: u32,
     ) -> anyhow::Result<Vec<(i32, String)>> {
-        let bucket = Self::bucket(bucket_name)?;
+        let min_remaining = i64::from(expiry_secs)
+            .saturating_add(60)
+            .max(CREDENTIAL_REFRESH_MARGIN_SECS);
+        let region = Region::from_default_env()?;
+        let bucket = Self::bucket_with_min_remaining(bucket_name, region, min_remaining).await?;
         let parts: Vec<(i32, Option<u64>)> = part_numbers.iter().map(|n| (*n, None)).collect();
         Self::presign_parts(&bucket, object_key, upload_id, &parts, expiry_secs).await
     }
@@ -414,8 +441,11 @@ impl Storage {
             Ok(_) => Region::from_default_env()?,
             Err(_) => regional(std::env::var("AWS_REGION")?),
         };
-        let credentials = Credentials::default()?;
-        let now = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs() as i64;
+        let min_remaining = i64::from(expiry_secs)
+            .saturating_add(60)
+            .max(CREDENTIAL_REFRESH_MARGIN_SECS);
+        let credentials = cached_credentials(min_remaining).await?;
+        let now = unix_now_secs()?;
         let expiry_secs = url_lifetime(
             expiry_secs,
             credentials
@@ -423,7 +453,7 @@ impl Storage {
                 .as_ref()
                 .map(|at| at.unix_timestamp() - now),
         )?;
-        let bucket = Bucket::new(bucket_name, region, credentials)?;
+        let bucket = Self::bucket_with_credentials(bucket_name, region, credentials).await?;
         let parts: Vec<(i32, Option<u64>)> = parts
             .iter()
             .map(|(number, length)| (*number, Some(*length)))
@@ -469,7 +499,7 @@ impl Storage {
         upload_id: &str,
         parts: Vec<Part>,
     ) -> anyhow::Result<()> {
-        let bucket = Self::bucket(bucket_name)?;
+        let bucket = Self::bucket(bucket_name).await?;
         Self::complete_bucket_multipart(bucket, object_key, upload_id, parts, None).await
     }
 
@@ -480,7 +510,7 @@ impl Storage {
         parts: Vec<Part>,
         crc64nvme: &str,
     ) -> anyhow::Result<()> {
-        let bucket = Self::bucket(bucket_name)?;
+        let bucket = Self::bucket(bucket_name).await?;
         Self::complete_bucket_multipart(bucket, object_key, upload_id, parts, Some(crc64nvme)).await
     }
 
@@ -540,16 +570,14 @@ impl Storage {
         object_key: &str,
         upload_id: &str,
     ) -> anyhow::Result<Vec<UploadPart>> {
-        let bucket = Self::bucket(bucket_name)?;
+        let bucket = Self::bucket(bucket_name).await?;
         let queries = HashMap::from([
             ("uploadId".to_owned(), upload_id.to_owned()),
             ("max-parts".to_owned(), "1000".to_owned()),
         ]);
         let url = bucket.presign_get(object_key, 900, Some(queries)).await?;
-        let response = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(30))
-            .redirect(reqwest::redirect::Policy::none())
-            .build()?
+        let response = list_parts_client()
+            .await?
             .get(url)
             .send()
             .await
@@ -587,7 +615,7 @@ impl Storage {
         size: i64,
         checksum: &str,
     ) -> anyhow::Result<bool> {
-        let bucket = Self::bucket(bucket_name)?;
+        let bucket = Self::bucket(bucket_name).await?;
         Self::matches_bucket_object(&bucket, object_key, size, checksum).await
     }
 
@@ -597,7 +625,7 @@ impl Storage {
         size: i64,
         crc64nvme: &str,
     ) -> anyhow::Result<bool> {
-        let bucket = Self::bucket(bucket_name)?;
+        let bucket = Self::bucket(bucket_name).await?;
         Self::matches_crc_bucket_object(&bucket, object_key, size, crc64nvme).await
     }
 
@@ -683,7 +711,7 @@ impl Storage {
         object_key: &str,
         upload_id: &str,
     ) -> anyhow::Result<()> {
-        let bucket = Self::bucket(bucket_name)?;
+        let bucket = Self::bucket(bucket_name).await?;
         bucket.abort_upload(object_key, upload_id).await?;
         Ok(())
     }
@@ -691,11 +719,177 @@ impl Storage {
     /// Size of a stored object, used to check an assembled upload against the
     /// size its client declared.
     pub async fn object_size(bucket_name: &str, object_key: &str) -> anyhow::Result<i64> {
-        let bucket = Self::bucket(bucket_name)?;
+        let bucket = Self::bucket(bucket_name).await?;
         let (head, _code) = bucket.head_object(object_key).await?;
         head.content_length
             .ok_or_else(|| anyhow::anyhow!("Content-Length missing for {object_key}"))
     }
+}
+
+struct CachedCredentials {
+    credentials: Credentials,
+    fetched_at: Instant,
+}
+
+struct CredentialCache {
+    cached: RwLock<Option<CachedCredentials>>,
+    refresh_lock: Mutex<()>,
+}
+
+impl CredentialCache {
+    const fn new() -> Self {
+        Self {
+            cached: RwLock::const_new(None),
+            refresh_lock: Mutex::const_new(()),
+        }
+    }
+
+    async fn get_or_refresh<F, Fut>(
+        &self,
+        min_remaining_secs: i64,
+        now_unix: i64,
+        now_instant: Instant,
+        load: F,
+    ) -> anyhow::Result<Credentials>
+    where
+        F: FnOnce() -> Fut,
+        Fut: std::future::Future<Output = anyhow::Result<Credentials>>,
+    {
+        if let Some(entry) = self.cached.read().await.as_ref()
+            && !needs_refresh(entry, min_remaining_secs, now_unix, now_instant)
+        {
+            return Ok(entry.credentials.clone());
+        }
+
+        let _guard = self.refresh_lock.lock().await;
+        if let Some(entry) = self.cached.read().await.as_ref()
+            && !needs_refresh(entry, min_remaining_secs, now_unix, now_instant)
+        {
+            return Ok(entry.credentials.clone());
+        }
+
+        match load().await {
+            Ok(credentials) => {
+                let mut guard = self.cached.write().await;
+                *guard = Some(CachedCredentials {
+                    credentials: credentials.clone(),
+                    fetched_at: now_instant,
+                });
+                Ok(credentials)
+            }
+            Err(err) => {
+                let mut guard = self.cached.write().await;
+                if let Some(entry) = guard.as_mut()
+                    && credentials_still_valid(&entry.credentials, now_unix)
+                {
+                    entry.fetched_at = now_instant;
+                    warn!(
+                        error = %err,
+                        "AWS credential refresh failed; continuing with valid cached credentials"
+                    );
+                    return Ok(entry.credentials.clone());
+                }
+                Err(err)
+            }
+        }
+    }
+}
+
+fn needs_refresh(
+    entry: &CachedCredentials,
+    min_remaining_secs: i64,
+    now_unix: i64,
+    now_instant: Instant,
+) -> bool {
+    let Some(expiration) = entry.credentials.expiration.as_ref() else {
+        return false;
+    };
+    let remaining = expiration.unix_timestamp() - now_unix;
+    if remaining <= 0 {
+        return true;
+    }
+    remaining < min_remaining_secs
+        && now_instant.saturating_duration_since(entry.fetched_at) >= CREDENTIAL_REFRESH_COOLDOWN
+}
+
+fn credentials_still_valid(credentials: &Credentials, now_unix: i64) -> bool {
+    match credentials.expiration.as_ref() {
+        Some(expiration) => expiration.unix_timestamp() > now_unix,
+        None => true,
+    }
+}
+
+fn unix_now_secs() -> anyhow::Result<i64> {
+    let secs = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs();
+    Ok(i64::try_from(secs).unwrap_or(i64::MAX))
+}
+
+async fn template_bucket() -> anyhow::Result<&'static Box<Bucket>> {
+    static TEMPLATE: OnceCell<Box<Bucket>> = OnceCell::const_new();
+    TEMPLATE
+        .get_or_try_init(|| async {
+            tokio::task::spawn_blocking(|| {
+                Bucket::new("", Region::UsEast1, Credentials::anonymous()?)
+            })
+            .await
+            .map_err(|err| anyhow::anyhow!("S3 client init task failed: {err}"))?
+            .map_err(anyhow::Error::from)
+        })
+        .await
+}
+
+async fn load_default_credentials() -> anyhow::Result<Credentials> {
+    tokio::task::spawn_blocking(Credentials::default)
+        .await
+        .map_err(|err| anyhow::anyhow!("AWS credential lookup task failed: {err}"))?
+        .map_err(anyhow::Error::from)
+}
+
+async fn cached_credentials(min_remaining_secs: i64) -> anyhow::Result<Credentials> {
+    static CREDENTIALS: CredentialCache = CredentialCache::new();
+    let now_unix = unix_now_secs()?;
+    CREDENTIALS
+        .get_or_refresh(
+            min_remaining_secs,
+            now_unix,
+            Instant::now(),
+            load_default_credentials,
+        )
+        .await
+}
+
+async fn list_parts_client() -> anyhow::Result<&'static reqwest::Client> {
+    static CLIENT: OnceCell<reqwest::Client> = OnceCell::const_new();
+    CLIENT
+        .get_or_try_init(|| async {
+            tokio::task::spawn_blocking(|| {
+                reqwest::Client::builder()
+                    .timeout(Duration::from_secs(30))
+                    .redirect(reqwest::redirect::Policy::none())
+                    .build()
+            })
+            .await
+            .map_err(|err| anyhow::anyhow!("S3 HTTP client init task failed: {err}"))?
+            .map_err(anyhow::Error::from)
+        })
+        .await
+}
+
+async fn upload_part_client() -> anyhow::Result<&'static reqwest::Client> {
+    static CLIENT: OnceCell<reqwest::Client> = OnceCell::const_new();
+    CLIENT
+        .get_or_try_init(|| async {
+            tokio::task::spawn_blocking(|| {
+                reqwest::Client::builder()
+                    .connect_timeout(Duration::from_secs(10))
+                    .redirect(reqwest::redirect::Policy::none())
+                    .build()
+            })
+            .await
+            .map_err(|err| anyhow::anyhow!("S3 upload HTTP client init task failed: {err}"))?
+            .map_err(anyhow::Error::from)
+        })
+        .await
 }
 
 pub(crate) async fn put_presigned_part(
@@ -703,10 +897,8 @@ pub(crate) async fn put_presigned_part(
     body: reqwest::Body,
     size: u64,
 ) -> anyhow::Result<String> {
-    let response = reqwest::Client::builder()
-        .connect_timeout(std::time::Duration::from_secs(10))
-        .redirect(reqwest::redirect::Policy::none())
-        .build()?
+    let response = upload_part_client()
+        .await?
         .put(url)
         .header("content-length", size)
         .body(body)
@@ -1253,6 +1445,175 @@ mod tests {
         assert_eq!(url_lifetime(3600, Some(6 * 3600))?, 3600);
         assert_eq!(url_lifetime(3600, Some(1000))?, 940);
         assert!(url_lifetime(3600, Some(100)).is_err());
+        Ok(())
+    }
+
+    fn test_credentials(
+        access_key: &str,
+        expires_at_unix: Option<i64>,
+    ) -> anyhow::Result<Credentials> {
+        let mut creds = Credentials::new(Some(access_key), Some("secret"), None, None, None)?;
+        if let Some(ts) = expires_at_unix {
+            let rfc3339 = chrono::DateTime::from_timestamp(ts, 0)
+                .ok_or_else(|| anyhow::anyhow!("invalid test timestamp {ts}"))?
+                .to_rfc3339();
+            creds.expiration = Some(serde_json::from_str(&format!("\"{rfc3339}\""))?);
+        }
+        Ok(creds)
+    }
+
+    #[tokio::test]
+    async fn buckets_share_one_http_client_pool_with_isolated_bucket_state() -> anyhow::Result<()> {
+        let first = Storage::bucket_with_credentials(
+            "assets",
+            regional("eu-north-1".into()),
+            test_credentials("AKIAFIRST", None)?,
+        )
+        .await?;
+        let mut second = Storage::bucket_with_credentials(
+            "packages",
+            s3::Region::UsEast1,
+            test_credentials("AKIASECOND", None)?,
+        )
+        .await?;
+        second.add_header("x-test", "value");
+
+        assert!(std::sync::Arc::ptr_eq(
+            &first.http_client(),
+            &second.http_client()
+        ));
+        assert_eq!(first.name(), "assets");
+        assert_eq!(second.name(), "packages");
+        assert_eq!(first.access_key().await?.as_deref(), Some("AKIAFIRST"));
+        assert_eq!(second.access_key().await?.as_deref(), Some("AKIASECOND"));
+        assert!(first.extra_headers().is_empty());
+        assert_eq!(second.extra_headers().len(), 1);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn credential_cache_reuses_and_proactively_refreshes_expiring_credentials()
+    -> anyhow::Result<()> {
+        use super::{CREDENTIAL_REFRESH_COOLDOWN, CredentialCache};
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::time::{Duration, Instant};
+
+        let cache = CredentialCache::new();
+        let loads = AtomicUsize::new(0);
+        let t0 = Instant::now();
+        let base_unix = 1_700_000_000i64;
+
+        // Initial load fetches credentials expiring in 1 hour.
+        let first = cache
+            .get_or_refresh(300, base_unix, t0, || async {
+                loads.fetch_add(1, Ordering::SeqCst);
+                test_credentials("AKIA1", Some(base_unix + 3600))
+            })
+            .await?;
+        assert_eq!(first.access_key.as_deref(), Some("AKIA1"));
+        assert_eq!(loads.load(Ordering::SeqCst), 1);
+
+        // Fresh credentials are served from cache without calling the loader.
+        let cached = cache
+            .get_or_refresh(
+                300,
+                base_unix + 1000,
+                t0 + Duration::from_secs(1000),
+                || async {
+                    loads.fetch_add(1, Ordering::SeqCst);
+                    test_credentials("AKIA_UNUSED", Some(base_unix + 7200))
+                },
+            )
+            .await?;
+        assert_eq!(cached.access_key.as_deref(), Some("AKIA1"));
+        assert_eq!(loads.load(Ordering::SeqCst), 1);
+
+        // When remaining time drops below min_remaining_secs after cooldown, refresh runs.
+        let t_near = t0 + Duration::from_secs(3400);
+        let refreshed = cache
+            .get_or_refresh(300, base_unix + 3400, t_near, || async {
+                loads.fetch_add(1, Ordering::SeqCst);
+                // Simulate metadata not rotated yet (still 200s left).
+                test_credentials("AKIA2", Some(base_unix + 3600))
+            })
+            .await?;
+        assert_eq!(refreshed.access_key.as_deref(), Some("AKIA2"));
+        assert_eq!(loads.load(Ordering::SeqCst), 2);
+
+        // Within cooldown, still-valid credentials are reused instead of hammering metadata.
+        let during_cooldown = cache
+            .get_or_refresh(
+                300,
+                base_unix + 3410,
+                t_near + Duration::from_secs(10),
+                || async {
+                    loads.fetch_add(1, Ordering::SeqCst);
+                    test_credentials("AKIA_UNUSED2", Some(base_unix + 7200))
+                },
+            )
+            .await?;
+        assert_eq!(during_cooldown.access_key.as_deref(), Some("AKIA2"));
+        assert_eq!(loads.load(Ordering::SeqCst), 2);
+
+        // A transient refresh error after cooldown falls back to still-valid credentials.
+        let t_after_cooldown = t_near + CREDENTIAL_REFRESH_COOLDOWN + Duration::from_secs(1);
+        let fallback = cache
+            .get_or_refresh(300, base_unix + 3470, t_after_cooldown, || async {
+                loads.fetch_add(1, Ordering::SeqCst);
+                anyhow::bail!("metadata timeout")
+            })
+            .await?;
+        assert_eq!(fallback.access_key.as_deref(), Some("AKIA2"));
+        assert_eq!(loads.load(Ordering::SeqCst), 3);
+
+        // Once truly expired, refresh runs immediately even inside cooldown.
+        let expired_refresh = cache
+            .get_or_refresh(
+                300,
+                base_unix + 3600,
+                t_after_cooldown + Duration::from_secs(5),
+                || async {
+                    loads.fetch_add(1, Ordering::SeqCst);
+                    test_credentials("AKIA3", Some(base_unix + 10_000))
+                },
+            )
+            .await?;
+        assert_eq!(expired_refresh.access_key.as_deref(), Some("AKIA3"));
+        assert_eq!(loads.load(Ordering::SeqCst), 4);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn credential_cache_coalesces_concurrent_refreshes() -> anyhow::Result<()> {
+        use super::CredentialCache;
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::time::{Duration, Instant};
+
+        let cache = Arc::new(CredentialCache::new());
+        let loads = Arc::new(AtomicUsize::new(0));
+        let now = Instant::now();
+        let now_unix = 1_700_000_000i64;
+
+        let mut tasks = Vec::new();
+        for _ in 0..16 {
+            let cache = cache.clone();
+            let loads = loads.clone();
+            tasks.push(tokio::spawn(async move {
+                cache
+                    .get_or_refresh(300, now_unix, now, || async move {
+                        loads.fetch_add(1, Ordering::SeqCst);
+                        tokio::time::sleep(Duration::from_millis(20)).await;
+                        test_credentials("AKIA_SINGLE", Some(now_unix + 3600))
+                    })
+                    .await
+            }));
+        }
+        for task in tasks {
+            let creds = task.await??;
+            assert_eq!(creds.access_key.as_deref(), Some("AKIA_SINGLE"));
+        }
+        assert_eq!(loads.load(Ordering::SeqCst), 1);
         Ok(())
     }
 
