@@ -140,7 +140,7 @@ jobs:
         uses: cargo-bins/cargo-binstall@main
 
       - name: Install SQLx CLI
-        run: cargo binstall sqlx-cli@~0.7 --no-confirm --no-symlinks
+        run: cargo binstall sqlx-cli@~0.8 --no-confirm --no-symlinks
 
       - name: Check SQLx
         working-directory: api
