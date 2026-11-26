@@ -215,6 +215,10 @@ pub struct Config {
     pub network_gc_interval_seconds: u64,
     pub mcp: Option<McpConfig>,
     pub max_concurrent_uploads: usize,
+    /// Base URL of the CDN path that forwards device part uploads to S3, for
+    /// example `https://cdn.teton.ai/device-uploads`. Without it, devices
+    /// send parts through the API.
+    pub device_upload_cdn_url: Option<String>,
     pub upload_token_key: crate::upload_token::UploadTokenKey,
 }
 
@@ -250,8 +254,31 @@ fn parse_max_concurrent_uploads(value: Option<&str>) -> anyhow::Result<usize> {
 
 #[cfg(test)]
 mod upload_limit_tests {
-    use super::parse_max_concurrent_uploads;
+    use super::{parse_device_upload_cdn_url, parse_max_concurrent_uploads};
     use tokio::sync::Semaphore;
+
+    #[test]
+    fn device_upload_cdn_url_is_an_http_url_or_absent() {
+        let cases = [
+            (None, Some(None)),
+            (Some(""), Some(None)),
+            (
+                Some("https://cdn.teton.ai/device-uploads/"),
+                Some(Some("https://cdn.teton.ai/device-uploads".to_string())),
+            ),
+            (Some("cdn.teton.ai/device-uploads"), None),
+            (Some("ftp://cdn.teton.ai/device-uploads"), None),
+            (Some("https://cdn.teton.ai/device-uploads?x=1"), None),
+            (Some("https://cdn.teton.ai/device-uploads#x"), None),
+        ];
+        for (value, expected) in cases {
+            assert_eq!(
+                parse_device_upload_cdn_url(value).ok(),
+                expected,
+                "{value:?}"
+            );
+        }
+    }
 
     #[test]
     fn upload_limit_defaults_and_bounds() {
@@ -270,6 +297,25 @@ mod upload_limit_tests {
             assert_eq!(parse_max_concurrent_uploads(value).ok(), expected, "{name}");
         }
     }
+}
+
+/// An empty value means no CDN. Any other value must be an http(s) URL.
+fn parse_device_upload_cdn_url(value: Option<&str>) -> anyhow::Result<Option<String>> {
+    let Some(url) = value.map(|v| v.trim().trim_end_matches('/')) else {
+        return Ok(None);
+    };
+    if url.is_empty() {
+        return Ok(None);
+    }
+    let parsed = reqwest::Url::parse(url).context("DEVICE_UPLOAD_CDN_URL is not a URL.")?;
+    anyhow::ensure!(
+        matches!(parsed.scheme(), "http" | "https")
+            && parsed.host_str().is_some()
+            && parsed.query().is_none()
+            && parsed.fragment().is_none(),
+        "DEVICE_UPLOAD_CDN_URL must be an http(s) URL without a query or fragment."
+    );
+    Ok(Some(url.to_string()))
 }
 
 impl Config {
@@ -326,6 +372,9 @@ impl Config {
             )?,
             max_concurrent_uploads: parse_max_concurrent_uploads(
                 env::var("MAX_CONCURRENT_UPLOADS").ok().as_deref(),
+            )?,
+            device_upload_cdn_url: parse_device_upload_cdn_url(
+                env::var("DEVICE_UPLOAD_CDN_URL").ok().as_deref(),
             )?,
         })
     }

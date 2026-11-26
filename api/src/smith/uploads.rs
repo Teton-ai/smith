@@ -7,15 +7,30 @@ use crate::{
 use axum::{
     Extension, Json,
     extract::Path,
-    http::{HeaderMap, StatusCode},
+    http::{HeaderMap, HeaderValue, StatusCode, header},
     response::{IntoResponse, Response},
 };
+use base64::{Engine, engine::general_purpose::STANDARD};
+use futures::StreamExt;
 use serde::{Deserialize, Serialize};
+use std::sync::{
+    Arc,
+    atomic::{AtomicU8, AtomicU64, Ordering},
+};
+use std::time::{Duration, Instant};
 use utoipa::ToSchema;
 
 pub const PART_SIZE: i64 = 5 * 1024 * 1024;
 const MAX_SIZE: i64 = 512_000_000;
 const TOKEN_TTL_SECONDS: i64 = 24 * 60 * 60;
+/// Retry-After value, in seconds, for every upload capacity 503.
+pub const RETRY_AFTER_SECONDS: &str = "30";
+/// Devices ask for fresh part URLs before this runs out.
+const PART_URL_TTL_SECONDS: u32 = 60 * 60;
+/// Max wait for the next body chunk from a device before aborting the transfer
+/// and releasing the upload permit. Exceeds the slowest 16 KiB paced interval (16 s at 1 KiB/s).
+const PART_IDLE_TIMEOUT: Duration = Duration::from_secs(30);
+const CRC64NVME_BYTES: usize = 8;
 
 pub struct UploadError(StatusCode, &'static str);
 
@@ -29,28 +44,27 @@ impl IntoResponse for UploadError {
     fn into_response(self) -> Response {
         let mut response = (self.0, Json(serde_json::json!({"code":self.1}))).into_response();
         if self.0 == StatusCode::SERVICE_UNAVAILABLE {
-            response
-                .headers_mut()
-                .insert("retry-after", axum::http::HeaderValue::from_static("5"));
+            response.headers_mut().insert(
+                header::RETRY_AFTER,
+                HeaderValue::from_static(RETRY_AFTER_SECONDS),
+            );
         }
         response
     }
 }
 
 fn storage_error(error: anyhow::Error) -> UploadError {
+    if crate::storage::is_bad_digest(&error) {
+        return UploadError(StatusCode::UNPROCESSABLE_ENTITY, "ChecksumMismatch");
+    }
     if crate::storage::is_missing_upload(&error) {
         return UploadError(StatusCode::GONE, "NoSuchUpload");
     }
-    tracing::error!("Multipart storage operation failed");
+    tracing::error!(
+        error = crate::storage::redacted(&error),
+        "Multipart storage operation failed"
+    );
     UploadError(StatusCode::BAD_GATEWAY, "StorageUnavailable")
-}
-
-fn capacity(state: &State) -> Result<tokio::sync::OwnedSemaphorePermit, UploadError> {
-    state
-        .upload_permits
-        .clone()
-        .try_acquire_owned()
-        .map_err(|_| UploadError(StatusCode::SERVICE_UNAVAILABLE, "UploadCapacity"))
 }
 
 #[derive(Deserialize, ToSchema)]
@@ -60,6 +74,8 @@ pub struct OpenUpload {
     checksum: String,
     #[serde(default)]
     sensitive: bool,
+    #[serde(default)]
+    crc64nvme: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, ToSchema)]
@@ -74,6 +90,16 @@ pub struct UploadPlan {
     confirmed_parts: Vec<UploadPart>,
     missing_parts: Vec<i32>,
     url: Option<String>,
+    /// A CDN URL per missing part. The device PUTs the part bytes there and
+    /// uses `PUT parts/{number}` on this API when the CDN URL fails.
+    #[serde(default)]
+    part_urls: Vec<PartUrl>,
+}
+
+#[derive(Serialize, Deserialize, ToSchema)]
+pub struct PartUrl {
+    part_number: i32,
+    url: String,
 }
 
 fn validate(request: &OpenUpload) -> Result<(), StatusCode> {
@@ -92,6 +118,13 @@ fn validate(request: &OpenUpload) -> Result<(), StatusCode> {
             .checksum
             .bytes()
             .all(|c| c.is_ascii_digit() || (b'a'..=b'f').contains(&c))
+    {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    if let Some(crc64nvme) = &request.crc64nvme
+        && !STANDARD
+            .decode(crc64nvme)
+            .is_ok_and(|bytes| bytes.len() == CRC64NVME_BYTES)
     {
         return Err(StatusCode::BAD_REQUEST);
     }
@@ -133,14 +166,22 @@ fn object_url(claims: &UploadClaims) -> String {
 }
 
 async fn matches_object(claims: &UploadClaims) -> Result<bool, UploadError> {
-    Storage::matches_object(
-        &claims.bucket,
-        &claims.key,
-        claims.size_bytes,
-        &claims.checksum,
-    )
-    .await
-    .map_err(storage_error)
+    let matched = match &claims.crc64nvme {
+        Some(crc64nvme) => {
+            Storage::matches_crc_object(&claims.bucket, &claims.key, claims.size_bytes, crc64nvme)
+                .await
+        }
+        None => {
+            Storage::matches_object(
+                &claims.bucket,
+                &claims.key,
+                claims.size_bytes,
+                &claims.checksum,
+            )
+            .await
+        }
+    };
+    matched.map_err(storage_error)
 }
 
 async fn plan(claims: &UploadClaims) -> Result<UploadPlan, UploadError> {
@@ -149,57 +190,153 @@ async fn plan(claims: &UploadClaims) -> Result<UploadPlan, UploadError> {
             confirmed_parts: vec![],
             missing_parts: vec![],
             url: Some(object_url(claims)),
+            part_urls: vec![],
         });
     }
-    let mut confirmed_parts =
-        Storage::list_upload_parts(&claims.bucket, &claims.key, &claims.upload_id)
-            .await
-            .map_err(storage_error)?;
-    confirmed_parts.sort_by_key(|p| p.part_number);
-    if confirmed_parts
+    let listed = Storage::list_upload_parts(&claims.bucket, &claims.key, &claims.upload_id)
+        .await
+        .map_err(storage_error)?;
+    let (confirmed_parts, missing_parts) = sort_parts(claims.size_bytes, listed)?;
+    Ok(UploadPlan {
+        confirmed_parts,
+        missing_parts,
+        url: None,
+        part_urls: vec![],
+    })
+}
+
+/// Splits the parts S3 lists into confirmed parts and missing part numbers.
+/// A CDN part PUT has no length check, so a part with the wrong size counts
+/// as missing and the device sends it again.
+fn sort_parts(
+    size: i64,
+    mut parts: Vec<UploadPart>,
+) -> Result<(Vec<UploadPart>, Vec<i32>), UploadError> {
+    parts.sort_by_key(|p| p.part_number);
+    if parts
         .windows(2)
         .any(|pair| pair[0].part_number == pair[1].part_number)
     {
         return Err(UploadError(StatusCode::CONFLICT, "InvalidParts"));
     }
-    for part in &confirmed_parts {
-        if part.etag.is_empty()
-            || part.size_bytes != part_length(claims.size_bytes, part.part_number)?
-        {
+    let mut confirmed = Vec::with_capacity(parts.len());
+    for part in parts {
+        if part.etag.is_empty() {
             return Err(UploadError(StatusCode::CONFLICT, "InvalidParts"));
         }
+        if part.size_bytes == part_length(size, part.part_number)? {
+            confirmed.push(part);
+        }
     }
-    let missing_parts = (1..=part_count(claims.size_bytes))
-        .filter(|n| !confirmed_parts.iter().any(|part| part.part_number == *n))
+    let missing = (1..=part_count(size))
+        .filter(|n| !confirmed.iter().any(|part| part.part_number == *n))
         .collect();
-    Ok(UploadPlan {
-        confirmed_parts,
-        missing_parts,
-        url: None,
-    })
+    Ok((confirmed, missing))
+}
+
+/// Presigned S3 `UploadPart` URLs moved onto the CDN. The CDN path forwards
+/// the query string to the bucket's regional host, so S3 checks the
+/// signature, the upload id and the part number. An error gives no URLs and
+/// the device uses the API route.
+async fn part_urls(state: &State, claims: &UploadClaims, parts: &[i32]) -> Vec<PartUrl> {
+    let Some(cdn) = &state.config.device_upload_cdn_url else {
+        return vec![];
+    };
+    if parts.is_empty() {
+        return vec![];
+    }
+    let prefix = bucket_label(state, claims);
+    let parts: Result<Vec<(i32, u64)>, _> = parts
+        .iter()
+        .map(|number| {
+            part_length(claims.size_bytes, *number).map(|length| (*number, length as u64))
+        })
+        .collect();
+    let Ok(parts) = parts else {
+        return vec![];
+    };
+    let urls: anyhow::Result<Vec<PartUrl>> = Storage::presign_regional_upload_parts(
+        &claims.bucket,
+        &claims.key,
+        &claims.upload_id,
+        &parts,
+        PART_URL_TTL_SECONDS,
+    )
+    .await
+    .and_then(|urls| {
+        urls.into_iter()
+            .map(|(part_number, url)| {
+                Ok(PartUrl {
+                    part_number,
+                    url: cdn_url(cdn, prefix, &url)?,
+                })
+            })
+            .collect()
+    });
+    match urls {
+        Ok(urls) => {
+            metrics::counter!("smith_upload_part_urls_total", urls.len() as u64, "bucket" => prefix);
+            urls
+        }
+        Err(error) => {
+            tracing::error!("Failed to presign CDN upload parts: {error}");
+            vec![]
+        }
+    }
+}
+
+/// `sensitive` for the data engine bucket, `assets` for the other bucket. It is
+/// the CDN path prefix and the counter label.
+fn bucket_label(state: &State, claims: &UploadClaims) -> &'static str {
+    if claims.bucket == state.config.data_engine_bucket_name {
+        "sensitive"
+    } else {
+        "assets"
+    }
+}
+
+fn cdn_url(cdn: &str, prefix: &str, presigned: &str) -> anyhow::Result<String> {
+    let url = reqwest::Url::parse(presigned)?;
+    let query = url
+        .query()
+        .ok_or_else(|| anyhow::anyhow!("Presigned URL has no query"))?;
+    Ok(format!("{cdn}/{prefix}{}?{query}", url.path()))
 }
 
 #[utoipa::path(post,path="/smith/upload-sessions",request_body=OpenUpload,
-    responses((status=200,body=OpenedUpload),(status=400,description="Invalid upload"),(status=503,description="Upload capacity reached")),security(("device_token"=[])))]
+    responses((status=200,body=OpenedUpload),(status=400,description="Invalid upload")),security(("device_token"=[])))]
 pub async fn open(
     device: AuthedDevice,
     Extension(state): Extension<State>,
     Json(request): Json<OpenUpload>,
 ) -> Result<Json<OpenedUpload>, UploadError> {
     validate(&request)?;
-    let _permit = capacity(&state)?;
     let bucket = if request.sensitive {
         &state.config.data_engine_bucket_name
     } else {
         &state.config.assets_bucket_name
     };
-    let upload_id = Storage::initiate_multipart(
-        bucket,
-        &request.key,
-        "application/octet-stream",
-        "attachment",
-    )
-    .await
+    let upload_id = match &request.crc64nvme {
+        Some(crc64nvme) => {
+            Storage::initiate_crc_multipart(
+                bucket,
+                &request.key,
+                "application/octet-stream",
+                "attachment",
+                crc64nvme,
+            )
+            .await
+        }
+        None => {
+            Storage::initiate_multipart(
+                bucket,
+                &request.key,
+                "application/octet-stream",
+                "attachment",
+            )
+            .await
+        }
+    }
     .map_err(storage_error)?;
     let claims = UploadClaims {
         device_id: device.id,
@@ -208,6 +345,7 @@ pub async fn open(
         upload_id: upload_id.clone(),
         size_bytes: request.size_bytes,
         checksum: request.checksum,
+        crc64nvme: request.crc64nvme,
         expires_at: chrono::Utc::now().timestamp() + TOKEN_TTL_SECONDS,
     };
     let token = state
@@ -230,18 +368,52 @@ pub async fn status(
     headers: HeaderMap,
 ) -> Result<Json<UploadPlan>, UploadError> {
     let claims = claims(&device, &state, &headers)?;
-    let _permit = capacity(&state)?;
-    Ok(Json(plan(&claims).await?))
+    let mut plan = plan(&claims).await?;
+    plan.part_urls = part_urls(&state, &claims, &plan.missing_parts).await;
+    Ok(Json(plan))
 }
 
 #[utoipa::path(put,path="/smith/upload-sessions/parts/{number}",params(("number"=i32,Path),("x-upload-token"=String,Header)),
-    request_body(content=Vec<u8>,content_type="application/octet-stream"),responses((status=200,body=UploadPart),(status=400,description="Invalid part length"),(status=410,description="Upload no longer exists")),security(("device_token"=[])))]
+    request_body(content=Vec<u8>,content_type="application/octet-stream"),responses((status=200,body=UploadPart),(status=400,description="Invalid part length or ClientAborted"),(status=408,description="Device upload timed out"),(status=410,description="Upload no longer exists"),(status=503,description="Upload capacity reached, retry after the Retry-After delay")),security(("device_token"=[])))]
 pub async fn put_part(
     device: AuthedDevice,
     Extension(state): Extension<State>,
     Path(number): Path<i32>,
     request: axum::extract::Request,
 ) -> Result<Json<UploadPart>, UploadError> {
+    put_part_with(
+        device,
+        state,
+        number,
+        request,
+        PART_IDLE_TIMEOUT,
+        |claims, number, body, size| async move {
+            Storage::upload_session_part(
+                &claims.bucket,
+                &claims.key,
+                &claims.upload_id,
+                number,
+                body,
+                size,
+            )
+            .await
+        },
+    )
+    .await
+}
+
+async fn put_part_with<F, Fut>(
+    device: AuthedDevice,
+    state: State,
+    number: i32,
+    request: axum::extract::Request,
+    idle_timeout: Duration,
+    upload_part: F,
+) -> Result<Json<UploadPart>, UploadError>
+where
+    F: FnOnce(UploadClaims, i32, reqwest::Body, u64) -> Fut,
+    Fut: std::future::Future<Output = anyhow::Result<String>>,
+{
     let claims = claims(&device, &state, request.headers())?;
     let size = part_length(claims.size_bytes, number)?;
     if request
@@ -253,23 +425,177 @@ pub async fn put_part(
     {
         return Err(UploadError(StatusCode::BAD_REQUEST, "InvalidPartLength"));
     }
-    let _permit = capacity(&state)?;
-    let body = reqwest::Body::wrap_stream(request.into_body().into_data_stream());
-    let etag = Storage::upload_session_part(
-        &claims.bucket,
-        &claims.key,
-        &claims.upload_id,
-        number,
-        body,
-        size as u64,
-    )
-    .await
-    .map_err(storage_error)?;
+    // Only part transfers hold a permit, because they last as long as the device link needs.
+    let Ok(_permit) = state.upload_permits.try_acquire() else {
+        return Err(UploadError(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "UploadCapacity",
+        ));
+    };
+    let progress = Arc::new(PartStreamState::default());
+    let body = reqwest::Body::wrap_stream(idle_timeout_stream(
+        request.into_body().into_data_stream(),
+        idle_timeout,
+        progress.clone(),
+    ));
+    let key = claims.key.clone();
+    let bucket = bucket_label(&state, &claims);
+    let started = Instant::now();
+    let etag = upload_part(claims, number, body, size as u64)
+        .await
+        .map_err(|error| {
+            let elapsed_ms = started.elapsed().as_millis() as u64;
+            part_upload_error(
+                error,
+                &device.serial_number,
+                number,
+                &key,
+                elapsed_ms,
+                &progress,
+            )
+        })?;
+    metrics::increment_counter!("smith_upload_proxied_parts_total", "bucket" => bucket);
     Ok(Json(UploadPart {
         part_number: number,
         etag,
         size_bytes: size,
     }))
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum StreamFailure {
+    None,
+    Aborted,
+    TimedOut,
+}
+
+#[derive(Default)]
+struct PartStreamState {
+    bytes: AtomicU64,
+    failure: AtomicU8,
+}
+
+impl PartStreamState {
+    const NONE: u8 = 0;
+    const ABORTED: u8 = 1;
+    const TIMED_OUT: u8 = 2;
+
+    fn add_bytes(&self, count: u64) {
+        self.bytes.fetch_add(count, Ordering::Release);
+    }
+
+    fn bytes(&self) -> u64 {
+        self.bytes.load(Ordering::Acquire)
+    }
+
+    fn set_failure(&self, failure: StreamFailure) {
+        let value = match failure {
+            StreamFailure::None => Self::NONE,
+            StreamFailure::Aborted => Self::ABORTED,
+            StreamFailure::TimedOut => Self::TIMED_OUT,
+        };
+        self.failure.store(value, Ordering::Release);
+    }
+
+    fn failure(&self) -> StreamFailure {
+        match self.failure.load(Ordering::Acquire) {
+            Self::ABORTED => StreamFailure::Aborted,
+            Self::TIMED_OUT => StreamFailure::TimedOut,
+            _ => StreamFailure::None,
+        }
+    }
+}
+
+/// Wraps a device upload body stream so an idle device fails with `TimedOut`
+/// instead of holding an upload permit while stalled.
+fn idle_timeout_stream<S, E>(
+    stream: S,
+    idle_timeout: Duration,
+    progress: Arc<PartStreamState>,
+) -> impl futures::Stream<Item = Result<axum::body::Bytes, std::io::Error>> + Send + 'static
+where
+    S: futures::Stream<Item = Result<axum::body::Bytes, E>> + Send + Unpin + 'static,
+    E: std::error::Error + Send + Sync + 'static,
+{
+    futures::stream::unfold(Some(stream), move |stream| {
+        let progress = progress.clone();
+        async move {
+            let mut stream = stream?;
+            // Empty chunks carry no payload and must not reset the idle timer.
+            let next_chunk = async {
+                loop {
+                    match stream.next().await {
+                        Some(Ok(chunk)) if chunk.is_empty() => continue,
+                        other => return other,
+                    }
+                }
+            };
+            match tokio::time::timeout(idle_timeout, next_chunk).await {
+                Ok(Some(Ok(chunk))) => {
+                    progress.add_bytes(chunk.len() as u64);
+                    Some((Ok(chunk), Some(stream)))
+                }
+                Ok(Some(Err(err))) => {
+                    progress.set_failure(StreamFailure::Aborted);
+                    Some((Err(std::io::Error::other(err)), None))
+                }
+                Ok(None) => None,
+                Err(_) => {
+                    progress.set_failure(StreamFailure::TimedOut);
+                    Some((
+                        Err(std::io::Error::new(
+                            std::io::ErrorKind::TimedOut,
+                            "device upload body idle timeout",
+                        )),
+                        None,
+                    ))
+                }
+            }
+        }
+    })
+}
+
+fn part_upload_error(
+    error: anyhow::Error,
+    serial: &str,
+    part: i32,
+    key: &str,
+    elapsed_ms: u64,
+    progress: &PartStreamState,
+) -> UploadError {
+    // Explicit S3 missing-upload responses must stay 410 so the device opens a new session.
+    if crate::storage::is_missing_upload(&error) {
+        return storage_error(error);
+    }
+    let failure = progress.failure();
+    let bytes = progress.bytes();
+    let client_outcome =
+        if failure == StreamFailure::TimedOut || crate::storage::is_request_timeout(&error) {
+            Some((
+                "Device upload timed out",
+                UploadError(StatusCode::REQUEST_TIMEOUT, "UploadTimeout"),
+            ))
+        } else if failure == StreamFailure::Aborted {
+            Some((
+                "Device upload aborted by client",
+                UploadError(StatusCode::BAD_REQUEST, "ClientAborted"),
+            ))
+        } else {
+            None
+        };
+    if let Some((message, response)) = client_outcome {
+        tracing::warn!(
+            serial,
+            part,
+            bytes,
+            elapsed_ms,
+            key,
+            error = crate::storage::redacted(&error),
+            "{message}"
+        );
+        return response;
+    }
+    storage_error(error.context(format!("part {part} of {serial} after {elapsed_ms} ms")))
 }
 
 #[utoipa::path(post,path="/smith/upload-sessions/complete",params(("x-upload-token"=String,Header)),
@@ -280,25 +606,41 @@ pub async fn complete(
     headers: HeaderMap,
 ) -> Result<Json<super::route::UploadResult>, UploadError> {
     let claims = claims(&device, &state, &headers)?;
-    let _permit = capacity(&state)?;
     let plan = plan(&claims).await?;
     if plan.url.is_none() {
         if !plan.missing_parts.is_empty() {
             return Err(UploadError(StatusCode::CONFLICT, "MissingParts"));
         }
-        let result = Storage::complete_multipart(
-            &claims.bucket,
-            &claims.key,
-            &claims.upload_id,
-            plan.confirmed_parts
-                .into_iter()
-                .map(|part| s3::serde_types::Part {
-                    part_number: part.part_number as u32,
-                    etag: part.etag,
-                })
-                .collect(),
-        )
-        .await;
+        let parts = plan.confirmed_parts.len() as u64;
+        let confirmed: Vec<s3::serde_types::Part> = plan
+            .confirmed_parts
+            .into_iter()
+            .map(|part| s3::serde_types::Part {
+                part_number: part.part_number as u32,
+                etag: part.etag,
+            })
+            .collect();
+        let result = match &claims.crc64nvme {
+            Some(crc64nvme) => {
+                Storage::complete_crc_multipart(
+                    &claims.bucket,
+                    &claims.key,
+                    &claims.upload_id,
+                    confirmed,
+                    crc64nvme,
+                )
+                .await
+            }
+            None => {
+                Storage::complete_multipart(
+                    &claims.bucket,
+                    &claims.key,
+                    &claims.upload_id,
+                    confirmed,
+                )
+                .await
+            }
+        };
         let verified = matches_object(&claims).await?;
         if let Err(error) = result
             && !verified
@@ -311,6 +653,7 @@ pub async fn complete(
                 "ChecksumMismatch",
             ));
         }
+        metrics::counter!("smith_upload_completed_parts_total", parts, "bucket" => bucket_label(&state, &claims));
     }
     Ok(Json(super::route::UploadResult {
         url: object_url(&claims),
@@ -322,12 +665,46 @@ mod tests {
     use super::*;
 
     #[test]
+    fn validates_crc64nvme_as_eight_base64_bytes() {
+        let mut request = OpenUpload {
+            key: "clips/one.mp4".into(),
+            size_bytes: 1,
+            checksum: "a".repeat(64),
+            sensitive: false,
+            crc64nvme: Some("zM77/A2gEEE=".into()),
+        };
+        assert_eq!(validate(&request), Ok(()));
+        for crc in [
+            "",
+            "zM77/A2gEEE",
+            "zM77/A2gEEEA",
+            "zM77/A2gEEE=\n",
+            "AAAAAAAAAAAAAAAA",
+        ] {
+            request.crc64nvme = Some(crc.into());
+            assert_eq!(validate(&request), Err(StatusCode::BAD_REQUEST), "{crc:?}");
+        }
+    }
+
+    #[test]
+    fn bad_digest_is_a_checksum_mismatch() {
+        let body = "<Error><Code>BadDigest</Code></Error>";
+        let error = anyhow::Error::from(s3::error::S3Error::HttpFailWithBody(400, body.into()));
+        let UploadError(status, code) = storage_error(error);
+        assert_eq!(
+            (status, code),
+            (StatusCode::UNPROCESSABLE_ENTITY, "ChecksumMismatch")
+        );
+    }
+
+    #[test]
     fn validates_immutable_identity_and_ranges() {
         let mut request = OpenUpload {
             key: "clips/one.mp4".into(),
             size_bytes: PART_SIZE + 1,
             checksum: "a".repeat(64),
             sensitive: true,
+            crc64nvme: None,
         };
         assert_eq!(validate(&request), Ok(()));
         assert_eq!(part_length(request.size_bytes, 1).ok(), Some(PART_SIZE));
@@ -340,6 +717,218 @@ mod tests {
         request.key = "clips/one.mp4".into();
         request.checksum = "G".repeat(64);
         assert_eq!(validate(&request), Err(StatusCode::BAD_REQUEST));
+    }
+
+    #[test]
+    fn wrong_size_part_is_missing_again() -> anyhow::Result<()> {
+        let part = |part_number, size_bytes| UploadPart {
+            part_number,
+            etag: "\"e\"".into(),
+            size_bytes,
+        };
+        let sorted = sort_parts(PART_SIZE + 1, vec![part(2, 1), part(1, 7)]);
+        let Ok((confirmed, missing)) = sorted else {
+            anyhow::bail!("valid parts were rejected");
+        };
+        assert_eq!(
+            confirmed.iter().map(|p| p.part_number).collect::<Vec<_>>(),
+            [2]
+        );
+        assert_eq!(missing, [1]);
+        assert!(sort_parts(PART_SIZE + 1, vec![part(1, PART_SIZE), part(1, PART_SIZE)]).is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn cdn_url_keeps_signed_path_and_query() {
+        let presigned = "https://b.s3.eu-north-1.amazonaws.com/clips/a%20b.mp4?partNumber=2&uploadId=u%2B1&X-Amz-Signature=s";
+        assert_eq!(
+            cdn_url("https://cdn.teton.ai/device-uploads", "sensitive", presigned).ok(),
+            Some("https://cdn.teton.ai/device-uploads/sensitive/clips/a%20b.mp4?partNumber=2&uploadId=u%2B1&X-Amz-Signature=s".into())
+        );
+    }
+
+    #[test]
+    fn part_upload_error_maps_timeouts_aborts_and_storage_errors() {
+        let state = |bytes, failure| {
+            let progress = PartStreamState::default();
+            progress.add_bytes(bytes);
+            progress.set_failure(failure);
+            progress
+        };
+
+        let s3_timeout = anyhow::Error::from(s3::error::S3Error::HttpFailWithBody(
+            400,
+            "<Error><Code>RequestTimeout</Code></Error>".into(),
+        ));
+        let UploadError(status, code) = part_upload_error(
+            s3_timeout,
+            "1423925028380",
+            1,
+            "clips/a.mp4",
+            62_000,
+            &state(1024, StreamFailure::None),
+        );
+        assert_eq!(
+            (status, code),
+            (StatusCode::REQUEST_TIMEOUT, "UploadTimeout")
+        );
+
+        let UploadError(status, code) = part_upload_error(
+            anyhow::anyhow!("stream timed out"),
+            "1423925028380",
+            1,
+            "clips/a.mp4",
+            30_000,
+            &state(1024, StreamFailure::TimedOut),
+        );
+        assert_eq!(
+            (status, code),
+            (StatusCode::REQUEST_TIMEOUT, "UploadTimeout")
+        );
+
+        let UploadError(status, code) = part_upload_error(
+            anyhow::anyhow!("connection reset"),
+            "1423925028380",
+            1,
+            "clips/a.mp4",
+            5_000,
+            &state(1024, StreamFailure::Aborted),
+        );
+        assert_eq!((status, code), (StatusCode::BAD_REQUEST, "ClientAborted"));
+
+        for failure in [
+            StreamFailure::None,
+            StreamFailure::Aborted,
+            StreamFailure::TimedOut,
+        ] {
+            let missing = anyhow::Error::from(s3::error::S3Error::HttpFailWithBody(
+                404,
+                "<Error><Code>NoSuchUpload</Code></Error>".into(),
+            ));
+            let UploadError(status, code) = part_upload_error(
+                missing,
+                "1423925028380",
+                1,
+                "clips/a.mp4",
+                5_000,
+                &state(1024, failure),
+            );
+            assert_eq!(
+                (status, code),
+                (StatusCode::GONE, "NoSuchUpload"),
+                "{failure:?}"
+            );
+        }
+
+        let UploadError(status, code) = part_upload_error(
+            anyhow::anyhow!("S3 rejected upload part (500 InternalError)"),
+            "1423925028380",
+            1,
+            "clips/a.mp4",
+            1_000,
+            &state(1024, StreamFailure::None),
+        );
+        assert_eq!(
+            (status, code),
+            (StatusCode::BAD_GATEWAY, "StorageUnavailable")
+        );
+    }
+
+    #[tokio::test]
+    async fn idle_timeout_stream_fails_stalled_device_and_ignores_empty_chunks()
+    -> anyhow::Result<()> {
+        let stalled = futures::stream::unfold(0u8, |step| async move {
+            match step {
+                0 => Some((
+                    Ok::<axum::body::Bytes, std::io::Error>(axum::body::Bytes::from_static(
+                        b"hello",
+                    )),
+                    1,
+                )),
+                _ => {
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                    Some((Ok(axum::body::Bytes::new()), step))
+                }
+            }
+        });
+        let progress = Arc::new(PartStreamState::default());
+        let mut wrapped = Box::pin(idle_timeout_stream(
+            Box::pin(stalled),
+            Duration::from_millis(35),
+            progress.clone(),
+        ));
+
+        let first = wrapped
+            .next()
+            .await
+            .ok_or_else(|| anyhow::anyhow!("missing first chunk"))??;
+        assert_eq!(&first[..], b"hello");
+        assert_eq!(progress.bytes(), 5);
+
+        let second = wrapped
+            .next()
+            .await
+            .ok_or_else(|| anyhow::anyhow!("missing timeout error"))?;
+        assert_eq!(
+            second.err().map(|e| e.kind()),
+            Some(std::io::ErrorKind::TimedOut)
+        );
+        assert_eq!(progress.failure(), StreamFailure::TimedOut);
+        assert!(wrapped.next().await.is_none());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn idle_timeout_stream_marks_client_abort_and_preserves_error_source()
+    -> anyhow::Result<()> {
+        #[derive(Debug)]
+        struct OuterBodyError(std::io::Error);
+
+        impl std::fmt::Display for OuterBodyError {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.write_str("error reading a body from connection")
+            }
+        }
+
+        impl std::error::Error for OuterBodyError {
+            fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+                Some(&self.0)
+            }
+        }
+
+        let broken = futures::stream::iter(vec![
+            Ok(axum::body::Bytes::from_static(b"hi")),
+            Err(OuterBodyError(std::io::Error::new(
+                std::io::ErrorKind::ConnectionReset,
+                "connection reset by peer",
+            ))),
+        ]);
+        let progress = Arc::new(PartStreamState::default());
+        let mut wrapped = Box::pin(idle_timeout_stream(
+            broken,
+            Duration::from_secs(5),
+            progress.clone(),
+        ));
+
+        let first = wrapped
+            .next()
+            .await
+            .ok_or_else(|| anyhow::anyhow!("missing first chunk"))??;
+        assert_eq!(&first[..], b"hi");
+        let second = wrapped
+            .next()
+            .await
+            .ok_or_else(|| anyhow::anyhow!("missing stream error"))?;
+        let Err(err) = second else {
+            anyhow::bail!("expected stream error");
+        };
+        let logged = crate::storage::redacted(&anyhow::Error::from(err));
+        assert!(logged.contains("connection reset by peer"), "{logged}");
+        assert_eq!(progress.failure(), StreamFailure::Aborted);
+        assert_eq!(progress.bytes(), 2);
+        assert!(wrapped.next().await.is_none());
+        Ok(())
     }
 }
 

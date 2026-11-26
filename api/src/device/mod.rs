@@ -113,6 +113,9 @@ pub struct UpdateDeviceRelease {
 
 #[derive(Debug, Deserialize, Serialize, utoipa::ToSchema)]
 pub struct ApproveDeviceBody {
+    /// Assign this release on approval. If omitted, a device that does not
+    /// follow latest and has no target defaults to its reported release,
+    /// as soon as that release is known.
     pub target_release_id: Option<i32>,
 }
 
@@ -850,89 +853,149 @@ async fn close_open_downtime(
     Ok(())
 }
 
+async fn resolve_ip_id(ip: IpAddr, pool: &PgPool) -> Result<(i64, bool), sqlx::Error> {
+    let ip_network: ipnetwork::IpNetwork = ip.into();
+
+    // SELECT first to avoid burning an IDENTITY sequence value on every ping —
+    // ON CONFLICT DO NOTHING still advances the sequence on conflict.
+    let existing = sqlx::query!(
+        r#"
+            SELECT id,
+                   CASE
+                       WHEN updated_at < NOW() - INTERVAL '24 hours' THEN true
+                       ELSE false
+                   END as needs_update
+            FROM ip_address
+            WHERE ip_address = $1
+        "#,
+        ip_network
+    )
+    .fetch_optional(pool)
+    .await?;
+
+    match existing {
+        Some(record) => Ok((record.id, record.needs_update.unwrap_or(false))),
+        None => {
+            let inserted = sqlx::query!(
+                "INSERT INTO ip_address (ip_address, created_at) VALUES ($1, NOW()) ON CONFLICT (ip_address) DO NOTHING RETURNING id",
+                ip_network
+            )
+            .fetch_optional(pool)
+            .await?;
+            match inserted {
+                Some(record) => Ok((record.id, true)),
+                None => {
+                    // Concurrent insert won the race; fetch the now-existing row.
+                    let row = sqlx::query!(
+                        "SELECT id FROM ip_address WHERE ip_address = $1",
+                        ip_network
+                    )
+                    .fetch_one(pool)
+                    .await?;
+                    Ok((row.id, true))
+                }
+            }
+        }
+    }
+}
+
+async fn update_device_ping_with_ip(
+    device_id: i32,
+    ip_id: i64,
+    pool: &PgPool,
+) -> anyhow::Result<()> {
+    let mut tx = pool.begin().await?;
+
+    // The CTE reads the pre-UPDATE snapshot, so this hands back both the
+    // ping timestamp being replaced and whether the gap was long enough
+    // to have been recorded as an outage — decided on the database
+    // clock, with no extra round trip. For a device pinging on cadence
+    // nothing further runs, which matters at hundreds of pings/sec.
+    let ping = sqlx::query!(
+        r#"
+        WITH prev AS (SELECT last_ping FROM device WHERE id = $1)
+        UPDATE device SET last_ping = NOW(), ip_address_id = $2
+        WHERE id = $1
+        RETURNING
+            (SELECT last_ping FROM prev) AS previous_last_ping,
+            (SELECT last_ping < NOW() - make_interval(secs => $3::double precision)
+             FROM prev) AS was_stale
+        "#,
+        device_id,
+        ip_id,
+        DOWNTIME_STALE_AFTER_SECS,
+    )
+    .fetch_optional(&mut *tx)
+    .await?;
+
+    if let Some(ping) = ping
+        && ping.was_stale.unwrap_or(false)
+        && let Some(previous) = ping.previous_last_ping
+    {
+        close_open_downtime(device_id, previous, &mut tx).await?;
+    }
+
+    tx.commit().await?;
+    Ok(())
+}
+
+fn is_foreign_key_violation(err: &anyhow::Error) -> bool {
+    matches!(
+        err.downcast_ref::<sqlx::Error>(),
+        Some(sqlx::Error::Database(db_err)) if db_err.code().as_deref() == Some("23503")
+    )
+}
+
+async fn record_device_ping_ip(
+    device_id: i32,
+    ip: IpAddr,
+    pool: &PgPool,
+    cache: Option<&crate::smith::HomeCache>,
+) -> anyhow::Result<(i64, bool)> {
+    // Resolve and commit the ip_address row before caching or opening the
+    // device transaction so HomeCache never holds an uncommitted id.
+    let (mut ip_id, mut should_update_geolocation, from_cache) =
+        if let Some(cached_id) = cache.and_then(|c| c.get_ip_id(ip)) {
+            (cached_id, false, true)
+        } else {
+            let (id, needs_geo) = resolve_ip_id(ip, pool).await?;
+            if let Some(cache) = cache {
+                cache.insert_ip_id(ip, id);
+            }
+            (id, needs_geo, false)
+        };
+
+    if let Err(err) = update_device_ping_with_ip(device_id, ip_id, pool).await {
+        if from_cache && is_foreign_key_violation(&err) {
+            if let Some(cache) = cache {
+                cache.invalidate_ip_id(ip);
+            }
+            let (fresh_id, needs_geo) = resolve_ip_id(ip, pool).await?;
+            if let Some(cache) = cache {
+                cache.insert_ip_id(ip, fresh_id);
+            }
+            ip_id = fresh_id;
+            should_update_geolocation = needs_geo;
+            update_device_ping_with_ip(device_id, ip_id, pool).await?;
+        } else {
+            return Err(err);
+        }
+    }
+
+    Ok((ip_id, should_update_geolocation))
+}
+
 pub async fn save_last_ping_with_ip(
     device_id: i32,
     ip_address: Option<IpAddr>,
     pool: &PgPool,
     config: &Config,
+    cache: Option<&crate::smith::HomeCache>,
 ) -> anyhow::Result<()> {
     match ip_address {
         Some(ip) => {
-            let mut tx = pool.begin().await?;
-            let ip_network: ipnetwork::IpNetwork = ip.into();
-
-            // SELECT first to avoid burning an IDENTITY sequence value on every ping —
-            // ON CONFLICT DO NOTHING still advances the sequence on conflict.
-            let existing = sqlx::query!(
-                r#"
-                    SELECT id,
-                           CASE
-                               WHEN updated_at < NOW() - INTERVAL '24 hours' THEN true
-                               ELSE false
-                           END as needs_update
-                    FROM ip_address
-                    WHERE ip_address = $1
-                "#,
-                ip_network
-            )
-            .fetch_optional(&mut *tx)
-            .await?;
-
-            let (ip_id, should_update_geolocation) = match existing {
-                Some(record) => (record.id, record.needs_update.unwrap_or(false)),
-                None => {
-                    let inserted = sqlx::query!(
-                        "INSERT INTO ip_address (ip_address, created_at) VALUES ($1, NOW()) ON CONFLICT (ip_address) DO NOTHING RETURNING id",
-                        ip_network
-                    )
-                    .fetch_optional(&mut *tx)
-                    .await?;
-                    match inserted {
-                        Some(record) => (record.id, true),
-                        None => {
-                            // Concurrent insert won the race; fetch the now-existing row.
-                            let row = sqlx::query!(
-                                "SELECT id FROM ip_address WHERE ip_address = $1",
-                                ip_network
-                            )
-                            .fetch_one(&mut *tx)
-                            .await?;
-                            (row.id, true)
-                        }
-                    }
-                }
-            };
-
-            // The CTE reads the pre-UPDATE snapshot, so this hands back both the
-            // ping timestamp being replaced and whether the gap was long enough
-            // to have been recorded as an outage — decided on the database
-            // clock, with no extra round trip. For a device pinging on cadence
-            // nothing further runs, which matters at hundreds of pings/sec.
-            let ping = sqlx::query!(
-                r#"
-                WITH prev AS (SELECT last_ping FROM device WHERE id = $1)
-                UPDATE device SET last_ping = NOW(), ip_address_id = $2
-                WHERE id = $1
-                RETURNING
-                    (SELECT last_ping FROM prev) AS previous_last_ping,
-                    (SELECT last_ping < NOW() - make_interval(secs => $3::double precision)
-                     FROM prev) AS was_stale
-                "#,
-                device_id,
-                ip_id,
-                DOWNTIME_STALE_AFTER_SECS,
-            )
-            .fetch_optional(&mut *tx)
-            .await?;
-
-            if let Some(ping) = ping
-                && ping.was_stale.unwrap_or(false)
-                && let Some(previous) = ping.previous_last_ping
-            {
-                close_open_downtime(device_id, previous, &mut tx).await?;
-            }
-
-            tx.commit().await?;
+            let (ip_id, should_update_geolocation) =
+                record_device_ping_ip(device_id, ip, pool, cache).await?;
 
             // If geolocation data needs updating and API key is available, spawn a background task
             if should_update_geolocation {
@@ -990,30 +1053,223 @@ async fn record_ping_without_ip(device_id: i32, pool: &PgPool) -> anyhow::Result
     Ok(())
 }
 
-/// The release a polling device should be on. A target whose staggered bucket
-/// hasn't opened yet is answered with the current release rather than nothing:
-/// smithd keeps its cached target when told nothing, so it would carry on
-/// towards an older target.
-pub async fn get_target_release<'e, E>(device_id: i32, executor: E) -> Option<i32>
-where
-    E: sqlx::PgExecutor<'e>,
-{
-    if let Ok(device) = sqlx::query!(
-        r#"SELECT
-            CASE
-                WHEN target_release_eligible_at > NOW() AND release_id IS NOT NULL
-                    THEN release_id
-                ELSE target_release_id
-            END AS "target_release_id"
-        FROM device WHERE id = $1"#,
-        &device_id
+/// Floor of the per-IP download limit when the IP has no override.
+pub const MIN_CONCURRENT_DOWNLOADS: i64 = 5;
+
+/// Without an override, an IP downloads at most one stagger bucket's share of
+/// its devices at once (5% with 20 buckets), and never fewer than the floor.
+fn default_download_limit(active_devices: i64) -> i64 {
+    let buckets = crate::deployment::STAGGER_MAX_BUCKETS as i64;
+    MIN_CONCURRENT_DOWNLOADS.max((active_devices + buckets - 1) / buckets)
+}
+
+pub struct DevicePollState {
+    pub release_id: Option<i32>,
+    target_release_id: Option<i32>,
+    target_release_id_set_at: Option<DateTime<Utc>>,
+    target_release_eligible_at: Option<DateTime<Utc>>,
+    download_slot_release_id: Option<i32>,
+    download_slot_at: Option<DateTime<Utc>>,
+    ip_address_id: Option<i64>,
+    pub settings_version: i32,
+    pub archived: bool,
+    now: DateTime<Utc>,
+}
+
+impl DevicePollState {
+    /// A slot from an earlier assignment of the same release (retargeted away
+    /// and back) was never checked against the IP's current holders.
+    fn holds_slot_for(&self, target: i32) -> bool {
+        self.download_slot_release_id == Some(target)
+            && match (self.download_slot_at, self.target_release_id_set_at) {
+                (Some(slot_at), Some(set_at)) => slot_at >= set_at,
+                (Some(_), None) => true,
+                (None, _) => false,
+            }
+    }
+
+    pub fn needs_auto_apply_settings(&self) -> bool {
+        self.settings_version == 0 && !self.archived
+    }
+}
+
+#[derive(Debug, PartialEq)]
+enum TargetDecision {
+    Answer(Option<i32>),
+    NeedsSlot {
+        ip_address_id: i64,
+        target: i32,
+        current: i32,
+    },
+}
+
+/// A target whose staggered bucket hasn't opened is answered with the current
+/// release rather than nothing: smithd keeps its cached target when told
+/// nothing. A holder is never told to give its target back, even when its
+/// slot has stopped counting against the IP.
+fn decide_target(row: &DevicePollState) -> TargetDecision {
+    let (Some(target), Some(current)) = (row.target_release_id, row.release_id) else {
+        return TargetDecision::Answer(row.target_release_id);
+    };
+    if target == current {
+        return TargetDecision::Answer(Some(target));
+    }
+    if row
+        .target_release_eligible_at
+        .is_some_and(|at| at > row.now)
+    {
+        return TargetDecision::Answer(Some(current));
+    }
+    if row.holds_slot_for(target) {
+        return TargetDecision::Answer(Some(target));
+    }
+    match row.ip_address_id {
+        Some(ip_address_id) => TargetDecision::NeedsSlot {
+            ip_address_id,
+            target,
+            current,
+        },
+        None => TargetDecision::Answer(Some(target)),
+    }
+}
+
+/// Takes a download slot for `device_id` if its IP has one free. The IP row
+/// lock serializes grants so concurrent polls cannot overshoot the limit.
+async fn try_take_download_slot(
+    pool: &PgPool,
+    device_id: i32,
+    ip_address_id: i64,
+    target: i32,
+) -> sqlx::Result<bool> {
+    let mut tx = pool.begin().await?;
+    // The pool's 10 s lock wait would hold the IP lock past smithd's /home
+    // timeout and queue every other device on the IP behind it.
+    sqlx::query(crate::home::RESULT_TX_TIMEOUTS)
+        .execute(&mut *tx)
+        .await?;
+    // NO KEY: still serializes grants, but does not block the FK check of a
+    // ping that moves a device onto this IP.
+    let ip = sqlx::query!(
+        "SELECT max_concurrent_downloads FROM ip_address WHERE id = $1 FOR NO KEY UPDATE",
+        ip_address_id
     )
-    .fetch_one(executor)
+    .fetch_one(&mut *tx)
+    .await?;
+
+    // Offline and long-stuck holders stop blocking the site. A fresh grant
+    // counts before its ping is saved: /home saves last_ping after answering.
+    // Dead devices still assigned to the IP would inflate the default limit,
+    // so only those seen in the last day size it.
+    let counts = sqlx::query!(
+        r#"SELECT
+            COUNT(*) FILTER (
+                WHERE id <> $2
+                  AND download_slot_release_id = target_release_id
+                  AND download_slot_at >= COALESCE(target_release_id_set_at, '-infinity')
+                  AND release_id IS DISTINCT FROM target_release_id
+                  AND (last_ping > NOW() - INTERVAL '5 minutes'
+                       OR download_slot_at > NOW() - INTERVAL '5 minutes')
+                  AND download_slot_at > NOW() - INTERVAL '2 hours'
+            ) AS "holders!",
+            COUNT(*) FILTER (WHERE last_ping > NOW() - INTERVAL '1 day') AS "active!"
+        FROM device
+        WHERE ip_address_id = $1 AND archived = false"#,
+        ip_address_id,
+        device_id
+    )
+    .fetch_one(&mut *tx)
+    .await?;
+    let limit = ip
+        .max_concurrent_downloads
+        .map_or_else(|| default_download_limit(counts.active), i64::from);
+
+    let granted = counts.holders < limit;
+    if granted {
+        sqlx::query!(
+            // Stamped after the IP lock wait, not at transaction start, so a
+            // retarget that commits during the wait cannot make this slot stale.
+            "UPDATE device SET download_slot_release_id = $2, download_slot_at = clock_timestamp()
+             WHERE id = $1",
+            device_id,
+            target
+        )
+        .execute(&mut *tx)
+        .await?;
+    }
+    tx.commit().await?;
+    Ok(granted)
+}
+
+/// Loads the fields `/smith/home` needs from `device` in a single PK lookup so
+/// settings auto-apply, target release selection, and release-id persistence do
+/// not re-read the same row.
+pub async fn load_device_poll_state(device_id: i32, pool: &PgPool) -> Option<DevicePollState> {
+    match sqlx::query_as!(
+        DevicePollState,
+        r#"SELECT release_id, target_release_id, target_release_id_set_at,
+            target_release_eligible_at, download_slot_release_id, download_slot_at,
+            ip_address_id, settings_version, archived, NOW() AS "now!"
+        FROM device WHERE id = $1"#,
+        device_id
+    )
+    .fetch_one(pool)
     .await
     {
-        return device.target_release_id;
+        Ok(row) => Some(row),
+        Err(err) => {
+            tracing::error!(device_id, "Failed to load device poll state: {err:?}");
+            None
+        }
     }
-    None
+}
+
+/// Resolves the target release from an already-loaded `DevicePollState`.
+pub async fn resolve_target_release(
+    device_id: i32,
+    row: &DevicePollState,
+    pool: &PgPool,
+) -> Option<i32> {
+    match decide_target(row) {
+        TargetDecision::Answer(answer) => answer,
+        TargetDecision::NeedsSlot {
+            ip_address_id,
+            target,
+            current,
+        } => match try_take_download_slot(pool, device_id, ip_address_id, target).await {
+            Ok(true) => Some(target),
+            Ok(false) => Some(current),
+            Err(err) => {
+                tracing::error!(device_id, "Failed to take a download slot: {err:?}");
+                Some(current)
+            }
+        },
+    }
+}
+
+/// The release a polling device should be on. Never fails the poll: when a
+/// slot cannot be decided the device is told to stay on its current release.
+#[cfg(test)]
+pub async fn get_target_release(device_id: i32, pool: &PgPool) -> Option<i32> {
+    let row = load_device_poll_state(device_id, pool).await?;
+    resolve_target_release(device_id, &row, pool).await
+}
+
+/// Complete approval's default target once the installed release is known.
+/// Never replace an explicit target or opt a device out of fleet rollouts.
+pub(super) async fn initialize_approved_target(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    device_id: i32,
+) -> sqlx::Result<bool> {
+    let result = sqlx::query!(
+        "UPDATE device SET target_release_id = release_id,
+            target_release_id_set_at = NOW(), target_release_eligible_at = NULL
+         WHERE id = $1 AND approved AND NOT follow_latest
+           AND target_release_id IS NULL AND release_id IS NOT NULL",
+        device_id
+    )
+    .execute(&mut **tx)
+    .await?;
+    Ok(result.rows_affected() > 0)
 }
 
 pub async fn save_release_id(
@@ -1051,6 +1307,8 @@ pub async fn save_release_id(
                 .execute(&mut *tx)
                 .await?;
             }
+
+            initialize_approved_target(&mut tx, device_id).await?;
         }
 
         tx.commit().await?;
@@ -1326,6 +1584,405 @@ mod target_release_tests {
             Some(target),
             "nothing to stay on, so the bucket doesn't apply"
         );
+        Ok(())
+    }
+
+    /// Devices on `current` targeting `target` with open buckets, all behind
+    /// one IP and pinging now.
+    struct Site {
+        current: i32,
+        target: i32,
+        ip: i64,
+        devices: Vec<i32>,
+    }
+
+    async fn site(pool: &PgPool, count: usize) -> anyhow::Result<Site> {
+        let [current, target] = insert_releases(pool).await?;
+        let devices = insert_devices(pool, count, Some(current)).await?;
+        let ip: i64 = sqlx::query_scalar(
+            "INSERT INTO ip_address (ip_address) VALUES ('203.0.113.7') RETURNING id",
+        )
+        .fetch_one(pool)
+        .await?;
+        sqlx::query(
+            "UPDATE device SET target_release_id = $1, ip_address_id = $2,
+                target_release_eligible_at = NOW() - INTERVAL '1 minute',
+                last_ping = NOW()
+             WHERE id = ANY($3)",
+        )
+        .bind(target)
+        .bind(ip)
+        .bind(&devices)
+        .execute(pool)
+        .await?;
+        // Small sites would never fill the default limit; the default has its
+        // own tests below.
+        sqlx::query("UPDATE ip_address SET max_concurrent_downloads = 2 WHERE id = $1")
+            .bind(ip)
+            .execute(pool)
+            .await?;
+        Ok(Site {
+            current,
+            target,
+            ip,
+            devices,
+        })
+    }
+
+    async fn poll_all(pool: &PgPool, devices: &[i32]) -> Vec<Option<i32>> {
+        let mut answers = Vec::new();
+        for device in devices {
+            answers.push(get_target_release(*device, pool).await);
+        }
+        answers
+    }
+
+    fn three(devices: &[i32]) -> anyhow::Result<[i32; 3]> {
+        Ok(devices.try_into()?)
+    }
+
+    #[sqlx::test]
+    #[ignore = "needs the compose Postgres; run with --test-threads=1"]
+    async fn only_the_limit_of_devices_per_ip_get_the_target(pool: PgPool) -> anyhow::Result<()> {
+        let Site {
+            current,
+            target,
+            devices,
+            ..
+        } = site(&pool, 5).await?;
+        assert_eq!(
+            poll_all(&pool, &devices).await,
+            vec![
+                Some(target),
+                Some(target),
+                Some(current),
+                Some(current),
+                Some(current)
+            ]
+        );
+        Ok(())
+    }
+
+    #[sqlx::test]
+    #[ignore = "needs the compose Postgres; run with --test-threads=1"]
+    async fn finishing_a_download_frees_a_slot(pool: PgPool) -> anyhow::Result<()> {
+        let Site {
+            current,
+            target,
+            devices,
+            ..
+        } = site(&pool, 3).await?;
+        let [first, _, third] = three(&devices)?;
+        poll_all(&pool, &devices).await;
+        assert_eq!(get_target_release(third, &pool).await, Some(current));
+
+        sqlx::query("UPDATE device SET release_id = $1 WHERE id = $2")
+            .bind(target)
+            .bind(first)
+            .execute(&pool)
+            .await?;
+        assert_eq!(get_target_release(third, &pool).await, Some(target));
+        Ok(())
+    }
+
+    #[sqlx::test]
+    #[ignore = "needs the compose Postgres; run with --test-threads=1"]
+    async fn ip_override_changes_the_limit(pool: PgPool) -> anyhow::Result<()> {
+        let Site {
+            current,
+            target,
+            ip,
+            devices,
+            ..
+        } = site(&pool, 3).await?;
+        sqlx::query("UPDATE ip_address SET max_concurrent_downloads = 1 WHERE id = $1")
+            .bind(ip)
+            .execute(&pool)
+            .await?;
+        assert_eq!(
+            poll_all(&pool, &devices).await,
+            vec![Some(target), Some(current), Some(current)]
+        );
+        Ok(())
+    }
+
+    #[sqlx::test]
+    #[ignore = "needs the compose Postgres; run with --test-threads=1"]
+    async fn a_holder_keeps_its_target_when_the_ip_is_full(pool: PgPool) -> anyhow::Result<()> {
+        let Site {
+            target,
+            ip,
+            devices,
+            ..
+        } = site(&pool, 3).await?;
+        let [first, second, _] = three(&devices)?;
+        poll_all(&pool, &devices).await;
+        sqlx::query("UPDATE ip_address SET max_concurrent_downloads = 1 WHERE id = $1")
+            .bind(ip)
+            .execute(&pool)
+            .await?;
+        for _ in 0..3 {
+            assert_eq!(get_target_release(first, &pool).await, Some(target));
+            assert_eq!(get_target_release(second, &pool).await, Some(target));
+        }
+        Ok(())
+    }
+
+    #[sqlx::test]
+    #[ignore = "needs the compose Postgres; run with --test-threads=1"]
+    async fn an_offline_holder_does_not_block_the_site(pool: PgPool) -> anyhow::Result<()> {
+        let Site {
+            current,
+            target,
+            devices,
+            ..
+        } = site(&pool, 3).await?;
+        let [first, _, third] = three(&devices)?;
+        poll_all(&pool, &devices).await;
+        assert_eq!(get_target_release(third, &pool).await, Some(current));
+
+        sqlx::query("UPDATE device SET last_ping = NOW() - INTERVAL '10 minutes' WHERE id = $1")
+            .bind(first)
+            .execute(&pool)
+            .await?;
+        assert_eq!(
+            get_target_release(third, &pool).await,
+            Some(current),
+            "a fresh grant counts before its ping is saved"
+        );
+
+        sqlx::query(
+            "UPDATE device SET download_slot_at = NOW() - INTERVAL '10 minutes' WHERE id = $1",
+        )
+        .bind(first)
+        .execute(&pool)
+        .await?;
+        assert_eq!(get_target_release(third, &pool).await, Some(target));
+        assert_eq!(
+            get_target_release(first, &pool).await,
+            Some(target),
+            "the offline holder keeps its target"
+        );
+        Ok(())
+    }
+
+    #[sqlx::test]
+    #[ignore = "needs the compose Postgres; run with --test-threads=1"]
+    async fn a_retarget_invalidates_the_slot(pool: PgPool) -> anyhow::Result<()> {
+        let Site {
+            current,
+            target,
+            devices,
+            ..
+        } = site(&pool, 3).await?;
+        let [first, second, third] = three(&devices)?;
+        poll_all(&pool, &devices).await;
+        sqlx::query("UPDATE device SET target_release_id = $1 WHERE id = ANY($2)")
+            .bind(current)
+            .bind(vec![first, second])
+            .execute(&pool)
+            .await?;
+        // Targets are back on the current release, so those slots count for nothing.
+        assert_eq!(get_target_release(third, &pool).await, Some(target));
+        Ok(())
+    }
+
+    #[sqlx::test]
+    #[ignore = "needs the compose Postgres; run with --test-threads=1"]
+    async fn a_slot_from_an_earlier_assignment_does_not_count(pool: PgPool) -> anyhow::Result<()> {
+        let Site {
+            current,
+            target,
+            devices,
+            ..
+        } = site(&pool, 3).await?;
+        let [first, _, third] = three(&devices)?;
+        poll_all(&pool, &devices).await;
+
+        // Away and back, as the retarget queries write it: the old slot still
+        // names `target`, and the third device takes the freed capacity.
+        let retarget = "UPDATE device SET target_release_id = $1, target_release_id_set_at = NOW(),
+            target_release_eligible_at = NULL WHERE id = $2";
+        sqlx::query(retarget)
+            .bind(current)
+            .bind(first)
+            .execute(&pool)
+            .await?;
+        assert_eq!(get_target_release(third, &pool).await, Some(target));
+        sqlx::query(retarget)
+            .bind(target)
+            .bind(first)
+            .execute(&pool)
+            .await?;
+
+        assert_eq!(
+            get_target_release(first, &pool).await,
+            Some(current),
+            "the IP is full, so the old slot must not let it through"
+        );
+        assert_eq!(
+            crate::deployment::rollout_progress(target, &pool)
+                .await?
+                .waiting_for_slot,
+            1,
+            "progress counts it as waiting"
+        );
+        Ok(())
+    }
+
+    #[sqlx::test]
+    #[ignore = "needs the compose Postgres; run with --test-threads=1"]
+    async fn devices_without_an_ip_are_not_limited(pool: PgPool) -> anyhow::Result<()> {
+        let Site {
+            target, devices, ..
+        } = site(&pool, 4).await?;
+        sqlx::query("UPDATE device SET ip_address_id = NULL")
+            .execute(&pool)
+            .await?;
+        assert_eq!(poll_all(&pool, &devices).await, vec![Some(target); 4]);
+        Ok(())
+    }
+
+    #[sqlx::test]
+    #[ignore = "needs the compose Postgres; run with --test-threads=1"]
+    async fn concurrent_polls_never_exceed_the_limit(pool: PgPool) -> anyhow::Result<()> {
+        let Site {
+            target, devices, ..
+        } = site(&pool, 10).await?;
+        let answers = futures::future::join_all(
+            devices
+                .iter()
+                .map(|device| get_target_release(*device, &pool)),
+        )
+        .await;
+        assert_eq!(answers.iter().filter(|a| **a == Some(target)).count(), 2);
+        Ok(())
+    }
+
+    #[test]
+    fn default_limit_is_one_bucket_with_a_floor() {
+        assert_eq!(default_download_limit(0), 5);
+        assert_eq!(default_download_limit(100), 5);
+        assert_eq!(default_download_limit(101), 6);
+        assert_eq!(default_download_limit(168), 9);
+    }
+
+    /// Clears the override `site` sets, so the default applies.
+    async fn use_default_limit(pool: &PgPool, ip: i64) -> anyhow::Result<()> {
+        sqlx::query("UPDATE ip_address SET max_concurrent_downloads = NULL WHERE id = $1")
+            .bind(ip)
+            .execute(pool)
+            .await?;
+        Ok(())
+    }
+
+    fn granted(answers: &[Option<i32>], target: i32) -> usize {
+        answers.iter().filter(|a| **a == Some(target)).count()
+    }
+
+    #[sqlx::test]
+    #[ignore = "needs the compose Postgres; run with --test-threads=1"]
+    async fn a_small_site_gets_the_floor(pool: PgPool) -> anyhow::Result<()> {
+        let Site {
+            target,
+            ip,
+            devices,
+            ..
+        } = site(&pool, 8).await?;
+        use_default_limit(&pool, ip).await?;
+        assert_eq!(granted(&poll_all(&pool, &devices).await, target), 5);
+        Ok(())
+    }
+
+    #[sqlx::test]
+    #[ignore = "needs the compose Postgres; run with --test-threads=1"]
+    async fn a_big_site_gets_one_bucket_of_its_active_devices(pool: PgPool) -> anyhow::Result<()> {
+        let Site {
+            target,
+            ip,
+            devices,
+            ..
+        } = site(&pool, 130).await?;
+        use_default_limit(&pool, ip).await?;
+        // Counting either the stale or the archived devices gives 6 or 7.
+        let (gone, active) = devices.split_at(30);
+        sqlx::query("UPDATE device SET last_ping = NOW() - INTERVAL '2 days' WHERE id = ANY($1)")
+            .bind(&gone[..20])
+            .execute(&pool)
+            .await?;
+        sqlx::query("UPDATE device SET archived = true WHERE id = ANY($1)")
+            .bind(&gone[20..])
+            .execute(&pool)
+            .await?;
+        // 100 active devices: ceil(100 / 20) = 5, where 130 would give 7.
+        assert_eq!(granted(&poll_all(&pool, active).await, target), 5);
+        Ok(())
+    }
+
+    #[sqlx::test]
+    #[ignore = "needs the compose Postgres; run with --test-threads=1"]
+    async fn load_poll_state_reflects_settings_and_release(pool: PgPool) -> anyhow::Result<()> {
+        let [current, target] = insert_releases(&pool).await?;
+        let devices = insert_devices(&pool, 1, Some(current)).await?;
+        let &[device_id] = devices.as_slice() else {
+            anyhow::bail!("expected 1 inserted device");
+        };
+
+        sqlx::query("UPDATE device SET settings_version = 1, target_release_id = $1 WHERE id = $2")
+            .bind(target)
+            .bind(device_id)
+            .execute(&pool)
+            .await?;
+
+        let state = load_device_poll_state(device_id, &pool)
+            .await
+            .ok_or_else(|| anyhow::anyhow!("poll state missing"))?;
+        assert_eq!(state.release_id, Some(current));
+        assert!(!state.needs_auto_apply_settings());
+        assert_eq!(
+            resolve_target_release(device_id, &state, &pool).await,
+            Some(target)
+        );
+
+        sqlx::query("UPDATE device SET settings_version = 0 WHERE id = $1")
+            .bind(device_id)
+            .execute(&pool)
+            .await?;
+        let state = load_device_poll_state(device_id, &pool)
+            .await
+            .ok_or_else(|| anyhow::anyhow!("poll state missing"))?;
+        assert!(state.needs_auto_apply_settings());
+        Ok(())
+    }
+
+    #[sqlx::test]
+    #[ignore = "needs the compose Postgres; run with --test-threads=1"]
+    async fn save_last_ping_with_ip_recovers_from_stale_cached_ip_id(
+        pool: PgPool,
+    ) -> anyhow::Result<()> {
+        let [current, _] = insert_releases(&pool).await?;
+        let devices = insert_devices(&pool, 1, Some(current)).await?;
+        let &[device_id] = devices.as_slice() else {
+            anyhow::bail!("expected 1 inserted device");
+        };
+        let cache = crate::smith::HomeCache::new();
+        let ip = std::net::IpAddr::V4(std::net::Ipv4Addr::new(203, 0, 113, 77));
+
+        // Seed cache with a nonexistent ip_address.id to simulate a deleted row.
+        cache.insert_ip_id(ip, 999_999);
+
+        let (resolved_id, needs_geo) =
+            record_device_ping_ip(device_id, ip, &pool, Some(&cache)).await?;
+        assert!(needs_geo);
+        assert_ne!(resolved_id, 999_999);
+
+        let saved_ip_id: Option<i64> =
+            sqlx::query_scalar("SELECT ip_address_id FROM device WHERE id = $1")
+                .bind(device_id)
+                .fetch_one(&pool)
+                .await?;
+        assert_eq!(saved_ip_id, Some(resolved_id));
+        assert_eq!(cache.get_ip_id(ip), Some(resolved_id));
         Ok(())
     }
 }

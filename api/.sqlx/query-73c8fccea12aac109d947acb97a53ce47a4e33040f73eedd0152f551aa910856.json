@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE device SET target_release_id = release_id,\n            target_release_id_set_at = NOW(), target_release_eligible_at = NULL\n         WHERE id = $1 AND approved AND NOT follow_latest\n           AND target_release_id IS NULL AND release_id IS NOT NULL",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "73c8fccea12aac109d947acb97a53ce47a4e33040f73eedd0152f551aa910856"
+}

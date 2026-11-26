@@ -76,7 +76,8 @@ pub enum DeviceSortDirection {
 #[derive(Deserialize, Serialize, Debug, Default, IntoParams)]
 #[into_params(parameter_in = Query)]
 pub struct DeviceFilter {
-    pub serial_number: Option<String>,
+    #[serde(default)]
+    pub serial_number: Vec<String>,
     /// Filter by approved status. If None, only approved devices are included by default.
     pub approved: Option<bool>,
     /// Filter by archived status. If None, archived devices are excluded by default.

@@ -7,6 +7,7 @@ for (const [name, device, ap, expected] of [
 	["same country", "DK", "DK", false],
 	["AP announces none", "00", undefined, false],
 	["device country unknown", undefined, "DK", false],
+	["device country null from the API", null, "DK", false],
 ]) {
 	test(name, () => {
 		assert.equal(countryDiffersFromAp(device, ap), expected);

@@ -20,6 +20,8 @@ pub struct IpAddressInfo {
     pub proxy: Option<bool>,
     pub hosting: Option<bool>,
     pub device_count: Option<i64>,
+    /// Devices on this IP that may download a release at once. Null means the API default.
+    pub max_concurrent_downloads: Option<i32>,
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub updated_at: chrono::DateTime<chrono::Utc>,
 }

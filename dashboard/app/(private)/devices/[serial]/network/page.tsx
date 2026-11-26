@@ -200,7 +200,9 @@ const ConnectionCard = ({
 					</div>
 				)}
 				<div className="flex justify-between">
-					<span className="text-gray-600">MAC Address</span>
+					<span className="text-gray-600">
+						{deviceType === "wifi" ? "Permanent MAC" : "MAC Address"}
+					</span>
 					<span className="font-mono text-gray-900">{iface.mac_address}</span>
 				</div>
 				{iface.ips.length > 1 && (
@@ -425,7 +427,7 @@ const NetworkPage = () => {
 					{/* Keyed by serial so filter/reveal state resets when navigating
 					    between devices. */}
 					{device && <WifiPanel key={serial} serial={serial} device={device} />}
-					<NetworkSettingsPanel key={serial} serial={serial} device={device} />
+					<NetworkSettingsPanel key={serial} device={device} />
 				</div>
 			</div>
 		</DeviceDetailLayout>

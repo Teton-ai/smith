@@ -16,6 +16,10 @@ const TELEMETRY_TAG: &str = "telemetry";
 
 const MAX_TELEMETRY_BYTES: usize = 8 * 1024 * 1024;
 
+/// A healthy write takes about 10 ms. Past this VictoriaMetrics is queueing
+/// inserts (up to a minute), and the device should not wait on it.
+const FORWARD_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3);
+
 #[utoipa::path(
     post,
     path = "/smith/telemetry/victoria",
@@ -73,6 +77,7 @@ pub async fn victoria(
         .client
         .request(parts.method, &client_config.url)
         .headers(parts.headers)
+        .timeout(FORWARD_TIMEOUT)
         .body(body_bytes)
         .send()
         .await
@@ -81,6 +86,7 @@ pub async fn victoria(
     if let Err(err) = forwarded {
         error!(
             error = %err,
+            timed_out = err.is_timeout(),
             serial_number = %device.serial_number,
             "Failed to forward telemetry to VictoriaMetrics"
         );

@@ -37,7 +37,6 @@ bore-cli = "0.5"
 pnet = "0.35"
 walkdir = "2.5"
 chrono = { workspace = true }
-governor = "0.10"
 futures = "0.3"
 sqlx = { version = "0.8", features = [
     "chrono",
@@ -66,6 +65,7 @@ utoipa = { workspace = true }
 utoipa-axum = "0.2"
 
 [dev-dependencies]
+zbus = { version = "5.6", features = ["p2p"] }
 # test-util enables start_paused so the police tests can drive the clock across
 # the reboot deadline without waiting minutes of wall time.
 tokio = { version = "1.40", features = ["test-util"] }

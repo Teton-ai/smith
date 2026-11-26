@@ -1,0 +1,35 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            WITH fetched AS (\n                SELECT\n                    id,\n                    cmd,\n                    continue_on_error\n                FROM command_queue\n                WHERE device_id = $1\n                  AND fetched = false\n                  AND canceled = false\n                  AND available_at <= now()\n                  -- smith-rescue takes Restarts once it has polled /smith/restart.\n                  AND NOT (\n                      cmd::jsonb = '\"Restart\"'::jsonb\n                      AND EXISTS (\n                          SELECT 1 FROM device WHERE id = $1 AND has_restart_channel\n                      )\n                  )\n                ORDER BY id\n                LIMIT $2\n                FOR UPDATE\n            ),\n            marked AS (\n                UPDATE command_queue\n                SET fetched_at = CURRENT_TIMESTAMP, fetched = true\n                WHERE id IN (SELECT id FROM fetched)\n                RETURNING id, cmd, continue_on_error\n            )\n            SELECT\n                id AS \"id!\",\n                cmd AS \"cmd!\",\n                continue_on_error AS \"continue_on_error!\"\n            FROM marked\n            ORDER BY id\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "cmd!",
+        "type_info": "Json"
+      },
+      {
+        "ordinal": 2,
+        "name": "continue_on_error!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "0a4698b38fb53c7c2ba2c6c398d27e0cbec924de214833d86c6a59a43391272f"
+}

@@ -326,7 +326,7 @@ async fn resolve_devices_from_selector(
         for id in &selector.ids {
             let devices = api
                 .get_devices(DeviceFilter {
-                    serial_number: Some(id.clone()),
+                    serial_number: vec![id.clone()],
                     follow_latest: follow_latest_filter,
                     ..Default::default()
                 })
@@ -2420,7 +2420,7 @@ where
 {
     let devices = api
         .get_devices(DeviceFilter {
-            serial_number: Some(serial_number.clone()),
+            serial_number: vec![serial_number.clone()],
             ..Default::default()
         })
         .await?;

@@ -4,7 +4,7 @@ use crate::filebrowser::FileBrowserHandle;
 use crate::filemanager::FileManagerHandle;
 use crate::logstream::LogStreamHandle;
 use crate::magic::MagicHandle;
-use crate::settings;
+use crate::settings::SettingsHandle;
 use crate::shutdown::ShutdownSignals;
 use crate::tunnel::TunnelHandle;
 use crate::updater::UpdaterHandle;
@@ -33,15 +33,19 @@ pub struct Handles {
     pub logstream: LogStreamHandle,
     pub filebrowser: FileBrowserHandle,
     pub net_guard: NetGuard,
+    pub settings: SettingsHandle,
 }
 
 /// Commands that reconfigure or reconnect Wi-Fi. A scan is included because
-/// its directed probes take the radio off channel.
+/// its directed probes take the radio off channel. `ApplySettings` holds it for
+/// the whole apply, the 90 s wait included; the settings actor takes its own
+/// hold too, for the reloads its checks make outside any command.
 fn changes_network(command: &SafeCommandTx) -> bool {
     matches!(
         command,
         SafeCommandTx::UpdateNetwork { .. }
             | SafeCommandTx::ApplyNetworks { .. }
+            | SafeCommandTx::ApplySettings { .. }
             | SafeCommandTx::WifiScan
     )
 }
@@ -137,34 +141,10 @@ impl Execute for Handles {
             SafeCommandTx::CloseFileSession { session_id } => {
                 files::close_session(action.id, &self.filebrowser, session_id).await
             }
-            SafeCommandTx::ReportSettings => match settings::read_now().await {
-                Some(report) => SafeCommandResponse {
-                    id: action.id,
-                    command: SafeCommandRx::ReportSettings {
-                        report: Box::new(report),
-                    },
-                    status: 0,
-                },
-                None => SafeCommandResponse {
-                    id: action.id,
-                    command: SafeCommandRx::ReportSettings {
-                        report: Default::default(),
-                    },
-                    status: -1,
-                },
-            },
-            // Understood but not applied by this build yet: answered like an
-            // unknown command, so the command history shows why nothing changed.
-            SafeCommandTx::ApplySettings { version, .. } => {
-                warn!(
-                    command_id = action.id,
-                    version, "ApplySettings is not supported by this smithd yet; upgrade smithd"
-                );
-                SafeCommandResponse {
-                    id: action.id,
-                    command: SafeCommandRx::Unknown,
-                    status: -1,
-                }
+            SafeCommandTx::ReportSettings => self.settings.report(action.id).await,
+            // Later commands wait behind the apply, which can take minutes when it reverts.
+            SafeCommandTx::ApplySettings { version, settings } => {
+                self.settings.apply(action.id, version, settings).await
             }
             // Issued by a newer api than this daemon understands. Report a
             // failure so the operator sees why the command did nothing instead
@@ -461,6 +441,10 @@ mod tests {
         assert!(changes_network(&SafeCommandTx::ApplyNetworks {
             version: 1,
             networks: Vec::new(),
+        }));
+        assert!(changes_network(&SafeCommandTx::ApplySettings {
+            version: 1,
+            settings: Default::default(),
         }));
         assert!(!changes_network(&SafeCommandTx::Ping));
         assert!(!changes_network(&SafeCommandTx::ReportNMProfiles));

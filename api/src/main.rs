@@ -83,6 +83,7 @@ pub struct State {
     device_jwt_signer: DeviceJwtSigner,
     upload_permits: Arc<Semaphore>,
     home_permits: Arc<Semaphore>,
+    home_cache: Arc<smith::HomeCache>,
 }
 
 // Below the pool's max_connections, so /home posts alone cannot exhaust the pool.
@@ -257,6 +258,7 @@ async fn start_main_server(
         device_jwt_signer,
         upload_permits: Arc::new(Semaphore::new(config.max_concurrent_uploads)),
         home_permits: Arc::new(Semaphore::new(HOME_PERMITS)),
+        home_cache: Arc::new(smith::HomeCache::new()),
     };
 
     // An unreachable device cannot report its own absence, so downtime has to be
@@ -273,6 +275,10 @@ async fn start_main_server(
     network::gc::spawn_sweeper(state.pg_pool.clone(), config.network_gc_interval_seconds);
 
     let recorder_handle = metric::setup_metrics_recorder();
+    metric::spawn_upload_permits_reporter(
+        state.upload_permits.clone(),
+        config.max_concurrent_uploads,
+    );
 
     let mut api_doc = ApiDoc::openapi();
 
@@ -355,6 +361,7 @@ async fn start_main_server(
             ip_address::route::get_ip_address_info,
             ip_address::route::update_ip_address
         ))
+        .routes(routes!(ip_address::route::update_download_limit))
         .routes(routes!(release::route::get_releases))
         .routes(routes!(
             release::route::get_release,
@@ -505,7 +512,8 @@ async fn start_main_server(
                 }))
                 .layer(RequestDecompressionLayer::new()),
         )
-        .layer(DefaultBodyLimit::max(512000000));
+        .layer(DefaultBodyLimit::max(512000000))
+        .layer(middleware::from_fn(middlewares::server_timing::record));
 
     let (ws_router, _ws_api) = OpenApiRouter::with_openapi(ApiDoc::openapi())
         .routes(routes!(logstream::dashboard_logs_ws))

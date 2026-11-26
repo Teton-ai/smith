@@ -34,6 +34,8 @@ pub struct Proc {
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct NetworkItem {
     pub ips: Vec<String>,
+    /// Permanent hardware address for Wi-Fi; active address for other interfaces.
+    /// `Unknown` when unavailable.
     pub mac_address: String,
     /// Addresses with their prefix, e.g. `192.168.1.23/24`. Empty on older smithd versions.
     #[serde(default)]

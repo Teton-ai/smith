@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT\n            COUNT(*) FILTER (\n                WHERE id <> $2\n                  AND download_slot_release_id = target_release_id\n                  AND download_slot_at >= COALESCE(target_release_id_set_at, '-infinity')\n                  AND release_id IS DISTINCT FROM target_release_id\n                  AND (last_ping > NOW() - INTERVAL '5 minutes'\n                       OR download_slot_at > NOW() - INTERVAL '5 minutes')\n                  AND download_slot_at > NOW() - INTERVAL '2 hours'\n            ) AS \"holders!\",\n            COUNT(*) FILTER (WHERE last_ping > NOW() - INTERVAL '1 day') AS \"active!\"\n        FROM device\n        WHERE ip_address_id = $1 AND archived = false",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "holders!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "active!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int4"
+      ]
+    },
+    "nullable": [
+      null,
+      null
+    ]
+  },
+  "hash": "671ff1b8eaffd99df5ac2a20faa25559dfab48523e303b5c16cb0fd5f7428d32"
+}

@@ -13,6 +13,10 @@ The **WiFi** panel on a device's **Network** tab shows three things, from most p
 
 Profiles and scan describe what is true on the device. Intent is what you want to be true. Nothing you do to the intent list reaches the device until you apply it.
 
+## Device MAC address
+
+The Network tab and API report the WiFi interface's permanent hardware MAC address, including while disconnected. This keeps the address stable when the adapter uses randomized addresses to scan for networks. Scan randomization is unaffected. If the permanent address cannot be read, Smith reports `Unknown`.
+
 ## Profiles
 
 A profile is a saved NetworkManager WiFi connection on the device. The **Configured profiles** list shows, for each one:

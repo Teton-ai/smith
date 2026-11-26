@@ -114,6 +114,14 @@ fn parse_search_terms(search: &str) -> Vec<String> {
         .collect()
 }
 
+fn exact_serial_numbers(serial_numbers: &[String]) -> Vec<String> {
+    serial_numbers
+        .iter()
+        .filter(|serial_number| !serial_number.is_empty())
+        .cloned()
+        .collect()
+}
+
 #[utoipa::path(
     get,
     path = "/devices",
@@ -149,6 +157,7 @@ pub async fn get_devices(
     let sort_labels_desc = matches!(filter.sort, Some(DeviceSortField::Labels))
         && matches!(filter.order, Some(DeviceSortDirection::Desc));
     let search_terms = parse_search_terms(filter.search.as_deref().unwrap_or(""));
+    let serial_numbers = exact_serial_numbers(&filter.serial_number);
 
     #[allow(deprecated)]
     let devices = sqlx::query!(
@@ -187,6 +196,7 @@ pub async fn get_devices(
             ip.hosting as "ip_hosting?",
             ip.created_at as "ip_created_at?",
             ip.updated_at as "ip_updated_at?",
+            ip.max_concurrent_downloads as "ip_max_concurrent_downloads?",
             m.id as "modem_id_nested?",
             m.imei as "modem_imei?",
             m.network_provider as "modem_network_provider?",
@@ -243,7 +253,7 @@ pub async fn get_devices(
         LEFT JOIN device_settings_reported dsr ON dsr.device_id = d.id
         LEFT JOIN device_label dl ON dl.device_id = d.id
         LEFT JOIN label l ON l.id = dl.label_id
-        WHERE ($1::text IS NULL OR d.serial_number = $1)
+        WHERE (CARDINALITY($1::text[]) = 0 OR d.serial_number = ANY($1))
           AND ($2::boolean IS NULL OR d.approved = $2)
           AND (COALESCE($3, false) = true OR d.archived = false)
           -- A subquery, not a filter on the joined rows, so every label of a
@@ -318,7 +328,7 @@ pub async fn get_devices(
         LIMIT $8
         OFFSET $9
         "#,
-        filter.serial_number,
+        serial_numbers.as_slice(),
         filter.approved,
         filter.archived,
         filter.labels.as_slice(),
@@ -374,6 +384,7 @@ pub async fn get_devices(
                     proxy: row.ip_proxy,
                     hosting: row.ip_hosting,
                     device_count: None,
+                    max_concurrent_downloads: row.ip_max_concurrent_downloads,
                     created_at: row.ip_created_at.unwrap(),
                     updated_at: row.ip_updated_at.unwrap(),
                 })
@@ -1920,10 +1931,30 @@ pub async fn update_devices_target_release(
         error!("Failed to update target release id for devices; {err}");
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
+    let needs_deployment = sqlx::query_scalar!(
+        r#"SELECT EXISTS (
+            SELECT 1 FROM device
+            WHERE id = ANY($1) AND release_id IS DISTINCT FROM $2
+        ) AS "needs_deployment!""#,
+        &devices_release.devices,
+        target_release_id
+    )
+    .fetch_one(&mut *tx)
+    .await
+    .map_err(|err| {
+        error!("Failed to check whether devices need deployment: {err}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
     tx.commit().await.map_err(|err| {
         error!("Failed to commit target release update for devices; {err}");
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
+
+    // Assigning the installed release does not deploy anything. This also
+    // covers clients acting on stale state after approval filled in the target.
+    if !needs_deployment {
+        return Ok(StatusCode::OK);
+    }
 
     // Send Slack alert for direct bulk device deployment
     if let Some(deployment_slack_hook_url) = &state.config.deployment_slack_hook_url {
@@ -2148,6 +2179,7 @@ pub async fn load_device_info(
         ip.hosting as "ip_hosting?",
         ip.created_at as "ip_created_at?",
         ip.updated_at as "ip_updated_at?",
+        ip.max_concurrent_downloads as "ip_max_concurrent_downloads?",
         m.id as "modem_id_nested?",
         m.imei as "modem_imei?",
         m.network_provider as "modem_network_provider?",
@@ -2200,13 +2232,7 @@ pub async fn load_device_info(
         LEFT JOIN device_network dn ON d.id = dn.device_id
         LEFT JOIN device_label dl ON dl.device_id = d.id
         LEFT JOIN label l ON l.id = dl.label_id
-        WHERE
-            CASE
-                WHEN $2::int4 IS NOT NULL THEN
-                    d.id = $2
-                ELSE
-                    d.serial_number = $1
-            END
+        WHERE d.id = COALESCE($2::int4, (SELECT id FROM device WHERE serial_number = $1))
         GROUP BY d.id, ip.id, m.id, r.id, rd.id, tr.id, trd.id, dn.device_id
         "#,
         device_id,
@@ -2246,6 +2272,7 @@ pub async fn load_device_info(
             proxy: device_row.ip_proxy,
             hosting: device_row.ip_hosting,
             device_count: None,
+            max_concurrent_downloads: device_row.ip_max_concurrent_downloads,
             created_at: device_row.ip_created_at.unwrap(),
             updated_at: device_row.ip_updated_at.unwrap(),
         })
@@ -2679,6 +2706,7 @@ pub async fn delete_label(
 struct DeviceApproval {
     serial_number: String,
     newly_approved: bool,
+    release_assigned: bool,
 }
 
 /// Attribution belongs to whoever actually approved the device, so repeat calls
@@ -2706,9 +2734,12 @@ async fn record_device_approval(
         .await?;
     }
 
+    let release_assigned = super::initialize_approved_target(tx, device_id).await?;
+
     Ok(DeviceApproval {
         serial_number: device.serial_number,
         newly_approved: !device.approved,
+        release_assigned,
     })
 }
 
@@ -2811,9 +2842,10 @@ pub async fn approve_device(
         })?;
     }
 
-    if let Some((class, text)) =
-        approval_ledger_entry(approval.newly_approved, target_release_id.is_some())
-    {
+    if let Some((class, text)) = approval_ledger_entry(
+        approval.newly_approved,
+        target_release_id.is_some() || approval.release_assigned,
+    ) {
         sqlx::query!(
             r#"INSERT INTO ledger (device_id, "class", "text", user_id) VALUES ($1, $2, $3, $4)"#,
             device_id,
@@ -4072,7 +4104,10 @@ pub async fn apply_device_intent(
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_search_terms, wire_credentials};
+    use super::{exact_serial_numbers, parse_search_terms, wire_credentials};
+    use axum::http::Request;
+    use axum_extra::extract::Query;
+    use models::device::DeviceFilter;
     use serde_json::json;
 
     // Mirrors the legacy inline heuristic in apply_device_intent exactly.
@@ -4187,6 +4222,43 @@ mod tests {
         assert_eq!(parse_search_terms(&search).len(), 50);
         assert_eq!(parse_search_terms(&search)[0], "0");
         assert_eq!(parse_search_terms(&search)[49], "49");
+    }
+
+    async fn device_filter(uri: &str) -> anyhow::Result<DeviceFilter> {
+        use axum::extract::FromRequestParts;
+
+        let (mut parts, ()) = Request::get(uri).body(())?.into_parts();
+        let Query(filter) = Query::<DeviceFilter>::from_request_parts(&mut parts, &()).await?;
+        Ok(filter)
+    }
+
+    #[tokio::test]
+    async fn serial_number_filter_repeats() -> anyhow::Result<()> {
+        let filter = device_filter("/devices?serial_number=a&serial_number=b").await?;
+        assert_eq!(filter.serial_number, vec!["a", "b"]);
+
+        let filter = device_filter("/devices?serial_number=a").await?;
+        assert_eq!(filter.serial_number, vec!["a"]);
+
+        let filter = device_filter("/devices").await?;
+        assert!(
+            filter.serial_number.is_empty(),
+            "no param means no serial filter"
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn empty_serial_number_disables_the_filter() -> anyhow::Result<()> {
+        let filter = device_filter("/devices?serial_number=").await?;
+        assert!(
+            exact_serial_numbers(&filter.serial_number).is_empty(),
+            "an empty serial_number lists every device, as it did before it became repeatable"
+        );
+
+        let filter = device_filter("/devices?serial_number=a&serial_number=").await?;
+        assert_eq!(exact_serial_numbers(&filter.serial_number), vec!["a"]);
+        Ok(())
     }
 }
 
@@ -4965,6 +5037,8 @@ mod follow_latest_updates {
 #[cfg(test)]
 mod approval_attribution {
     use super::{approval_ledger_entry, record_device_approval, visible_approver_email};
+    use crate::deployment::tests::insert_releases;
+    use crate::device::{get_target_release, save_release_id};
     use chrono::{DateTime, Utc};
     use sqlx::PgPool;
 
@@ -5021,6 +5095,54 @@ mod approval_attribution {
             Some(("release", "Release assigned."))
         );
         assert_eq!(approval_ledger_entry(false, false), None);
+    }
+
+    #[sqlx::test]
+    #[ignore = "needs Postgres with pg_partman; run with --test-threads=1"]
+    async fn approval_defaults_to_installed_release_without_replacing_targets(
+        pool: PgPool,
+    ) -> anyhow::Result<()> {
+        let [current, explicit] = insert_releases(&pool).await?;
+        let user = insert_user(&pool, "approver", None).await?;
+        for (serial, follows, target, expected) in [
+            ("new-pinned", false, None, Some(current)),
+            ("explicit-target", false, Some(explicit), Some(explicit)),
+            ("follows-latest", true, None, None),
+        ] {
+            let device = insert_device(&pool, serial).await?;
+            sqlx::query("UPDATE device SET release_id = $2, follow_latest = $3, target_release_id = $4 WHERE id = $1")
+                .bind(device).bind(current).bind(follows).bind(target).execute(&pool).await?;
+            approve(&pool, device, user).await?;
+            assert_eq!(get_target_release(device, &pool).await, expected);
+            let actual_follows: bool =
+                sqlx::query_scalar("SELECT follow_latest FROM device WHERE id = $1")
+                    .bind(device)
+                    .fetch_one(&pool)
+                    .await?;
+            assert_eq!(actual_follows, follows);
+        }
+        Ok(())
+    }
+
+    #[sqlx::test]
+    #[ignore = "needs Postgres with pg_partman; run with --test-threads=1"]
+    async fn first_release_report_completes_approval_target(pool: PgPool) -> anyhow::Result<()> {
+        let [current, next] = insert_releases(&pool).await?;
+        let user = insert_user(&pool, "approver", None).await?;
+        let device = insert_device(&pool, "approved-before-report").await?;
+        approve(&pool, device, user).await?;
+        assert_eq!(get_target_release(device, &pool).await, None);
+        save_release_id(device, Some(current), &pool).await?;
+        assert_eq!(get_target_release(device, &pool).await, Some(current));
+        save_release_id(device, Some(next), &pool).await?;
+        assert_eq!(get_target_release(device, &pool).await, Some(current));
+
+        let unapproved = insert_device(&pool, "report-before-approval").await?;
+        save_release_id(unapproved, Some(current), &pool).await?;
+        assert_eq!(get_target_release(unapproved, &pool).await, None);
+        approve(&pool, unapproved, user).await?;
+        assert_eq!(get_target_release(unapproved, &pool).await, Some(current));
+        Ok(())
     }
 
     #[sqlx::test]
