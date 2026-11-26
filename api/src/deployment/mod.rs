@@ -407,14 +407,16 @@ pub async fn new_deployment(
                 ) AS "healthy!"
             FROM device d
             JOIN release r ON d.release_id = r.id
-            LEFT JOIN device_network dn ON d.id = dn.device_id
+            -- Untested links can be too slow to canary; they still get the full rollout
+            JOIN device_network dn ON d.id = dn.device_id
             WHERE d.last_ping > NOW() - INTERVAL '3 minutes'
             AND d.release_id = d.target_release_id
             AND d.release_id <> $2
             AND d.follow_latest
             AND r.distribution_id = $1
+            AND dn.network_score IS NOT NULL
             ORDER BY
-                COALESCE(dn.network_score, 0) DESC,
+                dn.network_score DESC,
                 d.last_ping DESC
             "#,
             release.distribution_id,

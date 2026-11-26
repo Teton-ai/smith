@@ -127,6 +127,7 @@ A device is eligible for *automatic* canary selection when it is:
 - **Up-to-date** — currently running its target release (not mid-update).
 - **In the same distribution** — belongs to the distribution the release targets.
 - **Following latest** — `follow_latest` is true.
+- **Speed-tested** — it has a network speed test score. Devices that have never run a speed test are left out of the canary but still update during the full rollout.
 
 Explicit selection by device id or label ignores `follow_latest`: naming a device by hand is taken as deliberate, which is what lets a pinned lab bench still be used as a canary.
 
