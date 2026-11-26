@@ -23,8 +23,9 @@ pub async fn get_registration_counts(
         WHERE NOT EXISTS (
             SELECT 1 FROM device_label dl
             JOIN label l ON l.id = dl.label_id
-            WHERE dl.device_id = d.id
-            AND l.name || '=' || dl.value = ANY($1)
+            WHERE CARDINALITY($1::text[]) > 0
+              AND dl.device_id = d.id
+              AND l.name || '=' || dl.value = ANY($1)
         )
         GROUP BY DATE_TRUNC('month', created_on)
         ORDER BY DATE_TRUNC('month', created_on)
@@ -45,108 +46,48 @@ pub struct Dashboard {
 }
 
 impl Dashboard {
-    pub async fn new(pool: &PgPool, excluded_labels: &[String]) -> Self {
-        let total_count = sqlx::query_scalar!(
+    pub async fn new(pool: &PgPool, excluded_labels: &[String]) -> Result<Self, sqlx::Error> {
+        // Keep CARDINALITY($1) > 0 inside NOT EXISTS so empty arrays skip the
+        // anti-join via a one-time filter while non-empty arrays still use Hash Anti Join.
+        let row = sqlx::query!(
             r#"
-            SELECT COUNT(*) FROM device d
-            WHERE d.archived = false
-            AND NOT EXISTS (
+            SELECT
+                COUNT(*) FILTER (WHERE d.archived = false) AS "total_count!",
+                COUNT(*) FILTER (
+                    WHERE d.archived = false
+                      AND d.last_ping >= now() - INTERVAL '3 minutes'
+                ) AS "online_count!",
+                COUNT(*) FILTER (
+                    WHERE d.archived = false
+                      AND d.last_ping < now() - INTERVAL '3 minutes'
+                ) AS "offline_count!",
+                COUNT(*) FILTER (
+                    WHERE d.archived = false
+                      AND d.release_id != d.target_release_id
+                      AND NOT COALESCE(d.target_release_eligible_at > now(), false)
+                ) AS "outdated_count!",
+                COUNT(*) FILTER (WHERE d.archived = true) AS "archived_count!"
+            FROM device d
+            WHERE NOT EXISTS (
                 SELECT 1 FROM device_label dl
                 JOIN label l ON l.id = dl.label_id
-                WHERE dl.device_id = d.id
-                AND l.name || '=' || dl.value = ANY($1)
+                WHERE CARDINALITY($1::text[]) > 0
+                  AND dl.device_id = d.id
+                  AND l.name || '=' || dl.value = ANY($1)
             )
             "#,
             excluded_labels
         )
         .fetch_one(pool)
-        .await
-        .unwrap_or(Some(0))
-        .unwrap_or(0) as u32;
+        .await?;
 
-        let online_count = sqlx::query_scalar!(
-            r#"
-            SELECT COUNT(*) FROM device d
-            WHERE d.last_ping >= now() - INTERVAL '3 minutes'
-            AND d.archived = false
-            AND NOT EXISTS (
-                SELECT 1 FROM device_label dl
-                JOIN label l ON l.id = dl.label_id
-                WHERE dl.device_id = d.id
-                AND l.name || '=' || dl.value = ANY($1)
-            )
-            "#,
-            excluded_labels
-        )
-        .fetch_one(pool)
-        .await
-        .unwrap_or(Some(0))
-        .unwrap_or(0) as u32;
-
-        let offline_count = sqlx::query_scalar!(
-            r#"
-            SELECT COUNT(*) FROM device d
-            WHERE d.last_ping < now() - INTERVAL '3 minutes'
-            AND d.archived = false
-            AND NOT EXISTS (
-                SELECT 1 FROM device_label dl
-                JOIN label l ON l.id = dl.label_id
-                WHERE dl.device_id = d.id
-                AND l.name || '=' || dl.value = ANY($1)
-            )
-            "#,
-            excluded_labels
-        )
-        .fetch_one(pool)
-        .await
-        .unwrap_or(Some(0))
-        .unwrap_or(0) as u32;
-
-        let outdated_count = sqlx::query_scalar!(
-            r#"
-            SELECT COUNT(*) FROM device d
-            WHERE d.release_id != d.target_release_id
-            AND NOT COALESCE(d.target_release_eligible_at > now(), false)
-            AND d.archived = false
-            AND NOT EXISTS (
-                SELECT 1 FROM device_label dl
-                JOIN label l ON l.id = dl.label_id
-                WHERE dl.device_id = d.id
-                AND l.name || '=' || dl.value = ANY($1)
-            )
-            "#,
-            excluded_labels
-        )
-        .fetch_one(pool)
-        .await
-        .unwrap_or(Some(0))
-        .unwrap_or(0) as u32;
-
-        let archived_count = sqlx::query_scalar!(
-            r#"
-            SELECT COUNT(*) FROM device d
-            WHERE d.archived = true
-            AND NOT EXISTS (
-                SELECT 1 FROM device_label dl
-                JOIN label l ON l.id = dl.label_id
-                WHERE dl.device_id = d.id
-                AND l.name || '=' || dl.value = ANY($1)
-            )
-            "#,
-            excluded_labels
-        )
-        .fetch_one(pool)
-        .await
-        .unwrap_or(Some(0))
-        .unwrap_or(0) as u32;
-
-        Self {
-            total_count,
-            online_count,
-            offline_count,
-            outdated_count,
-            archived_count,
-        }
+        Ok(Self {
+            total_count: u32::try_from(row.total_count).unwrap_or(0),
+            online_count: u32::try_from(row.online_count).unwrap_or(0),
+            offline_count: u32::try_from(row.offline_count).unwrap_or(0),
+            outdated_count: u32::try_from(row.outdated_count).unwrap_or(0),
+            archived_count: u32::try_from(row.archived_count).unwrap_or(0),
+        })
     }
 }
 
@@ -186,8 +127,9 @@ pub async fn get_unhealthy_service_devices(
           AND NOT EXISTS (
               SELECT 1 FROM device_label dl
               JOIN label l ON l.id = dl.label_id
-              WHERE dl.device_id = d.id
-              AND l.name || '=' || dl.value = ANY($1)
+              WHERE CARDINALITY($1::text[]) > 0
+                AND dl.device_id = d.id
+                AND l.name || '=' || dl.value = ANY($1)
           )
         ORDER BY d.serial_number, rs.service_name
         "#,

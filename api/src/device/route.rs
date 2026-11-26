@@ -161,7 +161,91 @@ pub async fn get_devices(
 
     #[allow(deprecated)]
     let devices = sqlx::query!(
-        r#"SELECT
+        r#"WITH matched AS (
+            SELECT
+                d.id,
+                -- Evaluated over all matching rows before LIMIT/OFFSET so the
+                -- caller gets the full filtered count without joining detail
+                -- tables or aggregating labels for off-page devices.
+                COUNT(*) OVER () as total_count
+            FROM device d
+            -- One-time filter skips device_settings_reported when search is empty,
+            -- and fetches hostname once per device (not per search term) when non-empty.
+            LEFT JOIN device_settings_reported dsr
+                ON CARDINALITY($10::text[]) > 0 AND dsr.device_id = d.id
+            WHERE (CARDINALITY($1::text[]) = 0 OR d.serial_number = ANY($1))
+              AND ($2::boolean IS NULL OR d.approved = $2)
+              AND (COALESCE($3, false) = true OR d.archived = false)
+              AND (CARDINALITY($4::text[]) = 0 OR EXISTS (
+                  SELECT 1 FROM device_label fdl
+                  JOIN label fl ON fl.id = fdl.label_id
+                  WHERE fdl.device_id = d.id
+                  AND fl.name || '=' || fdl.value = ANY($4)
+              ))
+              AND ($5::boolean IS NULL OR
+                   ($5 = true AND d.last_ping >= now() - INTERVAL '3 minutes') OR
+                   ($5 = false AND d.last_ping < now() - INTERVAL '3 minutes'))
+              AND ($6::boolean IS NULL OR
+                   -- A device waiting for its staggered bucket is scheduled, not outdated.
+                   ($6 = true AND d.release_id != d.target_release_id
+                       AND NOT COALESCE(d.target_release_eligible_at > now(), false)) OR
+                   ($6 = false AND d.release_id = d.target_release_id))
+              -- Measured from when the device was allowed to move: a device that
+              -- waited for its staggered bucket isn't late for that time.
+              AND ($12::bigint IS NULL OR
+                   COALESCE(d.target_release_eligible_at, d.target_release_id_set_at)
+                       <= now() - make_interval(mins => $12::int))
+              AND NOT EXISTS (
+                  SELECT 1 FROM device_label edl
+                  JOIN label el ON el.id = edl.label_id
+                  WHERE CARDINALITY($7::text[]) > 0
+                    AND edl.device_id = d.id
+                    AND el.name || '=' || edl.value = ANY($7)
+              )
+              AND (CARDINALITY($10::text[]) = 0 OR EXISTS (
+                  SELECT 1 FROM unnest($10::text[]) AS term
+                  WHERE POSITION(LOWER(term) IN LOWER(d.serial_number)) > 0
+                     -- The settings report holds the hostname; system_info is the
+                     -- fallback for devices on a smithd without settings reporting.
+                     OR POSITION(LOWER(term) IN LOWER(COALESCE(dsr.hostname, d.system_info->>'hostname', ''))) > 0
+                     OR POSITION(LOWER(term) IN LOWER(COALESCE(d.system_info->'device_tree'->>'model', ''))) > 0
+              ))
+              AND ($11::int IS NULL OR d.release_id = $11)
+              AND ($13::int IS NULL OR EXISTS (
+                  SELECT 1 FROM release fr
+                  WHERE fr.id = d.release_id AND fr.distribution_id = $13
+              ))
+              AND ($14::boolean IS NULL OR
+                   ($14 = true AND EXISTS (
+                       SELECT 1 FROM device_service_status dss
+                       JOIN release_services rs ON rs.id = dss.release_service_id
+                       WHERE dss.device_id = d.id
+                         AND rs.release_id = d.release_id
+                         AND rs.watchdog_sec IS NOT NULL
+                         AND dss.active_state != 'active'
+                   )))
+              AND ($19::boolean IS NULL OR d.follow_latest = $19)
+            ORDER BY
+                CASE WHEN $15 THEN d.serial_number END ASC NULLS LAST,
+                CASE WHEN $16 THEN d.serial_number END DESC NULLS LAST,
+                CASE WHEN $17 THEN (
+                    SELECT MIN(l2.name || '=' || dl2.value)
+                    FROM device_label dl2
+                    JOIN label l2 ON l2.id = dl2.label_id
+                    WHERE dl2.device_id = d.id
+                ) END ASC NULLS LAST,
+                CASE WHEN $18 THEN (
+                    SELECT MIN(l2.name || '=' || dl2.value)
+                    FROM device_label dl2
+                    JOIN label l2 ON l2.id = dl2.label_id
+                    WHERE dl2.device_id = d.id
+                ) END DESC NULLS LAST,
+                d.last_ping DESC NULLS LAST,
+                d.serial_number
+            LIMIT $8
+            OFFSET $9
+        )
+        SELECT
             d.id,
             d.serial_number,
             d.note,
@@ -238,11 +322,18 @@ pub async fn get_devices(
             d.intent_version,
             d.observed_intent_version,
             d.network_conditions,
-            COALESCE(JSONB_OBJECT_AGG(l.name, dl.value) FILTER (WHERE l.name IS NOT NULL), '{}') as "labels!: SqlxJson<HashMap<String, String>>",
-            -- Evaluated after GROUP BY but before LIMIT/OFFSET, so this counts
-            -- every device matching the filter, not just the ones on this page.
-            COUNT(*) OVER () as "total_count!"
-        FROM device d
+            COALESCE(
+                (
+                    SELECT JSONB_OBJECT_AGG(l.name, dl.value) FILTER (WHERE l.name IS NOT NULL)
+                    FROM device_label dl
+                    JOIN label l ON l.id = dl.label_id
+                    WHERE dl.device_id = d.id
+                ),
+                '{}'::jsonb
+            ) as "labels!: SqlxJson<HashMap<String, String>>",
+            matched.total_count as "total_count!"
+        FROM matched
+        JOIN device d ON d.id = matched.id
         LEFT JOIN ip_address ip ON d.ip_address_id = ip.id
         LEFT JOIN modem m ON d.modem_id = m.id
         LEFT JOIN release r ON d.release_id = r.id
@@ -250,67 +341,9 @@ pub async fn get_devices(
         LEFT JOIN release tr ON d.target_release_id = tr.id
         LEFT JOIN distribution trd ON tr.distribution_id = trd.id
         LEFT JOIN device_network dn ON d.id = dn.device_id
-        LEFT JOIN device_settings_reported dsr ON dsr.device_id = d.id
-        LEFT JOIN device_label dl ON dl.device_id = d.id
-        LEFT JOIN label l ON l.id = dl.label_id
-        WHERE (CARDINALITY($1::text[]) = 0 OR d.serial_number = ANY($1))
-          AND ($2::boolean IS NULL OR d.approved = $2)
-          AND (COALESCE($3, false) = true OR d.archived = false)
-          -- A subquery, not a filter on the joined rows, so every label of a
-          -- matching device still reaches the aggregate.
-          AND (CARDINALITY($4::text[]) = 0 OR EXISTS (
-              SELECT 1 FROM device_label fdl
-              JOIN label fl ON fl.id = fdl.label_id
-              WHERE fdl.device_id = d.id
-              AND fl.name || '=' || fdl.value = ANY($4)
-          ))
-          AND ($5::boolean IS NULL OR
-               ($5 = true AND d.last_ping >= now() - INTERVAL '3 minutes') OR
-               ($5 = false AND d.last_ping < now() - INTERVAL '3 minutes'))
-          AND ($6::boolean IS NULL OR
-               -- A device waiting for its staggered bucket is scheduled, not outdated.
-               ($6 = true AND d.release_id != d.target_release_id
-                   AND NOT COALESCE(d.target_release_eligible_at > now(), false)) OR
-               ($6 = false AND d.release_id = d.target_release_id))
-          -- Measured from when the device was allowed to move: a device that
-          -- waited for its staggered bucket isn't late for that time.
-          AND ($12::bigint IS NULL OR
-               COALESCE(d.target_release_eligible_at, d.target_release_id_set_at)
-                   <= now() - make_interval(mins => $12::int))
-          AND (CARDINALITY($7::text[]) = 0 OR NOT EXISTS (
-              SELECT 1 FROM device_label edl
-              JOIN label el ON el.id = edl.label_id
-              WHERE edl.device_id = d.id
-              AND el.name || '=' || edl.value = ANY($7)
-          ))
-          AND (CARDINALITY($10::text[]) = 0 OR EXISTS (
-              SELECT 1 FROM unnest($10::text[]) AS term
-              WHERE POSITION(LOWER(term) IN LOWER(d.serial_number)) > 0
-                 -- The settings report holds the hostname; system_info is the
-                 -- fallback for devices on a smithd without settings reporting.
-                 OR POSITION(LOWER(term) IN LOWER(COALESCE(dsr.hostname, d.system_info->>'hostname', ''))) > 0
-                 OR POSITION(LOWER(term) IN LOWER(COALESCE(d.system_info->'device_tree'->>'model', ''))) > 0
-          ))
-          AND ($11::int IS NULL OR d.release_id = $11)
-          AND ($13::int IS NULL OR rd.id = $13)
-          AND ($14::boolean IS NULL OR
-               ($14 = true AND EXISTS (
-                   SELECT 1 FROM device_service_status dss
-                   JOIN release_services rs ON rs.id = dss.release_service_id
-                   WHERE dss.device_id = d.id
-                     AND rs.release_id = d.release_id
-                     AND rs.watchdog_sec IS NOT NULL
-                     AND dss.active_state != 'active'
-               )))
-          AND ($19::boolean IS NULL OR d.follow_latest = $19)
-        GROUP BY d.id, ip.id, m.id, r.id, rd.id, tr.id, trd.id, dn.device_id
         ORDER BY
             CASE WHEN $15 THEN d.serial_number END ASC NULLS LAST,
             CASE WHEN $16 THEN d.serial_number END DESC NULLS LAST,
-            -- Correlated subquery, not the outer dl/l join: an active label
-            -- filter (see $4 above) restricts that join to matching rows
-            -- only, which would make every filtered device tie on the same
-            -- filtered label instead of sorting by its actual first label.
             CASE WHEN $17 THEN (
                 SELECT MIN(l2.name || '=' || dl2.value)
                 FROM device_label dl2
@@ -325,8 +358,6 @@ pub async fn get_devices(
             ) END DESC NULLS LAST,
             d.last_ping DESC NULLS LAST,
             d.serial_number
-        LIMIT $8
-        OFFSET $9
         "#,
         serial_numbers.as_slice(),
         filter.approved,
