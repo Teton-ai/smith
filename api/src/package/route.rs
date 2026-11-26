@@ -192,10 +192,16 @@ pub async fn stream_package_from_s3(
     file_name: &str,
     config: &Config,
 ) -> Result<Response, Response> {
-    let region = config.aws_region.parse().map_err(|e| {
-        error!("Failed to parse AWS region: {:?}", e);
-        StatusCode::INTERNAL_SERVER_ERROR.into_response()
-    })?;
+    let region = match std::env::var("AWS_ENDPOINT") {
+        Ok(endpoint) => s3::Region::Custom {
+            region: config.aws_region.clone(),
+            endpoint,
+        },
+        Err(_) => config.aws_region.parse().map_err(|e| {
+            error!("Failed to parse AWS region: {:?}", e);
+            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+        })?,
+    };
     let bucket = Storage::bucket_in_region(&config.packages_bucket_name, region)
         .await
         .map_err(|e| {
