@@ -26,7 +26,7 @@ pub fn setup_metrics_recorder() -> PrometheusHandle {
         1_073_741_824.0,
     ];
 
-    PrometheusBuilder::new()
+    let handle = PrometheusBuilder::new()
         .set_buckets_for_metric(
             Matcher::Full("http_requests_duration_seconds".to_string()),
             EXPONENTIAL_SECONDS,
@@ -38,7 +38,12 @@ pub fn setup_metrics_recorder() -> PrometheusHandle {
         )
         .expect("error: failed to build prometheus recorder")
         .install_recorder()
-        .expect("error: failed to install prometheus recorder")
+        .expect("error: failed to install prometheus recorder");
+
+    metrics::register_counter!("smith_home_rejected_total", "reason" => "queue_full");
+    metrics::register_counter!("smith_home_rejected_total", "reason" => "wait_timeout");
+
+    handle
 }
 
 pub async fn track_metrics(req: Request, next: Next) -> impl IntoResponse {

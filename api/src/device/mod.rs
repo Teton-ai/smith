@@ -904,22 +904,37 @@ async fn update_device_ping_with_ip(
     ip_id: i64,
     pool: &PgPool,
 ) -> anyhow::Result<()> {
-    let mut tx = pool.begin().await?;
-
-    // The CTE reads the pre-UPDATE snapshot, so this hands back both the
-    // ping timestamp being replaced and whether the gap was long enough
-    // to have been recorded as an outage — decided on the database
-    // clock, with no extra round trip. For a device pinging on cadence
-    // nothing further runs, which matters at hundreds of pings/sec.
-    let ping = sqlx::query!(
+    // Fast path for non-stale pings: one autocommit UPDATE without BEGIN/COMMIT.
+    // Stale devices match 0 rows here so last_ping is never updated without
+    // atomically closing/recording the outage in the fallback transaction.
+    let updated = sqlx::query!(
         r#"
-        WITH prev AS (SELECT last_ping FROM device WHERE id = $1)
         UPDATE device SET last_ping = NOW(), ip_address_id = $2
         WHERE id = $1
+          AND NOT COALESCE(last_ping < NOW() - make_interval(secs => $3::double precision), FALSE)
+        "#,
+        device_id,
+        ip_id,
+        DOWNTIME_STALE_AFTER_SECS,
+    )
+    .execute(pool)
+    .await?;
+    if updated.rows_affected() > 0 {
+        return Ok(());
+    }
+
+    let mut tx = pool.begin().await?;
+    let ping = sqlx::query!(
+        r#"
+        WITH prev AS (
+            SELECT id, last_ping FROM device WHERE id = $1 FOR NO KEY UPDATE
+        )
+        UPDATE device d SET last_ping = NOW(), ip_address_id = $2
+        FROM prev
+        WHERE d.id = prev.id
         RETURNING
-            (SELECT last_ping FROM prev) AS previous_last_ping,
-            (SELECT last_ping < NOW() - make_interval(secs => $3::double precision)
-             FROM prev) AS was_stale
+            prev.last_ping AS previous_last_ping,
+            (prev.last_ping < NOW() - make_interval(secs => $3::double precision)) AS was_stale
         "#,
         device_id,
         ip_id,
@@ -1025,17 +1040,34 @@ pub async fn save_last_ping_with_ip(
 /// Split out of `save_last_ping_with_ip` so tests can drive the real ping path
 /// without building a `Config`, which only the IP branch reads.
 async fn record_ping_without_ip(device_id: i32, pool: &PgPool) -> anyhow::Result<()> {
+    let updated = sqlx::query!(
+        r#"
+        UPDATE device SET last_ping = NOW()
+        WHERE id = $1
+          AND NOT COALESCE(last_ping < NOW() - make_interval(secs => $2::double precision), FALSE)
+        "#,
+        device_id,
+        DOWNTIME_STALE_AFTER_SECS,
+    )
+    .execute(pool)
+    .await?;
+    if updated.rows_affected() > 0 {
+        return Ok(());
+    }
+
     let mut tx = pool.begin().await?;
     let ping = sqlx::query!(
         r#"
-                WITH prev AS (SELECT last_ping FROM device WHERE id = $1)
-                UPDATE device SET last_ping = NOW()
-                WHERE id = $1
-                RETURNING
-                    (SELECT last_ping FROM prev) AS previous_last_ping,
-                    (SELECT last_ping < NOW() - make_interval(secs => $2::double precision)
-                     FROM prev) AS was_stale
-                "#,
+        WITH prev AS (
+            SELECT id, last_ping FROM device WHERE id = $1 FOR NO KEY UPDATE
+        )
+        UPDATE device d SET last_ping = NOW()
+        FROM prev
+        WHERE d.id = prev.id
+        RETURNING
+            prev.last_ping AS previous_last_ping,
+            (prev.last_ping < NOW() - make_interval(secs => $2::double precision)) AS was_stale
+        "#,
         device_id,
         DOWNTIME_STALE_AFTER_SECS,
     )
@@ -1072,7 +1104,9 @@ pub struct DevicePollState {
     download_slot_at: Option<DateTime<Utc>>,
     ip_address_id: Option<i64>,
     pub settings_version: i32,
+    pub approved: bool,
     pub archived: bool,
+    pub has_token: bool,
     now: DateTime<Utc>,
 }
 
@@ -1086,6 +1120,14 @@ impl DevicePollState {
                 (Some(_), None) => true,
                 (None, _) => false,
             }
+    }
+
+    pub fn is_active(&self) -> bool {
+        self.approved && !self.archived && self.has_token
+    }
+
+    pub fn ip_address_id(&self) -> Option<i64> {
+        self.ip_address_id
     }
 
     pub fn needs_auto_apply_settings(&self) -> bool {
@@ -1201,26 +1243,23 @@ async fn try_take_download_slot(
 }
 
 /// Loads the fields `/smith/home` needs from `device` in a single PK lookup so
-/// settings auto-apply, target release selection, and release-id persistence do
-/// not re-read the same row.
-pub async fn load_device_poll_state(device_id: i32, pool: &PgPool) -> Option<DevicePollState> {
-    match sqlx::query_as!(
+/// active-device checks, settings auto-apply, target release selection, and
+/// release-id persistence do not re-read the same row.
+pub async fn load_device_poll_state(
+    device_id: i32,
+    pool: &PgPool,
+) -> Result<Option<DevicePollState>, sqlx::Error> {
+    sqlx::query_as!(
         DevicePollState,
         r#"SELECT release_id, target_release_id, target_release_id_set_at,
             target_release_eligible_at, download_slot_release_id, download_slot_at,
-            ip_address_id, settings_version, archived, NOW() AS "now!"
+            ip_address_id, settings_version, approved, archived,
+            (token IS NOT NULL) AS "has_token!", NOW() AS "now!"
         FROM device WHERE id = $1"#,
         device_id
     )
-    .fetch_one(pool)
+    .fetch_optional(pool)
     .await
-    {
-        Ok(row) => Some(row),
-        Err(err) => {
-            tracing::error!(device_id, "Failed to load device poll state: {err:?}");
-            None
-        }
-    }
 }
 
 /// Resolves the target release from an already-loaded `DevicePollState`.
@@ -1228,6 +1267,7 @@ pub async fn resolve_target_release(
     device_id: i32,
     row: &DevicePollState,
     pool: &PgPool,
+    cache: Option<&crate::smith::HomeCache>,
 ) -> Option<i32> {
     match decide_target(row) {
         TargetDecision::Answer(answer) => answer,
@@ -1235,14 +1275,36 @@ pub async fn resolve_target_release(
             ip_address_id,
             target,
             current,
-        } => match try_take_download_slot(pool, device_id, ip_address_id, target).await {
-            Ok(true) => Some(target),
-            Ok(false) => Some(current),
-            Err(err) => {
-                tracing::error!(device_id, "Failed to take a download slot: {err:?}");
-                Some(current)
+        } => {
+            if cache.is_some_and(|c| c.is_download_slot_full(ip_address_id)) {
+                return Some(current);
             }
-        },
+            let _slot_guard = match cache {
+                Some(cache) => {
+                    let Some(guard) = cache.try_enter_download_slot_check(ip_address_id) else {
+                        return Some(current);
+                    };
+                    if cache.is_download_slot_full(ip_address_id) {
+                        return Some(current);
+                    }
+                    Some(guard)
+                }
+                None => None,
+            };
+            match try_take_download_slot(pool, device_id, ip_address_id, target).await {
+                Ok(true) => Some(target),
+                Ok(false) => {
+                    if let Some(cache) = cache {
+                        cache.mark_download_slot_full(ip_address_id);
+                    }
+                    Some(current)
+                }
+                Err(err) => {
+                    tracing::error!(device_id, "Failed to take a download slot: {err:?}");
+                    Some(current)
+                }
+            }
+        }
     }
 }
 
@@ -1250,8 +1312,8 @@ pub async fn resolve_target_release(
 /// slot cannot be decided the device is told to stay on its current release.
 #[cfg(test)]
 pub async fn get_target_release(device_id: i32, pool: &PgPool) -> Option<i32> {
-    let row = load_device_poll_state(device_id, pool).await?;
-    resolve_target_release(device_id, &row, pool).await
+    let row = load_device_poll_state(device_id, pool).await.ok()??;
+    resolve_target_release(device_id, &row, pool, None).await
 }
 
 /// Complete approval's default target once the installed release is known.
@@ -1935,12 +1997,12 @@ mod target_release_tests {
             .await?;
 
         let state = load_device_poll_state(device_id, &pool)
-            .await
+            .await?
             .ok_or_else(|| anyhow::anyhow!("poll state missing"))?;
         assert_eq!(state.release_id, Some(current));
         assert!(!state.needs_auto_apply_settings());
         assert_eq!(
-            resolve_target_release(device_id, &state, &pool).await,
+            resolve_target_release(device_id, &state, &pool, None).await,
             Some(target)
         );
 
@@ -1949,7 +2011,7 @@ mod target_release_tests {
             .execute(&pool)
             .await?;
         let state = load_device_poll_state(device_id, &pool)
-            .await
+            .await?
             .ok_or_else(|| anyhow::anyhow!("poll state missing"))?;
         assert!(state.needs_auto_apply_settings());
         Ok(())

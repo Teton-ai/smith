@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE device SET last_ping = NOW()\n        WHERE id = $1\n          AND NOT COALESCE(last_ping < NOW() - make_interval(secs => $2::double precision), FALSE)\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Float8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "3bf87610ef8b1d7876bb959677b369f6fcfc32b064bfc9802b11f223a747c691"
+}

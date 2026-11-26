@@ -21,10 +21,24 @@ use smith::utils::schema::{
 use std::convert::Infallible;
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::time::{Instant, SystemTime};
+use std::time::{Duration, Instant, SystemTime};
 use tokio_util::io::StreamReader;
 use tracing::{debug, error, info, warn};
 use utoipa::{IntoParams, ToSchema};
+
+/// Bounded wait for a `/smith/home` permit so brief reconnect bursts drain
+/// without shedding 503s, while genuine database overload still fails fast well
+/// inside smithd's 10 s timeout.
+const HOME_WAIT_TIMEOUT: Duration = Duration::from_millis(500);
+
+fn home_busy(reason: &'static str) -> Response {
+    metrics::increment_counter!("smith_home_rejected_total", "reason" => reason);
+    (
+        StatusCode::SERVICE_UNAVAILABLE,
+        [(header::RETRY_AFTER, "20")],
+    )
+        .into_response()
+}
 
 #[utoipa::path(
   post,
@@ -77,24 +91,30 @@ pub async fn home(
     body: Bytes,
 ) -> Response {
     // Shed before handler database work; opaque-token authentication may already query the pool.
-    let Ok(permit) = state.home_permits.clone().try_acquire_owned() else {
-        return (
-            StatusCode::SERVICE_UNAVAILABLE,
-            [(header::RETRY_AFTER, "20")],
-        )
-            .into_response();
+    let Ok(queue_permit) = state.home_queue_permits.try_acquire() else {
+        return home_busy("queue_full");
     };
-    // /home delivers queued commands, network secrets included, so a revoked or
-    // archived device must not keep getting them on a JWT minted before that.
-    // A 401 makes smithd refresh, which fails, and it then drops its token.
-    match device.is_active(&state.pg_pool).await {
-        Ok(true) => {}
-        Ok(false) => return StatusCode::UNAUTHORIZED.into_response(),
+    let Ok(Ok(permit)) = tokio::time::timeout(
+        HOME_WAIT_TIMEOUT,
+        state.home_permits.clone().acquire_owned(),
+    )
+    .await
+    else {
+        return home_busy("wait_timeout");
+    };
+    drop(queue_permit);
+
+    // One PK lookup checks active status (revoked/archived devices on a
+    // pre-existing JWT must be cut off before queued commands leave) and feeds
+    // settings auto-apply, target release, and release-id persistence.
+    let poll_state = match load_device_poll_state(device.id, &state.pg_pool).await {
+        Ok(Some(poll_state)) if poll_state.is_active() => poll_state,
+        Ok(_) => return StatusCode::UNAUTHORIZED.into_response(),
         Err(err) => {
-            error!("Failed to check device {} is active: {err}", device.id);
+            error!("Failed to load device {} poll state: {err}", device.id);
             return StatusCode::INTERNAL_SERVER_ERROR.into_response();
         }
-    }
+    };
     // Temporary diagnostic: axum's `Json<HomePost>` extractor rejects with 422
     // before the handler runs, and the raw body/error aren't logged anywhere,
     // making a payload mismatch invisible. Parse manually here so we can see
@@ -141,14 +161,10 @@ pub async fn home(
                 .into_response();
         }
     }
-    // One PK lookup feeds settings auto-apply, target release, and release-id persistence.
-    let poll_state = load_device_poll_state(device.id, &state.pg_pool).await;
 
     // Before fetching commands, so an automatic settings apply leaves with this
     // poll. Its errors are logged where they happen and never fail the poll.
-    if poll_state
-        .as_ref()
-        .is_none_or(|state| state.needs_auto_apply_settings())
+    if poll_state.needs_auto_apply_settings()
         && crate::device::settings::auto_apply_settings(&state.pg_pool, device.id)
             .await
             .is_err()
@@ -156,10 +172,13 @@ pub async fn home(
         error!(device_id = device.id, "Automatic settings apply failed");
     }
 
-    let target_release_id = match poll_state.as_ref() {
-        Some(device_state) => resolve_target_release(device.id, device_state, &state.pg_pool).await,
-        None => None,
-    };
+    let target_release_id = resolve_target_release(
+        device.id,
+        &poll_state,
+        &state.pg_pool,
+        Some(&state.home_cache),
+    )
+    .await;
 
     let services = if let Some(rid) = target_release_id.or(release_id) {
         if let Some(cached) = state.home_cache.get_release_services(rid) {
@@ -204,16 +223,21 @@ pub async fn home(
         services,
     };
 
-    let known_release_id = poll_state.and_then(|s| s.release_id);
+    let known_release_id = poll_state.release_id;
+    let known_ip_id = poll_state.ip_address_id();
     let client_ip = Some(extract_client_ip(&headers, addr));
     tokio::spawn(async move {
         // Held until the background writes finish so they count against the cap.
         let _permit = permit;
-        if release_id.is_some()
-            && release_id != known_release_id
-            && let Err(err) = save_release_id(device.id, release_id, &state.pg_pool).await
-        {
-            error!("Error saving release_id: {:?}", err);
+        if release_id.is_some() && release_id != known_release_id {
+            match save_release_id(device.id, release_id, &state.pg_pool).await {
+                Ok(()) => {
+                    if let Some(ip_id) = known_ip_id {
+                        state.home_cache.invalidate_download_slot_full(ip_id);
+                    }
+                }
+                Err(err) => error!("Error saving release_id: {:?}", err),
+            }
         }
         if let Err(err) = save_last_ping_with_ip(
             device.id,

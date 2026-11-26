@@ -5300,7 +5300,8 @@ mod approval_attribution {
 #[cfg(test)]
 mod device_revocation {
     use super::{record_device_approval, record_device_archival, record_device_revocation};
-    use crate::handlers::{AuthedDevice, device_by_opaque_token};
+    use crate::device::load_device_poll_state;
+    use crate::handlers::device_by_opaque_token;
     use axum::http::StatusCode;
     use sqlx::PgPool;
 
@@ -5334,11 +5335,9 @@ mod device_revocation {
     }
 
     async fn is_active(pool: &PgPool, id: i32) -> anyhow::Result<bool> {
-        let device = AuthedDevice {
-            id,
-            serial_number: String::new(),
-        };
-        Ok(device.is_active(pool).await?)
+        Ok(load_device_poll_state(id, pool)
+            .await?
+            .is_some_and(|state| state.is_active()))
     }
 
     async fn state(pool: &PgPool, id: i32) -> anyhow::Result<(bool, bool, Option<String>)> {

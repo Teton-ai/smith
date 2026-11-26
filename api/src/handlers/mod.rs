@@ -19,23 +19,6 @@ pub struct AuthedDevice {
     pub serial_number: String,
 }
 
-impl AuthedDevice {
-    /// JWTs are verified without the database, so one minted before a revoke
-    /// or archive stays valid until it expires. Handlers that hand the device
-    /// anything sensitive call this to cut it off right away instead.
-    pub async fn is_active(&self, pool: &sqlx::PgPool) -> Result<bool, sqlx::Error> {
-        sqlx::query_scalar!(
-            r#"SELECT EXISTS (
-                SELECT 1 FROM device
-                WHERE id = $1 AND approved AND NOT archived AND token IS NOT NULL
-            ) AS "active!""#,
-            self.id
-        )
-        .fetch_one(pool)
-        .await
-    }
-}
-
 /// A device authenticated by its long-lived opaque token only, never a JWT.
 /// Used to mint JWTs, so a JWT cannot be renewed with itself and outlive the
 /// token it came from.

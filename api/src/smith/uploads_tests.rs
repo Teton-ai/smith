@@ -65,6 +65,7 @@ fn test_state_with_cdn(pool: PgPool, cdn: Option<&str>) -> anyhow::Result<State>
         device_jwt_signer: signer,
         upload_permits: Arc::new(Semaphore::new(4)),
         home_permits: Arc::new(Semaphore::new(4)),
+        home_queue_permits: Arc::new(Semaphore::new(16)),
         home_cache: Arc::new(crate::smith::HomeCache::new()),
     })
 }

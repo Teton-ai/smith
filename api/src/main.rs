@@ -82,11 +82,14 @@ pub struct State {
     device_jwt_signer: DeviceJwtSigner,
     upload_permits: Arc<Semaphore>,
     home_permits: Arc<Semaphore>,
+    home_queue_permits: Arc<Semaphore>,
     home_cache: Arc<smith::HomeCache>,
 }
 
 // Below the pool's max_connections, so /home posts alone cannot exhaust the pool.
 const HOME_PERMITS: usize = 80;
+// Bounds queued /home waiters during reconnect bursts before instant 503 shedding.
+const HOME_MAX_WAITERS: usize = 320;
 
 fn main() {
     logging::init_logging();
@@ -257,6 +260,7 @@ async fn start_main_server(
         device_jwt_signer,
         upload_permits: Arc::new(Semaphore::new(config.max_concurrent_uploads)),
         home_permits: Arc::new(Semaphore::new(HOME_PERMITS)),
+        home_queue_permits: Arc::new(Semaphore::new(HOME_MAX_WAITERS)),
         home_cache: Arc::new(smith::HomeCache::new()),
     };
 
