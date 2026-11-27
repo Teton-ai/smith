@@ -329,7 +329,6 @@ const DeviceHeader: React.FC<DeviceHeaderProps> = ({ device, serial }) => {
 			},
 		});
 
-	const queryClient = useQueryClient();
 	const { mutate: revokeDevice, isPending: isRevoking } = useRevokeDevice({
 		mutation: {
 			onSuccess: () => {
