@@ -1,9 +1,9 @@
 use crate::State;
 use crate::deployment::{
-    Deployment, DeploymentDeviceWithStatus, DeviceServiceHealth, FinishNowResult, RollbackRequest,
-    RollbackResult, RolloutProgress, StaggerPolicy, confirm_full_rollout, finish_now,
-    get_deployment, get_deployment_service_health, get_devices_in_deployment, new_deployment,
-    rollback_release, rollout_progress, stagger_policy,
+    Deployment, DeploymentDeviceWithStatus, DeploymentWave, DeviceServiceHealth, FinishNowResult,
+    RollbackRequest, RollbackResult, RolloutProgress, StaggerPolicy, confirm_full_rollout,
+    finish_now, get_deployment, get_deployment_service_health, get_deployment_waves,
+    get_devices_in_deployment, new_deployment, rollback_release, rollout_progress, stagger_policy,
 };
 use crate::error::ApiError;
 use crate::user::CurrentUser;
@@ -82,11 +82,19 @@ pub async fn api_release_deployment(
     Ok(Json(release))
 }
 
+#[derive(Default, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
+pub struct DeploymentDevicesQuery {
+    /// Wave to list. Omit to list the initial group (wave 0).
+    pub wave: Option<i32>,
+}
+
 #[utoipa::path(
   get,
   path = "/releases/{release_id}/deployment/devices",
     params(
         ("release_id" = i32, Path),
+        DeploymentDevicesQuery,
     ),
   responses(
         (status = StatusCode::OK, body = Vec<DeploymentDeviceWithStatus>),
@@ -99,8 +107,9 @@ pub async fn api_release_deployment(
 pub async fn api_get_deployment_devices(
     Path(release_id): Path<i32>,
     Extension(state): Extension<State>,
+    Query(query): Query<DeploymentDevicesQuery>,
 ) -> Result<(StatusCode, Json<Vec<DeploymentDeviceWithStatus>>), StatusCode> {
-    let devices = get_devices_in_deployment(release_id, &state.pg_pool)
+    let devices = get_devices_in_deployment(release_id, query.wave.unwrap_or(0), &state.pg_pool)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     Ok((StatusCode::OK, Json(devices)))
@@ -283,6 +292,33 @@ pub async fn api_get_rollout_progress(
             tracing::error!("Failed to get rollout progress for release {release_id}: {e:?}");
         })?;
     Ok(Json(progress))
+}
+
+/// Wave-by-wave progress of a release's deployment (wave 0 is the canary).
+#[utoipa::path(
+    get,
+    path = "/releases/{release_id}/deployment/waves",
+    params(
+        ("release_id" = i32, Path),
+    ),
+    responses(
+        (status = StatusCode::OK, body = Vec<DeploymentWave>),
+    ),
+    security(
+        ("auth_token" = [])
+    ),
+    tag = TAG
+)]
+pub async fn api_get_deployment_waves(
+    Path(release_id): Path<i32>,
+    Extension(state): Extension<State>,
+) -> Result<Json<Vec<DeploymentWave>>, ApiError> {
+    let waves = get_deployment_waves(release_id, &state.pg_pool)
+        .await
+        .inspect_err(|e| {
+            tracing::error!("Failed to get deployment waves for release {release_id}: {e:?}");
+        })?;
+    Ok(Json(waves))
 }
 
 async fn current_user_email(state: &State, current_user: &CurrentUser) -> Option<String> {

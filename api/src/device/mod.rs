@@ -1284,6 +1284,19 @@ pub async fn save_release_id(
             .fetch_one(&mut *tx)
             .await?;
 
+        sqlx::query!(
+            "UPDATE deployment_devices dd SET reached_at = NOW()
+             FROM deployment dep
+             WHERE dep.id = dd.deployment_id
+               AND dep.release_id = $1
+               AND dd.device_id = $2
+               AND dd.reached_at IS NULL",
+            new_release_id,
+            device_id,
+        )
+        .execute(&mut *tx)
+        .await?;
+
         if current.release_id != Some(new_release_id) {
             sqlx::query!(
                 "UPDATE device SET release_id = $1 WHERE id = $2",

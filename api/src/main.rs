@@ -432,6 +432,7 @@ async fn start_main_server(
         .routes(routes!(deployment::route::api_get_stagger_policy))
         .routes(routes!(deployment::route::api_finish_now))
         .routes(routes!(deployment::route::api_get_rollout_progress))
+        .routes(routes!(deployment::route::api_get_deployment_waves))
         .routes(routes!(
             deployment::route::api_get_deployment_service_health
         ))

@@ -1,0 +1,70 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "WITH states AS (\n            SELECT\n                dd.wave,\n                dd.opens_at,\n                CASE\n                    WHEN dd.reached_at IS NOT NULL OR dev.release_id = dep.release_id THEN 'updated'\n                    WHEN dev.target_release_id IS DISTINCT FROM dep.release_id OR dev.archived THEN 'superseded'\n                    WHEN dev.target_release_eligible_at > NOW() THEN 'scheduled'\n                    WHEN dev.last_ping IS NULL OR dev.last_ping < NOW() - INTERVAL '3 minutes' THEN 'offline'\n                    ELSE 'updating'\n                END AS state,\n                dev.release_id = dep.release_id AND EXISTS (\n                    SELECT 1 FROM release_services rs\n                    WHERE rs.release_id = dep.release_id\n                      AND rs.watchdog_sec IS NOT NULL\n                      AND NOT EXISTS (\n                          SELECT 1 FROM device_service_status dss\n                          WHERE dss.device_id = dev.id\n                            AND dss.release_service_id = rs.id\n                            AND dss.active_state = 'active'\n                      )\n                ) AS unhealthy\n            FROM deployment dep\n            JOIN deployment_devices dd ON dd.deployment_id = dep.id\n            JOIN device dev ON dev.id = dd.device_id\n            WHERE dep.release_id = $1\n        )\n        SELECT\n            wave,\n            MIN(opens_at) AS \"opens_at!\",\n            COUNT(*) AS \"total!\",\n            COUNT(*) FILTER (WHERE state = 'updated') AS \"updated!\",\n            COUNT(*) FILTER (WHERE state = 'scheduled') AS \"scheduled!\",\n            COUNT(*) FILTER (WHERE state = 'updating') AS \"updating!\",\n            COUNT(*) FILTER (WHERE state = 'offline') AS \"offline!\",\n            COUNT(*) FILTER (WHERE state = 'superseded') AS \"superseded!\",\n            COUNT(*) FILTER (WHERE unhealthy) AS \"unhealthy!\"\n        FROM states\n        GROUP BY wave\n        ORDER BY wave",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "wave",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "opens_at!",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 2,
+        "name": "total!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 3,
+        "name": "updated!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 4,
+        "name": "scheduled!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 5,
+        "name": "updating!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 6,
+        "name": "offline!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 7,
+        "name": "superseded!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 8,
+        "name": "unhealthy!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "5b841c5fc2694fd72505d59e68f8f81a889e8118c8a38186e4cb46b3cff2bcae"
+}
