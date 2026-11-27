@@ -374,7 +374,7 @@ pub async fn update_download_limit(
         ));
     }
 
-    set_download_limit(
+    let updated = set_download_limit(
         &state.pg_pool,
         ip_address_id,
         request.max_concurrent_downloads,
@@ -384,8 +384,12 @@ pub async fn update_download_limit(
         error!("Failed to update download limit: {}", err);
         (StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
     })?
-    .map(Json)
-    .ok_or((StatusCode::NOT_FOUND, String::new()))
+    .ok_or((StatusCode::NOT_FOUND, String::new()))?;
+
+    state
+        .home_cache
+        .invalidate_download_slot_full(ip_address_id);
+    Ok(Json(updated))
 }
 
 async fn set_download_limit(

@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT release_id, target_release_id, target_release_id_set_at,\n            target_release_eligible_at, download_slot_release_id, download_slot_at,\n            ip_address_id, settings_version, archived, NOW() AS \"now!\"\n        FROM device WHERE id = $1",
+  "query": "SELECT release_id, target_release_id, target_release_id_set_at,\n            target_release_eligible_at, download_slot_release_id, download_slot_at,\n            ip_address_id, settings_version, approved, archived,\n            (token IS NOT NULL) AS \"has_token!\", NOW() AS \"now!\"\n        FROM device WHERE id = $1",
   "describe": {
     "columns": [
       {
@@ -45,11 +45,21 @@
       },
       {
         "ordinal": 8,
-        "name": "archived",
+        "name": "approved",
         "type_info": "Bool"
       },
       {
         "ordinal": 9,
+        "name": "archived",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 10,
+        "name": "has_token!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 11,
         "name": "now!",
         "type_info": "Timestamptz"
       }
@@ -69,8 +79,10 @@
       true,
       false,
       false,
+      false,
+      null,
       null
     ]
   },
-  "hash": "d1b4c14707b67a64f6a67411b831d0450ea125a7f1032760d234c5f6994f3c78"
+  "hash": "6cf207cade9335cdc2f680bf817124091dd6537e1af7009b998e7a27d0a47d74"
 }
