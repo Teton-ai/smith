@@ -31,7 +31,7 @@ export function DevicePinBadge({
 				<span className="block w-64 whitespace-normal">{description}</span>
 			}
 			placement={plain ? "top" : "right"}
-			className="z-10 hover:z-20 shrink-0"
+			className="z-10 hover:z-20 focus-within:z-20 shrink-0"
 		>
 			{plain ? (
 				<button
