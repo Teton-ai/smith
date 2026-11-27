@@ -11,6 +11,17 @@ pub struct RegistrationCount {
     pub count: i64,
 }
 
+/// Lets the dashboard warn operators when devices on their network would be
+/// rejected by `DEVICE_REGISTRATION_ALLOWED_IPS` instead of never appearing.
+#[derive(Serialize, Deserialize, Debug, Clone, ToSchema)]
+pub struct RegistrationAccess {
+    /// Allowed IPs; absent when registration is unrestricted.
+    pub allowed_ips: Option<Vec<String>>,
+    /// Caller's IP as registration would resolve it; absent if it cannot be determined.
+    pub client_ip: Option<String>,
+    pub client_allowed: bool,
+}
+
 pub async fn get_registration_counts(
     pool: &PgPool,
     excluded_labels: &[String],

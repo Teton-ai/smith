@@ -1,7 +1,8 @@
 use anyhow::Context;
 use axum::http::HeaderMap;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::env;
+use std::net::IpAddr;
 use std::time::Duration;
 use tokio::sync::Semaphore;
 use tracing::{info, warn};
@@ -179,6 +180,38 @@ mod mcp_config_tests {
     }
 }
 
+/// Unset allows every IP; a configured empty list allows none.
+#[derive(Debug)]
+pub struct RegistrationIpAllowlist(Option<HashSet<IpAddr>>);
+
+impl RegistrationIpAllowlist {
+    pub(crate) fn parse(value: Option<&str>) -> anyhow::Result<Self> {
+        let Some(value) = value else {
+            return Ok(Self(None));
+        };
+        let mut ips = HashSet::new();
+        if !value.trim().is_empty() {
+            for entry in value.split(',') {
+                ips.insert(entry.trim().parse::<IpAddr>().with_context(|| {
+                    format!("Invalid IP address in DEVICE_REGISTRATION_ALLOWED_IPS: {entry:?}")
+                })?);
+            }
+        }
+        Ok(Self(Some(ips)))
+    }
+
+    /// `None` when registration is unrestricted.
+    pub fn ips(&self) -> Option<&HashSet<IpAddr>> {
+        self.0.as_ref()
+    }
+
+    pub fn allows(&self, ip: Option<IpAddr>) -> bool {
+        self.0
+            .as_ref()
+            .is_none_or(|ips| ip.is_some_and(|ip| ips.contains(&ip)))
+    }
+}
+
 #[derive(Debug)]
 pub struct Config {
     pub database_url: String,
@@ -192,6 +225,7 @@ pub struct Config {
     pub victoria_metrics_client: Option<VictoriaMetricsClient>,
     pub victoria_metrics_read_client: Option<VictoriaMetricsClient>,
     pub ip_api_key: Option<String>,
+    pub registration_ip_allowlist: RegistrationIpAllowlist,
     pub auth0_issuer: String,
     pub auth0_audience: String,
     pub cloudfront: CloudFrontConfig,
@@ -340,6 +374,14 @@ impl Config {
             victoria_metrics_client: VictoriaMetricsClient::from_env()?,
             victoria_metrics_read_client: VictoriaMetricsClient::from_env_read()?,
             ip_api_key: env::var("IP_API_KEY").ok(),
+            registration_ip_allowlist: RegistrationIpAllowlist::parse(
+                match env::var("DEVICE_REGISTRATION_ALLOWED_IPS") {
+                    Ok(value) => Some(value),
+                    Err(env::VarError::NotPresent) => None,
+                    Err(err) => return Err(err).context("Invalid DEVICE_REGISTRATION_ALLOWED_IPS"),
+                }
+                .as_deref(),
+            )?,
             auth0_issuer: env::var("AUTH0_ISSUER").context("AUTH0_ISSUER is required.")?,
             auth0_audience,
             cloudfront: CloudFrontConfig::new()?,
