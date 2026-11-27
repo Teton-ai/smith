@@ -1312,7 +1312,10 @@ pub async fn resolve_target_release(
 /// slot cannot be decided the device is told to stay on its current release.
 #[cfg(test)]
 pub async fn get_target_release(device_id: i32, pool: &PgPool) -> Option<i32> {
-    let row = load_device_poll_state(device_id, pool).await.ok()??;
+    let row = load_device_poll_state(device_id, pool)
+        .await
+        .inspect_err(|err| tracing::error!(device_id, "Failed to load device poll state: {err:?}"))
+        .ok()??;
     resolve_target_release(device_id, &row, pool, None).await
 }
 
