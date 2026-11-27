@@ -1670,6 +1670,79 @@ mod downtime_tests {
         assert!(rows[0].1.is_some(), "outage still open: {rows:?}");
         Ok(())
     }
+
+    #[sqlx::test]
+    #[ignore = "needs the compose Postgres; run with --test-threads=1"]
+    async fn sweeper_and_concurrent_stale_pings_with_ip_leave_one_closed_outage(
+        pool: PgPool,
+    ) -> anyhow::Result<()> {
+        backdate_epoch(&pool).await?;
+        let ip_id: i64 = sqlx::query_scalar(
+            "INSERT INTO ip_address (ip_address) VALUES ('203.0.113.21') RETURNING id",
+        )
+        .fetch_one(&pool)
+        .await?;
+
+        // 1. Sweeper opens an outage in an open tx while update_device_ping_with_ip runs concurrently.
+        let d_sweep = insert_device(&pool, "sweeper-vs-ping-ip", 120.0).await?;
+        let mut sweeper = pool.begin().await?;
+        assert_eq!(open_outages_for_stale_devices(&mut sweeper).await?, 1);
+        let ping = tokio::spawn({
+            let pool = pool.clone();
+            async move { update_device_ping_with_ip(d_sweep, ip_id, &pool).await }
+        });
+        settle(&pool, &ping).await?;
+        sweeper.commit().await?;
+        ping.await??;
+        let saved_ip: Option<i64> =
+            sqlx::query_scalar("SELECT ip_address_id FROM device WHERE id = $1")
+                .bind(d_sweep)
+                .fetch_one(&pool)
+                .await?;
+        assert_eq!(saved_ip, Some(ip_id));
+        let rows = outages(&pool, d_sweep).await?;
+        assert_eq!(rows.len(), 1, "expected 1 outage row, got {rows:?}");
+        assert!(rows[0].1.is_some(), "outage still open: {rows:?}");
+
+        // 2. Two concurrent stale pings for the same device must record exactly one closed outage.
+        let d_race = insert_device(&pool, "concurrent-stale-ping-ip", 120.0).await?;
+        let (r1, r2) = tokio::join!(
+            update_device_ping_with_ip(d_race, ip_id, &pool),
+            update_device_ping_with_ip(d_race, ip_id, &pool),
+        );
+        r1?;
+        r2?;
+        let race_rows = outages(&pool, d_race).await?;
+        assert_eq!(
+            race_rows.len(),
+            1,
+            "concurrent stale pings should record 1 outage, got {race_rows:?}"
+        );
+        assert!(race_rows[0].1.is_some());
+
+        // 3. Stale device with a stale/deleted cached ip_id recovers from FK 23503 on the fallback path.
+        let d_fk = insert_device(&pool, "stale-fk-recovery", 120.0).await?;
+        let cache = crate::smith::HomeCache::new();
+        let ip = std::net::IpAddr::V4(std::net::Ipv4Addr::new(203, 0, 113, 99));
+        cache.insert_ip_id(ip, 999_999);
+        let (resolved_id, needs_geo) = record_device_ping_ip(d_fk, ip, &pool, Some(&cache)).await?;
+        assert!(needs_geo);
+        assert_ne!(resolved_id, 999_999);
+        let fk_saved_ip: Option<i64> =
+            sqlx::query_scalar("SELECT ip_address_id FROM device WHERE id = $1")
+                .bind(d_fk)
+                .fetch_one(&pool)
+                .await?;
+        assert_eq!(fk_saved_ip, Some(resolved_id));
+        let fk_rows = outages(&pool, d_fk).await?;
+        assert_eq!(
+            fk_rows.len(),
+            1,
+            "expected 1 closed outage, got {fk_rows:?}"
+        );
+        assert!(fk_rows[0].1.is_some());
+        Ok(())
+    }
 }
 
 #[cfg(test)]

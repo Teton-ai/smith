@@ -71,6 +71,24 @@ pub async fn register_device(
     }
 }
 
+async fn acquire_home_permit(
+    home_permits: &std::sync::Arc<tokio::sync::Semaphore>,
+    home_queue_permits: &tokio::sync::Semaphore,
+    wait_timeout: Duration,
+) -> Result<tokio::sync::OwnedSemaphorePermit, Response> {
+    // Fast path: claim an active slot directly without touching the waiter queue.
+    if let Ok(permit) = home_permits.clone().try_acquire_owned() {
+        return Ok(permit);
+    }
+    let Ok(_queue_permit) = home_queue_permits.try_acquire() else {
+        return Err(home_busy("queue_full"));
+    };
+    match tokio::time::timeout(wait_timeout, home_permits.clone().acquire_owned()).await {
+        Ok(Ok(permit)) => Ok(permit),
+        _ => Err(home_busy("wait_timeout")),
+    }
+}
+
 #[utoipa::path(
   post,
   path = "/smith/home",
@@ -91,18 +109,16 @@ pub async fn home(
     body: Bytes,
 ) -> Response {
     // Shed before handler database work; opaque-token authentication may already query the pool.
-    let Ok(queue_permit) = state.home_queue_permits.try_acquire() else {
-        return home_busy("queue_full");
-    };
-    let Ok(Ok(permit)) = tokio::time::timeout(
+    let permit = match acquire_home_permit(
+        &state.home_permits,
+        &state.home_queue_permits,
         HOME_WAIT_TIMEOUT,
-        state.home_permits.clone().acquire_owned(),
     )
     .await
-    else {
-        return home_busy("wait_timeout");
+    {
+        Ok(permit) => permit,
+        Err(resp) => return resp,
     };
-    drop(queue_permit);
 
     // One PK lookup checks active status (revoked/archived devices on a
     // pre-existing JWT must be cut off before queued commands leave) and feeds
@@ -618,5 +634,80 @@ mod tests {
             .await
             .unwrap();
         assert!(body.is_empty());
+    }
+
+    #[tokio::test]
+    async fn acquire_home_permit_fast_path_bypasses_queue() {
+        let home_permits = std::sync::Arc::new(tokio::sync::Semaphore::new(1));
+        // Even with 0 queue permits, an uncontended active slot succeeds directly.
+        let queue_permits = tokio::sync::Semaphore::new(0);
+        let permit = acquire_home_permit(&home_permits, &queue_permits, Duration::from_millis(50))
+            .await
+            .expect("fast path should succeed without queue permits");
+        assert_eq!(home_permits.available_permits(), 0);
+        drop(permit);
+        assert_eq!(home_permits.available_permits(), 1);
+    }
+
+    #[tokio::test]
+    async fn acquire_home_permit_waits_and_recovers_within_timeout() {
+        let home_permits = std::sync::Arc::new(tokio::sync::Semaphore::new(1));
+        let queue_permits = tokio::sync::Semaphore::new(1);
+        let held = home_permits.clone().try_acquire_owned().unwrap();
+
+        let waiter = tokio::spawn({
+            let home_permits = home_permits.clone();
+            async move {
+                tokio::time::sleep(Duration::from_millis(20)).await;
+                drop(held);
+                home_permits
+            }
+        });
+
+        let permit = acquire_home_permit(&home_permits, &queue_permits, Duration::from_millis(200))
+            .await
+            .expect("queued waiter should acquire once active permit drops");
+        waiter.await.unwrap();
+        // Queue permit is released as soon as the active permit is granted.
+        assert_eq!(queue_permits.available_permits(), 1);
+        drop(permit);
+        assert_eq!(home_permits.available_permits(), 1);
+    }
+
+    #[tokio::test]
+    async fn acquire_home_permit_rejects_on_wait_timeout_and_queue_full() {
+        let home_permits = std::sync::Arc::new(tokio::sync::Semaphore::new(1));
+        let queue_permits = tokio::sync::Semaphore::new(1);
+        let _held = home_permits.clone().try_acquire_owned().unwrap();
+
+        // Queue full: hold the sole queue permit so a second waiter is shed immediately.
+        let held_q = queue_permits.try_acquire().unwrap();
+        let resp = acquire_home_permit(&home_permits, &queue_permits, Duration::from_millis(200))
+            .await
+            .expect_err("full queue should reject immediately");
+        assert_eq!(resp.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(resp.headers()[header::RETRY_AFTER], "20");
+        assert!(
+            axum::body::to_bytes(resp.into_body(), usize::MAX)
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        drop(held_q);
+
+        // Wait timeout: queue slot available, but active permit stays held past timeout.
+        let resp = acquire_home_permit(&home_permits, &queue_permits, Duration::from_millis(20))
+            .await
+            .expect_err("waiter should time out");
+        assert_eq!(resp.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(resp.headers()[header::RETRY_AFTER], "20");
+        assert!(
+            axum::body::to_bytes(resp.into_body(), usize::MAX)
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        // Queue permit must be released after timeout.
+        assert_eq!(queue_permits.available_permits(), 1);
     }
 }
