@@ -1,6 +1,7 @@
+use crate::State;
 use crate::config::Config;
 use crate::package::Package;
-use crate::{State, storage};
+use crate::storage::{self, Storage};
 use axum::body::Body;
 use axum::extract::{Path, Query};
 use axum::http::StatusCode;
@@ -8,8 +9,6 @@ use axum::response::{IntoResponse, Response};
 use axum::{Extension, Json};
 use axum_typed_multipart::{FieldData, TryFromMultipart, TypedMultipart};
 use futures::TryStreamExt;
-use s3::Bucket;
-use s3::creds::Credentials;
 use s3::error::S3Error;
 use serde::Deserialize;
 use smith::utils::schema;
@@ -193,21 +192,22 @@ pub async fn stream_package_from_s3(
     file_name: &str,
     config: &Config,
 ) -> Result<Response, Response> {
-    let bucket = Bucket::new(
-        &config.packages_bucket_name,
-        config.aws_region.parse().map_err(|e| {
+    let region = match std::env::var("AWS_ENDPOINT") {
+        Ok(endpoint) => s3::Region::Custom {
+            region: config.aws_region.clone(),
+            endpoint,
+        },
+        Err(_) => config.aws_region.parse().map_err(|e| {
             error!("Failed to parse AWS region: {:?}", e);
             StatusCode::INTERNAL_SERVER_ERROR.into_response()
         })?,
-        Credentials::default().map_err(|e| {
-            error!("Failed to get AWS credentials: {:?}", e);
+    };
+    let bucket = Storage::bucket_in_region(&config.packages_bucket_name, region)
+        .await
+        .map_err(|e| {
+            error!("Failed to create S3 bucket: {:?}", e);
             StatusCode::INTERNAL_SERVER_ERROR.into_response()
-        })?,
-    )
-    .map_err(|e| {
-        error!("Failed to create S3 bucket: {:?}", e);
-        StatusCode::INTERNAL_SERVER_ERROR.into_response()
-    })?;
+        })?;
 
     let stream = bucket.get_object_stream(file_name).await.map_err(|e| {
         error!("Failed to get package from S3: {:?}", e);
