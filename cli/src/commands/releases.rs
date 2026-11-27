@@ -41,11 +41,13 @@ pub enum ReleasesCommands {
     /// Deploy a release
     Deploy {
         release_number: String,
-        /// Customize which devices are canary released,
-        /// by filtering devices by labels.
+        /// Select release-candidate devices by labels. Stable releases use automatic canaries.
         /// e.g. --labels label1=a --labels label2=b
-        #[arg(long, visible_alias = "labels")]
+        #[arg(long, visible_alias = "labels", conflicts_with = "devices")]
         canary_device_labels: Option<Vec<String>>,
+        /// Select release-candidate device IDs (comma-separated).
+        #[arg(long, value_delimiter = ',', conflicts_with = "canary_device_labels")]
+        devices: Option<Vec<i32>>,
     },
 }
 
@@ -105,7 +107,8 @@ impl ReleasesCommands {
             ReleasesCommands::Deploy {
                 release_number,
                 canary_device_labels,
-            } => deploy_release(release_number, canary_device_labels, config).await?,
+                devices,
+            } => deploy_release(release_number, canary_device_labels, devices, config).await?,
         };
 
         Ok(())
@@ -115,6 +118,7 @@ impl ReleasesCommands {
 async fn deploy_release(
     release_number: String,
     canary_device_labels: Option<Vec<String>>,
+    devices: Option<Vec<i32>>,
     config: crate::config::Config,
 ) -> anyhow::Result<()> {
     let secrets = auth::get_secrets(&config)
@@ -122,16 +126,32 @@ async fn deploy_release(
         .with_context(|| "Error getting token")?
         .with_context(|| "No Token found, please Login")?;
     let api = SmithAPI::new(secrets, &config);
+    let release_candidate = api
+        .get_release_info(release_number.clone())
+        .await?
+        .release_candidate;
+    if release_candidate && canary_device_labels.is_none() && devices.is_none() {
+        anyhow::bail!("Release candidates deploy to selected devices: pass --devices or --labels");
+    }
 
     // Start the deployment
     api.deploy_release(
         release_number.clone(),
-        canary_device_labels.map(|l| DeploymentRequest {
-            canary_device_labels: Some(l),
-            canary_device_ids: None,
+        Some(DeploymentRequest {
+            canary_device_labels,
+            canary_device_ids: devices,
         }),
     )
     .await?;
+
+    // The polling below confirms a full rollout, which release candidates
+    // reject, so there is nothing to wait for.
+    if release_candidate {
+        println!(
+            "Release candidate deployment started. It stays on the selected devices until promoted."
+        );
+        return Ok(());
+    }
 
     // Set up polling parameters
     let start_time = std::time::Instant::now();
@@ -341,4 +361,38 @@ async fn draft_release(config: crate::config::Config) -> anyhow::Result<()> {
     spinner.stop(format!("Release created. New release id {new_release_id}"));
 
     Ok(())
+}
+
+#[cfg(test)]
+mod selection_tests {
+    use super::ReleasesCommands;
+    use crate::cli::{Cli, Commands};
+    use clap::Parser;
+
+    #[test]
+    fn deployment_selection_cli_accepts_device_ids_and_rejects_mixed_selectors()
+    -> anyhow::Result<()> {
+        let cli = Cli::try_parse_from(["sm", "releases", "deploy", "42", "--devices", "1,2,3"])?;
+        let Some(Commands::Releases {
+            command: ReleasesCommands::Deploy { devices, .. },
+        }) = cli.command
+        else {
+            anyhow::bail!("expected release deployment");
+        };
+        assert_eq!(devices, Some(vec![1, 2, 3]));
+        assert!(
+            Cli::try_parse_from([
+                "sm",
+                "releases",
+                "deploy",
+                "42",
+                "--devices",
+                "1",
+                "--labels",
+                "site=lab"
+            ])
+            .is_err()
+        );
+        Ok(())
+    }
 }

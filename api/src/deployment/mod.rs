@@ -262,7 +262,7 @@ pub async fn new_deployment(
 ) -> Result<Deployment, ApiError> {
     let mut tx = pg_pool.begin().await?;
     let release = sqlx::query!(
-        "SELECT distribution_id, draft, yanked FROM release WHERE id = $1",
+        "SELECT distribution_id, draft, yanked, release_candidate FROM release WHERE id = $1",
         release_id
     )
     .fetch_one(&mut *tx)
@@ -274,6 +274,12 @@ pub async fn new_deployment(
     if release.yanked {
         return Err(ApiError::bad_request("Cannot deploy a yanked release."));
     }
+
+    request
+        .as_ref()
+        .unwrap_or(&DeploymentRequest::default())
+        .validate_selection(release.release_candidate)
+        .map_err(ApiError::bad_request)?;
 
     // A release keeps a single deployment row, so deploying one that already
     // finished (e.g. going back to an older version) restarts that row with a
@@ -311,34 +317,7 @@ pub async fn new_deployment(
         .and_then(|r| r.canary_device_labels.as_ref());
     let ids_opt = request.as_ref().and_then(|r| r.canary_device_ids.as_ref());
 
-    if matches!(labels_opt, Some(l) if l.is_empty()) {
-        tx.rollback().await?;
-        return Err(ApiError::bad_request(
-            "canary_device_labels cannot be empty.",
-        ));
-    }
-    if matches!(ids_opt, Some(i) if i.is_empty()) {
-        tx.rollback().await?;
-        return Err(ApiError::bad_request("canary_device_ids cannot be empty."));
-    }
-
-    let has_labels = labels_opt.is_some_and(|l| !l.is_empty());
-    let has_ids = ids_opt.is_some_and(|i| !i.is_empty());
-
-    if has_labels && has_ids {
-        tx.rollback().await?;
-        return Err(ApiError::bad_request(
-            "Cannot specify both canary_device_labels and canary_device_ids.",
-        ));
-    }
-
-    let res = if has_ids {
-        let canary_device_ids = request
-            .as_ref()
-            .unwrap()
-            .canary_device_ids
-            .as_ref()
-            .unwrap();
+    let res = if let Some(canary_device_ids) = ids_opt {
         sqlx::query!(
             r#"
             WITH selected_devices AS (
@@ -361,13 +340,7 @@ pub async fn new_deployment(
         )
         .execute(&mut *tx)
         .await?
-    } else if has_labels {
-        let canary_device_labels = request
-            .as_ref()
-            .unwrap()
-            .canary_device_labels
-            .as_ref()
-            .unwrap();
+    } else if let Some(canary_device_labels) = labels_opt {
         sqlx::query!(
             r#"
             WITH selected_devices AS (
@@ -443,12 +416,14 @@ pub async fn new_deployment(
         .execute(&mut *tx)
         .await?
     };
-    let canary_count = res.rows_affected();
-    if canary_count == 0 {
+    let device_count = res.rows_affected();
+    if device_count == 0 {
         tx.rollback().await?;
-        return Err(ApiError::bad_request(
-            "Canary release contains no devices, aborting.",
-        ));
+        return Err(ApiError::bad_request(if release.release_candidate {
+            "None of the selected devices can receive this release, aborting."
+        } else {
+            "No eligible canary devices found, aborting."
+        }));
     }
 
     sqlx::query!(
@@ -488,10 +463,11 @@ pub async fn new_deployment(
                         "text": {
                             "type": "mrkdwn",
                             "text": format!(
-                                ":rocket: *Deployment Started*\n\n*Distribution:* {}\n*Version:* {}\n*Canary devices:* {}\n*Triggered by:* {}",
+                                ":rocket: *Deployment Started*\n\n*Distribution:* {}\n*Version:* {}\n*{}:* {}\n*Triggered by:* {}",
                                 info.distribution_name,
                                 info.version,
-                                canary_count,
+                                if release.release_candidate { "Selected devices" } else { "Canary devices" },
+                                device_count,
                                 triggered_by
                             )
                         }
@@ -1231,6 +1207,78 @@ pub(crate) mod tests {
             .into_iter()
             .map(|(id, secs)| (id, secs.map(|secs| (secs / 60.0).round() as i64)))
             .collect())
+    }
+
+    #[sqlx::test]
+    #[ignore = "needs disposable Postgres; run with --test-threads=1"]
+    async fn deployment_selection_depends_on_release_type(pool: PgPool) -> anyhow::Result<()> {
+        let state = crate::test_support::test_state(pool.clone())?;
+        let [current, stable, candidate] = insert_releases(&pool).await?;
+        sqlx::query("UPDATE release SET draft = false, release_candidate = (id = $1)")
+            .bind(candidate)
+            .execute(&pool)
+            .await?;
+        let devices = insert_devices(&pool, 3, Some(current)).await?;
+        sqlx::query("UPDATE device SET target_release_id = release_id, last_ping = NOW(), follow_latest = (id = $1)")
+            .bind(devices[2]).execute(&pool).await?;
+        let selected = DeploymentRequest {
+            canary_device_ids: Some(vec![devices[0]]),
+            ..Default::default()
+        };
+        assert!(
+            new_deployment(stable, Some(selected.clone()), &pool, state.config, None)
+                .await
+                .is_err()
+        );
+        assert!(
+            new_deployment(candidate, None, &pool, state.config, None)
+                .await
+                .is_err()
+        );
+        let rows: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM deployment")
+            .fetch_one(&pool)
+            .await?;
+        assert_eq!(rows, 0, "invalid selection must not create a deployment");
+
+        let auto = new_deployment(stable, None, &pool, state.config, None)
+            .await
+            .map_err(|err| anyhow::anyhow!("{err:?}"))?;
+        let picked: Vec<i32> =
+            sqlx::query_scalar("SELECT device_id FROM deployment_devices WHERE deployment_id = $1")
+                .bind(auto.id)
+                .fetch_all(&pool)
+                .await?;
+        assert_eq!(
+            picked,
+            vec![devices[2]],
+            "stable canaries must be chosen automatically from followers"
+        );
+
+        let rc = new_deployment(candidate, Some(selected), &pool, state.config, None)
+            .await
+            .map_err(|err| anyhow::anyhow!("{err:?}"))?;
+        let picked: Vec<i32> =
+            sqlx::query_scalar("SELECT device_id FROM deployment_devices WHERE deployment_id = $1")
+                .bind(rc.id)
+                .fetch_all(&pool)
+                .await?;
+        assert_eq!(
+            picked,
+            vec![devices[0]],
+            "an RC targets only the selected device, including pinned devices"
+        );
+        assert!(
+            confirm_full_rollout(candidate, &pool, state.config, None)
+                .await
+                .is_err()
+        );
+        let untouched: Option<i32> =
+            sqlx::query_scalar("SELECT target_release_id FROM device WHERE id = $1")
+                .bind(devices[1])
+                .fetch_one(&pool)
+                .await?;
+        assert_eq!(untouched, Some(current));
+        Ok(())
     }
 
     #[sqlx::test]

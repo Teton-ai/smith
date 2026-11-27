@@ -68,6 +68,8 @@ pub mod slack;
 mod smith;
 mod storage;
 mod telemetry;
+#[cfg(test)]
+mod test_support;
 mod upload_token;
 mod user;
 
