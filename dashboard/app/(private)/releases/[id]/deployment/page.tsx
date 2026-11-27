@@ -1,4 +1,4 @@
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
 	Activity,
 	ArrowLeft,
@@ -26,10 +26,12 @@ import {
 	useGetRelease,
 	usePromoteRelease,
 } from "@/app/api-client";
+import { useClientMutator } from "@/app/api-client-mutator";
 import { Button } from "@/app/components/button";
 import { EmergencyConfirmModal } from "@/app/components/modal";
 import { RelativeTime } from "@/app/components/RelativeTime";
 import { requestErrorMessage } from "@/app/utils/release";
+import { DeploymentWaves } from "./DeploymentWaves";
 import {
 	type DeviceServiceHealth,
 	useDeploymentServiceHealth,
@@ -152,6 +154,12 @@ const DeploymentStatusPage = () => {
 	const [promoteVersion, setPromoteVersion] = useState("");
 	const promoteVersionId = useId();
 	const [confirmError, setConfirmError] = useState<string | null>(null);
+	const [waveSelection, setWaveSelection] = useState<{
+		releaseId: number;
+		wave: number;
+	} | null>(null);
+	const selectedWave =
+		waveSelection?.releaseId === releaseId ? waveSelection.wave : null;
 
 	const { data: release, isLoading: releaseLoading } = useGetRelease(releaseId);
 
@@ -164,6 +172,29 @@ const DeploymentStatusPage = () => {
 		useApiGetDeploymentDevices(releaseId, {
 			query: { refetchInterval: 5000 },
 		});
+
+	const fetchDevices = useClientMutator<DeploymentDeviceWithStatus[]>();
+	const waveDevices = useQuery({
+		queryKey: [...devicesQueryKey, selectedWave],
+		queryFn: ({ signal }) =>
+			fetchDevices({
+				url: `/releases/${releaseId}/deployment/devices`,
+				method: "GET",
+				params: { wave: selectedWave },
+				signal,
+			}),
+		enabled: selectedWave !== null && selectedWave > 0,
+		refetchInterval: 5000,
+	});
+	const showingRolloutWave = selectedWave !== null && selectedWave > 0;
+	const visibleDevices = showingRolloutWave
+		? (waveDevices.data ?? [])
+		: devices;
+	const deviceListTitle = showingRolloutWave
+		? `Wave ${selectedWave} Devices`
+		: release?.release_candidate
+			? "Deployment Devices"
+			: "Canary Devices";
 
 	const { data: serviceHealth = [] } = useDeploymentServiceHealth(releaseId);
 
@@ -258,7 +289,7 @@ const DeploymentStatusPage = () => {
 	});
 
 	const getDeviceStatus = (device: DeploymentDeviceWithStatus) => {
-		if (device.release_id === device.target_release_id) {
+		if (device.release_id === releaseId) {
 			return {
 				status: "updated",
 				label: "Updated",
@@ -344,32 +375,34 @@ const DeploymentStatusPage = () => {
 	}
 
 	return (
-		<div className="flex-1 overflow-y-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
-			<div className="flex items-center space-x-4">
+		<div className="w-full min-h-0 flex-1 overflow-y-auto space-y-5 px-4 py-6 sm:px-6 lg:px-8">
+			<div className="flex items-center">
 				<Link
 					to={`/releases/${releaseId}`}
-					className="flex items-center space-x-2 text-gray-600 hover:text-gray-900 transition-colors"
+					className="inline-flex items-center gap-2 text-sm text-gray-500 transition-colors hover:text-gray-900"
 				>
 					<ArrowLeft className="w-4 h-4" />
 					<span className="text-sm font-medium">Back to Release</span>
 				</Link>
 			</div>
 
-			<div className="bg-white rounded-lg border border-gray-200 p-6">
-				<div className="flex items-start justify-between mb-6">
-					<div>
-						<h1 className="text-2xl font-bold text-gray-900 mb-2">
+			<div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
+				<div className="mb-5 flex flex-wrap items-start justify-between gap-3">
+					<div className="min-w-0">
+						<h1 className="text-xl font-semibold text-gray-900">
 							Deploying Release v{release.version}
 						</h1>
-						<div className="flex items-center space-x-4 text-sm text-gray-600">
-							<span>{release.distribution_name}</span>
-							<span className="px-2 py-1 text-xs font-medium bg-gray-100 text-gray-700 rounded-full">
+						<div className="mt-1 flex flex-wrap items-center gap-2 text-sm text-gray-500">
+							<span className="font-medium text-gray-700">
+								{release.distribution_name}
+							</span>
+							<span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600">
 								{release.distribution_architecture.toUpperCase()}
 							</span>
 						</div>
 					</div>
 					{deployment && (
-						<div className="flex items-center space-x-2">
+						<div className="flex items-center gap-2">
 							{getStatusIcon(deployment.status)}
 							<span
 								className={`px-3 py-1 text-sm font-semibold rounded-full border ${getStatusColor(deployment.status)}`}
@@ -382,7 +415,7 @@ const DeploymentStatusPage = () => {
 
 				{deployment && (
 					<>
-						<div className="mb-6 flex items-center space-x-6 text-sm text-gray-600">
+						<div className="mb-5 flex flex-wrap items-center gap-x-5 gap-y-2 text-sm text-gray-500">
 							<div className="flex items-center space-x-2">
 								<Clock className="w-4 h-4" />
 								<span>
@@ -412,7 +445,7 @@ const DeploymentStatusPage = () => {
 							)}
 						</div>
 
-						<div className="space-y-4">
+						<div className="space-y-5">
 							<div
 								className={`border rounded-lg p-4 ${
 									deployment.status === "InProgress"
@@ -600,7 +633,7 @@ const DeploymentStatusPage = () => {
 							{deployment.status === "InProgress" &&
 								!isCanaryComplete() &&
 								!release.release_candidate && (
-									<div className="border border-gray-200 bg-gray-50 rounded-lg p-4">
+									<div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
 										<div className="flex items-center space-x-2 mb-3">
 											<Clock className="w-5 h-5 text-gray-600" />
 											<h3 className="font-semibold text-gray-900">
@@ -616,6 +649,16 @@ const DeploymentStatusPage = () => {
 							{deployment.status === "Done" && (
 								<StaggeredRolloutProgress releaseId={releaseId} />
 							)}
+							<DeploymentWaves
+								releaseId={releaseId}
+								releaseCandidate={release.release_candidate}
+								selectedWave={selectedWave}
+								onSelectWave={(wave) =>
+									setWaveSelection(
+										wave === selectedWave ? null : { releaseId, wave },
+									)
+								}
+							/>
 						</div>
 
 						{deployment.status === "InProgress" && (
@@ -632,15 +675,36 @@ const DeploymentStatusPage = () => {
 							</div>
 						)}
 
-						{devices.length > 0 && (
-							<div className="mt-6">
-								<div className="flex items-center space-x-2 mb-4">
-									<Monitor className="w-5 h-5 text-gray-700" />
-									<h3 className="font-semibold text-gray-900">
-										Deployment Devices ({devices.length})
-									</h3>
-								</div>
-								<div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
+						<div
+							id="deployment-device-list"
+							hidden={selectedWave === null && devices.length === 0}
+							className="mt-6 overflow-hidden rounded-xl border border-gray-200 bg-white"
+						>
+							<div className="flex items-center gap-2 border-b border-gray-100 px-4 py-3">
+								<Monitor className="w-5 h-5 text-gray-700" />
+								<h3 className="font-semibold text-gray-900">
+									{deviceListTitle} ({visibleDevices.length})
+								</h3>
+								{selectedWave !== null && (
+									<button
+										type="button"
+										className="ml-auto text-sm text-blue-700 hover:underline"
+										onClick={() => setWaveSelection(null)}
+									>
+										Clear selection
+									</button>
+								)}
+							</div>
+							{visibleDevices.length === 0 ? (
+								<output className="block px-4 py-3 text-sm text-gray-600">
+									{showingRolloutWave && waveDevices.isPending
+										? "Loading devices…"
+										: showingRolloutWave && waveDevices.isError
+											? "Could not load wave devices."
+											: "No devices in this wave."}
+								</output>
+							) : (
+								<div className="overflow-x-auto">
 									<table className="min-w-full divide-y divide-gray-200">
 										<thead className="bg-gray-50">
 											<tr>
@@ -665,7 +729,7 @@ const DeploymentStatusPage = () => {
 											</tr>
 										</thead>
 										<tbody className="bg-white divide-y divide-gray-200">
-											{devices.map((device) => {
+											{visibleDevices.map((device) => {
 												const deviceStatus = getDeviceStatus(device);
 												return (
 													<tr
@@ -764,8 +828,8 @@ const DeploymentStatusPage = () => {
 										</tbody>
 									</table>
 								</div>
-							</div>
-						)}
+							)}
+						</div>
 					</>
 				)}
 
