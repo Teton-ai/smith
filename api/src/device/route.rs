@@ -161,7 +161,91 @@ pub async fn get_devices(
 
     #[allow(deprecated)]
     let devices = sqlx::query!(
-        r#"SELECT
+        r#"WITH matched AS (
+            SELECT
+                d.id,
+                -- Evaluated over all matching rows before LIMIT/OFFSET so the
+                -- caller gets the full filtered count without joining detail
+                -- tables or aggregating labels for off-page devices.
+                COUNT(*) OVER () as total_count
+            FROM device d
+            -- One-time filter skips device_settings_reported when search is empty,
+            -- and fetches hostname once per device (not per search term) when non-empty.
+            LEFT JOIN device_settings_reported dsr
+                ON CARDINALITY($10::text[]) > 0 AND dsr.device_id = d.id
+            WHERE (CARDINALITY($1::text[]) = 0 OR d.serial_number = ANY($1))
+              AND ($2::boolean IS NULL OR d.approved = $2)
+              AND (COALESCE($3, false) = true OR d.archived = false)
+              AND (CARDINALITY($4::text[]) = 0 OR EXISTS (
+                  SELECT 1 FROM device_label fdl
+                  JOIN label fl ON fl.id = fdl.label_id
+                  WHERE fdl.device_id = d.id
+                  AND fl.name || '=' || fdl.value = ANY($4)
+              ))
+              AND ($5::boolean IS NULL OR
+                   ($5 = true AND d.last_ping >= now() - INTERVAL '3 minutes') OR
+                   ($5 = false AND d.last_ping < now() - INTERVAL '3 minutes'))
+              AND ($6::boolean IS NULL OR
+                   -- A device waiting for its staggered bucket is scheduled, not outdated.
+                   ($6 = true AND d.release_id != d.target_release_id
+                       AND NOT COALESCE(d.target_release_eligible_at > now(), false)) OR
+                   ($6 = false AND d.release_id = d.target_release_id))
+              -- Measured from when the device was allowed to move: a device that
+              -- waited for its staggered bucket isn't late for that time.
+              AND ($12::bigint IS NULL OR
+                   COALESCE(d.target_release_eligible_at, d.target_release_id_set_at)
+                       <= now() - make_interval(mins => $12::int))
+              AND NOT EXISTS (
+                  SELECT 1 FROM device_label edl
+                  JOIN label el ON el.id = edl.label_id
+                  WHERE CARDINALITY($7::text[]) > 0
+                    AND edl.device_id = d.id
+                    AND el.name || '=' || edl.value = ANY($7)
+              )
+              AND (CARDINALITY($10::text[]) = 0 OR EXISTS (
+                  SELECT 1 FROM unnest($10::text[]) AS term
+                  WHERE POSITION(LOWER(term) IN LOWER(d.serial_number)) > 0
+                     -- The settings report holds the hostname; system_info is the
+                     -- fallback for devices on a smithd without settings reporting.
+                     OR POSITION(LOWER(term) IN LOWER(COALESCE(dsr.hostname, d.system_info->>'hostname', ''))) > 0
+                     OR POSITION(LOWER(term) IN LOWER(COALESCE(d.system_info->'device_tree'->>'model', ''))) > 0
+              ))
+              AND ($11::int IS NULL OR d.release_id = $11)
+              AND ($13::int IS NULL OR EXISTS (
+                  SELECT 1 FROM release fr
+                  WHERE fr.id = d.release_id AND fr.distribution_id = $13
+              ))
+              AND ($14::boolean IS NULL OR
+                   ($14 = true AND EXISTS (
+                       SELECT 1 FROM device_service_status dss
+                       JOIN release_services rs ON rs.id = dss.release_service_id
+                       WHERE dss.device_id = d.id
+                         AND rs.release_id = d.release_id
+                         AND rs.watchdog_sec IS NOT NULL
+                         AND dss.active_state != 'active'
+                   )))
+              AND ($19::boolean IS NULL OR d.follow_latest = $19)
+            ORDER BY
+                CASE WHEN $15 THEN d.serial_number END ASC NULLS LAST,
+                CASE WHEN $16 THEN d.serial_number END DESC NULLS LAST,
+                CASE WHEN $17 THEN (
+                    SELECT MIN(l2.name || '=' || dl2.value)
+                    FROM device_label dl2
+                    JOIN label l2 ON l2.id = dl2.label_id
+                    WHERE dl2.device_id = d.id
+                ) END ASC NULLS LAST,
+                CASE WHEN $18 THEN (
+                    SELECT MIN(l2.name || '=' || dl2.value)
+                    FROM device_label dl2
+                    JOIN label l2 ON l2.id = dl2.label_id
+                    WHERE dl2.device_id = d.id
+                ) END DESC NULLS LAST,
+                d.last_ping DESC NULLS LAST,
+                d.serial_number
+            LIMIT $8
+            OFFSET $9
+        )
+        SELECT
             d.id,
             d.serial_number,
             d.note,
@@ -238,11 +322,18 @@ pub async fn get_devices(
             d.intent_version,
             d.observed_intent_version,
             d.network_conditions,
-            COALESCE(JSONB_OBJECT_AGG(l.name, dl.value) FILTER (WHERE l.name IS NOT NULL), '{}') as "labels!: SqlxJson<HashMap<String, String>>",
-            -- Evaluated after GROUP BY but before LIMIT/OFFSET, so this counts
-            -- every device matching the filter, not just the ones on this page.
-            COUNT(*) OVER () as "total_count!"
-        FROM device d
+            COALESCE(
+                (
+                    SELECT JSONB_OBJECT_AGG(l.name, dl.value) FILTER (WHERE l.name IS NOT NULL)
+                    FROM device_label dl
+                    JOIN label l ON l.id = dl.label_id
+                    WHERE dl.device_id = d.id
+                ),
+                '{}'::jsonb
+            ) as "labels!: SqlxJson<HashMap<String, String>>",
+            matched.total_count as "total_count!"
+        FROM matched
+        JOIN device d ON d.id = matched.id
         LEFT JOIN ip_address ip ON d.ip_address_id = ip.id
         LEFT JOIN modem m ON d.modem_id = m.id
         LEFT JOIN release r ON d.release_id = r.id
@@ -250,67 +341,9 @@ pub async fn get_devices(
         LEFT JOIN release tr ON d.target_release_id = tr.id
         LEFT JOIN distribution trd ON tr.distribution_id = trd.id
         LEFT JOIN device_network dn ON d.id = dn.device_id
-        LEFT JOIN device_settings_reported dsr ON dsr.device_id = d.id
-        LEFT JOIN device_label dl ON dl.device_id = d.id
-        LEFT JOIN label l ON l.id = dl.label_id
-        WHERE (CARDINALITY($1::text[]) = 0 OR d.serial_number = ANY($1))
-          AND ($2::boolean IS NULL OR d.approved = $2)
-          AND (COALESCE($3, false) = true OR d.archived = false)
-          -- A subquery, not a filter on the joined rows, so every label of a
-          -- matching device still reaches the aggregate.
-          AND (CARDINALITY($4::text[]) = 0 OR EXISTS (
-              SELECT 1 FROM device_label fdl
-              JOIN label fl ON fl.id = fdl.label_id
-              WHERE fdl.device_id = d.id
-              AND fl.name || '=' || fdl.value = ANY($4)
-          ))
-          AND ($5::boolean IS NULL OR
-               ($5 = true AND d.last_ping >= now() - INTERVAL '3 minutes') OR
-               ($5 = false AND d.last_ping < now() - INTERVAL '3 minutes'))
-          AND ($6::boolean IS NULL OR
-               -- A device waiting for its staggered bucket is scheduled, not outdated.
-               ($6 = true AND d.release_id != d.target_release_id
-                   AND NOT COALESCE(d.target_release_eligible_at > now(), false)) OR
-               ($6 = false AND d.release_id = d.target_release_id))
-          -- Measured from when the device was allowed to move: a device that
-          -- waited for its staggered bucket isn't late for that time.
-          AND ($12::bigint IS NULL OR
-               COALESCE(d.target_release_eligible_at, d.target_release_id_set_at)
-                   <= now() - make_interval(mins => $12::int))
-          AND (CARDINALITY($7::text[]) = 0 OR NOT EXISTS (
-              SELECT 1 FROM device_label edl
-              JOIN label el ON el.id = edl.label_id
-              WHERE edl.device_id = d.id
-              AND el.name || '=' || edl.value = ANY($7)
-          ))
-          AND (CARDINALITY($10::text[]) = 0 OR EXISTS (
-              SELECT 1 FROM unnest($10::text[]) AS term
-              WHERE POSITION(LOWER(term) IN LOWER(d.serial_number)) > 0
-                 -- The settings report holds the hostname; system_info is the
-                 -- fallback for devices on a smithd without settings reporting.
-                 OR POSITION(LOWER(term) IN LOWER(COALESCE(dsr.hostname, d.system_info->>'hostname', ''))) > 0
-                 OR POSITION(LOWER(term) IN LOWER(COALESCE(d.system_info->'device_tree'->>'model', ''))) > 0
-          ))
-          AND ($11::int IS NULL OR d.release_id = $11)
-          AND ($13::int IS NULL OR rd.id = $13)
-          AND ($14::boolean IS NULL OR
-               ($14 = true AND EXISTS (
-                   SELECT 1 FROM device_service_status dss
-                   JOIN release_services rs ON rs.id = dss.release_service_id
-                   WHERE dss.device_id = d.id
-                     AND rs.release_id = d.release_id
-                     AND rs.watchdog_sec IS NOT NULL
-                     AND dss.active_state != 'active'
-               )))
-          AND ($19::boolean IS NULL OR d.follow_latest = $19)
-        GROUP BY d.id, ip.id, m.id, r.id, rd.id, tr.id, trd.id, dn.device_id
         ORDER BY
             CASE WHEN $15 THEN d.serial_number END ASC NULLS LAST,
             CASE WHEN $16 THEN d.serial_number END DESC NULLS LAST,
-            -- Correlated subquery, not the outer dl/l join: an active label
-            -- filter (see $4 above) restricts that join to matching rows
-            -- only, which would make every filtered device tie on the same
-            -- filtered label instead of sorting by its actual first label.
             CASE WHEN $17 THEN (
                 SELECT MIN(l2.name || '=' || dl2.value)
                 FROM device_label dl2
@@ -325,8 +358,6 @@ pub async fn get_devices(
             ) END DESC NULLS LAST,
             d.last_ping DESC NULLS LAST,
             d.serial_number
-        LIMIT $8
-        OFFSET $9
         "#,
         serial_numbers.as_slice(),
         filter.approved,
@@ -5449,6 +5480,510 @@ mod device_revocation {
             );
             assert!(!is_active(&pool, id).await?);
         }
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod get_devices_query_tests {
+    use super::get_devices;
+    use crate::{
+        State,
+        auth::{DebugJwksClient, DeviceJwtSigner},
+        config::{CloudFrontConfig, Config},
+        middlewares::authorization::{AccountsConfig, AuthorizationConfig},
+    };
+    use axum::Extension;
+    use axum_extra::extract::Query;
+    use ed25519_dalek::pkcs8::EncodePrivateKey;
+    use models::device::{Device, DeviceFilter, DeviceSortDirection, DeviceSortField};
+    use sqlx::PgPool;
+    use std::{collections::HashMap, sync::Arc};
+    use tokio::sync::{Mutex, Semaphore, broadcast};
+
+    fn test_state(pool: PgPool) -> anyhow::Result<State> {
+        let pem =
+            ed25519_dalek::SigningKey::from_bytes(&[9; 32]).to_pkcs8_pem(Default::default())?;
+        let signer = DeviceJwtSigner::new(pem.as_str(), "devices-test".into(), 3600)?;
+        let config = Box::leak(Box::new(Config {
+            database_url: String::new(),
+            packages_bucket_name: "packages".into(),
+            assets_bucket_name: "upload-assets".into(),
+            data_engine_bucket_name: "upload-sensitive".into(),
+            aws_region: "us-east-1".into(),
+            sentry_url: None,
+            slack_hook_url: None,
+            deployment_slack_hook_url: None,
+            victoria_metrics_client: None,
+            victoria_metrics_read_client: None,
+            ip_api_key: None,
+            auth0_issuer: "http://127.0.0.1".into(),
+            auth0_audience: "devices-test".into(),
+            cloudfront: CloudFrontConfig {
+                package_domain_name: String::new(),
+                package_key_pair_id: String::new(),
+                package_private_key: String::new(),
+            },
+            dashboard_excluded_labels: vec![],
+            device_jwt_private_key_pem: pem.to_string(),
+            device_jwt_issuer: "devices-test".into(),
+            device_jwt_ttl_seconds: 3600,
+            known_holders: HashMap::new(),
+            network_gc_interval_seconds: 3600,
+            mcp: None,
+            max_concurrent_uploads: 4,
+            device_upload_cdn_url: None,
+            upload_token_key: crate::upload_token::UploadTokenKey::new(&"test-key".repeat(8))?,
+        }));
+        Ok(State {
+            pg_pool: pool,
+            config,
+            public_events: Arc::new(Mutex::new(broadcast::channel(1).0)),
+            authorization: Arc::new(AuthorizationConfig {
+                roles: HashMap::new(),
+            }),
+            accounts: Arc::new(AccountsConfig::default()),
+            jwks_client: DebugJwksClient::init("http://127.0.0.1")
+                .map_err(|e| anyhow::anyhow!(e.to_string()))?,
+            device_jwt_signer: signer,
+            upload_permits: Arc::new(Semaphore::new(4)),
+            home_permits: Arc::new(Semaphore::new(4)),
+            home_cache: Arc::new(crate::smith::HomeCache::new()),
+        })
+    }
+
+    async fn query(
+        state: &State,
+        filter: DeviceFilter,
+    ) -> anyhow::Result<(Option<i64>, Vec<Device>)> {
+        let (headers, axum::Json(devices)) = get_devices(Extension(state.clone()), Query(filter))
+            .await
+            .map_err(|s| anyhow::anyhow!("get_devices returned {s}"))?;
+        let total = headers
+            .get("x-total-count")
+            .map(|v| v.to_str().unwrap().parse::<i64>().unwrap());
+        Ok((total, devices))
+    }
+
+    #[sqlx::test]
+    #[ignore = "needs Postgres with pg_partman; run with --test-threads=1"]
+    async fn filters_search_sort_and_pagination_preserve_exact_semantics(
+        pool: PgPool,
+    ) -> anyhow::Result<()> {
+        let state = test_state(pool.clone())?;
+
+        // Empty table returns empty list and omits x-total-count.
+        let (empty_total, empty_rows) = query(&state, DeviceFilter::default()).await?;
+        assert_eq!(empty_total, None);
+        assert!(empty_rows.is_empty());
+
+        let dist_a: i32 = sqlx::query_scalar(
+            "INSERT INTO distribution (name, description, architecture) VALUES ('dist-a', 'a', 'arm64') RETURNING id",
+        )
+        .fetch_one(&pool)
+        .await?;
+        let dist_b: i32 = sqlx::query_scalar(
+            "INSERT INTO distribution (name, description, architecture) VALUES ('dist-b', 'b', 'arm64') RETURNING id",
+        )
+        .fetch_one(&pool)
+        .await?;
+        let rel_a1: i32 = sqlx::query_scalar(
+            "INSERT INTO release (distribution_id, version) VALUES ($1, '1.0.0') RETURNING id",
+        )
+        .bind(dist_a)
+        .fetch_one(&pool)
+        .await?;
+        let rel_a2: i32 = sqlx::query_scalar(
+            "INSERT INTO release (distribution_id, version) VALUES ($1, '2.0.0') RETURNING id",
+        )
+        .bind(dist_a)
+        .fetch_one(&pool)
+        .await?;
+        let rel_b1: i32 = sqlx::query_scalar(
+            "INSERT INTO release (distribution_id, version) VALUES ($1, '1.0.0') RETURNING id",
+        )
+        .bind(dist_b)
+        .fetch_one(&pool)
+        .await?;
+
+        // d1: online, up-to-date, dist_a/rel_a2, labels: site=alpha + tier=gold, hostname in dsr overrides system_info
+        let d1: i32 = sqlx::query_scalar(
+            "INSERT INTO device (serial_number, approved, archived, last_ping, release_id, target_release_id, follow_latest, system_info)
+             VALUES ('dev-001', true, false, NOW() - INTERVAL '10 seconds', $1, $1, true,
+                     '{\"hostname\":\"legacy-host-1\",\"device_tree\":{\"model\":\"Orin Nano\"}}'::jsonb) RETURNING id",
+        )
+        .bind(rel_a2)
+        .fetch_one(&pool)
+        .await?;
+        sqlx::query(
+            "INSERT INTO device_settings_reported (device_id, hostname, reported_at)
+             VALUES ($1, 'reported-host-one', NOW())",
+        )
+        .bind(d1)
+        .execute(&pool)
+        .await?;
+
+        // d2: offline, outdated (eligible 60m ago), dist_a/rel_a1->rel_a2, labels: site=alpha + tier=gold,
+        // dsr row with NULL hostname (falls back to system_info->>'hostname'), and TWO unhealthy watchdog services
+        let d2: i32 = sqlx::query_scalar(
+            "INSERT INTO device (serial_number, approved, archived, last_ping, release_id, target_release_id, target_release_id_set_at, target_release_eligible_at, follow_latest, system_info)
+             VALUES ('dev-002', true, false, NOW() - INTERVAL '10 minutes', $1, $2, NOW() - INTERVAL '90 minutes', NOW() - INTERVAL '60 minutes', false,
+                     '{\"hostname\":\"fallback-host-two\",\"device_tree\":{\"model\":\"Jetson Xavier\"}}'::jsonb) RETURNING id",
+        )
+        .bind(rel_a1)
+        .bind(rel_a2)
+        .fetch_one(&pool)
+        .await?;
+        sqlx::query(
+            "INSERT INTO device_settings_reported (device_id, hostname, reported_at)
+             VALUES ($1, NULL, NOW())",
+        )
+        .bind(d2)
+        .execute(&pool)
+        .await?;
+
+        // d3: online, staggered future eligible_at (NOT outdated), dist_b/rel_b1->rel_a2, labels: env=test + site=gamma
+        let d3: i32 = sqlx::query_scalar(
+            "INSERT INTO device (serial_number, approved, archived, last_ping, release_id, target_release_id, target_release_eligible_at, follow_latest)
+             VALUES ('dev-003', true, false, NOW() - INTERVAL '30 seconds', $1, $2, NOW() + INTERVAL '2 hours', true) RETURNING id",
+        )
+        .bind(rel_b1)
+        .bind(rel_a2)
+        .fetch_one(&pool)
+        .await?;
+
+        // d4: archived, unapproved
+        let _d4: i32 = sqlx::query_scalar(
+            "INSERT INTO device (serial_number, approved, archived, last_ping, release_id, target_release_id)
+             VALUES ('dev-004', false, true, NOW() - INTERVAL '20 seconds', $1, $1) RETURNING id",
+        )
+        .bind(rel_a2)
+        .fetch_one(&pool)
+        .await?;
+
+        let lbl_site: i32 =
+            sqlx::query_scalar("INSERT INTO label (name) VALUES ('site') RETURNING id")
+                .fetch_one(&pool)
+                .await?;
+        let lbl_tier: i32 =
+            sqlx::query_scalar("INSERT INTO label (name) VALUES ('tier') RETURNING id")
+                .fetch_one(&pool)
+                .await?;
+        let lbl_env: i32 =
+            sqlx::query_scalar("INSERT INTO label (name) VALUES ('env') RETURNING id")
+                .fetch_one(&pool)
+                .await?;
+
+        for (dev, lbl, val) in [
+            (d1, lbl_site, "zeta"),
+            (d1, lbl_tier, "gold"),
+            (d2, lbl_site, "alpha"),
+            (d2, lbl_tier, "gold"),
+            (d3, lbl_env, "test"),
+            (d3, lbl_site, "gamma"),
+        ] {
+            sqlx::query(
+                "INSERT INTO device_label (device_id, label_id, value) VALUES ($1, $2, $3)",
+            )
+            .bind(dev)
+            .bind(lbl)
+            .bind(val)
+            .execute(&pool)
+            .await?;
+        }
+
+        let svc_rel_a1: i32 = sqlx::query_scalar(
+            "INSERT INTO release_services (release_id, service_name, watchdog_sec) VALUES ($1, 'smithd.service', 30) RETURNING id",
+        )
+        .bind(rel_a1)
+        .fetch_one(&pool)
+        .await?;
+        let svc_rel_a1_b: i32 = sqlx::query_scalar(
+            "INSERT INTO release_services (release_id, service_name, watchdog_sec) VALUES ($1, 'brain.service', 60) RETURNING id",
+        )
+        .bind(rel_a1)
+        .fetch_one(&pool)
+        .await?;
+        sqlx::query(
+            "INSERT INTO device_service_status (device_id, release_service_id, active_state, n_restarts, checked_at)
+             VALUES ($1, $2, 'failed', 1, NOW()), ($1, $3, 'inactive', 0, NOW())",
+        )
+        .bind(d2)
+        .bind(svc_rel_a1)
+        .bind(svc_rel_a1_b)
+        .execute(&pool)
+        .await?;
+
+        // Default excludes archived; ordered by last_ping DESC NULLS LAST, serial_number
+        let (total, rows) = query(&state, DeviceFilter::default()).await?;
+        assert_eq!(total, Some(3));
+        assert_eq!(
+            rows.iter()
+                .map(|d| d.serial_number.as_str())
+                .collect::<Vec<_>>(),
+            vec!["dev-001", "dev-003", "dev-002"]
+        );
+        // Every device receives all its labels (not truncated by filters)
+        assert_eq!(
+            rows[0].labels.0.get("site").map(String::as_str),
+            Some("zeta")
+        );
+        assert_eq!(
+            rows[0].labels.0.get("tier").map(String::as_str),
+            Some("gold")
+        );
+
+        // Pagination preserves full total_count; offset past end omits x-total-count
+        let (p_total, page1) = query(
+            &state,
+            DeviceFilter {
+                limit: Some(1),
+                offset: Some(1),
+                sort: Some(DeviceSortField::SerialNumber),
+                order: Some(DeviceSortDirection::Asc),
+                ..Default::default()
+            },
+        )
+        .await?;
+        assert_eq!(p_total, Some(3));
+        assert_eq!(page1.len(), 1);
+        assert_eq!(page1[0].serial_number, "dev-002");
+
+        let (empty_total, past_end) = query(
+            &state,
+            DeviceFilter {
+                limit: Some(10),
+                offset: Some(10),
+                ..Default::default()
+            },
+        )
+        .await?;
+        assert_eq!(empty_total, None);
+        assert!(past_end.is_empty());
+
+        // Labels filter + sort by labels ASC uses each device's actual MIN label (d2: site=alpha < d1: site=zeta)
+        // and still returns all labels for each device.
+        let (lbl_total, lbl_rows) = query(
+            &state,
+            DeviceFilter {
+                labels: vec!["tier=gold".into()],
+                sort: Some(DeviceSortField::Labels),
+                order: Some(DeviceSortDirection::Asc),
+                ..Default::default()
+            },
+        )
+        .await?;
+        assert_eq!(lbl_total, Some(2));
+        assert_eq!(
+            lbl_rows
+                .iter()
+                .map(|d| d.serial_number.as_str())
+                .collect::<Vec<_>>(),
+            vec!["dev-002", "dev-001"]
+        );
+        assert_eq!(lbl_rows[0].labels.0.len(), 2);
+
+        // Exclude labels
+        let (ex_total, ex_rows) = query(
+            &state,
+            DeviceFilter {
+                exclude_labels: vec!["env=test".into()],
+                ..Default::default()
+            },
+        )
+        .await?;
+        assert_eq!(ex_total, Some(2));
+        assert!(!ex_rows.iter().any(|d| d.serial_number == "dev-003"));
+
+        // Search checks reported hostname (overriding legacy system_info hostname), fallback hostname, and model
+        let (_, s_reported) = query(
+            &state,
+            DeviceFilter {
+                search: Some("reported-host-one".into()),
+                ..Default::default()
+            },
+        )
+        .await?;
+        assert_eq!(s_reported.len(), 1);
+        assert_eq!(s_reported[0].serial_number, "dev-001");
+
+        let (_, s_overridden) = query(
+            &state,
+            DeviceFilter {
+                search: Some("legacy-host-1".into()),
+                ..Default::default()
+            },
+        )
+        .await?;
+        assert!(s_overridden.is_empty());
+
+        let (_, s_fallback_and_model) = query(
+            &state,
+            DeviceFilter {
+                search: Some("fallback-host-two,Orin Nano".into()),
+                sort: Some(DeviceSortField::SerialNumber),
+                ..Default::default()
+            },
+        )
+        .await?;
+        assert_eq!(
+            s_fallback_and_model
+                .iter()
+                .map(|d| d.serial_number.as_str())
+                .collect::<Vec<_>>(),
+            vec!["dev-001", "dev-002"]
+        );
+
+        // Outdated excludes future staggered devices; outdated_minutes respects eligible_at
+        let (_, outdated) = query(
+            &state,
+            DeviceFilter {
+                outdated: Some(true),
+                outdated_minutes: Some(30),
+                ..Default::default()
+            },
+        )
+        .await?;
+        assert_eq!(outdated.len(), 1);
+        assert_eq!(outdated[0].serial_number, "dev-002");
+
+        // Distribution, service_not_running, follow_latest, archived
+        let (_, dist_b_rows) = query(
+            &state,
+            DeviceFilter {
+                distribution_id: Some(dist_b),
+                ..Default::default()
+            },
+        )
+        .await?;
+        assert_eq!(dist_b_rows.len(), 1);
+        assert_eq!(dist_b_rows[0].serial_number, "dev-003");
+
+        let (_, unhealthy_rows) = query(
+            &state,
+            DeviceFilter {
+                service_not_running: Some(true),
+                ..Default::default()
+            },
+        )
+        .await?;
+        assert_eq!(unhealthy_rows.len(), 1);
+        assert_eq!(unhealthy_rows[0].serial_number, "dev-002");
+
+        let (_, pinned_rows) = query(
+            &state,
+            DeviceFilter {
+                follow_latest: Some(false),
+                ..Default::default()
+            },
+        )
+        .await?;
+        assert_eq!(pinned_rows.len(), 1);
+        assert_eq!(pinned_rows[0].serial_number, "dev-002");
+
+        let (arch_total, arch_rows) = query(
+            &state,
+            DeviceFilter {
+                archived: Some(true),
+                approved: Some(false),
+                ..Default::default()
+            },
+        )
+        .await?;
+        assert_eq!(arch_total, Some(1));
+        assert_eq!(arch_rows[0].serial_number, "dev-004");
+
+        // Multi-value labels filter where d1 matches both requested labels must not duplicate rows.
+        let (multi_lbl_total, multi_lbl_rows) = query(
+            &state,
+            DeviceFilter {
+                labels: vec!["site=zeta".into(), "tier=gold".into()],
+                sort: Some(DeviceSortField::SerialNumber),
+                ..Default::default()
+            },
+        )
+        .await?;
+        assert_eq!(multi_lbl_total, Some(2));
+        assert_eq!(
+            multi_lbl_rows
+                .iter()
+                .map(|d| d.serial_number.as_str())
+                .collect::<Vec<_>>(),
+            vec!["dev-001", "dev-002"]
+        );
+
+        // Compound query: search + labels + exclude_labels + distribution_id + sort=labels + pagination.
+        let (cmp_total, cmp_p1) = query(
+            &state,
+            DeviceFilter {
+                search: Some("dev".into()),
+                labels: vec!["tier=gold".into()],
+                exclude_labels: vec!["env=test".into()],
+                distribution_id: Some(dist_a),
+                sort: Some(DeviceSortField::Labels),
+                order: Some(DeviceSortDirection::Asc),
+                limit: Some(1),
+                offset: Some(1),
+                ..Default::default()
+            },
+        )
+        .await?;
+        assert_eq!(cmp_total, Some(2));
+        assert_eq!(cmp_p1.len(), 1);
+        assert_eq!(cmp_p1[0].serial_number, "dev-001");
+
+        // Tie-breaking across page boundaries on identical last_ping and identical MIN label.
+        let d_tie_1: i32 = sqlx::query_scalar(
+            "INSERT INTO device (serial_number, approved, archived, last_ping, release_id, target_release_id)
+             VALUES ('tie-001', true, false, '2026-03-01T10:00:00Z'::timestamptz, $1, $1) RETURNING id",
+        )
+        .bind(rel_a2)
+        .fetch_one(&pool)
+        .await?;
+        let d_tie_2: i32 = sqlx::query_scalar(
+            "INSERT INTO device (serial_number, approved, archived, last_ping, release_id, target_release_id)
+             VALUES ('tie-002', true, false, '2026-03-01T10:00:00Z'::timestamptz, $1, $1) RETURNING id",
+        )
+        .bind(rel_a2)
+        .fetch_one(&pool)
+        .await?;
+        for dev in [d_tie_1, d_tie_2] {
+            sqlx::query(
+                "INSERT INTO device_label (device_id, label_id, value) VALUES ($1, $2, 'same')",
+            )
+            .bind(dev)
+            .bind(lbl_site)
+            .execute(&pool)
+            .await?;
+        }
+        let (t0_total, t0) = query(
+            &state,
+            DeviceFilter {
+                labels: vec!["site=same".into()],
+                sort: Some(DeviceSortField::Labels),
+                order: Some(DeviceSortDirection::Asc),
+                limit: Some(1),
+                offset: Some(0),
+                ..Default::default()
+            },
+        )
+        .await?;
+        let (t1_total, t1) = query(
+            &state,
+            DeviceFilter {
+                labels: vec!["site=same".into()],
+                sort: Some(DeviceSortField::Labels),
+                order: Some(DeviceSortDirection::Asc),
+                limit: Some(1),
+                offset: Some(1),
+                ..Default::default()
+            },
+        )
+        .await?;
+        assert_eq!((t0_total, t1_total), (Some(2), Some(2)));
+        assert_eq!(t0[0].serial_number, "tie-001");
+        assert_eq!(t1[0].serial_number, "tie-002");
+
         Ok(())
     }
 }

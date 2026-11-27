@@ -1,0 +1,46 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT\n                COUNT(*) FILTER (WHERE d.archived = false) AS \"total_count!\",\n                COUNT(*) FILTER (\n                    WHERE d.archived = false\n                      AND d.last_ping >= now() - INTERVAL '3 minutes'\n                ) AS \"online_count!\",\n                COUNT(*) FILTER (\n                    WHERE d.archived = false\n                      AND d.last_ping < now() - INTERVAL '3 minutes'\n                ) AS \"offline_count!\",\n                COUNT(*) FILTER (\n                    WHERE d.archived = false\n                      AND d.release_id != d.target_release_id\n                      AND NOT COALESCE(d.target_release_eligible_at > now(), false)\n                ) AS \"outdated_count!\",\n                COUNT(*) FILTER (WHERE d.archived = true) AS \"archived_count!\"\n            FROM device d\n            WHERE NOT EXISTS (\n                SELECT 1 FROM device_label dl\n                JOIN label l ON l.id = dl.label_id\n                WHERE CARDINALITY($1::text[]) > 0\n                  AND dl.device_id = d.id\n                  AND l.name || '=' || dl.value = ANY($1)\n            )\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "total_count!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "online_count!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 2,
+        "name": "offline_count!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 3,
+        "name": "outdated_count!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 4,
+        "name": "archived_count!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "TextArray"
+      ]
+    },
+    "nullable": [
+      null,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "0bebd1941546f85ce929cbe0116627fdf3dc7e4ed77c4a3e5af2900d69a679d5"
+}

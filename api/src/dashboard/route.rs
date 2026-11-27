@@ -14,7 +14,12 @@ use axum::{Extension, Json};
 pub async fn get_dashboard(
     Extension(state): Extension<State>,
 ) -> axum::response::Result<Json<Dashboard>, StatusCode> {
-    let dashboard = Dashboard::new(&state.pg_pool, &state.config.dashboard_excluded_labels).await;
+    let dashboard = Dashboard::new(&state.pg_pool, &state.config.dashboard_excluded_labels)
+        .await
+        .map_err(|e| {
+            tracing::error!("Failed to get dashboard counts: {}", e);
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
     Ok(Json(dashboard))
 }
 
