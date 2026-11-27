@@ -234,6 +234,20 @@ export interface DeploymentRequest {
 	canary_device_labels?: string[];
 }
 
+export interface DeploymentWave {
+	offline: number;
+	opens_at: string;
+	scheduled: number;
+	superseded: number;
+	total: number;
+	/** Devices currently on the release whose watchdog services are failing. */
+	unhealthy: number;
+	updated: number;
+	updating: number;
+	/** 0 is the canary; staggered rollout waves start at 1. */
+	wave: number;
+}
+
 export type DeviceLabels = { [key: string]: string };
 
 export interface IpAddressInfo {
@@ -24599,6 +24613,338 @@ export function useApiGetDeploymentServiceHealth<
 		releaseId,
 		options,
 	);
+
+	const query = useQuery(queryOptions, queryClient) as UseQueryResult<
+		TData,
+		TError
+	> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+	return withQueryKey(query, queryOptions.queryKey);
+}
+
+/**
+ * @summary Wave-by-wave progress of a release's deployment (wave 0 is the canary).
+ */
+export const useApiGetDeploymentWavesHook = () => {
+	const apiGetDeploymentWaves = useClientMutator<DeploymentWave[]>();
+
+	return useCallback(
+		(releaseId: number, signal?: AbortSignal) => {
+			return apiGetDeploymentWaves({
+				url: `/releases/${releaseId}/deployment/waves`,
+				method: "GET",
+				signal,
+			});
+		},
+		[apiGetDeploymentWaves],
+	);
+};
+
+export const getApiGetDeploymentWavesInfiniteQueryKey = (releaseId: number) => {
+	return ["infinite", `/releases/${releaseId}/deployment/waves`] as const;
+};
+
+export const getApiGetDeploymentWavesQueryKey = (releaseId: number) => {
+	return [`/releases/${releaseId}/deployment/waves`] as const;
+};
+
+export const useApiGetDeploymentWavesInfiniteQueryOptions = <
+	TData = InfiniteData<
+		Awaited<ReturnType<ReturnType<typeof useApiGetDeploymentWavesHook>>>
+	>,
+	TError = unknown,
+>(
+	releaseId: number,
+	options?: {
+		query?: Partial<
+			UseInfiniteQueryOptions<
+				Awaited<ReturnType<ReturnType<typeof useApiGetDeploymentWavesHook>>>,
+				TError,
+				TData
+			>
+		>;
+	},
+) => {
+	const { query: queryOptions } = options ?? {};
+
+	const queryKey =
+		queryOptions?.queryKey ??
+		getApiGetDeploymentWavesInfiniteQueryKey(releaseId);
+
+	const apiGetDeploymentWaves = useApiGetDeploymentWavesHook();
+
+	const queryFn: QueryFunction<
+		Awaited<ReturnType<ReturnType<typeof useApiGetDeploymentWavesHook>>>
+	> = ({ signal }) => apiGetDeploymentWaves(releaseId, signal);
+
+	return {
+		queryKey,
+		queryFn,
+		enabled: releaseId !== null && releaseId !== undefined,
+		...queryOptions,
+	} as UseInfiniteQueryOptions<
+		Awaited<ReturnType<ReturnType<typeof useApiGetDeploymentWavesHook>>>,
+		TError,
+		TData
+	> & { queryKey: DataTag<QueryKey, TData, TError> };
+};
+
+export type ApiGetDeploymentWavesInfiniteQueryResult = NonNullable<
+	Awaited<ReturnType<ReturnType<typeof useApiGetDeploymentWavesHook>>>
+>;
+export type ApiGetDeploymentWavesInfiniteQueryError = unknown;
+
+export function useApiGetDeploymentWavesInfinite<
+	TData = InfiniteData<
+		Awaited<ReturnType<ReturnType<typeof useApiGetDeploymentWavesHook>>>
+	>,
+	TError = unknown,
+>(
+	releaseId: number,
+	options: {
+		query: Partial<
+			UseInfiniteQueryOptions<
+				Awaited<ReturnType<ReturnType<typeof useApiGetDeploymentWavesHook>>>,
+				TError,
+				TData
+			>
+		> &
+			Pick<
+				DefinedInitialDataOptions<
+					Awaited<ReturnType<ReturnType<typeof useApiGetDeploymentWavesHook>>>,
+					TError,
+					Awaited<ReturnType<ReturnType<typeof useApiGetDeploymentWavesHook>>>
+				>,
+				"initialData"
+			>;
+	},
+	queryClient?: QueryClient,
+): DefinedUseInfiniteQueryResult<TData, TError> & {
+	queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useApiGetDeploymentWavesInfinite<
+	TData = InfiniteData<
+		Awaited<ReturnType<ReturnType<typeof useApiGetDeploymentWavesHook>>>
+	>,
+	TError = unknown,
+>(
+	releaseId: number,
+	options?: {
+		query?: Partial<
+			UseInfiniteQueryOptions<
+				Awaited<ReturnType<ReturnType<typeof useApiGetDeploymentWavesHook>>>,
+				TError,
+				TData
+			>
+		> &
+			Pick<
+				UndefinedInitialDataOptions<
+					Awaited<ReturnType<ReturnType<typeof useApiGetDeploymentWavesHook>>>,
+					TError,
+					Awaited<ReturnType<ReturnType<typeof useApiGetDeploymentWavesHook>>>
+				>,
+				"initialData"
+			>;
+	},
+	queryClient?: QueryClient,
+): UseInfiniteQueryResult<TData, TError> & {
+	queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useApiGetDeploymentWavesInfinite<
+	TData = InfiniteData<
+		Awaited<ReturnType<ReturnType<typeof useApiGetDeploymentWavesHook>>>
+	>,
+	TError = unknown,
+>(
+	releaseId: number,
+	options?: {
+		query?: Partial<
+			UseInfiniteQueryOptions<
+				Awaited<ReturnType<ReturnType<typeof useApiGetDeploymentWavesHook>>>,
+				TError,
+				TData
+			>
+		>;
+	},
+	queryClient?: QueryClient,
+): UseInfiniteQueryResult<TData, TError> & {
+	queryKey: DataTag<QueryKey, TData, TError>;
+};
+/**
+ * @summary Wave-by-wave progress of a release's deployment (wave 0 is the canary).
+ */
+
+export function useApiGetDeploymentWavesInfinite<
+	TData = InfiniteData<
+		Awaited<ReturnType<ReturnType<typeof useApiGetDeploymentWavesHook>>>
+	>,
+	TError = unknown,
+>(
+	releaseId: number,
+	options?: {
+		query?: Partial<
+			UseInfiniteQueryOptions<
+				Awaited<ReturnType<ReturnType<typeof useApiGetDeploymentWavesHook>>>,
+				TError,
+				TData
+			>
+		>;
+	},
+	queryClient?: QueryClient,
+): UseInfiniteQueryResult<TData, TError> & {
+	queryKey: DataTag<QueryKey, TData, TError>;
+} {
+	const queryOptions = useApiGetDeploymentWavesInfiniteQueryOptions(
+		releaseId,
+		options,
+	);
+
+	const query = useInfiniteQuery(
+		queryOptions,
+		queryClient,
+	) as UseInfiniteQueryResult<TData, TError> & {
+		queryKey: DataTag<QueryKey, TData, TError>;
+	};
+
+	return withQueryKey(query, queryOptions.queryKey);
+}
+
+export const useApiGetDeploymentWavesQueryOptions = <
+	TData = Awaited<ReturnType<ReturnType<typeof useApiGetDeploymentWavesHook>>>,
+	TError = unknown,
+>(
+	releaseId: number,
+	options?: {
+		query?: Partial<
+			UseQueryOptions<
+				Awaited<ReturnType<ReturnType<typeof useApiGetDeploymentWavesHook>>>,
+				TError,
+				TData
+			>
+		>;
+	},
+) => {
+	const { query: queryOptions } = options ?? {};
+
+	const queryKey =
+		queryOptions?.queryKey ?? getApiGetDeploymentWavesQueryKey(releaseId);
+
+	const apiGetDeploymentWaves = useApiGetDeploymentWavesHook();
+
+	const queryFn: QueryFunction<
+		Awaited<ReturnType<ReturnType<typeof useApiGetDeploymentWavesHook>>>
+	> = ({ signal }) => apiGetDeploymentWaves(releaseId, signal);
+
+	return {
+		queryKey,
+		queryFn,
+		enabled: releaseId !== null && releaseId !== undefined,
+		...queryOptions,
+	} as UseQueryOptions<
+		Awaited<ReturnType<ReturnType<typeof useApiGetDeploymentWavesHook>>>,
+		TError,
+		TData
+	> & { queryKey: DataTag<QueryKey, TData, TError> };
+};
+
+export type ApiGetDeploymentWavesQueryResult = NonNullable<
+	Awaited<ReturnType<ReturnType<typeof useApiGetDeploymentWavesHook>>>
+>;
+export type ApiGetDeploymentWavesQueryError = unknown;
+
+export function useApiGetDeploymentWaves<
+	TData = Awaited<ReturnType<ReturnType<typeof useApiGetDeploymentWavesHook>>>,
+	TError = unknown,
+>(
+	releaseId: number,
+	options: {
+		query: Partial<
+			UseQueryOptions<
+				Awaited<ReturnType<ReturnType<typeof useApiGetDeploymentWavesHook>>>,
+				TError,
+				TData
+			>
+		> &
+			Pick<
+				DefinedInitialDataOptions<
+					Awaited<ReturnType<ReturnType<typeof useApiGetDeploymentWavesHook>>>,
+					TError,
+					Awaited<ReturnType<ReturnType<typeof useApiGetDeploymentWavesHook>>>
+				>,
+				"initialData"
+			>;
+	},
+	queryClient?: QueryClient,
+): DefinedUseQueryResult<TData, TError> & {
+	queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useApiGetDeploymentWaves<
+	TData = Awaited<ReturnType<ReturnType<typeof useApiGetDeploymentWavesHook>>>,
+	TError = unknown,
+>(
+	releaseId: number,
+	options?: {
+		query?: Partial<
+			UseQueryOptions<
+				Awaited<ReturnType<ReturnType<typeof useApiGetDeploymentWavesHook>>>,
+				TError,
+				TData
+			>
+		> &
+			Pick<
+				UndefinedInitialDataOptions<
+					Awaited<ReturnType<ReturnType<typeof useApiGetDeploymentWavesHook>>>,
+					TError,
+					Awaited<ReturnType<ReturnType<typeof useApiGetDeploymentWavesHook>>>
+				>,
+				"initialData"
+			>;
+	},
+	queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+	queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useApiGetDeploymentWaves<
+	TData = Awaited<ReturnType<ReturnType<typeof useApiGetDeploymentWavesHook>>>,
+	TError = unknown,
+>(
+	releaseId: number,
+	options?: {
+		query?: Partial<
+			UseQueryOptions<
+				Awaited<ReturnType<ReturnType<typeof useApiGetDeploymentWavesHook>>>,
+				TError,
+				TData
+			>
+		>;
+	},
+	queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+	queryKey: DataTag<QueryKey, TData, TError>;
+};
+/**
+ * @summary Wave-by-wave progress of a release's deployment (wave 0 is the canary).
+ */
+
+export function useApiGetDeploymentWaves<
+	TData = Awaited<ReturnType<ReturnType<typeof useApiGetDeploymentWavesHook>>>,
+	TError = unknown,
+>(
+	releaseId: number,
+	options?: {
+		query?: Partial<
+			UseQueryOptions<
+				Awaited<ReturnType<ReturnType<typeof useApiGetDeploymentWavesHook>>>,
+				TError,
+				TData
+			>
+		>;
+	},
+	queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+	queryKey: DataTag<QueryKey, TData, TError>;
+} {
+	const queryOptions = useApiGetDeploymentWavesQueryOptions(releaseId, options);
 
 	const query = useQuery(queryOptions, queryClient) as UseQueryResult<
 		TData,

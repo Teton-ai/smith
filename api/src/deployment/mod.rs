@@ -153,11 +153,19 @@ pub async fn retarget_selected(
     })
 }
 
+pub struct RolloutPlan {
+    pub device_ids: Vec<i32>,
+    /// 1-based wave number for each device (wave 0 is reserved for canaries).
+    pub waves: Vec<i32>,
+}
+
 pub struct StaggerOutcome {
     /// Every device now targeting the release, including those already on it.
     pub retargeted: u64,
     /// Minutes until the last bucket opens.
     pub window_minutes: i32,
+    /// Devices scheduled to move, paired with their wave number.
+    pub plan: RolloutPlan,
 }
 
 /// Points `device_ids` at `release_id`, letting each device move only once its
@@ -199,8 +207,12 @@ pub async fn stagger_retarget(
     let ranked_ids = spread_by_network(devices.iter().map(|d| (d.id, d.ip_address_id)), |rank| {
         bucket_for_rank(rank, device_count)
     });
-    let offset_minutes: Vec<i32> = (0..device_count)
-        .map(|rank| bucket_for_rank(rank, device_count) as i32 * STAGGER_INTERVAL_MINUTES)
+    let waves: Vec<i32> = (0..device_count)
+        .map(|rank| bucket_for_rank(rank, device_count) as i32 + 1)
+        .collect();
+    let offset_minutes: Vec<i32> = waves
+        .iter()
+        .map(|wave| (wave - 1) * STAGGER_INTERVAL_MINUTES)
         .collect();
 
     // Eligibility uses the database clock, the same one the poll compares it to.
@@ -222,6 +234,10 @@ pub async fn stagger_retarget(
     Ok(StaggerOutcome {
         retargeted: already_on_release + staggered,
         window_minutes: stagger_window_minutes(device_count),
+        plan: RolloutPlan {
+            device_ids: ranked_ids,
+            waves,
+        },
     })
 }
 
@@ -621,9 +637,23 @@ pub async fn confirm_full_rollout(
     .fetch_all(&mut *tx)
     .await?;
 
-    let device_count = stagger_retarget(&mut tx, release_id, &follower_ids)
-        .await?
-        .retargeted;
+    let outcome = stagger_retarget(&mut tx, release_id, &follower_ids).await?;
+    let device_count = outcome.retargeted;
+
+    sqlx::query!(
+        "INSERT INTO deployment_devices (deployment_id, device_id, wave, opens_at)
+         SELECT $1, d.id, u.wave, COALESCE(d.target_release_eligible_at, NOW())
+         FROM UNNEST($2::int[], $3::int[]) AS u(id, wave)
+         JOIN device d ON d.id = u.id
+         ON CONFLICT (deployment_id, device_id) DO UPDATE
+            SET wave = EXCLUDED.wave, opens_at = EXCLUDED.opens_at
+            WHERE deployment_devices.wave <> 0",
+        updated_deployment.id,
+        &outcome.plan.device_ids,
+        &outcome.plan.waves
+    )
+    .execute(&mut *tx)
+    .await?;
 
     sqlx::query!(
         "UPDATE distribution SET latest_release_id = $1 WHERE id = $2",
@@ -831,22 +861,33 @@ pub struct FinishNowResult {
     pub devices_released: i64,
 }
 
-/// Opens every remaining bucket of the release at once.
+/// Opens every remaining bucket of the release at once, and the deployment's
+/// waves with them.
 pub async fn release_waiting_devices<'e, E>(release_id: i32, executor: E) -> sqlx::Result<u64>
 where
     E: sqlx::PgExecutor<'e>,
 {
-    Ok(sqlx::query!(
-        "UPDATE device SET target_release_eligible_at = NOW()
-         WHERE target_release_id = $1
-         AND target_release_eligible_at > NOW()
-         AND release_id IS DISTINCT FROM target_release_id
-         AND archived = false",
+    let released = sqlx::query_scalar!(
+        r#"WITH released AS (
+            UPDATE device SET target_release_eligible_at = NOW()
+            WHERE target_release_id = $1
+            AND target_release_eligible_at > NOW()
+            AND release_id IS DISTINCT FROM target_release_id
+            AND archived = false
+            RETURNING id
+        ), opened AS (
+            UPDATE deployment_devices dd SET opens_at = NOW()
+            FROM deployment dep
+            WHERE dep.id = dd.deployment_id
+              AND dep.release_id = $1
+              AND dd.opens_at > NOW()
+        )
+        SELECT COUNT(*) AS "count!" FROM released"#,
         release_id
     )
-    .execute(executor)
-    .await?
-    .rows_affected())
+    .fetch_one(executor)
+    .await?;
+    Ok(released as u64)
 }
 
 pub async fn finish_now(
@@ -959,8 +1000,77 @@ where
     .await
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone, ToSchema)]
+pub struct DeploymentWave {
+    /// 0 is the canary; staggered rollout waves start at 1.
+    pub wave: i32,
+    pub opens_at: DateTime<Utc>,
+    pub total: i64,
+    pub updated: i64,
+    pub scheduled: i64,
+    pub updating: i64,
+    pub offline: i64,
+    pub superseded: i64,
+    /// Devices currently on the release whose watchdog services are failing.
+    pub unhealthy: i64,
+}
+
+/// Wave-by-wave progress of a release's deployment.
+pub async fn get_deployment_waves(
+    release_id: i32,
+    pg_pool: &PgPool,
+) -> sqlx::Result<Vec<DeploymentWave>> {
+    sqlx::query_as!(
+        DeploymentWave,
+        r#"WITH states AS (
+            SELECT
+                dd.wave,
+                dd.opens_at,
+                CASE
+                    WHEN dd.reached_at IS NOT NULL OR dev.release_id = dep.release_id THEN 'updated'
+                    WHEN dev.target_release_id IS DISTINCT FROM dep.release_id OR dev.archived THEN 'superseded'
+                    WHEN dev.target_release_eligible_at > NOW() THEN 'scheduled'
+                    WHEN dev.last_ping IS NULL OR dev.last_ping < NOW() - INTERVAL '3 minutes' THEN 'offline'
+                    ELSE 'updating'
+                END AS state,
+                dev.release_id = dep.release_id AND EXISTS (
+                    SELECT 1 FROM release_services rs
+                    WHERE rs.release_id = dep.release_id
+                      AND rs.watchdog_sec IS NOT NULL
+                      AND NOT EXISTS (
+                          SELECT 1 FROM device_service_status dss
+                          WHERE dss.device_id = dev.id
+                            AND dss.release_service_id = rs.id
+                            AND dss.active_state = 'active'
+                      )
+                ) AS unhealthy
+            FROM deployment dep
+            JOIN deployment_devices dd ON dd.deployment_id = dep.id
+            JOIN device dev ON dev.id = dd.device_id
+            WHERE dep.release_id = $1
+        )
+        SELECT
+            wave,
+            MIN(opens_at) AS "opens_at!",
+            COUNT(*) AS "total!",
+            COUNT(*) FILTER (WHERE state = 'updated') AS "updated!",
+            COUNT(*) FILTER (WHERE state = 'scheduled') AS "scheduled!",
+            COUNT(*) FILTER (WHERE state = 'updating') AS "updating!",
+            COUNT(*) FILTER (WHERE state = 'offline') AS "offline!",
+            COUNT(*) FILTER (WHERE state = 'superseded') AS "superseded!",
+            COUNT(*) FILTER (WHERE unhealthy) AS "unhealthy!"
+        FROM states
+        GROUP BY wave
+        ORDER BY wave"#,
+        release_id
+    )
+    .fetch_all(pg_pool)
+    .await
+}
+
 pub async fn get_devices_in_deployment(
     release_id: i32,
+    wave: i32,
     pg_pool: &PgPool,
 ) -> anyhow::Result<Vec<DeploymentDeviceWithStatus>> {
     let deployment = sqlx::query!(
@@ -989,11 +1099,12 @@ pub async fn get_devices_in_deployment(
             JOIN device d ON dd.device_id = d.id
             LEFT JOIN device_label dl ON dl.device_id = d.id
             LEFT JOIN label l ON l.id = dl.label_id
-            WHERE dd.deployment_id = $1
+            WHERE dd.deployment_id = $1 AND dd.wave = $2
             GROUP BY d.id, d.serial_number, d.release_id, d.target_release_id, d.last_ping, dd.created_at
-            ORDER BY dd.created_at ASC
+            ORDER BY dd.created_at ASC, d.id ASC
             "#,
-        deployment.id
+        deployment.id,
+        wave
     )
     .fetch_all(pg_pool)
     .await?;
@@ -1405,6 +1516,103 @@ pub(crate) mod tests {
             17,
             "a device without an IP is never held back"
         );
+        Ok(())
+    }
+
+    #[sqlx::test]
+    #[ignore = "needs disposable Postgres; run with --test-threads=1"]
+    async fn deployment_waves_track_canaries_staggered_waves_and_outcomes(
+        pool: PgPool,
+    ) -> anyhow::Result<()> {
+        let state = crate::test_support::test_state(pool.clone())?;
+        let [base, target, later] = insert_releases(&pool).await?;
+        sqlx::query("UPDATE release SET draft = false WHERE id = ANY($1)")
+            .bind(&[base, target, later][..])
+            .execute(&pool)
+            .await?;
+
+        // 1 online canary + 2 offline followers so only the canary starts in wave 0.
+        let devices = insert_devices(&pool, 3, Some(base)).await?;
+        let [canary, follower_a, follower_b] = [devices[0], devices[1], devices[2]];
+        sqlx::query(
+            "UPDATE device
+             SET target_release_id = release_id,
+                 follow_latest = true,
+                 last_ping = CASE WHEN id = $1 THEN NOW() ELSE NOW() - INTERVAL '10 minutes' END",
+        )
+        .bind(canary)
+        .execute(&pool)
+        .await?;
+
+        new_deployment(target, None, &pool, state.config, None)
+            .await
+            .map_err(|err| anyhow::anyhow!("{err:?}"))?;
+
+        let waves = get_deployment_waves(target, &pool).await?;
+        assert_eq!(waves.len(), 1);
+        assert_eq!(waves[0].wave, 0);
+        assert_eq!(waves[0].total, 1);
+        assert_eq!(waves[0].updating, 1);
+
+        // Canary reports the release -> reached_at is stamped and wave 0 is updated.
+        crate::device::save_release_id(canary, Some(target), &pool).await?;
+        let waves = get_deployment_waves(target, &pool).await?;
+        assert_eq!(waves[0].updated, 1);
+        assert_eq!(waves[0].updating, 0);
+
+        // Confirm full rollout: waves 1 and 2 are recorded for the 2 followers,
+        // while the legacy canary device list still returns only wave 0.
+        confirm_full_rollout(target, &pool, state.config, None)
+            .await
+            .map_err(|err| anyhow::anyhow!("{err:?}"))?;
+
+        let canaries = get_devices_in_deployment(target, 0, &pool).await?;
+        assert_eq!(canaries.len(), 1);
+        assert_eq!(canaries[0].device_id, canary);
+
+        let first_wave = get_devices_in_deployment(target, 1, &pool).await?;
+        let second_wave = get_devices_in_deployment(target, 2, &pool).await?;
+        assert_eq!(first_wave.len(), 1);
+        assert_eq!(second_wave.len(), 1);
+        let mut followers = [first_wave[0].device_id, second_wave[0].device_id];
+        followers.sort_unstable();
+        let mut expected_followers = [follower_a, follower_b];
+        expected_followers.sort_unstable();
+        assert_eq!(followers, expected_followers);
+
+        let waves = get_deployment_waves(target, &pool).await?;
+        assert_eq!(waves.len(), 3, "wave 0 (canary) + waves 1 and 2");
+        assert_eq!(waves[0].wave, 0);
+        assert_eq!(waves[0].updated, 1);
+        assert_eq!(waves[1].wave, 1);
+        assert_eq!(waves[1].total, 1);
+        assert_eq!(waves[1].offline, 1);
+        assert_eq!(waves[2].wave, 2);
+        assert_eq!(waves[2].total, 1);
+        assert_eq!(waves[2].scheduled, 1);
+
+        // Finish Now opens the scheduled wave, not just its devices.
+        assert_eq!(release_waiting_devices(target, &pool).await?, 1);
+        let waves = get_deployment_waves(target, &pool).await?;
+        assert_eq!(waves[2].scheduled, 0);
+        assert!(waves[2].opens_at <= chrono::Utc::now());
+
+        // Retargeting a pending follower marks it superseded; moving the canary
+        // to a later release preserves its `updated` status via reached_at.
+        sqlx::query("UPDATE device SET target_release_id = $1 WHERE id = $2")
+            .bind(later)
+            .bind(follower_a)
+            .execute(&pool)
+            .await?;
+        crate::device::save_release_id(canary, Some(later), &pool).await?;
+        crate::device::save_release_id(follower_b, Some(target), &pool).await?;
+
+        let waves = get_deployment_waves(target, &pool).await?;
+        assert_eq!(waves[0].updated, 1, "reached_at preserves wave 0 history");
+        let total_updated: i64 = waves[1..].iter().map(|w| w.updated).sum();
+        let total_superseded: i64 = waves[1..].iter().map(|w| w.superseded).sum();
+        assert_eq!(total_updated, 1);
+        assert_eq!(total_superseded, 1);
         Ok(())
     }
 }

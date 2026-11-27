@@ -524,6 +524,7 @@ impl SmithMcp {
         let (_, AxumJson(devices)) = call(deployment_route::api_get_deployment_devices(
             Path(params.release_id),
             AxumExtension(self.state.clone()),
+            Query(Default::default()),
         ))
         .await?;
         let (_, AxumJson(health)) = call(deployment_route::api_get_deployment_service_health(

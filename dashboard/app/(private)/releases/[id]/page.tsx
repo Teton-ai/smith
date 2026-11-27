@@ -158,12 +158,13 @@ const ReleaseDetailPage = () => {
 			},
 		});
 
-	const { data: existingDeployment } = useApiGetReleaseDeployment(releaseId, {
-		query: {
-			enabled: !!releaseId && !!release && !release.draft && !release.yanked,
-			retry: false,
-		},
-	});
+	const { data: existingDeployment, isLoading: deploymentLoading } =
+		useApiGetReleaseDeployment(releaseId, {
+			query: {
+				enabled: !!releaseId && !!release && !release.draft && !release.yanked,
+				retry: false,
+			},
+		});
 
 	const rollbackPickerOpen = showYankModal || showRollbackModal;
 	const { data: distributionReleases = [] } = useGetDistributionReleases(
@@ -811,25 +812,31 @@ const ReleaseDetailPage = () => {
 								>
 									Yank
 								</Button>
-								{existingDeployment?.status === "InProgress" ? (
+								{existingDeployment && (
 									<Button
 										variant="solid"
 										tone="blue"
 										to={`/releases/${releaseId}/deployment`}
-										icon={<Loader2 className="w-4 h-4 animate-spin" />}
+										icon={
+											existingDeployment.status === "InProgress" ? (
+												<Loader2 className="w-4 h-4 animate-spin" />
+											) : undefined
+										}
 									>
 										View Deployment
 									</Button>
-								) : (
-									<Button
-										variant="solid"
-										tone="blue"
-										icon={<Rocket className="w-4 h-4" />}
-										onClick={handleOpenDeployModal}
-									>
-										Deploy
-									</Button>
 								)}
+								{!deploymentLoading &&
+									existingDeployment?.status !== "InProgress" && (
+										<Button
+											variant={existingDeployment ? "soft" : "solid"}
+											tone="blue"
+											icon={<Rocket className="w-4 h-4" />}
+											onClick={handleOpenDeployModal}
+										>
+											{existingDeployment ? "Deploy Again" : "Deploy"}
+										</Button>
+									)}
 							</>
 						)}
 					</div>
