@@ -721,6 +721,13 @@ pub async fn get_commands(
                   AND fetched = false
                   AND canceled = false
                   AND available_at <= now()
+                  -- smith-rescue takes Restarts once it has polled /smith/restart.
+                  AND NOT (
+                      cmd::jsonb = '"Restart"'::jsonb
+                      AND EXISTS (
+                          SELECT 1 FROM device WHERE id = $1 AND has_restart_channel
+                      )
+                  )
                 ORDER BY id
                 LIMIT $2
                 FOR UPDATE

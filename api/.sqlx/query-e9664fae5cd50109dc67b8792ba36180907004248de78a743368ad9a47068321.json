@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE device SET has_restart_channel = true\n         WHERE id = $1 AND NOT has_restart_channel",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "e9664fae5cd50109dc67b8792ba36180907004248de78a743368ad9a47068321"
+}
