@@ -34,10 +34,14 @@ export function DevicePinBadge({
 			className="z-10 hover:z-20 shrink-0"
 		>
 			{plain ? (
-				<span className="flex items-center gap-1 cursor-help">
+				<button
+					type="button"
+					aria-label={description}
+					className="flex items-center gap-1 cursor-help rounded focus-visible:outline-2 focus-visible:outline-blue-600"
+				>
 					<Pin className="w-4 h-4" aria-hidden="true" />
 					<span>Pinned</span>
-				</span>
+				</button>
 			) : (
 				<Link
 					to={`/devices/${device.serial_number}`}

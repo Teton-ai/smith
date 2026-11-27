@@ -10,12 +10,12 @@ interface TooltipProps {
 }
 
 const placementClasses: Record<Placement, string> = {
-	top: "left-1/2 -translate-x-1/2 bottom-full mb-2 group-hover/tt:-translate-y-0.5 translate-y-0.5",
+	top: "left-1/2 -translate-x-1/2 bottom-full mb-2 group-hover/tt:-translate-y-0.5 group-has-focus-visible/tt:-translate-y-0.5 translate-y-0.5",
 	bottom:
-		"left-1/2 -translate-x-1/2 top-full mt-2 group-hover/tt:translate-y-0.5 -translate-y-0.5",
-	left: "right-full top-1/2 -translate-y-1/2 mr-2 group-hover/tt:-translate-x-0.5 translate-x-0.5",
+		"left-1/2 -translate-x-1/2 top-full mt-2 group-hover/tt:translate-y-0.5 group-has-focus-visible/tt:translate-y-0.5 -translate-y-0.5",
+	left: "right-full top-1/2 -translate-y-1/2 mr-2 group-hover/tt:-translate-x-0.5 group-has-focus-visible/tt:-translate-x-0.5 translate-x-0.5",
 	right:
-		"left-full top-1/2 -translate-y-1/2 ml-2 group-hover/tt:translate-x-0.5 -translate-x-0.5",
+		"left-full top-1/2 -translate-y-1/2 ml-2 group-hover/tt:translate-x-0.5 group-has-focus-visible/tt:translate-x-0.5 -translate-x-0.5",
 };
 
 const arrowClasses: Record<Placement, string> = {
@@ -36,7 +36,7 @@ export const Tooltip = ({
 			{children}
 			<span
 				role="tooltip"
-				className={`pointer-events-none absolute ${placementClasses[placement]} whitespace-nowrap rounded-md bg-gray-900 px-2 py-1 text-xs font-normal text-white shadow-lg opacity-0 group-hover/tt:opacity-100 transition-[opacity,transform] duration-150 ease-out z-50`}
+				className={`pointer-events-none absolute ${placementClasses[placement]} whitespace-nowrap rounded-md bg-gray-900 px-2 py-1 text-xs font-normal text-white shadow-lg opacity-0 group-hover/tt:opacity-100 group-has-focus-visible/tt:opacity-100 transition-[opacity,transform] duration-150 ease-out z-50`}
 			>
 				{content}
 				<span
