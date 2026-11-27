@@ -140,3 +140,179 @@ pub async fn get_unhealthy_service_devices(
 
     Ok(devices)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[sqlx::test]
+    #[ignore = "needs the compose Postgres; run with --test-threads=1"]
+    async fn dashboard_counts_registrations_and_unhealthy_services(
+        pool: PgPool,
+    ) -> anyhow::Result<()> {
+        // Empty table returns all zeros without error.
+        let empty = Dashboard::new(&pool, &[]).await?;
+        assert_eq!(
+            (
+                empty.total_count,
+                empty.online_count,
+                empty.offline_count,
+                empty.outdated_count,
+                empty.archived_count
+            ),
+            (0, 0, 0, 0, 0)
+        );
+        assert!(get_registration_counts(&pool, &[]).await?.is_empty());
+        assert!(get_unhealthy_service_devices(&pool, &[]).await?.is_empty());
+
+        let dist_id: i32 = sqlx::query_scalar(
+            "INSERT INTO distribution (name, description, architecture) VALUES ('dash-dist', 'd', 'arm64') RETURNING id",
+        )
+        .fetch_one(&pool)
+        .await?;
+        let rel_old: i32 = sqlx::query_scalar(
+            "INSERT INTO release (distribution_id, version) VALUES ($1, '1.0.0') RETURNING id",
+        )
+        .bind(dist_id)
+        .fetch_one(&pool)
+        .await?;
+        let rel_new: i32 = sqlx::query_scalar(
+            "INSERT INTO release (distribution_id, version) VALUES ($1, '2.0.0') RETURNING id",
+        )
+        .bind(dist_id)
+        .fetch_one(&pool)
+        .await?;
+
+        // Online up-to-date device (with unhealthy watchdog service)
+        let d_online_ok: i32 = sqlx::query_scalar(
+            "INSERT INTO device (serial_number, approved, archived, last_ping, release_id, target_release_id, created_on)
+             VALUES ('dash-1', true, false, NOW() - INTERVAL '30 seconds', $1, $1, '2026-01-15T00:00:00Z') RETURNING id",
+        )
+        .bind(rel_new)
+        .fetch_one(&pool)
+        .await?;
+        // Offline outdated device (eligible now)
+        let _d_offline_outdated: i32 = sqlx::query_scalar(
+            "INSERT INTO device (serial_number, approved, archived, last_ping, release_id, target_release_id, target_release_eligible_at, created_on)
+             VALUES ('dash-2', true, false, NOW() - INTERVAL '10 minutes', $1, $2, NOW() - INTERVAL '5 minutes', '2026-01-20T00:00:00Z') RETURNING id",
+        )
+        .bind(rel_old)
+        .bind(rel_new)
+        .fetch_one(&pool)
+        .await?;
+        // Online staggered device (eligible in future -> NOT outdated)
+        let _d_staggered: i32 = sqlx::query_scalar(
+            "INSERT INTO device (serial_number, approved, archived, last_ping, release_id, target_release_id, target_release_eligible_at, created_on)
+             VALUES ('dash-3', true, false, NOW() - INTERVAL '10 seconds', $1, $2, NOW() + INTERVAL '1 hour', '2026-02-10T00:00:00Z') RETURNING id",
+        )
+        .bind(rel_old)
+        .bind(rel_new)
+        .fetch_one(&pool)
+        .await?;
+        // Active device with NULL last_ping (counts in total, neither online nor offline)
+        let _d_null_ping: i32 = sqlx::query_scalar(
+            "INSERT INTO device (serial_number, approved, archived, last_ping, release_id, target_release_id, created_on)
+             VALUES ('dash-4', true, false, NULL, $1, $1, '2026-02-11T00:00:00Z') RETURNING id",
+        )
+        .bind(rel_new)
+        .fetch_one(&pool)
+        .await?;
+        // Archived device
+        let _d_archived: i32 = sqlx::query_scalar(
+            "INSERT INTO device (serial_number, approved, archived, last_ping, release_id, target_release_id, created_on)
+             VALUES ('dash-5', true, true, NOW() - INTERVAL '10 seconds', $1, $2, '2026-02-12T00:00:00Z') RETURNING id",
+        )
+        .bind(rel_old)
+        .bind(rel_new)
+        .fetch_one(&pool)
+        .await?;
+        // Online excluded-label device (with unhealthy watchdog service)
+        let d_excluded: i32 = sqlx::query_scalar(
+            "INSERT INTO device (serial_number, approved, archived, last_ping, release_id, target_release_id, created_on)
+             VALUES ('dash-6', true, false, NOW() - INTERVAL '15 seconds', $1, $1, '2026-02-13T00:00:00Z') RETURNING id",
+        )
+        .bind(rel_new)
+        .fetch_one(&pool)
+        .await?;
+
+        let label_id: i32 =
+            sqlx::query_scalar("INSERT INTO label (name) VALUES ('env') RETURNING id")
+                .fetch_one(&pool)
+                .await?;
+        sqlx::query(
+            "INSERT INTO device_label (device_id, label_id, value) VALUES ($1, $2, 'test')",
+        )
+        .bind(d_excluded)
+        .bind(label_id)
+        .execute(&pool)
+        .await?;
+
+        // Services on rel_new: one watchdog service, one non-watchdog service.
+        let svc_watchdog: i32 = sqlx::query_scalar(
+            "INSERT INTO release_services (release_id, service_name, watchdog_sec) VALUES ($1, 'smithd.service', 30) RETURNING id",
+        )
+        .bind(rel_new)
+        .fetch_one(&pool)
+        .await?;
+        let svc_no_watchdog: i32 = sqlx::query_scalar(
+            "INSERT INTO release_services (release_id, service_name, watchdog_sec) VALUES ($1, 'helper.service', NULL) RETURNING id",
+        )
+        .bind(rel_new)
+        .fetch_one(&pool)
+        .await?;
+
+        sqlx::query(
+            "INSERT INTO device_service_status (device_id, release_service_id, active_state, n_restarts, checked_at)
+             VALUES ($1, $3, 'failed', 2, NOW()), ($1, $4, 'failed', 1, NOW()), ($2, $3, 'failed', 3, NOW())",
+        )
+        .bind(d_online_ok)
+        .bind(d_excluded)
+        .bind(svc_watchdog)
+        .bind(svc_no_watchdog)
+        .execute(&pool)
+        .await?;
+
+        // Without exclusions
+        let all = Dashboard::new(&pool, &[]).await?;
+        assert_eq!(all.total_count, 5);
+        assert_eq!(all.online_count, 3);
+        assert_eq!(all.offline_count, 1);
+        assert_eq!(all.outdated_count, 1);
+        assert_eq!(all.archived_count, 1);
+
+        let regs_all = get_registration_counts(&pool, &[]).await?;
+        assert_eq!(regs_all.len(), 2);
+        assert_eq!((regs_all[0].count, regs_all[1].count), (2, 4));
+
+        let unhealthy_all = get_unhealthy_service_devices(&pool, &[]).await?;
+        assert_eq!(
+            unhealthy_all
+                .iter()
+                .map(|r| (r.serial_number.as_str(), r.service_name.as_str()))
+                .collect::<Vec<_>>(),
+            vec![("dash-1", "smithd.service"), ("dash-6", "smithd.service")]
+        );
+
+        // With env=test excluded
+        let excluded = vec!["env=test".to_string()];
+        let filtered = Dashboard::new(&pool, &excluded).await?;
+        assert_eq!(filtered.total_count, 4);
+        assert_eq!(filtered.online_count, 2);
+        assert_eq!(filtered.offline_count, 1);
+        assert_eq!(filtered.outdated_count, 1);
+        assert_eq!(filtered.archived_count, 1);
+
+        let regs_filtered = get_registration_counts(&pool, &excluded).await?;
+        assert_eq!((regs_filtered[0].count, regs_filtered[1].count), (2, 3));
+
+        let unhealthy_filtered = get_unhealthy_service_devices(&pool, &excluded).await?;
+        assert_eq!(
+            unhealthy_filtered
+                .iter()
+                .map(|r| (r.serial_number.as_str(), r.service_name.as_str()))
+                .collect::<Vec<_>>(),
+            vec![("dash-1", "smithd.service")]
+        );
+        Ok(())
+    }
+}

@@ -5483,3 +5483,396 @@ mod device_revocation {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod get_devices_query_tests {
+    use super::get_devices;
+    use crate::{
+        State,
+        auth::{DebugJwksClient, DeviceJwtSigner},
+        config::{CloudFrontConfig, Config},
+        middlewares::authorization::{AccountsConfig, AuthorizationConfig},
+    };
+    use axum::Extension;
+    use axum_extra::extract::Query;
+    use ed25519_dalek::pkcs8::EncodePrivateKey;
+    use models::device::{Device, DeviceFilter, DeviceSortDirection, DeviceSortField};
+    use sqlx::PgPool;
+    use std::{collections::HashMap, sync::Arc};
+    use tokio::sync::{Mutex, Semaphore, broadcast};
+
+    fn test_state(pool: PgPool) -> anyhow::Result<State> {
+        let pem =
+            ed25519_dalek::SigningKey::from_bytes(&[9; 32]).to_pkcs8_pem(Default::default())?;
+        let signer = DeviceJwtSigner::new(pem.as_str(), "devices-test".into(), 3600)?;
+        let config = Box::leak(Box::new(Config {
+            database_url: String::new(),
+            packages_bucket_name: "packages".into(),
+            assets_bucket_name: "upload-assets".into(),
+            data_engine_bucket_name: "upload-sensitive".into(),
+            aws_region: "us-east-1".into(),
+            sentry_url: None,
+            slack_hook_url: None,
+            deployment_slack_hook_url: None,
+            victoria_metrics_client: None,
+            victoria_metrics_read_client: None,
+            ip_api_key: None,
+            auth0_issuer: "http://127.0.0.1".into(),
+            auth0_audience: "devices-test".into(),
+            cloudfront: CloudFrontConfig {
+                package_domain_name: String::new(),
+                package_key_pair_id: String::new(),
+                package_private_key: String::new(),
+            },
+            dashboard_excluded_labels: vec![],
+            device_jwt_private_key_pem: pem.to_string(),
+            device_jwt_issuer: "devices-test".into(),
+            device_jwt_ttl_seconds: 3600,
+            known_holders: HashMap::new(),
+            network_gc_interval_seconds: 3600,
+            mcp: None,
+            max_concurrent_uploads: 4,
+            device_upload_cdn_url: None,
+            upload_token_key: crate::upload_token::UploadTokenKey::new(&"test-key".repeat(8))?,
+        }));
+        Ok(State {
+            pg_pool: pool,
+            config,
+            public_events: Arc::new(Mutex::new(broadcast::channel(1).0)),
+            authorization: Arc::new(AuthorizationConfig {
+                roles: HashMap::new(),
+            }),
+            accounts: Arc::new(AccountsConfig::default()),
+            jwks_client: DebugJwksClient::init("http://127.0.0.1")
+                .map_err(|e| anyhow::anyhow!(e.to_string()))?,
+            device_jwt_signer: signer,
+            upload_permits: Arc::new(Semaphore::new(4)),
+            home_permits: Arc::new(Semaphore::new(4)),
+            home_cache: Arc::new(crate::smith::HomeCache::new()),
+        })
+    }
+
+    async fn query(
+        state: &State,
+        filter: DeviceFilter,
+    ) -> anyhow::Result<(Option<i64>, Vec<Device>)> {
+        let (headers, axum::Json(devices)) = get_devices(Extension(state.clone()), Query(filter))
+            .await
+            .map_err(|s| anyhow::anyhow!("get_devices returned {s}"))?;
+        let total = headers
+            .get("x-total-count")
+            .map(|v| v.to_str().unwrap().parse::<i64>().unwrap());
+        Ok((total, devices))
+    }
+
+    #[sqlx::test]
+    #[ignore = "needs Postgres with pg_partman; run with --test-threads=1"]
+    async fn filters_search_sort_and_pagination_preserve_exact_semantics(
+        pool: PgPool,
+    ) -> anyhow::Result<()> {
+        let state = test_state(pool.clone())?;
+
+        let dist_a: i32 = sqlx::query_scalar(
+            "INSERT INTO distribution (name, description, architecture) VALUES ('dist-a', 'a', 'arm64') RETURNING id",
+        )
+        .fetch_one(&pool)
+        .await?;
+        let dist_b: i32 = sqlx::query_scalar(
+            "INSERT INTO distribution (name, description, architecture) VALUES ('dist-b', 'b', 'arm64') RETURNING id",
+        )
+        .fetch_one(&pool)
+        .await?;
+        let rel_a1: i32 = sqlx::query_scalar(
+            "INSERT INTO release (distribution_id, version) VALUES ($1, '1.0.0') RETURNING id",
+        )
+        .bind(dist_a)
+        .fetch_one(&pool)
+        .await?;
+        let rel_a2: i32 = sqlx::query_scalar(
+            "INSERT INTO release (distribution_id, version) VALUES ($1, '2.0.0') RETURNING id",
+        )
+        .bind(dist_a)
+        .fetch_one(&pool)
+        .await?;
+        let rel_b1: i32 = sqlx::query_scalar(
+            "INSERT INTO release (distribution_id, version) VALUES ($1, '1.0.0') RETURNING id",
+        )
+        .bind(dist_b)
+        .fetch_one(&pool)
+        .await?;
+
+        // d1: online, up-to-date, dist_a/rel_a2, labels: site=alpha + tier=gold, hostname in dsr overrides system_info
+        let d1: i32 = sqlx::query_scalar(
+            "INSERT INTO device (serial_number, approved, archived, last_ping, release_id, target_release_id, follow_latest, system_info)
+             VALUES ('dev-001', true, false, NOW() - INTERVAL '10 seconds', $1, $1, true,
+                     '{\"hostname\":\"legacy-host-1\",\"device_tree\":{\"model\":\"Orin Nano\"}}'::jsonb) RETURNING id",
+        )
+        .bind(rel_a2)
+        .fetch_one(&pool)
+        .await?;
+        sqlx::query(
+            "INSERT INTO device_settings_reported (device_id, hostname, reported_at)
+             VALUES ($1, 'reported-host-one', NOW())",
+        )
+        .bind(d1)
+        .execute(&pool)
+        .await?;
+
+        // d2: offline, outdated (eligible 60m ago), dist_a/rel_a1->rel_a2, labels: site=beta + tier=gold, unhealthy watchdog service
+        let d2: i32 = sqlx::query_scalar(
+            "INSERT INTO device (serial_number, approved, archived, last_ping, release_id, target_release_id, target_release_id_set_at, target_release_eligible_at, follow_latest, system_info)
+             VALUES ('dev-002', true, false, NOW() - INTERVAL '10 minutes', $1, $2, NOW() - INTERVAL '90 minutes', NOW() - INTERVAL '60 minutes', false,
+                     '{\"hostname\":\"fallback-host-two\",\"device_tree\":{\"model\":\"Jetson Xavier\"}}'::jsonb) RETURNING id",
+        )
+        .bind(rel_a1)
+        .bind(rel_a2)
+        .fetch_one(&pool)
+        .await?;
+
+        // d3: online, staggered future eligible_at (NOT outdated), dist_b/rel_b1->rel_a2, labels: env=test + site=gamma
+        let d3: i32 = sqlx::query_scalar(
+            "INSERT INTO device (serial_number, approved, archived, last_ping, release_id, target_release_id, target_release_eligible_at, follow_latest)
+             VALUES ('dev-003', true, false, NOW() - INTERVAL '30 seconds', $1, $2, NOW() + INTERVAL '2 hours', true) RETURNING id",
+        )
+        .bind(rel_b1)
+        .bind(rel_a2)
+        .fetch_one(&pool)
+        .await?;
+
+        // d4: archived, unapproved
+        let _d4: i32 = sqlx::query_scalar(
+            "INSERT INTO device (serial_number, approved, archived, last_ping, release_id, target_release_id)
+             VALUES ('dev-004', false, true, NOW() - INTERVAL '20 seconds', $1, $1) RETURNING id",
+        )
+        .bind(rel_a2)
+        .fetch_one(&pool)
+        .await?;
+
+        let lbl_site: i32 =
+            sqlx::query_scalar("INSERT INTO label (name) VALUES ('site') RETURNING id")
+                .fetch_one(&pool)
+                .await?;
+        let lbl_tier: i32 =
+            sqlx::query_scalar("INSERT INTO label (name) VALUES ('tier') RETURNING id")
+                .fetch_one(&pool)
+                .await?;
+        let lbl_env: i32 =
+            sqlx::query_scalar("INSERT INTO label (name) VALUES ('env') RETURNING id")
+                .fetch_one(&pool)
+                .await?;
+
+        for (dev, lbl, val) in [
+            (d1, lbl_site, "zeta"),
+            (d1, lbl_tier, "gold"),
+            (d2, lbl_site, "alpha"),
+            (d2, lbl_tier, "gold"),
+            (d3, lbl_env, "test"),
+            (d3, lbl_site, "gamma"),
+        ] {
+            sqlx::query(
+                "INSERT INTO device_label (device_id, label_id, value) VALUES ($1, $2, $3)",
+            )
+            .bind(dev)
+            .bind(lbl)
+            .bind(val)
+            .execute(&pool)
+            .await?;
+        }
+
+        let svc_rel_a1: i32 = sqlx::query_scalar(
+            "INSERT INTO release_services (release_id, service_name, watchdog_sec) VALUES ($1, 'smithd.service', 30) RETURNING id",
+        )
+        .bind(rel_a1)
+        .fetch_one(&pool)
+        .await?;
+        sqlx::query(
+            "INSERT INTO device_service_status (device_id, release_service_id, active_state, n_restarts, checked_at)
+             VALUES ($1, $2, 'failed', 1, NOW())",
+        )
+        .bind(d2)
+        .bind(svc_rel_a1)
+        .execute(&pool)
+        .await?;
+
+        // Default excludes archived; ordered by last_ping DESC NULLS LAST, serial_number
+        let (total, rows) = query(&state, DeviceFilter::default()).await?;
+        assert_eq!(total, Some(3));
+        assert_eq!(
+            rows.iter()
+                .map(|d| d.serial_number.as_str())
+                .collect::<Vec<_>>(),
+            vec!["dev-001", "dev-003", "dev-002"]
+        );
+        // Every device receives all its labels (not truncated by filters)
+        assert_eq!(
+            rows[0].labels.0.get("site").map(String::as_str),
+            Some("zeta")
+        );
+        assert_eq!(
+            rows[0].labels.0.get("tier").map(String::as_str),
+            Some("gold")
+        );
+
+        // Pagination preserves full total_count; offset past end omits x-total-count
+        let (p_total, page1) = query(
+            &state,
+            DeviceFilter {
+                limit: Some(1),
+                offset: Some(1),
+                sort: Some(DeviceSortField::SerialNumber),
+                order: Some(DeviceSortDirection::Asc),
+                ..Default::default()
+            },
+        )
+        .await?;
+        assert_eq!(p_total, Some(3));
+        assert_eq!(page1.len(), 1);
+        assert_eq!(page1[0].serial_number, "dev-002");
+
+        let (empty_total, past_end) = query(
+            &state,
+            DeviceFilter {
+                limit: Some(10),
+                offset: Some(10),
+                ..Default::default()
+            },
+        )
+        .await?;
+        assert_eq!(empty_total, None);
+        assert!(past_end.is_empty());
+
+        // Labels filter + sort by labels ASC uses each device's actual MIN label (d2: site=alpha < d1: site=zeta)
+        // and still returns all labels for each device.
+        let (lbl_total, lbl_rows) = query(
+            &state,
+            DeviceFilter {
+                labels: vec!["tier=gold".into()],
+                sort: Some(DeviceSortField::Labels),
+                order: Some(DeviceSortDirection::Asc),
+                ..Default::default()
+            },
+        )
+        .await?;
+        assert_eq!(lbl_total, Some(2));
+        assert_eq!(
+            lbl_rows
+                .iter()
+                .map(|d| d.serial_number.as_str())
+                .collect::<Vec<_>>(),
+            vec!["dev-002", "dev-001"]
+        );
+        assert_eq!(lbl_rows[0].labels.0.len(), 2);
+
+        // Exclude labels
+        let (ex_total, ex_rows) = query(
+            &state,
+            DeviceFilter {
+                exclude_labels: vec!["env=test".into()],
+                ..Default::default()
+            },
+        )
+        .await?;
+        assert_eq!(ex_total, Some(2));
+        assert!(!ex_rows.iter().any(|d| d.serial_number == "dev-003"));
+
+        // Search checks reported hostname (overriding legacy system_info hostname), fallback hostname, and model
+        let (_, s_reported) = query(
+            &state,
+            DeviceFilter {
+                search: Some("reported-host-one".into()),
+                ..Default::default()
+            },
+        )
+        .await?;
+        assert_eq!(s_reported.len(), 1);
+        assert_eq!(s_reported[0].serial_number, "dev-001");
+
+        let (_, s_overridden) = query(
+            &state,
+            DeviceFilter {
+                search: Some("legacy-host-1".into()),
+                ..Default::default()
+            },
+        )
+        .await?;
+        assert!(s_overridden.is_empty());
+
+        let (_, s_fallback_and_model) = query(
+            &state,
+            DeviceFilter {
+                search: Some("fallback-host-two,Orin Nano".into()),
+                sort: Some(DeviceSortField::SerialNumber),
+                ..Default::default()
+            },
+        )
+        .await?;
+        assert_eq!(
+            s_fallback_and_model
+                .iter()
+                .map(|d| d.serial_number.as_str())
+                .collect::<Vec<_>>(),
+            vec!["dev-001", "dev-002"]
+        );
+
+        // Outdated excludes future staggered devices; outdated_minutes respects eligible_at
+        let (_, outdated) = query(
+            &state,
+            DeviceFilter {
+                outdated: Some(true),
+                outdated_minutes: Some(30),
+                ..Default::default()
+            },
+        )
+        .await?;
+        assert_eq!(outdated.len(), 1);
+        assert_eq!(outdated[0].serial_number, "dev-002");
+
+        // Distribution, service_not_running, follow_latest, archived
+        let (_, dist_b_rows) = query(
+            &state,
+            DeviceFilter {
+                distribution_id: Some(dist_b),
+                ..Default::default()
+            },
+        )
+        .await?;
+        assert_eq!(dist_b_rows.len(), 1);
+        assert_eq!(dist_b_rows[0].serial_number, "dev-003");
+
+        let (_, unhealthy_rows) = query(
+            &state,
+            DeviceFilter {
+                service_not_running: Some(true),
+                ..Default::default()
+            },
+        )
+        .await?;
+        assert_eq!(unhealthy_rows.len(), 1);
+        assert_eq!(unhealthy_rows[0].serial_number, "dev-002");
+
+        let (_, pinned_rows) = query(
+            &state,
+            DeviceFilter {
+                follow_latest: Some(false),
+                ..Default::default()
+            },
+        )
+        .await?;
+        assert_eq!(pinned_rows.len(), 1);
+        assert_eq!(pinned_rows[0].serial_number, "dev-002");
+
+        let (arch_total, arch_rows) = query(
+            &state,
+            DeviceFilter {
+                archived: Some(true),
+                approved: Some(false),
+                ..Default::default()
+            },
+        )
+        .await?;
+        assert_eq!(arch_total, Some(1));
+        assert_eq!(arch_rows[0].serial_number, "dev-004");
+
+        Ok(())
+    }
+}
