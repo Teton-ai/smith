@@ -1209,7 +1209,7 @@ pub(crate) mod tests {
     #[sqlx::test]
     #[ignore = "needs disposable Postgres; run with --test-threads=1"]
     async fn deployment_selection_depends_on_release_type(pool: PgPool) -> anyhow::Result<()> {
-        let state = crate::smith::uploads::integration_tests::test_state(pool.clone())?;
+        let state = crate::test_support::test_state(pool.clone())?;
         let [current, stable, candidate] = insert_releases(&pool).await?;
         sqlx::query("UPDATE release SET draft = false, release_candidate = (id = $1)")
             .bind(candidate)
