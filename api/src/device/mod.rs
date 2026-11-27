@@ -1280,9 +1280,14 @@ pub async fn save_release_id(
     if let Some(new_release_id) = release_id {
         let mut tx = pool.begin().await?;
 
-        let current = sqlx::query!("SELECT release_id FROM device WHERE id = $1", device_id)
-            .fetch_one(&mut *tx)
-            .await?;
+        // Lock the device before its deployment rows, the same order as
+        // confirm_full_rollout, so the two can't deadlock.
+        let current = sqlx::query!(
+            "SELECT release_id FROM device WHERE id = $1 FOR UPDATE",
+            device_id
+        )
+        .fetch_one(&mut *tx)
+        .await?;
 
         sqlx::query!(
             "UPDATE deployment_devices dd SET reached_at = NOW()

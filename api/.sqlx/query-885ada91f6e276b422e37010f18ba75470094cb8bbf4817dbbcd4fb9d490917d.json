@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT release_id FROM device WHERE id = $1",
+  "query": "SELECT release_id FROM device WHERE id = $1 FOR UPDATE",
   "describe": {
     "columns": [
       {
@@ -18,5 +18,5 @@
       true
     ]
   },
-  "hash": "16e4853adb0bc440a139abba04b1aef944a53686bf8ffc94463418e7b131ec36"
+  "hash": "885ada91f6e276b422e37010f18ba75470094cb8bbf4817dbbcd4fb9d490917d"
 }

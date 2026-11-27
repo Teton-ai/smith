@@ -646,7 +646,8 @@ pub async fn confirm_full_rollout(
          FROM UNNEST($2::int[], $3::int[]) AS u(id, wave)
          JOIN device d ON d.id = u.id
          ON CONFLICT (deployment_id, device_id) DO UPDATE
-            SET wave = EXCLUDED.wave, opens_at = EXCLUDED.opens_at",
+            SET wave = EXCLUDED.wave, opens_at = EXCLUDED.opens_at
+            WHERE deployment_devices.wave <> 0",
         updated_deployment.id,
         &outcome.plan.device_ids,
         &outcome.plan.waves

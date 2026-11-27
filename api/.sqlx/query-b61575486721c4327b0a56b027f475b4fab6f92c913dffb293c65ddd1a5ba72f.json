@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO deployment_devices (deployment_id, device_id, wave, opens_at)\n         SELECT $1, d.id, u.wave, COALESCE(d.target_release_eligible_at, NOW())\n         FROM UNNEST($2::int[], $3::int[]) AS u(id, wave)\n         JOIN device d ON d.id = u.id\n         ON CONFLICT (deployment_id, device_id) DO UPDATE\n            SET wave = EXCLUDED.wave, opens_at = EXCLUDED.opens_at\n            WHERE deployment_devices.wave <> 0",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Int4Array",
+        "Int4Array"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "b61575486721c4327b0a56b027f475b4fab6f92c913dffb293c65ddd1a5ba72f"
+}
