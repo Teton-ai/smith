@@ -145,25 +145,36 @@ pub async fn get_unhealthy_service_devices(
 mod tests {
     use super::*;
 
+    #[tokio::test]
+    async fn dashboard_new_returns_error_on_closed_pool() {
+        let pool = sqlx::postgres::PgPoolOptions::new()
+            .connect_lazy("postgres://postgres:postgres@127.0.0.1:1/postgres")
+            .expect("lazy pool");
+        pool.close().await;
+        assert!(Dashboard::new(&pool, &[]).await.is_err());
+    }
+
     #[sqlx::test]
     #[ignore = "needs the compose Postgres; run with --test-threads=1"]
     async fn dashboard_counts_registrations_and_unhealthy_services(
         pool: PgPool,
     ) -> anyhow::Result<()> {
-        // Empty table returns all zeros without error.
-        let empty = Dashboard::new(&pool, &[]).await?;
-        assert_eq!(
-            (
-                empty.total_count,
-                empty.online_count,
-                empty.offline_count,
-                empty.outdated_count,
-                empty.archived_count
-            ),
-            (0, 0, 0, 0, 0)
-        );
-        assert!(get_registration_counts(&pool, &[]).await?.is_empty());
-        assert!(get_unhealthy_service_devices(&pool, &[]).await?.is_empty());
+        // Empty table returns all zeros without error for both empty and non-empty excluded labels.
+        for excl in [&[][..], &["env=test".to_string()][..]] {
+            let empty = Dashboard::new(&pool, excl).await?;
+            assert_eq!(
+                (
+                    empty.total_count,
+                    empty.online_count,
+                    empty.offline_count,
+                    empty.outdated_count,
+                    empty.archived_count
+                ),
+                (0, 0, 0, 0, 0)
+            );
+            assert!(get_registration_counts(&pool, excl).await?.is_empty());
+            assert!(get_unhealthy_service_devices(&pool, excl).await?.is_empty());
+        }
 
         let dist_id: i32 = sqlx::query_scalar(
             "INSERT INTO distribution (name, description, architecture) VALUES ('dash-dist', 'd', 'arm64') RETURNING id",
@@ -247,9 +258,15 @@ mod tests {
         .execute(&pool)
         .await?;
 
-        // Services on rel_new: one watchdog service, one non-watchdog service.
+        // Services on rel_new: two watchdog services and one non-watchdog service.
         let svc_watchdog: i32 = sqlx::query_scalar(
             "INSERT INTO release_services (release_id, service_name, watchdog_sec) VALUES ($1, 'smithd.service', 30) RETURNING id",
+        )
+        .bind(rel_new)
+        .fetch_one(&pool)
+        .await?;
+        let svc_watchdog_2: i32 = sqlx::query_scalar(
+            "INSERT INTO release_services (release_id, service_name, watchdog_sec) VALUES ($1, 'brain.service', 60) RETURNING id",
         )
         .bind(rel_new)
         .fetch_one(&pool)
@@ -263,11 +280,12 @@ mod tests {
 
         sqlx::query(
             "INSERT INTO device_service_status (device_id, release_service_id, active_state, n_restarts, checked_at)
-             VALUES ($1, $3, 'failed', 2, NOW()), ($1, $4, 'failed', 1, NOW()), ($2, $3, 'failed', 3, NOW())",
+             VALUES ($1, $3, 'failed', 2, NOW()), ($1, $4, 'inactive', 0, NOW()), ($1, $5, 'failed', 1, NOW()), ($2, $3, 'failed', 3, NOW())",
         )
         .bind(d_online_ok)
         .bind(d_excluded)
         .bind(svc_watchdog)
+        .bind(svc_watchdog_2)
         .bind(svc_no_watchdog)
         .execute(&pool)
         .await?;
@@ -290,7 +308,11 @@ mod tests {
                 .iter()
                 .map(|r| (r.serial_number.as_str(), r.service_name.as_str()))
                 .collect::<Vec<_>>(),
-            vec![("dash-1", "smithd.service"), ("dash-6", "smithd.service")]
+            vec![
+                ("dash-1", "brain.service"),
+                ("dash-1", "smithd.service"),
+                ("dash-6", "smithd.service"),
+            ]
         );
 
         // With env=test excluded
@@ -311,7 +333,7 @@ mod tests {
                 .iter()
                 .map(|r| (r.serial_number.as_str(), r.service_name.as_str()))
                 .collect::<Vec<_>>(),
-            vec![("dash-1", "smithd.service")]
+            vec![("dash-1", "brain.service"), ("dash-1", "smithd.service")]
         );
         Ok(())
     }

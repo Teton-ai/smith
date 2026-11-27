@@ -5572,6 +5572,11 @@ mod get_devices_query_tests {
     ) -> anyhow::Result<()> {
         let state = test_state(pool.clone())?;
 
+        // Empty table returns empty list and omits x-total-count.
+        let (empty_total, empty_rows) = query(&state, DeviceFilter::default()).await?;
+        assert_eq!(empty_total, None);
+        assert!(empty_rows.is_empty());
+
         let dist_a: i32 = sqlx::query_scalar(
             "INSERT INTO distribution (name, description, architecture) VALUES ('dist-a', 'a', 'arm64') RETURNING id",
         )
@@ -5618,7 +5623,8 @@ mod get_devices_query_tests {
         .execute(&pool)
         .await?;
 
-        // d2: offline, outdated (eligible 60m ago), dist_a/rel_a1->rel_a2, labels: site=beta + tier=gold, unhealthy watchdog service
+        // d2: offline, outdated (eligible 60m ago), dist_a/rel_a1->rel_a2, labels: site=alpha + tier=gold,
+        // dsr row with NULL hostname (falls back to system_info->>'hostname'), and TWO unhealthy watchdog services
         let d2: i32 = sqlx::query_scalar(
             "INSERT INTO device (serial_number, approved, archived, last_ping, release_id, target_release_id, target_release_id_set_at, target_release_eligible_at, follow_latest, system_info)
              VALUES ('dev-002', true, false, NOW() - INTERVAL '10 minutes', $1, $2, NOW() - INTERVAL '90 minutes', NOW() - INTERVAL '60 minutes', false,
@@ -5627,6 +5633,13 @@ mod get_devices_query_tests {
         .bind(rel_a1)
         .bind(rel_a2)
         .fetch_one(&pool)
+        .await?;
+        sqlx::query(
+            "INSERT INTO device_settings_reported (device_id, hostname, reported_at)
+             VALUES ($1, NULL, NOW())",
+        )
+        .bind(d2)
+        .execute(&pool)
         .await?;
 
         // d3: online, staggered future eligible_at (NOT outdated), dist_b/rel_b1->rel_a2, labels: env=test + site=gamma
@@ -5685,12 +5698,19 @@ mod get_devices_query_tests {
         .bind(rel_a1)
         .fetch_one(&pool)
         .await?;
+        let svc_rel_a1_b: i32 = sqlx::query_scalar(
+            "INSERT INTO release_services (release_id, service_name, watchdog_sec) VALUES ($1, 'brain.service', 60) RETURNING id",
+        )
+        .bind(rel_a1)
+        .fetch_one(&pool)
+        .await?;
         sqlx::query(
             "INSERT INTO device_service_status (device_id, release_service_id, active_state, n_restarts, checked_at)
-             VALUES ($1, $2, 'failed', 1, NOW())",
+             VALUES ($1, $2, 'failed', 1, NOW()), ($1, $3, 'inactive', 0, NOW())",
         )
         .bind(d2)
         .bind(svc_rel_a1)
+        .bind(svc_rel_a1_b)
         .execute(&pool)
         .await?;
 
@@ -5872,6 +5892,97 @@ mod get_devices_query_tests {
         .await?;
         assert_eq!(arch_total, Some(1));
         assert_eq!(arch_rows[0].serial_number, "dev-004");
+
+        // Multi-value labels filter where d1 matches both requested labels must not duplicate rows.
+        let (multi_lbl_total, multi_lbl_rows) = query(
+            &state,
+            DeviceFilter {
+                labels: vec!["site=zeta".into(), "tier=gold".into()],
+                sort: Some(DeviceSortField::SerialNumber),
+                ..Default::default()
+            },
+        )
+        .await?;
+        assert_eq!(multi_lbl_total, Some(2));
+        assert_eq!(
+            multi_lbl_rows
+                .iter()
+                .map(|d| d.serial_number.as_str())
+                .collect::<Vec<_>>(),
+            vec!["dev-001", "dev-002"]
+        );
+
+        // Compound query: search + labels + exclude_labels + distribution_id + sort=labels + pagination.
+        let (cmp_total, cmp_p1) = query(
+            &state,
+            DeviceFilter {
+                search: Some("dev".into()),
+                labels: vec!["tier=gold".into()],
+                exclude_labels: vec!["env=test".into()],
+                distribution_id: Some(dist_a),
+                sort: Some(DeviceSortField::Labels),
+                order: Some(DeviceSortDirection::Asc),
+                limit: Some(1),
+                offset: Some(1),
+                ..Default::default()
+            },
+        )
+        .await?;
+        assert_eq!(cmp_total, Some(2));
+        assert_eq!(cmp_p1.len(), 1);
+        assert_eq!(cmp_p1[0].serial_number, "dev-001");
+
+        // Tie-breaking across page boundaries on identical last_ping and identical MIN label.
+        let d_tie_1: i32 = sqlx::query_scalar(
+            "INSERT INTO device (serial_number, approved, archived, last_ping, release_id, target_release_id)
+             VALUES ('tie-001', true, false, '2026-03-01T10:00:00Z'::timestamptz, $1, $1) RETURNING id",
+        )
+        .bind(rel_a2)
+        .fetch_one(&pool)
+        .await?;
+        let d_tie_2: i32 = sqlx::query_scalar(
+            "INSERT INTO device (serial_number, approved, archived, last_ping, release_id, target_release_id)
+             VALUES ('tie-002', true, false, '2026-03-01T10:00:00Z'::timestamptz, $1, $1) RETURNING id",
+        )
+        .bind(rel_a2)
+        .fetch_one(&pool)
+        .await?;
+        for dev in [d_tie_1, d_tie_2] {
+            sqlx::query(
+                "INSERT INTO device_label (device_id, label_id, value) VALUES ($1, $2, 'same')",
+            )
+            .bind(dev)
+            .bind(lbl_site)
+            .execute(&pool)
+            .await?;
+        }
+        let (t0_total, t0) = query(
+            &state,
+            DeviceFilter {
+                labels: vec!["site=same".into()],
+                sort: Some(DeviceSortField::Labels),
+                order: Some(DeviceSortDirection::Asc),
+                limit: Some(1),
+                offset: Some(0),
+                ..Default::default()
+            },
+        )
+        .await?;
+        let (t1_total, t1) = query(
+            &state,
+            DeviceFilter {
+                labels: vec!["site=same".into()],
+                sort: Some(DeviceSortField::Labels),
+                order: Some(DeviceSortDirection::Asc),
+                limit: Some(1),
+                offset: Some(1),
+                ..Default::default()
+            },
+        )
+        .await?;
+        assert_eq!((t0_total, t1_total), (Some(2), Some(2)));
+        assert_eq!(t0[0].serial_number, "tie-001");
+        assert_eq!(t1[0].serial_number, "tie-002");
 
         Ok(())
     }
