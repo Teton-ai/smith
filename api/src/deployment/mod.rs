@@ -416,12 +416,14 @@ pub async fn new_deployment(
         .execute(&mut *tx)
         .await?
     };
-    let canary_count = res.rows_affected();
-    if canary_count == 0 {
+    let device_count = res.rows_affected();
+    if device_count == 0 {
         tx.rollback().await?;
-        return Err(ApiError::bad_request(
-            "Canary release contains no devices, aborting.",
-        ));
+        return Err(ApiError::bad_request(if release.release_candidate {
+            "None of the selected devices can receive this release, aborting."
+        } else {
+            "No eligible canary devices found, aborting."
+        }));
     }
 
     sqlx::query!(
@@ -461,10 +463,11 @@ pub async fn new_deployment(
                         "text": {
                             "type": "mrkdwn",
                             "text": format!(
-                                ":rocket: *Deployment Started*\n\n*Distribution:* {}\n*Version:* {}\n*Canary devices:* {}\n*Triggered by:* {}",
+                                ":rocket: *Deployment Started*\n\n*Distribution:* {}\n*Version:* {}\n*{}:* {}\n*Triggered by:* {}",
                                 info.distribution_name,
                                 info.version,
-                                canary_count,
+                                if release.release_candidate { "Selected devices" } else { "Canary devices" },
+                                device_count,
                                 triggered_by
                             )
                         }
