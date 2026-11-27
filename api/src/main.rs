@@ -294,6 +294,7 @@ async fn start_main_server(
     let (protected_router, protected_api) = OpenApiRouter::with_openapi(ApiDoc::openapi())
         .routes(routes!(dashboard::route::get_dashboard))
         .routes(routes!(dashboard::route::get_registration_counts))
+        .routes(routes!(dashboard::route::get_registration_access))
         .routes(routes!(dashboard::route::get_unhealthy_services))
         .routes(routes!(auth::route::verify_token))
         .routes(routes!(

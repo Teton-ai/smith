@@ -1,6 +1,6 @@
 import { useAuth0 } from "@auth0/auth0-react";
 import { useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
-import { Button, LabelChip, Select, Toast } from "@teton/smith-ui";
+import { AlertBanner, Button, LabelChip, Select, Toast } from "@teton/smith-ui";
 import {
 	AlertTriangle,
 	Calendar,
@@ -39,12 +39,14 @@ import {
 	GetDevicesOrder,
 	GetDevicesSort,
 	getGetDevicesInfiniteQueryKey,
+	type RegistrationAccess,
 	type Release,
 	useApiGetStaggerPolicy,
 	useApproveDevice,
 	useDeleteDevice,
 	useGetDistributionRollouts,
 	useGetRecipes,
+	useGetRegistrationAccess,
 	useGetReleases,
 	useIssueCommandsToDevices,
 	useUpdateDevicesTargetRelease,
@@ -319,6 +321,7 @@ const DevicesPage = () => {
 	}, [toast]);
 
 	const approveDeviceHook = useApproveDevice();
+	const { data: registrationAccess } = useGetRegistrationAccess();
 	const deleteDeviceHook = useDeleteDevice();
 
 	const deviceFilterParams = useMemo(
@@ -1335,6 +1338,14 @@ const DevicesPage = () => {
 				</div>
 			</div>
 
+			{/* Blocked registrations never create a device, so say so where operators look for new ones. */}
+			{showPendingApproval && registrationAccess?.allowed_ips && (
+				<RegistrationAccessNotice
+					access={registrationAccess}
+					allowedIps={registrationAccess.allowed_ips}
+				/>
+			)}
+
 			{/* On short viewports the page is the single scroll region, so the list must not trap scrolling. */}
 			<div className="flex-1 px-4 sm:px-6 lg:px-8 pb-6 [@media(min-height:40rem)]:min-h-64 [@media(min-height:40rem)]:overflow-y-auto">
 				<div className="pb-2 text-sm text-gray-500">
@@ -2213,3 +2224,37 @@ const DevicesPage = () => {
 };
 
 export default DevicesPage;
+
+function RegistrationAccessNotice({
+	access,
+	allowedIps,
+}: {
+	access: RegistrationAccess;
+	allowedIps: string[];
+}) {
+	const allowed =
+		allowedIps.length > 0
+			? `restricted to ${allowedIps.join(", ")}`
+			: "blocked for all IPs";
+	const yourIp = access.client_ip ?? "unknown";
+	return (
+		<div className="px-4 sm:px-6 lg:px-8 pb-3">
+			{access.client_allowed ? (
+				<p className="text-sm text-gray-500">
+					Device registration is {allowed}. Your network ({yourIp}) is allowed;
+					devices registering from other networks are rejected and won't appear
+					here.
+				</p>
+			) : (
+				<AlertBanner
+					tone="amber"
+					title="Devices on your network can't register"
+				>
+					Device registration is {allowed}. Your network ({yourIp}) isn't on the
+					list, so devices registering from it are rejected and won't appear
+					here.
+				</AlertBanner>
+			)}
+		</div>
+	);
+}

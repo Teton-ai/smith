@@ -1,7 +1,10 @@
 use crate::State;
-use crate::dashboard::{Dashboard, RegistrationCount, UnhealthyServiceDevice};
-use axum::http::StatusCode;
+use crate::dashboard::{Dashboard, RegistrationAccess, RegistrationCount, UnhealthyServiceDevice};
+use crate::ip_address::registration_client_ip;
+use axum::extract::ConnectInfo;
+use axum::http::{HeaderMap, StatusCode};
 use axum::{Extension, Json};
+use std::net::SocketAddr;
 
 #[utoipa::path(
   get,
@@ -62,4 +65,30 @@ pub async fn get_unhealthy_services(
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
     Ok(Json(devices))
+}
+
+#[utoipa::path(
+  get,
+  path = "/dashboard/registration-access",
+  responses(
+        (status = StatusCode::OK, description = "Device registration IP allowlist and whether the caller's IP is on it", body = RegistrationAccess),
+  )
+)]
+pub async fn get_registration_access(
+    headers: HeaderMap,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    Extension(state): Extension<State>,
+) -> Json<RegistrationAccess> {
+    let allowlist = &state.config.registration_ip_allowlist;
+    let client_ip = registration_client_ip(&headers, addr);
+    let allowed_ips = allowlist.ips().map(|ips| {
+        let mut ips: Vec<String> = ips.iter().map(ToString::to_string).collect();
+        ips.sort();
+        ips
+    });
+    Json(RegistrationAccess {
+        allowed_ips,
+        client_ip: client_ip.map(|ip| ip.to_string()),
+        client_allowed: allowlist.allows(client_ip),
+    })
 }

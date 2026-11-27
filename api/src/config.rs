@@ -200,6 +200,11 @@ impl RegistrationIpAllowlist {
         Ok(Self(Some(ips)))
     }
 
+    /// `None` when registration is unrestricted.
+    pub fn ips(&self) -> Option<&HashSet<IpAddr>> {
+        self.0.as_ref()
+    }
+
     pub fn allows(&self, ip: Option<IpAddr>) -> bool {
         self.0
             .as_ref()

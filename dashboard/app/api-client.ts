@@ -1150,6 +1150,18 @@ export interface ReferenceRequest {
 	external_key: string;
 }
 
+/**
+ * Lets the dashboard warn operators when devices on their network would be
+rejected by `DEVICE_REGISTRATION_ALLOWED_IPS` instead of never appearing.
+ */
+export interface RegistrationAccess {
+	/** Allowed IPs; absent when registration is unrestricted. */
+	allowed_ips?: string[];
+	client_allowed: boolean;
+	/** Caller's IP as registration would resolve it; absent if it cannot be determined. */
+	client_ip?: string;
+}
+
 export interface RegistrationCount {
 	count: number;
 	date: string;
@@ -3857,6 +3869,300 @@ export function useGetRegistrationCounts<
 	queryKey: DataTag<QueryKey, TData, TError>;
 } {
 	const queryOptions = useGetRegistrationCountsQueryOptions(options);
+
+	const query = useQuery(queryOptions, queryClient) as UseQueryResult<
+		TData,
+		TError
+	> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+	return withQueryKey(query, queryOptions.queryKey);
+}
+
+export const useGetRegistrationAccessHook = () => {
+	const getRegistrationAccess = useClientMutator<RegistrationAccess>();
+
+	return useCallback(
+		(signal?: AbortSignal) => {
+			return getRegistrationAccess({
+				url: `/dashboard/registration-access`,
+				method: "GET",
+				signal,
+			});
+		},
+		[getRegistrationAccess],
+	);
+};
+
+export const getGetRegistrationAccessInfiniteQueryKey = () => {
+	return ["infinite", `/dashboard/registration-access`] as const;
+};
+
+export const getGetRegistrationAccessQueryKey = () => {
+	return [`/dashboard/registration-access`] as const;
+};
+
+export const useGetRegistrationAccessInfiniteQueryOptions = <
+	TData = InfiniteData<
+		Awaited<ReturnType<ReturnType<typeof useGetRegistrationAccessHook>>>
+	>,
+	TError = void,
+>(options?: {
+	query?: Partial<
+		UseInfiniteQueryOptions<
+			Awaited<ReturnType<ReturnType<typeof useGetRegistrationAccessHook>>>,
+			TError,
+			TData
+		>
+	>;
+}) => {
+	const { query: queryOptions } = options ?? {};
+
+	const queryKey =
+		queryOptions?.queryKey ?? getGetRegistrationAccessInfiniteQueryKey();
+
+	const getRegistrationAccess = useGetRegistrationAccessHook();
+
+	const queryFn: QueryFunction<
+		Awaited<ReturnType<ReturnType<typeof useGetRegistrationAccessHook>>>
+	> = ({ signal }) => getRegistrationAccess(signal);
+
+	return { queryKey, queryFn, ...queryOptions } as UseInfiniteQueryOptions<
+		Awaited<ReturnType<ReturnType<typeof useGetRegistrationAccessHook>>>,
+		TError,
+		TData
+	> & { queryKey: DataTag<QueryKey, TData, TError> };
+};
+
+export type GetRegistrationAccessInfiniteQueryResult = NonNullable<
+	Awaited<ReturnType<ReturnType<typeof useGetRegistrationAccessHook>>>
+>;
+export type GetRegistrationAccessInfiniteQueryError = void;
+
+export function useGetRegistrationAccessInfinite<
+	TData = InfiniteData<
+		Awaited<ReturnType<ReturnType<typeof useGetRegistrationAccessHook>>>
+	>,
+	TError = void,
+>(
+	options: {
+		query: Partial<
+			UseInfiniteQueryOptions<
+				Awaited<ReturnType<ReturnType<typeof useGetRegistrationAccessHook>>>,
+				TError,
+				TData
+			>
+		> &
+			Pick<
+				DefinedInitialDataOptions<
+					Awaited<ReturnType<ReturnType<typeof useGetRegistrationAccessHook>>>,
+					TError,
+					Awaited<ReturnType<ReturnType<typeof useGetRegistrationAccessHook>>>
+				>,
+				"initialData"
+			>;
+	},
+	queryClient?: QueryClient,
+): DefinedUseInfiniteQueryResult<TData, TError> & {
+	queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useGetRegistrationAccessInfinite<
+	TData = InfiniteData<
+		Awaited<ReturnType<ReturnType<typeof useGetRegistrationAccessHook>>>
+	>,
+	TError = void,
+>(
+	options?: {
+		query?: Partial<
+			UseInfiniteQueryOptions<
+				Awaited<ReturnType<ReturnType<typeof useGetRegistrationAccessHook>>>,
+				TError,
+				TData
+			>
+		> &
+			Pick<
+				UndefinedInitialDataOptions<
+					Awaited<ReturnType<ReturnType<typeof useGetRegistrationAccessHook>>>,
+					TError,
+					Awaited<ReturnType<ReturnType<typeof useGetRegistrationAccessHook>>>
+				>,
+				"initialData"
+			>;
+	},
+	queryClient?: QueryClient,
+): UseInfiniteQueryResult<TData, TError> & {
+	queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useGetRegistrationAccessInfinite<
+	TData = InfiniteData<
+		Awaited<ReturnType<ReturnType<typeof useGetRegistrationAccessHook>>>
+	>,
+	TError = void,
+>(
+	options?: {
+		query?: Partial<
+			UseInfiniteQueryOptions<
+				Awaited<ReturnType<ReturnType<typeof useGetRegistrationAccessHook>>>,
+				TError,
+				TData
+			>
+		>;
+	},
+	queryClient?: QueryClient,
+): UseInfiniteQueryResult<TData, TError> & {
+	queryKey: DataTag<QueryKey, TData, TError>;
+};
+
+export function useGetRegistrationAccessInfinite<
+	TData = InfiniteData<
+		Awaited<ReturnType<ReturnType<typeof useGetRegistrationAccessHook>>>
+	>,
+	TError = void,
+>(
+	options?: {
+		query?: Partial<
+			UseInfiniteQueryOptions<
+				Awaited<ReturnType<ReturnType<typeof useGetRegistrationAccessHook>>>,
+				TError,
+				TData
+			>
+		>;
+	},
+	queryClient?: QueryClient,
+): UseInfiniteQueryResult<TData, TError> & {
+	queryKey: DataTag<QueryKey, TData, TError>;
+} {
+	const queryOptions = useGetRegistrationAccessInfiniteQueryOptions(options);
+
+	const query = useInfiniteQuery(
+		queryOptions,
+		queryClient,
+	) as UseInfiniteQueryResult<TData, TError> & {
+		queryKey: DataTag<QueryKey, TData, TError>;
+	};
+
+	return withQueryKey(query, queryOptions.queryKey);
+}
+
+export const useGetRegistrationAccessQueryOptions = <
+	TData = Awaited<ReturnType<ReturnType<typeof useGetRegistrationAccessHook>>>,
+	TError = void,
+>(options?: {
+	query?: Partial<
+		UseQueryOptions<
+			Awaited<ReturnType<ReturnType<typeof useGetRegistrationAccessHook>>>,
+			TError,
+			TData
+		>
+	>;
+}) => {
+	const { query: queryOptions } = options ?? {};
+
+	const queryKey = queryOptions?.queryKey ?? getGetRegistrationAccessQueryKey();
+
+	const getRegistrationAccess = useGetRegistrationAccessHook();
+
+	const queryFn: QueryFunction<
+		Awaited<ReturnType<ReturnType<typeof useGetRegistrationAccessHook>>>
+	> = ({ signal }) => getRegistrationAccess(signal);
+
+	return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+		Awaited<ReturnType<ReturnType<typeof useGetRegistrationAccessHook>>>,
+		TError,
+		TData
+	> & { queryKey: DataTag<QueryKey, TData, TError> };
+};
+
+export type GetRegistrationAccessQueryResult = NonNullable<
+	Awaited<ReturnType<ReturnType<typeof useGetRegistrationAccessHook>>>
+>;
+export type GetRegistrationAccessQueryError = void;
+
+export function useGetRegistrationAccess<
+	TData = Awaited<ReturnType<ReturnType<typeof useGetRegistrationAccessHook>>>,
+	TError = void,
+>(
+	options: {
+		query: Partial<
+			UseQueryOptions<
+				Awaited<ReturnType<ReturnType<typeof useGetRegistrationAccessHook>>>,
+				TError,
+				TData
+			>
+		> &
+			Pick<
+				DefinedInitialDataOptions<
+					Awaited<ReturnType<ReturnType<typeof useGetRegistrationAccessHook>>>,
+					TError,
+					Awaited<ReturnType<ReturnType<typeof useGetRegistrationAccessHook>>>
+				>,
+				"initialData"
+			>;
+	},
+	queryClient?: QueryClient,
+): DefinedUseQueryResult<TData, TError> & {
+	queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useGetRegistrationAccess<
+	TData = Awaited<ReturnType<ReturnType<typeof useGetRegistrationAccessHook>>>,
+	TError = void,
+>(
+	options?: {
+		query?: Partial<
+			UseQueryOptions<
+				Awaited<ReturnType<ReturnType<typeof useGetRegistrationAccessHook>>>,
+				TError,
+				TData
+			>
+		> &
+			Pick<
+				UndefinedInitialDataOptions<
+					Awaited<ReturnType<ReturnType<typeof useGetRegistrationAccessHook>>>,
+					TError,
+					Awaited<ReturnType<ReturnType<typeof useGetRegistrationAccessHook>>>
+				>,
+				"initialData"
+			>;
+	},
+	queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+	queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useGetRegistrationAccess<
+	TData = Awaited<ReturnType<ReturnType<typeof useGetRegistrationAccessHook>>>,
+	TError = void,
+>(
+	options?: {
+		query?: Partial<
+			UseQueryOptions<
+				Awaited<ReturnType<ReturnType<typeof useGetRegistrationAccessHook>>>,
+				TError,
+				TData
+			>
+		>;
+	},
+	queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+	queryKey: DataTag<QueryKey, TData, TError>;
+};
+
+export function useGetRegistrationAccess<
+	TData = Awaited<ReturnType<ReturnType<typeof useGetRegistrationAccessHook>>>,
+	TError = void,
+>(
+	options?: {
+		query?: Partial<
+			UseQueryOptions<
+				Awaited<ReturnType<ReturnType<typeof useGetRegistrationAccessHook>>>,
+				TError,
+				TData
+			>
+		>;
+	},
+	queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+	queryKey: DataTag<QueryKey, TData, TError>;
+} {
+	const queryOptions = useGetRegistrationAccessQueryOptions(options);
 
 	const query = useQuery(queryOptions, queryClient) as UseQueryResult<
 		TData,
