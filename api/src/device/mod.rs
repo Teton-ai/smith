@@ -1611,6 +1611,65 @@ mod downtime_tests {
         assert!(rows[0].1.is_some(), "outage still open: {rows:?}");
         Ok(())
     }
+
+    #[sqlx::test]
+    #[ignore = "needs the compose Postgres; run with --test-threads=1"]
+    async fn ping_with_ip_fast_path_and_stale_recovery(pool: PgPool) -> anyhow::Result<()> {
+        backdate_epoch(&pool).await?;
+        let ip_a: i64 = sqlx::query_scalar(
+            "INSERT INTO ip_address (ip_address) VALUES ('203.0.113.10') RETURNING id",
+        )
+        .fetch_one(&pool)
+        .await?;
+        let ip_b: i64 = sqlx::query_scalar(
+            "INSERT INTO ip_address (ip_address) VALUES ('203.0.113.11') RETURNING id",
+        )
+        .fetch_one(&pool)
+        .await?;
+
+        // 1. Fresh device takes the autocommit fast path and opens no outage.
+        let fresh_id = insert_device(&pool, "fresh-with-ip", 10.0).await?;
+        update_device_ping_with_ip(fresh_id, ip_a, &pool).await?;
+        let saved_ip: Option<i64> =
+            sqlx::query_scalar("SELECT ip_address_id FROM device WHERE id = $1")
+                .bind(fresh_id)
+                .fetch_one(&pool)
+                .await?;
+        assert_eq!(saved_ip, Some(ip_a));
+        assert!(outages(&pool, fresh_id).await?.is_empty());
+
+        // 2. First-ever ping (NULL last_ping) also takes the fast path without opening an outage.
+        let never_seen_id: i32 = sqlx::query_scalar(
+            "INSERT INTO device (serial_number, last_ping) VALUES ('null-ping-ip', NULL) RETURNING id",
+        )
+        .fetch_one(&pool)
+        .await?;
+        update_device_ping_with_ip(never_seen_id, ip_a, &pool).await?;
+        let (null_saved_ip, null_last_ping): (Option<i64>, Option<DateTime<Utc>>) =
+            sqlx::query_as("SELECT ip_address_id, last_ping FROM device WHERE id = $1")
+                .bind(never_seen_id)
+                .fetch_one(&pool)
+                .await?;
+        assert_eq!(null_saved_ip, Some(ip_a));
+        assert!(null_last_ping.is_some());
+        assert!(outages(&pool, never_seen_id).await?.is_empty());
+
+        // 3. Stale device falls back to the transaction path, updates IP, and closes one outage.
+        let stale_id = insert_device(&pool, "stale-with-ip", 120.0).await?;
+        let silent_since = last_ping(&pool, stale_id).await?;
+        update_device_ping_with_ip(stale_id, ip_b, &pool).await?;
+        let stale_saved_ip: Option<i64> =
+            sqlx::query_scalar("SELECT ip_address_id FROM device WHERE id = $1")
+                .bind(stale_id)
+                .fetch_one(&pool)
+                .await?;
+        assert_eq!(stale_saved_ip, Some(ip_b));
+        let rows = outages(&pool, stale_id).await?;
+        assert_eq!(rows.len(), 1, "expected one outage row, got {rows:?}");
+        assert_eq!(rows[0].0, silent_since);
+        assert!(rows[0].1.is_some(), "outage still open: {rows:?}");
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -2048,6 +2107,142 @@ mod target_release_tests {
                 .await?;
         assert_eq!(saved_ip_id, Some(resolved_id));
         assert_eq!(cache.get_ip_id(ip), Some(resolved_id));
+        Ok(())
+    }
+
+    #[sqlx::test]
+    #[ignore = "needs the compose Postgres; run with --test-threads=1"]
+    async fn home_cache_negative_caches_full_site_and_invalidation_opens_slot(
+        pool: PgPool,
+    ) -> anyhow::Result<()> {
+        let Site {
+            current,
+            target,
+            ip,
+            devices,
+        } = site(&pool, 4).await?;
+        let cache = crate::smith::HomeCache::new();
+
+        // First two devices take the 2 slots; the third sees the site full and sets the negative cache.
+        for (idx, &dev) in devices[..3].iter().enumerate() {
+            let state = load_device_poll_state(dev, &pool)
+                .await?
+                .ok_or_else(|| anyhow::anyhow!("poll state missing"))?;
+            let ans = resolve_target_release(dev, &state, &pool, Some(&cache)).await;
+            let expected = if idx < 2 { Some(target) } else { Some(current) };
+            assert_eq!(ans, expected);
+        }
+        assert!(cache.is_download_slot_full(ip));
+
+        // Even while cached full, an existing slot holder keeps its target via decide_target.
+        let holder_state = load_device_poll_state(devices[0], &pool)
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("poll state missing"))?;
+        assert_eq!(
+            resolve_target_release(devices[0], &holder_state, &pool, Some(&cache)).await,
+            Some(target)
+        );
+
+        // Once holder finishes downloading and cache is invalidated (as /smith/home does), device 3 gets the slot.
+        save_release_id(devices[0], Some(target), &pool).await?;
+        cache.invalidate_download_slot_full(ip);
+        assert!(!cache.is_download_slot_full(ip));
+
+        let waiting_state = load_device_poll_state(devices[3], &pool)
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("poll state missing"))?;
+        assert_eq!(
+            resolve_target_release(devices[3], &waiting_state, &pool, Some(&cache)).await,
+            Some(target)
+        );
+        Ok(())
+    }
+
+    #[sqlx::test]
+    #[ignore = "needs the compose Postgres; run with --test-threads=1"]
+    async fn concurrent_polls_with_home_cache_never_exceed_limit(
+        pool: PgPool,
+    ) -> anyhow::Result<()> {
+        let Site {
+            target,
+            ip,
+            devices,
+            ..
+        } = site(&pool, 10).await?;
+        let cache = crate::smith::HomeCache::new();
+
+        let answers = futures::future::join_all(devices.iter().map(|&device| {
+            let pool = pool.clone();
+            let cache = &cache;
+            async move {
+                let state = load_device_poll_state(device, &pool).await.ok()??;
+                resolve_target_release(device, &state, &pool, Some(cache)).await
+            }
+        }))
+        .await;
+        let wave1 = granted(&answers, target);
+        assert!((1..=2).contains(&wave1), "wave1 granted {wave1}");
+
+        // Guard was released after concurrent wave; sequential follow-up fills to the exact cap of 2 and caches full.
+        let mut wave2_answers = Vec::new();
+        for &dev in &devices {
+            let state = load_device_poll_state(dev, &pool)
+                .await?
+                .ok_or_else(|| anyhow::anyhow!("poll state missing"))?;
+            wave2_answers.push(resolve_target_release(dev, &state, &pool, Some(&cache)).await);
+        }
+        assert_eq!(granted(&wave2_answers, target), 2);
+        assert!(cache.is_download_slot_full(ip));
+        Ok(())
+    }
+
+    #[sqlx::test]
+    #[ignore = "needs the compose Postgres; run with --test-threads=1"]
+    async fn poll_state_is_active_matches_approval_archival_and_token(
+        pool: PgPool,
+    ) -> anyhow::Result<()> {
+        let active: i32 = sqlx::query_scalar(
+            "INSERT INTO device (serial_number, approved, archived, token) VALUES ('act-1', true, false, 'tok-1') RETURNING id",
+        )
+        .fetch_one(&pool)
+        .await?;
+        let unapproved: i32 = sqlx::query_scalar(
+            "INSERT INTO device (serial_number, approved, archived, token) VALUES ('act-2', false, false, 'tok-2') RETURNING id",
+        )
+        .fetch_one(&pool)
+        .await?;
+        let archived: i32 = sqlx::query_scalar(
+            "INSERT INTO device (serial_number, approved, archived, token) VALUES ('act-3', true, true, 'tok-3') RETURNING id",
+        )
+        .fetch_one(&pool)
+        .await?;
+        let revoked: i32 = sqlx::query_scalar(
+            "INSERT INTO device (serial_number, approved, archived, token) VALUES ('act-4', true, false, NULL) RETURNING id",
+        )
+        .fetch_one(&pool)
+        .await?;
+
+        assert!(
+            load_device_poll_state(active, &pool)
+                .await?
+                .is_some_and(|s| s.is_active())
+        );
+        assert!(
+            !load_device_poll_state(unapproved, &pool)
+                .await?
+                .is_some_and(|s| s.is_active())
+        );
+        assert!(
+            !load_device_poll_state(archived, &pool)
+                .await?
+                .is_some_and(|s| s.is_active())
+        );
+        assert!(
+            !load_device_poll_state(revoked, &pool)
+                .await?
+                .is_some_and(|s| s.is_active())
+        );
+        assert!(load_device_poll_state(999_999, &pool).await?.is_none());
         Ok(())
     }
 }
