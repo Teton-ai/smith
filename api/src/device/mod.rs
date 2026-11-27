@@ -2171,15 +2171,19 @@ mod target_release_tests {
         } = site(&pool, 10).await?;
         let cache = crate::smith::HomeCache::new();
 
-        let answers = futures::future::join_all(devices.iter().map(|&device| {
+        let answers = futures::future::try_join_all(devices.iter().map(|&device| {
             let pool = pool.clone();
             let cache = &cache;
             async move {
-                let state = load_device_poll_state(device, &pool).await.ok()??;
-                resolve_target_release(device, &state, &pool, Some(cache)).await
+                let state = load_device_poll_state(device, &pool)
+                    .await?
+                    .ok_or_else(|| anyhow::anyhow!("poll state missing for device {device}"))?;
+                Ok::<_, anyhow::Error>(
+                    resolve_target_release(device, &state, &pool, Some(cache)).await,
+                )
             }
         }))
-        .await;
+        .await?;
         let wave1 = granted(&answers, target);
         assert!((1..=2).contains(&wave1), "wave1 granted {wave1}");
 
