@@ -860,22 +860,33 @@ pub struct FinishNowResult {
     pub devices_released: i64,
 }
 
-/// Opens every remaining bucket of the release at once.
+/// Opens every remaining bucket of the release at once, and the deployment's
+/// waves with them.
 pub async fn release_waiting_devices<'e, E>(release_id: i32, executor: E) -> sqlx::Result<u64>
 where
     E: sqlx::PgExecutor<'e>,
 {
-    Ok(sqlx::query!(
-        "UPDATE device SET target_release_eligible_at = NOW()
-         WHERE target_release_id = $1
-         AND target_release_eligible_at > NOW()
-         AND release_id IS DISTINCT FROM target_release_id
-         AND archived = false",
+    let released = sqlx::query_scalar!(
+        r#"WITH released AS (
+            UPDATE device SET target_release_eligible_at = NOW()
+            WHERE target_release_id = $1
+            AND target_release_eligible_at > NOW()
+            AND release_id IS DISTINCT FROM target_release_id
+            AND archived = false
+            RETURNING id
+        ), opened AS (
+            UPDATE deployment_devices dd SET opens_at = NOW()
+            FROM deployment dep
+            WHERE dep.id = dd.deployment_id
+              AND dep.release_id = $1
+              AND dd.opens_at > NOW()
+        )
+        SELECT COUNT(*) AS "count!" FROM released"#,
         release_id
     )
-    .execute(executor)
-    .await?
-    .rows_affected())
+    .fetch_one(executor)
+    .await?;
+    Ok(released as u64)
 }
 
 pub async fn finish_now(
@@ -1578,6 +1589,12 @@ pub(crate) mod tests {
         assert_eq!(waves[2].wave, 2);
         assert_eq!(waves[2].total, 1);
         assert_eq!(waves[2].scheduled, 1);
+
+        // Finish Now opens the scheduled wave, not just its devices.
+        assert_eq!(release_waiting_devices(target, &pool).await?, 1);
+        let waves = get_deployment_waves(target, &pool).await?;
+        assert_eq!(waves[2].scheduled, 0);
+        assert!(waves[2].opens_at <= chrono::Utc::now());
 
         // Retargeting a pending follower marks it superseded; moving the canary
         // to a later release preserves its `updated` status via reached_at.

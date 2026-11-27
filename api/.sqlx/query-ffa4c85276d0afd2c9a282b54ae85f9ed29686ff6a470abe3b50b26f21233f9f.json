@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "WITH released AS (\n            UPDATE device SET target_release_eligible_at = NOW()\n            WHERE target_release_id = $1\n            AND target_release_eligible_at > NOW()\n            AND release_id IS DISTINCT FROM target_release_id\n            AND archived = false\n            RETURNING id\n        ), opened AS (\n            UPDATE deployment_devices dd SET opens_at = NOW()\n            FROM deployment dep\n            WHERE dep.id = dd.deployment_id\n              AND dep.release_id = $1\n              AND dd.opens_at > NOW()\n        )\n        SELECT COUNT(*) AS \"count!\" FROM released",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "ffa4c85276d0afd2c9a282b54ae85f9ed29686ff6a470abe3b50b26f21233f9f"
+}
