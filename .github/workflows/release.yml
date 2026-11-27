@@ -95,15 +95,15 @@ jobs:
           github-token: ${{ secrets.RELEASE_PR_TOKEN }}
           script: |
             const tag = `v${process.env.VERSION}`;
-            try {
-              await github.rest.repos.getReleaseByTag({ ...context.repo, tag });
-            } catch (error) {
-              if (error.status === 404) {
-                return;
+            const pages = github.paginate.iterator(github.rest.repos.listReleases, {
+              ...context.repo,
+              per_page: 100,
+            });
+            for await (const { data: releases } of pages) {
+              if (releases.some((release) => release.tag_name === tag)) {
+                throw new Error(`Release ${tag} already exists; refusing to overwrite it.`);
               }
-              throw error;
             }
-            throw new Error(`Release ${tag} already exists; refusing to overwrite it.`);
 
       - name: Identify releaser
         id: releaser
